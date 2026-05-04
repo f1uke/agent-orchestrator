@@ -369,6 +369,80 @@ export type {
 
 export { atomicWriteFileSync } from "./atomic-write.js";
 
+// Pipeline subsystem — types, reducer, flat-file store (issue #1627)
+export {
+  // Branded ID factories
+  asPipelineId,
+  asRunId,
+  asStageRunId,
+  asArtifactId,
+  // Constants & helpers
+  PIPELINE_FINDINGS_FILENAME,
+  TERMINAL_STAGE_STATUSES,
+  TERMINAL_LOOP_STATES,
+  isTerminalStageStatus,
+  isTerminalLoopState,
+  loopKey,
+  emptyEngineState,
+  // Reducer
+  reduce,
+  // Store
+  createPipelineStore,
+  // Path helpers
+  pipelineLayout,
+  runFilePath,
+  stageFilePath,
+  artifactsDirForRun,
+  artifactsFilePath,
+  loopFilePath,
+} from "./pipeline/index.js";
+
+export type {
+  // IDs
+  PipelineId,
+  RunId,
+  StageRunId,
+  ArtifactId,
+  // Configuration
+  TaskMode,
+  StageTriggerEvent,
+  StageTrigger,
+  AgentExecutor,
+  CommandExecutor,
+  StageExecutor,
+  TaskSpec,
+  StagePolicy,
+  StageBudget,
+  Stage,
+  Pipeline,
+  // Artifacts
+  Severity,
+  ArtifactStatus,
+  FindingArtifactInput,
+  JsonArtifactInput,
+  ArtifactInput,
+  Artifact,
+  // Three-tier exit
+  StageStatus,
+  Verdict,
+  RunTerminationReason,
+  LoopStateName,
+  // Runtime state
+  StageState,
+  RunState,
+  LoopState,
+  RunSummary,
+  EngineState,
+  // Reducer surface
+  PipelineEvent,
+  PipelineEffect,
+  ReducerResult,
+  // Store surface
+  PipelineStore,
+  PersistedStageRun,
+  PipelineLayout,
+} from "./pipeline/index.js";
+
 // Activity event logging — structured diagnostic event trail
 export { recordActivityEvent, droppedEventCount } from "./activity-events.js";
 export { isActivityEventsFtsEnabled } from "./events-db.js";
