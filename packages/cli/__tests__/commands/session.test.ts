@@ -758,7 +758,7 @@ describe("session attach", () => {
     ).rejects.toThrow("process.exit(1)");
   });
 
-  it.skipIf(process.platform === "win32")("connects to named pipe on Windows", async () => {
+  it("connects to named pipe on Windows", async () => {
     mockIsWindows.mockReturnValue(true);
     mockSessionManager.get.mockResolvedValue({
       id: "app-1",
@@ -815,7 +815,7 @@ describe("session attach", () => {
     mockIsWindows.mockReturnValue(false);
   });
 
-  it.skipIf(process.platform === "win32")("handles PTY exit status on Windows", async () => {
+  it("handles PTY exit status on Windows", async () => {
     mockIsWindows.mockReturnValue(true);
     mockSessionManager.get.mockResolvedValue({
       id: "app-1",
@@ -861,7 +861,7 @@ describe("session attach", () => {
     mockIsWindows.mockReturnValue(false);
   });
 
-  it.skipIf(process.platform === "win32")("detaches on Ctrl+backslash on Windows", async () => {
+  it("detaches on Ctrl+backslash on Windows", async () => {
     mockIsWindows.mockReturnValue(true);
     mockSessionManager.get.mockResolvedValue({
       id: "app-1",
@@ -907,7 +907,7 @@ describe("session attach", () => {
     mockIsWindows.mockReturnValue(false);
   });
 
-  it.skipIf(process.platform === "win32")("falls back to config hash when runtimeHandle is missing on Windows", async () => {
+  it("falls back to config hash when runtimeHandle is missing on Windows", async () => {
     mockIsWindows.mockReturnValue(true);
     mockSessionManager.get.mockResolvedValue(null);
 
@@ -928,7 +928,7 @@ describe("session attach", () => {
     mockIsWindows.mockReturnValue(false);
   });
 
-  it.skipIf(process.platform === "win32")("shows error when pipe not available on Windows", async () => {
+  it("shows error when pipe not available on Windows", async () => {
     mockIsWindows.mockReturnValue(true);
     mockSessionManager.get.mockResolvedValue({
       id: "app-1",

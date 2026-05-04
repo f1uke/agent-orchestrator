@@ -1829,6 +1829,34 @@ describe("stop command", () => {
       expect(output).toContain("was on port 3001");
     },
   );
+
+  // Windows parallel: the port-scan fallback must still find the orphaned
+  // dashboard, but killDashboardOnPort intentionally skips the `ps` cmdline
+  // check (no `ps` on Windows; we trust netstat output via findPidByPort).
+  // Ensures a developer who breaks the Windows port-scan path is caught.
+  it.runIf(process.platform === "win32")(
+    "finds orphaned dashboard on a reassigned port via port scan (Windows)",
+    async () => {
+      mockConfigRef.current = makeConfig({ "my-app": makeProject() });
+      mockSessionManager.list.mockResolvedValue([]);
+      mockFindPidByPort.mockImplementation(async (port: number) =>
+        port === 3001 ? "99999" : null,
+      );
+
+      await program.parseAsync(["node", "test", "stop"]);
+
+      expect(mockKillProcessTree).toHaveBeenCalledWith(99999);
+      // `ps` must NOT be invoked on Windows — the cmdline verification is
+      // skipped by design in killDashboardOnPort.
+      const psCalls = mockExec.mock.calls.filter((c) => c[0] === "ps");
+      expect(psCalls).toHaveLength(0);
+      const output = vi
+        .mocked(console.log)
+        .mock.calls.map((c) => c.join(" "))
+        .join("\n");
+      expect(output).toContain("was on port 3001");
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

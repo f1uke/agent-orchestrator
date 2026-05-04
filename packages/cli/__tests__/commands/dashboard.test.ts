@@ -309,4 +309,47 @@ describe("findRunningDashboardPidsForWebDir", () => {
 
     await expect(findRunningDashboardPidsForWebDir(webDir, [3000, 3001])).resolves.toEqual(["111"]);
   });
+
+  // Windows-runif parallels: on Windows, the function intentionally skips the
+  // lsof + cwd verification (lsof doesn't exist) and trusts findPidByPort. The
+  // tests above assert lsof behavior; these assert the Windows path runs the
+  // findPidByPort branch and produces correct dedup semantics.
+  it.runIf(process.platform === "win32")(
+    "returns all pids on the listed ports via findPidByPort on Windows",
+    async () => {
+      const webDir = join(tmpDir, "packages", "web");
+      mkdirSync(webDir, { recursive: true });
+
+      mockFindPidByPort.mockImplementation(async (port: number) =>
+        port === 3000 ? "111" : port === 3001 ? "222" : null,
+      );
+
+      const { findRunningDashboardPidsForWebDir } =
+        await import("../../src/lib/dashboard-rebuild.js");
+
+      const pids = await findRunningDashboardPidsForWebDir(webDir, [3000, 3001, 3002]);
+      expect(pids.sort()).toEqual(["111", "222"]);
+      // lsof must NOT be invoked on Windows.
+      expect(mockExecSilent).not.toHaveBeenCalled();
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "deduplicates dashboard pids found on multiple ports on Windows",
+    async () => {
+      const webDir = join(tmpDir, "packages", "web");
+      mkdirSync(webDir, { recursive: true });
+
+      // Same pid claimed on two ports (e.g. parent + child Next.js workers
+      // sharing the listener) — must collapse to one entry.
+      mockFindPidByPort.mockResolvedValue("111");
+
+      const { findRunningDashboardPidsForWebDir } =
+        await import("../../src/lib/dashboard-rebuild.js");
+
+      await expect(findRunningDashboardPidsForWebDir(webDir, [3000, 3001])).resolves.toEqual([
+        "111",
+      ]);
+    },
+  );
 });
