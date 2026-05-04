@@ -15,9 +15,10 @@
  * is undergoing larger work and AE evidence there is not currently useful.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type * as ActivityEventsModule from "../activity-events.js";
 
 vi.mock("../activity-events.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../activity-events.js")>();
+  const original = await importOriginal<typeof ActivityEventsModule>();
   return {
     ...original,
     recordActivityEvent: vi.fn(),
