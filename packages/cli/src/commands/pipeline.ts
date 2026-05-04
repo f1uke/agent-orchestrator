@@ -22,9 +22,11 @@ import {
 
 import { getPluginRegistry } from "../lib/create-session-manager.js";
 import { resolveScopedProjectId } from "../lib/project-resolution.js";
+import { getRunning } from "../lib/running-state.js";
 import {
   cancelRun,
   describeRun,
+  LoopAlreadyActiveError,
   listConfiguredPipelines,
   listRuns,
   migrateStore,
@@ -49,6 +51,32 @@ function openScope(projectOpt?: string): ProjectScope {
 function fail(err: unknown): never {
   console.error(chalk.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
   process.exit(1);
+}
+
+/**
+ * Inverse of `warnIfAONotRunning` in spawn.ts. The running orchestrator
+ * holds engine state in memory and (until v0.4 lifecycle wiring lands) does
+ * not re-read pipeline runs from disk. CLI mutations therefore won't be seen
+ * by the in-process engine until the user restarts it. Make that explicit.
+ */
+async function warnIfAORunning(projectId: string): Promise<void> {
+  const running = await getRunning();
+  if (!running || !running.projects.includes(projectId)) return;
+  console.log(
+    chalk.yellow(
+      `⚠ AO is running (pid ${running.pid}) and holds in-memory pipeline state.`,
+    ),
+  );
+  console.log(
+    chalk.dim(
+      `  This change is persisted to disk but the running engine won't pick it up until v0.4 lifecycle wiring lands.`,
+    ),
+  );
+  console.log(
+    chalk.dim(
+      `  Restart \`ao start\` to re-hydrate engine state from the store.`,
+    ),
+  );
 }
 
 function formatLoopState(state: RunState["loopState"]): string {
@@ -210,40 +238,54 @@ export function registerPipeline(program: Command): void {
   pipeline
     .command("run")
     .description("Trigger a manual run for a configured pipeline")
-    .argument("<pipelineName>", "Pipeline name (matches the key under projects.<id>.pipelines)")
+    .argument(
+      "<pipeline>",
+      "Pipeline id (YAML map key) or `name` field — both are accepted",
+    )
     .option("-p, --project <id>", "Project to scope to")
     .option("--session <id>", "Override the session id used to key the run")
     .option("--head-sha <sha>", "Override the head SHA recorded for the run")
     .option("--json", "Output as JSON")
     .action(
       async (
-        pipelineName: string,
+        pipelineRef: string,
         opts: { project?: string; session?: string; headSha?: string; json?: boolean },
       ) => {
         try {
           const { config, projectId, store } = openScope(opts.project);
-          const pipeline = resolveConfiguredPipeline(config, projectId, pipelineName);
+          const pipeline = resolveConfiguredPipeline(config, projectId, pipelineRef);
           const registry = await getPluginRegistry(config);
-          const runId = triggerRun(store, registry, pipeline, {
-            ...(opts.session ? { sessionId: opts.session } : {}),
-            ...(opts.headSha ? { headSha: opts.headSha } : {}),
-          });
+          let runId;
+          try {
+            runId = triggerRun(store, registry, pipeline, {
+              ...(opts.session ? { sessionId: opts.session } : {}),
+              ...(opts.headSha ? { headSha: opts.headSha } : {}),
+            });
+          } catch (err) {
+            if (err instanceof LoopAlreadyActiveError) {
+              fail(err);
+            }
+            throw err;
+          }
 
           if (opts.json) {
-            console.log(JSON.stringify({ projectId, runId, pipelineName }, null, 2));
+            console.log(
+              JSON.stringify({ projectId, runId, pipelineName: pipeline.name }, null, 2),
+            );
             return;
           }
 
           console.log(
             chalk.green(
-              `✓ Triggered ${chalk.bold(pipelineName)} for ${chalk.bold(projectId)} → ${runId}`,
+              `✓ Triggered ${chalk.bold(pipeline.name)} for ${chalk.bold(projectId)} → ${runId}`,
             ),
           );
           console.log(
             chalk.dim(
-              `  Run state persisted. Stages will execute on the next orchestrator tick.`,
+              `  Run state persisted. v0.4 lifecycle integration will pick it up.`,
             ),
           );
+          await warnIfAORunning(projectId);
         } catch (err) {
           fail(err);
         }
@@ -256,21 +298,38 @@ export function registerPipeline(program: Command): void {
     .argument("<runId>", "Pipeline run id")
     .option("-p, --project <id>", "Project to scope to")
     .option("--json", "Output as JSON")
-    .action((runIdArg: string, opts: { project?: string; json?: boolean }) => {
+    .action(async (runIdArg: string, opts: { project?: string; json?: boolean }) => {
       try {
-        const { store } = openScope(opts.project);
-        const updated = cancelRun(store, asRunId(runIdArg));
+        const { store, projectId } = openScope(opts.project);
+        const { run, alreadyTerminal } = cancelRun(store, asRunId(runIdArg));
 
         if (opts.json) {
-          console.log(JSON.stringify({ run: updated }, null, 2));
+          console.log(JSON.stringify({ run, alreadyTerminal }, null, 2));
+          return;
+        }
+
+        if (alreadyTerminal) {
+          console.log(
+            chalk.yellow(
+              `⚠ ${run.runId} is already in a terminal state (${formatLoopState(run.loopState)})${run.terminationReason ? chalk.dim(` — ${run.terminationReason}`) : ""}.`,
+            ),
+          );
+          if (run.loopState === "stalled") {
+            console.log(
+              chalk.dim(
+                `  Use \`ao pipeline resume ${run.runId}\` to retry failed stages instead.`,
+              ),
+            );
+          }
           return;
         }
 
         console.log(
           chalk.green(
-            `✓ ${updated.runId} → ${formatLoopState(updated.loopState)}${updated.terminationReason ? chalk.dim(` (${updated.terminationReason})`) : ""}`,
+            `✓ ${run.runId} → ${formatLoopState(run.loopState)}${run.terminationReason ? chalk.dim(` (${run.terminationReason})`) : ""}`,
           ),
         );
+        await warnIfAORunning(projectId);
       } catch (err) {
         fail(err);
       }
@@ -282,9 +341,9 @@ export function registerPipeline(program: Command): void {
     .argument("<runId>", "Pipeline run id")
     .option("-p, --project <id>", "Project to scope to")
     .option("--json", "Output as JSON")
-    .action((runIdArg: string, opts: { project?: string; json?: boolean }) => {
+    .action(async (runIdArg: string, opts: { project?: string; json?: boolean }) => {
       try {
-        const { store } = openScope(opts.project);
+        const { store, projectId } = openScope(opts.project);
         const result = resumeRun(store, asRunId(runIdArg));
 
         if (opts.json) {
@@ -302,6 +361,7 @@ export function registerPipeline(program: Command): void {
             `✓ Reset ${result.resetStages.length} stage(s): ${result.resetStages.join(", ")}`,
           ),
         );
+        await warnIfAORunning(projectId);
       } catch (err) {
         fail(err);
       }

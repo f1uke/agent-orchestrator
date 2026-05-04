@@ -34,6 +34,10 @@ vi.mock("../../src/lib/create-session-manager.js", () => ({
   getPluginRegistry: async () => mockRegistry,
 }));
 
+vi.mock("../../src/lib/running-state.js", () => ({
+  getRunning: async () => null,
+}));
+
 import { Command } from "commander";
 import { registerPipeline } from "../../src/commands/pipeline.js";
 import {
@@ -298,37 +302,94 @@ describe("ao pipeline run", () => {
 describe("ao pipeline cancel", () => {
   it("dispatches RUN_CANCELLED and persists the terminal state", async () => {
     const runId = asRunId("r1");
-    mockStore.loadRun.mockReturnValue({
+    const run: RunState = {
       runId,
       pipelineId: asPipelineId("p"),
       pipelineName: "review",
       sessionId: "s",
-      pipelineConfigSnapshot: {} as Pipeline,
+      pipelineConfigSnapshot: {
+        id: asPipelineId("p"),
+        name: "review",
+        stages: [
+          {
+            name: "review-stage",
+            trigger: { on: ["manual"] },
+            executor: { kind: "agent", plugin: "claude-code", mode: "review" },
+            task: {},
+          },
+        ],
+      },
       headSha: "deadbeef",
       loopState: "running",
       loopRounds: 0,
-      stages: {},
+      stages: {
+        "review-stage": {
+          stageRunId: asStageRunId("sr1"),
+          status: "running",
+          attempt: 1,
+          artifacts: [],
+        },
+      },
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-01T00:00:00Z",
-    });
+    };
+    // hydrateEngineState reads listRuns; loadRun is read by cancelRun directly.
+    mockStore.listRuns.mockReturnValue([run]);
+    mockStore.loadRun.mockReturnValue(run);
     await program.parseAsync(["node", "test", "pipeline", "cancel", "r1"]);
     expect(mockStore.saveRun).toHaveBeenCalled();
     const persisted = mockStore.saveRun.mock.calls[0][0] as RunState;
     expect(persisted.loopState).toBe("terminated");
     expect(persisted.terminationReason).toBe("manual_cancel");
   });
-});
 
-describe("ao pipeline resume", () => {
-  it("resets failed stages back to pending", async () => {
+  it("warns instead of cancelling on a stalled run and suggests resume", async () => {
     const runId = asRunId("r1");
-    const stageRunId = asStageRunId("sr1");
-    mockStore.loadRun.mockReturnValue({
+    const run: RunState = {
       runId,
       pipelineId: asPipelineId("p"),
       pipelineName: "review",
       sessionId: "s",
       pipelineConfigSnapshot: {} as Pipeline,
+      headSha: "deadbeef",
+      loopState: "stalled",
+      terminationReason: "stage_failure",
+      loopRounds: 1,
+      stages: {},
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    };
+    mockStore.listRuns.mockReturnValue([run]);
+    mockStore.loadRun.mockReturnValue(run);
+    await program.parseAsync(["node", "test", "pipeline", "cancel", "r1"]);
+    expect(mockStore.saveRun).not.toHaveBeenCalled();
+    const out = consoleLogSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(out).toContain("already in a terminal state");
+    expect(out).toContain("ao pipeline resume");
+  });
+});
+
+describe("ao pipeline resume", () => {
+  it("resets failed stages back to pending via the reducer", async () => {
+    const runId = asRunId("r1");
+    const stageRunId = asStageRunId("sr1");
+    const run: RunState = {
+      runId,
+      pipelineId: asPipelineId("p"),
+      pipelineName: "review",
+      sessionId: "s",
+      pipelineConfigSnapshot: {
+        id: asPipelineId("p"),
+        name: "review",
+        stages: [
+          {
+            name: "review-stage",
+            trigger: { on: ["manual"] },
+            executor: { kind: "agent", plugin: "claude-code", mode: "review" },
+            task: {},
+          },
+        ],
+      },
       headSha: "deadbeef",
       loopState: "stalled",
       terminationReason: "stage_failure",
@@ -344,12 +405,46 @@ describe("ao pipeline resume", () => {
       },
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-01T00:00:00Z",
-    });
+    };
+    mockStore.listRuns.mockReturnValue([run]);
+    mockStore.loadRun.mockReturnValue(run);
     await program.parseAsync(["node", "test", "pipeline", "resume", "r1"]);
     expect(mockStore.saveRun).toHaveBeenCalled();
     const persisted = mockStore.saveRun.mock.calls[0][0] as RunState;
     expect(persisted.loopState).toBe("running");
     expect(persisted.stages["review-stage"]?.status).toBe("pending");
+  });
+
+  it("rejects resume on non-terminal runs", async () => {
+    const runId = asRunId("r1");
+    const run: RunState = {
+      runId,
+      pipelineId: asPipelineId("p"),
+      pipelineName: "review",
+      sessionId: "s",
+      pipelineConfigSnapshot: {} as Pipeline,
+      headSha: "deadbeef",
+      loopState: "running",
+      loopRounds: 0,
+      stages: {
+        "review-stage": {
+          stageRunId: asStageRunId("sr1"),
+          status: "failed",
+          attempt: 1,
+          artifacts: [],
+        },
+      },
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    };
+    mockStore.listRuns.mockReturnValue([run]);
+    mockStore.loadRun.mockReturnValue(run);
+    await expect(
+      program.parseAsync(["node", "test", "pipeline", "resume", "r1"]),
+    ).rejects.toThrow(/process.exit/);
+    expect(mockStore.saveRun).not.toHaveBeenCalled();
+    const err = consoleErrSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(err).toMatch(/not a terminal state/);
   });
 });
 

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { Argument, Command, Option } from "commander";
 import {
   AGENT_REPORTED_STATES,
@@ -7,6 +8,7 @@ import {
   loadConfig,
   loadGlobalConfig,
   getGlobalConfigPath,
+  pipelineLayout,
   type OrchestratorConfig,
   type Session,
 } from "@aoagents/ao-core";
@@ -454,11 +456,22 @@ async function listPipelinesAcrossProjects(): Promise<CompletionSuggestion[]> {
   }
 }
 
+/**
+ * existsSync-gate the pipeline runs dir before instantiating the store. The
+ * store's `listRuns` calls `ensureLayout()` which mkdirs `runs/`, `stages/`,
+ * `artifacts/`, `loops/` for every project — completion is read-only by
+ * definition and must not materialize empty dirs as a tab-press side effect.
+ */
+function projectHasPipelineState(projectId: string): boolean {
+  return existsSync(pipelineLayout(getProjectPipelinesDir(projectId)).runsDir);
+}
+
 async function listPipelineRuns(): Promise<CompletionSuggestion[]> {
   try {
     const config = loadConfig();
     const out: CompletionSuggestion[] = [];
     for (const projectId of Object.keys(config.projects)) {
+      if (!projectHasPipelineState(projectId)) continue;
       const store = createPipelineStore(getProjectPipelinesDir(projectId));
       for (const run of store.listRuns()) {
         out.push({
@@ -478,6 +491,7 @@ async function listStageRuns(): Promise<CompletionSuggestion[]> {
     const config = loadConfig();
     const out: CompletionSuggestion[] = [];
     for (const projectId of Object.keys(config.projects)) {
+      if (!projectHasPipelineState(projectId)) continue;
       const store = createPipelineStore(getProjectPipelinesDir(projectId));
       for (const run of store.listRuns()) {
         for (const [stageName, state] of Object.entries(run.stages)) {

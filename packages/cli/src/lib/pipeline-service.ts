@@ -19,7 +19,8 @@ import {
   asRunId,
   asStageRunId,
   configuredPipelineToRuntime,
-  emptyEngineState,
+  isTerminalLoopState,
+  loopKey,
   reduce,
   validatePipelineAgentModes,
   type Artifact,
@@ -35,10 +36,27 @@ import {
   type PluginRegistry,
   type RunId,
   type RunState,
+  type RunSummary,
   type StageRunId,
   type StageState,
-  type StageStatus,
 } from "@aoagents/ao-core";
+
+/**
+ * Thrown by `triggerRun` when a non-terminal run already exists for the same
+ * `(sessionId, pipelineName)` loop key. Surfaces the offending runId so the
+ * CLI can suggest `ao pipeline cancel <runId>` before retrying.
+ */
+export class LoopAlreadyActiveError extends Error {
+  constructor(
+    message: string,
+    public readonly activeRunId: RunId,
+    public readonly sessionId: string,
+    public readonly pipelineName: string,
+  ) {
+    super(message);
+    this.name = "LoopAlreadyActiveError";
+  }
+}
 
 /** Lightweight summary used by `ao pipeline list`. */
 export interface ConfiguredPipelineSummary {
@@ -89,20 +107,37 @@ function collectTriggers(configured: ConfiguredPipeline): string[] {
   return [...seen].sort();
 }
 
-/** Resolve a pipeline by name (case-sensitive map key). */
+/**
+ * Resolve a pipeline by id (YAML map key) or by `name` field. The map key
+ * wins on ties; falls back to a `name`-field match before throwing so
+ * `ao pipeline run my-review` works whether the user spelled `pipelines.my-review`
+ * or `pipelines.review.name: my-review`.
+ */
 export function resolveConfiguredPipeline(
   config: OrchestratorConfig,
   projectId: string,
   pipelineName: string,
 ): Pipeline {
   const project = config.projects[projectId];
-  const configured = project?.pipelines?.[pipelineName];
-  if (!configured) {
+  const pipelines = project?.pipelines;
+  if (!pipelines) {
     throw new Error(
       `Pipeline "${pipelineName}" is not configured for project "${projectId}".`,
     );
   }
-  return configuredPipelineToRuntime(pipelineName, configured);
+
+  const direct = pipelines[pipelineName];
+  if (direct) return configuredPipelineToRuntime(pipelineName, direct);
+
+  for (const [key, configured] of Object.entries(pipelines)) {
+    if (configured.name === pipelineName) {
+      return configuredPipelineToRuntime(key, configured);
+    }
+  }
+
+  throw new Error(
+    `Pipeline "${pipelineName}" is not configured for project "${projectId}".`,
+  );
 }
 
 /** Filtered, newest-first list of runs for `ao pipeline runs`. */
@@ -174,9 +209,52 @@ export function readStageArtifacts(
 }
 
 /**
- * Trigger a manual run for a pipeline. The reducer dispatches TRIGGER_FIRED;
- * effects are persisted via the store. The CLI returns the allocated run id;
- * the running orchestrator (when present) drives the run forward via tick().
+ * Rebuild engine state from the flat-file store. Used so reducer dispatches
+ * see existing runs / loop pointers / history rather than starting from
+ * `emptyEngineState()` (which would defeat the reducer's collision guards).
+ *
+ * Terminal runs go into `historySummaries`; the latest non-terminal run on
+ * each loop key wins `currentRunByLoop`.
+ */
+export function hydrateEngineState(store: PipelineStore): EngineState {
+  const runs: Record<string, RunState> = {};
+  const currentRunByLoop: Record<string, RunId> = {};
+  const historySummaries: Record<string, RunSummary[]> = {};
+
+  // Sort oldest-first so historySummaries preserves chronological order.
+  const sorted = [...store.listRuns()].sort((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
+  );
+
+  for (const run of sorted) {
+    runs[run.runId] = run;
+    const key = loopKey(run.sessionId, run.pipelineName);
+
+    if (isTerminalLoopState(run.loopState)) {
+      const list = historySummaries[key] ?? [];
+      list.push({
+        runId: run.runId,
+        loopState: run.loopState,
+        ...(run.terminationReason ? { terminationReason: run.terminationReason } : {}),
+        headSha: run.headSha,
+        loopRounds: run.loopRounds,
+        fingerprints: [],
+        createdAt: run.createdAt,
+      });
+      historySummaries[key] = list;
+    } else {
+      currentRunByLoop[key] = run.runId;
+    }
+  }
+
+  return { runs, currentRunByLoop, historySummaries };
+}
+
+/**
+ * Trigger a manual run for a pipeline. Hydrates engine state from the store
+ * so the reducer's "active run already in flight for this loop" guard fires
+ * when a non-terminal run already exists. Returns the allocated run id; the
+ * running orchestrator drives stage execution.
  *
  * `sessionId` defaults to `pipeline.<name>` so a CLI-triggered run can be
  * looked up by name without a worker session attached. Callers that already
@@ -196,17 +274,31 @@ export function triggerRun(
 ): RunId {
   validatePipelineAgentModes(pipeline, registry);
 
+  const sessionId = options.sessionId ?? `pipeline.${pipeline.name}`;
+  const initialState = hydrateEngineState(store);
+  const key = loopKey(sessionId, pipeline.name);
+  const activeRunId = initialState.currentRunByLoop[key];
+  if (activeRunId && initialState.runs[activeRunId]) {
+    throw new LoopAlreadyActiveError(
+      `Pipeline "${pipeline.name}" already has an active run (${activeRunId}). ` +
+        `Cancel it with \`ao pipeline cancel ${activeRunId}\` before triggering a new one.`,
+      activeRunId,
+      sessionId,
+      pipeline.name,
+    );
+  }
+
   const runId = asRunId(`run-${randomUUID()}`);
   const stageRunIds: Record<string, StageRunId> = {};
   for (const stage of pipeline.stages) {
     stageRunIds[stage.name] = asStageRunId(`sr-${randomUUID()}`);
   }
 
-  applyEvent(store, emptyEngineState(), {
+  applyEvent(store, initialState, {
     type: "TRIGGER_FIRED",
     now: now(),
     trigger: "manual",
-    sessionId: options.sessionId ?? `pipeline.${pipeline.name}`,
+    sessionId,
     pipeline,
     headSha: options.headSha ?? "manual",
     runId,
@@ -217,50 +309,52 @@ export function triggerRun(
 }
 
 /**
- * Cancel an in-flight run. Loads the run state from the store, dispatches
- * RUN_CANCELLED through the reducer, and persists effects. Idempotent:
- * cancelling a terminal run is a no-op.
+ * Cancel an in-flight run. Hydrates engine state from the store, dispatches
+ * RUN_CANCELLED through the reducer, and persists effects.
+ *
+ * Returns `{ run, alreadyTerminal }`. `alreadyTerminal` is true when the run
+ * was already in a terminal loop state and the reducer was not invoked, so
+ * the caller can distinguish a no-op from an actual cancellation. Stalled
+ * runs are reported as already terminal — the user should `resume` instead,
+ * or accept the existing terminal state.
  */
+export interface CancelResult {
+  run: RunState;
+  alreadyTerminal: boolean;
+}
+
 export function cancelRun(
   store: PipelineStore,
   runId: RunId,
   now: () => number = Date.now,
-): RunState {
+): CancelResult {
   const run = store.loadRun(runId);
   if (!run) throw new Error(`Run not found: ${runId}`);
 
-  if (
-    run.loopState === "done" ||
-    run.loopState === "stalled" ||
-    run.loopState === "terminated"
-  ) {
-    return run;
+  if (isTerminalLoopState(run.loopState)) {
+    return { run, alreadyTerminal: true };
   }
 
-  const initialState: EngineState = {
-    runs: { [runId]: run },
-    currentRunByLoop: { [`${run.sessionId}:${run.pipelineName}`]: runId },
-    historySummaries: {},
-  };
-
-  applyEvent(store, initialState, {
+  applyEvent(store, hydrateEngineState(store), {
     type: "RUN_CANCELLED",
     now: now(),
     runId,
     reason: "manual_cancel",
   });
 
-  const updated = store.loadRun(runId);
-  return updated ?? run;
+  const updated = store.loadRun(runId) ?? run;
+  return { run: updated, alreadyTerminal: false };
 }
 
 /**
- * Re-attempt failed stages of a previously terminated run. v0.3 keeps this
- * simple: failed stages are reset to `pending` and the run's loop state
- * returns to `running` so the orchestrator picks them up on its next tick.
+ * Re-attempt failed stages of a previously terminated run by dispatching
+ * RUN_RESUMED through the reducer. The reducer enforces the `stage.retries`
+ * cap and emits the same persistence + start-stage effects as the initial
+ * trigger, so a CLI resume looks indistinguishable from a fresh trigger to
+ * downstream consumers.
  *
- * Returns the list of stage names that were reset. If nothing was failed,
- * the run is returned untouched.
+ * Returns the run with the list of stage names that were reset (empty when
+ * the run had nothing to resume — that's a no-op, not an error).
  */
 export interface ResumeResult {
   run: RunState;
@@ -275,56 +369,39 @@ export function resumeRun(
   const run = store.loadRun(runId);
   if (!run) throw new Error(`Run not found: ${runId}`);
 
-  const resetStages: string[] = [];
-  const stages: Record<string, StageState> = {};
-  for (const [name, stage] of Object.entries(run.stages)) {
-    if (stage.status === "failed") {
-      stages[name] = {
-        ...stage,
-        status: "pending" as StageStatus,
-        attempt: stage.attempt + 1,
-        ...(stage.errorMessage !== undefined ? { errorMessage: undefined } : {}),
-      };
-      // Drop the optional errorMessage rather than leaving the previous one in.
-      delete (stages[name] as { errorMessage?: string }).errorMessage;
-      resetStages.push(name);
-    } else {
-      stages[name] = stage;
-    }
+  // Resume is only meaningful for runs that have stopped advancing — i.e.
+  // already in a terminal loop state. Bailing out on `running` /
+  // `awaiting_context` prevents a concurrent CLI resume from re-arming a
+  // run that the engine still considers in flight (which once v0.4 wires
+  // the orchestrator to the store could double-spawn stages).
+  if (!isTerminalLoopState(run.loopState)) {
+    throw new Error(
+      `Run ${runId} is in state "${run.loopState}", not a terminal state. ` +
+        `Cancel it first with \`ao pipeline cancel ${runId}\` if you want to restart.`,
+    );
   }
 
-  if (resetStages.length === 0) return { run, resetStages };
-
-  const iso = new Date(now()).toISOString();
-  const updated: RunState = {
-    ...run,
-    stages,
-    loopState: "running",
-    ...(run.terminationReason ? { terminationReason: undefined } : {}),
-    updatedAt: iso,
-  };
-  delete (updated as { terminationReason?: RunState["terminationReason"] }).terminationReason;
-  store.saveRun(updated);
-  for (const name of resetStages) {
-    store.saveStage({
-      ...stages[name],
-      runId,
-      stageName: name,
-    });
+  const failedStageNames = Object.entries(run.stages)
+    .filter(([, s]) => s.status === "failed")
+    .map(([name]) => name);
+  if (failedStageNames.length === 0) {
+    return { run, resetStages: [] };
   }
 
-  // Re-arm the loop pointer so the orchestrator treats this run as active.
-  store.saveLoopState(runId, {
-    sessionId: updated.sessionId,
-    pipelineName: updated.pipelineName,
-    loopState: "running",
-    loopRounds: updated.loopRounds,
-    lastSha: updated.headSha,
-    currentRunId: runId,
-    updatedAt: iso,
+  const stageRunIds: Record<string, StageRunId> = {};
+  for (const name of failedStageNames) {
+    stageRunIds[name] = asStageRunId(`sr-${randomUUID()}`);
+  }
+
+  applyEvent(store, hydrateEngineState(store), {
+    type: "RUN_RESUMED",
+    now: now(),
+    runId,
+    stageRunIds,
   });
 
-  return { run: updated, resetStages };
+  const updated = store.loadRun(runId);
+  return { run: updated ?? run, resetStages: failedStageNames };
 }
 
 /**

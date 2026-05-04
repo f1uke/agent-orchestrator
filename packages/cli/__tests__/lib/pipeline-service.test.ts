@@ -212,6 +212,25 @@ describe("triggerRun", () => {
       /supportedTaskModes/i,
     );
   });
+
+  it("rejects with LoopAlreadyActiveError when an active run already owns the loop key", async () => {
+    const { LoopAlreadyActiveError } = await import("../../src/lib/pipeline-service.js");
+    const { store, state } = createMockStore();
+    const registry = makeMockRegistry();
+    const pipeline = resolveConfiguredPipeline(mockConfig, "proj", "review");
+
+    triggerRun(store, registry, pipeline);
+    expect(state.runs.size).toBe(1);
+
+    let captured: unknown;
+    try {
+      triggerRun(store, registry, pipeline);
+    } catch (err) {
+      captured = err;
+    }
+    expect(captured).toBeInstanceOf(LoopAlreadyActiveError);
+    expect(state.runs.size).toBe(1); // still only one run
+  });
 });
 
 describe("listRuns", () => {
@@ -347,12 +366,24 @@ describe("cancelRun", () => {
     const { store, state } = createMockStore();
     const runId = asRunId("r1");
     const stageRunId = asStageRunId("sr1");
+    const snapshot: Pipeline = {
+      id: asPipelineId("p"),
+      name: "review",
+      stages: [
+        {
+          name: "review-stage",
+          trigger: { on: ["manual"] },
+          executor: { kind: "agent", plugin: "claude-code", mode: "review" },
+          task: {},
+        },
+      ],
+    };
     state.runs.set(runId, {
       runId,
       pipelineId: asPipelineId("p"),
       pipelineName: "review",
       sessionId: "s",
-      pipelineConfigSnapshot: {} as Pipeline,
+      pipelineConfigSnapshot: snapshot,
       headSha: "deadbeef",
       loopState: "running",
       loopRounds: 0,
@@ -360,7 +391,7 @@ describe("cancelRun", () => {
         "review-stage": {
           stageRunId,
           status: "running",
-          attempt: 0,
+          attempt: 1,
           artifacts: [],
         },
       },
@@ -368,16 +399,17 @@ describe("cancelRun", () => {
       updatedAt: "2024-01-01T00:00:00Z",
     });
 
-    const result = cancelRun(store, runId);
-    expect(result.loopState).toBe("terminated");
-    expect(result.terminationReason).toBe("manual_cancel");
+    const { run, alreadyTerminal } = cancelRun(store, runId);
+    expect(alreadyTerminal).toBe(false);
+    expect(run.loopState).toBe("terminated");
+    expect(run.terminationReason).toBe("manual_cancel");
     expect(state.loops.get(runId)?.loopState).toBe("terminated");
   });
 
-  it("is idempotent on already-terminal runs", () => {
+  it("is idempotent on already-terminal runs (returns alreadyTerminal=true)", () => {
     const { store, state } = createMockStore();
     const runId = asRunId("r1");
-    const run: RunState = {
+    const original: RunState = {
       runId,
       pipelineId: asPipelineId("p"),
       pipelineName: "review",
@@ -390,10 +422,33 @@ describe("cancelRun", () => {
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-01T00:00:00Z",
     };
-    state.runs.set(runId, run);
-    const result = cancelRun(store, runId);
-    expect(result).toBe(run);
+    state.runs.set(runId, original);
+    const { run, alreadyTerminal } = cancelRun(store, runId);
+    expect(alreadyTerminal).toBe(true);
+    expect(run).toBe(original);
     expect(state.loops.size).toBe(0);
+  });
+
+  it("flags stalled runs as alreadyTerminal so the CLI can suggest resume", () => {
+    const { store, state } = createMockStore();
+    const runId = asRunId("r1");
+    state.runs.set(runId, {
+      runId,
+      pipelineId: asPipelineId("p"),
+      pipelineName: "review",
+      sessionId: "s",
+      pipelineConfigSnapshot: {} as Pipeline,
+      headSha: "deadbeef",
+      loopState: "stalled",
+      terminationReason: "stage_failure",
+      loopRounds: 1,
+      stages: {},
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    });
+    const { run, alreadyTerminal } = cancelRun(store, runId);
+    expect(alreadyTerminal).toBe(true);
+    expect(run.loopState).toBe("stalled");
   });
 
   it("throws on unknown runId", () => {
@@ -403,7 +458,23 @@ describe("cancelRun", () => {
 });
 
 describe("resumeRun", () => {
-  it("resets failed stages to pending and restarts the loop pointer", () => {
+  function snapshotWithRetries(retries?: number): Pipeline {
+    return {
+      id: asPipelineId("p"),
+      name: "review",
+      stages: [
+        {
+          name: "review-stage",
+          trigger: { on: ["manual"] },
+          executor: { kind: "agent", plugin: "claude-code", mode: "review" },
+          task: {},
+          ...(retries !== undefined ? { retries } : {}),
+        },
+      ],
+    };
+  }
+
+  it("resets failed stages to pending and re-arms the loop pointer", () => {
     const { store, state } = createMockStore();
     const runId = asRunId("r1");
     const stageRunId = asStageRunId("sr1");
@@ -412,7 +483,7 @@ describe("resumeRun", () => {
       pipelineId: asPipelineId("p"),
       pipelineName: "review",
       sessionId: "s",
-      pipelineConfigSnapshot: {} as Pipeline,
+      pipelineConfigSnapshot: snapshotWithRetries(2),
       headSha: "deadbeef",
       loopState: "stalled",
       terminationReason: "stage_failure",
@@ -436,7 +507,71 @@ describe("resumeRun", () => {
     expect(run.terminationReason).toBeUndefined();
     expect(run.stages["review-stage"]?.status).toBe("pending");
     expect(run.stages["review-stage"]?.attempt).toBe(2);
+    // New stageRunId minted by the service (so the next attempt's artifacts
+    // don't collide with the previous attempt's).
+    expect(run.stages["review-stage"]?.stageRunId).not.toBe(stageRunId);
     expect(state.loops.get(runId)?.loopState).toBe("running");
+  });
+
+  it("rejects resume on non-terminal runs (would double-spawn under v0.4)", () => {
+    const { store, state } = createMockStore();
+    const runId = asRunId("r1");
+    state.runs.set(runId, {
+      runId,
+      pipelineId: asPipelineId("p"),
+      pipelineName: "review",
+      sessionId: "s",
+      pipelineConfigSnapshot: snapshotWithRetries(),
+      headSha: "deadbeef",
+      loopState: "running",
+      loopRounds: 0,
+      stages: {
+        "review-stage": {
+          stageRunId: asStageRunId("sr1"),
+          status: "failed",
+          attempt: 1,
+          artifacts: [],
+          errorMessage: "boom",
+        },
+      },
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    });
+    expect(() => resumeRun(store, runId)).toThrow(
+      /not a terminal state/,
+    );
+  });
+
+  it("refuses to bump attempt past stage.retries", () => {
+    const { store, state } = createMockStore();
+    const runId = asRunId("r1");
+    state.runs.set(runId, {
+      runId,
+      pipelineId: asPipelineId("p"),
+      pipelineName: "review",
+      sessionId: "s",
+      pipelineConfigSnapshot: snapshotWithRetries(1), // 1 retry → cap = 2 attempts
+      headSha: "deadbeef",
+      loopState: "stalled",
+      terminationReason: "stage_failure",
+      loopRounds: 1,
+      stages: {
+        "review-stage": {
+          stageRunId: asStageRunId("sr1"),
+          status: "failed",
+          attempt: 2, // already at the cap
+          artifacts: [],
+          errorMessage: "boom",
+        },
+      },
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    });
+    // The reducer rejects (logs a console warning) and the run stays stalled.
+    const { run, resetStages } = resumeRun(store, runId);
+    expect(resetStages).toEqual(["review-stage"]); // listed but no state change
+    expect(run.loopState).toBe("stalled");
+    expect(run.stages["review-stage"]?.status).toBe("failed");
   });
 
   it("returns unchanged when no stages are failed", () => {
@@ -447,7 +582,7 @@ describe("resumeRun", () => {
       pipelineId: asPipelineId("p"),
       pipelineName: "review",
       sessionId: "s",
-      pipelineConfigSnapshot: {} as Pipeline,
+      pipelineConfigSnapshot: snapshotWithRetries(),
       headSha: "deadbeef",
       loopState: "done",
       loopRounds: 0,
