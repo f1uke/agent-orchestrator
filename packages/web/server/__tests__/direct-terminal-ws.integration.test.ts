@@ -17,6 +17,7 @@ import { createDirectTerminalServer, type DirectTerminalServer } from "../direct
 const TMUX = findTmux();
 const TEST_SESSION = `ao-test-integration-${process.pid}`;
 const TEST_HASH_SESSION = `abcdef123456-ao-test-hash-${process.pid}`;
+const TEST_SPACED_TARGET = `abcdef123456-my project-${process.pid}`;
 
 // These integration tests require a running tmux — skip on Windows where tmux is unavailable
 const describeWithTmux = TMUX ? describe : describe.skip;
@@ -34,7 +35,9 @@ function httpGet(path: string): Promise<{ status: number; body: string }> {
       { hostname: "localhost", port, path, method: "GET", timeout: 3000 },
       (res: IncomingMessage) => {
         let body = "";
-        res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        res.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       },
     );
@@ -93,6 +96,9 @@ beforeAll(() => {
   execFileSync(TMUX, ["new-session", "-d", "-s", TEST_HASH_SESSION, "-x", "80", "-y", "24"], {
     timeout: 5000,
   });
+  execFileSync(TMUX, ["new-session", "-d", "-s", TEST_SPACED_TARGET, "-x", "80", "-y", "24"], {
+    timeout: 5000,
+  });
 
   terminal = createDirectTerminalServer(TMUX);
   terminal.server.listen(0);
@@ -103,8 +109,21 @@ beforeAll(() => {
 afterAll(() => {
   if (!TMUX || !terminal) return; // skip teardown on Windows
   terminal.shutdown();
-  try { execFileSync(TMUX, ["kill-session", "-t", TEST_SESSION], { timeout: 5000 }); } catch { /* */ }
-  try { execFileSync(TMUX, ["kill-session", "-t", TEST_HASH_SESSION], { timeout: 5000 }); } catch { /* */ }
+  try {
+    execFileSync(TMUX, ["kill-session", "-t", TEST_SESSION], { timeout: 5000 });
+  } catch {
+    /* */
+  }
+  try {
+    execFileSync(TMUX, ["kill-session", "-t", TEST_HASH_SESSION], { timeout: 5000 });
+  } catch {
+    /* */
+  }
+  try {
+    execFileSync(TMUX, ["kill-session", "-t", TEST_SPACED_TARGET], { timeout: 5000 });
+  } catch {
+    /* */
+  }
 });
 
 // =============================================================================
@@ -181,10 +200,12 @@ describeWithTmux("mux terminal open", () => {
   it("sends 'opened' response for a valid tmux session", async () => {
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "open" }));
+    ws.send(
+      JSON.stringify({ ch: "terminal", id: "test-session", tmuxName: TEST_SESSION, type: "open" }),
+    );
 
     const msg = await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "opened");
-    expect(msg.id).toBe(TEST_SESSION);
+    expect(msg.id).toBe("test-session");
 
     ws.close();
   });
@@ -203,7 +224,14 @@ describeWithTmux("mux terminal open", () => {
   it("sends error for invalid session ID (path traversal)", async () => {
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: "../../../etc/passwd", type: "open" }));
+    ws.send(
+      JSON.stringify({
+        ch: "terminal",
+        id: "../../../etc/passwd",
+        tmuxName: TEST_SESSION,
+        type: "open",
+      }),
+    );
 
     const msg = await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "error");
     expect(msg.message).toMatch(/invalid session/i);
@@ -214,7 +242,14 @@ describeWithTmux("mux terminal open", () => {
   it("sends error for shell injection in session ID", async () => {
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: "test;rm -rf /", type: "open" }));
+    ws.send(
+      JSON.stringify({
+        ch: "terminal",
+        id: "test;rm -rf /",
+        tmuxName: TEST_SESSION,
+        type: "open",
+      }),
+    );
 
     const msg = await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "error");
     expect(msg.message).toMatch(/invalid session/i);
@@ -222,14 +257,34 @@ describeWithTmux("mux terminal open", () => {
     ws.close();
   });
 
-  it("resolves hash-prefixed tmux session by suffix", async () => {
+  it("uses an explicit exact tmuxName for hash-prefixed sessions", async () => {
     const hashOnlyId = `ao-test-hash-${process.pid}`;
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: hashOnlyId, type: "open" }));
+    ws.send(
+      JSON.stringify({ ch: "terminal", id: hashOnlyId, tmuxName: TEST_HASH_SESSION, type: "open" }),
+    );
 
-    const msg = await waitForMessage(ws, (m) => m.ch === "terminal" && (m.type === "opened" || m.type === "error"));
-    expect(msg.type).toBe("opened");
+    const exactMsg = await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "opened");
+    expect(exactMsg.id).toBe(hashOnlyId);
+
+    ws.close();
+  });
+
+  it("allows a legacy tmuxName that is not a valid AO session id", async () => {
+    const ws = await connectMux();
+
+    ws.send(
+      JSON.stringify({
+        ch: "terminal",
+        id: "legacy-session",
+        tmuxName: TEST_SPACED_TARGET,
+        type: "open",
+      }),
+    );
+
+    const msg = await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "opened");
+    expect(msg.id).toBe("legacy-session");
 
     ws.close();
   });
@@ -243,7 +298,9 @@ describeWithTmux("mux terminal I/O", () => {
   it("receives terminal data after open", async () => {
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "open" }));
+    ws.send(
+      JSON.stringify({ ch: "terminal", id: "test-session", tmuxName: TEST_SESSION, type: "open" }),
+    );
     await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "opened");
 
     // tmux sends terminal init sequences on attach — wait for any data
@@ -257,13 +314,22 @@ describeWithTmux("mux terminal I/O", () => {
   it("can send input and receive echo", async () => {
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "open" }));
+    ws.send(
+      JSON.stringify({ ch: "terminal", id: "test-session", tmuxName: TEST_SESSION, type: "open" }),
+    );
     await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "opened");
     // Drain initial output
     await new Promise((r) => setTimeout(r, 300));
 
     const marker = `MUX_IO_${Date.now()}`;
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "data", data: `echo ${marker}\n` }));
+    ws.send(
+      JSON.stringify({
+        ch: "terminal",
+        id: "test-session",
+        type: "data",
+        data: `echo ${marker}\n`,
+      }),
+    );
 
     let received = "";
     await new Promise<void>((resolve) => {
@@ -277,10 +343,15 @@ describeWithTmux("mux terminal I/O", () => {
               resolve();
             }
           }
-        } catch { /* */ }
+        } catch {
+          /* */
+        }
       };
       ws.on("message", handler);
-      setTimeout(() => { ws.off("message", handler); resolve(); }, 4000);
+      setTimeout(() => {
+        ws.off("message", handler);
+        resolve();
+      }, 4000);
     });
 
     expect(received).toContain(marker);
@@ -290,16 +361,33 @@ describeWithTmux("mux terminal I/O", () => {
   it("handles resize without error", async () => {
     const ws = await connectMux();
 
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "open" }));
+    ws.send(
+      JSON.stringify({ ch: "terminal", id: "test-session", tmuxName: TEST_SESSION, type: "open" }),
+    );
     await waitForMessage(ws, (m) => m.ch === "terminal" && m.type === "opened");
 
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "resize", cols: 120, rows: 40 }));
+    ws.send(
+      JSON.stringify({
+        ch: "terminal",
+        id: "test-session",
+        type: "resize",
+        cols: 120,
+        rows: 40,
+      }),
+    );
 
     // No error message expected
     await new Promise((r) => setTimeout(r, 200));
 
     const marker = `RESIZE_${Date.now()}`;
-    ws.send(JSON.stringify({ ch: "terminal", id: TEST_SESSION, type: "data", data: `echo ${marker}\n` }));
+    ws.send(
+      JSON.stringify({
+        ch: "terminal",
+        id: "test-session",
+        type: "data",
+        data: `echo ${marker}\n`,
+      }),
+    );
 
     let received = "";
     await new Promise<void>((resolve) => {
@@ -308,12 +396,20 @@ describeWithTmux("mux terminal I/O", () => {
           const msg = JSON.parse(raw.toString()) as MuxMessage;
           if (msg.ch === "terminal" && msg.type === "data") {
             received += msg.data as string;
-            if (received.includes(marker)) { ws.off("message", handler); resolve(); }
+            if (received.includes(marker)) {
+              ws.off("message", handler);
+              resolve();
+            }
           }
-        } catch { /* */ }
+        } catch {
+          /* */
+        }
       };
       ws.on("message", handler);
-      setTimeout(() => { ws.off("message", handler); resolve(); }, 4000);
+      setTimeout(() => {
+        ws.off("message", handler);
+        resolve();
+      }, 4000);
     });
 
     expect(received).toContain(marker);
