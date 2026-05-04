@@ -91,14 +91,12 @@ export interface AgentStageExecutor {
 /**
  * Thrown when the executor cannot construct a fresh session for a stage —
  * usually because the stage's executor is not `agent` or the session manager
- * spawn fails. Caller (engine) maps this to STAGE_FAILED.
+ * spawn fails. Caller (engine) maps this to STAGE_FAILED. Underlying error is
+ * attached as `Error.cause` (TS5+ / Node 16.9+).
  */
 export class AgentExecutorSpawnError extends Error {
-  constructor(
-    message: string,
-    public readonly cause?: unknown,
-  ) {
-    super(message);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "AgentExecutorSpawnError";
   }
 }
@@ -135,7 +133,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): AgentStageExecutor
         `Failed to spawn session for stage "${input.stage.name}": ${
           err instanceof Error ? err.message : String(err)
         }`,
-        err,
+        { cause: err },
       );
     }
 
@@ -233,6 +231,10 @@ function isFailedTerminalSession(session: {
 }
 
 function parseFindingsFile(path: string): ArtifactInput[] {
+  // TODO(v1.x): readFileSync is unbounded — a misbehaving agent could OOM the
+  // engine by dumping its full reasoning trace into findings. Fine for v0.2
+  // since the engine and agent are co-located, but stream-and-cap once the
+  // engine moves out-of-process or runs untrusted plugins.
   const body = readFileSync(path, "utf-8");
   const out: ArtifactInput[] = [];
   for (const [lineNo, raw] of body.split("\n").entries()) {
@@ -266,7 +268,7 @@ function coerceArtifactInput(value: unknown, lineNo: number): ArtifactInput {
     requireString(obj, "description", lineNo);
     requireString(obj, "category", lineNo);
     requireEnum(obj, "severity", VALID_SEVERITIES, lineNo);
-    requireNumber(obj, "confidence", lineNo);
+    requireNumberInRange(obj, "confidence", 0, 1, lineNo);
     return obj as unknown as ArtifactInput;
   }
   if (obj["kind"] === "json") {
@@ -287,6 +289,21 @@ function requireString(obj: Record<string, unknown>, key: string, lineNo: number
 function requireNumber(obj: Record<string, unknown>, key: string, lineNo: number): void {
   if (typeof obj[key] !== "number") {
     throw new Error(`line ${lineNo}: missing numeric field "${key}"`);
+  }
+}
+
+function requireNumberInRange(
+  obj: Record<string, unknown>,
+  key: string,
+  min: number,
+  max: number,
+  lineNo: number,
+): void {
+  const value = obj[key];
+  if (typeof value !== "number" || value < min || value > max) {
+    throw new Error(
+      `line ${lineNo}: field "${key}" must be a number in [${min}, ${max}], got ${JSON.stringify(value)}`,
+    );
   }
 }
 

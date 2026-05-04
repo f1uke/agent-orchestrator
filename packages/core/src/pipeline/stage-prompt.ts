@@ -35,7 +35,9 @@ export function buildStagePrompt(input: StagePromptInput): string {
   lines.push(`Stage: ${stage.name}`);
   if (mode) lines.push(`Mode: ${mode}`);
   if (typeof loopRound === "number") lines.push(`Loop round: ${loopRound}`);
-  if (stage.policy?.blocksMerge) lines.push(`This stage blocks merge — fail on critical findings.`);
+  if (stage.policy?.blocksMerge) {
+    lines.push(`This stage's findings will block merge until they are resolved.`);
+  }
 
   if (stage.task.prompt) {
     lines.push(``);
@@ -60,10 +62,18 @@ export function buildStagePrompt(input: StagePromptInput): string {
 
 function formatFindingsInstructions(mode: TaskMode | null): string {
   const path = `.ao/${PIPELINE_FINDINGS_FILENAME}`;
+  const tmpPath = `${path}.tmp`;
   const blocks: string[] = [];
 
   blocks.push(
-    `When this stage is complete, append your findings to \`${path}\` (one JSON object per line).`,
+    `When this stage is complete, write your findings to \`${path}\` (one JSON object per line, JSONL).`,
+  );
+  // Atomicity contract: the executor polls for the final file's existence
+  // and parses it on first sight. A torn write (partial JSONL line) would
+  // be classified as `failed` and stall the run. Mandate write-then-rename
+  // so the executor only ever sees a fully-written file.
+  blocks.push(
+    `Write the JSONL to \`${tmpPath}\` first, then rename it to \`${path}\` so the orchestrator never observes a partial file (e.g. \`mv ${tmpPath} ${path}\`).`,
   );
   blocks.push(
     `The orchestrator harvests this file once you go idle — without it the stage cannot complete.`,
@@ -84,7 +94,7 @@ function formatFindingsInstructions(mode: TaskMode | null): string {
   }
 
   blocks.push(
-    `If there are no findings, write an empty file. The file's existence — not its contents — is the completion signal.`,
+    `If there are no findings, rename an empty file. The file's existence — not its contents — is the completion signal.`,
   );
 
   return blocks.join(" ");

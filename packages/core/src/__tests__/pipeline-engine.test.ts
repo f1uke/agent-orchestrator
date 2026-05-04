@@ -289,6 +289,104 @@ describe("pipeline engine — end-to-end", () => {
     expect(pollSpy).not.toHaveBeenCalled();
   });
 
+  it("runs a multi-stage pipeline sequentially (serial scheduling, maxConcurrentStages=1)", async () => {
+    const registry = withRegistry([makeAgentPlugin("codex", ["review", "code"])]);
+    const store = createPipelineStore(storeRoot);
+    const executor = makeMockExecutor();
+    const engine = createPipelineEngine({ store, registry, agentExecutor: executor });
+
+    const pipeline = makePipeline([
+      makeStage({ name: "review" }),
+      makeStage({
+        name: "fix",
+        executor: { kind: "agent", plugin: "codex", mode: "code" },
+      }),
+    ]);
+
+    const runId = await engine.startRun({
+      pipeline,
+      projectId: "proj-a",
+      sessionId: "ses-1",
+      headSha: "sha-aaa",
+    });
+
+    // Only the first stage should be running at this point — maxConcurrentStages=1
+    expect(executor.startCalls).toHaveLength(1);
+    expect(executor.startCalls[0]?.stage.name).toBe("review");
+
+    // Complete stage 1 — engine should immediately schedule stage 2
+    executor.setNextOutcome({ status: "completed", artifacts: [] });
+    await engine.tick();
+
+    expect(executor.startCalls).toHaveLength(2);
+    expect(executor.startCalls[1]?.stage.name).toBe("fix");
+
+    // Complete stage 2 — run reaches `done`
+    executor.setNextOutcome({ status: "completed", artifacts: [] });
+    await engine.tick();
+
+    const finalRun = store.loadRun(runId)!;
+    expect(finalRun.stages["review"]?.status).toBe("succeeded");
+    expect(finalRun.stages["fix"]?.status).toBe("succeeded");
+    expect(finalRun.loopState).toBe("done");
+  });
+
+  it("serializes top-level dispatches: cancelRun launched mid-tick observes the post-tick state", async () => {
+    // Without serialization, cancelRun's reduce() reads `state` while tick's
+    // reduce() is mid-update. With the lock, cancel waits for tick to finish
+    // its dispatchInline chain — so the state cancel sees is the one tick
+    // produced (run already in `done`), and cancel becomes a no-op.
+    const registry = withRegistry([makeAgentPlugin("codex", ["review"])]);
+    const store = createPipelineStore(storeRoot);
+
+    let pollResolve: (() => void) | null = null;
+    const executor: AgentStageExecutor = {
+      async startStage(input) {
+        return {
+          runId: input.runId,
+          stageRunId: input.stageRunId,
+          stageName: input.stage.name,
+          sessionId: "ses-1",
+          workspacePath: "/tmp",
+          startedAt: Date.now(),
+          input,
+        };
+      },
+      async pollStage(_handle): Promise<StageOutcome> {
+        await new Promise<void>((resolve) => {
+          pollResolve = resolve;
+        });
+        return { status: "completed", artifacts: [] };
+      },
+      async cancelStage() {},
+    };
+
+    const engine = createPipelineEngine({ store, registry, agentExecutor: executor });
+    const runId = await engine.startRun({
+      pipeline: makePipeline(),
+      projectId: "proj-a",
+      sessionId: "ses-1",
+      headSha: "sha-aaa",
+    });
+
+    // Kick off a tick that will block on pollStage
+    const tickPromise = engine.tick();
+    // Yield so the tick's `pollStage` is actually awaiting
+    await new Promise((r) => setTimeout(r, 0));
+    // Now fire cancelRun — must NOT execute until tick releases the lock
+    const cancelPromise = engine.cancelRun(runId);
+    // Release pollStage → tick completes → run reaches `done` → cancel runs
+    pollResolve!();
+    await tickPromise;
+    await cancelPromise;
+
+    const finalRun = store.loadRun(runId)!;
+    // Tick completed first (lock acquired first) so the run is `done`,
+    // not `terminated`. Cancel ran on a terminal run — no-op.
+    expect(finalRun.loopState).toBe("done");
+    expect(finalRun.terminationReason).toBe("completed");
+  });
+
   it("subsequent runs against the same loop key still receive their projectId after the prior run terminated", async () => {
     // Regression: the engine prunes its run-metadata side-table when a run
     // reaches a terminal loop state. A naive implementation that pruned the

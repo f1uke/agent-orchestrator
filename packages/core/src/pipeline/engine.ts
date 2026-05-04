@@ -19,6 +19,13 @@
  * Tick frequency: there is no internal timer. The caller (lifecycle manager
  * piggybacks on its existing 5s SSE poll, per C-14) drives tick() — no new
  * polling loop is introduced.
+ *
+ * Concurrency: top-level `dispatch` and `tick` calls are serialized through
+ * a single promise-chain lock so concurrent callers (e.g. `cancelRun()`
+ * landing while a tick is mid-flight) cannot interleave reads/writes of the
+ * in-memory `state`. The engine-internal saga (e.g. START_STAGE → STAGE_STARTED
+ * → STAGE_FAILED) routes through `dispatchInline`, which bypasses the lock
+ * because it's already running inside it.
  */
 
 import { randomUUID } from "node:crypto";
@@ -32,11 +39,9 @@ import {
   asStageRunId,
   emptyEngineState,
   isTerminalLoopState,
-  isTerminalStageStatus,
   type EngineState,
   type Pipeline,
   type RunId,
-  type RunState,
   type StageRunId,
   type StageTriggerEvent,
 } from "./types.js";
@@ -81,15 +86,15 @@ export interface PipelineEngine {
   startRun(input: StartRunInput): Promise<RunId>;
 
   /**
-   * Drive forward any in-flight agent stages. Safe to call on a fixed
-   * interval — re-entrancy guarded so concurrent ticks no-op.
+   * Drive forward any in-flight agent stages. Serialized against `dispatch`
+   * and `cancelRun` so concurrent callers cannot race state mutations.
    */
   tick(): Promise<void>;
 
   /**
    * Dispatch a single event through the reducer and execute its effects.
    * Exposed for tests and for callers that want to inject events directly
-   * (e.g. CONFIG_CHANGED from a config watcher).
+   * (e.g. CONFIG_CHANGED from a config watcher). Serialized.
    */
   dispatch(event: PipelineEvent): Promise<void>;
 
@@ -103,9 +108,37 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
   let state: EngineState = deps.initialState ?? emptyEngineState();
   /** stageRunId → executor handle for stages we own. */
   const inflight = new Map<StageRunId, RunningAgentStage>();
-  let ticking = false;
+  /**
+   * Side-table for projectId/issueId, keyed by RunId. The persisted RunState
+   * shape was locked by v0.1 and doesn't carry these, so the engine threads
+   * them out-of-band into START_STAGE inputs. Pruned by
+   * `pruneTerminatedRunMetadata` after every dispatch.
+   */
+  const runMetadata = new Map<RunId, { projectId: string; issueId?: string }>();
+
+  /**
+   * Serialization lock for top-level dispatches. Each public dispatch chains
+   * onto `lockTail`; engine-internal recursive dispatches use `dispatchInline`
+   * directly because they're already running inside this lock.
+   */
+  let lockTail: Promise<void> = Promise.resolve();
+
+  function withLock<T>(work: () => Promise<T>): Promise<T> {
+    const result = lockTail.then(work);
+    // Swallow errors on the chain so one failure doesn't poison subsequent
+    // waiters; the original promise (`result`) still rejects to its caller.
+    lockTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
 
   async function dispatch(event: PipelineEvent): Promise<void> {
+    return withLock(() => dispatchInline(event));
+  }
+
+  async function dispatchInline(event: PipelineEvent): Promise<void> {
     const result = reduce(state, event);
     state = result.state;
     for (const effect of result.effects) {
@@ -152,7 +185,7 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
         if (effect.stage.executor.kind !== "agent") {
           // command/builtin executors are out of scope for v0.2 — synthesize
           // a STAGE_FAILED so the run terminates cleanly instead of hanging.
-          await dispatch({
+          await dispatchInline({
             type: "STAGE_FAILED",
             now: now(),
             runId: effect.runId,
@@ -164,7 +197,7 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
 
         // Mark the stage as running BEFORE starting the executor — failures
         // during spawn translate to STAGE_FAILED, which requires running|pending.
-        await dispatch({
+        await dispatchInline({
           type: "STAGE_STARTED",
           now: now(),
           runId: effect.runId,
@@ -186,7 +219,7 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
           const handle = await agentExecutor.startStage(startInput);
           inflight.set(effect.stageRunId, handle);
         } catch (err) {
-          await dispatch({
+          await dispatchInline({
             type: "STAGE_FAILED",
             now: now(),
             runId: effect.runId,
@@ -219,10 +252,8 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
   }
 
   async function tick(): Promise<void> {
-    if (ticking) return;
-    if (inflight.size === 0) return;
-    ticking = true;
-    try {
+    return withLock(async () => {
+      if (inflight.size === 0) return;
       const handles = [...inflight.values()];
       for (const handle of handles) {
         const outcome = await agentExecutor.pollStage(handle);
@@ -231,7 +262,7 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
         inflight.delete(handle.stageRunId);
 
         if (outcome.status === "completed") {
-          await dispatch({
+          await dispatchInline({
             type: "STAGE_COMPLETED",
             now: now(),
             runId: handle.runId,
@@ -239,7 +270,7 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
             artifacts: outcome.artifacts,
           });
         } else {
-          await dispatch({
+          await dispatchInline({
             type: "STAGE_FAILED",
             now: now(),
             runId: handle.runId,
@@ -248,9 +279,7 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
           });
         }
       }
-    } finally {
-      ticking = false;
-    }
+    });
   }
 
   async function startRun(input: StartRunInput): Promise<RunId> {
@@ -292,13 +321,6 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
     await dispatch({ type: "RUN_CANCELLED", now: now(), runId, reason });
   }
 
-  /**
-   * Look up the project a run was started for. Reducer-state doesn't carry
-   * projectId (the persisted RunState is locked from v0.1), so the engine
-   * keeps a side-table populated by startRun().
-   */
-  const runMetadata = new Map<RunId, { projectId: string; issueId?: string }>();
-
   return {
     state: () => state,
     startRun,
@@ -306,26 +328,4 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
     dispatch,
     cancelRun,
   };
-}
-
-/** Internal: utility for resuming engine state from disk (v0.3 will use this). */
-export function rebuildStateFromStore(store: PipelineStore): EngineState {
-  const runs: Record<RunId, RunState> = {};
-  for (const run of store.listRuns()) {
-    runs[run.runId] = run;
-  }
-  // currentRunByLoop and historySummaries can be derived deterministically from
-  // the RunStates above, but the v0.1 store doesn't persist either index. We
-  // rebuild as much as we can; the rest will be repopulated as events flow.
-  const currentRunByLoop: Record<string, RunId> = {};
-  for (const run of Object.values(runs)) {
-    if (!isAllStagesTerminal(run)) {
-      currentRunByLoop[`${run.sessionId}:${run.pipelineName}`] = run.runId;
-    }
-  }
-  return { runs, currentRunByLoop, historySummaries: {} };
-}
-
-function isAllStagesTerminal(run: RunState): boolean {
-  return Object.values(run.stages).every((s) => isTerminalStageStatus(s.status));
 }
