@@ -260,6 +260,9 @@ export function hydrateEngineState(store: PipelineStore): EngineState {
  * looked up by name without a worker session attached. Callers that already
  * have a session (e.g. lifecycle integration in v0.4) should override it.
  */
+/** Sentinel recorded in RunState.headSha when a run is triggered via CLI with no git context. */
+const MANUAL_TRIGGER_SHA = "manual";
+
 export interface TriggerOptions {
   sessionId?: string;
   headSha?: string;
@@ -300,7 +303,7 @@ export function triggerRun(
     trigger: "manual",
     sessionId,
     pipeline,
-    headSha: options.headSha ?? "manual",
+    headSha: options.headSha ?? MANUAL_TRIGGER_SHA,
     runId,
     stageRunIds,
   });

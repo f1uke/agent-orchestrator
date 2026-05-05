@@ -2,7 +2,6 @@
  * `ao artifact` — inspect findings produced by a stage run.
  */
 
-import chalk from "chalk";
 import type { Command } from "commander";
 import {
   asStageRunId,
@@ -11,13 +10,9 @@ import {
   loadConfig,
 } from "@aoagents/ao-core";
 
+import { fail } from "../lib/cli-utils.js";
 import { resolveScopedProjectId } from "../lib/project-resolution.js";
 import { readStageArtifacts } from "../lib/pipeline-service.js";
-
-function fail(err: unknown): never {
-  console.error(chalk.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
-  process.exit(1);
-}
 
 export function registerArtifact(program: Command): void {
   const artifact = program

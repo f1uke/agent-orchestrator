@@ -416,6 +416,50 @@ describe("ao pipeline resume", () => {
     expect(persisted.stages["review-stage"]?.status).toBe("pending");
   });
 
+  it("warns when retries cap prevents any stage from being reset", async () => {
+    const runId = asRunId("r1");
+    // retries=0 → cap=1 attempt; attempt=1 means already at cap
+    const run: RunState = {
+      runId,
+      pipelineId: asPipelineId("p"),
+      pipelineName: "review",
+      sessionId: "s",
+      pipelineConfigSnapshot: {
+        id: asPipelineId("p"),
+        name: "review",
+        stages: [
+          {
+            name: "review-stage",
+            trigger: { on: ["manual"] },
+            executor: { kind: "agent", plugin: "claude-code", mode: "review" },
+            task: {},
+            retries: 0,
+          },
+        ],
+      },
+      headSha: "deadbeef",
+      loopState: "stalled",
+      terminationReason: "stage_failure",
+      loopRounds: 1,
+      stages: {
+        "review-stage": {
+          stageRunId: asStageRunId("sr1"),
+          status: "failed",
+          attempt: 1,
+          artifacts: [],
+        },
+      },
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    };
+    mockStore.listRuns.mockReturnValue([run]);
+    mockStore.loadRun.mockReturnValue(run);
+    await program.parseAsync(["node", "test", "pipeline", "resume", "r1"]);
+    expect(mockStore.saveRun).not.toHaveBeenCalled();
+    const out = consoleLogSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(out).toContain("retry cap exceeded");
+  });
+
   it("rejects resume on non-terminal runs", async () => {
     const runId = asRunId("r1");
     const run: RunState = {

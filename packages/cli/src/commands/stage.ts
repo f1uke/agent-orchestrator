@@ -11,13 +11,9 @@ import {
   loadConfig,
 } from "@aoagents/ao-core";
 
+import { fail } from "../lib/cli-utils.js";
 import { resolveScopedProjectId } from "../lib/project-resolution.js";
 import { describeStage } from "../lib/pipeline-service.js";
-
-function fail(err: unknown): never {
-  console.error(chalk.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
-  process.exit(1);
-}
 
 export function registerStage(program: Command): void {
   const stage = program.command("stage").description("Pipeline stage inspection");

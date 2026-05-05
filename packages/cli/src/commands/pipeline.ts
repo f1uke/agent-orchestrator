@@ -20,6 +20,7 @@ import {
   type RunState,
 } from "@aoagents/ao-core";
 
+import { fail } from "../lib/cli-utils.js";
 import { getPluginRegistry } from "../lib/create-session-manager.js";
 import { resolveScopedProjectId } from "../lib/project-resolution.js";
 import { getRunning } from "../lib/running-state.js";
@@ -46,11 +47,6 @@ function openScope(projectOpt?: string): ProjectScope {
   const projectId = resolveScopedProjectId(config, projectOpt);
   const store = createPipelineStore(getProjectPipelinesDir(projectId));
   return { projectId, store, config };
-}
-
-function fail(err: unknown): never {
-  console.error(chalk.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
-  process.exit(1);
 }
 
 /**
@@ -353,6 +349,15 @@ export function registerPipeline(program: Command): void {
 
         if (result.resetStages.length === 0) {
           console.log(chalk.dim(`  No failed stages to resume for ${result.run.runId}.`));
+          return;
+        }
+
+        if (result.run.loopState !== "running") {
+          console.log(
+            chalk.yellow(
+              `⚠ No stages could be reset — retry cap exceeded for: ${result.resetStages.join(", ")}.`,
+            ),
+          );
           return;
         }
 
