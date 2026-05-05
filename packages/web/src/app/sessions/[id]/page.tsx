@@ -493,21 +493,10 @@ export default function SessionPage() {
 
   // Fetch session data (memoized to avoid recreating on every render)
   const fetchSession = useCallback(async () => {
-    if (fetchingSessionRef.current) {
-      // eslint-disable-next-line no-console
-      if (process.env.NEXT_PUBLIC_AO_PERF === "1") console.log(`[ao-perf] cid=client client.fetch.skip-inflight id=${id}`);
-      return;
-    }
+    if (fetchingSessionRef.current) return;
     fetchingSessionRef.current = true;
     const controller = new AbortController();
     sessionFetchControllerRef.current = controller;
-    const perfOn = process.env.NEXT_PUBLIC_AO_PERF === "1";
-    const cid = Math.random().toString(36).slice(2, 8);
-    const t0 = Date.now();
-    if (perfOn) {
-      // eslint-disable-next-line no-console
-      console.log(`[ao-perf] cid=${cid} client.fetch.start id=${id}`);
-    }
     try {
       const data = await fetchJsonWithTimeout<DashboardSession | { error: string }>(
         `/api/sessions/${encodeURIComponent(id)}`,
@@ -515,23 +504,13 @@ export default function SessionPage() {
           signal: controller.signal,
           timeoutMs: SESSION_FETCH_TIMEOUT_MS,
           timeoutMessage: `Session request timed out after ${SESSION_FETCH_TIMEOUT_MS}ms`,
-          headers: { "x-correlation-id": cid },
         },
       );
-      if (perfOn) {
-        // eslint-disable-next-line no-console
-        console.log(`[ao-perf] cid=${cid} client.fetch.end=${Date.now() - t0}ms outcome=ok`);
-      }
       setSession(data as DashboardSession);
       setRouteError(null);
       setSessionMissing(false);
       hasLoadedSessionRef.current = true;
     } catch (err) {
-      if (perfOn) {
-        const reason = err instanceof Error ? err.message : "unknown";
-        // eslint-disable-next-line no-console
-        console.log(`[ao-perf] cid=${cid} client.fetch.end=${Date.now() - t0}ms outcome=error reason=${JSON.stringify(reason)}`);
-      }
       if (pageUnloadingRef.current || controller.signal.aborted || isAbortLikeError(err)) {
         return;
       }

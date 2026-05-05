@@ -9,7 +9,6 @@ import {
   getActivityFallbackState,
   recordTerminalActivity,
   isWindows,
-  perfMark,
   type Agent,
   type AgentSessionInfo,
   type AgentLaunchConfig,
@@ -229,26 +228,14 @@ async function sessionFileMatchesCwd(filePath: string, workspacePath: string): P
  * Returns the path to the most recently modified matching file, or null.
  */
 async function findCodexSessionFile(workspacePath: string): Promise<string | null> {
-  const t0 = Date.now();
   const jsonlFiles = await collectJsonlFiles(CODEX_SESSIONS_DIR);
-  const collectMs = Date.now() - t0;
-  if (jsonlFiles.length === 0) {
-    perfMark(`codex:${workspacePath}`, "codex.findSessionFile", Date.now() - t0, {
-      scanned: 0,
-      matched: 0,
-    });
-    return null;
-  }
+  if (jsonlFiles.length === 0) return null;
 
   let bestMatch: { path: string; mtime: number } | null = null;
-  let openedFiles = 0;
-  let matchedFiles = 0;
 
   for (const filePath of jsonlFiles) {
-    openedFiles++;
     const matches = await sessionFileMatchesCwd(filePath, workspacePath);
     if (matches) {
-      matchedFiles++;
       try {
         const s = await stat(filePath);
         if (!bestMatch || s.mtimeMs > bestMatch.mtime) {
@@ -260,13 +247,6 @@ async function findCodexSessionFile(workspacePath: string): Promise<string | nul
     }
   }
 
-  perfMark(`codex:${workspacePath}`, "codex.findSessionFile", Date.now() - t0, {
-    scanned: jsonlFiles.length,
-    opened: openedFiles,
-    matched: matchedFiles,
-    collectMs,
-    found: bestMatch ? 1 : 0,
-  });
   return bestMatch?.path ?? null;
 }
 
@@ -517,7 +497,6 @@ const sessionFileCache = new Map<string, { path: string | null; expiry: number }
 async function findCodexSessionFileCached(workspacePath: string): Promise<string | null> {
   const cached = sessionFileCache.get(workspacePath);
   if (cached && Date.now() < cached.expiry) {
-    perfMark(`codex:${workspacePath}`, "codex.findSessionFile.cache", 0, { hit: 1 });
     return cached.path;
   }
   const result = await findCodexSessionFile(workspacePath);

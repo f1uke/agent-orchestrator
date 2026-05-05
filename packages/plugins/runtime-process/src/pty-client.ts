@@ -9,7 +9,6 @@
  */
 
 import { connect, type Socket } from "node:net";
-import { perfMark } from "@aoagents/ao-core";
 import {
   MSG_TERMINAL_INPUT,
   MSG_TERMINAL_DATA,
@@ -61,7 +60,6 @@ export function getPipePath(sessionId: string): string {
 export function connectPtyHost(pipePath: string, timeoutMs = 3000): Promise<Socket> {
   return new Promise<Socket>((resolve, reject) => {
     let settled = false;
-    const t0 = Date.now();
 
     const sock = connect(pipePath);
 
@@ -69,7 +67,6 @@ export function connectPtyHost(pipePath: string, timeoutMs = 3000): Promise<Sock
       if (settled) return;
       settled = true;
       sock.destroy();
-      perfMark(`pty:${pipePath}`, "pty.connect", Date.now() - t0, { outcome: "timeout" });
       reject(new Error(`Timed out connecting to pty-host at ${pipePath} (${timeoutMs}ms)`));
     }, timeoutMs);
 
@@ -77,7 +74,6 @@ export function connectPtyHost(pipePath: string, timeoutMs = 3000): Promise<Sock
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      perfMark(`pty:${pipePath}`, "pty.connect", Date.now() - t0, { outcome: "ok" });
       resolve(sock);
     });
 
@@ -85,7 +81,6 @@ export function connectPtyHost(pipePath: string, timeoutMs = 3000): Promise<Sock
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      perfMark(`pty:${pipePath}`, "pty.connect", Date.now() - t0, { outcome: "error" });
       reject(err);
     });
   });
@@ -223,15 +218,12 @@ export async function ptyHostGetOutput(pipePath: string, lines = 50): Promise<st
  * Returns false if the pipe is unreachable (host has exited).
  */
 export async function ptyHostIsAlive(pipePath: string): Promise<boolean> {
-  const t0 = Date.now();
   let sock: Socket;
   try {
     sock = await connectPtyHost(pipePath, 2000);
   } catch {
-    perfMark(`pty:${pipePath}`, "pty.isAlive", Date.now() - t0, { outcome: "connect_fail" });
     return false;
   }
-  const tConnected = Date.now();
 
   return new Promise<boolean>((resolve) => {
     let settled = false;
@@ -241,11 +233,6 @@ export async function ptyHostIsAlive(pipePath: string): Promise<boolean> {
       settled = true;
       clearTimeout(timer);
       sock.destroy();
-      perfMark(`pty:${pipePath}`, "pty.isAlive", Date.now() - t0, {
-        outcome: result ? "alive" : "dead",
-        connectMs: tConnected - t0,
-        statusMs: Date.now() - tConnected,
-      });
       resolve(result);
     };
 

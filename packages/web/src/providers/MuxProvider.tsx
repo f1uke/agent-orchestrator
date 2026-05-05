@@ -108,21 +108,14 @@ export function MuxProvider({ children }: { children: ReactNode }) {
     try {
       const url = buildMuxWsUrl(runtimeConfigRef.current);
       console.log("[MuxProvider] Connecting to", url);
-      const perfOn = process.env.NEXT_PUBLIC_AO_PERF === "1";
-      const wsT0 = Date.now();
       const ws = new WebSocket(url);
       // Assign immediately so cleanup can close it even during CONNECTING state
       wsRef.current = ws;
-      const firstDataPerTerminal = new Set<string>();
 
       ws.addEventListener("open", () => {
         if (isDestroyedRef.current) {
           ws.close();
           return;
-        }
-        if (perfOn) {
-          // eslint-disable-next-line no-console
-          console.log(`[ao-perf] cid=ws ws.open=${Date.now() - wsT0}ms`);
         }
         console.log("[MuxProvider] Connected");
         setStatus("connected");
@@ -155,11 +148,6 @@ export function MuxProvider({ children }: { children: ReactNode }) {
           if (msg.ch === "terminal") {
             const key = terminalKey(msg.id, "projectId" in msg ? msg.projectId : undefined);
             if (msg.type === "data") {
-              if (perfOn && !firstDataPerTerminal.has(key)) {
-                firstDataPerTerminal.add(key);
-                // eslint-disable-next-line no-console
-                console.log(`[ao-perf] cid=ws ws.firstByte=${Date.now() - wsT0}ms id=${msg.id}`);
-              }
               // Push to subscribers
               const subs = subscribersRef.current.get(key);
               if (subs) {
