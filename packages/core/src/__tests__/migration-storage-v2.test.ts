@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type * as ChildProcess from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -1348,7 +1349,7 @@ describe.skipIf(process.platform === "win32")("migration edge cases", () => {
     // working when storage-v2 → atomic-write.ts pulls platform.ts into the
     // module graph. A bare-object mock would leave execFile undefined.
     vi.doMock("node:child_process", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("node:child_process")>();
+      const actual = await importOriginal<typeof ChildProcess>();
       return { ...actual, execSync: vi.fn(() => "be-1\n") };
     });
 
