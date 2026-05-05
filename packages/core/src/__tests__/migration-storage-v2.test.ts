@@ -1344,9 +1344,13 @@ describe.skipIf(process.platform === "win32")("migration edge cases", () => {
     );
 
     vi.resetModules();
-    vi.doMock("node:child_process", () => ({
-      execSync: vi.fn(() => "be-1\n"),
-    }));
+    // Use importOriginal so platform.ts's top-level promisify(execFile) keeps
+    // working when storage-v2 → atomic-write.ts pulls platform.ts into the
+    // module graph. A bare-object mock would leave execFile undefined.
+    vi.doMock("node:child_process", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:child_process")>();
+      return { ...actual, execSync: vi.fn(() => "be-1\n") };
+    });
 
     const { migrateStorage: migrateStorageWithMock } = await import("../migration/storage-v2.js");
 
