@@ -1074,7 +1074,6 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       try {
         const detected = await perfTime(`sm:${session.id}`, "sm.agent.getActivityState", () =>
           plugins.agent!.getActivityState(session, config.readyThresholdMs),
-          { agent: session.agent ?? "unknown" },
         );
         if (detected !== null) {
           session.activitySignal = classifyActivitySignal(detected, "native");
@@ -1097,7 +1096,6 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       try {
         info = await perfTime(`sm:${session.id}`, "sm.agent.getSessionInfo", () =>
           plugins.agent!.getSessionInfo(session),
-          { agent: session.agent ?? "unknown" },
         );
       } catch {
         // Can't get session info — keep existing values
