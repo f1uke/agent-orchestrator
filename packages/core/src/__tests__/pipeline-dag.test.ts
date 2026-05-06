@@ -91,7 +91,7 @@ describe("pipeline DAG — cycle detection (config load)", () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     const messages = result.error.issues.map((i) => i.message).join("\n");
-    expect(messages).toContain("dependsOn cycle");
+    expect(messages).toContain("stage dependency cycle");
     expect(messages).toContain("a → b → a");
   });
 
@@ -106,17 +106,99 @@ describe("pipeline DAG — cycle detection (config load)", () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     const messages = result.error.issues.map((i) => i.message).join("\n");
-    expect(messages).toMatch(/dependsOn cycle.*a.*c|c.*b.*a/);
+    expect(messages).toMatch(/stage dependency cycle.*a.*c|c.*b.*a/);
   });
 
-  it("rejects self-dependency", () => {
+  it("rejects routes-only cycles (would deadlock at runtime)", () => {
+    // Without dependsOn edges in the cycle graph, a→b→a via routes alone
+    // would leave both stages waiting on each other in `arePreconditionsTerminal`.
+    const result = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        {
+          ...makeStage("a"),
+          routes: { when: { kind: "allSucceeded", stages: ["b"] } },
+        },
+        {
+          ...makeStage("b"),
+          routes: { when: { kind: "allSucceeded", stages: ["a"] } },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const messages = result.error.issues.map((i) => i.message).join("\n");
+    expect(messages).toContain("stage dependency cycle");
+    expect(messages).toContain("a → b → a");
+  });
+
+  it("rejects mixed dependsOn + routes cycles", () => {
+    const result = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        { ...makeStage("a"), dependsOn: ["b"] },
+        {
+          ...makeStage("b"),
+          routes: { when: { kind: "allSucceeded", stages: ["a"] } },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const messages = result.error.issues.map((i) => i.message).join("\n");
+    expect(messages).toContain("stage dependency cycle");
+  });
+
+  it("rejects self-dependency without emitting a duplicate cycle error", () => {
     const result = ConfiguredPipelineSchema.safeParse({
       stages: [{ ...makeStage("a"), dependsOn: ["a"] }],
     });
     expect(result.success).toBe(false);
     if (result.success) return;
+    const messages = result.error.issues.map((i) => i.message);
+    expect(messages.some((m) => m.includes('"a" cannot depend on itself'))).toBe(true);
+    // Trivial self-loops are owned by the explicit self-ref check; the cycle
+    // detector must NOT emit an additional "stage dependency cycle: a → a".
+    expect(messages.some((m) => m.includes("stage dependency cycle"))).toBe(false);
+  });
+
+  it("rejects routes self-reference (would deadlock at runtime)", () => {
+    // A stage whose routes reference itself never sees its own state become
+    // terminal, so `arePreconditionsTerminal` returns false forever.
+    const result = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        {
+          ...makeStage("a"),
+          routes: { when: { kind: "allSucceeded", stages: ["a"] } },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
     const messages = result.error.issues.map((i) => i.message).join("\n");
-    expect(messages).toContain('"a" cannot depend on itself');
+    expect(messages).toContain('"a" cannot route to itself');
+  });
+
+  it("rejects empty stages arrays in route predicates", () => {
+    // Vacuous truth/falsity on empty stage lists is surprising — every
+    // predicate kind must name at least one upstream stage.
+    const allEmpty = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        {
+          ...makeStage("a"),
+          routes: { when: { kind: "allSucceeded", stages: [] } },
+        },
+      ],
+    });
+    expect(allEmpty.success).toBe(false);
+
+    const anyEmpty = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        {
+          ...makeStage("a"),
+          routes: { when: { kind: "anyFailed", stages: [] } },
+        },
+      ],
+    });
+    expect(anyEmpty.success).toBe(false);
   });
 
   it("rejects unknown stage names in dependsOn", () => {
@@ -389,6 +471,6 @@ describe("pipeline DAG — multi-pipeline support", () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     const messages = result.error.issues.map((i) => i.message).join("\n");
-    expect(messages).toContain("dependsOn cycle");
+    expect(messages).toContain("stage dependency cycle");
   });
 });

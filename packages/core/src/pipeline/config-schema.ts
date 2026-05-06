@@ -65,9 +65,9 @@ const StageBudgetSchema = z.object({
 });
 
 const StageRoutePredicateSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("allSucceeded"), stages: z.array(z.string().min(1)) }),
-  z.object({ kind: z.literal("anySucceeded"), stages: z.array(z.string().min(1)) }),
-  z.object({ kind: z.literal("anyFailed"), stages: z.array(z.string().min(1)) }),
+  z.object({ kind: z.literal("allSucceeded"), stages: z.array(z.string().min(1)).min(1) }),
+  z.object({ kind: z.literal("anySucceeded"), stages: z.array(z.string().min(1)).min(1) }),
+  z.object({ kind: z.literal("anyFailed"), stages: z.array(z.string().min(1)).min(1) }),
 ]);
 
 const StageRoutesSchema = z.object({
@@ -92,10 +92,15 @@ const StageSchema = z.object({
  * Pipeline config without its branded id — id is derived from the YAML map key.
  * `name` defaults to that same key when omitted.
  *
- * Cross-stage validations (unknown `dependsOn`/`routes` references and
- * `dependsOn` cycles) run via `superRefine` so they surface alongside the
- * normal Zod errors at config load — operators see one consolidated failure
- * instead of a runtime crash later.
+ * Cross-stage validations (unknown `dependsOn`/`routes` references, self-refs,
+ * and cycles in the combined `dependsOn`+`routes` graph) run via `superRefine`
+ * so they surface alongside the normal Zod errors at config load — operators
+ * see one consolidated failure instead of a runtime deadlock later.
+ *
+ * Cycle detection treats both `dependsOn` and `routes.when.stages` as graph
+ * edges because the runtime scheduler waits for both before evaluating a
+ * stage (`arePreconditionsTerminal` in dag.ts). A routes-only cycle would
+ * otherwise leave every stage in the cycle stuck `pending` forever.
  */
 export const ConfiguredPipelineSchema = z
   .object({
@@ -150,34 +155,57 @@ export const ConfiguredPipelineSchema = z
               message: `Stage "${stage.name}" routes references unknown stage "${ref}".`,
             });
           }
+          if (ref === stage.name) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["stages", i, "routes", "when", "stages"],
+              message: `Stage "${stage.name}" cannot route to itself.`,
+            });
+          }
         }
       }
     }
 
-    // Cycle detection on the dependsOn graph (Tarjan's SCC).
-    // Returns the first cycle found, in the order the stages appear so the
-    // error message reads naturally (e.g. "a → b → c → a").
-    const cycle = findFirstDependencyCycle(pipeline.stages);
+    // Cycle detection over the combined dependsOn + routes-refs graph.
+    // Iterative DFS; returns the first cycle found in declaration order so
+    // the error reads naturally (e.g. "a → b → c → a"). Trivial self-loops
+    // (`[X, X]`) are excluded — the explicit self-ref checks above already
+    // report those with clearer messages.
+    const cycle = findFirstStageCycle(pipeline.stages);
     if (cycle) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["stages"],
-        message: `Pipeline has a dependsOn cycle: ${cycle.join(" → ")}.`,
+        message: `Pipeline has a stage dependency cycle: ${cycle.join(" → ")}.`,
       });
     }
   });
 
 /**
- * Find the first dependsOn cycle and return it as `[stage, ..., stage]` (first
- * and last names equal). Iterative DFS — pure, allocation-bounded, suitable
- * for running inside Zod refinements at config load.
+ * Find the first cycle in the combined `dependsOn` + `routes.when.stages`
+ * graph and return it as `[stage, ..., stage]` (first and last names equal).
+ * Trivial self-loops (`[X, X]`) are excluded so the explicit self-reference
+ * checks own that error message; multi-node cycles are reported here.
+ *
+ * Iterative DFS — pure, allocation-bounded, suitable for running inside Zod
+ * refinements at config load. Both edge types contribute because the runtime
+ * scheduler waits for either kind of reference before evaluating a stage, so
+ * a cycle in either graph deadlocks the run.
  */
-function findFirstDependencyCycle(
-  stages: Array<{ name: string; dependsOn?: string[] }>,
+function findFirstStageCycle(
+  stages: Array<{
+    name: string;
+    dependsOn?: string[];
+    routes?: { when: { stages: string[] } };
+  }>,
 ): string[] | null {
   const adjacency = new Map<string, string[]>();
   for (const stage of stages) {
-    adjacency.set(stage.name, [...(stage.dependsOn ?? [])]);
+    const edges = new Set<string>([
+      ...(stage.dependsOn ?? []),
+      ...(stage.routes?.when.stages ?? []),
+    ]);
+    adjacency.set(stage.name, [...edges]);
   }
   const WHITE = 0;
   const GRAY = 1;
@@ -206,6 +234,9 @@ function findFirstDependencyCycle(
       const nextColor = color.get(next);
       if (nextColor === GRAY) {
         const cycleStart = path.indexOf(next);
+        // Skip trivial self-loops; the explicit self-reference checks above
+        // already produced a clearer error for those.
+        if (cycleStart === path.length - 1) continue;
         return [...path.slice(cycleStart), next];
       }
       if (nextColor === WHITE) {
