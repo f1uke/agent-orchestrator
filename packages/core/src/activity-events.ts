@@ -105,12 +105,47 @@ function pruneOldEvents(db: ReturnType<typeof getDb>, cutoff: number): void {
 // Patterns that indicate sensitive field names
 const SENSITIVE_KEY_RE = /token|password|secret|authorization|cookie|api[-_]?key/i;
 // URL credentials: https://token@host or http://user:pass@host.
-// Excluding `/` from the userinfo class is both semantically correct (RFC 3986
-// userinfo can't contain unencoded `/`) AND prevents the polynomial-regex
-// (ReDoS) backtracking that the unbounded `[^@\s]+` allowed on inputs like
-// `http://http://http://...` with no terminating `@`. Length cap is a belt-
-// and-braces guard against pathological inputs.
-const CREDENTIAL_URL_RE = /https?:\/\/[^@\s/]{1,200}@/gi;
+// Linear scan — find :// then scan forward for the next @ before a path
+// separator or whitespace. O(n) worst case, no regex backtracking, no length
+// limits. Replaces the previous CREDENTIAL_URL_RE which either ReDoS'd
+// (unbounded quantifier) or missed >200-char userinfo (bounded quantifier).
+function redactCredentialUrls(input: string): string {
+  let result = input;
+  let offset = 0;
+  while (offset < result.length) {
+    const proto = result.indexOf("://", offset);
+    if (proto === -1) break;
+    // Only match http:// or https:// (case-insensitive, matching old /gi flag)
+    if (proto < 4) { offset = proto + 3; continue; }
+    const schemeEnd = result.slice(Math.max(0, proto - 5), proto).toLowerCase();
+    if (!schemeEnd.endsWith("http") && !schemeEnd.endsWith("https")) {
+      offset = proto + 3;
+      continue;
+    }
+
+    let cursor = proto + 3;
+    while (cursor < result.length) {
+      const ch = result.charCodeAt(cursor);
+      // Space/control chars or '/' mean no '@' is coming in userinfo
+      if (ch <= 0x20 || ch === 0x2F) break;
+      if (ch === 0x40) {
+        // '@' found — redact everything between :// and @
+        // Lowercase the scheme to match the old /gi regex behavior
+        const before = result.slice(0, proto + 3).toLowerCase();
+        const suffix = result.slice(cursor);
+        result = before + "[redacted]" + suffix;
+        offset = proto + 3 + "[redacted]".length + 1;
+        break;
+      }
+      cursor++;
+    }
+    // No '@' found — not a credential URL, move past this ://
+    if (cursor >= result.length || result.charCodeAt(cursor) <= 0x20 || result.charCodeAt(cursor) === 0x2F) {
+      offset = proto + 3;
+    }
+  }
+  return result;
+}
 
 // Per-string-value cap. The whole-data 16 KB cap still applies on top of this;
 // truncating individual strings limits blast radius if a pattern below misses a
@@ -151,7 +186,7 @@ const TOKEN_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 function sanitizeString(value: string): string {
-  let cleaned = value.replace(CREDENTIAL_URL_RE, "https://[redacted]@");
+  let cleaned = redactCredentialUrls(value);
   for (const [pattern, replacement] of TOKEN_PATTERNS) {
     cleaned = cleaned.replace(pattern, replacement);
   }

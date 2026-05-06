@@ -346,21 +346,43 @@ describe("recordActivityEvent", () => {
     expect(attempts[1]!["error"]).not.toContain("ghp_abc");
   });
 
-  it("REGRESSION: CREDENTIAL_URL_RE doesn't ReDoS on attacker-shaped input (CodeQL alert)", () => {
-    // CodeQL flagged the original pattern `[^@\s]+@` as polynomial: an input
-    // like `http://http://http://...` with no terminating @ caused O(n²)
-    // backtracking. Excluding `/` from the userinfo class + length cap fixes
-    // both the false positive (URL userinfo can't contain `/` per RFC 3986)
-    // and the perf cliff. This test runs a 16KB pathological input through
-    // the full sanitize pipeline and asserts it completes in <100ms.
+  it("REGRESSION: redactCredentialUrls handles pathological input in <100ms (was ReDoS)", () => {
+    // Replaced the regex-based CREDENTIAL_URL_RE with a linear scan — no
+    // backtracking possible. Kept as a regression guard in case of regression.
     const pathological = "http://".repeat(2000); // ~14KB, ~2000 prefix repetitions, no @
     const start = Date.now();
     const out = recordAndCaptureData({ errorMessage: pathological });
     const elapsed = Date.now() - start;
-    // Generous bound — the fixed regex should complete in single-digit ms.
-    // Pre-fix this input took multiple seconds.
     expect(elapsed).toBeLessThan(100);
-    // No `@` in input → no replacement should occur (other than length cap).
     expect((out["errorMessage"] as string).length).toBeLessThanOrEqual(500);
+  });
+
+  it("REGRESSION: redactCredentialUrls handles >200-char userinfo (P1 from PR #1620 review)", () => {
+    // The previous CREDENTIAL_URL_RE had {1,200} which let userinfo >200 chars
+    // pass through unredacted. The linear scan has no length limit.
+    const longPass = "a".repeat(300);
+    const input = `https://user:${longPass}@github.com/org/repo.git`;
+    const out = recordAndCaptureData({ remoteUrl: input });
+    const result = out["remoteUrl"] as string;
+    expect(result).not.toContain(longPass);
+    expect(result).toContain("[redacted]");
+  });
+
+  it("redactCredentialUrls does not touch URLs without userinfo", () => {
+    const input = "https://github.com/org/repo.git pushed successfully";
+    const out = recordAndCaptureData({ message: input });
+    expect(out["message"]).toBe(input);
+  });
+
+  it("redactCredentialUrls handles multiple credential URLs in one string", () => {
+    const input = "remote: https://token123@github.com/a.git origin: https://pass@github.com/b.git";
+    const out = recordAndCaptureData({ message: input });
+    const result = out["message"] as string;
+    expect(result).not.toContain("token123");
+    expect(result).not.toContain("pass");
+    expect(result).toMatch(/\[redacted\]/g);
+    // Should still contain the host parts
+    expect(result).toContain("github.com/a.git");
+    expect(result).toContain("github.com/b.git");
   });
 });
