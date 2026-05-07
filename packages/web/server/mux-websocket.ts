@@ -274,9 +274,9 @@ export class TerminalManager {
       return tmuxSessionId;
     }
 
-    // tmux 3.4 only honours the `=` exact-match prefix for has-session and
-    // attach-session — set-option silently ignores it, so use the bare id here.
-    const exactTmuxTarget = `=${tmuxSessionId}`;
+    // tmux 3.4 only honours the `=` exact-match prefix on has-session and
+    // attach-session; set-option silently ignores it, so we use the bare id
+    // here. The `=`-prefixed form is built below for attach-session.
 
     // Enable mouse mode
     const mouseProc = spawn(this.TMUX, ["set-option", "-t", tmuxSessionId, "mouse", "on"]);
@@ -307,7 +307,9 @@ export class TerminalManager {
       throw new Error("node-pty not available");
     }
 
-    // Spawn PTY
+    // Spawn PTY — use `=`-prefixed exact-match target so we never attach to
+    // a session whose name happens to be a prefix of the requested id.
+    const exactTmuxTarget = `=${tmuxSessionId}`;
     const pty = ptySpawn(this.TMUX, ["attach-session", "-t", exactTmuxTarget], {
       name: "xterm-256color",
       cols: 80,
