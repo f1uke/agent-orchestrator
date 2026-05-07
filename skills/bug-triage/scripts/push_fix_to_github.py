@@ -4,13 +4,14 @@ Push a file fix to GitHub via API and create a PR.
 
 Usage: python3 push_fix_to_github.py <repo> <branch-name> <file-path> <commit-message> <pr-title> <pr-body>
 
-Reads the original file content from GitHub (main branch), applies a sed-like
+Reads the original file content from GitHub (default branch), applies a sed-like
 replacement using OLD_STRING / NEW_STRING env vars, and pushes via GitHub API.
 
 Environment variables:
-  OLD_STRING   - The exact string to find in the file (required)
-  NEW_STRING   - The replacement string (required)
-  BASE_SHA     - Override the base commit SHA (optional, defaults to main HEAD)
+  OLD_STRING    - The exact string to find in the file (required)
+  NEW_STRING    - The replacement string (set to empty string to delete) (required as env var)
+  BASE_SHA      - Override the base commit SHA (optional, defaults to default branch HEAD)
+  BASE_BRANCH   - Override the base branch name (optional, defaults to "main")
 
 Example:
   OLD_STRING='<td className="foo">{bar}</td>' \
@@ -48,45 +49,52 @@ if __name__ == "__main__":
     commit_msg = sys.argv[4]
     pr_title = sys.argv[5]
     pr_body = sys.argv[6]
+    base_branch = os.environ.get("BASE_BRANCH", "main")
 
     old_string = os.environ.get("OLD_STRING", "")
-    new_string = os.environ.get("NEW_STRING", "")
+    new_string = os.environ.get("NEW_STRING")
 
-    if not old_string or not new_string:
-        print("ERROR: OLD_STRING and NEW_STRING env vars are required", file=sys.stderr)
+    if not old_string:
+        print("ERROR: OLD_STRING env var is required", file=sys.stderr)
+        sys.exit(1)
+    if new_string is None:
+        print("ERROR: NEW_STRING env var is required (set to empty string to delete)", file=sys.stderr)
         sys.exit(1)
 
-    # 1. Get current file content and SHA from GitHub
-    print(f"Fetching {file_path} from {repo}...")
-    file_data = run_gh([f"repos/{repo}/contents/{file_path}"])
-    file_sha = file_data["sha"]
-    decoded_content = base64.b64decode(file_data["content"]).decode("utf-8")
-
-    # 2. Get main HEAD SHA
+    # 1. Get base HEAD SHA first
     base_sha = os.environ.get("BASE_SHA")
     if not base_sha:
-        ref_data = run_gh([f"repos/{repo}/git/ref/heads/main"])
+        ref_data = run_gh([f"repos/{repo}/git/ref/heads/{base_branch}"])
         base_sha = ref_data["object"]["sha"]
 
-    print(f"Base SHA: {base_sha}")
-    print(f"File SHA: {file_sha}")
-
-    # 3. Apply replacement
-    if old_string not in decoded_content:
-        print(f"ERROR: OLD_STRING not found in file!", file=sys.stderr)
-        print(f"Looking for:\n{old_string}", file=sys.stderr)
-        sys.exit(1)
-
-    new_content = decoded_content.replace(old_string, new_string, 1)
-    encoded = base64.b64encode(new_content.encode("utf-8")).decode("ascii")
-
-    # 4. Create branch (ignore error if exists)
-    print(f"Creating branch {branch}...")
+    # 2. Create branch from base SHA (before fetching file to avoid SHA race)
+    print(f"Creating branch {branch} from {base_branch} ({base_sha[:8]})...")
     run_gh([
         "-X", "POST", f"repos/{repo}/git/refs",
         "-f", f"ref=refs/heads/{branch}",
         "-f", f"sha={base_sha}"
     ], check=False)
+
+    # 3. Fetch file content from the new branch (avoids SHA mismatch)
+    print(f"Fetching {file_path} from {repo} (branch: {branch})...")
+    file_data = run_gh([f"repos/{repo}/contents/{file_path}?ref={branch}"])
+    file_sha = file_data["sha"]
+    decoded_content = base64.b64decode(file_data["content"]).decode("utf-8")
+
+    print(f"File SHA: {file_sha}")
+
+    # 4. Apply replacement
+    if old_string not in decoded_content:
+        print(f"ERROR: OLD_STRING not found in file!", file=sys.stderr)
+        print(f"Looking for:\n{old_string}", file=sys.stderr)
+        sys.exit(1)
+
+    match_count = decoded_content.count(old_string)
+    if match_count > 1:
+        print(f"WARNING: OLD_STRING found {match_count} times — replacing only the first occurrence.", file=sys.stderr)
+
+    new_content = decoded_content.replace(old_string, new_string, 1)
+    encoded = base64.b64encode(new_content.encode("utf-8")).decode("ascii")
 
     # 5. Push file to branch
     print(f"Pushing updated file...")
@@ -105,7 +113,7 @@ if __name__ == "__main__":
         "-f", f"title={pr_title}",
         "-f", f"body={pr_body}",
         "-f", f"head={branch}",
-        "-f", "base=main"
+        "-f", f"base={base_branch}"
     ])
 
     pr_url = pr_result.get("html_url", "unknown")

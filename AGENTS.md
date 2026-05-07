@@ -33,7 +33,7 @@ Full guidelines with AO-specific context: see "Working Principles" in CLAUDE.md.
 
 Agents working on this repo should use these checked-in skills:
 
-### Bug Triage (`.skills/bug-triage/`)
+### Bug Triage (`skills/bug-triage/`)
 
 **When to use:** Any time a bug is reported — in chat, issues, or live observation.
 

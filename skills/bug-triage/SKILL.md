@@ -94,29 +94,30 @@ EOF
 
 **⛔ NEVER use placeholder URLs.** Every image must be uploaded BEFORE the issue is created. Placeholder URLs (`placeholder-will-upload`, `TODO`, etc.) always result in broken links that need follow-up fixes. See [#1151](https://github.com/ComposioHQ/agent-orchestrator/issues/1151) for an RCA on this pattern.
 
-Create a dedicated branch for issue assets (main is usually protected):
+Create a dedicated branch for issue assets (main is usually protected). Use a descriptive slug since the issue number doesn't exist yet:
 
 ```bash
-# Create a branch for issue assets
+# Create a branch for issue assets (use a slug, not issue number — issue doesn't exist yet)
+SLUG="mobile-kanban-break"
 gh api -X POST repos/<repo>/git/refs \
-  -f ref="refs/heads/issue-assets-<issue-number>" \
+  -f ref="refs/heads/issue-assets-${SLUG}" \
   -f sha=$(git rev-parse origin/main)
 ```
 
 Upload the image:
 
 ```bash
-# Encode image as base64 and upload
-IMG_B64=$(base64 -w 0 < /path/to/screenshot.png)
-gh api -X PUT "repos/<repo>/contents/.issue-assets/<descriptive-name>.png" \
+# Encode image as base64 (portable across Linux and macOS)
+IMG_B64=$(base64 < /path/to/screenshot.png | tr -d '\n')
+gh api -X PUT "repos/<repo>/contents/.issue-assets/${SLUG}/<descriptive-name>.png" \
   -f message="chore: upload screenshot for issue" \
   -f content="$IMG_B64" \
-  -f branch="issue-assets-<issue-number>"
+  -f branch="issue-assets-${SLUG}"
 ```
 
 Extract the `download_url` from the response. Use the raw URL in the issue body:
 ```
-![screenshot](https://raw.githubusercontent.com/<repo>/issue-assets-<N>/.issue-assets/<filename>)
+![screenshot](https://raw.githubusercontent.com/<repo>/issue-assets-<slug>/.issue-assets/<filename>)
 ```
 
 **Upload checklist — verify ALL before proceeding to 4.2:**
@@ -187,7 +188,7 @@ Do NOT use other labels (no `p0`, `p1`, `p2`, etc.).
 
 If the label doesn't exist:
 ```bash
-gh label create "priority:medium" --repo <upstream-repo> --color "FBCA04" --description "Medium priority"
+gh label create "priority: medium" --repo <upstream-repo> --color "FBCA04" --description "Medium priority"
 ```
 
 ### 4.4 Create a PR for the fix (always attempt this)
@@ -206,7 +207,7 @@ Use the `push_fix_to_github.py` script in this skill's `scripts/` directory:
 ```bash
 OLD_STRING='<old code>' \
 NEW_STRING='<new code>' \
-python3 .skills/bug-triage/scripts/push_fix_to_github.py \
+python3 skills/bug-triage/scripts/push_fix_to_github.py \
   <owner/repo> \
   fix/descriptive-branch-name \
   path/to/file.tsx \
