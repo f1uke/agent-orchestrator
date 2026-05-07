@@ -650,10 +650,13 @@ function createGitHubSCM(): SCM {
         }> = JSON.parse(raw);
 
         // Only same-repo PRs auto-associate. Fork PRs (different head owner)
-        // are someone else's work — never the session's.
+        // are someone else's work — never the session's. Strict-by-default:
+        // a missing/null/empty headOwner is rejected so a future gh API
+        // change or deleted-account edge case can't quietly let a fork PR
+        // through.
         const sameRepoPrs = prs.filter((pr) => {
           const headOwner = pr.headRepositoryOwner?.login;
-          return !headOwner || headOwner === owner;
+          return typeof headOwner === "string" && headOwner === owner;
         });
 
         if (sameRepoPrs.length === 0) return null;

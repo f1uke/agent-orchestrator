@@ -226,6 +226,36 @@ describe("restore", () => {
     await expect(sm.restore("app-1")).rejects.toThrow(/is merged/);
   });
 
+  it("refuses to restore sessions whose PR is closed (unmerged terminal state)", async () => {
+    const ws = "/tmp/mock-ws/app-1-closed";
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: ws,
+      branch: "feat/abandoned",
+      status: "killed",
+      pr: "https://github.com/acme/repo/pull/99",
+      project: "my-app",
+      runtimeHandle: makeHandle("rt-old"),
+    });
+    // No legacy `status` maps to lifecycle.pr.state="closed", so write the
+    // canonical lifecycle directly to exercise the closed branch of step 3a.
+    updateMetadata(sessionsDir, "app-1", {
+      lifecycle: JSON.stringify({
+        version: 2,
+        session: { state: "terminated", terminatedAt: new Date().toISOString() },
+        pr: {
+          state: "closed",
+          reason: "closed_unmerged",
+          number: 99,
+          url: "https://github.com/acme/repo/pull/99",
+          lastObservedAt: new Date().toISOString(),
+        },
+      }),
+    });
+
+    const sm = createSessionManager({ config, registry: mockRegistry });
+    await expect(sm.restore("app-1")).rejects.toThrow(/is closed/);
+  });
+
   it("throws SessionNotRestorableError for working sessions", async () => {
     writeMetadata(sessionsDir, "app-1", {
       worktree: "/tmp",

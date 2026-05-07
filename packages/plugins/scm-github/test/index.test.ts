@@ -400,6 +400,7 @@ describe("scm-github plugin", () => {
           headRefName: "feat/my-feature",
           baseRefName: "main",
           isDraft: false,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
 
@@ -459,10 +460,35 @@ describe("scm-github plugin", () => {
           headRefName: "feat/my-feature",
           baseRefName: "main",
           isDraft: true,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
       const result = await scm.detectPR(makeSession(), project);
       expect(result?.isDraft).toBe(true);
+    });
+
+    it("rejects PRs with missing/null headRepositoryOwner (strict-by-default)", async () => {
+      mockGh([
+        {
+          number: 50,
+          url: "https://github.com/acme/repo/pull/50",
+          title: "owner missing",
+          headRefName: "feat/my-feature",
+          baseRefName: "main",
+          isDraft: false,
+          headRepositoryOwner: null,
+        },
+        {
+          number: 51,
+          url: "https://github.com/acme/repo/pull/51",
+          title: "owner field absent",
+          headRefName: "feat/my-feature",
+          baseRefName: "main",
+          isDraft: false,
+        },
+      ]);
+      const result = await scm.detectPR(makeSession(), project);
+      expect(result).toBeNull();
     });
 
     it("returns null when session.branch === project.defaultBranch", async () => {
@@ -1334,6 +1360,7 @@ describe("scm-github plugin", () => {
           headRefName: "feat/my-feature",
           baseRefName: "main",
           isDraft: false,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
       const a = await scm.detectPR(makeSession(), project);
@@ -1366,6 +1393,7 @@ describe("scm-github plugin", () => {
           headRefName: "feat/my-feature",
           baseRefName: "main",
           isDraft: false,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
       const after = await scm.detectPR(makeSession(), project);
@@ -1382,6 +1410,7 @@ describe("scm-github plugin", () => {
           headRefName: "feat/a",
           baseRefName: "main",
           isDraft: false,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
       mockGh([
@@ -1392,6 +1421,7 @@ describe("scm-github plugin", () => {
           headRefName: "feat/b",
           baseRefName: "main",
           isDraft: false,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
       const a = await scm.detectPR(makeSession({ branch: "feat/a" }), project);
@@ -1410,6 +1440,7 @@ describe("scm-github plugin", () => {
           headRefName: pr.branch,
           baseRefName: "main",
           isDraft: false,
+          headRepositoryOwner: { login: "acme" },
         },
       ]);
       await scm.detectPR(makeSession({ branch: pr.branch }), project);
