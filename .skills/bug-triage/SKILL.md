@@ -31,7 +31,7 @@ Collect all available context about the bug:
 ## Step 1: Understand the Issue
 
 1. Read the bug report carefully. Ask clarifying questions if ambiguous.
-2. **Always trace the actual code path** — don't surface-level diagnose. The obvious answer isn't always the real answer.
+2. **Always trace the actual code path** — don't surface-level diagnose. The obvious answer isn't always the real answer. Example: [#1129](https://github.com/ComposioHQ/agent-orchestrator/issues/1129) looked like a simple `ao stop` issue but was actually a session lineage/cascade problem.
 3. Look at the **latest main** code to trace the root cause:
    - Run `git fetch origin main && git log --oneline origin/main -5` to see current HEAD
    - Record the **commit hash** you're analyzing against
@@ -41,7 +41,7 @@ Collect all available context about the bug:
    git log --oneline -S 'exact-string' -- <file>
    git show <sha> -- <file> | grep -B 5 -A 10 'pattern'
    ```
-   This finds which commits introduced or removed specific code.
+   This finds which commits introduced or removed specific code. Example: [#1391](https://github.com/ComposioHQ/agent-orchestrator/issues/1391) traced a mobile layout break to a `display: flex` → `display: grid` change that silently broke `flex-direction: column` overrides.
 5. **Research upstream dependencies** when the bug involves a library (xterm, node-pty, React, etc.):
    - Check installed vs latest version
    - Search the dependency's GitHub issues for the same symptom
@@ -92,7 +92,7 @@ EOF
 
 ### 4.1b Upload screenshots to GitHub
 
-**⛔ NEVER use placeholder URLs.** Every image must be uploaded BEFORE the issue is created.
+**⛔ NEVER use placeholder URLs.** Every image must be uploaded BEFORE the issue is created. Placeholder URLs (`placeholder-will-upload`, `TODO`, etc.) always result in broken links that need follow-up fixes. See [#1151](https://github.com/ComposioHQ/agent-orchestrator/issues/1151) for an RCA on this pattern.
 
 Create a dedicated branch for issue assets (main is usually protected):
 
@@ -291,7 +291,7 @@ diff /tmp/ao-diff/v1/package/dist-server/file.js /tmp/ao-diff/v2/package/dist-se
 diff -rq /tmp/ao-diff/v1/package/.next/static/chunks/ /tmp/ao-diff/v2/package/.next/static/chunks/
 ```
 
-**Why this matters:** The npm package may include pre-built bundles that differ from what `pnpm build` produces locally. The only authoritative source of truth is what's published.
+**Why this matters:** The npm package may include pre-built bundles that differ from what `pnpm build` produces locally. The only authoritative source of truth is what's published. Example: [PR #1608](https://github.com/ComposioHQ/agent-orchestrator/pull/1608) had a scroll regression where source analysis led to wrong theories, but diffing the actual npm packages showed the **only change** was a single `=` prefix on a tmux `set-option` call.
 
 ## Remote Code Inspection (repo not cloned locally)
 
@@ -326,4 +326,4 @@ gh api "repos/{owner}/{repo}/contents/{path}?ref={sha}" --jq '.content' | base64
 - **`gh api --jq .content` truncates large files** — files over ~100KB get corrupted. Use local git for large files.
 - **Push script `OSError: Argument list too long`** — long commit messages exceed OS arg limits. Use `execute_code` with JSON payloads instead.
 - **Exact OLD_STRING matching** — `OLD_STRING` must match the file byte-for-byte on GitHub. Code traced locally may differ from what's on `origin/main`. Always fetch from GitHub API first.
-- **Adding new required fields to shared TypeScript interfaces.** New fields on exported interfaces (`Session`, `SessionSpawnConfig`, etc.) MUST be optional (`field?: Type`). Downstream packages use `Partial<X>` spread — required fields break CI across all plugins. Progression: `field: T | null` → fails, `field?: T | null` → works.
+- **Adding new required fields to shared TypeScript interfaces.** New fields on exported interfaces (`Session`, `SessionSpawnConfig`, etc.) MUST be optional (`field?: Type`). Downstream packages use `Partial<X>` spread — required fields break CI across all plugins. Progression: `field: T | null` → fails, `field?: T | null` → works. Example: [PR #1523](https://github.com/ComposioHQ/agent-orchestrator/pull/1523) hit this exact pattern.
