@@ -360,6 +360,7 @@ export {
 } from "./portfolio-routing.js";
 
 // Storage V2 migration — one-time converter from hash-based to projectId-based layout
+// (Internal helpers; the V1→V3 path is now driven by ao migrate.)
 export {
   migrateStorage,
   rollbackStorage,
@@ -372,6 +373,21 @@ export type {
   RollbackOptions,
   HashDirEntry,
 } from "./migration/storage-v2.js";
+
+// Storage V3 migration — inventory + plan generator (dry-run only in v0.6.0)
+export { inventoryV3, planV3, formatBytes } from "./migration/v3.js";
+export type {
+  V3Inventory,
+  V3Plan,
+  V3Step,
+  V3Issue,
+  V3IssueKind,
+  V3ProjectInventory,
+  V3StrandedWorktree,
+  V3LiveTmuxSession,
+  V3DuplicateRepo,
+  InventoryOptions as V3InventoryOptions,
+} from "./migration/v3.js";
 
 export { atomicWriteFileSync } from "./atomic-write.js";
 

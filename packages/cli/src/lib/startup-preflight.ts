@@ -156,7 +156,7 @@ export function warnAboutLegacyStorage(): void {
       chalk.yellow(
         `\n  ⚠ Found ${nonEmptyDirCount} legacy storage director${nonEmptyDirCount === 1 ? "y" : "ies"} that need${nonEmptyDirCount === 1 ? "s" : ""} migration.\n` +
           `    Sessions stored in the old format won't appear until migrated.\n` +
-          `    Run ${chalk.bold("ao migrate-storage")} to upgrade (use ${chalk.bold("--dry-run")} to preview).\n`,
+          `    Run ${chalk.bold("ao migrate --dry-run")} to preview the V3 plan. Execution unlocks in v0.6.1.\n`,
       ),
     );
   } catch {
