@@ -336,7 +336,7 @@ export function useXtermTerminal(
     // fontSize intentionally NOT in deps — it's handled by a dedicated effect
     // below that mutates terminal.options.fontSize in place. Adding it here
     // would tear down and recreate the terminal (and WebSocket) on every
-    // stepper click, losing scrollback and flashing content.
+    // stepper click, causing a content flash and WebSocket reconnect.
   }, [
     appearance,
     sessionId,
@@ -392,12 +392,14 @@ export function useXtermTerminal(
     const t = terminalInstance.current;
     if (t) {
       if (t.buffer.active.type === "normal") {
-        // Normal buffer: scrollback exists in xterm, use its API.
+        // Normal buffer: xterm scrollback is disabled (scrollback: 0), so
+        // history lives in tmux. scrollToBottom() is a safe no-op that
+        // re-anchors the viewport to the live tail.
         t.scrollToBottom();
       } else {
-        // Alternate buffer (tmux/vim): xterm has no scrollback to scroll
-        // to. The user is in tmux copy-mode (entered by attachTouchScroll
-        // on swipe). Send 'q' to exit copy-mode and return to live tail.
+        // Alternate buffer (tmux/vim): the user is in tmux copy-mode
+        // (entered by attachTouchScroll on swipe). Send 'q' to exit
+        // copy-mode and return to live tail.
         writeTerminal(sessionId, "q", projectId);
       }
     }
