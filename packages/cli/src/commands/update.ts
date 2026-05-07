@@ -8,6 +8,7 @@ import {
   isWindows,
   loadConfig,
   loadGlobalConfig,
+  recordActivityEvent,
   type Session,
 } from "@aoagents/ao-core";
 import { runRepoScript } from "../lib/script-runner.js";
@@ -82,6 +83,14 @@ export function registerUpdate(program: Command): void {
         }
 
         const method = detectInstallMethod();
+
+        recordActivityEvent({
+          source: "cli",
+          kind: "cli.update_invoked",
+          level: "info",
+          summary: `ao update invoked (method: ${method})`,
+          data: { method, options: opts },
+        });
 
         // Reject git-only flags up front when the install isn't a git source.
         // Without this, users copy/pasting `ao update --skip-smoke` from older
@@ -225,6 +234,13 @@ async function handleGitUpdate(opts: {
   try {
     const exitCode = await runRepoScript("ao-update.sh", args);
     if (exitCode !== 0) {
+      recordActivityEvent({
+        source: "cli",
+        kind: "cli.update_failed",
+        level: "error",
+        summary: `ao update (git) failed: ao-update.sh exited non-zero`,
+        data: { method: "git", exitCode },
+      });
       process.exit(exitCode);
     }
     invalidateCache();
@@ -233,6 +249,13 @@ async function handleGitUpdate(opts: {
       error instanceof Error &&
       error.message.includes("Script not found: ao-update.sh")
     ) {
+      recordActivityEvent({
+        source: "cli",
+        kind: "cli.update_failed",
+        level: "error",
+        summary: `ao update (git) failed: ao-update.sh missing from bundled assets`,
+        data: { method: "git", reason: "script_missing" },
+      });
       console.error(
         chalk.red(
           "ao-update.sh is missing from the bundled assets. " +
@@ -243,6 +266,16 @@ async function handleGitUpdate(opts: {
       process.exit(1);
     }
 
+    recordActivityEvent({
+      source: "cli",
+      kind: "cli.update_failed",
+      level: "error",
+      summary: `ao update (git) failed`,
+      data: {
+        method: "git",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      },
+    });
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
@@ -369,6 +402,13 @@ async function handleNpmUpdate(method: InstallMethod): Promise<void> {
     invalidateCache();
     console.log(chalk.green("\nUpdate complete."));
   } else {
+    recordActivityEvent({
+      source: "cli",
+      kind: "cli.update_failed",
+      level: "error",
+      summary: `ao update (npm/pnpm) failed: install command exited non-zero`,
+      data: { method: "npm-global", command, exitCode },
+    });
     process.exit(exitCode);
   }
 }

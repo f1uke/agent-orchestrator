@@ -21,7 +21,8 @@ export type ActivityEventSource =
   | "runtime"
   | "agent"
   | "reaction"
-  | "report-watcher";
+  | "report-watcher"
+  | "cli";
 
 export type ActivityEventKind =
   | "session.spawn_started"
