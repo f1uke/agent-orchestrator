@@ -5,7 +5,6 @@ import {
   readCanvases,
   synthesizeGitDiffCanvas,
   SessionNotFoundError,
-  type CanvasArtifact,
 } from "@aoagents/ao-core";
 import {
   getCorrelationId,
@@ -13,6 +12,7 @@ import {
   recordApiObservation,
   resolveProjectIdForSessionId,
 } from "@/lib/observability";
+import { mergeCanvases } from "./merge";
 
 /** GET /api/sessions/:id/canvases — List canvas artifacts for a session */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -47,13 +47,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         ])
       : [[], null];
 
-    const merged = new Map<string, CanvasArtifact>();
-    if (synthesized) merged.set(synthesized.id, synthesized);
-    for (const c of fileCanvases) merged.set(c.id, c);
-
-    const canvases = Array.from(merged.values()).sort((a, b) =>
-      a.updatedAt < b.updatedAt ? 1 : -1,
-    );
+    const canvases = mergeCanvases(synthesized, fileCanvases);
 
     recordApiObservation({
       config,

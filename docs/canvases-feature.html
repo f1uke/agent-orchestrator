@@ -214,6 +214,7 @@
     <li><a href="#files">File map</a></li>
     <li><a href="#try">Try it locally</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#why-no-html">Why no <code>html</code> canvas type?</a></li>
     <li><a href="#non-goals">Deliberate non-goals</a></li>
   </ol>
 </nav>
@@ -623,7 +624,45 @@ EOF</code></pre>
   </tbody>
 </table>
 
-<h2 id="non-goals">10. Deliberate non-goals</h2>
+<h2 id="why-no-html">10. Why no <code>html</code> canvas type?</h2>
+<p>The most-asked design question — answered honestly here so reviewers don't have to ask.</p>
+<p>Two reasons, both load-bearing.</p>
+
+<h3>Trust hierarchy inversion</h3>
+<p>Agents are the lowest-trust surface in the system. They emit content on every poll cycle, and large parts of that content come from LLMs that can be prompt-injected. If an agent ingests a malicious URL, summarizes a poisoned document, or just hits a jailbreak, its next "render this nice summary" call could include attacker-controlled HTML. Putting that HTML into the same-origin dashboard means the attacker now has:</p>
+<ul>
+  <li>Read access to every same-origin auth token / cookie / <code>localStorage</code> value.</li>
+  <li>Permission to call every API the user can call (kill sessions, restore them, modify config).</li>
+  <li>The ability to inject scripts that survive across navigation.</li>
+  <li>Keylogging on every page the dashboard renders.</li>
+</ul>
+<p>That's the same blast radius v0.4 renderer plugins have — but renderer plugins clear <code>npm install</code> review <em>once</em>. An agent emits a fresh canvas every poll. The trust gap is enormous.</p>
+
+<h3>HTML sanitization is a leaky abstraction</h3>
+<p>DOMPurify, sanitize-html, etc. are honest attempts but every year ships new bypasses — <code>&lt;svg&gt;</code> foreign objects, <code>&lt;math&gt;</code> payloads, mutation-XSS via clipboard, CSS exfiltration via <code>attr()</code>. A sanitizer-based HTML canvas is a 90% solution that fails open on the 10%, and the 10% is "execute arbitrary JS in your supervisor". Even GitHub, GitLab, and Slack treat HTML rendering as a multi-quarter security investment, not a feature you slot in next to <code>markdown</code>.</p>
+
+<h3>What the existing types cover</h3>
+<table>
+  <thead><tr><th>You want to render</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td>Formatted text with bold / italic / headings / code / lists</td><td><code>markdown</code> (the v0.1 parser handles all of this safely — no HTML pass-through)</td></tr>
+    <tr><td>Code changes</td><td><code>diff</code></td></tr>
+    <tr><td>Structured rows</td><td><code>table</code></td></tr>
+    <tr><td>Metric cards</td><td><code>stats</code></td></tr>
+    <tr><td>Custom UI (flame graph, Gantt, network diagram)</td><td><code>canvas-renderer</code> plugin (v0.4)</td></tr>
+    <tr><td>Genuinely arbitrary, untrusted markup</td><td><strong>Sandboxed iframe canvas</strong> — credible v0.5+ option, deferred</td></tr>
+  </tbody>
+</table>
+
+<h3>The legitimate "I need raw HTML" path — sandboxed iframe</h3>
+<p>An iframe with <code>sandbox="allow-scripts"</code> (no <code>allow-same-origin</code>) runs in a null origin — it can't reach your auth tokens or call APIs. Add a <code>postMessage</code> protocol for size negotiation and limited event-out, document the trust trade-off explicitly, and you've got a real HTML surface that's safe by construction.</p>
+<p>But — per codex's pass-13 advice — <strong>half-baked iframe support is worse than no sandbox</strong>. Sandbox protocols have to be designed end-to-end (CSP headers, postMessage validation, focus management, accessibility, viewport sizing) before they ship. v0.4 renderer plugins is the bigger unlock; the iframe canvas comes after, only if a real use case shows up.</p>
+
+<div class="callout">
+  <strong>Bottom line</strong> — not because we couldn't, but because direct HTML inverts the trust hierarchy (agents shouldn't be able to JS-execute in the supervisor) and sanitizers don't fix that. The plugin path covers most "I need a custom widget" cases at v0.4. Sandboxed iframe is the answer for genuine arbitrary HTML when we're ready to design the protocol properly.
+</div>
+
+<h2 id="non-goals">11. Deliberate non-goals</h2>
 <ul>
   <li><strong>Remote-loaded JS at runtime.</strong> No URL-fetched code, no agent-emitted React, no on-the-fly module fetching. v0.4 plugins are <em>discovered</em> at AO startup from <code>node_modules</code> (Node loads each plugin's schema entrypoint) and <em>renderers</em> are bundled at web build time via a generated barrel of static imports. That's the OSS extensibility line: trust at install, not at runtime.</li>
   <li><strong>Write APIs from the dashboard back into canvases.</strong> Read-only surface in v0.1. Bidirectional adds a whole new failure mode (auth, ordering, conflict).</li>
