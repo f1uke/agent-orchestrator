@@ -3,12 +3,17 @@ import { readdir, readFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CanvasArtifactSchema } from "./canvas-schema.js";
+import { isWindows } from "./platform.js";
 import type {
   CanvasArtifact,
   CanvasDiffFile,
   ProjectConfig,
   Session,
 } from "./types.js";
+
+// Git's "empty side" sentinel for `git diff --no-index`. Windows git rejects
+// `/dev/null` and expects `NUL`; POSIX accepts the conventional path.
+const NULL_DEVICE = isWindows() ? "NUL" : "/dev/null";
 
 const execFileAsync = promisify(execFile);
 
@@ -176,7 +181,7 @@ export async function synthesizeGitDiffCanvas(
       try {
         const { stdout: addDiff } = await execFileAsync(
           "git",
-          ["diff", "--no-color", "--no-index", "--", "/dev/null", path],
+          ["diff", "--no-color", "--no-index", "--", NULL_DEVICE, path],
           { cwd: session.workspacePath, maxBuffer: 1 * 1024 * 1024, timeout: 5_000 },
         );
         stdout += addDiff;
