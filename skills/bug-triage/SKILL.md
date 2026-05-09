@@ -48,6 +48,35 @@ Collect all available context about the bug:
    - Check changelogs for fixes between versions
    - The root cause is often an upstream bug, not your code
 
+### Step 1b: Cross-Platform Check (Windows / macOS / Linux)
+
+AO runs on **Windows, macOS, and Linux** as first-class targets. Many bugs are OS-specific — what works on Linux may be completely broken on Windows (different runtime, different shell, different paths).
+
+**If you can't pinpoint the root cause after tracing the code, ask the reporter:**
+1. **What OS are you on?** Windows, macOS, Linux — and which version
+2. **What shell?** PowerShell, cmd.exe, bash, zsh, fish
+3. **What runtime?** `runtime-process` (Windows default) or `runtime-tmux` (macOS/Linux default)
+4. **Is it reproducible?** Consistent or intermittent? Does it happen on other OSes?
+
+**Common Windows-specific bug patterns to check:**
+- **Path separators** — `C:\Users\...` vs `/home/...`. Code using hardcoded `/` or `\` breaks cross-platform
+- **Shell syntax** — PowerShell doesn't support `&&`, `$VAR`, `$(cat ...)`, `/dev/null`, here-docs. Bash-isms in spawn commands fail silently
+- **`process.platform === "win32"` inline checks** — should use `isWindows()` from `@aoagents/ao-core` (see `docs/CROSS_PLATFORM.md`)
+- **`process.kill(-pid)`** — negative PIDs are POSIX-only, silently fail on Windows. Should use `killProcessTree()`
+- **Named pipes vs Unix sockets** — Windows IPC uses `\\.\pipe\ao-pty-<id>`, not Unix domain sockets
+- **`localhost` vs `127.0.0.1`** — Windows resolves `localhost` to `::1` first, causing ~21s stalls if server is IPv4-only
+- **NTFS case-insensitivity** — `D:\Foo` == `d:\foo`. Path comparisons must use `pathsEqual()`, not `===`
+- **ConPTY orphan processes** — `conpty_console_list_agent.exe` can orphan and trigger WER dialogs if pty-host isn't shut down cooperatively
+- **`.cmd`/`.bat` shim resolution** — spawning npm CLIs needs `shell: true` on Windows for `PATHEXT` lookup
+
+**Key files for cross-platform code:**
+- `packages/core/src/platform.ts` — central platform abstraction (`isWindows`, `getShell`, `killProcessTree`, `getEnvDefaults`)
+- `docs/CROSS_PLATFORM.md` — full helper inventory, gotchas, pre-merge checklist
+- `packages/plugins/runtime-process/` — Windows runtime (ConPTY, named pipes, pty-host)
+- `packages/cli/src/lib/path-equality.ts` — `pathsEqual()`, `canonicalCompareKey()`
+
+If the bug looks OS-specific, tag the issue with `to-reproduce` and include the reporter's system info.
+
 ## Step 2: Search for Duplicate Issues
 
 ```bash
@@ -321,6 +350,7 @@ gh api "repos/{owner}/{repo}/contents/{path}?ref={sha}" --jq '.content' | base64
 
 ## Pitfalls
 
+- **Cross-platform bugs are easy to miss.** AO runs on Windows, macOS, and Linux. If you're tracing code on Linux and can't find the bug, it might be a Windows-specific issue (wrong runtime, shell, or path handling). Always ask for OS + shell + runtime when root cause is unclear. See Step 1b.
 - **Reporter ≠ person who tagged you.** The person who escalated the bug is often NOT the reporter. Always attribute to the actual reporter.
 - **Always file on the upstream org repo**, not personal forks.
 - **Always record the commit hash** you analyzed — code changes fast.
