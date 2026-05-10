@@ -2260,6 +2260,59 @@ describe("start command — autoCreateConfig", () => {
     );
     expect(parsed.defaults?.notifiers).toEqual([]);
   });
+
+  it("registers a first-run project in the global config", async () => {
+    createFakeRepo(tmpDir, "https://github.com/org/first-run.git");
+
+    const { detectEnvironment } = await import("../../src/lib/detect-env.js");
+    vi.mocked(detectEnvironment).mockResolvedValue({
+      isGitRepo: true,
+      gitRemote: "https://github.com/org/first-run.git",
+      ownerRepo: "org/first-run",
+      currentBranch: "main",
+      defaultBranch: "main",
+      hasTmux: true,
+      hasGh: true,
+      ghAuthed: true,
+      hasLinearKey: false,
+      hasSlackWebhook: false,
+    });
+
+    const { detectAvailableAgents, detectAgentRuntime } =
+      await import("../../src/lib/detect-agent.js");
+    vi.mocked(detectAvailableAgents).mockResolvedValue([]);
+    vi.mocked(detectAgentRuntime).mockResolvedValue("claude-code");
+
+    const { findFreePort } = await import("../../src/lib/web-dir.js");
+    vi.mocked(findFreePort).mockResolvedValue(3000);
+
+    mockProcessCwd.mockReturnValue(tmpDir);
+    mockIsHumanCaller.mockReturnValue(false);
+
+    const originalGlobalConfig = process.env["AO_GLOBAL_CONFIG"];
+    const globalConfigPath = join(tmpDir, "global", "config.yaml");
+    process.env["AO_GLOBAL_CONFIG"] = globalConfigPath;
+
+    try {
+      await autoCreateConfig(tmpDir);
+
+      expect(existsSync(join(tmpDir, "agent-orchestrator.yaml"))).toBe(true);
+      expect(existsSync(globalConfigPath)).toBe(true);
+
+      const parsed = parseYaml(readFileSync(globalConfigPath, "utf-8")) as {
+        projects: Record<string, { path: string; repo?: { originUrl: string } }>;
+      };
+      const projects = Object.values(parsed.projects);
+      expect(projects).toHaveLength(1);
+      expect(projects[0]).toMatchObject({
+        path: realpathSync(tmpDir),
+        repo: { originUrl: "https://github.com/org/first-run" },
+      });
+    } finally {
+      if (originalGlobalConfig === undefined) delete process.env["AO_GLOBAL_CONFIG"];
+      else process.env["AO_GLOBAL_CONFIG"] = originalGlobalConfig;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
