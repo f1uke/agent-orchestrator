@@ -103,7 +103,14 @@ export function isCanonicalGlobalConfigPath(configPath: string | undefined): boo
 }
 
 function registryPathCompareKey(path: string): string {
-  const resolved = resolve(path);
+  let resolved = resolve(path);
+  try {
+    resolved = realpathSync(resolved);
+  } catch {
+    // The global config file itself, or a hand-edited registry path, may not
+    // exist yet. Fall back to the resolved path while preserving Windows casing
+    // behavior below.
+  }
   return isWindows() ? resolved.toLowerCase() : resolved;
 }
 

@@ -482,6 +482,68 @@ function createFakeRepo(dir: string, remoteUrl: string, files?: Record<string, s
   }
 }
 
+describe("start command — auto config creation", () => {
+  it("warns instead of failing when first-run global registration collides", async () => {
+    createFakeRepo(tmpDir, "https://github.com/org/first-run.git");
+
+    const detectEnv = await import("../../src/lib/detect-env.js");
+    vi.mocked(detectEnv.detectEnvironment).mockResolvedValueOnce({
+      isGitRepo: true,
+      gitRemote: "https://github.com/org/first-run.git",
+      ownerRepo: "org/first-run",
+      currentBranch: "main",
+      defaultBranch: "main",
+      hasTmux: true,
+      hasGh: true,
+      ghAuthed: true,
+      hasLinearKey: false,
+      hasSlackWebhook: false,
+    });
+
+    const globalConfigDir = join(tmpDir, "global");
+    const globalConfigPath = join(globalConfigDir, "config.yaml");
+    mkdirSync(globalConfigDir, { recursive: true });
+    const { stringify: yamlStringify } = await import("yaml");
+    writeFileSync(
+      globalConfigPath,
+      yamlStringify(
+        {
+          defaults: { runtime: "process", agent: "claude-code", workspace: "worktree", notifiers: [] },
+          projects: {
+            existing: {
+              projectId: "existing",
+              path: realpathSync(tmpDir),
+              defaultBranch: "main",
+              source: "local",
+              registeredAt: 1,
+              displayName: "Existing",
+              sessionPrefix: "existing",
+            },
+          },
+        },
+        { indent: 2 },
+      ),
+    );
+
+    const originalGlobalConfig = process.env["AO_GLOBAL_CONFIG"];
+    process.env["AO_GLOBAL_CONFIG"] = globalConfigPath;
+    try {
+      await autoCreateConfig(tmpDir);
+
+      expect(existsSync(join(tmpDir, "agent-orchestrator.yaml"))).toBe(true);
+      const output = vi
+        .mocked(console.log)
+        .mock.calls.map((call) => call.join(" "))
+        .join("\n");
+      expect(output).toContain("Could not register project in global config");
+      expect(output).toContain("Project \"existing\" is already registered");
+    } finally {
+      if (originalGlobalConfig === undefined) delete process.env["AO_GLOBAL_CONFIG"];
+      else process.env["AO_GLOBAL_CONFIG"] = originalGlobalConfig;
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // resolveProject (tested through `ao start` with --no-dashboard --no-orchestrator)
 // ---------------------------------------------------------------------------
