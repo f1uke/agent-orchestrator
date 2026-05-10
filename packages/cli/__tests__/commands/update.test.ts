@@ -39,8 +39,9 @@ const {
   }),
 }));
 
-const { mockResolveUpdateChannel } = vi.hoisted(() => ({
+const { mockResolveUpdateChannel, mockReadCachedUpdateInfo } = vi.hoisted(() => ({
   mockResolveUpdateChannel: vi.fn(() => "manual" as "stable" | "nightly" | "manual"),
+  mockReadCachedUpdateInfo: vi.fn<() => { channel?: string } | null>(() => null),
 }));
 
 vi.mock("../../src/lib/update-check.js", () => ({
@@ -50,6 +51,7 @@ vi.mock("../../src/lib/update-check.js", () => ({
   getCurrentVersion: () => mockGetCurrentVersion(),
   getUpdateCommand: (...args: unknown[]) => mockGetUpdateCommand(...args),
   resolveUpdateChannel: () => mockResolveUpdateChannel(),
+  readCachedUpdateInfo: (...args: unknown[]) => mockReadCachedUpdateInfo(...args),
   isManualOnlyInstall: (m: string) => m === "homebrew",
 }));
 
@@ -159,6 +161,8 @@ describe("update command", () => {
     mockSpawn.mockReset();
     mockResolveUpdateChannel.mockReset();
     mockResolveUpdateChannel.mockReturnValue("manual");
+    mockReadCachedUpdateInfo.mockReset();
+    mockReadCachedUpdateInfo.mockReturnValue(null);
     mockIsWindows.mockReset();
     mockIsWindows.mockReturnValue(false);
     // Default: project-local loadConfig succeeds with no projects, and no
@@ -638,6 +642,103 @@ describe("update command", () => {
       mockPromptConfirm.mockResolvedValue(false);
       await program.parseAsync(["node", "test", "update"]);
       expect(mockPromptConfirm).toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Channel-switch detection (review #2)
+  // -----------------------------------------------------------------------
+
+  describe("channel-switch detection", () => {
+    beforeEach(() => {
+      mockDetectInstallMethod.mockReturnValue("npm-global");
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    });
+
+    it("forces an explicit prompt when active channel differs from cached.channel and !isOutdated", async () => {
+      // Stable→nightly transition: numeric base equal so isOutdated=false,
+      // but the user clearly wants the nightly build.
+      mockResolveUpdateChannel.mockReturnValue("nightly");
+      mockReadCachedUpdateInfo.mockReturnValue({ channel: "stable" });
+      mockCheckForUpdate.mockResolvedValue(
+        makeNpmUpdateInfo({
+          installMethod: "npm-global",
+          currentVersion: "0.5.0",
+          latestVersion: "0.5.0-nightly-abc",
+          isOutdated: false,
+          recommendedCommand: "npm install -g @aoagents/ao@nightly",
+        }),
+      );
+      mockPromptConfirm.mockResolvedValue(true);
+      mockSpawn.mockReturnValue(createMockChild(0));
+
+      await program.parseAsync(["node", "test", "update"]);
+
+      // Prompt was forced (default=false for safety) and user confirmed → install ran.
+      expect(mockPromptConfirm).toHaveBeenCalledWith(
+        expect.stringMatching(/Switch to nightly/),
+        false,
+      );
+      expect(mockSpawn).toHaveBeenCalled();
+    });
+
+    it("declines the channel-switch prompt → no install", async () => {
+      mockResolveUpdateChannel.mockReturnValue("nightly");
+      mockReadCachedUpdateInfo.mockReturnValue({ channel: "stable" });
+      mockCheckForUpdate.mockResolvedValue(
+        makeNpmUpdateInfo({
+          installMethod: "npm-global",
+          currentVersion: "0.5.0",
+          latestVersion: "0.5.0-nightly-abc",
+          isOutdated: false,
+        }),
+      );
+      mockPromptConfirm.mockResolvedValue(false);
+
+      await program.parseAsync(["node", "test", "update"]);
+      expect(mockPromptConfirm).toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it("does NOT force a prompt when channel matches cached.channel (no switch)", async () => {
+      mockResolveUpdateChannel.mockReturnValue("nightly");
+      mockReadCachedUpdateInfo.mockReturnValue({ channel: "nightly" });
+      mockCheckForUpdate.mockResolvedValue(
+        makeNpmUpdateInfo({
+          installMethod: "npm-global",
+          currentVersion: "0.5.0-nightly-abc",
+          latestVersion: "0.5.0-nightly-abc",
+          isOutdated: false,
+        }),
+      );
+      const logSpy = vi.mocked(console.log);
+
+      await program.parseAsync(["node", "test", "update"]);
+
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toMatch(/Already on latest nightly/);
+      expect(mockPromptConfirm).not.toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it("does NOT force a prompt when no previous cache exists (first ever update)", async () => {
+      mockResolveUpdateChannel.mockReturnValue("nightly");
+      mockReadCachedUpdateInfo.mockReturnValue(null);
+      mockCheckForUpdate.mockResolvedValue(
+        makeNpmUpdateInfo({
+          installMethod: "npm-global",
+          currentVersion: "0.5.0",
+          latestVersion: "0.5.0-nightly-abc",
+          isOutdated: false,
+        }),
+      );
+      const logSpy = vi.mocked(console.log);
+
+      await program.parseAsync(["node", "test", "update"]);
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toMatch(/Already on latest nightly/);
       expect(mockSpawn).not.toHaveBeenCalled();
     });
   });

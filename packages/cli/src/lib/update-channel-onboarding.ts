@@ -106,7 +106,12 @@ export async function maybePromptForUpdateChannel(deps: PromptDeps = {}): Promis
   console.log(chalk.bold("\nHow do you want to receive updates?"));
   console.log(
     chalk.dim(
-      "  Stable ships every Thursday. Nightly ships daily Fri–Tue. Manual stays put.\n",
+      "  Stable ships every Thursday. Nightly ships daily Fri–Tue. Manual stays put.",
+    ),
+  );
+  console.log(
+    chalk.dim(
+      "  You can switch later with `ao config set updateChannel <value>` —\n  the next `ao update` will prompt before installing the other channel's build.\n",
     ),
   );
 

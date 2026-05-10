@@ -18,6 +18,7 @@ import {
   getUpdateCommand,
   invalidateCache,
   isManualOnlyInstall,
+  readCachedUpdateInfo,
   resolveUpdateChannel,
   type InstallMethod,
 } from "../lib/update-check.js";
@@ -227,6 +228,12 @@ async function handleGitUpdate(opts: {
 
 async function handleNpmUpdate(method: InstallMethod): Promise<void> {
   const channel = resolveUpdateChannel();
+
+  // Snapshot the previously cached channel BEFORE we force a refresh, so we
+  // can detect a channel switch (stable→nightly or vice versa). force:true
+  // would overwrite cache.channel before we can read it.
+  const previousChannel = readCachedUpdateInfo(method)?.channel;
+
   const info = await checkForUpdate({ force: true, channel });
 
   if (!info.latestVersion) {
@@ -234,14 +241,41 @@ async function handleNpmUpdate(method: InstallMethod): Promise<void> {
     process.exit(1);
   }
 
-  if (!info.isOutdated) {
-    console.log(chalk.green(`Already on latest ${channel === "nightly" ? "nightly" : "version"} (${info.currentVersion}).`));
+  // Detect a channel switch. When stable=0.5.0 and nightly=0.5.0-nightly-abc,
+  // isVersionOutdated returns false (per semver, prerelease < stable on equal
+  // base), so a stable→nightly user would see "Already on latest nightly"
+  // until the next numeric bump. Force the prompt instead — explicit consent
+  // is the right UX for a channel transition, and the install command we'd
+  // run is genuinely different even if the version-compare says "no".
+  const isChannelSwitch =
+    !info.isOutdated &&
+    previousChannel !== undefined &&
+    previousChannel !== channel;
+
+  if (!info.isOutdated && !isChannelSwitch) {
+    console.log(
+      chalk.green(
+        `Already on latest ${channel === "nightly" ? "nightly" : "version"} (${info.currentVersion}).`,
+      ),
+    );
     return;
   }
 
   console.log(`Current version: ${chalk.dim(info.currentVersion)}`);
   console.log(`Latest version:  ${chalk.green(info.latestVersion)}`);
   console.log(`Channel:         ${chalk.cyan(channel)}`);
+  if (isChannelSwitch) {
+    console.log(
+      chalk.yellow(
+        `\nChannel switch detected: was on ${previousChannel}, now ${channel}.`,
+      ),
+    );
+    console.log(
+      chalk.dim(
+        "  The version compare says you're current, but the install command picks a different dist-tag.",
+      ),
+    );
+  }
   console.log();
 
   const command = getUpdateCommand(method, channel);
@@ -257,10 +291,13 @@ async function handleNpmUpdate(method: InstallMethod): Promise<void> {
 
   // Soft auto-install: when the user has opted into stable or nightly we
   // skip the confirm prompt — they've already said "keep me on this channel."
-  // Manual users still see the confirm so an unintended `ao update` doesn't
-  // wipe the version they pinned to.
-  if (channel === "manual") {
-    const confirmed = await promptConfirm(`Run ${chalk.cyan(command)}?`);
+  // Manual users (and explicit channel switches) still see the confirm so an
+  // unintended `ao update` doesn't wipe the version they pinned to.
+  if (channel === "manual" || isChannelSwitch) {
+    const promptText = isChannelSwitch
+      ? `Switch to ${channel} via ${chalk.cyan(command)}?`
+      : `Run ${chalk.cyan(command)}?`;
+    const confirmed = await promptConfirm(promptText, !isChannelSwitch);
     if (!confirmed) return;
   } else {
     console.log(chalk.dim(`Updating: ${command}`));
