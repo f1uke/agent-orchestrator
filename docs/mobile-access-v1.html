@@ -1,0 +1,960 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AO Mobile Access — V1 Design</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --surface-2: #f1efe9;
+    --border: #e3dfd6;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --accent: #b3541e;
+    --accent-soft: #fbe9da;
+    --code-bg: #0f172a;
+    --code-fg: #e5e7eb;
+    --ok: #2f7a3a;
+    --warn: #b88a00;
+    --bad: #b3261e;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15140f;
+      --surface: #1d1c17;
+      --surface-2: #25241e;
+      --border: #34322a;
+      --text: #ecebe6;
+      --muted: #9c9a93;
+      --accent: #e07a3c;
+      --accent-soft: #3a2618;
+      --code-bg: #0b1020;
+      --code-fg: #e5e7eb;
+      --ok: #58c46c;
+      --warn: #e5b441;
+      --bad: #ef6e63;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 48px 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 920px; margin: 0 auto; }
+  header.doc-header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1 {
+    font-size: 34px;
+    line-height: 1.15;
+    margin: 8px 0 12px;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 22px;
+    margin: 40px 0 12px;
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  p { margin: 8px 0 12px; }
+  .lede { color: var(--muted); font-size: 16px; max-width: 70ch; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.92em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .stat .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    padding: 8px 10px;
+    vertical-align: top;
+  }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+  .pill.ok   { color: var(--ok);   border-color: color-mix(in oklab, var(--ok) 40%, var(--border)); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 40%, var(--border)); }
+  .pill.bad  { color: var(--bad);  border-color: color-mix(in oklab, var(--bad) 40%, var(--border)); }
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 12px 14px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+    color: var(--text);
+  }
+  .callout strong { color: var(--accent); }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 720px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    body { padding: 24px 16px 64px; }
+    h1 { font-size: 28px; }
+  }
+  figure { margin: 16px 0; }
+  figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .sev { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .sev.ok  { background: var(--ok); }
+  .sev.warn{ background: var(--warn); }
+  .sev.bad { background: var(--bad); }
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    margin: 8px 0;
+  }
+  details[open] { padding-bottom: 14px; }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+
+<header class="doc-header">
+  <div class="eyebrow">Design Doc · V1 · post-codex-3rd-pass</div>
+  <h1>Mobile Access for Agent Orchestrator</h1>
+  <p class="lede">
+    Replace the Tailscale-only mobile workflow with a single command — <code>ao mobile</code> — that
+    spins up an HTTPS tunnel, gates the dashboard with an auto-generated token + cookie session,
+    and prints a QR code. Scoped narrowly: single-user, opt-in, tunnel-only.
+    Borrowed shape from OpenCode but does not copy their security posture — basic auth + plain HTTP
+    is unsafe for a tool whose blast radius is "shell on the user's dev machine."
+  </p>
+  <div class="callout">
+    <strong>Revision note.</strong> This doc was rewritten after a Codex review caught three
+    showstoppers in the original draft: (1) Next.js middleware does not gate WebSocket upgrades,
+    (2) browsers do not reliably attach <code>Authorization: Basic</code> to <code>new WebSocket()</code>
+    (especially on iOS Safari), and (3) user-chosen passwords combined with an in-memory
+    rate limiter is not "brute-force resistant" for an internet-exposed RCE surface.
+    See <a href="#codex-applied">Codex review applied</a> for the full list of changes.
+  </div>
+</header>
+
+<section>
+  <h2>The shape of V1</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="k">New surface</div><div class="v">1 CLI command</div></div>
+    <div class="stat"><div class="k">Auth primitive</div><div class="v">Generated token → cookie session</div></div>
+    <div class="stat"><div class="k">Transport</div><div class="v">HTTPS via Cloudflare Tunnel</div></div>
+    <div class="stat"><div class="k">LAN mode</div><div class="v">Not in V1</div></div>
+    <div class="stat"><div class="k">Default state</div><div class="v">Off</div></div>
+    <div class="stat"><div class="k">Code estimate</div><div class="v">~600 LoC + tests</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>Why not what we have today</h2>
+  <p>
+    Tailscale works, but it has friction that keeps people from actually using AO from their phone:
+    the user must install a client on every device, share-with-a-teammate requires inviting them to
+    a tailnet, and Tailscale itself becomes a dependency you may not want for a quick check-in
+    from the couch. The bar is "open a URL, type a password, see your sessions."
+  </p>
+  <p>
+    The OpenCode model gets that part right — one command, one password, browser works.
+    Their docs leave the transport unspecified (so it ends up plain HTTP for many users) and
+    have no rate limit / origin pinning, which is the part we won't copy.
+  </p>
+</section>
+
+<section>
+  <h2>Architecture</h2>
+  <figure>
+    <svg viewBox="0 0 880 320" width="100%" role="img" aria-label="Architecture diagram">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" color="currentColor">
+        <!-- Phone -->
+        <rect x="20" y="120" width="130" height="80" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="85" y="155" text-anchor="middle">Phone browser</text>
+        <text x="85" y="175" text-anchor="middle" fill="currentColor" opacity="0.6">QR-scanned URL</text>
+
+        <!-- Cloudflare -->
+        <rect x="220" y="100" width="170" height="120" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="305" y="135" text-anchor="middle" font-weight="700">Cloudflare edge</text>
+        <text x="305" y="158" text-anchor="middle" opacity="0.7">TLS termination</text>
+        <text x="305" y="178" text-anchor="middle" opacity="0.7">*.cfargotunnel.com</text>
+        <text x="305" y="198" text-anchor="middle" opacity="0.7">DDoS / WAF (free tier)</text>
+
+        <!-- cloudflared -->
+        <rect x="450" y="40" width="170" height="80" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="535" y="70" text-anchor="middle" font-weight="700">cloudflared</text>
+        <text x="535" y="92" text-anchor="middle" opacity="0.7">spawned by ao mobile</text>
+        <text x="535" y="110" text-anchor="middle" opacity="0.7">outbound only</text>
+
+        <!-- Auth layer -->
+        <rect x="450" y="150" width="170" height="60" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="535" y="172" text-anchor="middle" font-weight="700">Auth layer</text>
+        <text x="535" y="190" text-anchor="middle" opacity="0.7">login → HttpOnly cookie</text>
+        <text x="535" y="204" text-anchor="middle" opacity="0.7">WS upgrade verifies cookie</text>
+
+        <!-- Next.js -->
+        <rect x="690" y="100" width="170" height="120" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="775" y="135" text-anchor="middle" font-weight="700">AO dashboard</text>
+        <text x="775" y="158" text-anchor="middle" opacity="0.7">Next.js + WS</text>
+        <text x="775" y="178" text-anchor="middle" opacity="0.7">localhost:PORT</text>
+        <text x="775" y="198" text-anchor="middle" opacity="0.7">unchanged</text>
+
+        <!-- arrows -->
+        <line x1="150" y1="160" x2="220" y2="160" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="390" y1="140" x2="450" y2="100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="620" y1="80"  x2="690" y2="140" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="620" y1="180" x2="690" y2="160" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="535" y1="120" x2="535" y2="150" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <text x="180" y="150" font-size="10" opacity="0.6">HTTPS</text>
+        <text x="640" y="60"  font-size="10" opacity="0.6">QUIC outbound</text>
+      </g>
+    </svg>
+    <figcaption>
+      Phone → Cloudflare edge (TLS) → cloudflared (outbound tunnel) → auth layer (login + cookie /
+      WS upgrade verifier) → existing dashboard bound strictly to <code>127.0.0.1</code>.
+      No inbound port opens. Auth is enforced at two distinct points: the HTTP request pipeline
+      and the WebSocket upgrade handler — they share a session store, not a Next.js middleware.
+    </figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>What ships</h2>
+
+  <h3><code>ao mobile</code> command</h3>
+  <pre><code>$ ao mobile
+✓ cloudflared detected at /usr/local/bin/cloudflared
+✓ Generated session token (128-bit, stored hashed at ~/.agent-orchestrator/mobile.json)
+✓ Dashboard locked to 127.0.0.1:7456
+✓ Tunnel up: https://maple-bear-9341.trycloudflare.com
+
+  Open this URL on your phone — the token is in the URL fragment so it
+  is never sent to Cloudflare or written to server logs:
+
+  https://maple-bear-9341.trycloudflare.com/m#t=KX7n…(redacted)…q9
+
+  ┌─────────────────────────────┐
+  │ ████ ▄▄▄▄▄ █▀█ █▄█▄▀ ████   │
+  │ ████ █   █ █▀▀▀█ ▀▀▀ ████   │
+  │ ████ █▄▄▄█ █ ▀ █▄▀█▄ ████   │
+  └─────────────────────────────┘
+
+  Token expires in 24h. Press Ctrl+C to tear down the tunnel and
+  invalidate all sessions.
+
+  ⚠ Anyone holding this token gets full RCE-equivalent access to this
+    machine until the token expires or you run `ao mobile revoke`.
+    No read-only mode in V1.</code></pre>
+
+  <h3>Subcommands</h3>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>ao mobile</code></td><td>Generate token, lock dashboard to 127.0.0.1, start tunnel, print QR. Blocks until Ctrl+C.</td></tr>
+    <tr><td><code>ao mobile status</code></td><td>Show whether a tunnel is currently active and its URL (no token).</td></tr>
+    <tr><td><code>ao mobile revoke</code></td><td>Invalidate all active mobile sessions immediately and force-close any live WebSocket connections within 60s (next re-verify tick). Tunnel keeps running; next request must re-auth.</td></tr>
+  </table>
+  <p style="font-size: 13px; color: var(--muted)">
+    No <code>--no-tunnel</code> / LAN mode in V1. Codex review flagged it as the most dangerous
+    surface (binding <code>0.0.0.0</code> on hostile wifi = anyone on the LAN gets RCE).
+    If a real use case appears we revisit it behind an explicit <code>--lan-i-accept-the-risk</code>
+    flag with a printed warning.
+  </p>
+</section>
+
+<section>
+  <h2>Security checklist</h2>
+  <table>
+    <tr><th>Property</th><th>V1 status</th><th>How</th></tr>
+    <tr><td>Encrypted in transit</td><td><span class="pill ok">Yes</span></td><td>Cloudflare TLS termination, cloudflared QUIC outbound. Dashboard binds <code>127.0.0.1</code> only.</td></tr>
+    <tr><td>Strong credential by default</td><td><span class="pill ok">Yes</span></td><td>Auto-generated 128-bit token from <code>crypto.randomBytes(16)</code>, base32-encoded. Not user-chosen.</td></tr>
+    <tr><td>Token never logged or proxied</td><td><span class="pill ok">Yes</span></td><td>Delivered via URL fragment (<code>#t=…</code>) — fragments are not sent to servers. Phone JS exchanges it for a session cookie at <code>/api/mobile/login</code>, then strips it from history.</td></tr>
+    <tr><td>HTTP auth gate</td><td><span class="pill ok">Yes</span></td><td>Edge-runtime middleware checks signed HttpOnly <code>Secure</code> <code>SameSite=Strict</code> cookie. No basic auth. <code>timingSafeEqual</code> via Web Crypto.</td></tr>
+    <tr><td>WS upgrade gate</td><td><span class="pill ok">Yes</span></td><td>Verified directly in the WS server's <code>upgrade</code> handler — middleware does not run there. Re-validates the same cookie + checks session not revoked. <code>Origin</code> pin is defense-in-depth, not the primary gate (RFC 6455 lets non-browser clients fake it).</td></tr>
+    <tr><td>Brute-force resistant</td><td><span class="pill ok">Yes (by entropy)</span></td><td>128-bit token makes online guessing infeasible regardless of rate limit. Lockout below is belt + suspenders, not the primary defense.</td></tr>
+    <tr><td>Fail-closed lockout</td><td><span class="pill warn">Yes — also a DoS lever</span></td><td>10 token-validation failures across the daemon disable the mobile session until <code>ao mobile revoke</code> is run on the host. Persisted to <code>~/.agent-orchestrator/mobile.json</code>, survives restart. <strong>Honest framing:</strong> anyone who knows the tunnel URL can intentionally trigger this and lock the legit user out remotely until they're back at the host. Acceptable for a personal-use feature; documented as such, not advertised as "brute-force resistance."</td></tr>
+    <tr><td>Inbound ports opened</td><td><span class="pill ok">None</span></td><td>cloudflared dials out. Dashboard + WS bound to <code>127.0.0.1</code>; loopback-only enforced even if env says otherwise.</td></tr>
+    <tr><td>Off by default</td><td><span class="pill ok">Yes</span></td><td><code>ao start</code> never starts the tunnel. Explicit <code>ao mobile</code> required.</td></tr>
+    <tr><td>Token TTL</td><td><span class="pill ok">24h</span></td><td>Sessions expire 24h after issue. Tunnel teardown invalidates all sessions immediately.</td></tr>
+    <tr><td><code>cf-connecting-ip</code> spoofing</td><td><span class="pill ok">N/A</span></td><td>Header trusted only when request entered via cloudflared (verified by request-source check); ignored otherwise. We don't gate on IP regardless.</td></tr>
+    <tr><td>Per-device revocation</td><td><span class="pill warn">Coarse, ~60s lag on live WS</span></td><td>V1 has session-level revocation only (<code>ao mobile revoke</code> wipes all sessions). New HTTP/WS requests are blocked instantly. <strong>Already-open WebSocket connections close within ~60s</strong> via the dashboard's process-wide re-verify scanner — file-mediated, no CLI↔dashboard IPC. True per-device passkey is V2.</td></tr>
+    <tr><td>Audit log</td><td><span class="pill warn">V1.5</span></td><td>Deferred per eng-review scope reduction. V1 relies on stdout + cloudflared access logs. V1.5 adds redacted JSONL at <code>~/.agent-orchestrator/mobile-audit.jsonl</code> (kind, session id, length, timestamp — no prompt text, no tokens, mode <code>0600</code>).</td></tr>
+    <tr><td>CSRF</td><td><span class="pill ok">Yes</span></td><td>Session cookie is <code>SameSite=Strict</code>. Mutating routes additionally enforce <code>Sec-Fetch-Site: same-origin</code> and reject simple-content-type requests. (Earlier draft overstated "POST + JSON" alone as a defense — it isn't.)</td></tr>
+    <tr><td>Clickjacking / framing</td><td><span class="pill ok">Yes</span></td><td><code>Content-Security-Policy: frame-ancestors 'none'</code> on dashboard and <code>/m</code>. <code>/m</code> additionally has a tight CSP since it handles the fragment token.</td></tr>
+    <tr><td>SSO / passkey</td><td><span class="pill warn">V2+</span></td><td>Cloudflare Access (free SSO at the edge) documented as a hardening path.</td></tr>
+    <tr><td>Phishing-resistant</td><td><span class="pill bad">No</span></td><td>Unbranded <code>trycloudflare.com</code> hostnames are trivially spoofable. README warns. SSO via Cloudflare Access is the V2 fix.</td></tr>
+    <tr><td>Compromised host</td><td><span class="pill bad">No</span></td><td>Out of scope. If the dev machine is already compromised, all bets are off.</td></tr>
+  </table>
+
+  <div class="callout">
+    <strong>Threat model — what V1 defends against.</strong>
+    Passive snooping on hostile wifi (TLS); casual port-scanners (no inbound port);
+    online token brute-force (128-bit + lockout-then-revoke); WebSocket hijack from a
+    malicious page (HttpOnly <code>SameSite=Strict</code> cookie + WS upgrade re-check);
+    server-log leakage of the credential (URL fragment delivery); curl-driven attacks that
+    fake <code>Origin</code> (we don't depend on origin as the primary gate).
+  </div>
+  <div class="callout">
+    <strong>What V1 does <em>not</em> defend against.</strong>
+    <strong>Phishing of the tunnel URL + token</strong> — the strongest realistic attack and the
+    main reason V2 should ship Cloudflare Access SSO. A fake page styled as the AO mobile entry can
+    capture the fragment token; users have no UI cue to distinguish real from fake.
+    A malicious browser extension on the phone reading the URL fragment <em>before</em> the JS exchange
+    (HttpOnly blocks reading the cookie afterward, but not the fragment) or operating the page DOM
+    while the user is signed in.
+    An attacker who has already compromised the user's host machine.
+    A stolen unlocked phone with the cookie still valid (mitigation: <code>ao mobile revoke</code>).
+    cloudflared binary tampering / PATH hijack (mitigation: pinned-checksum verify).
+    Cloudflare itself, which terminates TLS and observes connection metadata.
+    The fail-closed lockout being used as a remote DoS lever (see Security checklist row).
+    These are documented in the README, not papered over.
+  </div>
+</section>
+
+<section>
+  <h2>Implementation plan</h2>
+
+  <h3>Files to add / change</h3>
+  <table>
+    <tr><th>File</th><th>Change</th></tr>
+    <tr><td><code>packages/cli/src/commands/mobile.ts</code></td><td>New. <code>ao mobile</code> + <code>status</code> / <code>revoke</code> only (V1.5: <code>install</code>). Generates token + persistent HMAC key, spawns cloudflared, locks dashboard to loopback, prints QR. Revoke writes a revocation record to <code>mobile.json</code>; the dashboard's in-process timer (see WS section) picks it up within 60s. CLI does not directly close sockets — different process.</td></tr>
+    <tr><td><code>packages/cli/src/lib/cloudflared.ts</code></td><td>New. Spawn, parse URL from stderr, teardown. (V1.5: pinned-checksum verify.)</td></tr>
+    <tr><td><code>packages/cli/src/lib/qr.ts</code></td><td>New. Inline ANSI QR — no extra dep.</td></tr>
+    <tr><td><code>packages/core/src/mobile-store.ts</code></td><td>New. Persisted token-hash, <strong>persisted HMAC signing key</strong>, sessions, and lockout counter at <code>~/.agent-orchestrator/mobile.json</code> (mode <code>0600</code>). Atomic temp-file-rename writes.</td></tr>
+    <tr><td><code>packages/web/src/lib/mobile-runtime.ts</code></td><td><strong>Process-local owner of WS state inside the dashboard process.</strong> Node-runtime module that lazy-constructs <code>liveSockets: Map&lt;sessionId, Set&lt;WebSocket&gt;&gt;</code> and the in-process re-verify timer. <strong>Not</strong> a global cross-process singleton — Node's module cache only unifies one module graph per process. <code>mobile.json</code> remains source of truth across processes.</td></tr>
+    <tr><td><code>packages/web/src/middleware.ts</code></td><td>New. <strong>Edge runtime.</strong> <strong>Stateless</strong> cookie verifier — checks HMAC signature + expiry from cookie body only. Reads HMAC verification key from <code>process.env.AO_MOBILE_COOKIE_KEY</code>, which the dashboard process injects into the Edge runtime at start (Next propagates <code>process.env</code> to Edge at boot). Gates everything <strong>except</strong> the public allowlist: <code>/m</code>, <code>/api/mobile/login</code>, Next.js static assets. Adds <code>Content-Security-Policy: frame-ancestors 'none'</code> + <code>X-Content-Type-Options: nosniff</code>. <strong>Does not check revocation</strong> — that is enforced by Node-runtime mutating routes and the WS gate.</td></tr>
+    <tr><td><code>packages/web/src/app/api/mobile/login/route.ts</code></td><td>New. <strong><code>export const runtime = "nodejs"</code></strong> — needs filesystem for the file-locked counter. <code>POST { token }</code>, body capped at 1KB <strong>while reading the stream</strong> (not just from <code>content-length</code>, which can be missing on chunked bodies). Content-type matched with a <code>startsWith("application/json")</code> so <code>application/json; charset=utf-8</code> is accepted. Sets HttpOnly cookie. Failure counter is atomic via <code>proper-lockfile</code>; ≥10 disables until <code>ao mobile revoke</code>.</td></tr>
+    <tr><td><code>packages/web/src/app/m/page.tsx</code></td><td>New. Tiny mobile entry page that reads <code>#t=…</code> from the URL fragment, POSTs to <code>/api/mobile/login</code>, <code>history.replaceState</code> to drop the fragment. <strong>Served as a static client component</strong> (no SSR data) so the CSP can be tight: <code>default-src 'none'; script-src 'self' 'nonce-&lt;per-request&gt;'; connect-src 'self'; frame-ancestors 'none'</code>. The nonce handles Next's inline runtime; <code>/m</code>'s middleware-set CSP threads the nonce into the response. JS-disabled fallback: <code>&lt;noscript&gt;</code> shows manual instructions.</td></tr>
+    <tr><td><code>packages/web/src/lib/ws-auth.ts</code></td><td>New. <code>verifyUpgrade(req)</code> — parses cookie, checks signature + expiry against the mobile-store, <strong>requires</strong> a matching normalized <code>Origin</code> when mobile is enabled (no missing-origin pass-through). Path allowlist of known WS routes; unknown paths rejected. Async errors caught and converted to 500/close.</td></tr>
+    <tr><td>WS server entry points</td><td>Wire <code>verifyUpgrade</code> into the <code>upgrade</code> event <em>before</em> <code>handleUpgrade</code>. Track sockets via <code>mobile-runtime.liveSockets</code>. <strong>Periodic 60s re-verify</strong> on each accepted socket: check <code>store.isRevoked</code> + <code>session.exp</code>; close <code>4001 revoked</code> or <code>4002 session_expired</code> on fail. <strong>Middleware does not run here</strong> — this is the gate.</td></tr>
+    <tr><td>Dashboard server bootstrap</td><td><strong>Hard rule:</strong> if a dashboard is already running without mobile mode, <code>ao mobile</code> <em>refuses</em> with a clear instruction (<code>ao stop && ao start --mobile</code>). No silent restart, no post-hoc env mutation, no orphaned desktop browser tabs. When mobile is enabled, bind is forced to <code>127.0.0.1</code>; non-loopback config is a hard-fail at startup. Loopback assertion lives at startup only — not per-WS-handler.</td></tr>
+    <tr><td><code>packages/cli/src/index.ts</code></td><td>Register the new command.</td></tr>
+    <tr><td><code>README.md</code></td><td>"Use AO from your phone" + threat model + <code>ao mobile revoke</code>.</td></tr>
+  </table>
+
+  <h3>Auth flow (corrected)</h3>
+  <ol>
+    <li><code>ao mobile</code> generates a 128-bit token. Stores <code>sha256(token)</code> + a <strong>persistent HMAC signing key</strong> at <code>~/.agent-orchestrator/mobile.json</code> (mode <code>0600</code>). Persisting the key means phone sessions survive <code>ao stop</code> / <code>ao start --mobile</code> cycles; only <code>ao mobile revoke</code> kills them.</li>
+    <li>If a dashboard is already running without mobile mode: <strong>refuse with instructions</strong>. Otherwise start it bound to <code>127.0.0.1</code> with <code>--mobile-origin</code> as a CLI arg. No post-hoc env mutation.</li>
+    <li>cloudflared spawns; stderr is parsed for the URL.</li>
+    <li>Phone opens <code>https://&lt;tunnel&gt;/m#t=&lt;token&gt;</code>. The fragment is never sent to the server.</li>
+    <li><code>/m</code> page JS POSTs the token to <code>/api/mobile/login</code>. <strong>That route runs on the Node runtime</strong> (it touches the file-locked counter and session list). Server validates via constant-time hash compare, issues an HMAC-signed HttpOnly <code>Secure</code> <code>SameSite=Strict</code> cookie with 24h TTL. <code>history.replaceState</code> drops the fragment.</li>
+    <li>Subsequent HTTP requests carry the cookie. <strong>Edge middleware</strong> verifies signature + expiry on every request — no fs reads, so revocation is enforced by the Node-runtime mutating routes and the WS gate, not by middleware.</li>
+    <li>WebSocket <code>upgrade</code> handler (Node runtime) reads the cookie, runs the full verifier including <code>store.isRevoked</code>, requires a matching <code>Origin</code>, and rejects with HTTP 401 before <code>handleUpgrade</code>. After accept, a <strong>60s re-verify interval</strong> runs per socket: on revoke or expiry, close <code>4001 revoked</code> / <code>4002 session_expired</code>.</li>
+  </ol>
+
+  <h3>Cookie verifiers — split by runtime</h3>
+  <p>
+    Two functions, two runtimes. The Edge-safe variant is stateless (signature + expiry only) so
+    the Edge bundle never imports anything that touches <code>fs</code>. The Node variant calls
+    the Edge variant first, then adds the revocation check.
+  </p>
+  <pre><code>// packages/web/src/lib/mobile-auth-edge.ts — Edge-safe, no fs imports
+import { timingSafeEqualHex, b64urlDecode } from "./crypto-edge";
+
+export type Session = { id: string; iat: number; exp: number };
+const MAX_COOKIE_BYTES = 4096;
+
+// Stateless: signature + expiry only. Used by middleware.
+export async function verifyCookieEdge(
+  cookieHeader: string | null,
+  hmacKey: CryptoKey,
+): Promise&lt;Session | null&gt; {
+  try {
+    const raw = parseCookie(cookieHeader, "ao_mobile");
+    if (!raw || raw.length &gt; MAX_COOKIE_BYTES) return null;
+
+    const parts = raw.split(".");
+    if (parts.length !== 2) return null;
+    const [body, sig] = parts;
+    if (!body || !sig) return null;
+
+    const expected = await hmacHex(hmacKey, body);
+    if (!(await timingSafeEqualHex(sig, expected))) return null;
+
+    const decoded = b64urlDecode(body);
+    const session = JSON.parse(decoded);
+    if (typeof session?.id !== "string"
+     || typeof session?.iat !== "number"
+     || typeof session?.exp !== "number") return null;
+
+    if (session.exp &lt;= Date.now()) return null;
+    return session as Session;
+  } catch {
+    return null;
+  }
+}</code></pre>
+  <pre><code>// packages/web/src/lib/mobile-auth-node.ts — Node-only, may import the store
+import { verifyCookieEdge, Session } from "./mobile-auth-edge";
+import type { MobileStore } from "@aoagents/ao-core";
+
+// Full check: stateless verify + revocation lookup. Used by login route's
+// post-auth flows, mutating /api/* routes, and the WS upgrade gate.
+export async function verifyCookieFull(
+  cookieHeader: string | null,
+  hmacKey: CryptoKey,
+  store: MobileStore,
+): Promise&lt;Session | null&gt; {
+  const session = await verifyCookieEdge(cookieHeader, hmacKey);
+  if (!session) return null;
+  if (await store.isRevoked(session.id)) return null;
+  return session;
+}</code></pre>
+  <p style="font-size: 13px; color: var(--muted)">
+    <strong>HMAC key delivery:</strong> the dashboard process reads the key from <code>mobile.json</code>
+    at startup and injects it into <code>process.env.AO_MOBILE_COOKIE_KEY</code> before Next boots.
+    Next.js propagates <code>process.env</code> into the Edge runtime at startup, so middleware
+    can read it without filesystem access. The Node-runtime side reads the same value from env
+    or from the store directly.
+  </p>
+
+  <h3>WebSocket upgrade gate + process-wide re-verify</h3>
+  <pre><code>// In the existing WS server bootstrap. Imports liveSockets from mobile-runtime.ts
+// so all upgrade paths share the same Map within this process.
+import { liveSockets, store, hmacKey, expectedOrigin } from "./mobile-runtime";
+import { verifyCookieFull } from "./mobile-auth-node";
+
+const WS_PATH_ALLOWLIST = new Set(["/ws/terminal", "/ws/events"]);
+
+httpServer.on("upgrade", async (req, socket, head) =&gt; {
+  try {
+    if (!isMobileEnabled()) {
+      // Loopback assertion already enforced once at bootstrap; not repeated here.
+      return wss.handleUpgrade(req, socket, head, (ws) =&gt; wss.emit("connection", ws, req));
+    }
+
+    const path = new URL(req.url ?? "/", "http://x").pathname;
+    if (!WS_PATH_ALLOWLIST.has(path)) return reject(socket, 404, "unknown_path");
+
+    const session = await verifyCookieFull(req.headers.cookie ?? null, hmacKey, store);
+    if (!session) return reject(socket, 401, "no_session");
+
+    const origin = normalizeOrigin(req.headers.origin);
+    if (!origin || origin !== expectedOrigin) {
+      return reject(socket, 403, "origin_mismatch");
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) =&gt; {
+      let sockets = liveSockets.get(session.id);
+      if (!sockets) liveSockets.set(session.id, (sockets = new Set()));
+      sockets.add(ws);
+      // Tag the socket so the scanner below knows the bound session.
+      (ws as any)._aoSession = session;
+      ws.on("close", () =&gt; sockets!.delete(ws));
+      wss.emit("connection", ws, req);
+    });
+  } catch {
+    reject(socket, 500, "internal");
+  }
+});
+
+function reject(socket: Socket, code: number, reason: string) {
+  socket.write(`HTTP/1.1 ${code} ${STATUS[code]}\r\n\r\n`);
+  socket.destroy();
+}
+
+// One process-wide scanner — not a per-socket setInterval. Reads from the file
+// store every tick so `ao mobile revoke` (a separate CLI process that just
+// writes mobile.json) takes effect within ~60s without IPC.
+//
+// This is what makes the doc's "revoke kicks live sockets within 60s" claim
+// honest: revoke is file-mediated, not in-process.
+const REVERIFY_INTERVAL_MS = 60_000;
+const reverifyTimer = setInterval(async () =&gt; {
+  const now = Date.now();
+  for (const [sessionId, sockets] of liveSockets) {
+    const revoked = await store.isRevoked(sessionId);
+    for (const ws of sockets) {
+      const session = (ws as any)._aoSession as Session | undefined;
+      if (revoked) ws.close(4001, "revoked");
+      else if (session && session.exp &lt;= now) ws.close(4002, "session_expired");
+    }
+  }
+}, REVERIFY_INTERVAL_MS);
+reverifyTimer.unref();   // don't keep process alive on shutdown</code></pre>
+  <p style="font-size: 13px; color: var(--muted)">
+    <strong>Revoke semantics — honest framing:</strong> <code>ao mobile revoke</code> is a separate
+    CLI process. It cannot directly close sockets in the dashboard process. It writes a revocation
+    record to <code>mobile.json</code>; the dashboard's process-wide scanner above reads from disk
+    every 60s and closes any matching live sockets. <strong>Worst-case window: ~60s.</strong>
+    Tightening below that would require an admin HTTP endpoint or Unix socket from CLI to dashboard
+    — out of scope for V1.
+  </p>
+
+  <h3>Login route + lockout</h3>
+  <pre><code>// packages/web/src/app/api/mobile/login/route.ts
+export const runtime = "nodejs";   // fs access required
+const MAX_BODY_BYTES = 1024;
+
+export async function POST(req: Request) {
+  // Content-type with charset suffix is valid (e.g. "application/json; charset=utf-8").
+  const ct = (req.headers.get("content-type") ?? "").toLowerCase();
+  if (!ct.startsWith("application/json")) {
+    return new Response("bad content-type", { status: 415 });
+  }
+  // Sec-Fetch-Site is absent on older browsers; only reject when present and wrong.
+  const sfs = req.headers.get("sec-fetch-site");
+  if (sfs &amp;&amp; sfs !== "same-origin") {
+    return new Response("bad origin", { status: 403 });
+  }
+
+  // Cap while reading the stream — content-length can be missing on chunked
+  // bodies, so a header-only check is bypassable.
+  const raw = await readWithCap(req.body, MAX_BODY_BYTES);
+  if (raw === "OVERSIZE") return new Response("body too large", { status: 413 });
+
+  const store = await getMobileStore();
+  if (await store.isLocked()) {
+    return new Response("locked — run `ao mobile revoke` on host", { status: 423 });
+  }
+
+  let token = "";
+  try {
+    const body = JSON.parse(raw);
+    if (typeof body?.token === "string" &amp;&amp; body.token.length &lt;= 256) {
+      token = body.token;
+    }
+  } catch { /* token stays "" */ }
+
+  const ok = token !== "" &amp;&amp; (await store.verifyToken(token));
+  if (!ok) {
+    await store.recordFailure();              // file-locked atomic; ≥10 → store.lock()
+    return new Response("invalid", { status: 401 });
+  }
+
+  const session = await store.issueSession({ ttlMs: 24 * 3600 * 1000 });
+  const cookie = await signSession(session, hmacKey);   // base64url(json).hmacHex
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Set-Cookie": `ao_mobile=${cookie}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=86400`,
+    },
+  });
+}
+
+// readWithCap: pulls chunks from the body and aborts if the running total
+// exceeds `limit`. Returns the string on success, or the literal "OVERSIZE".
+async function readWithCap(body: ReadableStream | null, limit: number) {
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total &gt; limit) { reader.cancel(); return "OVERSIZE"; }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks.map((c) =&gt; Buffer.from(c))));
+}</code></pre>
+
+  <h3>cloudflared lifecycle</h3>
+  <ol>
+    <li>Locate <code>cloudflared</code> on PATH. <em>Binary checksum verification deferred to V1.5</em> — V1 prints a one-line note that PATH is trusted.</li>
+    <li>Spawn <code>cloudflared tunnel --url http://127.0.0.1:$PORT --no-autoupdate</code>.</li>
+    <li>Stream stderr; match <code>https://[a-z0-9-]+\.trycloudflare\.com</code> for the URL. Treat any URL on a different host as a hard error.</li>
+    <li>Pass the normalized URL to the dashboard as <code>--mobile-origin</code> <strong>at start</strong>, never as post-hoc env on a running process. If a dashboard is already running without mobile mode, <code>ao mobile</code> <strong>refuses</strong> with the instruction to <code>ao stop && ao start --mobile</code> first. No silent restart.</li>
+    <li>Render QR + URL with the token in the fragment. Block on the cloudflared process.</li>
+    <li>On Ctrl+C: invalidate all sessions in the mobile-store, send SIGTERM to cloudflared, wait 5s, SIGKILL.</li>
+    <li>If <code>ao mobile</code> runs while <code>ao start</code> isn't already up, start the dashboard inline first (same code path as <code>ao start</code>) so the loopback bind is enforced from boot.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>What we are explicitly <em>not</em> building in V1</h2>
+  <h3>Deferred to V1.5 (eng-review scope reduction)</h3>
+  <ul>
+    <li><strong>Audit log to <code>mobile-audit.jsonl</code>.</strong> V1 relies on stdout + cloudflared access logs. Forensic capability lands in V1.5.</li>
+    <li><strong>cloudflared binary checksum verification.</strong> V1 trusts PATH; PATH-hijack is documented as not-defended-in-V1. Pinned-checksum verify ships in V1.5.</li>
+    <li><strong><code>ao mobile install</code> subcommand.</strong> V1 prints brew/apt instructions on missing binary and exits.</li>
+  </ul>
+  <h3>Deferred indefinitely</h3>
+  <ul>
+    <li><strong>LAN mode (<code>--no-tunnel</code>).</strong> Removed entirely. Binding <code>0.0.0.0</code> on a typical laptop wifi exposes the RCE surface to every device on the network. Returns later only with a loud opt-in flag.</li>
+    <li><strong>Per-device passkeys / WebAuthn.</strong> V1 has session-level revocation, not device-level.</li>
+    <li><strong>Cloudflare Access SSO.</strong> Documented as a hardening path; no first-class support yet.</li>
+    <li><strong>Mobile-optimized UI.</strong> Dashboard responds to small viewports adequately. Separate track.</li>
+    <li><strong>Push notifications.</strong> Existing notifier plugin slot covers this.</li>
+    <li><strong>Multiple concurrent tunnels.</strong> One per machine.</li>
+    <li><strong>ngrok fallback.</strong> Cloudflare-only.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Worktree parallelization</h2>
+  <p>From the eng review: three implementation lanes, mostly sequential after a small shared-types stub.</p>
+  <table>
+    <tr><th>Lane</th><th>Modules</th><th>Depends on</th></tr>
+    <tr><td><strong>A — CLI + store</strong></td><td><code>packages/cli/</code>, <code>packages/core/mobile-store</code></td><td>—</td></tr>
+    <tr><td><strong>B — Web auth surface</strong></td><td><code>packages/web/src/{app,lib,middleware}</code></td><td>Lane A's store types stub</td></tr>
+    <tr><td><strong>C — WS gate + 60s re-verify</strong></td><td>WS bootstrap, <code>ws-auth.ts</code></td><td>Lane B's <code>mobile-runtime.ts</code></td></tr>
+  </table>
+  <p>Conflict flag: B and C both touch <code>packages/web/</code>; run sequentially. A can start fully in parallel with B once the store types stub is shared.</p>
+</section>
+
+<section>
+  <h2>Eng review applied</h2>
+  <p>Plan went through <code>/plan-eng-review</code> after the second Codex pass. Five decisions taken; folded into the doc above.</p>
+  <table>
+    <tr><th>Eng-review issue</th><th>Decision</th></tr>
+    <tr>
+      <td><strong>Issue 1.</strong> Login route writes to filesystem; Edge runtime can't do that.</td>
+      <td>Pin login route + any mobile route that writes to <strong>Node runtime</strong> (<code>export const runtime = "nodejs"</code>). Middleware stays Edge for cookie-signature verify only (no fs).</td>
+    </tr>
+    <tr>
+      <td><strong>Issue 2.</strong> What if dashboard is already running without mobile mode?</td>
+      <td><code>ao mobile</code> <strong>refuses</strong> with <code>ao stop && ao start --mobile</code> instruction. No silent restart, no orphaned desktop browser tabs.</td>
+    </tr>
+    <tr>
+      <td><strong>Issue 3.</strong> HMAC key lifetime unspecified.</td>
+      <td>Persist HMAC signing key in <code>mobile.json</code> alongside token hash (mode <code>0600</code>). Phone stays signed in across <code>ao stop</code> / <code>ao start --mobile</code>; only revoke kills sessions.</td>
+    </tr>
+    <tr>
+      <td><strong>Issue 4.</strong> WS auth is once-per-connection; revoke / expiry doesn't reach a live WS.</td>
+      <td>Add <strong>60s periodic re-verify</strong> per accepted socket. On revoke or expiry, close <code>4001 revoked</code> / <code>4002 session_expired</code>. Doc claim ("revoke kicks live sockets") now matches reality.</td>
+    </tr>
+    <tr>
+      <td><strong>Issue 5.</strong> Cross-file singletons (store, hmacKey, liveSockets) would fragment in implementation.</td>
+      <td>New file <code>packages/web/src/lib/mobile-runtime.ts</code> as the single owner of all mobile singletons. Every other mobile file imports from it.</td>
+    </tr>
+    <tr>
+      <td><strong>Scope reduction.</strong> Plan touched 13 files / 3 services — past the complexity gate.</td>
+      <td>Defer audit log, cloudflared checksum verify, and <code>ao mobile install</code> to V1.5. All Codex hard-blockers stay in V1.</td>
+    </tr>
+  </table>
+</section>
+
+<section>
+  <h2>Verification</h2>
+  <table>
+    <tr><th>Check</th><th>How</th></tr>
+    <tr><td>Refuses to expose tunnel without generated token</td><td>Unit test — token-generation cannot be skipped.</td></tr>
+    <tr><td>Token is &gt;=128-bit and base32-encoded</td><td>Unit test on the generator.</td></tr>
+    <tr><td>Token-fragment delivery: server never sees fragment</td><td>Inspect Cloudflare and Next.js access logs in the integration test.</td></tr>
+    <tr><td>Middleware blocks <code>/api/*</code> without cookie, except <code>/api/mobile/login</code> and <code>/m</code></td><td>Vitest with mocked <code>NextRequest</code>; allowlisted paths must pass through unauthenticated.</td></tr>
+    <tr><td>Cookie verification is constant-time</td><td>Unit tests: equal-length good, equal-length bad-sig, unequal-length, malformed base64url, oversized cookie, missing dot, three dots, non-string fields. None must throw; all return <code>null</code>.</td></tr>
+    <tr><td>Login route rejects bad envelopes</td><td>Unit tests: wrong content-type → 415; oversized body → 413; cross-site Sec-Fetch-Site → 403; non-string token → 401.</td></tr>
+    <tr><td>Failure counter is atomic under concurrency</td><td>Test: 100 concurrent bad-token POSTs from worker threads. Counter must read exactly 100 (file-locking works) and lockout fires once.</td></tr>
+    <tr><td>WS upgrade requires <code>Origin</code></td><td>Integration test: valid cookie + missing Origin → 403. Valid cookie + matching Origin → upgraded.</td></tr>
+    <tr><td>WS path allowlist enforced</td><td>Integration test: valid cookie on <code>/ws/unknown</code> → 404, not upgraded.</td></tr>
+    <tr><td>Async verifier errors don't hang sockets</td><td>Inject a verifier throw; socket must close with 500, not leak.</td></tr>
+    <tr><td>WS upgrade rejects without cookie</td><td>Integration test against the real WS server. <strong>Critical</strong> — middleware does not run here.</td></tr>
+    <tr><td>WS upgrade rejects mismatched <code>Origin</code></td><td>Integration test.</td></tr>
+    <tr><td>WS upgrade verifier is reachable from upgrade handler</td><td>Smoke test: connect with curl, valid cookie but wrong origin → 403; no cookie → 401; valid cookie + correct origin → upgraded.</td></tr>
+    <tr><td>Lockout fires after 10 token-validation failures</td><td>Vitest. Lock persists across daemon restart (file-backed).</td></tr>
+    <tr><td>Dashboard refuses to start non-loopback when <code>AO_MOBILE_ENABLED=1</code></td><td>Unit test on the bootstrap.</td></tr>
+    <tr><td><code>cf-connecting-ip</code> only trusted via tunnel</td><td>Unit test — direct loopback request with header set must not pass it through.</td></tr>
+    <tr><td>cloudflared URL parser rejects unexpected hosts</td><td>Fixture test with malicious stderr (e.g. <code>https://evil.example.com</code>).</td></tr>
+    <tr><td>Tunnel teardown invalidates all sessions</td><td>Integration test.</td></tr>
+    <tr><td><code>ao mobile revoke</code> kicks live WS connections</td><td>Integration test — open WS, run revoke, expect close.</td></tr>
+    <tr><td>iOS Safari end-to-end</td><td>Manual on a real iPhone: scan QR → login → spawn session → open terminal WS. Codex specifically called this out as needing real-device testing rather than simulators.</td></tr>
+    <tr><td><code>ao mobile</code> refuses if dashboard is up without <code>--mobile</code></td><td>Unit test on the command (Issue 2 from eng review).</td></tr>
+    <tr><td>HMAC key persists in <code>mobile.json</code>; sessions survive <code>ao stop && ao start --mobile</code>; die on <code>ao mobile revoke</code></td><td>Unit on the store (Issue 3 from eng review).</td></tr>
+    <tr><td>Live WS gets <code>4002 session_expired</code> within 60s of cookie TTL elapsing</td><td>Integration test, mocked clock (Issue 4 from eng review).</td></tr>
+    <tr><td>Live WS gets <code>4001 revoked</code> within 60s of <code>ao mobile revoke</code></td><td>Integration test (Issue 4 from eng review).</td></tr>
+    <tr><td><code>/api/mobile/login</code> runs on Node runtime (signature export verified)</td><td>Unit test asserts <code>runtime === 'nodejs'</code> (Issue 1 from eng review).</td></tr>
+    <tr><td><code>mobile-runtime.ts</code> singleton invariant: 3 import sites → same liveSockets reference (within one process)</td><td>Unit test (Issue 5 from eng review).</td></tr>
+    <tr><td>Edge bundle does not import <code>fs</code> or <code>MobileStore</code></td><td>Build-time check + grep on the Edge bundle output (3rd Codex pass).</td></tr>
+    <tr><td><code>verifyCookieEdge</code> never reads revocation; <code>verifyCookieFull</code> always does</td><td>Unit tests on each verifier (3rd Codex pass).</td></tr>
+    <tr><td>HMAC key from <code>process.env.AO_MOBILE_COOKIE_KEY</code> is reachable in middleware</td><td>Integration test: dashboard boot wires env, middleware verifies a known cookie (3rd Codex pass).</td></tr>
+    <tr><td>Login route accepts <code>application/json; charset=utf-8</code></td><td>Unit test (3rd Codex pass).</td></tr>
+    <tr><td>Login route caps body while reading the stream (chunked-body bypass blocked)</td><td>Integration test: send a 2KB chunked body without <code>content-length</code>, expect 413 (3rd Codex pass).</td></tr>
+    <tr><td>CLI prints URL with <code>/m#t=</code> path, never bare <code>/#t=</code></td><td>Snapshot test on the CLI output (3rd Codex pass).</td></tr>
+    <tr><td>Process-wide re-verify scanner closes 4001 / 4002 within 60s of file-store change</td><td>Integration test with a clock mock, two open sockets, write revoke to mobile.json, both close (3rd Codex pass).</td></tr>
+    <tr><td>Re-verify timer is <code>unref</code>'d so process exits cleanly</td><td>Unit test on the WS bootstrap module (3rd Codex pass).</td></tr>
+  </table>
+</section>
+
+<section id="codex-applied">
+  <h2>Codex review applied</h2>
+  <p>
+    The first draft of this doc went to a Codex consult. It found three showstoppers and several
+    smaller bugs. Each item below names what changed and where to look in the doc above.
+  </p>
+  <table>
+    <tr><th>Codex finding</th><th>What changed</th></tr>
+    <tr>
+      <td>"Next.js middleware does not protect raw WebSocket upgrade paths."</td>
+      <td>WS auth is now enforced inside the <code>upgrade</code> event handler before <code>handleUpgrade</code> — see <em>WebSocket upgrade gate</em>. Doc no longer claims middleware covers WS.</td>
+    </tr>
+    <tr>
+      <td>"Browsers do not let JS set arbitrary <code>Authorization</code> headers on <code>new WebSocket(...)</code>. iOS Safari unreliable for Basic + WS."</td>
+      <td>Dropped HTTP basic for the dashboard entirely. Auth is now: token-via-fragment → <code>POST /api/mobile/login</code> → HttpOnly <code>SameSite=Strict</code> cookie. The cookie rides with the WS upgrade automatically. Verified path is the same on every platform.</td>
+    </tr>
+    <tr>
+      <td>"In-memory rate limiter resets on restart, per-process only, multi-IP bypass, unbounded <code>Map</code> = memory DoS, <code>cf-connecting-ip</code> spoofable in LAN mode."</td>
+      <td>Replaced with daemon-wide failure counter persisted to <code>mobile.json</code>. Hits 10 → feature locks until <code>ao mobile revoke</code>. Not per-IP (spoofable). LAN mode removed in V1, sidestepping the <code>cf-connecting-ip</code> spoofing concern.</td>
+    </tr>
+    <tr>
+      <td>"<code>timingSafeEqual</code> is not a JS built-in; Node's throws on unequal-length buffers; Edge runtime may not have <code>Buffer</code>/<code>crypto</code>."</td>
+      <td>All comparison goes through a single <code>timingSafeEqualHex</code> helper backed by <code>crypto.subtle</code> (Edge-safe), with explicit length-mismatch handling that always returns false in constant time.</td>
+    </tr>
+    <tr>
+      <td>"<code>atob(...).split(":")</code> breaks passwords containing colons."</td>
+      <td>Moot now — no basic-auth parsing.</td>
+    </tr>
+    <tr>
+      <td>"<code>AO_MOBILE_ORIGIN</code> can't be set on an already-running dashboard process."</td>
+      <td>Origin (and the mobile-store path) is passed at dashboard start as a CLI arg, not env. <code>ao mobile</code> restarts the dashboard inline if needed.</td>
+    </tr>
+    <tr>
+      <td>"Origin pinning helps against browser cross-site WS abuse, not curl/native clients (RFC 6455)."</td>
+      <td>Doc now states explicitly that <code>Origin</code> is defense-in-depth. The primary WS gate is the signed cookie + revocation check.</td>
+    </tr>
+    <tr>
+      <td>"User-chosen 16-char password is meaningless. Require generated 128-bit secret."</td>
+      <td>Token is generated by <code>ao mobile</code> via <code>crypto.randomBytes(16)</code>. There is no <code>AO_MOBILE_PASSWORD</code> env var any more.</td>
+    </tr>
+    <tr>
+      <td>"<code>--no-tunnel</code> binding <code>0.0.0.0</code> exposes RCE to the LAN."</td>
+      <td>Removed in V1. Dashboard hard-binds to <code>127.0.0.1</code> when mobile is enabled.</td>
+    </tr>
+    <tr>
+      <td>"<code>cloudflared</code> stdout is not an audit log; PATH hijack possible."</td>
+      <td>Both deferred to V1.5 in the eng-review scope reduction. V1 ships with stdout + cloudflared logs and trusts PATH; V1.5 adds the redacted JSONL audit log and pinned-checksum verification.</td>
+    </tr>
+    <tr>
+      <td>"No CSRF story for HTTP mutating endpoints."</td>
+      <td><code>SameSite=Strict</code> on the session cookie prevents cross-site form posts. All mutating routes also require a <code>POST</code> + cookie + JSON body content-type.</td>
+    </tr>
+    <tr>
+      <td>"Phishing of the tunnel URL." (Codex called this out as a hard limit.)</td>
+      <td>Documented in the threat-model callout as not-defended in V1. SSO via Cloudflare Access is the V2 fix; doc notes how to wire it up for users who care.</td>
+    </tr>
+  </table>
+
+  <h3>Second pass (post-rewrite)</h3>
+  <p>Codex re-reviewed the rewrite and surfaced a smaller set of correctness + claim-honesty issues. Each is folded into the doc above.</p>
+  <table>
+    <tr><th>Codex finding (2nd pass)</th><th>What changed</th></tr>
+    <tr>
+      <td>"Middleware as written would block <code>/api/mobile/login</code> and <code>/m</code> — first login deadlocks."</td>
+      <td><em>Implementation plan → middleware.ts</em> now spells out the public allowlist (<code>/m</code>, <code>/api/mobile/login</code>, static assets).</td>
+    </tr>
+    <tr>
+      <td>"Cookie parser can throw on attacker junk → 500s. Should fail closed."</td>
+      <td><em>Cookie verifier</em> now wraps everything in <code>try/catch</code>, returns <code>null</code> on any malformed input. Verification tests cover this explicitly.</td>
+    </tr>
+    <tr>
+      <td>"Cookie body should be base64url, not raw base64. Enforce exactly 2 dot-parts. Cap cookie size."</td>
+      <td>Verifier uses <code>b64urlDecode</code>, asserts <code>parts.length === 2</code>, caps at 4KB. Sign path emits base64url too.</td>
+    </tr>
+    <tr>
+      <td>"Cookie expiry uses <code>&lt;</code>; should be <code>&lt;=</code>."</td>
+      <td>Fixed in the verifier sketch.</td>
+    </tr>
+    <tr>
+      <td>"Threat model wrongly says HttpOnly cookie is readable by extension."</td>
+      <td>Reworded: extension can read the URL <em>fragment</em> before JS exchange, or operate the page DOM. HttpOnly does block direct cookie reads.</td>
+    </tr>
+    <tr>
+      <td>"WS revoke does not actually close live sockets."</td>
+      <td>WS gate now tracks <code>Map&lt;sessionId, Set&lt;WebSocket&gt;&gt;</code>. <code>killSessionSockets()</code> is called by <code>ao mobile revoke</code> and tunnel teardown. Verification table updated.</td>
+    </tr>
+    <tr>
+      <td>"<code>origin && origin !== expected</code> allows missing Origin to pass."</td>
+      <td>WS gate now <strong>requires</strong> Origin in mobile mode and rejects missing as 403. <code>expectedOrigin</code> is normalized (scheme + lowercase host, no trailing slash).</td>
+    </tr>
+    <tr>
+      <td>"Async verifier throw can leave the socket hanging."</td>
+      <td>Whole upgrade handler is in <code>try/catch</code>; errors close with 500 and audit-log <code>ws_error</code>.</td>
+    </tr>
+    <tr>
+      <td>"No path allowlist on WS upgrades."</td>
+      <td><code>WS_PATH_ALLOWLIST</code> added; unknown paths get 404.</td>
+    </tr>
+    <tr>
+      <td>"File-backed counter is a remote DoS lever — don't sell it as 'brute-force resistant.'"</td>
+      <td>Security checklist row reframed: brute-force resistance comes from the 128-bit token; the lockout is "fail-closed by design, also a DoS lever," documented honestly. Threat model callout names this explicitly.</td>
+    </tr>
+    <tr>
+      <td>"Login route missing body cap, content-type check, atomic counter, file lock."</td>
+      <td>Login route sketch now enforces 1KB cap, <code>application/json</code> only, <code>Sec-Fetch-Site</code> check; failure counter and session list use file-locking. Concurrency test added.</td>
+    </tr>
+    <tr>
+      <td>"'Or via mobile-store file' for origin is hand-wavy."</td>
+      <td>cloudflared lifecycle is now unambiguous: origin is a CLI arg at dashboard start. If a dashboard is already running, restart or refuse. No watch-read fallback.</td>
+    </tr>
+    <tr>
+      <td>"CSRF claim 'POST + JSON content-type' is too strong."</td>
+      <td>Security checklist now cites <code>SameSite=Strict</code> + <code>Sec-Fetch-Site: same-origin</code> as the actual defense, with content-type as enforcement (not defense in itself).</td>
+    </tr>
+    <tr>
+      <td>"No clickjacking headers, no CSP on <code>/m</code>."</td>
+      <td>Added: <code>frame-ancestors 'none'</code> globally, tight per-route CSP on <code>/m</code> since it handles the fragment token.</td>
+    </tr>
+    <tr>
+      <td>"Audit log: prompt text could leak secrets — decide explicitly."</td>
+      <td>Audit log itself deferred to V1.5 (eng-review scope reduction). The redaction policy stands when V1.5 lands: metadata only (kind, session id, length, timestamp), no prompt text, no tokens, mode <code>0600</code>.</td>
+    </tr>
+    <tr>
+      <td>"Read-only mode is V2 → V1 mobile has full RCE-equivalent power."</td>
+      <td>CLI banner now prints an explicit warning when <code>ao mobile</code> starts. README will repeat it.</td>
+    </tr>
+  </table>
+
+  <h3>Third pass (post eng-review)</h3>
+  <p>
+    Codex re-reviewed the eng-review delta and caught one structural problem and a list of drift /
+    correctness fixes. All folded in.
+  </p>
+  <table>
+    <tr><th>Codex finding (3rd pass)</th><th>What changed</th></tr>
+    <tr>
+      <td><strong>Structural:</strong> the cookie verifier said it ran in middleware AND ws-auth, but middleware can't call <code>store.isRevoked</code>. Internally inconsistent and would pull <code>MobileStore</code> (and <code>fs</code>) into the Edge bundle.</td>
+      <td>Split into <strong>two functions, two files</strong>: <code>verifyCookieEdge</code> in <code>mobile-auth-edge.ts</code> (signature + expiry only, no fs imports) and <code>verifyCookieFull</code> in <code>mobile-auth-node.ts</code> (calls Edge variant then adds revocation). Edge bundle is provably fs-free.</td>
+    </tr>
+    <tr>
+      <td>"How does Edge middleware get the persisted HMAC key without fs?"</td>
+      <td>Dashboard process reads the key from <code>mobile.json</code> at boot and injects it into <code>process.env.AO_MOBILE_COOKIE_KEY</code>. Next.js propagates <code>process.env</code> into the Edge runtime at startup.</td>
+    </tr>
+    <tr>
+      <td><strong>Structural:</strong> <code>ao mobile revoke</code> is a separate CLI process; importing <code>mobile-runtime.ts</code> from it gets a fresh empty <code>liveSockets</code> Map. <code>killSessionSockets()</code> from CLI was a no-op.</td>
+      <td>Revoke is now <strong>file-mediated</strong>: CLI writes a revocation record to <code>mobile.json</code>; the dashboard's process-wide 60s scanner reads it and closes matching sockets. Doc framing changed from "kicks live sockets" to "kicks live sockets within ~60s." Honest. No IPC needed in V1.</td>
+    </tr>
+    <tr>
+      <td>"WS upgrade-gate pseudocode said periodic re-verify but didn't actually create the interval. Per-socket intervals would leak."</td>
+      <td>Sketch now creates <strong>one process-wide</strong> <code>setInterval</code> that scans <code>liveSockets</code> every 60s. Timer is <code>unref</code>'d for clean shutdown.</td>
+    </tr>
+    <tr>
+      <td>"<code>mobile-runtime.ts</code> overclaims process-wide singleton via Node module cache."</td>
+      <td>Doc reframed: <code>mobile-runtime.ts</code> owns <strong>process-local</strong> WS state inside the dashboard process only. <code>mobile.json</code> is the source of truth across processes (CLI ↔ dashboard, Node ↔ Edge).</td>
+    </tr>
+    <tr>
+      <td>"CLI prints <code>https://host/#t=…</code>; auth flow needs <code>/m#t=…</code>. Root fragment won't trigger the login page."</td>
+      <td>CLI output sample fixed to <code>https://host/m#t=…</code>. Snapshot test added to lock it.</td>
+    </tr>
+    <tr>
+      <td>"<code>content-type === 'application/json'</code> rejects valid <code>application/json; charset=utf-8</code>."</td>
+      <td>Login route uses <code>startsWith('application/json')</code> on the lowercased header.</td>
+    </tr>
+    <tr>
+      <td>"Missing <code>content-length</code> → 0 → chunked body bypasses 1KB cap."</td>
+      <td>Body cap is now enforced <strong>while reading the stream</strong> via a <code>readWithCap</code> helper that aborts on overflow.</td>
+    </tr>
+    <tr>
+      <td>"<code>/m</code> CSP <code>script-src 'self'</code> may break Next's inline runtime."</td>
+      <td><code>/m</code> is now declared as a static client component with a per-request CSP nonce; <code>&lt;noscript&gt;</code> fallback for JS-disabled phones.</td>
+    </tr>
+    <tr>
+      <td>"Verification row 'middleware blocks all <code>/api/*</code>' missed the public allowlist."</td>
+      <td>Test description updated to except <code>/api/mobile/login</code> and <code>/m</code>; allowlisted-paths-pass-through is now an explicit assertion.</td>
+    </tr>
+    <tr>
+      <td>"cloudflared lifecycle says 'stops it and starts a fresh one — or refuses with --no-restart' — contradicts the eng-review 'always refuse' decision."</td>
+      <td>Lifecycle now says always-refuse, no <code>--no-restart</code> flag.</td>
+    </tr>
+    <tr>
+      <td>"Files-table still listed <code>install</code>; <code>cloudflared.ts</code> row still claimed checksum verify on first use."</td>
+      <td>Both removed; both are V1.5 per scope reduction.</td>
+    </tr>
+    <tr>
+      <td>"Codex-review-applied table still claimed audit log + checksum were V1."</td>
+      <td>Reworded to reflect V1.5 deferral.</td>
+    </tr>
+    <tr>
+      <td><strong>Audit references in code sketches contradicted the V1.5 deferral.</strong></td>
+      <td>Stripped <code>audit.log</code> calls from the WS upgrade gate and login route sketches; <code>mobile-runtime.ts</code> row no longer claims to own an audit handle.</td>
+    </tr>
+  </table>
+  <div class="callout">
+    <strong>Honest revoke window.</strong> V1 revoke is file-mediated and takes effect in
+    <strong>up to 60 seconds</strong> on already-open WebSocket connections. The doc previously
+    implied immediate. New requests (HTTP and WS) are blocked the moment <code>mobile.json</code>
+    is rewritten — the lag only applies to sockets that were authorized before the revoke.
+    Tightening this would require an admin HTTP endpoint or Unix socket from CLI to dashboard;
+    out of scope for V1.
+  </div>
+</section>
+
+<section>
+  <h2>V2 follow-ups (when usage justifies)</h2>
+  <ul>
+    <li>Per-device passkeys / WebAuthn — pair a phone, get a device-bound credential, <code>ao devices list / revoke</code>.</li>
+    <li>Cloudflare Access integration: drop SSO in front of the tunnel for phishing-resistant auth.</li>
+    <li>Self-hosted relay option for users who don't want Cloudflare in the path.</li>
+    <li>Mobile-tuned dashboard route (slimmer kanban, larger touch targets, terminal sizing).</li>
+    <li>Read-only mode toggle on the cookie — phone can watch sessions but cannot spawn / kill / send prompts.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Open questions</h2>
+  <ul>
+    <li>Do we want a named-tunnel option (stable hostname across restarts)? Requires a Cloudflare account. <em>Add as a flag in V1.5 if users ask.</em></li>
+    <li>Where do we vendor the cloudflared binary checksum list? <em>Probably a small JSON in the cli package, refreshed on releases.</em></li>
+    <li>Do we ship a <code>read-only</code> token type in V1 too, or wait? <em>Wait — single token type keeps the surface small.</em></li>
+  </ul>
+</section>
+
+</main>
+</body>
+</html>
