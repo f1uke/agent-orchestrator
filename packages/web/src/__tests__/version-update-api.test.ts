@@ -105,6 +105,47 @@ describe("GET /api/version", () => {
     const body = (await res.json()) as { latest: string | null };
     expect(body.latest).toBeNull();
   });
+
+  it("trusts cached.isOutdated for git installs (latestVersion is a ref, not semver)", async () => {
+    // Git installs cache `latestVersion: "origin/main"`. Without the
+    // installMethod=="git" branch, `isVersionOutdated(current, "origin/main")`
+    // would always return false because parseVersion produces NaN parts —
+    // git-installed users would never see the banner.
+    mockGlobalConfig.value = { updateChannel: "stable" };
+    writeCache({
+      latestVersion: "origin/main",
+      checkedAt: new Date().toISOString(),
+      currentVersionAtCheck: "0.6.0",
+      installMethod: "git",
+      channel: "stable",
+      isOutdated: true,
+      currentRevisionAtCheck: "abc",
+      latestRevisionAtCheck: "def",
+    });
+
+    const res = await versionGET();
+    const body = (await res.json()) as { latest: string | null; isOutdated: boolean };
+    expect(body.latest).toBe("origin/main");
+    expect(body.isOutdated).toBe(true);
+  });
+
+  it("returns isOutdated=false for git installs whose cache says they're current", async () => {
+    mockGlobalConfig.value = { updateChannel: "stable" };
+    writeCache({
+      latestVersion: "origin/main",
+      checkedAt: new Date().toISOString(),
+      currentVersionAtCheck: "0.6.0",
+      installMethod: "git",
+      channel: "stable",
+      isOutdated: false,
+      currentRevisionAtCheck: "abc",
+      latestRevisionAtCheck: "abc",
+    });
+
+    const res = await versionGET();
+    const body = (await res.json()) as { isOutdated: boolean };
+    expect(body.isOutdated).toBe(false);
+  });
 });
 
 describe("POST /api/update", () => {

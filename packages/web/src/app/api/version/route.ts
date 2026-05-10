@@ -28,6 +28,14 @@ interface CacheData {
   checkedAt?: string;
   currentVersionAtCheck?: string;
   channel?: UpdateChannel;
+  /**
+   * Mirrors the CLI's CacheData. Only the literal "git" matters here — for git
+   * installs we read the cached `isOutdated` directly because `latestVersion`
+   * is a git ref like "origin/main" (not a semver), so `isVersionOutdated`
+   * would always return false.
+   */
+  installMethod?: string;
+  isOutdated?: boolean;
 }
 
 interface VersionResponse {
@@ -93,11 +101,24 @@ export async function GET() {
   const cacheMatchesChannel = !cache?.channel || cache.channel === channel;
   const latest = cache?.latestVersion && cacheMatchesChannel ? cache.latestVersion : null;
 
+  // Git installs cache `latestVersion: "origin/main"` (a ref, not a semver),
+  // so `isVersionOutdated(current, "origin/main")` would always return false.
+  // The CLI works around this by trusting the precomputed `cached.isOutdated`
+  // for git installs — mirror that here so the dashboard banner actually
+  // appears when a git-installed user is behind origin/main.
+  let isOutdated = false;
+  if (latest && cacheMatchesChannel) {
+    isOutdated =
+      cache?.installMethod === "git"
+        ? cache.isOutdated === true
+        : isVersionOutdated(current, latest);
+  }
+
   const body: VersionResponse = {
     current,
     latest,
     channel,
-    isOutdated: latest ? isVersionOutdated(current, latest) : false,
+    isOutdated,
     checkedAt: cache?.checkedAt && cacheMatchesChannel ? cache.checkedAt : null,
   };
 
