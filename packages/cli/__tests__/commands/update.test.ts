@@ -566,6 +566,55 @@ describe("update command", () => {
     // Global-config layout (review #3 / scope-gap follow-up)
     // ---------------------------------------------------------------------
 
+    it("the refusal message lists active sessions from EVERY registered project, not just one (Dhruv proof)", async () => {
+      // Reviewer challenge: prove loadConfig(globalPath) actually enumerates
+      // sessions across all registered projects, not just the cwd's project.
+      // We register proj-a + proj-b in the global config, seed one active
+      // session in each, and assert BOTH ids appear in the stderr output.
+      mockLoadConfig.mockImplementation((path?: string) => {
+        // Mimic buildEffectiveConfigFromGlobalConfigPath: the global path
+        // returns BOTH projects; project-local would only return one.
+        if (!path) {
+          return { projects: { "proj-a": {} }, configPath: "/cwd/agent-orchestrator.yaml" };
+        }
+        return {
+          projects: {
+            "proj-a": { path: "/repos/a" },
+            "proj-b": { path: "/repos/b" },
+          },
+          configPath: path,
+        };
+      });
+      mockLoadGlobalConfig.mockReturnValue({
+        projects: {
+          "proj-a": { path: "/repos/a" },
+          "proj-b": { path: "/repos/b" },
+        },
+      });
+      mockExistsSync.mockReturnValue(true);
+      // One active session per project. sm.list() is single-call (the SM
+      // implementation enumerates across all projectIds), so we return both
+      // sessions in one shot — matching real behavior. `projectId` is
+      // included so it's visible to anyone reading the refusal output.
+      mockSessions.value = [
+        { id: "proj-a-feat-1", status: "working", projectId: "proj-a" },
+        { id: "proj-b-feat-2", status: "needs_input", projectId: "proj-b" },
+      ];
+
+      const errSpy = vi.mocked(console.error);
+      await expect(
+        program.parseAsync(["node", "test", "update"]),
+      ).rejects.toThrow("process.exit(1)");
+
+      const stderr = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      // Refusal message reports the correct total count (2, not 1).
+      expect(stderr).toMatch(/2 sessions active/);
+      // Both project's session ids appear in the listing.
+      expect(stderr).toMatch(/proj-a-feat-1/);
+      expect(stderr).toMatch(/proj-b-feat-2/);
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
     it("always loads global config (never project-local), so sessions in OTHER projects fire the guard", async () => {
       // Simulate running inside a project: project-local loadConfig() would
       // succeed and return only THIS project's sessions. The guard must

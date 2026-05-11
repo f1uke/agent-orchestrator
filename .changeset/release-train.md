@@ -14,7 +14,12 @@ Ships the full release pipeline described in `release-process.html`:
   Bake window (Wed–Thu) pauses scheduled nightlies; the captain re-cuts via
   workflow_dispatch when a fix lands. Stable `release.yml` publishes via
   `changesets/action`. `.changeset/config.json` adds the snapshot template
-  (`{tag}-{commit}`) and moves the private `@aoagents/ao-web` to `ignore`.
+  (`{tag}-{commit}`). `@aoagents/ao-web` stays in the linked group and ships
+  alongside `@aoagents/ao-cli` (it's a workspace:* runtime dep, so marking it
+  private would 404 every `npm install -g @aoagents/ao` after publish).
+  `scripts/check-publishable-deps.mjs` runs in both release.yml and canary.yml
+  before the publish step and fails CI if a publishable package depends on a
+  `private: true` package via workspace:*.
 
 - **Update channels.** New `updateChannel` field in the global config schema
   (`stable | nightly | manual`, default `manual` so existing users see no
