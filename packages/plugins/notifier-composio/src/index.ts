@@ -41,6 +41,49 @@ interface ComposioToolkit {
   }): Promise<{ successful: boolean; data?: unknown; error?: string }>;
 }
 
+interface ComposioActionsClient {
+  actions?: {
+    execute?: (params: {
+      actionName: string;
+      requestBody: {
+        input: Record<string, unknown>;
+      };
+    }) => Promise<{ successful: boolean; data?: unknown; error?: string }>;
+  };
+}
+
+function hasExecuteAction(value: unknown): value is ComposioToolkit {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as ComposioToolkit).executeAction === "function"
+  );
+}
+
+function hasActionsExecute(value: unknown): value is ComposioActionsClient {
+  const actions = (value as ComposioActionsClient | undefined)?.actions;
+  return actions !== undefined && typeof actions.execute === "function";
+}
+
+function adaptComposioClient(client: unknown): ComposioToolkit {
+  if (hasExecuteAction(client)) return client;
+
+  if (hasActionsExecute(client)) {
+    return {
+      executeAction({ action, params }) {
+        return client.actions!.execute!({
+          actionName: action,
+          requestBody: {
+            input: params,
+          },
+        });
+      },
+    };
+  }
+
+  throw new Error("Composio SDK client does not expose executeAction() or actions.execute()");
+}
+
 /**
  * Lazy-load composio-core SDK.
  * Returns null if the package is not installed.
@@ -61,7 +104,7 @@ async function loadComposioSDK(apiKey: string): Promise<ComposioToolkit | null> 
       throw new Error("Could not find Composio class in composio-core module");
     }
     const client = new ComposioClass({ apiKey });
-    return client as ComposioToolkit;
+    return adaptComposioClient(client);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
@@ -143,10 +186,8 @@ export function create(config?: Record<string, unknown>): Notifier {
 
   // Internal: allows tests to inject a mock client without mocking composio-core
   const clientOverride =
-    config?._clientOverride !== undefined &&
-    config._clientOverride !== null &&
-    typeof (config._clientOverride as ComposioToolkit).executeAction === "function"
-      ? (config._clientOverride as ComposioToolkit)
+    config?._clientOverride !== undefined && config._clientOverride !== null
+      ? adaptComposioClient(config._clientOverride)
       : undefined;
 
   if (typeof config?.defaultApp === "string" && !VALID_APPS.has(config.defaultApp)) {
