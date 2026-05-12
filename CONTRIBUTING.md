@@ -103,7 +103,7 @@ agent-orchestrator (public)                    ao-publisher (private)
 | `PUBLISHER_DISPATCH_TOKEN`   | this repo (Actions secret) | Fine-grained PAT, `repository_dispatch:write` on `ao-publisher` **only** |
 | `NPM_TOKEN`                  | `ao-publisher`             | npm automation token, publish access to the `@aoagents` org          |
 
-Add `PUBLISHER_DISPATCH_TOKEN` at **Settings → Secrets and variables → Actions → New repository secret**. Without it, the dispatch step in both `release.yml` and `canary.yml` fails — but version bumps and GitHub releases still go through, so the failure is recoverable by re-running the workflow after the secret is restored.
+Add `PUBLISHER_DISPATCH_TOKEN` at **Settings → Secrets and variables → Actions → New repository secret**. Without it, the dispatch step in both `release.yml` and `canary.yml` fails — but version bumps and GitHub releases still go through, so the failure is recoverable by re-running the workflow once the secret is restored (see "Recovery" below).
 
 ### Rotation
 
@@ -120,6 +120,31 @@ The blast radius of a leaked `PUBLISHER_DISPATCH_TOKEN` is limited to "can trigg
 - **Nightly**: `canary.yml` runs on cron (23:30 IST Fri–Tue) or via `workflow_dispatch`. It snapshots versions to `0.0.0-nightly-<sha>`-style, tags, creates a prerelease GitHub release, and dispatches `publish-npm-nightly`.
 
 The dispatch step is the **only** way npm gets new versions — there is no path from this repo that calls `npm publish` directly.
+
+### Idempotency contract for `ao-publisher`
+
+`release.yml` is idempotent: each step (tag push, GitHub release creation, dispatch) is gated on whether that piece of state already exists, so a re-run after a partial failure picks up only the missing steps. Specifically, the dispatch step fires whenever the workflow is running on a version-bump commit, even on a re-run where the tag and release already exist on the remote. This guarantees recovery from the most common partial failure (first run completed tag+release but failed at dispatch because `PUBLISHER_DISPATCH_TOKEN` was absent).
+
+For that to be safe, the `ao-publisher` workflow MUST be idempotent against already-published versions. Specifically:
+
+- On receiving `publish-npm-stable` for tag `vX.Y.Z`, check whether `@aoagents/ao@X.Y.Z` already exists on npm; if so, treat the run as a successful no-op (do not error).
+- The same applies to `publish-npm-nightly` for snapshot tags.
+
+`pnpm changeset publish` already has this property — it skips packages whose current version is already on the registry — so a plain `pnpm changeset publish` in `ao-publisher` satisfies the contract.
+
+### Recovery
+
+If `release.yml` fails after the GitHub release was created (for example, `PUBLISHER_DISPATCH_TOKEN` was missing during the first run), the cleanest recovery is to **re-run the failed workflow**: the state-detection step will see that the tag and release already exist, skip those steps, and run the dispatch step. The publisher's idempotency contract above ensures this is safe even if the prior dispatch did partially go through.
+
+If for some reason re-running isn't practical (e.g. the workflow run has aged out of the UI), trigger the dispatch manually from a maintainer's shell with `gh` authenticated against the `PUBLISHER_DISPATCH_TOKEN` PAT:
+
+```bash
+gh api repos/ComposioHQ/ao-publisher/dispatches \
+  -f event_type=publish-npm-stable \
+  -F client_payload[tag]=vX.Y.Z
+```
+
+(Use `publish-npm-nightly` and the nightly tag for a missed canary.)
 
 ## Testing your changes
 

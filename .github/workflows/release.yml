@@ -83,11 +83,54 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # After a "Version Packages" PR is merged, no pending changesets
-      # remain (`hasChangesets == 'false'`) and the merge commit bumped
-      # versions in package.json files. `pnpm changeset tag` creates a
-      # local git tag per bumped package; it's a no-op when no versions
-      # changed, so it's safe to run whenever this branch is true.
+      # Determine release state. Each downstream step (tag push, GH
+      # release creation, publisher dispatch) is gated on its own
+      # piece of state so the workflow is idempotent and recovers
+      # cleanly on re-run after a partial failure.
+      #
+      # `is_release_commit` is the crucial signal: it filters out
+      # regular commits to main (which also have `hasChangesets ==
+      # 'false'` but should NOT trigger a publish). We detect a
+      # version-bump commit by comparing the umbrella package's
+      # version against its value in the parent commit — a Version
+      # Packages merge changes that version, a regular commit does not.
+      # The umbrella `@aoagents/ao` is the canonical version source for
+      # the `vX.Y.Z` tag scheme and is part of the linked group, so
+      # any release that bumps the cohort will bump this file.
+      - name: Determine release state
+        id: state
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./packages/ao/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          prev_version=""
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            prev_version=$(git show HEAD^:packages/ao/package.json 2>/dev/null | jq -r .version 2>/dev/null || echo "")
+          fi
+          if [ -n "$prev_version" ] && [ "$prev_version" != "$version" ]; then
+            echo "is_release_commit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release_commit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git ls-remote --tags --exit-code origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "tag_on_remote=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_on_remote=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if gh release view "v$version" --json tagName >/dev/null 2>&1; then
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Push tags only if this is a fresh version-bump commit AND the
+      # tag isn't already on the remote. Skipped on re-runs where the
+      # tag was pushed on a prior run (idempotent recovery).
       #
       # We also create a `vX.Y.Z` git tag pointing at the same
       # version-bump commit. That tag is what `gh release create` and
@@ -95,34 +138,25 @@ jobs:
       # publisher's checkout are anchored to a specific SHA and can't
       # drift if other commits land on main between push and release.
       - name: Tag versioned packages
-        id: tag
-        if: steps.changesets.outputs.hasChangesets == 'false'
+        if: steps.state.outputs.is_release_commit == 'true' && steps.state.outputs.tag_on_remote == 'false'
         run: |
-          before=$(git tag --list | wc -l | tr -d ' ')
           pnpm changeset tag
-          after=$(git tag --list | wc -l | tr -d ' ')
-          if [ "$after" -gt "$before" ]; then
-            version=$(node -p "require('./packages/ao/package.json').version")
-            git tag "v$version"
-            git push origin --tags
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "released=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          fi
+          git tag "v${{ steps.state.outputs.version }}"
+          git push origin --tags
 
       # Public-facing GitHub release. Stable channel — not a prerelease.
-      # No `--target`: the `vX.Y.Z` tag was just pushed at the
+      # No `--target`: the `vX.Y.Z` tag is on the remote at the
       # version-bump commit, and `gh release create` resolves the
       # commitish from the existing tag. Avoids the race where another
       # commit lands on main between the tag push and this step,
       # pulling unrelated commits into the auto-generated release notes.
+      # Skipped if a release for this version already exists.
       - name: Create GitHub release
-        if: steps.tag.outputs.released == 'true'
+        if: steps.state.outputs.is_release_commit == 'true' && steps.state.outputs.release_exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v${{ steps.tag.outputs.version }}" \
+          gh release create "v${{ steps.state.outputs.version }}" \
             --generate-notes
 
       # Hand off to the private publisher repo. PUBLISHER_DISPATCH_TOKEN
@@ -130,12 +164,19 @@ jobs:
       # `repository_dispatch:write`. NPM_TOKEN lives in that repo's
       # secret store — never here. The publisher repo's workflow listens
       # for `publish-npm-stable` and runs `changeset publish` (or the
-      # equivalent) against the tag we just pushed.
+      # equivalent) against the tag.
+      #
+      # This step fires whenever we are on a release commit, even on a
+      # re-run where tag and release already existed. This guarantees
+      # recovery from the "first run failed only at dispatch" case
+      # (e.g. PUBLISHER_DISPATCH_TOKEN was missing). The publisher repo
+      # MUST be idempotent against already-published versions — see
+      # CONTRIBUTING.md → "Release Architecture" for the contract.
       - name: Dispatch npm publish to ao-publisher
-        if: steps.tag.outputs.released == 'true'
+        if: steps.state.outputs.is_release_commit == 'true'
         env:
           GH_TOKEN: ${{ secrets.PUBLISHER_DISPATCH_TOKEN }}
         run: |
           gh api repos/ComposioHQ/ao-publisher/dispatches \
             -f event_type=publish-npm-stable \
-            -F client_payload[tag]=v${{ steps.tag.outputs.version }}
+            -F client_payload[tag]=v${{ steps.state.outputs.version }}
