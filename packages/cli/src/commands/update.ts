@@ -23,6 +23,7 @@ import {
 } from "../lib/update-check.js";
 import { promptConfirm } from "../lib/prompts.js";
 import { getSessionManager } from "../lib/create-session-manager.js";
+import { getRunning } from "../lib/running-state.js";
 
 /** Inline check instead of module-level constant so tests can control TTY state. */
 function isTTY(): boolean {
@@ -139,33 +140,43 @@ async function handleCheck(): Promise<void> {
 async function ensureNoActiveSessions(): Promise<boolean> {
   let sessions: Session[];
   try {
-    // ALWAYS load the global registry, never project-local config.
+    // Live signal first: running.json lists whichever projects the active
+    // `ao start` daemon is currently polling. That can include local-only
+    // projects whose `agent-orchestrator.yaml` is NOT in the global registry
+    // (Dhruv edge case: user runs `ao start` from a repo with a local config
+    // and no global registration — sessions live on disk, would be clobbered
+    // if `ao update` proceeded).
     //
-    // `ao update` replaces the binary that supervises every registered project,
-    // so the guard must see active sessions across all of them. If we loaded
-    // the project-local config when run inside a repo, sm.list() would only
-    // enumerate that project's sessions and we'd let the install proceed
-    // even though another project has work in flight.
-    //
-    // When the global config doesn't exist yet (fresh install before any
-    // `ao start`), there are no registered projects so the guard short-
-    // circuits to "allow."
-    const globalPath = getGlobalConfigPath();
-    if (!existsSync(globalPath)) return true;
-    const globalConfig = loadGlobalConfig(globalPath);
-    if (!globalConfig || Object.keys(globalConfig.projects).length === 0) {
-      return true;
+    // If a daemon is running, trust its configPath — it's the source of
+    // truth for "which sessions does the running ao instance own?"
+    const running = await getRunning();
+    if (running && running.projects.length > 0) {
+      // running.configPath could be local-wrapped (a project's
+      // agent-orchestrator.yaml) OR the canonical global path. loadConfig
+      // dispatches based on the path shape — both cases produce a full
+      // OrchestratorConfig the SessionManager can enumerate.
+      const config = loadConfig(running.configPath);
+      const sm = await getSessionManager(config);
+      sessions = await sm.list();
+    } else {
+      // No live daemon. Fall back to the global registry — covers the case
+      // where the user ran `ao stop` (running.json gone) but stale sessions
+      // sit on disk under ~/.agent-orchestrator/{hash}-{projectId}/. The
+      // SessionManager's enrichment will reconcile any stale-runtime
+      // sessions to `killed`, so terminal statuses don't block the update.
+      const globalPath = getGlobalConfigPath();
+      if (!existsSync(globalPath)) return true;
+      const globalConfig = loadGlobalConfig(globalPath);
+      if (!globalConfig || Object.keys(globalConfig.projects).length === 0) {
+        return true;
+      }
+      if (!isCanonicalGlobalConfigPath(globalPath)) {
+        return true;
+      }
+      const config = loadConfig(globalPath);
+      const sm = await getSessionManager(config);
+      sessions = await sm.list();
     }
-    if (!isCanonicalGlobalConfigPath(globalPath)) {
-      // Defensive: if someone overrode AO_GLOBAL_CONFIG to a non-canonical
-      // path, loadConfig would treat the file as a project config. Bail.
-      return true;
-    }
-    // loadConfig dispatches to buildEffectiveConfigFromGlobalConfigPath when
-    // given the canonical global path — see packages/core/src/config.ts.
-    const config = loadConfig(globalPath);
-    const sm = await getSessionManager(config);
-    sessions = await sm.list();
   } catch {
     // If we can't enumerate sessions, don't pretend there are zero — but
     // also don't block the upgrade indefinitely. Surface a soft warning.

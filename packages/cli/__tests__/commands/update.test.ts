@@ -98,6 +98,18 @@ vi.mock("node:fs", async () => {
   };
 });
 
+// running.json is the live signal: ensureNoActiveSessions now consults
+// `getRunning()` before falling back to the global registry. Default to
+// "no daemon running" so the existing global-config-driven tests keep
+// exercising the fallback path. Per-test overrides simulate a live daemon.
+const { mockGetRunning } = vi.hoisted(() => ({
+  mockGetRunning: vi.fn<() => Promise<unknown>>(async () => null),
+}));
+
+vi.mock("../../src/lib/running-state.js", () => ({
+  getRunning: () => mockGetRunning(),
+}));
+
 const { mockPromptConfirm } = vi.hoisted(() => ({
   mockPromptConfirm: vi.fn(async () => false),
 }));
@@ -174,6 +186,8 @@ describe("update command", () => {
     mockLoadGlobalConfig.mockReturnValue(null);
     mockExistsSync.mockReset();
     mockExistsSync.mockReturnValue(false);
+    mockGetRunning.mockReset();
+    mockGetRunning.mockResolvedValue(null); // default: no live daemon
     mockSessions.value = [];
     origStdinTTY = process.stdin.isTTY;
     origStdoutTTY = process.stdout.isTTY;
@@ -705,6 +719,95 @@ describe("update command", () => {
       // We didn't even consult loadGlobalConfig — existsSync(globalPath) was false.
       expect(mockLoadGlobalConfig).not.toHaveBeenCalled();
       expect(mockPromptConfirm).toHaveBeenCalled();
+    });
+
+    it("refuses when sessions exist in a locally-registered project not in global config (Dhruv edge-case)", async () => {
+      // The bypass: user ran `ao start` from a repo with a local
+      // agent-orchestrator.yaml and no global registration. running.json
+      // says that project is being polled, sessions live on disk, but the
+      // global registry is empty. Before this fix, the guard hit the
+      // "global has no projects → allow" branch and let `ao update`
+      // clobber the running daemon.
+      //
+      // Fix: consult running.json BEFORE falling back to global. When
+      // running.json has projects, build the SessionManager from
+      // running.configPath (which is the local project's yaml in this case)
+      // and enumerate from there.
+      mockGetRunning.mockResolvedValue({
+        pid: 12345,
+        configPath: "/repos/local-only/agent-orchestrator.yaml",
+        port: 3000,
+        startedAt: new Date().toISOString(),
+        projects: ["local-only"],
+      });
+      // Global registry has no record of `local-only` — this is the bypass
+      // condition. With the old code, we'd return true here.
+      mockLoadGlobalConfig.mockReturnValue({ projects: {} });
+      // loadConfig with the local configPath returns the local project's
+      // OrchestratorConfig (project-local schema is auto-wrapped).
+      mockLoadConfig.mockImplementation((path?: string) => {
+        if (path === "/repos/local-only/agent-orchestrator.yaml") {
+          return {
+            projects: { "local-only": { path: "/repos/local-only" } },
+            configPath: path,
+          };
+        }
+        return { projects: {}, configPath: path ?? "/cwd/agent-orchestrator.yaml" };
+      });
+      mockSessions.value = [
+        { id: "local-feat-1", status: "working", projectId: "local-only" },
+      ];
+
+      const errSpy = vi.mocked(console.error);
+      await expect(
+        program.parseAsync(["node", "test", "update"]),
+      ).rejects.toThrow("process.exit(1)");
+
+      const stderr = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(stderr).toMatch(/1 session active/);
+      expect(stderr).toMatch(/local-feat-1/);
+      // We must have routed through running.configPath, NOT the global path.
+      expect(mockLoadConfig).toHaveBeenCalledWith("/repos/local-only/agent-orchestrator.yaml");
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it("returns true (allows update) when running.json is gone and global is empty", async () => {
+      // No daemon running, no global projects. Genuinely safe to update.
+      mockGetRunning.mockResolvedValue(null);
+      mockExistsSync.mockReturnValue(false);
+      mockPromptConfirm.mockResolvedValue(false);
+      await program.parseAsync(["node", "test", "update"]);
+      expect(mockPromptConfirm).toHaveBeenCalled(); // guard passed → reached prompt
+    });
+
+    it("trusts running.json over an inconsistent global config", async () => {
+      // running.json says project P is being polled. Global config also
+      // lists P. We should use running.configPath (the live signal), and
+      // any active session in P fires the guard.
+      mockGetRunning.mockResolvedValue({
+        pid: 12345,
+        configPath: "/tmp/test-global-config.yaml",
+        port: 3000,
+        startedAt: new Date().toISOString(),
+        projects: ["my-app"],
+      });
+      mockLoadConfig.mockImplementation((path?: string) => ({
+        projects: { "my-app": { path: "/tmp/foo" } },
+        configPath: path ?? "/cwd/agent-orchestrator.yaml",
+      }));
+      mockLoadGlobalConfig.mockReturnValue({
+        projects: { "my-app": { path: "/tmp/foo" } },
+      });
+      mockSessions.value = [{ id: "feat-1", status: "working" }];
+
+      await expect(
+        program.parseAsync(["node", "test", "update"]),
+      ).rejects.toThrow("process.exit(1)");
+
+      // Because getRunning() returned a daemon, we went straight to its
+      // configPath — we should NOT have fallen back to loadGlobalConfig.
+      expect(mockLoadGlobalConfig).not.toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
     });
   });
 
