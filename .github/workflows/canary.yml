@@ -41,15 +41,21 @@ jobs:
           fetch-depth: 0
 
       # Skip-if-unchanged guard: if the most recent prerelease in this
-      # repo already points at the current tip of main, there's nothing
-      # new to publish — short-circuit the whole job. Prevents republishing
-      # the same SHA on every cron tick during quiet stretches (and keeps
-      # the npm version list from filling with identical nightlies).
+      # repo was cut from the current tip of main, there's nothing new
+      # to publish — short-circuit the whole job. Prevents republishing
+      # the same SHA on every cron tick during quiet stretches (and
+      # keeps the npm version list from filling with identical nightlies).
       #
       # We filter to prereleases only (`isPrerelease == true`). If the
       # most recent release were a stable cut from `release.yml`, an
       # explicit `workflow_dispatch` nightly right after the stable
       # release would otherwise be suppressed — which we don't want.
+      #
+      # The previous-nightly tag points at the *orphan snapshot commit*
+      # created by the "Commit snapshot version bumps" step below, not
+      # at the main HEAD it was cut from. The snapshot commit's first
+      # parent is the source main HEAD, so `${LAST_TAG}^` is the right
+      # anchor to compare against `GITHUB_SHA` (main HEAD at this run).
       - name: Check if main has new commits since the last nightly
         id: check
         env:
@@ -58,10 +64,10 @@ jobs:
           LAST_TAG=$(gh release list --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease)][0].tagName // empty')
           LAST_SHA=""
           if [ -n "$LAST_TAG" ]; then
-            LAST_SHA=$(git rev-list -n 1 "$LAST_TAG" 2>/dev/null || echo "")
+            LAST_SHA=$(git rev-parse "${LAST_TAG}^" 2>/dev/null || echo "")
           fi
           if [ -n "$LAST_SHA" ] && [ "$LAST_SHA" = "$GITHUB_SHA" ]; then
-            echo "Last prerelease ($LAST_TAG) already points at $GITHUB_SHA — skipping."
+            echo "Last prerelease ($LAST_TAG) was cut from $GITHUB_SHA — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
