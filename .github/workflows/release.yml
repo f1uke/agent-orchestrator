@@ -128,21 +128,22 @@ jobs:
             echo "release_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Push tags only if this is a fresh version-bump commit AND the
-      # tag isn't already on the remote. Skipped on re-runs where the
-      # tag was pushed on a prior run (idempotent recovery).
+      # Push the umbrella `vX.Y.Z` tag only if this is a fresh
+      # version-bump commit AND the tag isn't already on the remote.
+      # Skipped on re-runs where the tag was pushed on a prior run
+      # (idempotent recovery).
       #
-      # We also create a `vX.Y.Z` git tag pointing at the same
-      # version-bump commit. That tag is what `gh release create` and
-      # `ao-publisher` will resolve, so the release notes range and the
-      # publisher's checkout are anchored to a specific SHA and can't
-      # drift if other commits land on main between push and release.
+      # We deliberately skip `pnpm changeset tag`: it would create one
+      # tag per publishable package (~27 here) on every release, which
+      # adds up fast on the nightly cadence and creates partial-recovery
+      # conflicts on re-run when `git push --tags` tries to re-push
+      # existing per-package tags. `ao-publisher` only consumes the
+      # umbrella tag, so the per-package tags are pure decoration.
       - name: Tag versioned packages
         if: steps.state.outputs.is_release_commit == 'true' && steps.state.outputs.tag_on_remote == 'false'
         run: |
-          pnpm changeset tag
           git tag "v${{ steps.state.outputs.version }}"
-          git push origin --tags
+          git push origin "v${{ steps.state.outputs.version }}"
 
       # Public-facing GitHub release. Stable channel — not a prerelease.
       # No `--target`: the `vX.Y.Z` tag is on the remote at the

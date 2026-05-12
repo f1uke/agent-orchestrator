@@ -87,14 +87,17 @@ The flow on every release:
 agent-orchestrator (public)                    ao-publisher (private)
 ─────────────────────────────                  ──────────────────────
 .github/workflows/release.yml      ─dispatch→  receives publish-npm-stable
-  changeset version → tag → push                runs `npm publish` with NPM_TOKEN
+  changeset version                             runs `npm publish` with NPM_TOKEN
+  push vX.Y.Z tag
   gh release create vX.Y.Z
 
 .github/workflows/canary.yml       ─dispatch→  receives publish-npm-nightly
   changeset version --snapshot                  runs `npm publish --tag nightly`
-  changeset tag → push
+  push vX.Y.Z-nightly-… tag
   gh release create --prerelease
 ```
+
+Each release pushes a single umbrella `vX.Y.Z` git tag pointing at the version-bump commit. We deliberately do **not** run `pnpm changeset tag`, which would emit one tag per publishable package (~27) every release — fine for stable's monthly cadence, noisy on the nightly cadence (~7 000 tags/year). `ao-publisher` only needs the umbrella tag, so the per-package tags add no value.
 
 ### Secret layout
 
