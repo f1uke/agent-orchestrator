@@ -1,18 +1,17 @@
 name: Release
 
-# Two-repo release pipeline.
+# Two-stage release pipeline.
 #
-# This public repo is responsible for tagging versioned packages and
-# creating the GitHub release. The actual `npm publish` runs in the private
-# ComposioHQ/ao-publisher repo, dispatched at the end of this workflow.
+# This public repo is responsible for version bumps, tagging, and creating
+# the GitHub release. npm publishing is handled by a private cron job (AO)
+# that polls GitHub releases and publishes when a new tag is ahead of the
+# current npm version.
 #
-# Why split it: org compliance forbids npm publish credentials in public
-# repositories. The only secret this workflow needs is
-# PUBLISHER_DISPATCH_TOKEN — a fine-grained PAT scoped to ao-publisher with
-# `repository_dispatch:write`. NPM_TOKEN never enters this repo.
+# No NPM_TOKEN or publisher dispatch secrets are needed in this repo.
+# The only secret used is GITHUB_TOKEN (automatic).
 #
-# See CONTRIBUTING.md → "Release architecture" for the full picture,
-# secret layout, and rotation procedure.
+# See CONTRIBUTING.md → "Release architecture" for the full picture.
+
 on:
   workflow_run:
     # Depends on the workflow named "CI" in .github/workflows/ci.yml — if
@@ -30,10 +29,6 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
-  # id-token is no longer used for npm provenance (that now lives in
-  # ao-publisher), but the changesets action and gh release steps run
-  # cleanly without it. Kept here only as a no-op for forward compatibility
-  # if a future step needs OIDC for non-npm purposes.
   id-token: write
 
 jobs:
@@ -55,8 +50,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          # No `registry-url`: this workflow no longer publishes to npm,
-          # so it doesn't need an authenticated .npmrc.
+          # No `registry-url`: this workflow does not publish to npm.
       - run: echo "HUSKY=0" >> $GITHUB_ENV
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
@@ -64,16 +58,15 @@ jobs:
       # workspace:* runtime dep on a `private: true` package — pnpm would
       # rewrite the dep on publish to a version that doesn't exist on npm,
       # breaking `npm install -g @aoagents/ao`. Still runs here so the
-      # public repo blocks a malformed version bump before it can hand off
-      # to the private publisher.
+      # public repo blocks a malformed version bump before it reaches npm.
       - run: node scripts/check-publishable-deps.mjs
 
       # changesets/action manages the "Version Packages" PR — when there
       # are pending changesets it opens/updates the PR; when there are
-      # none (i.e. that PR was just merged) it normally invokes the
+      # none (i.e. that PR was just merged) it would normally invoke the
       # `publish:` command. We deliberately omit `publish:` so the action
-      # never runs `changeset publish`. npm publishing is delegated to
-      # the private ao-publisher repo via the dispatch step below.
+      # never runs `changeset publish`. npm publishing is handled by a
+      # private cron that detects the GitHub release.
       - uses: changesets/action@v1
         id: changesets
         with:
@@ -84,9 +77,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Determine release state. Each downstream step (tag push, GH
-      # release creation, publisher dispatch) is gated on its own
-      # piece of state so the workflow is idempotent and recovers
-      # cleanly on re-run after a partial failure.
+      # release creation) is gated on its own piece of state so the
+      # workflow is idempotent and recovers cleanly on re-run after a
+      # partial failure.
       #
       # `is_release_commit` is the crucial signal: it filters out
       # regular commits to main (which also have `hasChangesets ==
@@ -135,10 +128,10 @@ jobs:
       #
       # We deliberately skip `pnpm changeset tag`: it would create one
       # tag per publishable package (~27 here) on every release, which
-      # adds up fast on the nightly cadence and creates partial-recovery
-      # conflicts on re-run when `git push --tags` tries to re-push
-      # existing per-package tags. `ao-publisher` only consumes the
-      # umbrella tag, so the per-package tags are pure decoration.
+      # creates partial-recovery conflicts on re-run when `git push --tags`
+      # tries to re-push existing per-package tags. The npm publisher
+      # only consumes the umbrella tag, so the per-package tags add no
+      # value.
       - name: Tag versioned packages
         if: steps.state.outputs.is_release_commit == 'true' && steps.state.outputs.tag_on_remote == 'false'
         run: |
@@ -159,25 +152,3 @@ jobs:
         run: |
           gh release create "v${{ steps.state.outputs.version }}" \
             --generate-notes
-
-      # Hand off to the private publisher repo. PUBLISHER_DISPATCH_TOKEN
-      # is a fine-grained PAT scoped to ComposioHQ/ao-publisher only with
-      # `repository_dispatch:write`. NPM_TOKEN lives in that repo's
-      # secret store — never here. The publisher repo's workflow listens
-      # for `publish-npm-stable` and runs `changeset publish` (or the
-      # equivalent) against the tag.
-      #
-      # This step fires whenever we are on a release commit, even on a
-      # re-run where tag and release already existed. This guarantees
-      # recovery from the "first run failed only at dispatch" case
-      # (e.g. PUBLISHER_DISPATCH_TOKEN was missing). The publisher repo
-      # MUST be idempotent against already-published versions — see
-      # CONTRIBUTING.md → "Release Architecture" for the contract.
-      - name: Dispatch npm publish to ao-publisher
-        if: steps.state.outputs.is_release_commit == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.PUBLISHER_DISPATCH_TOKEN }}
-        run: |
-          gh api repos/ComposioHQ/ao-publisher/dispatches \
-            -f event_type=publish-npm-stable \
-            -F client_payload[tag]=v${{ steps.state.outputs.version }}

@@ -72,82 +72,55 @@ ao update
 
 ## Release Architecture (maintainers only)
 
-AO uses a **two-repo release pipeline**. Org compliance forbids npm publish credentials in public repositories, so this repo never sees `NPM_TOKEN`.
+AO uses a **two-stage release pipeline**. This public repo handles version bumps, git tags, and GitHub releases. npm publishing runs on a private server (AO cron job) that polls GitHub releases and publishes when a new tag is ahead of the current npm version. Org compliance forbids npm publish credentials in public repositories, so `NPM_TOKEN` never enters this repo.
 
 ### Where things happen
 
-| Repo                                  | Visibility | Responsibility                                                                |
-| ------------------------------------- | ---------- | ----------------------------------------------------------------------------- |
-| `ComposioHQ/agent-orchestrator` (this repo) | Public  | Version bumps, git tags, GitHub releases (stable + nightly prereleases)       |
-| `ComposioHQ/ao-publisher`             | Private    | `npm publish` to the `@aoagents` org under the `latest` or `nightly` dist-tag |
+| Stage                    | Where                          | Responsibility                                                           |
+| ------------------------ | ------------------------------ | ------------------------------------------------------------------------ |
+| Versioning + GitHub release | This repo (public, CI)      | Changesets version bumps, git tags, `gh release create`                  |
+| npm publish              | Private server (AO cron)       | Detects new GitHub releases → builds → `pnpm changeset publish`         |
 
 The flow on every release:
 
 ```
-agent-orchestrator (public)                    ao-publisher (private)
-─────────────────────────────                  ──────────────────────
-.github/workflows/release.yml      ─dispatch→  receives publish-npm-stable
-  changeset version                             runs `npm publish` with NPM_TOKEN
-  push vX.Y.Z tag
-  gh release create vX.Y.Z
+This repo (public CI)                         Private server (AO cron)
+──────────────────────                        ─────────────────────────
+release.yml:                                  Polls gh release list
+  changeset version                           Detects new vX.Y.Z tag
+  push vX.Y.Z tag                             Compare to npm @latest/@nightly
+  gh release create vX.Y.Z                    If behind → checkout tag → build → publish
 
-.github/workflows/canary.yml       ─dispatch→  receives publish-npm-nightly
-  changeset version --snapshot                  runs `npm publish --tag nightly`
-  push vX.Y.Z-nightly-… tag
+canary.yml:                                   Same cron, detects prereleases
+  changeset version --snapshot                Publishes with --tag nightly
+  commit snapshot (orphan) + tag
   gh release create --prerelease
 ```
 
-Each release pushes a single umbrella `vX.Y.Z` git tag pointing at the version-bump commit. We deliberately do **not** run `pnpm changeset tag`, which would emit one tag per publishable package (~27) every release — fine for stable's monthly cadence, noisy on the nightly cadence (~7 000 tags/year). `ao-publisher` only needs the umbrella tag, so the per-package tags add no value.
+Each release pushes a single umbrella `vX.Y.Z` git tag pointing at the version-bump commit. We deliberately do **not** run `pnpm changeset tag`, which would emit one tag per publishable package (~27) every release — fine for stable's monthly cadence, noisy on the nightly cadence (~7 000 tags/year). The npm publisher only consumes the umbrella tag, so the per-package tags add no value.
 
-### Secret layout
+### Secrets
 
-| Secret                       | Lives in                  | Scope                                                                |
-| ---------------------------- | ------------------------- | -------------------------------------------------------------------- |
-| `PUBLISHER_DISPATCH_TOKEN`   | this repo (Actions secret) | Fine-grained PAT, `repository_dispatch:write` on `ao-publisher` **only** |
-| `NPM_TOKEN`                  | `ao-publisher`             | npm automation token, publish access to the `@aoagents` org          |
-
-Add `PUBLISHER_DISPATCH_TOKEN` at **Settings → Secrets and variables → Actions → New repository secret**. Without it, the dispatch step in both `release.yml` and `canary.yml` fails — but version bumps and GitHub releases still go through, so the failure is recoverable by re-running the workflow once the secret is restored (see "Recovery" below).
-
-### Rotation
-
-When rotating either token, only the holding repo needs to change:
-
-1. **`PUBLISHER_DISPATCH_TOKEN`** — generate a new fine-grained PAT (same scope: `repository_dispatch:write` on `ao-publisher` only), replace the secret here. No change required in `ao-publisher`.
-2. **`NPM_TOKEN`** — generate a new npm automation token, replace the secret in `ao-publisher`. No change required in this repo.
-
-The blast radius of a leaked `PUBLISHER_DISPATCH_TOKEN` is limited to "can trigger an unwanted publish workflow on `ao-publisher`"; it cannot publish to npm directly, and it cannot read or write anything else.
+This repo requires **no additional secrets** beyond the automatic `GITHUB_TOKEN`. `NPM_TOKEN` lives only on the private server.
 
 ### How releases are cut
 
-- **Stable**: merge the "chore: version packages" PR opened by `changesets/action`. `release.yml` tags the bumped packages, creates a `vX.Y.Z` GitHub release, and dispatches `publish-npm-stable` to `ao-publisher`.
-- **Nightly**: `canary.yml` runs on cron (23:30 IST Fri–Tue) or via `workflow_dispatch`. It snapshots versions to `0.0.0-nightly-<sha>`-style, tags, creates a prerelease GitHub release, and dispatches `publish-npm-nightly`.
+- **Stable**: merge the "chore: version packages" PR opened by `changesets/action`. `release.yml` tags the bumped packages and creates a `vX.Y.Z` GitHub release. The AO cron detects the new release and publishes to npm `@latest`.
+- **Nightly**: `canary.yml` runs on cron (23:30 IST Fri–Tue) or via `workflow_dispatch`. It snapshots versions to `0.0.0-nightly-<sha>`-style, tags, and creates a prerelease GitHub release. The AO cron detects the new prerelease and publishes to npm `@nightly`.
 
-The dispatch step is the **only** way npm gets new versions — there is no path from this repo that calls `npm publish` directly.
+There is no path from this repo that calls `npm publish` directly.
 
-### Idempotency contract for `ao-publisher`
+### Idempotency
 
-`release.yml` is idempotent: each step (tag push, GitHub release creation, dispatch) is gated on whether that piece of state already exists, so a re-run after a partial failure picks up only the missing steps. Specifically, the dispatch step fires whenever the workflow is running on a version-bump commit, even on a re-run where the tag and release already exist on the remote. This guarantees recovery from the most common partial failure (first run completed tag+release but failed at dispatch because `PUBLISHER_DISPATCH_TOKEN` was absent).
+`release.yml` is idempotent: each step (tag push, GitHub release creation) is gated on whether that piece of state already exists, so a re-run after a partial failure picks up only the missing steps.
 
-For that to be safe, the `ao-publisher` workflow MUST be idempotent against already-published versions. Specifically:
-
-- On receiving `publish-npm-stable` for tag `vX.Y.Z`, check whether `@aoagents/ao@X.Y.Z` already exists on npm; if so, treat the run as a successful no-op (do not error).
-- The same applies to `publish-npm-nightly` for snapshot tags.
-
-`pnpm changeset publish` already has this property — it skips packages whose current version is already on the registry — so a plain `pnpm changeset publish` in `ao-publisher` satisfies the contract.
+The AO cron is also idempotent — `pnpm changeset publish` skips packages whose current version is already on the registry, so re-running after a partial publish is safe.
 
 ### Recovery
 
-If `release.yml` fails after the GitHub release was created (for example, `PUBLISHER_DISPATCH_TOKEN` was missing during the first run), the cleanest recovery is to **re-run the failed workflow**: the state-detection step will see that the tag and release already exist, skip those steps, and run the dispatch step. The publisher's idempotency contract above ensures this is safe even if the prior dispatch did partially go through.
+If `release.yml` fails after the GitHub release was created, **re-run the failed workflow**: the state-detection step will see that the tag and release already exist and skip those steps.
 
-If for some reason re-running isn't practical (e.g. the workflow run has aged out of the UI), trigger the dispatch manually from a maintainer's shell with `gh` authenticated against the `PUBLISHER_DISPATCH_TOKEN` PAT:
-
-```bash
-gh api repos/ComposioHQ/ao-publisher/dispatches \
-  -f event_type=publish-npm-stable \
-  -F client_payload[tag]=vX.Y.Z
-```
-
-(Use `publish-npm-nightly` and the nightly tag for a missed canary.)
+If the AO cron fails to publish, it will retry on the next poll cycle (every 15 minutes). No manual intervention needed for transient failures. For persistent issues, check the cron logs on the private server.
 
 ## Testing your changes
 

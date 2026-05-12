@@ -1,19 +1,21 @@
 name: Canary
 
-# Two-repo release pipeline (nightly canary side).
+# Two-stage release pipeline (nightly canary side).
 #
-# Nightly canary publishes the current tip of `main` to npm under
-# @nightly. This public workflow only handles snapshot versioning,
-# tagging, and the GitHub prerelease. The actual `npm publish` runs in
-# the private ComposioHQ/ao-publisher repo, dispatched at the end. See
-# CONTRIBUTING.md → "Release architecture" for full context — the only
-# secret needed here is PUBLISHER_DISPATCH_TOKEN.
+# Nightly canary creates snapshot versions, tags, and a GitHub prerelease.
+# npm publishing is handled by a private cron job (AO) that polls GitHub
+# releases and publishes when a new tag is ahead of the current npm
+# nightly version.
+#
+# No NPM_TOKEN or publisher dispatch secrets are needed in this repo.
+# The only secret used is GITHUB_TOKEN (automatic).
 #
 # Cron schedule: 23:30 IST = 18:00 UTC, on Fri,Sat,Sun,Mon,Tue
 # (DOW 5,6,0,1,2). Wed/Thu are the bake window — no scheduled publishes.
 # `workflow_dispatch` lets the release captain re-cut a nightly during
 # bake when a fix lands and the Discord cohort should test the patched
 # candidate.
+
 on:
   schedule:
     - cron: "0 18 * * 5,6,0,1,2"
@@ -25,8 +27,6 @@ concurrency:
 
 permissions:
   contents: write
-  # id-token retained as a no-op for forward compatibility; npm
-  # provenance now lives in ao-publisher.
   id-token: write
 
 jobs:
@@ -43,8 +43,7 @@ jobs:
       # Skip-if-unchanged guard: if the most recent prerelease in this
       # repo was cut from the current tip of main, there's nothing new
       # to publish — short-circuit the whole job. Prevents republishing
-      # the same SHA on every cron tick during quiet stretches (and
-      # keeps the npm version list from filling with identical nightlies).
+      # the same SHA on every cron tick during quiet stretches.
       #
       # We filter to prereleases only (`isPrerelease == true`). If the
       # most recent release were a stable cut from `release.yml`, an
@@ -58,11 +57,7 @@ jobs:
       # anchor to compare against `GITHUB_SHA` (main HEAD at this run).
       #
       # `workflow_dispatch` always proceeds — recovery path for partial
-      # failures (tag pushed, then `gh release create` or dispatch
-      # failed). A human triggered the run, they want it to run. The
-      # cron-driven path still dedupes via the SHA check above; the
-      # downstream tag-push and release-create steps are individually
-      # safe against existing remote state.
+      # failures. A human triggered the run, they want it to run.
       - name: Check if main has new commits since the last nightly
         id: check
         env:
@@ -93,7 +88,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          # No `registry-url`: this workflow no longer publishes to npm.
+          # No `registry-url`: this workflow does not publish to npm.
 
       - if: steps.check.outputs.skip != 'true'
         run: echo "HUSKY=0" >> $GITHUB_ENV
@@ -107,7 +102,7 @@ jobs:
       # Pre-publish guard: same as release.yml — catches workspace:* deps
       # on private packages before they'd silently break a published
       # install. Still runs here so the public repo blocks a malformed
-      # snapshot before handing off to the private publisher.
+      # snapshot before it reaches npm.
       - if: steps.check.outputs.skip != 'true'
         run: node scripts/check-publishable-deps.mjs
 
@@ -125,15 +120,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # `pnpm changeset version --snapshot` modifies package.json files
-      # on disk but does NOT create a git commit (that responsibility
-      # normally belongs to `changesets/action`, which we deliberately
-      # don't use here — see the comment in release.yml).
-      #
-      # Without this commit, the umbrella tag we push below would point
-      # at the pre-snapshot HEAD, so when ao-publisher checks out
-      # `client_payload.tag` it would see the un-bumped versions in
-      # package.json and either publish wrong version numbers or fail
-      # trying to republish an existing stable.
+      # on disk but does NOT create a git commit. Without this commit,
+      # the umbrella tag we push below would point at the pre-snapshot
+      # HEAD, so when the npm publisher checks out the tag it would see
+      # the un-bumped versions and either publish wrong version numbers
+      # or fail trying to republish an existing stable.
       #
       # The commit is NEVER pushed back to main — only the tag below is
       # pushed, and the orphan commit travels with it as part of the
@@ -148,14 +139,13 @@ jobs:
           git diff --cached --quiet || git commit -m 'chore: snapshot version bump [skip ci]'
 
       # Push the umbrella `vX.Y.Z` tag pointing at the snapshot commit.
-      # `ao-publisher` resolves `client_payload.tag` to this ref and the
-      # GH prerelease step below uses the same tag, so both are anchored
-      # at the bumped commit.
+      # The npm publisher resolves this tag to the snapshot commit with
+      # the bumped package.json versions.
       #
       # We deliberately skip `pnpm changeset tag`: it would create one
       # tag per publishable package (~27 here) every night, which adds
-      # up fast on the nightly cadence. ao-publisher only consumes the
-      # umbrella tag, so the per-package tags are pure decoration.
+      # up fast on the nightly cadence. The npm publisher only consumes
+      # the umbrella tag, so the per-package tags are pure decoration.
       - name: Tag snapshot versions
         id: tag
         if: steps.check.outputs.skip != 'true'
@@ -178,15 +168,3 @@ jobs:
           gh release create "v${{ steps.tag.outputs.version }}" \
             --prerelease \
             --generate-notes
-
-      # Hand off to the private publisher repo with event_type=publish-npm-nightly
-      # so it publishes under the `nightly` dist-tag. PUBLISHER_DISPATCH_TOKEN
-      # is a fine-grained PAT scoped to ComposioHQ/ao-publisher only.
-      - name: Dispatch npm publish to ao-publisher
-        if: steps.check.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.PUBLISHER_DISPATCH_TOKEN }}
-        run: |
-          gh api repos/ComposioHQ/ao-publisher/dispatches \
-            -f event_type=publish-npm-nightly \
-            -F client_payload[tag]=v${{ steps.tag.outputs.version }}
