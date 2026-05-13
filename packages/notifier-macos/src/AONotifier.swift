@@ -5,7 +5,6 @@ import UserNotifications
 let appName = "AO Notifier"
 let appVersion = "0.6.0"
 let bundleId = "com.aoagents.notifier"
-let defaultCategoryId = "ao.notification"
 
 struct NotifyPayload: Codable {
   struct Event: Codable {
@@ -20,9 +19,11 @@ struct NotifyPayload: Codable {
   struct Action: Codable {
     let label: String
     let url: String?
+    let callbackEndpoint: String?
   }
 
   let title: String
+  let subtitle: String?
   let body: String
   let sound: Bool
   let notificationId: String?
@@ -46,8 +47,18 @@ final class NotificationResponseDelegate: NSObject, UNUserNotificationCenterDele
       return
     }
 
-    if let actionUrls = userInfo["actionUrls"] as? [String: String] {
-      openUrl(actionUrls[actionIdentifier])
+    if let actionCallbacks = userInfo["actionCallbacks"] as? [String: String],
+      let callbackEndpoint = actionCallbacks[actionIdentifier]
+    {
+      postCallback(callbackEndpoint)
+      completionHandler()
+      return
+    }
+
+    if let actionUrls = userInfo["actionUrls"] as? [String: String],
+      let url = actionUrls[actionIdentifier]
+    {
+      openUrl(url)
     }
 
     completionHandler()
@@ -85,6 +96,23 @@ func openUrl(_ rawUrl: String?) {
   NSWorkspace.shared.open(url)
 }
 
+func postCallback(_ rawUrl: String?) {
+  guard let rawUrl = rawUrl, let url = URL(string: rawUrl) else { return }
+  guard url.scheme == "http" || url.scheme == "https" else { return }
+
+  var request = URLRequest(url: url)
+  request.httpMethod = "POST"
+  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+  request.httpBody = Data("{\"source\":\"ao-notifier\"}".utf8)
+
+  let semaphore = DispatchSemaphore(value: 0)
+  let task = URLSession.shared.dataTask(with: request) { _, _, _ in
+    semaphore.signal()
+  }
+  task.resume()
+  _ = semaphore.wait(timeout: .now() + 10)
+}
+
 func waitForSettings(_ center: UNUserNotificationCenter) -> UNNotificationSettings {
   let semaphore = DispatchSemaphore(value: 0)
   var resolved: UNNotificationSettings?
@@ -94,6 +122,19 @@ func waitForSettings(_ center: UNUserNotificationCenter) -> UNNotificationSettin
   }
   _ = semaphore.wait(timeout: .now() + 5)
   return resolved!
+}
+
+func notificationSettingStatus(_ setting: UNNotificationSetting) -> String {
+  switch setting {
+  case .enabled:
+    return "enabled"
+  case .disabled:
+    return "disabled"
+  case .notSupported:
+    return "not_supported"
+  @unknown default:
+    return "unknown"
+  }
 }
 
 func permissionStatus() -> String {
@@ -118,7 +159,7 @@ func requestPermission() -> Bool {
   let center = UNUserNotificationCenter.current()
   let semaphore = DispatchSemaphore(value: 0)
   var granted = false
-  center.requestAuthorization(options: [.alert, .sound]) { allowed, _ in
+  center.requestAuthorization(options: [.alert, .sound, .badge]) { allowed, _ in
     granted = allowed
     semaphore.signal()
   }
@@ -146,7 +187,9 @@ func printDeliveredNotifications() {
       "threadIdentifier": content.threadIdentifier,
       "categoryIdentifier": content.categoryIdentifier,
       "title": content.title,
+      "subtitle": content.subtitle,
       "body": content.body,
+      "badge": content.badge?.intValue ?? 0,
       "eventId": content.userInfo["eventId"] as? String ?? "",
       "eventType": content.userInfo["eventType"] as? String ?? "",
       "sessionId": content.userInfo["sessionId"] as? String ?? "",
@@ -169,6 +212,7 @@ func clearDeliveredNotifications() {
   }
 
   center.removeDeliveredNotifications(withIdentifiers: identifiers)
+  NSApplication.shared.dockTile.badgeLabel = nil
   Thread.sleep(forTimeInterval: 0.5)
 }
 
@@ -192,10 +236,16 @@ func sendNotification(_ payload: NotifyPayload) throws {
   center.delegate = delegate
 
   var actionUrls: [String: String] = [:]
+  var actionCallbacks: [String: String] = [:]
   let configuredUrlActions = (payload.actions ?? []).enumerated().compactMap { index, action -> UNNotificationAction? in
-    guard let url = action.url else { return nil }
+    guard action.url != nil || action.callbackEndpoint != nil else { return nil }
     let identifier = "ao.action.\(index)"
-    actionUrls[identifier] = url
+    if let url = action.url {
+      actionUrls[identifier] = url
+    }
+    if let callbackEndpoint = action.callbackEndpoint {
+      actionCallbacks[identifier] = callbackEndpoint
+    }
     return UNNotificationAction(
       identifier: identifier,
       title: action.label,
@@ -203,38 +253,33 @@ func sendNotification(_ payload: NotifyPayload) throws {
     )
   }
 
-  let urlActions: [UNNotificationAction]
-  let categoryId: String
-  if configuredUrlActions.isEmpty, let defaultOpenUrl = payload.defaultOpenUrl {
-    let identifier = "ao.openDashboard"
-    actionUrls[identifier] = defaultOpenUrl
-    urlActions = [
-      UNNotificationAction(
-        identifier: identifier,
-        title: "Open Dashboard",
-        options: [.foreground]
-      )
-    ]
-    categoryId = defaultCategoryId
+  let categoryId: String?
+  if configuredUrlActions.isEmpty {
+    categoryId = nil
   } else {
-    urlActions = configuredUrlActions
-    categoryId = urlActions.isEmpty ? defaultCategoryId : "ao.event.\(payload.event.id)"
+    let id = "ao.event.\(payload.event.id)"
+    let category = UNNotificationCategory(
+      identifier: id,
+      actions: configuredUrlActions,
+      intentIdentifiers: [],
+      options: []
+    )
+    center.setNotificationCategories([category])
+    categoryId = id
   }
-
-  let category = UNNotificationCategory(
-    identifier: categoryId,
-    actions: urlActions,
-    intentIdentifiers: [],
-    options: []
-  )
-  center.setNotificationCategories([category])
 
   let content = UNMutableNotificationContent()
   let threadId = payload.threadId ?? fallbackThreadId()
   content.title = payload.title
+  if let subtitle = payload.subtitle {
+    content.subtitle = subtitle
+  }
   content.body = payload.body
   content.threadIdentifier = threadId
-  content.categoryIdentifier = categoryId
+  if let categoryId = categoryId {
+    content.categoryIdentifier = categoryId
+  }
+  content.badge = NSNumber(value: waitForDeliveredNotifications(center).count + 1)
   if payload.sound {
     content.sound = .default
   }
@@ -246,6 +291,7 @@ func sendNotification(_ payload: NotifyPayload) throws {
     "projectId": payload.event.projectId,
     "threadId": threadId,
     "actionUrls": actionUrls,
+    "actionCallbacks": actionCallbacks,
   ]
   let requestId = payload.notificationId ?? fallbackNotificationId(payload.event.id)
   userInfo["notificationId"] = requestId
@@ -286,8 +332,10 @@ func runCommand(_ args: [String]) -> Int32 {
       ])
       return 0
     case "--permission-status-json":
+      let settings = waitForSettings(center)
       printJson([
         ("status", permissionStatus()),
+        ("badge", notificationSettingStatus(settings.badgeSetting)),
         ("bundleId", bundleId),
       ])
       return 0
@@ -303,8 +351,10 @@ func runCommand(_ args: [String]) -> Int32 {
       return 0
     case "--request-permission":
       let granted = requestPermission()
+      let settings = waitForSettings(center)
       printJson([
         ("status", granted ? "authorized" : permissionStatus()),
+        ("badge", notificationSettingStatus(settings.badgeSetting)),
         ("bundleId", bundleId),
       ])
       return granted ? 0 : 2

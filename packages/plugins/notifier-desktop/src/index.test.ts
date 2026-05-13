@@ -107,7 +107,7 @@ describe("notifier-desktop", () => {
       expect(mockExecFile.mock.calls[0][1][0]).toBe("-e");
     });
 
-    it("includes session ID in title", async () => {
+    it("includes session ID in notification subtitle", async () => {
       const notifier = create();
       await notifier.notify(makeEvent({ sessionId: "backend-5" }));
 
@@ -131,12 +131,12 @@ describe("notifier-desktop", () => {
       expect(script).toContain("URGENT");
     });
 
-    it("uses 'Agent Orchestrator' prefix for non-urgent priority", async () => {
+    it("uses event-aware titles for non-urgent priority", async () => {
       const notifier = create();
       await notifier.notify(makeEvent({ priority: "action" }));
 
       const script = mockExecFile.mock.calls[0][1][1] as string;
-      expect(script).toContain("Agent Orchestrator");
+      expect(script).toContain("Session Spawned");
     });
 
     it("includes sound for urgent notifications", async () => {
@@ -190,6 +190,50 @@ describe("notifier-desktop", () => {
       expect(script).toContain('test\\"inject');
       expect(script).toContain('\\"quotes\\"');
       expect(script).toContain("\\\\backslash");
+    });
+
+    it("formats v3 pull request context into a compact desktop summary", async () => {
+      const notifier = create();
+      await notifier.notify(
+        makeEvent({
+          type: "merge.ready",
+          priority: "action",
+          projectId: "demo",
+          sessionId: "demo-agent-29",
+          message: "PR #1579 is ready to merge",
+          data: {
+            schemaVersion: 3,
+            subject: {
+              session: { id: "demo-agent-29", projectId: "demo" },
+              pr: {
+                number: 1579,
+                title: "Normalize AO notifier payloads",
+                url: "https://github.com/ComposioHQ/agent-orchestrator/pull/1579",
+                branch: "ao/demo-notifier-harness",
+                baseBranch: "main",
+              },
+              issue: { id: "AO-1579", title: "Make AO notification payloads API-grade" },
+            },
+            ci: { status: "passing" },
+            review: { decision: "approved" },
+            merge: { ready: true, conflicts: false },
+            transition: { kind: "pr_state", from: "approved", to: "mergeable" },
+          },
+        }),
+      );
+
+      const script = mockExecFile.mock.calls[0][1][1] as string;
+      expect(script).toContain("PR #1579 ready to merge");
+      expect(script).toContain("Normalize AO notifier payloads");
+      expect(script).toContain("demo · demo-agent-29 · PR #1579");
+      expect(script).toContain("PR #1579");
+      expect(script).toContain("AO-1579");
+      expect(script).toContain("Branch: ao/demo-notifier-harness → main");
+      expect(script).toContain("CI: Passing");
+      expect(script).toContain("Review: Approved");
+      expect(script).toContain("Merge: Ready");
+      expect(script).toContain("Conflicts: None");
+      expect(script).toContain("Transition: approved → mergeable");
     });
   });
 
@@ -297,23 +341,27 @@ describe("notifier-desktop", () => {
       expect(mockExecFile.mock.calls[0][0]).toBe("terminal-notifier");
     });
 
-    it("passes -title and -message args", async () => {
+    it("passes -title, -subtitle, and -message args", async () => {
       const notifier = create();
       await notifier.notify(makeEvent({ sessionId: "s-1", message: "hello" }));
 
       const args = mockExecFile.mock.calls[0][1] as string[];
       expect(args).toContain("-title");
+      expect(args).toContain("-subtitle");
       expect(args).toContain("-message");
-      expect(args[args.indexOf("-message") + 1]).toBe("hello");
+      expect(args[args.indexOf("-subtitle") + 1]).toBe("my-project · s-1 · Info");
+      expect(args[args.indexOf("-message") + 1]).toContain("hello");
     });
 
-    it("passes -open with dashboardUrl when configured", async () => {
+    it("passes session deep link with dashboardUrl when configured", async () => {
       const notifier = create({ dashboardUrl: "http://localhost:8080" });
       await notifier.notify(makeEvent());
 
       const args = mockExecFile.mock.calls[0][1] as string[];
       expect(args).toContain("-open");
-      expect(args[args.indexOf("-open") + 1]).toBe("http://localhost:8080");
+      expect(args[args.indexOf("-open") + 1]).toBe(
+        "http://localhost:8080/projects/my-project/sessions/app-1",
+      );
     });
 
     it("does not pass -open when dashboardUrl is not configured", async () => {
@@ -404,12 +452,14 @@ describe("notifier-desktop", () => {
       const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")) as {
         notificationId: string;
         threadId: string;
+        subtitle: string;
         defaultOpenUrl: string;
         event: { id: string; sessionId: string };
       };
       expect(payload.notificationId).toMatch(/^evt-native\./);
       expect(payload.threadId).toBe("ao.notifications");
-      expect(payload.defaultOpenUrl).toBe("http://localhost:3001");
+      expect(payload.subtitle).toBe("my-project · s-9 · Info");
+      expect(payload.defaultOpenUrl).toBe("http://localhost:3001/projects/my-project/sessions/s-9");
       expect(payload.event).toMatchObject({ id: "evt-native", sessionId: "s-9" });
     });
 
@@ -424,13 +474,31 @@ describe("notifier-desktop", () => {
       const encoded = mockExecFile.mock.calls[0][1][1] as string;
       const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")) as {
         body: string;
-        actions: Array<{ label: string; url: string }>;
+        actions: Array<{ label: string; url?: string; callbackEndpoint?: string }>;
       };
       expect(payload.actions).toEqual([
         { label: "Open PR", url: "https://github.com/example/pr/1" },
       ]);
       expect(payload.body).toContain("Kill");
       expect(payload.body).not.toContain("Open PR");
+    });
+
+    it("passes callback actions to AO Notifier.app when they resolve against dashboardUrl", async () => {
+      const notifier = create({ backend: "ao-app", dashboardUrl: "http://localhost:3000" });
+      const actions: NotifyAction[] = [
+        { label: "Kill", callbackEndpoint: "/api/sessions/app-1/kill" },
+      ];
+      await notifier.notifyWithActions!(makeEvent(), actions);
+
+      const encoded = mockExecFile.mock.calls[0][1][1] as string;
+      const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")) as {
+        body: string;
+        actions: Array<{ label: string; callbackEndpoint?: string }>;
+      };
+      expect(payload.actions).toEqual([
+        { label: "Kill", callbackEndpoint: "http://localhost:3000/api/sessions/app-1/kill" },
+      ]);
+      expect(payload.body).not.toContain("Kill");
     });
 
     it("fails when backend ao-app is configured but the app is missing", async () => {
