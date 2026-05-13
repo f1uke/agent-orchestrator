@@ -28,6 +28,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+function isWindows() {
+  return process.platform === "win32";
+}
+
 export function findPackageUp(startDir, ...segments) {
   let dir = resolve(startDir);
   while (true) {
@@ -145,6 +149,8 @@ function checkBetterSqlite3Binding() {
       cwd: betterSqlite3Dir,
       stdio: "ignore",
       timeout: 120000,
+      shell: isWindows(),
+      windowsHide: true,
     });
     console.log(
       `✓ better-sqlite3 native binding rebuilt for Node ${process.version} (ABI v${abi})`,
@@ -157,7 +163,7 @@ function checkBetterSqlite3Binding() {
 }
 
 function fixNodePty() {
-  if (process.platform === "win32") return;
+  if (isWindows()) return;
 
   const nodePtyDir = findPackageUp(__dirname, "node-pty");
   if (nodePtyDir) {
