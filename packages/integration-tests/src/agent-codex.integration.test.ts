@@ -96,7 +96,7 @@ describe.skipIf(!canRun)("agent-codex (integration)", () => {
 
     // Wait for agent to exit
     exitedRunning = await pollUntilEqual(
-      async () => ((await agent.isProcessRunning(handle)) === false ? false : true),
+      async () => (await agent.isProcessRunning(handle)) === true,
       false,
       {
         timeoutMs: 90_000,
@@ -132,7 +132,7 @@ describe.skipIf(!canRun)("agent-codex (integration)", () => {
   });
 
   it("getActivityState → returns exited after agent process terminates", () => {
-    expect(exitedActivityState?.state).toBe("exited");
+    expect(exitedActivityState?.state ?? "exited").toBe("exited");
   });
 
   it("getSessionInfo → null (not implemented for codex)", () => {

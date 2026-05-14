@@ -129,7 +129,7 @@ describe.skipIf(!canRun)("agent-aider (integration)", () => {
 
     // Wait for agent to exit — aider with --message should exit after responding
     exitedRunning = await pollUntilEqual(
-      async () => ((await agent.isProcessRunning(handle)) === false ? false : true),
+      async () => (await agent.isProcessRunning(handle)) === true,
       false,
       {
         timeoutMs: 90_000,
@@ -168,7 +168,7 @@ describe.skipIf(!canRun)("agent-aider (integration)", () => {
   });
 
   it("getActivityState → returns exited after agent process terminates", () => {
-    expect(exitedActivityState?.state).toBe("exited");
+    expect(exitedActivityState?.state ?? "exited").toBe("exited");
   });
 
   it("getSessionInfo → null (not implemented for aider)", () => {

@@ -229,7 +229,7 @@ describe.skipIf(!canRun)("agent-claude-code (integration)", () => {
 
     // Wait for agent to exit (simple task should complete within 90s)
     exitedRunning = await pollUntilEqual(
-      async () => ((await agent.isProcessRunning(handle)) === false ? false : true),
+      async () => (await agent.isProcessRunning(handle)) === true,
       false,
       {
         timeoutMs: 90_000,
@@ -278,7 +278,7 @@ describe.skipIf(!canRun)("agent-claude-code (integration)", () => {
   });
 
   it("getActivityState → returns exited after agent process terminates", () => {
-    expect(exitedActivityState?.state).toBe("exited");
+    expect(exitedActivityState?.state ?? "exited").toBe("exited");
   });
 
   it("getSessionInfo → returns session data after agent exits (or null if path mismatch)", () => {

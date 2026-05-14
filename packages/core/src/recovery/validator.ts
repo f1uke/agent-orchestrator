@@ -131,7 +131,11 @@ export async function validateSession(
       };
       const detection = await agent.getActivityState(probeSession, config.readyThresholdMs);
       agentActivity = detection?.state ?? null;
-      if (!agentProcessRunning && indicatesLiveAgentActivity(agentActivity)) {
+      if (
+        processProbeSucceeded &&
+        !agentProcessRunning &&
+        indicatesLiveAgentActivity(agentActivity)
+      ) {
         agentProcessRunning = true;
       }
       if (agentActivity === "exited") {
