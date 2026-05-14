@@ -1,0 +1,106 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  __getDaemonChildrenRegistryFile,
+  clearDaemonChildrenRegistry,
+  detectAoOrphansFromPsOutput,
+  getDaemonChildren,
+  registerDaemonChild,
+  spawnManagedDaemonChild,
+  unregisterDaemonChild,
+} from "../daemon-children.js";
+
+describe("daemon child registry", () => {
+  let tmpHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), "ao-daemon-children-"));
+    originalHome = process.env["HOME"];
+    process.env["HOME"] = tmpHome;
+    clearDaemonChildrenRegistry();
+  });
+
+  afterEach(() => {
+    clearDaemonChildrenRegistry();
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("writes, reads, and unregisters daemon child pids", () => {
+    registerDaemonChild({
+      pid: process.pid,
+      parentPid: process.pid,
+      role: "dashboard",
+      command: "node dist-server/start-all.js",
+    });
+
+    expect(getDaemonChildren()).toEqual([
+      expect.objectContaining({
+        pid: process.pid,
+        parentPid: process.pid,
+        role: "dashboard",
+        command: "node dist-server/start-all.js",
+      }),
+    ]);
+
+    const raw = JSON.parse(readFileSync(__getDaemonChildrenRegistryFile(), "utf-8")) as unknown[];
+    expect(raw).toHaveLength(1);
+
+    unregisterDaemonChild(process.pid);
+    expect(getDaemonChildren()).toEqual([]);
+  });
+
+  it("spawnManagedDaemonChild makes registry tracking the default for daemon spawns", async () => {
+    const child = spawnManagedDaemonChild(
+      "test-child",
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30_000)"],
+      { stdio: "ignore" },
+    );
+
+    expect(child.pid).toBeTypeOf("number");
+    expect(getDaemonChildren()).toContainEqual(
+      expect.objectContaining({
+        pid: child.pid,
+        role: "test-child",
+        parentPid: process.pid,
+        command: `${process.execPath} -e setTimeout(() => {}, 30_000)`,
+      }),
+    );
+
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+
+    expect(getDaemonChildren()).not.toContainEqual(expect.objectContaining({ pid: child.pid }));
+  });
+});
+
+describe("AO orphan detection", () => {
+  it("detects PPID=1 AO dashboard, websocket, lifecycle, and messaging watcher processes", () => {
+    const output = [
+      "  90350      1 node next-server (v15.5.15)",
+      "  90351      1 node /opt/homebrew/lib/node_modules/@aoagents/ao-web/dist-server/start-all.js",
+      "  47457      1 node /opt/homebrew/lib/node_modules/@aoagents/ao-web@0.2.4/dist-server/start-all.js",
+      "  47575      1 node /opt/homebrew/lib/node_modules/@aoagents/ao-web@0.2.4/dist-server/terminal-websocket.js",
+      "  47580      1 node /opt/homebrew/lib/node_modules/@aoagents/ao-web@0.2.4/dist-server/direct-terminal-ws.js",
+      "   9914      1 node /opt/homebrew/bin/ao lifecycle-worker codex-startup-factory",
+      "  11111      1 node /repo/.ao-messaging/codex-startup-factory/ao-msg-watch.mjs",
+      "  22222   3333 node /opt/homebrew/bin/ao lifecycle-worker not-an-orphan",
+      "  44444      1 node unrelated-server.js",
+    ].join("\n");
+
+    expect(detectAoOrphansFromPsOutput(output)).toEqual([
+      expect.objectContaining({ pid: 90350, role: "next-server" }),
+      expect.objectContaining({ pid: 90351, role: "ao-web" }),
+      expect.objectContaining({ pid: 47457, role: "ao-web" }),
+      expect.objectContaining({ pid: 47575, role: "ao-web" }),
+      expect.objectContaining({ pid: 47580, role: "ao-web" }),
+      expect.objectContaining({ pid: 9914, role: "lifecycle-worker" }),
+      expect.objectContaining({ pid: 11111, role: "ao-msg-watch" }),
+    ]);
+  });
+});
