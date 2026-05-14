@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { __clearInflightFetchesForTest, dedupFetch } from "../client-fetch";
+import { __clearInflightFetchesForTest, dedupFetch, fetchJsonWithTimeout } from "../client-fetch";
 
 describe("dedupFetch", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     __clearInflightFetchesForTest();
   });
@@ -76,5 +77,31 @@ describe("dedupFetch", () => {
 
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
     expect(underlyingSignal?.aborted).toBe(true);
+  });
+
+  it("times out when response headers arrive but the JSON body stalls", async () => {
+    vi.useFakeTimers();
+    const cancelBody = vi.fn();
+    const body = new ReadableStream({
+      cancel: cancelBody,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = fetchJsonWithTimeout("/api/sessions/ao-187", {
+      timeoutMs: 100,
+      timeoutMessage: "session timed out",
+    });
+    const expectation = expect(request).rejects.toThrow("session timed out");
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expectation;
+    expect(cancelBody).toHaveBeenCalled();
   });
 });

@@ -74,6 +74,73 @@ function abortError(): DOMException {
   return new DOMException("The operation was aborted.", "AbortError");
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw abortError();
+  }
+}
+
+async function readResponseText(response: Response, signal: AbortSignal | undefined): Promise<string> {
+  throwIfAborted(signal);
+
+  if (!response.body) {
+    return typeof response.text === "function" ? await response.text() : "";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+
+  try {
+    while (true) {
+      throwIfAborted(signal);
+      let removeAbortListener: () => void = () => {};
+      const abortPromise =
+        signal === undefined
+          ? null
+          : new Promise<never>((_, reject) => {
+              const abort = () => {
+                void reader.cancel().catch(() => {});
+                reject(abortError());
+              };
+              if (signal.aborted) {
+                abort();
+                return;
+              }
+              signal.addEventListener("abort", abort, { once: true });
+              removeAbortListener = () => signal.removeEventListener("abort", abort);
+            });
+
+      try {
+        const result = await Promise.race([
+          reader.read(),
+          ...(abortPromise ? [abortPromise] : []),
+        ]);
+        if (result.done) break;
+        chunks.push(decoder.decode(result.value, { stream: true }));
+      } finally {
+        removeAbortListener();
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  chunks.push(decoder.decode());
+  return chunks.join("");
+}
+
+async function readResponseJson<T>(
+  response: Response,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  throwIfAborted(signal);
+  if (!response.body && typeof response.json === "function") {
+    return (await response.json()) as T;
+  }
+  return JSON.parse(await readResponseText(response, signal)) as T;
+}
+
 export function dedupFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const key = getFetchKey(input, init);
   let entry = inflightFetches.get(key);
@@ -168,14 +235,23 @@ function mergeAbortSignals(
   return controller.signal;
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readErrorMessage(
+  response: Response,
+  signal: AbortSignal | undefined,
+): Promise<string> {
   try {
-    const payload = (await response.json()) as { error?: string; message?: string } | null;
+    const payload = await readResponseJson<{ error?: string; message?: string } | null>(
+      response,
+      signal,
+    );
     const message = payload?.error ?? payload?.message;
     if (typeof message === "string" && message.trim().length > 0) {
       return message.trim();
     }
-  } catch {
+  } catch (error) {
+    if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+      throw error;
+    }
     // Ignore parse failures and fall back to status text.
   }
 
@@ -211,17 +287,16 @@ export async function fetchJsonWithTimeout<T>(
         reject(new Error(timeoutMessage ?? `Request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
+    void timeoutPromise.catch(() => {});
 
     const abortPromise =
       mergedSignal === undefined
         ? null
         : new Promise<never>((_, reject) => {
             const abort = () => {
-              reject(
-                timedOut
-                  ? new Error(timeoutMessage ?? `Request timed out after ${timeoutMs}ms`)
-                  : abortError(),
-              );
+              if (!timedOut) {
+                reject(abortError());
+              }
             };
             if (mergedSignal.aborted) {
               abort();
@@ -230,6 +305,7 @@ export async function fetchJsonWithTimeout<T>(
             mergedSignal.addEventListener("abort", abort, { once: true });
             removeAbortListener = () => mergedSignal.removeEventListener("abort", abort);
           });
+    void abortPromise?.catch(() => {});
 
     const response = await Promise.race([
       dedupFetch(input, requestInit).catch((error: unknown) => {
@@ -244,11 +320,25 @@ export async function fetchJsonWithTimeout<T>(
       ...(abortPromise ? [abortPromise] : []),
     ]);
 
+    const readWithTimeout = <T>(read: Promise<T>): Promise<T> =>
+      Promise.race([
+        read.catch((error: unknown) => {
+          if (timedOut) {
+            throw new Error(timeoutMessage ?? `Request timed out after ${timeoutMs}ms`, {
+              cause: error,
+            });
+          }
+          throw error;
+        }),
+        timeoutPromise,
+        ...(abortPromise ? [abortPromise] : []),
+      ]);
+
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response));
+      throw new Error(await readWithTimeout(readErrorMessage(response, mergedSignal)));
     }
 
-    return (await response.json()) as T;
+    return await readWithTimeout(readResponseJson<T>(response, mergedSignal));
   } finally {
     if (timer) {
       clearTimeout(timer);
