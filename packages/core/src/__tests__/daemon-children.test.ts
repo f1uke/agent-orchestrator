@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +10,26 @@ import {
   getDaemonChildren,
   registerDaemonChild,
   spawnManagedDaemonChild,
+  sweepDaemonChildren,
   unregisterDaemonChild,
 } from "../daemon-children.js";
+
+function isProcessAliveForTest(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    return (err as { code?: string }).code === "EPERM";
+  }
+}
+
+async function waitForChildExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await Promise.race([
+    new Promise<void>((resolve) => child.once("exit", () => resolve())),
+    new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+  ]);
+}
 
 describe("daemon child registry", () => {
   let tmpHome: string;
@@ -52,6 +71,52 @@ describe("daemon child registry", () => {
 
     unregisterDaemonChild(process.pid);
     expect(getDaemonChildren()).toEqual([]);
+  });
+
+  it("sweeps only children owned by the requested daemon pid", async () => {
+    const targetChild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+    const otherChild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+
+    try {
+      expect(targetChild.pid).toBeTypeOf("number");
+      expect(otherChild.pid).toBeTypeOf("number");
+      const targetPid = targetChild.pid as number;
+      const otherPid = otherChild.pid as number;
+
+      registerDaemonChild({
+        pid: targetPid,
+        parentPid: 111,
+        role: "owned-by-target",
+        command: "node target.js",
+      });
+      registerDaemonChild({
+        pid: otherPid,
+        parentPid: 222,
+        role: "owned-by-other-daemon",
+        command: "node other.js",
+      });
+
+      const result = await sweepDaemonChildren({ ownerPid: 111, graceMs: 1_000 });
+
+      expect(result.attempted).toBe(1);
+      expect(isProcessAliveForTest(otherPid)).toBe(true);
+      expect(getDaemonChildren()).toContainEqual(
+        expect.objectContaining({
+          pid: otherPid,
+          parentPid: 222,
+          role: "owned-by-other-daemon",
+        }),
+      );
+    } finally {
+      targetChild.kill("SIGKILL");
+      otherChild.kill("SIGKILL");
+      await waitForChildExit(targetChild);
+      await waitForChildExit(otherChild);
+    }
   });
 
   it("spawnManagedDaemonChild makes registry tracking the default for daemon spawns", async () => {

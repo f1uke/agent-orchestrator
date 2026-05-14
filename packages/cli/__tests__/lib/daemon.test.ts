@@ -103,7 +103,7 @@ describe("killExistingDaemon", () => {
   it("uses killProcessTree(SIGTERM), awaits exit, and unregisters on the happy path", async () => {
     mockWaitForExit.mockResolvedValueOnce(true);
     await killExistingDaemon(fakeRunning);
-    expect(mockSweepDaemonChildren).toHaveBeenCalled();
+    expect(mockSweepDaemonChildren).toHaveBeenCalledWith({ ownerPid: 12345 });
     expect(mockKillProcessTree).toHaveBeenCalledWith(12345, "SIGTERM");
     expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
     expect(mockWaitForExit).toHaveBeenCalledWith(12345, 5000);

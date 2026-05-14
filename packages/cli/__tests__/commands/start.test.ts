@@ -2016,6 +2016,7 @@ describe("start command — platform-aware runtime fallback", () => {
       .join("\n");
     expect(output).toContain("Stopped sessions for");
     expect(output).not.toContain("Dashboard stopped");
+    expect(mockSweepDaemonChildren).not.toHaveBeenCalled();
   });
 
   it("targeted stop does NOT unregister running.json", async () => {
@@ -2140,6 +2141,7 @@ describe("start command — platform-aware runtime fallback", () => {
     // not a direct process.kill — that's how it gets `taskkill /T /F` on
     // Windows and process-group kill on Unix. Assert on the mock.
     expect(mockKillProcessTree).toHaveBeenCalledWith(99999, "SIGTERM");
+    expect(mockSweepDaemonChildren).toHaveBeenCalledWith({ ownerPid: 99999 });
     expect(mockUnregister).toHaveBeenCalled();
     expect(mockRemoveProjectFromRunning).not.toHaveBeenCalled();
   });

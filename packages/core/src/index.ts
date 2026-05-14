@@ -424,6 +424,7 @@ export {
   scanAoOrphans,
   reapAoOrphans,
   type DaemonChildEntry,
+  type DaemonChildSweepOptions,
   type DaemonChildSweepResult,
   type AoOrphanProcess,
 } from "./daemon-children.js";

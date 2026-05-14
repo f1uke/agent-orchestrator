@@ -115,7 +115,7 @@ export function installShutdownHandlers(ctx: ShutdownContext): void {
           });
         }
 
-        await sweepDaemonChildren();
+        await sweepDaemonChildren({ ownerPid: process.pid });
         await unregister();
       } catch {
         // Best-effort — always exit even if cleanup fails

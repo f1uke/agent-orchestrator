@@ -1212,8 +1212,8 @@ function formatSweepSummary(result: DaemonChildSweepResult): string {
   }`;
 }
 
-async function sweepRegisteredDaemonChildren(): Promise<void> {
-  const result = await sweepDaemonChildren();
+async function sweepRegisteredDaemonChildren(ownerPid?: number): Promise<void> {
+  const result = await sweepDaemonChildren({ ownerPid });
   if (result.attempted > 0) {
     console.log(
       chalk.dim(
@@ -1733,7 +1733,7 @@ export function registerStop(program: Command): void {
             // protocol so node-pty disposes ConPTY gracefully (avoids WER
             // 0x800700e8). No-op on non-Windows.
             await sweepWindowsPtyHostsBeforeParentKill();
-            await sweepRegisteredDaemonChildren();
+            await sweepRegisteredDaemonChildren(running.pid);
             // killProcessTree handles process trees on Windows (taskkill /T /F)
             // and process groups on Unix; it swallows "already dead" internally.
             await killProcessTree(running.pid, "SIGTERM");
@@ -1871,7 +1871,7 @@ export function registerStop(program: Command): void {
             // protocol so node-pty disposes ConPTY gracefully (avoids WER
             // 0x800700e8). No-op on non-Windows.
             await sweepWindowsPtyHostsBeforeParentKill();
-            await sweepRegisteredDaemonChildren();
+            await sweepRegisteredDaemonChildren(running.pid);
             await killProcessTree(running.pid, "SIGTERM");
             await unregister();
           } else {

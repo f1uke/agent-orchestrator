@@ -465,14 +465,15 @@
             </p>
           </div>
           <div class="decision">
-            <h3><code>sweepDaemonChildren()</code></h3>
+            <h3><code>sweepDaemonChildren({ ownerPid })</code></h3>
             <p>
               <strong>Consumer:</strong> <code>ao stop</code>, daemon shutdown, and daemon
               replacement.
             </p>
             <p>
-              Reads the persistent registry, sends SIGTERM, waits within a bounded grace window,
-              SIGKILLs stragglers, and prunes dead entries.
+              Reads the persistent registry, filters to the daemon owner PID when supplied, sends
+              SIGTERM, waits within a bounded grace window, SIGKILLs stragglers, and prunes dead
+              entries.
             </p>
           </div>
         </div>
@@ -485,7 +486,10 @@
             <h3><code>ao stop</code></h3>
             <ol>
               <li>Read <code>running.json</code> to find the daemon.</li>
-              <li>Read <code>daemon-children.json</code> and sweep registered child PIDs.</li>
+              <li>
+                Read <code>daemon-children.json</code> and sweep child PIDs owned by the running
+                daemon PID.
+              </li>
               <li>Signal the daemon process tree through <code>killProcessTree()</code>.</li>
               <li>Escalate to SIGKILL if the daemon does not exit.</li>
               <li>Remove stale registry entries after confirmed process death.</li>

@@ -90,7 +90,7 @@ export function attachToDaemon(running: RunningState): AttachedDaemon {
  * internally.
  */
 export async function killExistingDaemon(running: RunningState): Promise<void> {
-  await sweepDaemonChildren();
+  await sweepDaemonChildren({ ownerPid: running.pid });
   await killProcessTree(running.pid, "SIGTERM");
   if (!(await waitForExit(running.pid, 5000))) {
     console.log(chalk.yellow("  Process didn't exit cleanly, sending SIGKILL..."));

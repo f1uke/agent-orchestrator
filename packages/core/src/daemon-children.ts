@@ -46,6 +46,11 @@ export interface AoOrphanProcess {
   role: string;
 }
 
+export interface DaemonChildSweepOptions {
+  ownerPid?: number;
+  graceMs?: number;
+}
+
 function getRegistryFile(): string {
   return join(homedir(), ".agent-orchestrator", "daemon-children.json");
 }
@@ -343,9 +348,12 @@ export function spawnManagedDaemonChild(
 }
 
 export async function sweepDaemonChildren(
-  graceMs: number = DEFAULT_GRACE_MS,
+  options: DaemonChildSweepOptions = {},
 ): Promise<DaemonChildSweepResult> {
-  const entries = getDaemonChildren();
+  const { ownerPid, graceMs = DEFAULT_GRACE_MS } = options;
+  const entries = getDaemonChildren().filter(
+    (entry) => ownerPid === undefined || entry.parentPid === ownerPid,
+  );
   const result: DaemonChildSweepResult = {
     attempted: entries.length,
     terminated: 0,
