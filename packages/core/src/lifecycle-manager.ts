@@ -1884,11 +1884,29 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
   }
 
   /**
+   * Format the verified-at-SHA anchor included with dispatched alerts.
+   *
+   * Workers compare the anchor against their current HEAD (e.g. `git rev-parse
+   * HEAD`) to detect rare cases where verification slipped through stale —
+   * the alert may have been computed against an older commit than the one
+   * currently on the PR. Returns "" when no SHA is available so the rest of
+   * the message degrades gracefully.
+   */
+  function formatVerifiedShaSuffix(headSha?: string): string {
+    if (!headSha) return "";
+    const short = headSha.slice(0, 7);
+    return ` (verified at SHA ${short}; if your current HEAD is past ${short}, verify before acting — the condition may already be resolved)`;
+  }
+
+  /**
    * Format CI check failures into a human-readable message for the agent.
    * Includes check names, statuses, and links for debugging.
    */
-  function formatCIFailureMessage(failedChecks: CICheck[]): string {
-    const lines = ["CI checks are failing on your PR. Here are the failed checks:", ""];
+  function formatCIFailureMessage(failedChecks: CICheck[], headSha?: string): string {
+    const lines = [
+      `CI checks are failing on your PR${formatVerifiedShaSuffix(headSha)}. Here are the failed checks:`,
+      "",
+    ];
     for (const check of failedChecks) {
       const status = check.conclusion ?? check.status;
       const link = check.url ? ` — ${check.url}` : "";
@@ -1945,11 +1963,14 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     const cachedEnrichment = prEnrichmentCache.get(prKey);
 
     let checks: CICheck[];
+    let dataSource: "batch" | "fresh";
     if (cachedEnrichment?.ciChecks !== undefined) {
       checks = cachedEnrichment.ciChecks;
+      dataSource = "batch";
     } else {
       try {
         checks = await scm.getCIChecks(session.pr);
+        dataSource = "fresh";
       } catch {
         // Failed to fetch checks — skip this cycle
         return;
@@ -1994,6 +2015,58 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     // Skip if we already dispatched this exact failure set
     if (ciFingerprint === lastCIDispatchHash) return;
 
+    // Re-verify against fresh SCM state before dispatching.
+    //
+    // Why: batch enrichment runs once per poll cycle and the cached snapshot can
+    // describe a prior commit's CI state — e.g. a transient infra failure that
+    // has already been rerun-fixed, or a real failure that the worker has
+    // already pushed a fix for. Dispatching the queued alert against that stale
+    // snapshot tells the worker to "fix failing CI" when CI is actually green,
+    // which is a real noise/wrong-action risk (issue #1122).
+    //
+    // The fresh fetch hits gh's per-instance 5s cache, which is populated by
+    // getCIChecks() itself — NOT by the batch GraphQL path — so even within the
+    // same poll cycle this surfaces the current truth (unless we already
+    // fell back to a fresh fetch above, in which case the same cache entry
+    // is returned at ~zero cost).
+    let verifiedChecks = failedChecks;
+    if (dataSource === "batch") {
+      try {
+        const freshChecks = await scm.getCIChecks(session.pr);
+        const freshFailed = freshChecks.filter(
+          (c) => c.status === "failed" || c.conclusion?.toUpperCase() === "FAILURE",
+        );
+        if (freshFailed.length === 0) {
+          // CI has cleared since the batch snapshot — suppress the stale alert.
+          observer.recordOperation({
+            metric: "lifecycle_poll",
+            operation: "lifecycle.ci_failure_dispatch.suppressed_stale",
+            outcome: "success",
+            correlationId: createCorrelationId("ci-stale-suppress"),
+            projectId: session.projectId,
+            sessionId: session.id,
+            data: {
+              prNumber: session.pr.number,
+              cachedFailedChecks: failedChecks.map((c) => c.name),
+              cachedHeadSha: cachedEnrichment?.headSha,
+            },
+            level: "info",
+          });
+          // Record this fingerprint as dispatched so we don't re-evaluate it
+          // every poll for a snapshot we've confirmed is stale.
+          updateSessionMetadata(session, {
+            lastCIFailureDispatchHash: ciFingerprint,
+            lastCIFailureDispatchAt: new Date().toISOString(),
+          });
+          return;
+        }
+        verifiedChecks = freshFailed;
+      } catch {
+        // Fail open: verification call failed, dispatch with cached data
+        // rather than swallow a potentially real failure.
+      }
+    }
+
     // Dispatch CI failure details directly via sessionManager.send() rather than
     // executeReaction() to avoid consuming the ci-failed reaction's retry budget.
     // The transition reaction owns escalation; this is a follow-up info delivery.
@@ -2003,7 +2076,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       reactionConfig.action &&
       (reactionConfig.auto !== false || reactionConfig.action === "notify")
     ) {
-      const detailedMessage = formatCIFailureMessage(failedChecks);
+      const detailedMessage = formatCIFailureMessage(verifiedChecks, cachedEnrichment?.headSha);
 
       try {
         if (reactionConfig.action === "send-to-agent") {
@@ -2015,7 +2088,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
             sessionId: session.id,
             projectId: session.projectId,
             message: detailedMessage,
-            data: { failedChecks: failedChecks.map((c) => c.name), context, schemaVersion: 2 },
+            data: {
+              failedChecks: verifiedChecks.map((c) => c.name),
+              context,
+              schemaVersion: 2,
+              ...(cachedEnrichment?.headSha ? { headSha: cachedEnrichment.headSha } : {}),
+            },
           });
           await notifyHuman(event, reactionConfig.priority ?? "warning");
         }
@@ -2088,6 +2166,47 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       // Already dispatched for current conflict state — skip
       if (lastDispatched === "true") return;
 
+      // Re-verify against fresh SCM state before dispatching.
+      //
+      // Why: batch enrichment runs once per poll cycle and GitHub computes
+      // `mergeable` asynchronously — the snapshot can carry a transient
+      // CONFLICTING that has since flipped back to MERGEABLE, or the worker
+      // may have already rebased. Dispatching the queued alert tells the
+      // worker to rebase + force-push when the branch is actually clean,
+      // which is a destructive wrong-action risk (issue #1122).
+      //
+      // getMergeability() runs a fresh `gh pr view --json mergeable,...`;
+      // it is NOT populated by the batch GraphQL path, so this returns the
+      // current truth even within the same poll cycle.
+      try {
+        const fresh = await scm.getMergeability(session.pr);
+        if (fresh.noConflicts) {
+          // Conflicts have cleared since the batch snapshot — suppress.
+          observer.recordOperation({
+            metric: "lifecycle_poll",
+            operation: "lifecycle.merge_conflict_dispatch.suppressed_stale",
+            outcome: "success",
+            correlationId: createCorrelationId("conflict-stale-suppress"),
+            projectId: session.projectId,
+            sessionId: session.id,
+            data: {
+              prNumber: session.pr.number,
+              cachedHeadSha: cachedData.headSha,
+              freshBlockers: fresh.blockers,
+            },
+            level: "info",
+          });
+          // Don't set lastMergeConflictDispatched=true — conflicts aren't
+          // actually present, so a real recurrence on a later cycle should
+          // still dispatch fresh. The expensive next-cycle re-fetch is
+          // gated by the cached snapshot continuing to claim conflicts.
+          return;
+        }
+      } catch {
+        // Fail open: verification call failed, dispatch with cached data
+        // rather than swallow a potentially real conflict.
+      }
+
       const reactionConfig = getReactionConfigForSession(session, conflictReactionKey);
       if (
         reactionConfig &&
@@ -2105,7 +2224,8 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           if (reactionConfig.action === "send-to-agent" && !reactionConfig.message) {
             const baseBranch = session.pr.baseBranch ?? "the default branch";
             const behindNote = cachedData.isBehind ? ` is behind ${baseBranch} and` : "";
-            enrichedConfig.message = `Your PR branch${behindNote} has merge conflicts with ${baseBranch}. Rebase your branch on ${baseBranch}, resolve the conflicts, and push. You should not need to call gh for merge status unless you need additional context — this information is current.`;
+            const shaSuffix = formatVerifiedShaSuffix(cachedData.headSha);
+            enrichedConfig.message = `Your PR branch${behindNote} has merge conflicts with ${baseBranch}${shaSuffix}. Rebase your branch on ${baseBranch}, resolve the conflicts, and push. You should not need to call gh for merge status unless you need additional context — this information is current.`;
           }
 
           const result = await executeReaction(session, conflictReactionKey, enrichedConfig);
@@ -2443,7 +2563,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
               if (failedChecks.length > 0) {
                 reactionConfig = {
                   ...reactionConfig,
-                  message: formatCIFailureMessage(failedChecks),
+                  message: formatCIFailureMessage(failedChecks, cachedData.headSha),
                 };
               }
             }

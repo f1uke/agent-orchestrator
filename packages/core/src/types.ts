@@ -894,6 +894,12 @@ export interface PREnrichmentData {
   isBehind?: boolean;
   /** List of blockers preventing merge */
   blockers?: string[];
+  /**
+   * Head SHA the enrichment was computed against. Lifecycle reactions use this
+   * to anchor dispatched alerts ("verified at SHA X") so workers can detect
+   * staleness if a later commit has already resolved the alert condition.
+   */
+  headSha?: string;
 }
 
 /**
@@ -1091,6 +1097,12 @@ export interface PREnrichmentData {
   blockers?: string[];
   /** Individual CI check results (populated from batch enrichment when available) */
   ciChecks?: CICheck[];
+  /**
+   * Head SHA the enrichment was computed against. Lifecycle reactions use this
+   * to anchor dispatched alerts ("verified at SHA X") so workers can detect
+   * staleness if a later commit has already resolved the alert condition.
+   */
+  headSha?: string;
 }
 
 /**

@@ -3007,7 +3007,16 @@ describe("reactions", () => {
     };
 
     const batchMock = mockBatchEnrichment({ hasConflicts: true });
+    const getMergeabilityMock = vi.fn().mockResolvedValue({
+      mergeable: false,
+      ciPassing: true,
+      approved: false,
+      noConflicts: false,
+      blockers: ["Merge conflicts"],
+    });
     const mockSCM = createMockSCM({
+      // Dispatch-time re-verification (issue #1122) — track conflict state.
+      getMergeability: getMergeabilityMock,
       enrichSessionsPRBatch: batchMock,
     });
 
@@ -3038,6 +3047,13 @@ describe("reactions", () => {
     vi.mocked(mockSCM.enrichSessionsPRBatch!).mockImplementation(
       mockBatchEnrichment({ hasConflicts: false }),
     );
+    getMergeabilityMock.mockResolvedValue({
+      mergeable: true,
+      ciPassing: true,
+      approved: false,
+      noConflicts: true,
+      blockers: [],
+    });
     await lm.check("app-1");
     const metadata = readMetadataRaw(env.sessionsDir, "app-1");
     expect(metadata?.["lastMergeConflictDispatched"]).toBeFalsy();
@@ -3046,6 +3062,13 @@ describe("reactions", () => {
     vi.mocked(mockSCM.enrichSessionsPRBatch!).mockImplementation(
       mockBatchEnrichment({ hasConflicts: true }),
     );
+    getMergeabilityMock.mockResolvedValue({
+      mergeable: false,
+      ciPassing: true,
+      approved: false,
+      noConflicts: false,
+      blockers: ["Merge conflicts"],
+    });
     vi.mocked(notifier.notify).mockClear();
     await lm.check("app-1");
 
@@ -3415,6 +3438,15 @@ describe("reactions", () => {
 
     const batchMock = mockBatchEnrichment({ hasConflicts: true });
     const mockSCM = createMockSCM({
+      // Dispatch-time re-verification (issue #1122) calls getMergeability;
+      // for this test we want conflicts to actually be confirmed.
+      getMergeability: vi.fn().mockResolvedValue({
+        mergeable: false,
+        ciPassing: true,
+        approved: false,
+        noConflicts: false,
+        blockers: ["Merge conflicts"],
+      }),
       enrichSessionsPRBatch: batchMock,
     });
 
@@ -3615,7 +3647,12 @@ describe("rate limiting optimizations", () => {
     return makePR({ owner: "org", repo: "my-app" });
   }
 
-  it("skips getMergeability() when batch enrichment has hasConflicts data", async () => {
+  it("re-verifies via getMergeability() before dispatching merge conflict alert", async () => {
+    // Conflict-condition detection comes from batch enrichment (hasConflicts),
+    // but right before dispatching the alert we re-fetch via getMergeability()
+    // so that a stale batch snapshot doesn't fire a false alarm telling the
+    // worker to rebase + force-push when the branch is actually clean
+    // (issue #1122).
     config.reactions = {
       "merge-conflicts": {
         auto: true,
@@ -3625,7 +3662,13 @@ describe("rate limiting optimizations", () => {
     };
 
     const pr = makeMatchingPR();
-    const getMergeabilityMock = vi.fn();
+    const getMergeabilityMock = vi.fn().mockResolvedValue({
+      mergeable: false,
+      ciPassing: true,
+      approved: false,
+      noConflicts: false,
+      blockers: ["Merge conflicts"],
+    });
     const mockSCM = createMockSCM({
       getMergeability: getMergeabilityMock,
       getCISummary: vi.fn().mockResolvedValue("passing"),
@@ -3660,10 +3703,75 @@ describe("rate limiting optimizations", () => {
     await vi.advanceTimersByTimeAsync(0);
     lm.stop();
 
-    // getMergeability() should NOT be called — batch enrichment has the data
-    expect(getMergeabilityMock).not.toHaveBeenCalled();
-    // Conflict notification should have been sent
+    // getMergeability() IS called now — for dispatch-time re-verification
+    expect(getMergeabilityMock).toHaveBeenCalled();
+    // Verification confirmed conflicts, so the notification fires as expected
     expect(mockSessionManager.send).toHaveBeenCalledWith("s-1", "Resolve conflicts.");
+  });
+
+  it("suppresses merge conflict alert when fresh getMergeability() shows no conflicts", async () => {
+    // Stale batch snapshot says hasConflicts=true, but the worker has already
+    // rebased and a fresh getMergeability() reports noConflicts. The orchestrator
+    // must NOT fire the alert (issue #1122) — telling the worker to
+    // rebase + force-push when the branch is clean is a real wrong-action risk.
+    config.reactions = {
+      "merge-conflicts": {
+        auto: true,
+        action: "send-to-agent",
+        message: "Resolve conflicts.",
+      },
+    };
+
+    const pr = makeMatchingPR();
+    const getMergeabilityMock = vi.fn().mockResolvedValue({
+      mergeable: true,
+      ciPassing: true,
+      approved: false,
+      noConflicts: true,
+      blockers: [],
+    });
+    const mockSCM = createMockSCM({
+      getMergeability: getMergeabilityMock,
+      getCISummary: vi.fn().mockResolvedValue("passing"),
+      enrichSessionsPRBatch: vi.fn().mockResolvedValue(
+        new Map([
+          [
+            `${pr.owner}/${pr.repo}#${pr.number}`,
+            {
+              state: "open" as const,
+              ciStatus: "passing" as const,
+              reviewDecision: "none" as const,
+              mergeable: false,
+              hasConflicts: true,
+              headSha: "deadbeefcafef00d",
+            },
+          ],
+        ]),
+      ),
+    });
+
+    const registry = createMockRegistry({
+      runtime: plugins.runtime,
+      agent: plugins.agent,
+      scm: mockSCM,
+    });
+
+    const session = makeSession({ id: "s-1", status: "pr_open", pr, workspacePath: null });
+    vi.mocked(mockSessionManager.list).mockResolvedValue([session]);
+    vi.mocked(mockSessionManager.send).mockResolvedValue(undefined);
+
+    const lm = createLifecycleManager({ config, registry, sessionManager: mockSessionManager });
+    lm.start(60_000);
+    await vi.advanceTimersByTimeAsync(0);
+    lm.stop();
+
+    expect(getMergeabilityMock).toHaveBeenCalled();
+    expect(mockSessionManager.send).not.toHaveBeenCalled();
+
+    // Dedup flag must remain unset — the condition isn't actually present, so
+    // a real recurrence on a later poll should still dispatch fresh.
+    const metadata = readMetadataRaw(env.sessionsDir, "s-1");
+    expect(metadata?.["lastMergeConflictDispatched"]).toBeFalsy();
   });
 
   it("skips getCIChecks() when batch enrichment has ciChecks data", async () => {
@@ -3735,6 +3843,158 @@ describe("rate limiting optimizations", () => {
     expect(detailMessage).not.toContain("test");
 
     lm.stop();
+  });
+
+  it("suppresses CI failure alert when fresh getCIChecks() shows no failures", async () => {
+    // Stale batch snapshot says CI is failing (e.g. transient bun CDN error),
+    // but a rerun has already cleared it. Without dispatch-time re-verification
+    // the worker gets a "fix failing CI" alert pointing at green CI — the exact
+    // false-alarm pattern issue #1122 calls out.
+    //
+    // Setup: session is already in ci_failed (so the transition path doesn't
+    // fire — we exercise the standalone maybeDispatchCIFailureDetails path on a
+    // subsequent poll, which is where the staleness window matters most).
+    config.reactions = {
+      "ci-failed": {
+        auto: true,
+        action: "send-to-agent",
+        message: "CI failing.",
+        retries: 3,
+        escalateAfter: 3,
+      },
+    };
+
+    const pr = makeMatchingPR();
+    const freshCIChecks = [
+      { name: "lint", status: "passed" as const, conclusion: "SUCCESS" },
+      { name: "test", status: "passed" as const, conclusion: "SUCCESS" },
+    ];
+    const getCIChecksMock = vi.fn().mockResolvedValue(freshCIChecks);
+    const mockSCM = createMockSCM({
+      getCIChecks: getCIChecksMock,
+      getCISummary: vi.fn().mockResolvedValue("failing"),
+      enrichSessionsPRBatch: vi.fn().mockResolvedValue(
+        new Map([
+          [
+            `${pr.owner}/${pr.repo}#${pr.number}`,
+            {
+              state: "open" as const,
+              ciStatus: "failing" as const,
+              reviewDecision: "none" as const,
+              mergeable: false,
+              hasConflicts: false,
+              headSha: "abc1234def5678",
+              ciChecks: [
+                {
+                  name: "lint",
+                  status: "failed" as const,
+                  conclusion: "FAILURE",
+                  url: "https://example.com/lint",
+                },
+              ],
+            },
+          ],
+        ]),
+      ),
+    });
+
+    const registry = createMockRegistry({
+      runtime: plugins.runtime,
+      agent: plugins.agent,
+      scm: mockSCM,
+    });
+
+    // Start with ci_failed so the transition path is bypassed and we exercise
+    // the dispatch-time re-verification on a steady-state poll.
+    const session = makeSession({ id: "s-3", status: "ci_failed", pr, workspacePath: null });
+    vi.mocked(mockSessionManager.list).mockResolvedValue([session]);
+    vi.mocked(mockSessionManager.send).mockResolvedValue(undefined);
+
+    const lm = createLifecycleManager({ config, registry, sessionManager: mockSessionManager });
+    lm.start(60_000);
+    await vi.advanceTimersByTimeAsync(0);
+    lm.stop();
+
+    // Re-verification must have called getCIChecks
+    expect(getCIChecksMock).toHaveBeenCalled();
+    // The stale alert must NOT be dispatched
+    const detailedSends = vi
+      .mocked(mockSessionManager.send)
+      .mock.calls.filter((c) => typeof c[1] === "string" && (c[1] as string).includes("lint"));
+    expect(detailedSends).toEqual([]);
+  });
+
+  it("annotates CI failure message with verified SHA from batch enrichment", async () => {
+    // The dispatched alert includes the head SHA the batch saw, so workers
+    // can compare against their local HEAD to detect the rare case where
+    // the verification call also returned stale data.
+    config.reactions = {
+      "ci-failed": {
+        auto: true,
+        action: "send-to-agent",
+        retries: 3,
+        escalateAfter: 3,
+      },
+    };
+
+    const pr = makeMatchingPR();
+    const mockSCM = createMockSCM({
+      getCIChecks: vi.fn().mockResolvedValue([
+        {
+          name: "lint",
+          status: "failed" as const,
+          conclusion: "FAILURE",
+          url: "https://example.com/lint",
+        },
+      ]),
+      getCISummary: vi.fn().mockResolvedValue("failing"),
+      enrichSessionsPRBatch: vi.fn().mockResolvedValue(
+        new Map([
+          [
+            `${pr.owner}/${pr.repo}#${pr.number}`,
+            {
+              state: "open" as const,
+              ciStatus: "failing" as const,
+              reviewDecision: "none" as const,
+              mergeable: false,
+              hasConflicts: false,
+              headSha: "abc1234def5678",
+              ciChecks: [
+                {
+                  name: "lint",
+                  status: "failed" as const,
+                  conclusion: "FAILURE",
+                  url: "https://example.com/lint",
+                },
+              ],
+            },
+          ],
+        ]),
+      ),
+    });
+
+    const registry = createMockRegistry({
+      runtime: plugins.runtime,
+      agent: plugins.agent,
+      scm: mockSCM,
+    });
+
+    const session = makeSession({ id: "s-4", status: "pr_open", pr, workspacePath: null });
+    vi.mocked(mockSessionManager.list).mockResolvedValue([session]);
+    vi.mocked(mockSessionManager.send).mockResolvedValue(undefined);
+
+    const lm = createLifecycleManager({ config, registry, sessionManager: mockSessionManager });
+    lm.start(60_000);
+    await vi.advanceTimersByTimeAsync(0);
+    lm.stop();
+
+    const sentMessages = vi
+      .mocked(mockSessionManager.send)
+      .mock.calls.map((c) => c[1] as string);
+    const message = sentMessages.find((m) => m.includes("lint"));
+    expect(message).toBeDefined();
+    // First 7 chars of the SHA appear in the verified-at suffix
+    expect(message).toContain("abc1234");
   });
 
   it("throttles review backlog API calls to at most once per 2 minutes", async () => {
