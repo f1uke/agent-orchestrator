@@ -385,6 +385,14 @@ describe("SessionPage project polling", () => {
     });
     await flushAsyncWork();
 
+    expect(screen.getByText("Loading session…")).toBeInTheDocument();
+    expect(screen.queryByText("Failed to load session")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await flushAsyncWork();
+
     expect(screen.getByText("Failed to load session")).toBeInTheDocument();
     expect(screen.getByText(/taking too long/i)).toBeInTheDocument();
     expect(screen.queryByText("Loading session…")).not.toBeInTheDocument();
@@ -436,6 +444,13 @@ describe("SessionPage project polling", () => {
     await flushAsyncWork();
 
     expect(sessionFetches).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText("Failed to load session")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    await flushAsyncWork();
+
     expect(screen.getAllByText("Failed to load session").length).toBeGreaterThan(0);
   });
 

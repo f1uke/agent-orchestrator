@@ -5,7 +5,15 @@ interface FetchJsonOptions extends RequestInit {
   timeoutMessage?: string;
 }
 
-const inflightFetches = new Map<string, Promise<Response>>();
+interface InflightFetch {
+  controller: AbortController;
+  consumers: number;
+  maxConsumers: number;
+  promise: Promise<Response>;
+  settled: boolean;
+}
+
+const inflightFetches = new Map<string, InflightFetch>();
 
 function getFetchUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
@@ -38,33 +46,104 @@ function hashBody(body: BodyInit | null | undefined): string {
   return body.constructor.name;
 }
 
+function hashHeaders(input: RequestInfo | URL, init: RequestInit | undefined): string {
+  const headers = new Headers(input instanceof Request ? input.headers : undefined);
+  if (init?.headers) {
+    new Headers(init.headers).forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
+  return [...headers.entries()]
+    .map(([key, value]) => `${key.toLowerCase()}:${value}`)
+    .sort()
+    .join("\n");
+}
+
 function getFetchKey(input: RequestInfo | URL, init: RequestInit | undefined): string {
-  return `${getFetchUrl(input)}|${getFetchMethod(input, init)}|${hashBody(init?.body)}`;
+  return `${getFetchUrl(input)}|${getFetchMethod(input, init)}|${hashHeaders(input, init)}|${hashBody(init?.body)}`;
 }
 
 function cloneResponse(response: Response): Response {
-  return typeof response.clone === "function" ? response.clone() : response;
+  if (typeof response.clone !== "function") {
+    throw new TypeError("Cannot clone deduplicated fetch response");
+  }
+  return response.clone();
+}
+
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted.", "AbortError");
 }
 
 export function dedupFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const key = getFetchKey(input, init);
-  const existing = inflightFetches.get(key);
-  if (existing) {
-    return existing;
+  let entry = inflightFetches.get(key);
+  if (!entry) {
+    const controller = new AbortController();
+    const { signal: _signal, ...sharedInit } = init ?? {};
+    const request = fetch(input, { ...sharedInit, signal: controller.signal });
+    const newEntry: InflightFetch = {
+      controller,
+      consumers: 0,
+      maxConsumers: 0,
+      promise: request,
+      settled: false,
+    };
+    request.finally(() => {
+      newEntry.settled = true;
+      inflightFetches.delete(key);
+    }).catch(() => {
+      // The original request promise is returned to callers; this side-effect
+      // chain only prevents an unhandled rejection from the cleanup branch.
+    });
+    entry = newEntry;
+    inflightFetches.set(key, entry);
   }
 
-  // Per-caller AbortSignals are handled by fetchJsonWithTimeout. Passing the
-  // first caller's signal to the shared fetch would let one timeout abort the
-  // network request for every waiter, defeating in-flight coalescing.
-  const { signal: _signal, ...sharedInit } = init ?? {};
-  const request = fetch(input, sharedInit).finally(() => {
-    inflightFetches.delete(key);
-  });
-  inflightFetches.set(key, request);
-  return request;
+  entry.consumers += 1;
+  entry.maxConsumers = Math.max(entry.maxConsumers, entry.consumers);
+
+  const callerSignal = init?.signal ?? undefined;
+  let removeAbortListener: () => void = () => {};
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    removeAbortListener();
+    entry.consumers -= 1;
+    if (entry.consumers === 0 && !entry.settled) {
+      entry.controller.abort();
+    }
+  };
+
+  const responsePromise = entry.promise.then((response) =>
+    entry.maxConsumers > 1 ? cloneResponse(response) : response,
+  );
+
+  const abortPromise =
+    callerSignal === undefined
+      ? null
+      : new Promise<never>((_, reject) => {
+          const abort = () => {
+            release();
+            reject(abortError());
+          };
+          if (callerSignal.aborted) {
+            abort();
+            return;
+          }
+          callerSignal.addEventListener("abort", abort, { once: true });
+          removeAbortListener = () => callerSignal.removeEventListener("abort", abort);
+        });
+
+  return Promise.race([responsePromise, ...(abortPromise ? [abortPromise] : [])]).finally(
+    release,
+  );
 }
 
 export function __clearInflightFetchesForTest(): void {
+  for (const entry of inflightFetches.values()) {
+    entry.controller.abort();
+  }
   inflightFetches.clear();
 }
 
@@ -113,12 +192,13 @@ export async function fetchJsonWithTimeout<T>(
   options: FetchJsonOptions = {},
 ): Promise<T> {
   const { timeoutMs = 8_000, timeoutMessage, signal, ...init } = options;
+  const timeoutController = new AbortController();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let removeAbortListener: () => void = () => {};
   let timedOut = false;
 
   try {
-    const mergedSignal = mergeAbortSignals([signal]);
+    const mergedSignal = mergeAbortSignals([signal, timeoutController.signal]);
     const requestInit: RequestInit = { ...init };
     if (mergedSignal) {
       requestInit.signal = mergedSignal;
@@ -127,6 +207,7 @@ export async function fetchJsonWithTimeout<T>(
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         timedOut = true;
+        timeoutController.abort();
         reject(new Error(timeoutMessage ?? `Request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
@@ -136,7 +217,11 @@ export async function fetchJsonWithTimeout<T>(
         ? null
         : new Promise<never>((_, reject) => {
             const abort = () => {
-              reject(new DOMException("The operation was aborted.", "AbortError"));
+              reject(
+                timedOut
+                  ? new Error(timeoutMessage ?? `Request timed out after ${timeoutMs}ms`)
+                  : abortError(),
+              );
             };
             if (mergedSignal.aborted) {
               abort();
@@ -146,7 +231,7 @@ export async function fetchJsonWithTimeout<T>(
             removeAbortListener = () => mergedSignal.removeEventListener("abort", abort);
           });
 
-    const sharedResponse = await Promise.race([
+    const response = await Promise.race([
       dedupFetch(input, requestInit).catch((error: unknown) => {
         if (timedOut) {
           throw new Error(timeoutMessage ?? `Request timed out after ${timeoutMs}ms`, {
@@ -158,7 +243,6 @@ export async function fetchJsonWithTimeout<T>(
       timeoutPromise,
       ...(abortPromise ? [abortPromise] : []),
     ]);
-    const response = cloneResponse(sharedResponse);
 
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));
