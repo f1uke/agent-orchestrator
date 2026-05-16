@@ -497,4 +497,60 @@ posixDescribe("engine + builtin executors — guardrails", () => {
     expect(run?.stages["lint"]?.status).toBe("failed");
     expect(run?.stages["lint"]?.errorMessage).toContain("command executor not configured");
   });
+
+  it("converts a thrown builtin executor exception into STAGE_FAILED (no stuck stage)", async () => {
+    // Regression: if a builtin executor's `run()` rejects (rather than
+    // returning `{ status: "failed" }`), the engine must still terminate
+    // the stage cleanly. Without the engine-side try/catch, the stage
+    // stays permanently `running` and the whole run stalls.
+    const registry = createPluginRegistry();
+    registry.register(makeAgentPlugin());
+    const store = createPipelineStore(storeRoot);
+
+    // Custom builtin that always throws.
+    const throwingRouter = {
+      async run(): Promise<never> {
+        throw new Error("simulated executor crash");
+      },
+    };
+
+    const engine = createPipelineEngine({
+      store,
+      registry,
+      agentExecutor: noopAgentExecutor(),
+      commandExecutor: createCommandExecutor(),
+      builtinRouter: throwingRouter,
+    });
+
+    const pipeline: Pipeline = {
+      id: asPipelineId("pl-throwing-router"),
+      name: "throwing-router",
+      stages: [
+        makeCommandStage("upstream", "true"),
+        {
+          name: "deliver",
+          trigger: { on: ["manual"] },
+          executor: {
+            kind: "builtin/router",
+            fromStages: ["upstream"],
+            target: { kind: "self" },
+          },
+          task: {},
+          dependsOn: ["upstream"],
+        },
+      ],
+    };
+
+    const runId = await engine.startRun({
+      pipeline,
+      projectId: "proj-a",
+      sessionId: "ses-1",
+      headSha: "sha-aaa",
+    });
+
+    const run = store.loadRun(runId);
+    expect(run?.stages["deliver"]?.status).toBe("failed");
+    expect(run?.stages["deliver"]?.errorMessage).toContain("simulated executor crash");
+    expect(run?.loopState).toBe("stalled");
+  });
 });

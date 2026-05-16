@@ -265,7 +265,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps = {}): CommandSt
           if (truncated) {
             settle({
               status: "failed",
-              errorMessage: `command "${executor.command}" stdout exceeded ${stdoutCap} bytes`,
+              errorMessage: `command "${executor.command}" stdout exceeded ${stdoutCap} bytes${stderr ? `: ${stderr}` : ""}`,
             });
             return;
           }

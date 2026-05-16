@@ -351,7 +351,24 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
       isFromFork: meta?.isFromFork ?? false,
     };
 
-    const outcome = await commandExecutor.run(input);
+    // Wrap the executor call so an unexpected throw (executor bug,
+    // platform error not surfaced as a CommandOutcome) still terminates
+    // the stage rather than escaping `executeEffect` and leaving the
+    // stage permanently `running`.
+    let outcome;
+    try {
+      outcome = await commandExecutor.run(input);
+    } catch (err) {
+      await dispatchInline({
+        type: "STAGE_FAILED",
+        now: now(),
+        runId,
+        stageName: stage.name,
+        errorMessage:
+          err instanceof Error ? err.message : `command executor threw: ${String(err)}`,
+      });
+      return;
+    }
     if (outcome.status === "completed") {
       await dispatchInline({
         type: "STAGE_COMPLETED",
@@ -391,13 +408,30 @@ export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
     }
 
     const ctx = createBuiltinContext(run, runId, stageRunId, stage.name);
-    const outcome = await executor.run({
-      runId,
-      stageRunId,
-      stage,
-      loopRound: run.loopRounds,
-      ctx,
-    });
+    // Defense-in-depth: builtin executors are supposed to convert all
+    // failures to `{ status: "failed" }`, but a thrown exception (e.g.
+    // a context method rejecting) would otherwise escape this function
+    // and leave the stage permanently `running` — see PR #1887 round-3.
+    let outcome;
+    try {
+      outcome = await executor.run({
+        runId,
+        stageRunId,
+        stage,
+        loopRound: run.loopRounds,
+        ctx,
+      });
+    } catch (err) {
+      await dispatchInline({
+        type: "STAGE_FAILED",
+        now: now(),
+        runId,
+        stageName: stage.name,
+        errorMessage:
+          err instanceof Error ? err.message : `${stage.executor.kind} executor threw: ${String(err)}`,
+      });
+      return;
+    }
 
     if (outcome.status === "completed") {
       await dispatchInline({

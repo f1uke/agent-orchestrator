@@ -447,6 +447,7 @@ export {
   formatForkRefusalMessage,
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_COMMAND_STDOUT_CAP_BYTES,
+  DEFAULT_COMMAND_STDERR_CAP_BYTES,
   COMMAND_KILL_GRACE_MS,
   parseFindingsJsonl,
   coerceArtifactInput,

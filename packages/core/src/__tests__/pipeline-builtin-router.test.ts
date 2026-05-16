@@ -192,4 +192,22 @@ describe("builtin/router — delivery", () => {
     expect(outcome.errorMessage).toContain("session not found");
     expect(outcome.errorMessage).toContain("session-self");
   });
+
+  it("surfaces readSiblingArtifacts errors as failed (does not throw past the executor)", async () => {
+    // Regression: previously the router let an uncaught rejection escape
+    // through the engine, leaving the stage permanently `running`. Now
+    // the router converts it to a normal `{ status: "failed" }` outcome.
+    const { ctx, read, send } = makeCtx();
+    read.mockRejectedValueOnce(new Error("store unavailable"));
+
+    const exec = createBuiltinRouterExecutor();
+    const outcome = await exec.run(makeInput(ctx));
+
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed") throw new Error("unreachable");
+    expect(outcome.errorMessage).toContain("store unavailable");
+    expect(outcome.errorMessage).toContain("read sibling artifacts");
+    // Must NOT have tried to deliver the (incomplete) payload.
+    expect(send).not.toHaveBeenCalled();
+  });
 });

@@ -69,10 +69,19 @@ export function createBuiltinRouterExecutor(): BuiltinExecutor {
 
       const bundles: Array<{ stage: string; count: number }> = [];
       const payloadSections: string[] = [];
-      for (const upstream of executor.fromStages) {
-        const artifacts = await ctx.readSiblingArtifacts(upstream);
-        bundles.push({ stage: upstream, count: artifacts.length });
-        payloadSections.push(formatStageSection(upstream, artifacts));
+      try {
+        for (const upstream of executor.fromStages) {
+          const artifacts = await ctx.readSiblingArtifacts(upstream);
+          bundles.push({ stage: upstream, count: artifacts.length });
+          payloadSections.push(formatStageSection(upstream, artifacts));
+        }
+      } catch (err) {
+        return {
+          status: "failed",
+          errorMessage: `builtin/router failed to read sibling artifacts: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        };
       }
 
       const payload = formatRouterPayload({

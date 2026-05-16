@@ -414,6 +414,47 @@ describe("pipeline DAG — fromStages validation (config load)", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts multi-entry fromStages when every entry is in dependsOn (no off-by-one)", () => {
+    const result = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        makeStage("a"),
+        makeStage("b"),
+        makeStage("c"),
+        {
+          ...makeStage("merge"),
+          dependsOn: ["a", "b", "c"],
+          executor: {
+            kind: "builtin/compose",
+            fromStages: ["a", "b", "c"],
+          },
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects multi-entry fromStages where one of several entries is missing from dependsOn", () => {
+    const result = ConfiguredPipelineSchema.safeParse({
+      stages: [
+        makeStage("a"),
+        makeStage("b"),
+        makeStage("c"),
+        {
+          ...makeStage("merge"),
+          dependsOn: ["a", "b"], // c missing
+          executor: {
+            kind: "builtin/compose",
+            fromStages: ["a", "b", "c"],
+          },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const messages = result.error.issues.map((i) => i.message).join("\n");
+    expect(messages).toContain('"c" in fromStages but not in dependsOn');
+  });
 });
 
 describe("pipeline DAG — allowFork validation (config load)", () => {
