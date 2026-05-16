@@ -81,6 +81,7 @@ function ctx(
 describe("PredicateSchema — parser", () => {
   it("accepts every leaf kind", () => {
     expect(PredicateSchema.safeParse({ kind: "all_pass", stages: ["a", "b"] }).success).toBe(true);
+    expect(PredicateSchema.safeParse({ kind: "any_failed", stages: ["a"] }).success).toBe(true);
     expect(PredicateSchema.safeParse({ kind: "no_open_findings" }).success).toBe(true);
     expect(PredicateSchema.safeParse({ kind: "finding_count_below", n: 3 }).success).toBe(true);
   });
@@ -161,6 +162,27 @@ describe("evaluatePredicate — leaves", () => {
   it("all_pass treats unknown stages as not-passing", () => {
     const stages = { a: makeStageState("a") };
     expect(evaluatePredicate({ kind: "all_pass", stages: ["ghost"] }, ctx(stages))).toBe(false);
+  });
+
+  it("any_failed fires only on status==='failed' (not skipped/outdated)", () => {
+    const stages = {
+      a: makeStageState("a", { status: "succeeded" }),
+      b: makeStageState("b", { status: "skipped" }),
+      c: makeStageState("c", { status: "outdated" }),
+      d: makeStageState("d", { status: "failed" }),
+    };
+    expect(evaluatePredicate({ kind: "any_failed", stages: ["a"] }, ctx(stages))).toBe(false);
+    expect(evaluatePredicate({ kind: "any_failed", stages: ["b"] }, ctx(stages))).toBe(false);
+    expect(evaluatePredicate({ kind: "any_failed", stages: ["c"] }, ctx(stages))).toBe(false);
+    expect(evaluatePredicate({ kind: "any_failed", stages: ["d"] }, ctx(stages))).toBe(true);
+    expect(evaluatePredicate({ kind: "any_failed", stages: ["a", "b", "c"] }, ctx(stages))).toBe(
+      false,
+    );
+  });
+
+  it("any_failed with empty scope is false (vacuous: no stages = no failures)", () => {
+    const stages = { a: makeStageState("a", { status: "succeeded" }) };
+    expect(evaluatePredicate({ kind: "any_failed", stages: [] }, ctx(stages))).toBe(false);
   });
 
   it("no_open_findings counts only open finding artifacts", () => {
@@ -303,10 +325,10 @@ describe("Legacy route predicate bridge", () => {
     ]);
   });
 
-  it("fromLegacyRoutePredicate maps anyFailed → not(all_pass)", () => {
+  it("fromLegacyRoutePredicate maps anyFailed → any_failed", () => {
     expect(fromLegacyRoutePredicate({ kind: "anyFailed", stages: ["a"] })).toEqual({
-      kind: "not",
-      predicate: { kind: "all_pass", stages: ["a"] },
+      kind: "any_failed",
+      stages: ["a"],
     });
   });
 
@@ -315,13 +337,29 @@ describe("Legacy route predicate bridge", () => {
     expect(normalizeRoutePredicate(dsl)).toBe(dsl);
   });
 
-  it("anyFailed semantics: not(all_pass) fires when any stage didn't succeed", () => {
+  it("anyFailed semantics: fires only when a stage actually status='failed'", () => {
     const stages = {
       a: makeStageState("a", { status: "succeeded" }),
       b: makeStageState("b", { status: "failed" }),
     };
     const pred = fromLegacyRoutePredicate({ kind: "anyFailed", stages: ["a", "b"] });
     expect(evaluatePredicate(pred, ctx(stages))).toBe(true);
+  });
+
+  it("anyFailed semantics: does NOT fire for skipped/outdated (v1.1 contract)", () => {
+    // The old bridge `not(all_pass)` would have incorrectly returned true
+    // here because isStagePassing treats skipped/outdated as not-passing.
+    // The dedicated any_failed leaf checks status === "failed" only.
+    const stages = {
+      a: makeStageState("a", { status: "succeeded" }),
+      b: makeStageState("b", { status: "skipped" }),
+      c: makeStageState("c", { status: "outdated" }),
+    };
+    const pred = fromLegacyRoutePredicate({
+      kind: "anyFailed",
+      stages: ["a", "b", "c"],
+    });
+    expect(evaluatePredicate(pred, ctx(stages))).toBe(false);
   });
 });
 

@@ -2,9 +2,11 @@
  * v1.3 — workspace class config validation + read-siblings prompt wiring.
  *
  * Covers WorkspaceGuard at config load: a stage that declares
- * `workspaceClass: "read-siblings"` must have an upstream stage to read
- * from. Also verifies the runtime prompt surfaces sibling artifacts when
- * the class is set.
+ * `workspaceClass: "read-siblings"` must declare `dependsOn` (the only edge
+ * the engine actually walks for sibling artifact collection). Positional
+ * neighbors and route refs don't qualify — the engine wouldn't collect
+ * their artifacts at runtime. Also verifies the prompt surfaces sibling
+ * artifacts when the class is set.
  */
 
 import { describe, expect, it } from "vitest";
@@ -30,7 +32,7 @@ function makeStageInput(name: string, overrides: Record<string, unknown> = {}): 
 }
 
 describe("WorkspaceGuard — read-siblings", () => {
-  it("rejects a single stage declaring read-siblings (orphan)", () => {
+  it("rejects a single stage declaring read-siblings (no dependsOn)", () => {
     const result = ConfiguredPipelineSchema.safeParse({
       stages: [makeStageInput("only", { workspaceClass: "read-siblings" })],
     });
@@ -39,7 +41,7 @@ describe("WorkspaceGuard — read-siblings", () => {
     const messages = result.error.issues.map((i) => i.message).join("\n");
     expect(messages).toContain('Stage "only"');
     expect(messages).toContain("read-siblings");
-    expect(messages).toContain("no upstream stages");
+    expect(messages).toContain("dependsOn");
   });
 
   it("rejects the first-declared stage when it claims read-siblings", () => {
@@ -62,17 +64,27 @@ describe("WorkspaceGuard — read-siblings", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts read-siblings when a prior stage is declared (implicit upstream)", () => {
+  it("rejects read-siblings when only a prior stage is declared (no dependsOn)", () => {
+    // Engine's collectSiblingArtifacts walks dependsOn only; positional
+    // neighbors don't seed the BFS, so without dependsOn the prompt block
+    // would silently be empty. Guard must reject.
     const result = ConfiguredPipelineSchema.safeParse({
       stages: [
         makeStageInput("review"),
         makeStageInput("fix", { workspaceClass: "read-siblings" }),
       ],
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const messages = result.error.issues.map((i) => i.message).join("\n");
+    expect(messages).toContain('Stage "fix"');
+    expect(messages).toContain("dependsOn");
   });
 
-  it("accepts read-siblings when routes reference an upstream stage", () => {
+  it("rejects read-siblings when only routes reference an upstream stage", () => {
+    // Routes are activation gates, not data edges — they don't seed the
+    // engine's artifact collection. Without dependsOn, sibling artifacts
+    // would be empty at runtime.
     const result = ConfiguredPipelineSchema.safeParse({
       stages: [
         makeStageInput("review"),
@@ -82,7 +94,7 @@ describe("WorkspaceGuard — read-siblings", () => {
         }),
       ],
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
   it("accepts independent (default) on a single-stage pipeline", () => {

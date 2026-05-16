@@ -12,6 +12,11 @@
  *                            `succeeded` (or `verdict === "pass"` when set).
  *                            Empty scope is vacuously true; the caller is
  *                            responsible for choosing a sensible default scope.
+ *  - `any_failed`          — at least one referenced stage's terminal status
+ *                            is `failed` specifically (not `skipped` or
+ *                            `outdated`). Mirrors v1.1's `anyFailed` exactly
+ *                            so the legacy bridge can preserve semantics for
+ *                            existing route configs.
  *  - `no_open_findings`    — zero finding artifacts in scope have
  *                            `status === "open"`.
  *  - `finding_count_below` — strictly fewer than `n` open findings in scope.
@@ -47,6 +52,7 @@ const StagesScope = z.array(z.string().min(1)).optional();
 export const PredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("all_pass"), stages: StagesScope }),
+    z.object({ kind: z.literal("any_failed"), stages: StagesScope }),
     z.object({ kind: z.literal("no_open_findings"), stages: StagesScope }),
     z.object({
       kind: z.literal("finding_count_below"),
@@ -90,6 +96,12 @@ export function evaluatePredicate(predicate: Predicate, context: PredicateContex
       const scope = predicate.stages ?? context.allStageNames;
       if (scope.length === 0) return true;
       return scope.every((name) => isStagePassing(context.stages[name]));
+    }
+    case "any_failed": {
+      const scope = predicate.stages ?? context.allStageNames;
+      // Empty scope is vacuously false — "no stages were failed" is the
+      // only consistent answer when the set is empty.
+      return scope.some((name) => context.stages[name]?.status === "failed");
     }
     case "no_open_findings": {
       return collectOpenFindings(predicate.stages, context).length === 0;
@@ -141,9 +153,10 @@ function collectOpenFindings(
  *
  *  - `allSucceeded` → `all_pass`
  *  - `anySucceeded` → `or(all_pass([s]))`
- *  - `anyFailed`    → `not(all_pass)` over the same scope. v1.1's reducer
- *    treats "any non-success terminal status" as failure for routing
- *    purposes, which is exactly what `not all_pass` captures.
+ *  - `anyFailed`    → `any_failed`. v1.1's `anyFailed` matches `status ===
+ *    "failed"` specifically — `not(all_pass)` would (wrongly) also fire for
+ *    `skipped` / `outdated` stages, which v1.1's evaluator never treated as
+ *    failures. The dedicated `any_failed` leaf preserves the exact semantics.
  */
 export function fromLegacyRoutePredicate(legacy: StageRoutePredicate): Predicate {
   switch (legacy.kind) {
@@ -155,7 +168,7 @@ export function fromLegacyRoutePredicate(legacy: StageRoutePredicate): Predicate
         predicates: legacy.stages.map((s) => ({ kind: "all_pass", stages: [s] })),
       };
     case "anyFailed":
-      return { kind: "not", predicate: { kind: "all_pass", stages: [...legacy.stages] } };
+      return { kind: "any_failed", stages: [...legacy.stages] };
   }
 }
 
@@ -187,6 +200,7 @@ export function collectReferencedStages(value: StageRoutePredicate | Predicate):
   function walk(p: Predicate): void {
     switch (p.kind) {
       case "all_pass":
+      case "any_failed":
       case "no_open_findings":
       case "finding_count_below":
         for (const s of p.stages ?? []) refs.add(s);
@@ -222,6 +236,7 @@ export function evaluateExitPredicates(
 export function predicateDepth(predicate: Predicate): number {
   switch (predicate.kind) {
     case "all_pass":
+    case "any_failed":
     case "no_open_findings":
     case "finding_count_below":
       return 0;

@@ -66,6 +66,33 @@ describe("classifyConfigChange — none", () => {
     ]);
     expect(classifyConfigChange(a, b).kind).toBe("none");
   });
+
+  it("is key-order independent for nested config (YAML reformatter safe)", () => {
+    // Two pipelines with the same executor.config but keys inserted in a
+    // different order — a JSON.stringify comparator would falsely call this
+    // structural and abort an in-flight run.
+    const a = pipeline([
+      stage("review", {
+        executor: {
+          kind: "agent",
+          plugin: "codex",
+          mode: "review",
+          config: { tone: "strict", depth: 2, nested: { a: 1, b: 2 } },
+        },
+      }),
+    ]);
+    const b = pipeline([
+      stage("review", {
+        executor: {
+          kind: "agent",
+          plugin: "codex",
+          mode: "review",
+          config: { depth: 2, nested: { b: 2, a: 1 }, tone: "strict" },
+        },
+      }),
+    ]);
+    expect(classifyConfigChange(a, b).kind).toBe("none");
+  });
 });
 
 describe("classifyConfigChange — structural", () => {

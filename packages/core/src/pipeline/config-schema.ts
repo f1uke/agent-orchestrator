@@ -215,16 +215,16 @@ export const ConfiguredPipelineSchema = z
       }
 
       if (stage.workspaceClass === "read-siblings") {
-        const hasDependsOn = (stage.dependsOn?.length ?? 0) > 0;
-        const hasRouteRefs = stage.routes
-          ? collectReferencedStages(stage.routes.when as StageRoutePredicate | Predicate).length > 0
-          : false;
-        const hasPriorStage = i > 0;
-        if (!hasDependsOn && !hasRouteRefs && !hasPriorStage) {
+        // Engine's `collectSiblingArtifacts` (engine.ts) walks `dependsOn`
+        // transitively and nothing else — route refs and positional
+        // neighbors don't seed the BFS. Reject any read-siblings stage that
+        // wouldn't actually receive artifacts at runtime, so the prompt
+        // block isn't silently omitted.
+        if ((stage.dependsOn?.length ?? 0) === 0) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["stages", i, "workspaceClass"],
-            message: `Stage "${stage.name}" declares workspaceClass="read-siblings" but has no upstream stages; declare dependsOn or place the stage after the stages it should read.`,
+            message: `Stage "${stage.name}" declares workspaceClass="read-siblings" but has no dependsOn; artifact collection follows only the dependsOn graph at runtime, so sibling artifacts would be empty. Add a dependsOn entry for each upstream stage whose artifacts this stage should read.`,
           });
         }
       }
@@ -344,6 +344,7 @@ function cloneRouteWhen(when: StageRoutePredicate | Predicate): StageRoutePredic
 function clonePredicate(p: Predicate): Predicate {
   switch (p.kind) {
     case "all_pass":
+    case "any_failed":
     case "no_open_findings":
       return p.stages !== undefined ? { kind: p.kind, stages: [...p.stages] } : { kind: p.kind };
     case "finding_count_below":

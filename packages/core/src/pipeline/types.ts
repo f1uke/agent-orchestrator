@@ -127,6 +127,7 @@ export type StageRoutePredicate =
  */
 export type Predicate =
   | { kind: "all_pass"; stages?: string[] }
+  | { kind: "any_failed"; stages?: string[] }
   | { kind: "no_open_findings"; stages?: string[] }
   | { kind: "finding_count_below"; n: number; stages?: string[] }
   | { kind: "and"; predicates: Predicate[] }

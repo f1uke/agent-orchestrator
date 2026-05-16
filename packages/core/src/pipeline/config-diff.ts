@@ -137,13 +137,38 @@ function arraysEqual<T>(a: readonly T[], b: readonly T[]): boolean {
 }
 
 /**
- * Structural deep-equal for plain-data records. Pipelines/Stages don't
- * contain Maps, Sets, Dates, or class instances — JSON.stringify is enough
- * and avoids hand-rolling a recursive comparator that would risk missing
- * an edge case. Output order isn't deterministic across JS engines for
- * objects with non-string keys, but Pipeline values are all string-keyed.
+ * Structural deep-equal for plain-data records.
+ *
+ * `JSON.stringify` is NOT safe here: V8 preserves insertion order, so a YAML
+ * reformatter that reorders `executor.config` keys (e.g. `{ tone, depth }` →
+ * `{ depth, tone }`) would stringify to different strings and falsely
+ * classify the diff as structural — aborting a live run for a no-op edit.
+ *
+ * Pipelines/Stages contain only plain values: primitives, arrays, and
+ * string-keyed objects from a parsed YAML/JSON tree. No Maps, Sets, Dates,
+ * class instances, or symbol-keyed properties to worry about. The recursive
+ * comparator below sorts keys lexicographically at every object level so the
+ * comparison is order-independent.
  */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (a === null || b === null) return false;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object") return false;
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+    return true;
+  }
+  if (Array.isArray(b)) return false;
+
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao).sort();
+  const bKeys = Object.keys(bo).sort();
+  if (aKeys.length !== bKeys.length) return false;
+  for (let i = 0; i < aKeys.length; i++) if (aKeys[i] !== bKeys[i]) return false;
+  for (const k of aKeys) if (!deepEqual(ao[k], bo[k])) return false;
+  return true;
 }
