@@ -426,6 +426,40 @@ describe("scm-gitlab plugin", () => {
       const result = await scm.detectPR(makeSession(), project);
       expect(result?.isDraft).toBe(true);
     });
+
+    it("flags fork MRs when source_project_id differs from target_project_id", async () => {
+      mockGlab([
+        {
+          iid: 42,
+          web_url: "https://gitlab.com/acme/repo/-/merge_requests/42",
+          title: "fork MR",
+          source_branch: "feat/my-feature",
+          target_branch: "main",
+          draft: false,
+          source_project_id: 1,
+          target_project_id: 2,
+        },
+      ]);
+      const result = await scm.detectPR(makeSession(), project);
+      expect(result?.isFromFork).toBe(true);
+    });
+
+    it("treats same-project MRs as non-fork (isFromFork false)", async () => {
+      mockGlab([
+        {
+          iid: 42,
+          web_url: "https://gitlab.com/acme/repo/-/merge_requests/42",
+          title: "same-repo MR",
+          source_branch: "feat/my-feature",
+          target_branch: "main",
+          draft: false,
+          source_project_id: 10,
+          target_project_id: 10,
+        },
+      ]);
+      const result = await scm.detectPR(makeSession(), project);
+      expect(result?.isFromFork).toBe(false);
+    });
   });
 
   // ---- getPRState --------------------------------------------------------

@@ -14,6 +14,7 @@ export {
   formatForkRefusalMessage,
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_COMMAND_STDOUT_CAP_BYTES,
+  DEFAULT_COMMAND_STDERR_CAP_BYTES,
   COMMAND_KILL_GRACE_MS,
   type CommandExecutorDeps,
   type CommandStageExecutor,
@@ -30,4 +31,4 @@ export {
   type BuiltinOutcome,
 } from "./builtin-router.js";
 
-export { createBuiltinComposeExecutor, type ComposeRunInput } from "./builtin-compose.js";
+export { createBuiltinComposeExecutor } from "./builtin-compose.js";

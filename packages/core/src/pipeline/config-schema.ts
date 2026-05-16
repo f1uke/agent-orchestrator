@@ -184,6 +184,52 @@ export const ConfiguredPipelineSchema = z
       }
     }
 
+    // fromStages references must point to known stage names and must not
+    // self-reference.  They must also be declared in dependsOn so the DAG
+    // scheduler guarantees the referenced stages are terminal before the
+    // builtin executor reads their artifacts.
+    for (let i = 0; i < pipeline.stages.length; i++) {
+      const stage = pipeline.stages[i];
+      const { executor } = stage;
+      if (executor.kind === "builtin/router" || executor.kind === "builtin/compose") {
+        for (const ref of executor.fromStages) {
+          if (!stageNames.has(ref)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["stages", i, "executor", "fromStages"],
+              message: `Stage "${stage.name}" references unknown stage "${ref}" in fromStages.`,
+            });
+          }
+          if (ref === stage.name) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["stages", i, "executor", "fromStages"],
+              message: `Stage "${stage.name}" cannot reference itself in fromStages.`,
+            });
+          }
+          if (stageNames.has(ref) && ref !== stage.name && !(stage.dependsOn ?? []).includes(ref)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["stages", i, "executor", "fromStages"],
+              message: `Stage "${stage.name}" lists "${ref}" in fromStages but not in dependsOn — execution order is not guaranteed.`,
+            });
+          }
+        }
+      }
+    }
+
+    // allowFork is only meaningful for command stages.
+    for (let i = 0; i < pipeline.stages.length; i++) {
+      const stage = pipeline.stages[i];
+      if (stage.allowFork !== undefined && stage.executor.kind !== "command") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["stages", i, "allowFork"],
+          message: `Stage "${stage.name}" sets allowFork but executor kind "${stage.executor.kind}" ignores it — allowFork is only meaningful for command stages.`,
+        });
+      }
+    }
+
     // Cycle detection over the combined dependsOn + routes-refs graph.
     // Iterative DFS; returns the first cycle found in declaration order so
     // the error reads naturally (e.g. "a → b → c → a"). Trivial self-loops

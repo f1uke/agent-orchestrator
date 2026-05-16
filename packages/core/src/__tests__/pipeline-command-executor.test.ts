@@ -15,6 +15,7 @@ import {
   asRunId,
   asStageRunId,
   createCommandExecutor,
+  DEFAULT_COMMAND_STDERR_CAP_BYTES,
   formatForkRefusalMessage,
   type CommandStartInput,
   type Stage,
@@ -275,6 +276,34 @@ posixDescribe("command executor — environment", () => {
     expect(outcome.status).toBe("completed");
     if (outcome.status !== "completed") throw new Error("unreachable");
     expect(outcome.artifacts[0]).toMatchObject({ kind: "json", data: { v: "from-stage" } });
+  });
+});
+
+posixDescribe("command executor — stderr cap", () => {
+  it("truncates stderr that exceeds DEFAULT_COMMAND_STDERR_CAP_BYTES and notes it in the error", async () => {
+    const exec = createCommandExecutor();
+    // Emit well over the 64 KB stderr cap then exit non-zero so stderr surfaces
+    // in the error message. `yes y | head -c N` writes N bytes to stdout; we
+    // redirect to stderr and add a newline-terminated final byte to ensure the
+    // buffer flushes cleanly.
+    const bytesOver = DEFAULT_COMMAND_STDERR_CAP_BYTES + 10_000;
+    const stage = makeCommandStage({
+      executor: {
+        kind: "command",
+        command: "/bin/sh",
+        args: ["-c", `yes y | head -c ${bytesOver} >&2; exit 1`],
+      },
+    });
+
+    const outcome = await exec.run(makeInput({ stage }));
+
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed") throw new Error("unreachable");
+    // The error message must contain the truncation marker.
+    expect(outcome.errorMessage).toContain("[stderr truncated]");
+    // The captured stderr in the error message must stay bounded — confirm it
+    // is well under 2x the cap (the raw cap plus the marker suffix).
+    expect(outcome.errorMessage.length).toBeLessThan(DEFAULT_COMMAND_STDERR_CAP_BYTES * 2);
   });
 });
 

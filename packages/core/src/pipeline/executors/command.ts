@@ -81,6 +81,11 @@ export const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 /** Default cap on stdout bytes; protects the engine from misbehaving scripts. */
 export const DEFAULT_COMMAND_STDOUT_CAP_BYTES = 4 * 1024 * 1024;
 /**
+ * Default cap on stderr bytes. Stderr is only ever surfaced inside an error
+ * message, so 64 KB is plenty for diagnosis without filling the conversation.
+ */
+export const DEFAULT_COMMAND_STDERR_CAP_BYTES = 64 * 1024;
+/**
  * Grace period between SIGTERM and SIGKILL when a stage times out. Long
  * enough for a well-behaved child to flush stdout/stderr, short enough that
  * the pipeline still recovers in bounded time.
@@ -173,7 +178,9 @@ export function createCommandExecutor(deps: CommandExecutorDeps = {}): CommandSt
         const stdoutChunks: Buffer[] = [];
         const stderrChunks: Buffer[] = [];
         let stdoutBytes = 0;
+        let stderrBytes = 0;
         let truncated = false;
+        let stderrTruncated = false;
         let settled = false;
         let timedOut = false;
         let killTimer: NodeJS.Timeout | null = null;
@@ -226,7 +233,17 @@ export function createCommandExecutor(deps: CommandExecutorDeps = {}): CommandSt
           }
         });
         child.stderr?.on("data", (chunk: Buffer) => {
-          stderrChunks.push(chunk);
+          stderrBytes += chunk.length;
+          if (stderrBytes <= DEFAULT_COMMAND_STDERR_CAP_BYTES) {
+            stderrChunks.push(chunk);
+          } else if (!stderrTruncated) {
+            stderrTruncated = true;
+            // Keep everything up to the cap; drop overflow rather than OOM.
+            const overflow = stderrBytes - DEFAULT_COMMAND_STDERR_CAP_BYTES;
+            if (chunk.length > overflow) {
+              stderrChunks.push(chunk.subarray(0, chunk.length - overflow));
+            }
+          }
         });
         child.on("error", (err) => {
           settle({
@@ -235,7 +252,8 @@ export function createCommandExecutor(deps: CommandExecutorDeps = {}): CommandSt
           });
         });
         child.on("close", (code, signal) => {
-          const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+          const stderrRaw = Buffer.concat(stderrChunks).toString("utf-8").trim();
+          const stderr = stderrTruncated ? `${stderrRaw}\n[stderr truncated]` : stderrRaw;
           if (timedOut) {
             const elapsed = now() - startedAt;
             settle({

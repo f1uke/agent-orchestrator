@@ -405,7 +405,13 @@ export interface BuiltinTaskContext {
   pipelineName: string;
   /**
    * Return artifacts emitted by an upstream sibling stage in the same run.
-   * Returns `[]` when the sibling has no artifacts or has not run.
+   *
+   * Returns `[]` in three distinct cases:
+   *   - Unknown stage name (typo or wrong `fromStages` config) — silent empty.
+   *   - Stage exists but has not completed yet — silent empty. The Zod config
+   *     schema enforces `fromStages ⊆ dependsOn`, so at runtime the scheduler
+   *     guarantees all listed stages are already terminal before this runs.
+   *   - Stage completed with zero artifacts — expected empty.
    */
   readSiblingArtifacts(stageName: string): Promise<Artifact[]>;
   /**

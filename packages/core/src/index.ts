@@ -442,6 +442,16 @@ export {
   findFirstStageCycle,
   scheduleAfterChange,
   validatePipelineDag,
+  // v1.2: command executor, builtin executors, findings parser
+  createCommandExecutor,
+  formatForkRefusalMessage,
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_COMMAND_STDOUT_CAP_BYTES,
+  COMMAND_KILL_GRACE_MS,
+  parseFindingsJsonl,
+  coerceArtifactInput,
+  createBuiltinRouterExecutor,
+  createBuiltinComposeExecutor,
   // Pipeline config schema (`pipelines:` block)
   ConfiguredPipelineSchema,
   PipelinesConfigSchema,
@@ -506,6 +516,18 @@ export type {
   StartRunInput,
   ConfiguredPipeline,
   PipelinesConfig,
+  // v1.2: command executor types
+  CommandStageExecutor,
+  CommandStartInput,
+  CommandOutcome,
+  CommandExecutorDeps,
+  // v1.2: builtin executor types
+  BuiltinExecutor,
+  BuiltinRunInput,
+  BuiltinOutcome,
+  BuiltinTaskContext,
+  BuiltinRouterExecutor,
+  BuiltinComposeExecutor,
 } from "./pipeline/index.js";
 
 export {

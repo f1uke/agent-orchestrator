@@ -18,16 +18,8 @@
  *     `bundles[].count: 0` so downstream stages know the upstream ran.
  */
 
-import type { ArtifactInput, BuiltinTaskContext, RunId, Stage, StageRunId } from "../types.js";
+import type { ArtifactInput } from "../types.js";
 import type { BuiltinExecutor, BuiltinOutcome } from "./builtin-router.js";
-
-export interface ComposeRunInput {
-  runId: RunId;
-  stageRunId: StageRunId;
-  stage: Stage;
-  loopRound?: number;
-  ctx: BuiltinTaskContext;
-}
 
 export function createBuiltinComposeExecutor(): BuiltinExecutor {
   return {
