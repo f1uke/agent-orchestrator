@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMediaQuery, MOBILE_BREAKPOINT } from "@/hooks/useMediaQuery";
 import {
   type DashboardSession,
-  TERMINAL_STATUSES,
-  NON_RESTORABLE_STATUSES,
+  isDashboardSessionRestorable,
+  isDashboardSessionTerminal,
 } from "@/lib/types";
 import dynamic from "next/dynamic";
 import { getSessionTitle } from "@/lib/format";
@@ -16,10 +16,7 @@ import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 
 import { ProjectSidebar, type ProjectSidebarOrchestrator } from "./ProjectSidebar";
 import { MobileBottomNav } from "./MobileBottomNav";
-import {
-  SessionDetailHeader,
-  type OrchestratorZones,
-} from "./SessionDetailHeader";
+import { SessionDetailHeader, type OrchestratorZones } from "./SessionDetailHeader";
 import { SessionEndedSummary } from "./SessionEndedSummary";
 import { sessionActivityMeta } from "./session-detail-utils";
 
@@ -70,8 +67,8 @@ export function SessionDetail({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const pr = session.pr;
-  const terminalEnded = TERMINAL_STATUSES.has(session.status);
-  const isRestorable = terminalEnded && !NON_RESTORABLE_STATUSES.has(session.status);
+  const terminalEnded = isDashboardSessionTerminal(session);
+  const isRestorable = isDashboardSessionRestorable(session);
   const activity = (session.activity && sessionActivityMeta[session.activity]) ?? {
     label: session.activity ?? "unknown",
     color: "var(--color-text-muted)",
@@ -190,10 +187,7 @@ export function SessionDetail({
             </div>
           ) : null}
           {mobileSidebarOpen && (
-            <div
-              className="sidebar-mobile-backdrop"
-              onClick={() => setMobileSidebarOpen(false)}
-            />
+            <div className="sidebar-mobile-backdrop" onClick={() => setMobileSidebarOpen(false)} />
           )}
 
           <div className="dashboard-main dashboard-main--desktop">
@@ -231,9 +225,7 @@ export function SessionDetail({
           activeTab={isOrchestrator ? "orchestrator" : undefined}
           dashboardHref={dashboardHref}
           prsHref={
-            session.projectId
-              ? `/?project=${encodeURIComponent(session.projectId)}&tab=prs`
-              : "/"
+            session.projectId ? `/?project=${encodeURIComponent(session.projectId)}&tab=prs` : "/"
           }
           showOrchestrator={!!orchestratorHref}
           orchestratorHref={orchestratorHref}

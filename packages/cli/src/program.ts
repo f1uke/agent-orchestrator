@@ -1,5 +1,4 @@
 import { Command } from "commander";
-import { registerInit } from "./commands/init.js";
 import { registerStatus } from "./commands/status.js";
 import { registerSpawn, registerBatchSpawn } from "./commands/spawn.js";
 import { registerSession } from "./commands/session.js";
@@ -21,6 +20,7 @@ import { registerEvents } from "./commands/events.js";
 import { registerPipeline } from "./commands/pipeline.js";
 import { registerStage } from "./commands/stage.js";
 import { registerArtifact } from "./commands/artifact.js";
+import { registerConfig } from "./commands/config.js";
 import { getConfigInstruction } from "./lib/config-instruction.js";
 import { getCliVersion } from "./options/version.js";
 
@@ -32,7 +32,6 @@ export function createProgram(): Command {
     .description("Agent Orchestrator — manage parallel AI coding agents")
     .version(getCliVersion());
 
-  registerInit(program);
   registerStart(program);
   registerStop(program);
   registerStatus(program);
@@ -57,6 +56,7 @@ export function createProgram(): Command {
   registerPipeline(program);
   registerStage(program);
   registerArtifact(program);
+  registerConfig(program);
 
   program
     .command("config-help")

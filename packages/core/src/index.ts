@@ -110,7 +110,6 @@ export {
   isTmuxAvailable,
   listSessions as listTmuxSessions,
   hasSession as hasTmuxSession,
-  newSession as newTmuxSession,
   sendKeys as tmuxSendKeys,
   capturePane as tmuxCapturePane,
   killSession as killTmuxSession,
@@ -120,6 +119,10 @@ export {
 // Session manager — session CRUD
 export { createSessionManager } from "./session-manager.js";
 export type { SessionManagerDeps } from "./session-manager.js";
+
+// Process-scoped async memoization — used by plugins to dedupe shared
+// prerequisite checks (e.g. multiple github plugins checking gh auth).
+export { memoizeAsync, _clearProcessCacheForTests } from "./process-cache.js";
 
 // Lifecycle manager — state machine + reaction engine
 export { createLifecycleManager } from "./lifecycle-manager.js";
@@ -197,6 +200,9 @@ export {
   buildAgentPath,
   PREFERRED_GH_PATH,
 } from "./agent-workspace-hooks.js";
+
+// Git-based activity helpers — recent-commit liveness signal for agent plugins
+export { hasRecentCommits } from "./git-activity.js";
 export type { NormalizedOrchestratorSessionStrategy } from "./orchestrator-session-strategy.js";
 
 export {
@@ -264,6 +270,18 @@ export {
   validateAndStoreOrigin,
 } from "./paths.js";
 
+// Platform adapter — centralized cross-platform branching
+export {
+  isWindows,
+  isMac,
+  isLinux,
+  getDefaultRuntime,
+  getShell,
+  killProcessTree,
+  findPidByPort,
+  getEnvDefaults,
+} from "./platform.js";
+
 export { normalizeOriginUrl, relativeSubdir, deriveStorageKey } from "./storage-key.js";
 
 // Global config — Option C hybrid architecture (global registry + local behavior)
@@ -272,6 +290,7 @@ export {
   isCanonicalGlobalConfigPath,
   loadGlobalConfig,
   saveGlobalConfig,
+  createDefaultGlobalConfig,
   loadLocalProjectConfig,
   LocalProjectConfigSchema,
   loadLocalProjectConfigDetailed,
@@ -291,7 +310,24 @@ export type {
   LocalProjectConfig,
   LocalProjectConfigLoadResult,
   RegisterProjectOptions,
+  UpdateChannel,
+  InstallMethodOverride,
 } from "./global-config.js";
+export { UpdateChannelSchema, InstallMethodOverrideSchema } from "./global-config.js";
+
+// Channel-aware semver comparison shared by the CLI's update-check and the
+// dashboard's /api/version route.
+export { isVersionOutdated } from "./version-compare.js";
+
+// Cache-layer primitives for the update pipeline. Both the CLI and the
+// dashboard's /api/version route read the same cache file; centralising the
+// path + shape here prevents drift.
+export {
+  getUpdateCheckCachePath,
+  readUpdateCheckCacheRaw,
+  getInstalledAoVersion,
+} from "./update-cache.js";
+export type { UpdateCheckCacheRaw } from "./update-cache.js";
 
 export { loadEffectiveProjectConfig, iterateAllProjects } from "./project-resolver.js";
 
@@ -472,9 +508,36 @@ export type {
   PipelinesConfig,
 } from "./pipeline/index.js";
 
+export {
+  registerWindowsPtyHost,
+  unregisterWindowsPtyHost,
+  getWindowsPtyHosts,
+  clearWindowsPtyHostRegistry,
+  type WindowsPtyHostEntry,
+} from "./windows-pty-registry.js";
+
+export {
+  registerDaemonChild,
+  unregisterDaemonChild,
+  getDaemonChildren,
+  clearDaemonChildrenRegistry,
+  markDaemonShutdownHandlerInstalled,
+  registerChildReaper,
+  spawnManagedDaemonChild,
+  sweepDaemonChildren,
+  classifyAoOrphanCommand,
+  detectAoOrphansFromPsOutput,
+  scanAoOrphans,
+  reapAoOrphans,
+  type DaemonChildEntry,
+  type DaemonChildSweepOptions,
+  type DaemonChildSweepResult,
+  type AoOrphanProcess,
+} from "./daemon-children.js";
+
 // Activity event logging — structured diagnostic event trail
 export { recordActivityEvent, droppedEventCount } from "./activity-events.js";
-export { isActivityEventsFtsEnabled } from "./events-db.js";
+export { isActivityEventsFtsEnabled, closeDb } from "./events-db.js";
 export type {
   ActivityEventInput,
   ActivityEventKind,
