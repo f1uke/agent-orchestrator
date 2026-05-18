@@ -119,7 +119,6 @@ export function installShutdownHandlers(ctx: ShutdownContext): void {
           }
         }
 
-        let lastStopWriteError: unknown;
         if (killedSessionIds.length > 0) {
           const targetIds = killedSessionIds.filter((id) =>
             activeSessions.some((s) => s.id === id && s.projectId === ctx.projectId),
@@ -144,15 +143,24 @@ export function installShutdownHandlers(ctx: ShutdownContext): void {
               otherProjects: otherProjects.length > 0 ? otherProjects : undefined,
             });
           } catch (err) {
-            lastStopWriteError = err;
+            recordActivityEvent({
+              projectId: ctx.projectId,
+              source: "cli",
+              kind: "cli.last_stop_write_failed",
+              level: "error",
+              summary: `failed to write last-stop state during shutdown`,
+              data: {
+                targetSessionCount: targetIds.length,
+                otherProjectCount: otherProjects.length,
+                totalKilled: killedSessionIds.length,
+                errorMessage: err instanceof Error ? err.message : String(err),
+              },
+            });
           }
         }
 
         await sweepDaemonChildren({ ownerPid: process.pid });
         await unregister();
-        if (lastStopWriteError) {
-          throw lastStopWriteError;
-        }
         recordActivityEvent({
           projectId: ctx.projectId,
           source: "cli",

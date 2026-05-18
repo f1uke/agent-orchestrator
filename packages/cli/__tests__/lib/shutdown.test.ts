@@ -209,13 +209,25 @@ describe("shutdown handlers — activity events", () => {
     const events = recordedEvents();
     expect(events).toContainEqual(
       expect.objectContaining({
-        kind: "cli.shutdown_failed",
+        kind: "cli.last_stop_write_failed",
         source: "cli",
         level: "error",
-        data: expect.objectContaining({ errorMessage: "disk full" }),
+        data: expect.objectContaining({
+          targetSessionCount: 1,
+          otherProjectCount: 0,
+          totalKilled: 1,
+          errorMessage: "disk full",
+        }),
       }),
     );
-    expect(events.filter((e) => e.kind === "cli.shutdown_completed")).toHaveLength(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "cli.shutdown_completed",
+        source: "cli",
+        projectId: "p1",
+      }),
+    );
+    expect(events.filter((e) => e.kind === "cli.shutdown_failed")).toHaveLength(0);
   });
 
   it("emits cli.shutdown_force_exit when the 10s timer fires", async () => {

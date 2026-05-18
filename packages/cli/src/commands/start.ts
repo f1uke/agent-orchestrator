@@ -117,6 +117,17 @@ import { projectSessionUrl } from "../lib/routes.js";
 // HELPERS
 // =============================================================================
 
+class CliFailureEventRecordedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CliFailureEventRecordedError";
+  }
+}
+
+function isCliFailureEventRecordedError(err: unknown): boolean {
+  return err instanceof CliFailureEventRecordedError;
+}
+
 function readProjectBehaviorConfig(projectPath: string): LocalProjectConfig {
   const localConfig = loadLocalProjectConfigDetailed(projectPath);
   if (localConfig.kind === "loaded") {
@@ -964,7 +975,7 @@ async function runStartup(
       if (dashboardProcess) {
         dashboardProcess.kill();
       }
-      throw new Error(
+      throw new CliFailureEventRecordedError(
         `Failed to setup orchestrator: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );
@@ -992,7 +1003,7 @@ async function runStartup(
       if (dashboardProcess) {
         dashboardProcess.kill();
       }
-      throw new Error(
+      throw new CliFailureEventRecordedError(
         `Failed to start project supervisor: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );
@@ -1006,12 +1017,21 @@ async function runStartup(
       if (lastStop && lastStop.sessionIds.length > 0) {
         const stoppedAgo = `stopped at ${new Date(lastStop.stoppedAt).toLocaleString()}`;
         const otherProjects = lastStop.otherProjects ?? [];
+        const restoreProjectBySessionId = new Map<string, string>();
 
         // Build flat list of all sessions to restore, grouped for display
         const allRestoreSessions: string[] = [
           ...(lastStop.projectId === projectId ? lastStop.sessionIds : []),
           ...otherProjects.flatMap((p) => p.sessionIds),
         ];
+        for (const sessionId of lastStop.sessionIds) {
+          restoreProjectBySessionId.set(sessionId, lastStop.projectId);
+        }
+        for (const otherProject of otherProjects) {
+          for (const sessionId of otherProject.sessionIds) {
+            restoreProjectBySessionId.set(sessionId, otherProject.projectId);
+          }
+        }
 
         // Display grouped by project
         const currentProjectSessions = lastStop.projectId === projectId ? lastStop.sessionIds : [];
@@ -1072,8 +1092,9 @@ async function runStartup(
                 restoredCount++;
               } catch (err) {
                 failedSessionIds.add(sessionId);
+                const restoreProjectId = restoreProjectBySessionId.get(sessionId) ?? projectId;
                 recordActivityEvent({
-                  projectId,
+                  projectId: restoreProjectId,
                   sessionId,
                   source: "cli",
                   kind: "cli.restore_session_failed",
@@ -1743,16 +1764,18 @@ export function registerStart(program: Command): void {
           // Ctrl+C and `ao stop` (which sends SIGTERM) perform a full
           // graceful shutdown via the handler installed inside runStartup().
         } catch (err) {
-          recordActivityEvent({
-            source: "cli",
-            kind: "cli.start_failed",
-            level: "error",
-            summary: `ao start action failed`,
-            data: {
-              reason: "outer",
-              errorMessage: err instanceof Error ? err.message : String(err),
-            },
-          });
+          if (!isCliFailureEventRecordedError(err)) {
+            recordActivityEvent({
+              source: "cli",
+              kind: "cli.start_failed",
+              level: "error",
+              summary: `ao start action failed`,
+              data: {
+                reason: "outer",
+                errorMessage: err instanceof Error ? err.message : String(err),
+              },
+            });
+          }
           if (err instanceof Error) {
             console.error(chalk.red("\nError:"), err.message);
           } else {
