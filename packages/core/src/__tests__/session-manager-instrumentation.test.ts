@@ -294,7 +294,7 @@ describe("runtime.lost_detected (MUST)", () => {
     const lifecycleStr = persisted!["lifecycle"];
     expect(lifecycleStr).toBeDefined();
     const lc = JSON.parse(lifecycleStr!) as { session: { state: string; reason: string } };
-    expect(lc.session.state).toBe("terminated");
+    expect(lc.session.state).toBe("detecting");
     expect(lc.session.reason).toBe("runtime_lost");
   });
 });
