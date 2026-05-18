@@ -20,7 +20,12 @@ import { writeMetadata, readMetadataRaw } from "../metadata.js";
 import { recordActivityEvent } from "../activity-events.js";
 import { getProjectWorktreesDir } from "../paths.js";
 import type { OrchestratorConfig, PluginRegistry, Agent } from "../types.js";
-import { setupTestContext, teardownTestContext, makeHandle, type TestContext } from "./test-utils.js";
+import {
+  setupTestContext,
+  teardownTestContext,
+  makeHandle,
+  type TestContext,
+} from "./test-utils.js";
 
 vi.mock("../activity-events.js", () => ({
   recordActivityEvent: vi.fn(),
@@ -90,11 +95,7 @@ function writeTerminatedSession(
   if (options.branch !== undefined) {
     metadata["branch"] = options.branch;
   }
-  writeMetadata(
-    sessionsDir,
-    sessionId,
-    metadata as unknown as Parameters<typeof writeMetadata>[2],
-  );
+  writeMetadata(sessionsDir, sessionId, metadata as unknown as Parameters<typeof writeMetadata>[2]);
 }
 
 describe("session.kill_started (MUST)", () => {
@@ -250,7 +251,9 @@ describe("session.spawn_failed — orchestrator path (MUST)", () => {
 
     const events = findAllEvents("session.spawn_failed");
     expect(events).toHaveLength(1);
-    const orchestratorFailure = events.find((e) => e.data && (e.data as Record<string, unknown>)["role"] === "orchestrator");
+    const orchestratorFailure = events.find(
+      (e) => e.data && (e.data as Record<string, unknown>)["role"] === "orchestrator",
+    );
     expect(orchestratorFailure).toBeDefined();
     expect(orchestratorFailure!.level).toBe("error");
     expect(orchestratorFailure!.projectId).toBe("my-app");
@@ -274,7 +277,9 @@ describe("session.spawn_failed — orchestrator path (MUST)", () => {
 
     const events = findAllEvents("session.spawn_failed");
     expect(events).toHaveLength(1);
-    const orchestratorFailure = events.find((e) => e.data && (e.data as Record<string, unknown>)["role"] === "orchestrator");
+    const orchestratorFailure = events.find(
+      (e) => e.data && (e.data as Record<string, unknown>)["role"] === "orchestrator",
+    );
     expect(orchestratorFailure).toBeDefined();
     expect(orchestratorFailure!.level).toBe("error");
 
@@ -613,20 +618,18 @@ describe("metadata.corrupt_detected (MUST)", () => {
     writeFileSync(sessionPath, "{ this is not json", "utf-8");
 
     const { mutateMetadata } = await import("../metadata.js");
-    mutateMetadata(
-      sessionsDir,
-      "app-corrupt",
-      () => ({ branch: "feat/x", project: "my-app" }),
-      { createIfMissing: true, activityEventSource: "agent-report" },
-    );
+    mutateMetadata(sessionsDir, "app-corrupt", () => ({ branch: "feat/x", project: "my-app" }), {
+      createIfMissing: true,
+      activityEventSource: "api",
+    });
 
     const event = findEvent("metadata.corrupt_detected");
     expect(event).toBeDefined();
-    expect(event!.level).toBe("warn");
-    expect(event!.source).toBe("agent-report");
+    expect(event!.level).toBe("error");
+    expect(event!.source).toBe("api");
     expect(event!.sessionId).toBe("app-corrupt");
     const data = event!.data as Record<string, unknown>;
-    expect(data["renamed"]).toBe(true);
-    expect(data["corruptPath"]).toMatch(/\.corrupt-\d+$/);
+    expect(data["renameSucceeded"]).toBe(true);
+    expect(data["renamedTo"]).toMatch(/\.corrupt-\d+$/);
   });
 });

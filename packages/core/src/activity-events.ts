@@ -20,8 +20,15 @@ export type ActivityEventSource =
   | "scm"
   | "runtime"
   | "agent"
+  | "tracker"
+  | "workspace"
+  | "notifier"
   | "reaction"
-  | "report-watcher";
+  | "report-watcher"
+  | "config"
+  | "plugin-registry"
+  | "migration"
+  | "recovery";
 
 export type ActivityEventKind =
   | "session.spawn_started"
@@ -59,6 +66,20 @@ export type ActivityEventKind =
   | "runtime.probe_failed"
   | "agent.process_probe_failed"
   | "agent.activity_probe_failed"
+  // Plugin-internal failure shapes (issue #1659)
+  | "scm.gh_unavailable"
+  | "scm.batch_enrich_pr_failed"
+  | "scm.ci_summary_failclosed"
+  | "workspace.post_create_failed"
+  | "workspace.branch_collision"
+  | "workspace.destroy_fell_back"
+  | "workspace.corrupt_clone_skipped"
+  | "tracker.dep_missing"
+  | "tracker.api_timeout"
+  | "notifier.auth_failed"
+  | "notifier.unreachable"
+  | "notifier.rate_limited"
+  | "notifier.dep_missing"
   // Reaction lifecycle
   | "reaction.escalated"
   | "reaction.send_to_agent_failed"
@@ -70,7 +91,38 @@ export type ActivityEventKind =
   | "lifecycle.poll_failed"
   | "detecting.escalated"
   // Report watcher
-  | "report_watcher.triggered";
+  | "report_watcher.triggered"
+  // Config/plugin-registry/storage migration
+  | "config.project_resolve_failed"
+  | "config.project_malformed"
+  | "config.project_invalid"
+  | "config.migrated"
+  | "plugin-registry.load_failed"
+  | "plugin-registry.validation_failed"
+  | "plugin-registry.specifier_failed"
+  | "migration.blocked"
+  | "migration.project_failed"
+  | "migration.rename_failed"
+  | "migration.completed"
+  | "migration.rollback_skipped"
+  // Webhook ingress (api source)
+  | "api.webhook_unverified"
+  | "api.webhook_rejected"
+  | "api.webhook_received"
+  | "api.webhook_failed"
+  // WebSocket terminal mux (ui source — Node-side server only)
+  | "ui.terminal_connected"
+  | "ui.terminal_disconnected"
+  | "ui.terminal_heartbeat_lost"
+  | "ui.terminal_pty_lost"
+  | "ui.terminal_protocol_error"
+  | "ui.session_broadcast_failed"
+  // Recovery/forensic instrumentation
+  | "recovery.session_failed"
+  | "recovery.action_failed"
+  | "api.agent_report.session_not_found"
+  | "api.agent_report.transition_rejected"
+  | "api.agent_report.apply_failed";
 
 export type ActivityEventLevel = "debug" | "info" | "warn" | "error";
 
@@ -110,14 +162,12 @@ export function droppedEventCount(): number {
 }
 
 function pruneOldEvents(db: ReturnType<typeof getDb>, cutoff: number): void {
-  db
-    ?.prepare(
-      `DELETE FROM activity_events
+  db?.prepare(
+    `DELETE FROM activity_events
        WHERE rowid IN (
          SELECT rowid FROM activity_events WHERE ts_epoch < ? LIMIT ?
        )`,
-    )
-    .run(cutoff, PRUNE_BATCH_SIZE);
+  ).run(cutoff, PRUNE_BATCH_SIZE);
 }
 
 // Patterns that indicate sensitive field names
@@ -134,7 +184,10 @@ function redactCredentialUrls(input: string): string {
     const proto = result.indexOf("://", offset);
     if (proto === -1) break;
     // Only match http:// or https:// (case-insensitive, matching old /gi flag)
-    if (proto < 4) { offset = proto + 3; continue; }
+    if (proto < 4) {
+      offset = proto + 3;
+      continue;
+    }
     const schemeEnd = result.slice(Math.max(0, proto - 5), proto).toLowerCase();
     if (!schemeEnd.endsWith("http") && !schemeEnd.endsWith("https")) {
       offset = proto + 3;
@@ -145,7 +198,7 @@ function redactCredentialUrls(input: string): string {
     while (cursor < result.length) {
       const ch = result.charCodeAt(cursor);
       // Space/control chars or '/' mean no '@' is coming in userinfo
-      if (ch <= 0x20 || ch === 0x2F) break;
+      if (ch <= 0x20 || ch === 0x2f) break;
       if (ch === 0x40) {
         // '@' found — redact everything between :// and @
         // Lowercase the scheme to match the old /gi regex behavior
@@ -158,7 +211,11 @@ function redactCredentialUrls(input: string): string {
       cursor++;
     }
     // No '@' found — not a credential URL, move past this ://
-    if (cursor >= result.length || result.charCodeAt(cursor) <= 0x20 || result.charCodeAt(cursor) === 0x2F) {
+    if (
+      cursor >= result.length ||
+      result.charCodeAt(cursor) <= 0x20 ||
+      result.charCodeAt(cursor) === 0x2f
+    ) {
       offset = proto + 3;
     }
   }
