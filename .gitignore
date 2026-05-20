@@ -11,6 +11,7 @@ coverage/
 .issue-assets/
 handoff/
 artifacts/
+changelog/
 packages/web/screenshots/
 .playwright-cli/
 
