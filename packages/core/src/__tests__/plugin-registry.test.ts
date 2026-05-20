@@ -387,6 +387,35 @@ describe("loadBuiltins", () => {
     });
   });
 
+  it("does not implicitly register manual opt-in built-in notifiers from routing alone", async () => {
+    const registry = createPluginRegistry();
+    const fakeComposio = makePlugin("notifier", "composio");
+    const cfg = makeOrchestratorConfig({
+      configPath: "/test/config.yaml",
+      defaults: {
+        runtime: "tmux",
+        agent: "codex",
+        workspace: "worktree",
+        notifiers: ["composio"],
+      },
+      notificationRouting: {
+        urgent: ["composio"],
+        action: [],
+        warning: [],
+        info: [],
+      },
+      notifiers: {},
+    });
+
+    await registry.loadBuiltins(cfg, async (pkg: string) => {
+      if (pkg === "@aoagents/ao-plugin-notifier-composio") return fakeComposio;
+      throw new Error(`Not found: ${pkg}`);
+    });
+
+    expect(fakeComposio.create).not.toHaveBeenCalled();
+    expect(registry.get("notifier", "composio")).toBeNull();
+  });
+
   it("does not create an implicit notifier registration over a conflicting explicit entry", async () => {
     const registry = createPluginRegistry();
     const fakeDashboard = makePlugin("notifier", "dashboard");

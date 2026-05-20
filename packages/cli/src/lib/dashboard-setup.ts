@@ -228,8 +228,7 @@ function resolveNonInteractiveSetup(
         ? parseLimit(existingDashboard["limit"])
         : DEFAULT_DASHBOARD_NOTIFICATION_LIMIT;
   const routingPreset =
-    resolveDashboardRoutingPreset(opts.routingPreset) ??
-    (opts.refresh ? undefined : "urgent-action");
+    resolveDashboardRoutingPreset(opts.routingPreset) ?? (opts.refresh ? undefined : "all");
 
   return { limit, routingPreset };
 }

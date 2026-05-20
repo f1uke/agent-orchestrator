@@ -19,11 +19,7 @@ import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
 import { EventEmitter } from "node:events";
-import {
-  getDefaultRuntime,
-  recordActivityEvent,
-  type SessionManager,
-} from "@aoagents/ao-core";
+import { getDefaultRuntime, recordActivityEvent, type SessionManager } from "@aoagents/ao-core";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -2366,7 +2362,7 @@ describe("start command — platform-aware runtime fallback", () => {
 // ---------------------------------------------------------------------------
 
 describe("start command — autoCreateConfig", () => {
-  it("writes a flat local config and returns the global project identity", async () => {
+  it("writes a flat local config, returns global project identity, and creates startup notifier defaults", async () => {
     const { detectEnvironment } = await import("../../src/lib/detect-env.js");
     vi.mocked(detectEnvironment).mockResolvedValue({
       isGitRepo: true,
@@ -2418,15 +2414,40 @@ describe("start command — autoCreateConfig", () => {
     const globalContent = readFileSync(globalConfigPath, "utf-8");
     const globalParsed = parseYaml(globalContent) as {
       defaults?: { notifiers?: unknown[] };
+      notifiers?: Record<
+        string,
+        { plugin?: string; backend?: string; dashboardUrl?: string; limit?: number }
+      >;
+      notificationRouting?: Record<string, string[]>;
       projects?: Record<string, { path?: string; sessionPrefix?: string }>;
     };
-    expect(globalParsed.defaults?.notifiers).toEqual(["composio", "desktop"]);
+    expect(globalParsed.defaults?.notifiers).toEqual([]);
+    expect(globalParsed.notifiers?.["dashboard"]).toEqual({ plugin: "dashboard", limit: 50 });
+    expect(globalParsed.notifiers?.["desktop"]).toMatchObject({
+      plugin: "desktop",
+      backend: "ao-app",
+      dashboardUrl: "http://localhost:3000",
+    });
+    expect(globalParsed.notificationRouting).toEqual({
+      urgent: ["desktop", "dashboard"],
+      action: ["dashboard"],
+      warning: ["dashboard"],
+      info: ["dashboard"],
+    });
+    expect(globalContent).not.toContain("composio");
 
     const projectIds = Object.keys(globalParsed.projects ?? {});
     expect(projectIds).toHaveLength(1);
     expect(config.configPath).toBe(configPath);
     expect(Object.keys(config.projects)).toEqual(projectIds);
     expect(config.projects[projectIds[0]!]!.path).toBe(realpathSync(tmpDir));
+    expect(config.defaults.notifiers).toEqual([]);
+    expect(config.notificationRouting).toEqual({
+      urgent: ["desktop", "dashboard"],
+      action: ["dashboard"],
+      warning: ["dashboard"],
+      info: ["dashboard"],
+    });
   });
 
   it("removes the flat local config when global registration fails", async () => {
@@ -2459,12 +2480,9 @@ describe("start command — autoCreateConfig", () => {
 
     writeFileSync(
       process.env["AO_GLOBAL_CONFIG"]!,
-      [
-        "projects:",
-        `  ${basename(tmpDir)}:`,
-        `    path: ${join(tmpDir, "other-repo")}`,
-        "",
-      ].join("\n"),
+      ["projects:", `  ${basename(tmpDir)}:`, `    path: ${join(tmpDir, "other-repo")}`, ""].join(
+        "\n",
+      ),
     );
 
     await expect(autoCreateConfig(tmpDir)).rejects.toThrow("already registered");

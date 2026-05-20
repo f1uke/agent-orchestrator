@@ -268,7 +268,7 @@ describe("setup dashboard command", () => {
     vi.unstubAllGlobals();
   });
 
-  it("writes dashboard notifier config with the urgent-action routing default", async () => {
+  it("writes dashboard notifier config with the all-priorities routing default", async () => {
     const program = createProgram();
 
     await program.parseAsync([
@@ -290,8 +290,8 @@ describe("setup dashboard command", () => {
     expect(parsed.notifiers?.["dashboard"]).toEqual({ plugin: "dashboard", limit: 75 });
     expect(parsed.notificationRouting?.urgent).toContain("dashboard");
     expect(parsed.notificationRouting?.action).toContain("dashboard");
-    expect(parsed.notificationRouting?.warning ?? []).not.toContain("dashboard");
-    expect(parsed.notificationRouting?.info ?? []).not.toContain("dashboard");
+    expect(parsed.notificationRouting?.warning).toContain("dashboard");
+    expect(parsed.notificationRouting?.info).toContain("dashboard");
   });
 
   it("prints status without mutating config", async () => {
@@ -2717,7 +2717,7 @@ describe("setup desktop command", () => {
     expect(setup?.commands.some((command) => command.name() === "desktop")).toBe(true);
   });
 
-  it("installs the bundled app and wires desktop routing to all priorities", async () => {
+  it("installs the bundled app and wires desktop routing to urgent only", async () => {
     const program = createProgram();
 
     await program.parseAsync(["node", "test", "setup", "desktop", "--non-interactive"]);
@@ -2735,9 +2735,9 @@ describe("setup desktop command", () => {
       dashboardUrl: "http://localhost:3000",
     });
     expect(parsed.notificationRouting?.["urgent"]).toContain("desktop");
-    expect(parsed.notificationRouting?.["action"]).toContain("desktop");
-    expect(parsed.notificationRouting?.["warning"]).toContain("desktop");
-    expect(parsed.notificationRouting?.["info"]).toContain("desktop");
+    expect(parsed.notificationRouting?.["action"] ?? []).not.toContain("desktop");
+    expect(parsed.notificationRouting?.["warning"] ?? []).not.toContain("desktop");
+    expect(parsed.notificationRouting?.["info"] ?? []).not.toContain("desktop");
   });
 
   it("configures terminal-notifier backend without installing AO Notifier.app", async () => {
@@ -2978,7 +2978,7 @@ projects:
       defaults?: { notifiers?: string[] };
     };
     expect(parsed.notificationRouting?.["urgent"]).toEqual(["slack", "desktop"]);
-    expect(parsed.notificationRouting?.["action"]).toEqual(["slack", "desktop"]);
+    expect(parsed.notificationRouting?.["action"]).toEqual(["slack"]);
     expect(parsed.defaults?.notifiers).toEqual(["slack"]);
   });
 

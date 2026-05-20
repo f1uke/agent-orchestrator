@@ -94,6 +94,10 @@ function hasExplicitConflictingNotifierEntry(
   );
 }
 
+function canImplicitlyRegisterNotifier(pluginName: string, isExternalLoad: boolean): boolean {
+  return isExternalLoad || pluginName === "dashboard" || pluginName === "desktop";
+}
+
 function collectNotifierRegistrations(
   pluginName: string,
   config: OrchestratorConfig,
@@ -129,6 +133,7 @@ function collectNotifierRegistrations(
   if (
     orderedMatches.size === 0 &&
     isReferencedByName &&
+    canImplicitlyRegisterNotifier(pluginName, isExternalLoad) &&
     !hasExplicitConflictingNotifierEntry(pluginName, config)
   ) {
     orderedMatches.set(pluginName, {});
@@ -439,7 +444,9 @@ export function createPluginRegistry(): PluginRegistry {
 
     if (registrations.length === 0) {
       if (hasExplicitConflictingNotifierEntry(manifest.name, config)) return;
-      registerInstance(manifest.slot, manifest.name, manifest, plugin.create(undefined));
+      if (isExternalLoad) {
+        registerInstance(manifest.slot, manifest.name, manifest, plugin.create(undefined));
+      }
       return;
     }
 

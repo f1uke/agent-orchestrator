@@ -82,8 +82,7 @@ describe("canonicalCompareKey", () => {
     process.env["HOME"] = tmpDir;
     try {
       const key = canonicalCompareKey("~");
-      // On Windows the result is lowercased; on POSIX it's case-preserved.
-      expect(key.toLowerCase()).toBe(tmpDir.toLowerCase());
+      expect(key).toBe(canonicalCompareKey(tmpDir));
     } finally {
       if (originalHome === undefined) delete process.env["HOME"];
       else process.env["HOME"] = originalHome;

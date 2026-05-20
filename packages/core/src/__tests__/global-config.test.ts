@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  createDefaultGlobalConfig,
   generateExternalId,
   loadGlobalConfig,
   migrateToGlobalConfig,
@@ -78,6 +79,30 @@ describe("global-config storage identity", () => {
     });
     expect(config?.projects[projectId]).not.toHaveProperty("agent");
     expect(config?.projects[projectId]).not.toHaveProperty("runtime");
+  });
+
+  it("creates fresh global configs without Composio and with startup notifier defaults", () => {
+    const config = createDefaultGlobalConfig();
+
+    expect(config.defaults.notifiers).toEqual([]);
+    expect(config.notifiers).toEqual({
+      desktop: {
+        plugin: "desktop",
+        backend: "ao-app",
+        dashboardUrl: "http://localhost:3000",
+      },
+      dashboard: {
+        plugin: "dashboard",
+        limit: 50,
+      },
+    });
+    expect(config.notificationRouting).toEqual({
+      urgent: ["desktop", "dashboard"],
+      action: ["dashboard"],
+      warning: ["dashboard"],
+      info: ["dashboard"],
+    });
+    expect(JSON.stringify(config)).not.toContain("composio");
   });
 
   it("rejects registration when another project already owns the generated session prefix", () => {
@@ -379,7 +404,9 @@ describe("global-config storage identity", () => {
       ].join("\n"),
     );
 
-    expect(resolveProjectIdentity(projectId, loadGlobalConfig(configPath)!, configPath)).toMatchObject({
+    expect(
+      resolveProjectIdentity(projectId, loadGlobalConfig(configPath)!, configPath),
+    ).toMatchObject({
       resolveError: expect.stringContaining("wrapped projects: format"),
     });
 
@@ -393,7 +420,9 @@ describe("global-config storage identity", () => {
       orchestrator: { agent: "codex" },
       worker: { agent: "opencode" },
     });
-    expect(resolveProjectIdentity(projectId, loadGlobalConfig(configPath)!, configPath)).toMatchObject({
+    expect(
+      resolveProjectIdentity(projectId, loadGlobalConfig(configPath)!, configPath),
+    ).toMatchObject({
       agent: "codex",
       runtime: "tmux",
       workspace: "worktree",

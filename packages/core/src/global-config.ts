@@ -12,6 +12,7 @@ import { generateSessionPrefix } from "./paths.js";
 import { normalizeOriginUrl } from "./storage-key.js";
 import { getDefaultRuntime } from "./platform.js";
 import { recordActivityEvent } from "./activity-events.js";
+import { DEFAULT_DASHBOARD_NOTIFICATION_LIMIT } from "./dashboard-notifications.js";
 
 function globalConfigLockPath(configPath: string): string {
   return `${configPath}.lock`;
@@ -66,6 +67,32 @@ function sanitizeBasename(name: string): string {
 export interface RegisterProjectOptions {
   /** @deprecated No longer used — storageKey has been removed */
   allowStorageKeyReuse?: boolean;
+}
+
+function createDefaultNotifierConfigs(): Record<
+  string,
+  { plugin: string } & Record<string, unknown>
+> {
+  return {
+    desktop: {
+      plugin: "desktop",
+      backend: "ao-app",
+      dashboardUrl: "http://localhost:3000",
+    },
+    dashboard: {
+      plugin: "dashboard",
+      limit: DEFAULT_DASHBOARD_NOTIFICATION_LIMIT,
+    },
+  };
+}
+
+function createDefaultNotificationRouting(): Record<string, string[]> {
+  return {
+    urgent: ["desktop", "dashboard"],
+    action: ["dashboard"],
+    warning: ["dashboard"],
+    info: ["dashboard"],
+  };
 }
 
 // =============================================================================
@@ -219,7 +246,7 @@ export const GlobalConfigSchema = z
         runtime: z.string().default(() => getDefaultRuntime()),
         agent: z.string().default("claude-code"),
         workspace: z.string().default("worktree"),
-        notifiers: z.array(z.string()).default(["composio", "desktop"]),
+        notifiers: z.array(z.string()).default([]),
         orchestrator: z.object({ agent: z.string().optional() }).optional(),
         worker: z.object({ agent: z.string().optional() }).optional(),
       })
@@ -229,14 +256,13 @@ export const GlobalConfigSchema = z
     /** Optional explicit project ordering for sidebar / portfolio display. */
     projectOrder: z.array(z.string()).optional(),
     /** Notification channel configurations. */
-    notifiers: z.record(z.object({ plugin: z.string() }).passthrough()).default({}),
+    notifiers: z
+      .record(z.object({ plugin: z.string() }).passthrough())
+      .default(() => createDefaultNotifierConfigs()),
     /** Maps priority levels to notifier channel IDs. */
-    notificationRouting: z.record(z.array(z.string())).default({
-      urgent: ["desktop", "composio"],
-      action: ["desktop", "composio"],
-      warning: ["composio"],
-      info: ["composio"],
-    }),
+    notificationRouting: z
+      .record(z.array(z.string()))
+      .default(() => createDefaultNotificationRouting()),
     /** Reaction rules (default reactions merged at load time). */
     reactions: z.record(z.object({}).passthrough()).default({}),
   })
@@ -480,7 +506,9 @@ export function writeLocalProjectConfig(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
+  return (
+    value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
+  );
 }
 
 function mergeRoleBehavior(
@@ -806,9 +834,10 @@ export function registerProjectInGlobalConfig(
       }
     }
 
-    const repoIdentity = existing?.repo
-      ?? normalizeRepoIdentity(originUrl)
-      ?? (localConfig?.repo ? normalizeLegacyRepoValue(localConfig.repo) : undefined);
+    const repoIdentity =
+      existing?.repo ??
+      normalizeRepoIdentity(originUrl) ??
+      (localConfig?.repo ? normalizeLegacyRepoValue(localConfig.repo) : undefined);
     const defaultBranch = existing?.defaultBranch ?? localConfig?.defaultBranch ?? "main";
     const requestedSessionPrefix =
       existing?.sessionPrefix ??
@@ -1185,16 +1214,11 @@ export function createDefaultGlobalConfig(): GlobalConfig {
       runtime: getDefaultRuntime(),
       agent: "claude-code",
       workspace: "worktree",
-      notifiers: ["composio", "desktop"],
+      notifiers: [],
     },
     projects: {},
-    notifiers: {},
-    notificationRouting: {
-      urgent: ["desktop", "composio"],
-      action: ["desktop", "composio"],
-      warning: ["composio"],
-      info: ["composio"],
-    },
+    notifiers: createDefaultNotifierConfigs(),
+    notificationRouting: createDefaultNotificationRouting(),
     reactions: {},
   };
 }

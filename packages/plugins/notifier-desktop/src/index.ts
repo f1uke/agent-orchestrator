@@ -383,8 +383,8 @@ function detectTerminalNotifier(): boolean {
   try {
     execFileSync("terminal-notifier", ["--version"], { stdio: "ignore", windowsHide: true });
     return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ENOENT";
+  } catch {
+    return false;
   }
 }
 
@@ -517,9 +517,7 @@ function sendNotification(
             // Don't crash the lifecycle on toast failures — log and resolve.
             // Common causes: stripped-down Windows SKU without WinRT, locked
             // group policy, or the user disabled toast notifications.
-            console.warn(
-              `[notifier-desktop] Windows toast failed: ${(err as Error).message}`,
-            );
+            console.warn(`[notifier-desktop] Windows toast failed: ${(err as Error).message}`);
           }
           resolve();
         },
