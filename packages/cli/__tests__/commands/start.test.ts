@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { EventEmitter } from "node:events";
 import {
   getDefaultRuntime,
@@ -2366,7 +2366,7 @@ describe("start command — platform-aware runtime fallback", () => {
 // ---------------------------------------------------------------------------
 
 describe("start command — autoCreateConfig", () => {
-  it("writes a flat local config and returns the global project identity", async () => {
+  it("generates flat local config and persists an empty global notifiers default", async () => {
     const { detectEnvironment } = await import("../../src/lib/detect-env.js");
     vi.mocked(detectEnvironment).mockResolvedValue({
       isGitRepo: true,
@@ -2403,33 +2403,126 @@ describe("start command — autoCreateConfig", () => {
     expect(existsSync(configPath)).toBe(true);
 
     const content = readFileSync(configPath, "utf-8");
-    const parsed = parseYaml(content) as {
-      projects?: unknown;
-      runtime?: string;
-      agent?: string;
-      workspace?: string;
-    };
-    expect(parsed.projects).toBeUndefined();
-    expect(parsed.runtime).toBe(getDefaultRuntime());
-    expect(parsed.agent).toBe("claude-code");
-    expect(parsed.workspace).toBe("worktree");
+    const parsed = parseYaml(content) as Record<string, unknown>;
+    expect(parsed["projects"]).toBeUndefined();
+    expect(parsed["defaults"]).toBeUndefined();
+    expect(parsed["agent"]).toBe("claude-code");
+    expect(parsed["workspace"]).toBe("worktree");
+    expect(parsed["runtime"]).toBe(getDefaultRuntime());
 
-    const globalConfigPath = process.env["AO_GLOBAL_CONFIG"]!;
-    const globalContent = readFileSync(globalConfigPath, "utf-8");
-    const globalParsed = parseYaml(globalContent) as {
+    const globalConfigPath = process.env["AO_GLOBAL_CONFIG"];
+    if (!globalConfigPath) throw new Error("AO_GLOBAL_CONFIG should be set in test setup");
+    const globalConfig = parseYaml(readFileSync(globalConfigPath, "utf-8")) as {
       defaults?: { notifiers?: unknown[] };
       projects?: Record<string, { path?: string; sessionPrefix?: string }>;
     };
-    expect(globalParsed.defaults?.notifiers).toEqual(["composio", "desktop"]);
+    expect(globalConfig.defaults?.notifiers).toEqual([]);
 
-    const projectIds = Object.keys(globalParsed.projects ?? {});
+    const projectIds = Object.keys(globalConfig.projects ?? {});
     expect(projectIds).toHaveLength(1);
     expect(config.configPath).toBe(configPath);
     expect(Object.keys(config.projects)).toEqual(projectIds);
     expect(config.projects[projectIds[0]!]!.path).toBe(realpathSync(tmpDir));
   });
 
-  it("removes the flat local config when global registration fails", async () => {
+  it("persists Codex first-run selection without erasing existing global notifiers", async () => {
+    createFakeRepo(tmpDir, "https://github.com/ComposioHQ/agent-orchestrator.git");
+
+    const { detectEnvironment } = await import("../../src/lib/detect-env.js");
+    vi.mocked(detectEnvironment).mockResolvedValue({
+      isGitRepo: true,
+      gitRemote: "https://github.com/ComposioHQ/agent-orchestrator.git",
+      ownerRepo: "ComposioHQ/agent-orchestrator",
+      currentBranch: "main",
+      defaultBranch: "main",
+      hasTmux: true,
+      hasGh: true,
+      ghAuthed: true,
+      hasLinearKey: false,
+      hasSlackWebhook: false,
+    });
+
+    const { detectProjectType, generateRulesFromTemplates } =
+      await import("../../src/lib/project-detection.js");
+    vi.mocked(detectProjectType).mockReturnValue({ languages: [], frameworks: [], tools: [] });
+    vi.mocked(generateRulesFromTemplates).mockReturnValue("custom first-run rules");
+
+    const { detectAvailableAgents, detectAgentRuntime } =
+      await import("../../src/lib/detect-agent.js");
+    vi.mocked(detectAvailableAgents).mockResolvedValue([]);
+    vi.mocked(detectAgentRuntime).mockResolvedValue("codex");
+
+    const { findFreePort } = await import("../../src/lib/web-dir.js");
+    vi.mocked(findFreePort).mockResolvedValue(4242);
+
+    mockProcessCwd.mockReturnValue(tmpDir);
+    mockIsHumanCaller.mockReturnValue(false);
+
+    const globalConfigPath = process.env["AO_GLOBAL_CONFIG"];
+    if (!globalConfigPath) throw new Error("AO_GLOBAL_CONFIG should be set in test setup");
+    writeFileSync(
+      globalConfigPath,
+      stringifyYaml(
+        {
+          port: 4242,
+          defaults: {
+            runtime: getDefaultRuntime(),
+            agent: "claude-code",
+            workspace: "worktree",
+            notifiers: ["desktop"],
+          },
+          projects: {},
+        },
+        { indent: 2 },
+      ),
+    );
+
+    const config = await autoCreateConfig(tmpDir);
+
+    const localConfig = parseYaml(
+      readFileSync(join(tmpDir, "agent-orchestrator.yaml"), "utf-8"),
+    ) as Record<string, unknown>;
+    expect(localConfig["projects"]).toBeUndefined();
+    expect(localConfig["defaults"]).toBeUndefined();
+    expect(localConfig["agent"]).toBe("codex");
+    expect(localConfig["runtime"]).toBe(getDefaultRuntime());
+    expect(localConfig["workspace"]).toBe("worktree");
+    expect(localConfig["agentRules"]).toBe("custom first-run rules");
+
+    const globalConfig = parseYaml(readFileSync(globalConfigPath, "utf-8")) as {
+      port?: number;
+      defaults?: {
+        runtime?: string;
+        agent?: string;
+        workspace?: string;
+        notifiers?: unknown[];
+      };
+      projects?: Record<string, { path?: string; sessionPrefix?: string }>;
+    };
+    expect(findFreePort).toHaveBeenCalledWith(4242);
+    expect(globalConfig.port).toBe(4242);
+    expect(globalConfig.defaults).toMatchObject({
+      runtime: getDefaultRuntime(),
+      agent: "codex",
+      workspace: "worktree",
+      notifiers: ["desktop"],
+    });
+
+    const entries = Object.entries(globalConfig.projects ?? {});
+    expect(entries).toHaveLength(1);
+    const firstEntry = entries[0];
+    if (!firstEntry) throw new Error("Expected one global project entry");
+    const [projectId, project] = firstEntry;
+    expect(projectId).not.toBe(basename(tmpDir));
+    expect(project.path).toBe(realpathSync(tmpDir));
+    expect(project.sessionPrefix).toBeTruthy();
+
+    expect(Object.keys(config.projects)).toEqual([projectId]);
+    expect(config.defaults.agent).toBe("codex");
+    expect(config.projects[projectId].agent).toBe("codex");
+  });
+
+  it("removes the generated local config if global registration fails", async () => {
     const { detectEnvironment } = await import("../../src/lib/detect-env.js");
     vi.mocked(detectEnvironment).mockResolvedValue({
       isGitRepo: true,
@@ -2450,15 +2543,18 @@ describe("start command — autoCreateConfig", () => {
     const { detectAvailableAgents, detectAgentRuntime } =
       await import("../../src/lib/detect-agent.js");
     vi.mocked(detectAvailableAgents).mockResolvedValue([]);
-    vi.mocked(detectAgentRuntime).mockResolvedValue("claude-code");
+    vi.mocked(detectAgentRuntime).mockResolvedValue("codex");
+
+    const { findFreePort } = await import("../../src/lib/web-dir.js");
+    vi.mocked(findFreePort).mockResolvedValue(3000);
 
     mockProcessCwd.mockReturnValue(tmpDir);
+    mockIsHumanCaller.mockReturnValue(false);
 
-    const callerContext = await import("../../src/lib/caller-context.js");
-    vi.spyOn(callerContext, "isHumanCaller").mockReturnValue(false);
-
+    const globalConfigPath = process.env["AO_GLOBAL_CONFIG"];
+    if (!globalConfigPath) throw new Error("AO_GLOBAL_CONFIG should be set in test setup");
     writeFileSync(
-      process.env["AO_GLOBAL_CONFIG"]!,
+      globalConfigPath,
       [
         "projects:",
         `  ${basename(tmpDir)}:`,
@@ -2467,9 +2563,55 @@ describe("start command — autoCreateConfig", () => {
       ].join("\n"),
     );
 
-    await expect(autoCreateConfig(tmpDir)).rejects.toThrow("already registered");
+    await expect(autoCreateConfig(tmpDir)).rejects.toThrow(
+      "Could not complete first-run config setup",
+    );
 
     expect(existsSync(join(tmpDir, "agent-orchestrator.yaml"))).toBe(false);
+  });
+
+  it("keeps the generated local config when defaults persistence fails after registration", async () => {
+    createFakeRepo(tmpDir, "https://github.com/ComposioHQ/agent-orchestrator.git");
+
+    const { detectEnvironment } = await import("../../src/lib/detect-env.js");
+    vi.mocked(detectEnvironment).mockResolvedValue({
+      isGitRepo: true,
+      gitRemote: "https://github.com/ComposioHQ/agent-orchestrator.git",
+      ownerRepo: "ComposioHQ/agent-orchestrator",
+      currentBranch: "main",
+      defaultBranch: "main",
+      hasTmux: true,
+      hasGh: true,
+      ghAuthed: true,
+      hasLinearKey: false,
+      hasSlackWebhook: false,
+    });
+
+    const { detectProjectType } = await import("../../src/lib/project-detection.js");
+    vi.mocked(detectProjectType).mockReturnValue({ languages: [], frameworks: [], tools: [] });
+
+    const { detectAvailableAgents, detectAgentRuntime } =
+      await import("../../src/lib/detect-agent.js");
+    vi.mocked(detectAvailableAgents).mockResolvedValue([]);
+    vi.mocked(detectAgentRuntime).mockResolvedValue("codex");
+
+    const { findFreePort } = await import("../../src/lib/web-dir.js");
+    vi.mocked(findFreePort).mockResolvedValue(3000);
+
+    mockProcessCwd.mockReturnValue(tmpDir);
+    mockIsHumanCaller.mockReturnValue(false);
+
+    const core = await import("@aoagents/ao-core");
+    const saveGlobalConfigSpy = vi.spyOn(core, "saveGlobalConfig").mockImplementation(() => {
+      throw new Error("persist failed");
+    });
+
+    await expect(autoCreateConfig(tmpDir)).rejects.toThrow(
+      "Could not complete first-run config setup",
+    );
+
+    expect(saveGlobalConfigSpy).toHaveBeenCalled();
+    expect(existsSync(join(tmpDir, "agent-orchestrator.yaml"))).toBe(true);
   });
 });
 

@@ -35,6 +35,9 @@ import {
   recordActivityEvent,
   registerProjectInGlobalConfig,
   getGlobalConfigPath,
+  loadGlobalConfig,
+  saveGlobalConfig,
+  createDefaultGlobalConfig,
   type OrchestratorConfig,
   type LocalProjectConfig,
   type ProjectConfig,
@@ -139,6 +142,36 @@ function readProjectBehaviorConfig(projectPath: string): LocalProjectConfig {
 
 function writeProjectBehaviorConfig(projectPath: string, config: LocalProjectConfig): void {
   writeLocalProjectConfig(projectPath, config);
+}
+
+function persistFirstRunGlobalDefaults(params: {
+  port: number;
+  runtime: string;
+  agent: string;
+  workspace: string;
+  notifiers: string[];
+  preserveExistingNotifiers: boolean;
+}): void {
+  const globalConfigPath = getGlobalConfigPath();
+  const existing = loadGlobalConfig(globalConfigPath);
+  const baseConfig = existing ?? createDefaultGlobalConfig();
+  saveGlobalConfig(
+    {
+      ...baseConfig,
+      port: params.port,
+      defaults: {
+        ...baseConfig.defaults,
+        runtime: params.runtime,
+        agent: params.agent,
+        workspace: params.workspace,
+        notifiers:
+          params.preserveExistingNotifiers && existing
+            ? [...baseConfig.defaults.notifiers]
+            : [...params.notifiers],
+      },
+    },
+    globalConfigPath,
+  );
 }
 
 /**
@@ -566,10 +599,24 @@ export async function autoCreateConfig(workingDir: string): Promise<Orchestrator
   const agent = await detectAgentRuntime(detectedAgents);
   console.log(chalk.green(`  ✓ Agent runtime: ${agent}`));
 
+  const existingGlobalConfig = loadGlobalConfig(getGlobalConfigPath());
+  const requestedDashboardPort = existingGlobalConfig?.port ?? DEFAULT_PORT;
+  const port = await findFreePort(requestedDashboardPort);
+  const dashboardPort = port ?? requestedDashboardPort;
+  if (port !== null && port !== requestedDashboardPort) {
+    console.log(
+      chalk.yellow(`  ⚠ Port ${requestedDashboardPort} is busy — using ${port} instead.`),
+    );
+  }
+
+  const runtime = getDefaultRuntime();
+  const workspace = "worktree";
+  const notifiers: string[] = [];
+  const preserveExistingGlobalNotifiers = existingGlobalConfig !== null;
   const localConfig: LocalProjectConfig = {
-    runtime: getDefaultRuntime(),
+    runtime,
     agent,
-    workspace: "worktree",
+    workspace,
     ...(agentRules ? { agentRules } : {}),
   };
 
@@ -579,22 +626,39 @@ export async function autoCreateConfig(workingDir: string): Promise<Orchestrator
     console.log(chalk.dim("  Use 'ao start' to start with the existing config.\n"));
     return loadConfig(outputPath);
   }
-  writeLocalProjectConfig(workingDir, localConfig, outputPath);
 
+  let registeredProjectId: string | null = null;
   try {
-    const registeredProjectId = registerProjectInGlobalConfig(projectId, projectId, path, {
+    writeLocalProjectConfig(workingDir, localConfig, outputPath);
+    console.log(chalk.green(`✓ Config created: ${outputPath}\n`));
+
+    const sessionPrefix = generateSessionPrefix(projectId);
+    registeredProjectId = registerProjectInGlobalConfig(projectId, projectId, path, {
       ...(repo ? { repo } : {}),
       defaultBranch,
-      sessionPrefix: generateSessionPrefix(projectId),
+      sessionPrefix,
+    });
+    persistFirstRunGlobalDefaults({
+      port: dashboardPort,
+      runtime,
+      agent,
+      workspace,
+      notifiers,
+      preserveExistingNotifiers: preserveExistingGlobalNotifiers,
     });
 
     console.log(chalk.green(`✓ Registered "${registeredProjectId}" in global config\n`));
   } catch (err) {
-    rmSync(outputPath, { force: true });
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    if (!registeredProjectId) {
+      rmSync(outputPath, { force: true });
+    }
+    console.log(chalk.yellow("⚠ Could not complete first-run config setup."));
+    console.log(chalk.dim(`  ${message}\n`));
+    throw new Error(`Could not complete first-run config setup: ${message}`, {
+      cause: err,
+    });
   }
-
-  console.log(chalk.green(`✓ Config created: ${outputPath}\n`));
 
   if (!repo) {
     console.log(
