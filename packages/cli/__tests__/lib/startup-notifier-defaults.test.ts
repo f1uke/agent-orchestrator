@@ -159,6 +159,41 @@ describe("startup notifier defaults", () => {
     expect(parsed.notificationRouting?.urgent).toEqual(["desktop", "dashboard"]);
   });
 
+  it("preserves defaults.notifiers fallback semantics when writing startup routes", () => {
+    writeFileSync(
+      configPath,
+      [
+        "port: 3000",
+        "defaults:",
+        "  notifiers:",
+        "    - slack",
+        "notifiers:",
+        "  slack:",
+        "    plugin: slack",
+        "    webhookUrl: https://hooks.slack.com/services/T/B/C",
+        "projects: {}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      ensureStartupNotifierDefaults({
+        configPath,
+        dashboardUrl: "http://localhost:3000",
+        desktopMode: "enable",
+      }),
+    ).toBe(true);
+
+    const parsed = readConfig();
+    expect(parsed.defaults?.notifiers).toEqual(["slack"]);
+    expect(parsed.notificationRouting).toEqual({
+      urgent: ["slack", "desktop", "dashboard"],
+      action: ["slack", "dashboard"],
+      warning: ["slack", "dashboard"],
+      info: ["slack", "dashboard"],
+    });
+  });
+
   it("preserves configured manual opt-in notifiers while removing only implicit manual defaults", () => {
     writeFileSync(
       configPath,

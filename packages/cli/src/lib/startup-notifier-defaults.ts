@@ -44,6 +44,10 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
 function hasNotifierConfig(notifiers: Record<string, unknown>, notifierName: string): boolean {
   return isRecord(notifiers[notifierName]);
 }
@@ -227,7 +231,12 @@ export function ensureStartupNotifierDefaults(options: StartupNotifierDefaultsOp
   const shouldRemoveDefaultDesktopRouting = desktopMode === "disable-default" && !desktopConfigured;
 
   for (const priority of NOTIFICATION_PRIORITIES) {
-    const existingRoute = sanitizeNotifierReferences(notifiers, routing[priority]);
+    const hasExplicitRoute = hasOwn(routing, priority);
+    const existingRoute = sanitizeNotifierReferences(
+      notifiers,
+      hasExplicitRoute ? routing[priority] : defaults["notifiers"],
+    );
+    const previousRoute = hasExplicitRoute ? asStringArray(routing[priority]) : existingRoute;
     let nextRoute = existingRoute;
 
     if (shouldRemoveDefaultDesktopRouting) {
@@ -245,7 +254,7 @@ export function ensureStartupNotifierDefaults(options: StartupNotifierDefaultsOp
     }
 
     nextRoute = unique(nextRoute);
-    if (!arraysEqual(asStringArray(routing[priority]), nextRoute)) {
+    if (!arraysEqual(previousRoute, nextRoute)) {
       routing[priority] = nextRoute;
       changed = true;
     }

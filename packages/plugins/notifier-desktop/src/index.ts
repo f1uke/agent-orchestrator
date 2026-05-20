@@ -388,6 +388,10 @@ function detectTerminalNotifier(): boolean {
   }
 }
 
+function usesAoNotifierNativeActions(backend: DesktopBackend, appPath: string): boolean {
+  return isMac() && (backend === "ao-app" || (backend === "auto" && detectAoNotifierApp(appPath)));
+}
+
 /**
  * Send a desktop notification using terminal-notifier / osascript (macOS) or
  * notify-send (Linux). Falls back gracefully if neither is available.
@@ -568,10 +572,9 @@ export function create(config?: Record<string, unknown>): Notifier {
     async notifyWithActions(event: OrchestratorEvent, actions: NotifyAction[]): Promise<void> {
       const nativeActions = nativeActionPayloads(actions, dashboardUrl);
       const content = formatContent(event, actions, {
-        hiddenActionIndexes:
-          backend === "ao-app" || (backend === "auto" && detectAoNotifierApp(appPath))
-            ? nativeActionIndexes(actions, dashboardUrl)
-            : undefined,
+        hiddenActionIndexes: usesAoNotifierNativeActions(backend, appPath)
+          ? nativeActionIndexes(actions, dashboardUrl)
+          : undefined,
       });
       const fallbackContent = formatContent(event, actions);
       const sound = shouldPlaySound(event.priority, soundEnabled);

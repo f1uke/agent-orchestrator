@@ -483,6 +483,18 @@ describe("notifier-desktop", () => {
       expect(mockExecFile.mock.calls[0][0]).toBe("notify-send");
     });
 
+    it("keeps action labels on non-macOS even when backend is ao-app", async () => {
+      mockPlatform.mockReturnValue("linux");
+      setProcessPlatform("linux");
+      const notifier = create({ backend: "ao-app", dashboardUrl: "http://localhost:3000" });
+      const actions: NotifyAction[] = [{ label: "Open PR", url: "https://example.com/pr/1" }];
+      await notifier.notifyWithActions!(makeEvent(), actions);
+
+      expect(mockExecFile.mock.calls[0][0]).toBe("notify-send");
+      const args = mockExecFile.mock.calls[0][1] as string[];
+      expect(args.join("\n")).toContain("Open PR");
+    });
+
     it("uses terminal-notifier for notifyWithActions too", async () => {
       const notifier = create({ dashboardUrl: "http://localhost:3000" });
       const actions: NotifyAction[] = [{ label: "View", url: "https://example.com" }];
