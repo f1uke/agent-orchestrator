@@ -118,15 +118,18 @@ jobs:
               const addPackage = (m) => {
                 if (!fs.existsSync(m)) return;
                 const d = JSON.parse(fs.readFileSync(m, 'utf8'));
-                if (d.publishConfig?.access === 'public') pkgs.push(d.name);
+                if (!d.private && d.publishConfig?.access === 'public') pkgs.push(d.name);
               };
 
-              for (const entry of fs.readdirSync('packages', { withFileTypes: true })) {
-                if (entry.isDirectory()) addPackage(`packages/${entry.name}/package.json`);
-              }
-              for (const entry of fs.readdirSync('packages/plugins', { withFileTypes: true })) {
-                if (entry.isDirectory()) addPackage(`packages/plugins/${entry.name}/package.json`);
-              }
+              const scanPackages = (dir) => {
+                if (!fs.existsSync(dir)) return;
+                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                  if (entry.isDirectory()) addPackage(`${dir}/${entry.name}/package.json`);
+                }
+              };
+
+              scanPackages('packages');
+              scanPackages('packages/plugins');
 
               let body = '---\n';
               pkgs.forEach(p => body += '"' + p + '": patch\n');
