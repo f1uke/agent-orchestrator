@@ -35,7 +35,14 @@ function createHealthyRepo(tempRoot: string): string {
   mkdirSync(join(fakeRepo, "packages", "core", "dist"), { recursive: true });
   mkdirSync(join(fakeRepo, "packages", "cli", "dist"), { recursive: true });
   mkdirSync(join(fakeRepo, "packages", "web"), { recursive: true });
-  writeFileSync(join(fakeRepo, "packages", "core", "dist", "index.js"), "export {};\n");
+  writeFileSync(
+    join(fakeRepo, "packages", "core", "package.json"),
+    JSON.stringify({ type: "module", main: "dist/index.js" }, null, 2),
+  );
+  writeFileSync(
+    join(fakeRepo, "packages", "core", "dist", "index.js"),
+    'export function getNodePtyPrebuildsSubdir() { return process.platform + "-" + process.arch; }\n',
+  );
   writeFileSync(join(fakeRepo, "packages", "cli", "dist", "index.js"), "export {};\n");
   writeFileSync(
     join(fakeRepo, "packages", "ao", "bin", "ao.js"),

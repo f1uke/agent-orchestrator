@@ -414,6 +414,7 @@ resolve_node_pty_spawn_helper() {
 const fs = require("node:fs");
 const { createRequire } = require("node:module");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const repoRoot = process.argv[2];
 
@@ -442,34 +443,57 @@ function resolveNodeModulesPackage(fromDir, ...segments) {
   return fs.existsSync(path.resolve(packageDir, "package.json")) ? packageDir : null;
 }
 
-const packageJsonPath =
-  resolvePackageJson(repoRoot) ??
-  (() => {
-    const directNodePtyDir = findPackageUp(repoRoot, "node-pty");
-    if (directNodePtyDir) return path.join(directNodePtyDir, "package.json");
+function resolveCoreEntrypoint() {
+  const sourceCoreDir = path.resolve(repoRoot, "packages", "core");
+  const coreDir =
+    (fs.existsSync(path.join(sourceCoreDir, "package.json")) ? sourceCoreDir : null) ??
+    findPackageUp(repoRoot, "@aoagents", "ao-core") ??
+    resolveNodeModulesPackage(repoRoot, "@aoagents", "ao-core");
+  if (!coreDir) return null;
 
-    const sourceWebDir = path.resolve(repoRoot, "packages", "web");
-    const webDir =
-      (fs.existsSync(path.join(sourceWebDir, "package.json")) ? sourceWebDir : null) ??
-      findPackageUp(repoRoot, "@aoagents", "ao-web") ??
-      resolveNodeModulesPackage(repoRoot, "@aoagents", "ao-web");
-    if (!webDir) return null;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(coreDir, "package.json"), "utf8"));
+    const entry = pkg.exports?.["."]?.import ?? pkg.module ?? pkg.main ?? "dist/index.js";
+    return path.resolve(coreDir, entry);
+  } catch {
+    return null;
+  }
+}
 
-    const webNodePtyDir =
-      resolveNodeModulesPackage(webDir, "node-pty") ?? findPackageUp(webDir, "node-pty");
-    return webNodePtyDir ? path.join(webNodePtyDir, "package.json") : null;
-  })();
+async function getNodePtyPrebuildsSubdir() {
+  const coreEntrypoint = resolveCoreEntrypoint();
+  if (!coreEntrypoint || !fs.existsSync(coreEntrypoint)) return null;
 
-if (!packageJsonPath) process.exit(0);
+  const core = await import(pathToFileURL(coreEntrypoint).href);
+  return typeof core.getNodePtyPrebuildsSubdir === "function"
+    ? core.getNodePtyPrebuildsSubdir()
+    : null;
+}
 
-console.log(
-  path.join(
-    path.dirname(packageJsonPath),
-    "prebuilds",
-    `${process.platform}-${process.arch}`,
-    "spawn-helper",
-  ),
-);
+(async () => {
+  const packageJsonPath =
+    resolvePackageJson(repoRoot) ??
+    (() => {
+      const directNodePtyDir = findPackageUp(repoRoot, "node-pty");
+      if (directNodePtyDir) return path.join(directNodePtyDir, "package.json");
+
+      const sourceWebDir = path.resolve(repoRoot, "packages", "web");
+      const webDir =
+        (fs.existsSync(path.join(sourceWebDir, "package.json")) ? sourceWebDir : null) ??
+        findPackageUp(repoRoot, "@aoagents", "ao-web") ??
+        resolveNodeModulesPackage(repoRoot, "@aoagents", "ao-web");
+      if (!webDir) return null;
+
+      const webNodePtyDir =
+        resolveNodeModulesPackage(webDir, "node-pty") ?? findPackageUp(webDir, "node-pty");
+      return webNodePtyDir ? path.join(webNodePtyDir, "package.json") : null;
+    })();
+
+  const prebuildsSubdir = await getNodePtyPrebuildsSubdir();
+  if (!packageJsonPath || !prebuildsSubdir) process.exit(0);
+
+  console.log(path.join(path.dirname(packageJsonPath), "prebuilds", prebuildsSubdir, "spawn-helper"));
+})().catch(() => process.exit(0));
 NODE
 }
 

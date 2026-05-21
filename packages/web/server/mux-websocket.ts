@@ -16,6 +16,7 @@ import {
   DEFAULT_DASHBOARD_NOTIFICATION_LIMIT,
   getEnvDefaults,
   getDashboardNotificationStorePath,
+  getNodePtyPrebuildsSubdir,
   isWindows,
   loadConfig,
   normalizeDashboardNotificationLimit,
@@ -395,12 +396,7 @@ export function resolveNodePtySpawnHelperPath(): string | null {
 
   try {
     const packageJsonPath = nodePtyRequire.resolve("node-pty/package.json");
-    return join(
-      dirname(packageJsonPath),
-      "prebuilds",
-      `${process.platform}-${process.arch}`,
-      "spawn-helper",
-    );
+    return join(dirname(packageJsonPath), "prebuilds", getNodePtyPrebuildsSubdir(), "spawn-helper");
   } catch {
     return null;
   }

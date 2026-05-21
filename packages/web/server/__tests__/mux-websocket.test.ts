@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import { WebSocket } from "ws";
-import { appendDashboardNotification, type OrchestratorEvent } from "@aoagents/ao-core";
+import { appendDashboardNotification, isWindows, type OrchestratorEvent } from "@aoagents/ao-core";
 import type { SessionBroadcaster as SessionBroadcasterType } from "../mux-websocket";
 
 // vi.mock factories run before module-level statements. Hoist the mock
@@ -967,7 +967,7 @@ describe("TerminalManager.open — tmux target args (regression for #1714)", () 
     expect(args).toEqual(["attach-session", "-t", "=ao-177"]);
   });
 
-  it("chmods node-pty spawn-helper and retries once after posix_spawnp failure", () => {
+  it("repairs node-pty spawn-helper when applicable and retries once after posix_spawnp failure", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "ao-mux-spawn-helper-"));
     const helperPath = join(tempRoot, "spawn-helper");
     writeFileSync(helperPath, "#!/bin/sh\nexit 0\n");
@@ -993,7 +993,9 @@ describe("TerminalManager.open — tmux target args (regression for #1714)", () 
       mgr.open("ao-177");
 
       expect(mockPtySpawn).toHaveBeenCalledTimes(2);
-      expect((statSync(helperPath).mode & 0o111) !== 0).toBe(true);
+      if (!isWindows()) {
+        expect((statSync(helperPath).mode & 0o111) !== 0).toBe(true);
+      }
     } finally {
       delete process.env.AO_NODE_PTY_SPAWN_HELPER_PATH;
       rmSync(tempRoot, { recursive: true, force: true });
