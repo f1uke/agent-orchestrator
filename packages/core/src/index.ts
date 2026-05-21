@@ -382,6 +382,8 @@ export {
   appendDashboardNotificationRecord,
   createDashboardNotificationRecord,
   getDashboardNotificationStorePath,
+  getDaemonDashboardNotificationStorePath,
+  getLiveDashboardNotificationStorePath,
   normalizeDashboardNotificationLimit,
   readDashboardNotifications,
   readDashboardNotificationsFromFile,

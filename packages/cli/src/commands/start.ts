@@ -35,6 +35,7 @@ import {
   recordActivityEvent,
   registerProjectInGlobalConfig,
   getGlobalConfigPath,
+  getDaemonDashboardNotificationStorePath,
   type OrchestratorConfig,
   type LocalProjectConfig,
   type ProjectConfig,
@@ -815,9 +816,16 @@ async function startDashboard(
   configPath: string | null,
   terminalPort?: number,
   directTerminalPort?: number,
+  dashboardNotificationStore?: string,
   devMode?: boolean,
 ): Promise<ChildProcess> {
-  const env = await buildDashboardEnv(port, configPath, terminalPort, directTerminalPort);
+  const env = await buildDashboardEnv(
+    port,
+    configPath,
+    terminalPort,
+    directTerminalPort,
+    dashboardNotificationStore,
+  );
 
   // Detect monorepo vs npm install: the `server/` source directory only exists
   // in the monorepo. Published npm packages only have `dist-server/`.
@@ -901,6 +909,7 @@ async function runStartup(
 
   const shouldStartLifecycle = opts?.dashboard !== false || opts?.orchestrator !== false;
   let port = config.port ?? DEFAULT_PORT;
+  const dashboardNotificationStore = getDaemonDashboardNotificationStorePath();
   console.log(chalk.bold(`\nStarting orchestrator for ${chalk.cyan(project.name)}\n`));
 
   const spinner = ora();
@@ -942,6 +951,7 @@ async function runStartup(
       config.configPath,
       config.terminalPort,
       config.directTerminalPort,
+      dashboardNotificationStore,
       opts?.dev,
     );
     spinner.succeed(`Dashboard starting on ${dashboardUrl(port)}`);

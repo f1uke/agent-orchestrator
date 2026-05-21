@@ -16,6 +16,7 @@ import {
   DEFAULT_DASHBOARD_NOTIFICATION_LIMIT,
   getEnvDefaults,
   getDashboardNotificationStorePath,
+  getLiveDashboardNotificationStorePath,
   getNodePtyPrebuildsSubdir,
   isWindows,
   loadConfig,
@@ -245,7 +246,8 @@ function readDashboardLimit(configPath: string | undefined): number {
 
 /**
  * Polls the dashboard notification JSONL store and broadcasts changes to mux
- * subscribers. The store is config-scoped and survives dashboard reloads.
+ * subscribers. A live daemon's store wins over the config-scoped fallback so
+ * producers that resolved a different config still write to the visible dashboard.
  */
 export class NotificationBroadcaster {
   private subscribers = new Set<
@@ -259,11 +261,25 @@ export class NotificationBroadcaster {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private lastRecords: DashboardNotificationRecord[] = [];
   private readonly configPath: string | undefined;
-  private readonly storePath: string | null;
+  private readonly envStorePath: string | null;
 
-  constructor(configPath = process.env["AO_CONFIG_PATH"]) {
+  constructor(
+    configPath = process.env["AO_CONFIG_PATH"],
+    envStorePath = process.env["AO_DASHBOARD_NOTIFICATION_STORE"],
+  ) {
     this.configPath = configPath;
-    this.storePath = configPath ? getDashboardNotificationStorePath(configPath) : null;
+    this.envStorePath =
+      typeof envStorePath === "string" && envStorePath.trim().length > 0
+        ? envStorePath.trim()
+        : null;
+  }
+
+  private getStorePath(): string | null {
+    return (
+      getLiveDashboardNotificationStorePath() ??
+      this.envStorePath ??
+      (this.configPath ? getDashboardNotificationStorePath(this.configPath) : null)
+    );
   }
 
   subscribe(
@@ -334,11 +350,12 @@ export class NotificationBroadcaster {
     limit: number;
   } {
     const limit = readDashboardLimit(this.configPath);
-    if (!this.storePath) return { notifications: [], error: null, limit };
+    const storePath = this.getStorePath();
+    if (!storePath) return { notifications: [], error: null, limit };
 
     try {
       return {
-        notifications: readDashboardNotificationsFromFile(this.storePath, limit),
+        notifications: readDashboardNotificationsFromFile(storePath, limit),
         error: null,
         limit,
       };

@@ -11,7 +11,11 @@ import {
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
-import { atomicWriteFileSync, recordActivityEvent } from "@aoagents/ao-core";
+import {
+  atomicWriteFileSync,
+  getDaemonDashboardNotificationStorePath,
+  recordActivityEvent,
+} from "@aoagents/ao-core";
 
 export interface RunningState {
   pid: number;
@@ -19,6 +23,7 @@ export interface RunningState {
   port: number;
   startedAt: string;
   projects: string[];
+  dashboardNotificationStore?: string;
 }
 
 const STATE_DIR = join(homedir(), ".agent-orchestrator");
@@ -187,7 +192,11 @@ function writeState(state: RunningState | null): void {
 export async function register(entry: RunningState): Promise<void> {
   const release = await acquireLock(STATE_LOCK_FILE, 5000, "running.json lock");
   try {
-    writeState(entry);
+    writeState({
+      ...entry,
+      dashboardNotificationStore:
+        entry.dashboardNotificationStore ?? getDaemonDashboardNotificationStorePath(),
+    });
   } finally {
     release();
   }

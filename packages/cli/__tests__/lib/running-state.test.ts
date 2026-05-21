@@ -45,6 +45,11 @@ describe("running-state", () => {
       port: 4321,
       startedAt: new Date("2026-04-19T00:00:00.000Z").toISOString(),
       projects: ["my-app"],
+      dashboardNotificationStore: join(
+        testHome,
+        ".agent-orchestrator",
+        "dashboard-notifications.jsonl",
+      ),
     });
     expect(existsSync(stateFile)).toBe(true);
     expect(killSpy).toHaveBeenCalledWith(424242, 0);

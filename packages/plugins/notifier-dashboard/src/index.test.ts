@@ -1,19 +1,23 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSessionTransitionNotificationData,
+  getDaemonDashboardNotificationStorePath,
   getDashboardNotificationStorePath,
   readDashboardNotifications,
+  readDashboardNotificationsFromFile,
   type OrchestratorEvent,
 } from "@aoagents/ao-core";
 import { create, manifest } from "./index.js";
 
 let tempDir: string | null = null;
+let originalHome: string | undefined;
+let originalUserProfile: string | undefined;
 
 function makeConfigPath(): string {
-  tempDir = mkdtempSync(join(tmpdir(), "ao-dashboard-plugin-"));
+  if (!tempDir) throw new Error("tempDir not initialized");
   return join(tempDir, "agent-orchestrator.yaml");
 }
 
@@ -53,9 +57,29 @@ function makeEvent(overrides: Partial<OrchestratorEvent> = {}): OrchestratorEven
   };
 }
 
+beforeEach(() => {
+  tempDir = mkdtempSync(join(tmpdir(), "ao-dashboard-plugin-"));
+  originalHome = process.env["HOME"];
+  originalUserProfile = process.env["USERPROFILE"];
+  process.env["HOME"] = tempDir;
+  process.env["USERPROFILE"] = tempDir;
+});
+
 afterEach(() => {
+  if (originalHome === undefined) {
+    delete process.env["HOME"];
+  } else {
+    process.env["HOME"] = originalHome;
+  }
+  if (originalUserProfile === undefined) {
+    delete process.env["USERPROFILE"];
+  } else {
+    process.env["USERPROFILE"] = originalUserProfile;
+  }
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   tempDir = null;
+  originalHome = undefined;
+  originalUserProfile = undefined;
   vi.restoreAllMocks();
 });
 
@@ -108,13 +132,42 @@ describe("notifier-dashboard", () => {
     ]);
   });
 
+  it("persists to the live daemon dashboard store when one is registered", async () => {
+    if (!tempDir) throw new Error("tempDir not initialized");
+    const stateDir = join(tempDir, ".agent-orchestrator");
+    mkdirSync(stateDir, { recursive: true });
+    const daemonStorePath = getDaemonDashboardNotificationStorePath();
+    const configPath = join(tempDir, ".agent-orchestrator", "config.yaml");
+    writeFileSync(
+      join(stateDir, "running.json"),
+      JSON.stringify({
+        pid: process.pid,
+        configPath: join(tempDir, "project", "agent-orchestrator.yaml"),
+        port: 3000,
+        startedAt: "2026-05-21T00:00:00.000Z",
+        projects: ["demo"],
+        dashboardNotificationStore: daemonStorePath,
+      }),
+    );
+
+    const notifier = create({ configPath });
+    await notifier.notify(makeEvent({ id: "evt-live" }));
+
+    expect(
+      readDashboardNotificationsFromFile(daemonStorePath).map((record) => record.event.id),
+    ).toEqual(["evt-live"]);
+    expect(readDashboardNotifications(configPath)).toEqual([]);
+  });
+
   it("warns and no-ops when configPath is missing", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const notifier = create();
 
     await notifier.notify(makeEvent());
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("No configPath available"));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("No live dashboard notification store or configPath available"),
+    );
   });
 
   it("uses the expected store path shape", () => {

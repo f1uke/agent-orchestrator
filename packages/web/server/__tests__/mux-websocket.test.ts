@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import { WebSocket } from "ws";
-import { appendDashboardNotification, isWindows, type OrchestratorEvent } from "@aoagents/ao-core";
+import {
+  appendDashboardNotification,
+  appendDashboardNotificationRecord,
+  createDashboardNotificationRecord,
+  getDaemonDashboardNotificationStorePath,
+  isWindows,
+  type OrchestratorEvent,
+} from "@aoagents/ao-core";
 import type { SessionBroadcaster as SessionBroadcasterType } from "../mux-websocket";
 
 // vi.mock factories run before module-level statements. Hoist the mock
@@ -783,10 +790,16 @@ describe("TerminalManager ui.terminal_pty_lost activity events", () => {
 describe("NotificationBroadcaster", () => {
   let tempDir: string | null = null;
   let configPath: string;
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers();
     tempDir = mkdtempSync(join(tmpdir(), "ao-notification-broadcaster-"));
+    originalHome = process.env["HOME"];
+    originalUserProfile = process.env["USERPROFILE"];
+    process.env["HOME"] = tempDir;
+    process.env["USERPROFILE"] = tempDir;
     configPath = join(tempDir, "agent-orchestrator.yaml");
     writeFileSync(
       configPath,
@@ -804,6 +817,16 @@ describe("NotificationBroadcaster", () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+    if (originalHome === undefined) {
+      delete process.env["HOME"];
+    } else {
+      process.env["HOME"] = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env["USERPROFILE"];
+    } else {
+      process.env["USERPROFILE"] = originalUserProfile;
+    }
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     tempDir = null;
   });
@@ -835,6 +858,31 @@ describe("NotificationBroadcaster", () => {
     });
   }
 
+  function writeRunningState(dashboardNotificationStore: string): void {
+    if (!tempDir) throw new Error("tempDir not initialized");
+    const stateDir = join(tempDir, ".agent-orchestrator");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, "running.json"),
+      JSON.stringify({
+        pid: process.pid,
+        configPath,
+        port: 3000,
+        startedAt: "2026-05-21T00:00:00.000Z",
+        projects: ["demo"],
+        dashboardNotificationStore,
+      }),
+    );
+  }
+
+  function appendDaemonEvent(id: string, receivedAt: string, storePath: string): void {
+    appendDashboardNotificationRecord(
+      storePath,
+      createDashboardNotificationRecord(makeEvent(id), undefined, new Date(receivedAt)),
+      2,
+    );
+  }
+
   it("sends an immediate dashboard notification snapshot", () => {
     appendEvent("evt-1", "2026-05-13T12:00:01.000Z");
     const broadcaster = new NotificationBroadcaster(configPath);
@@ -844,6 +892,25 @@ describe("NotificationBroadcaster", () => {
 
     expect(callback).toHaveBeenCalledWith(
       [expect.objectContaining({ event: expect.objectContaining({ id: "evt-1" }) })],
+      "snapshot",
+      2,
+    );
+
+    unsubscribe();
+  });
+
+  it("reads the live daemon dashboard notification store instead of the config-scoped store", () => {
+    appendEvent("evt-config", "2026-05-13T12:00:01.000Z");
+    const daemonStorePath = getDaemonDashboardNotificationStorePath();
+    writeRunningState(daemonStorePath);
+    appendDaemonEvent("evt-daemon", "2026-05-13T12:00:02.000Z", daemonStorePath);
+    const broadcaster = new NotificationBroadcaster(configPath);
+    const callback = vi.fn();
+
+    const unsubscribe = broadcaster.subscribe(callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      [expect.objectContaining({ event: expect.objectContaining({ id: "evt-daemon" }) })],
       "snapshot",
       2,
     );

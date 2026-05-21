@@ -1,5 +1,8 @@
 import {
-  appendDashboardNotification,
+  appendDashboardNotificationRecord,
+  createDashboardNotificationRecord,
+  getDashboardNotificationStorePath,
+  getLiveDashboardNotificationStorePath,
   normalizeDashboardNotificationLimit,
   type Notifier,
   type NotifyAction,
@@ -21,20 +24,31 @@ function stringValue(value: unknown): string | undefined {
 export function create(config?: Record<string, unknown>): Notifier {
   const configPath = stringValue(config?.configPath);
   const limit = normalizeDashboardNotificationLimit(config?.limit);
-  let warnedMissingConfigPath = false;
+  let warnedMissingStore = false;
+
+  function resolveStorePath(): string | null {
+    const liveStorePath = getLiveDashboardNotificationStorePath();
+    if (liveStorePath) return liveStorePath;
+    return configPath ? getDashboardNotificationStorePath(configPath) : null;
+  }
 
   function persist(event: OrchestratorEvent, actions?: NotifyAction[]): void {
-    if (!configPath) {
-      if (!warnedMissingConfigPath) {
+    const storePath = resolveStorePath();
+    if (!storePath) {
+      if (!warnedMissingStore) {
         console.warn(
-          "[notifier-dashboard] No configPath available - dashboard notifications will be no-ops",
+          "[notifier-dashboard] No live dashboard notification store or configPath available - dashboard notifications will be no-ops",
         );
-        warnedMissingConfigPath = true;
+        warnedMissingStore = true;
       }
       return;
     }
 
-    appendDashboardNotification(configPath, event, actions, { limit });
+    appendDashboardNotificationRecord(
+      storePath,
+      createDashboardNotificationRecord(event, actions),
+      limit,
+    );
   }
 
   return {

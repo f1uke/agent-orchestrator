@@ -132,12 +132,17 @@ export async function buildDashboardEnv(
   configPath: string | null,
   terminalPort?: number,
   directTerminalPort?: number,
+  dashboardNotificationStore?: string | null,
 ): Promise<Record<string, string>> {
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
 
   // Pass config path so dashboard uses the same config as the CLI
   if (configPath) {
     env["AO_CONFIG_PATH"] = configPath;
+  }
+
+  if (dashboardNotificationStore) {
+    env["AO_DASHBOARD_NOTIFICATION_STORE"] = dashboardNotificationStore;
   }
 
   env["PORT"] = String(port);
