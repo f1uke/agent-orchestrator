@@ -810,6 +810,36 @@ interface HookRegistration {
   identifiers: ReadonlyArray<string>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBareHookDefinition(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value["command"] === "string" && !Array.isArray(value["hooks"]);
+}
+
+function normalizeHookEntry(entry: unknown): unknown {
+  if (!isRecord(entry)) return entry;
+
+  if (isBareHookDefinition(entry)) {
+    return { matcher: "", hooks: [entry] };
+  }
+
+  if (Array.isArray(entry["hooks"]) && typeof entry["matcher"] !== "string") {
+    return { ...entry, matcher: "" };
+  }
+
+  return entry;
+}
+
+function normalizeClaudeHookSettings(hooks: Record<string, unknown>): void {
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (!Array.isArray(entries)) continue;
+    hooks[event] = entries.map(normalizeHookEntry);
+  }
+}
+
 /**
  * Set the registration's hook in the `event`'s hook array, updating any
  * existing entry whose command contains one of `identifiers` (idempotent).
@@ -835,13 +865,13 @@ function upsertHookEntry(
   let foundDefIdx = -1;
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
-    const hooksList = (entry as Record<string, unknown>)["hooks"];
+    if (!isRecord(entry)) continue;
+    const hooksList = entry["hooks"];
     if (!Array.isArray(hooksList)) continue;
     for (let j = 0; j < hooksList.length; j++) {
       const def = hooksList[j];
-      if (typeof def !== "object" || def === null || Array.isArray(def)) continue;
-      const cmd = (def as Record<string, unknown>)["command"];
+      if (!isRecord(def)) continue;
+      const cmd = def["command"];
       if (typeof cmd === "string" && reg.identifiers.some((id) => cmd.includes(id))) {
         foundEntryIdx = i;
         foundDefIdx = j;
@@ -989,7 +1019,8 @@ async function setupHookInWorkspace(workspacePath: string): Promise<void> {
     }
   }
 
-  const hooks = (existingSettings["hooks"] as Record<string, unknown>) ?? {};
+  const hooks = isRecord(existingSettings["hooks"]) ? existingSettings["hooks"] : {};
+  normalizeClaudeHookSettings(hooks);
   for (const reg of buildHookRegistrations(metadataCommand, activityCommand)) {
     upsertHookEntry(hooks, reg);
   }

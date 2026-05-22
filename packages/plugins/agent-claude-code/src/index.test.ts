@@ -1159,6 +1159,43 @@ describe("setupWorkspaceHooks — activity-updater (#1941)", () => {
     expect(commands).toContain(ACTIVITY_CMD_UNIX); // our hook added
   });
 
+  it("migrates a legacy bare SessionStart hook before adding activity-updater", async () => {
+    const existingSettings = {
+      hooks: {
+        SessionStart: [
+          {
+            type: "command",
+            command: "python .claude/hooks/session_start_context.py",
+          },
+        ],
+      },
+    };
+    mockExistsSync.mockReturnValueOnce(true);
+    mockReadFile.mockResolvedValueOnce(JSON.stringify(existingSettings));
+    mockWriteFile.mockClear();
+
+    await agent.setupWorkspaceHooks!("/workspace/test", {} as WorkspaceHooksConfig);
+
+    const settings = getParsedSettings();
+    const sessionStart = (settings.hooks as Record<string, unknown>)["SessionStart"] as Array<{
+      matcher: string;
+      hooks: Array<{ command: string }>;
+    }>;
+    expect(sessionStart[0]).toEqual({
+      matcher: "",
+      hooks: [
+        {
+          type: "command",
+          command: "python .claude/hooks/session_start_context.py",
+        },
+      ],
+    });
+
+    const commands = sessionStart.flatMap((g) => g.hooks).map((h) => h.command);
+    expect(commands).toContain("python .claude/hooks/session_start_context.py");
+    expect(commands).toContain(ACTIVITY_CMD_UNIX);
+  });
+
   it("tolerates malformed hooks.<event> (object instead of array)", async () => {
     // A user could hand-edit settings.json or an older plugin could have
     // written a non-array shape there. We must not crash — start fresh.
