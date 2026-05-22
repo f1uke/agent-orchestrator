@@ -38,6 +38,58 @@ describe("DirectoryBrowser", () => {
     await waitFor(() => expect(row.closest("button")?.className).toContain("is-selected"));
   });
 
+  it("renders breadcrumb segments and navigates on crumb click", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ entries: [], roots: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Harness />);
+
+    await waitFor(() => expect(screen.getByText("home")).toBeInTheDocument());
+    fetchMock.mockClear();
+    fireEvent.click(screen.getByText("home"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/filesystem/browse?path=~"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets focused breadcrumb Enter activate the crumb instead of descending into the selected folder", () => {
+    const browser = {
+      browsePath: "~/workspace",
+      selectedBrowsePath: "~/workspace/alpha",
+      setSelectedBrowsePath: vi.fn(),
+      directoryEntries: [{ name: "alpha", isDirectory: true, isGitRepo: false, hasLocalConfig: false }],
+      currentDirectory: null,
+      roots: [],
+      selectedRootPath: "",
+      locationInput: "~/workspace",
+      setLocationInput: vi.fn(),
+      loading: false,
+      error: null,
+      parentPath: "~",
+      canGoBack: false,
+      canGoForward: false,
+      browse: vi.fn(),
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+      goUp: vi.fn(),
+      refresh: vi.fn(),
+      reset: vi.fn(),
+    } satisfies UseDirectoryBrowser;
+
+    render(<DirectoryBrowser browser={browser} />);
+
+    const homeCrumb = screen.getByRole("button", { name: "home" });
+    homeCrumb.focus();
+    fireEvent.keyDown(homeCrumb, { key: "Enter" });
+    fireEvent.click(homeCrumb);
+
+    expect(browser.browse).toHaveBeenCalledWith("~");
+    expect(browser.browse).not.toHaveBeenCalledWith("~/workspace/alpha");
+  });
+
   it("selects a folder with ArrowDown and descends with Enter", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -5,6 +5,7 @@ import {
   ArrowUpIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  getBreadcrumbs,
   joinBrowsePath,
   RefreshIcon,
 } from "@/components/AddProjectModal.parts";
@@ -18,6 +19,10 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
+function isFolderRowTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.classList.contains("add-project-browser__row");
 }
 
 export function DirectoryBrowser({ browser }: DirectoryBrowserProps) {
@@ -58,6 +63,7 @@ export function DirectoryBrowser({ browser }: DirectoryBrowserProps) {
       if (
         event.key === "Enter" &&
         selectedIndex >= 0 &&
+        isFolderRowTarget(event.target) &&
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
@@ -143,6 +149,18 @@ export function DirectoryBrowser({ browser }: DirectoryBrowserProps) {
         <div className="add-project-browser">
           <div className="add-project-browser__current">
             <div className="add-project-browser__current-label">Current folder</div>
+            <div className="add-project-browser__breadcrumb">
+              {getBreadcrumbs(browser.browsePath).map((crumb) => (
+                <button
+                  key={crumb.path}
+                  type="button"
+                  className="add-project-browser__crumb"
+                  onClick={() => void browser.browse(crumb.path)}
+                >
+                  {crumb.label}
+                </button>
+              ))}
+            </div>
             <div className="add-project-browser__current-path">{browser.browsePath}</div>
           </div>
           {browser.error ? (
