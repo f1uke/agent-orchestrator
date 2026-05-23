@@ -521,8 +521,46 @@ describe("spawn command", () => {
     const help = spawnCommand?.helpInformation() ?? "";
 
     expect(help).toContain("Usage:  spawn [options] [issue]");
+    expect(help).toContain("--preview-prompt");
     expect(help).not.toContain("[first]");
     expect(help).not.toContain("[second]");
+  });
+
+  it("prints a composed prompt preview without spawning or requiring the daemon", async () => {
+    const projects = (mockConfigRef.current as Record<string, unknown>).projects as Record<
+      string,
+      Record<string, unknown>
+    >;
+    projects["my-app"].agentRules = "Always write focused tests.";
+    projects["my-app"].agentRulesFile = "AGENTS.md";
+    writeFileSync(join(tmpDir, "main-repo", "AGENTS.md"), "Prefer small changes.");
+    mockGetRunning.mockRejectedValue(new Error("daemon should not be checked"));
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "INT-42",
+      "--preview-prompt",
+      "--prompt",
+      "Fix this\ncarefully",
+    ]);
+
+    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(output).toContain("PROMPT PREVIEW");
+    expect(output).toContain("Project: my-app");
+    expect(output).toContain("Issue:   INT-42");
+    expect(output).toContain("tracker issue context is not fetched in preview mode");
+    expect(output).toContain("--- System Prompt ---");
+    expect(output).toContain("## Project Context");
+    expect(output).toContain("Work on issue #INT-42");
+    expect(output).toContain("Always write focused tests.");
+    expect(output).toContain("Prefer small changes.");
+    expect(output).toContain("--- Task Prompt ---");
+    expect(output).toContain("Fix this carefully");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockRegistryGet).not.toHaveBeenCalled();
+    expect(mockGetRunning).not.toHaveBeenCalled();
   });
 
   it("rejects more than one positional arg with replacement usage", async () => {

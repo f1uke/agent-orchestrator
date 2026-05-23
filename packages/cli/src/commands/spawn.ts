@@ -3,7 +3,10 @@ import ora from "ora";
 import type { Command } from "commander";
 import { resolve } from "node:path";
 import {
+  buildPrompt,
+  getProjectSessionsDir,
   loadConfig,
+  readMetadataRaw,
   recordActivityEvent,
   resolveSpawnTarget,
   TERMINAL_STATUSES,
@@ -98,6 +101,58 @@ function resolveProjectAndIssue(
 interface SpawnClaimOptions {
   claimPr?: string;
   assignOnGithub?: boolean;
+}
+
+function sanitizeSpawnPrompt(prompt: string | undefined): string | undefined {
+  const sanitizedPrompt = prompt?.replace(/[\r\n]/g, " ").trim() || undefined;
+  if (sanitizedPrompt && sanitizedPrompt.length > 4096) {
+    throw new Error("Prompt must be at most 4096 characters");
+  }
+  return sanitizedPrompt;
+}
+
+function previewSpawnPrompt(
+  config: OrchestratorConfig,
+  projectId: string,
+  issueId?: string,
+  prompt?: string,
+): void {
+  const project = config.projects[projectId];
+  if (!project) {
+    throw new Error(`Unknown project: ${projectId}`);
+  }
+
+  const sanitizedPrompt = sanitizeSpawnPrompt(prompt);
+  const orchestratorSessionId = `${project.sessionPrefix}-orchestrator`;
+  const orchestratorExists =
+    readMetadataRaw(getProjectSessionsDir(projectId), orchestratorSessionId) !== null;
+  const { systemPrompt, taskPrompt } = buildPrompt({
+    project,
+    projectId,
+    issueId,
+    userPrompt: sanitizedPrompt,
+    ...(orchestratorExists && { orchestratorSessionId }),
+  });
+
+  console.log(banner("PROMPT PREVIEW"));
+  console.log();
+  console.log(`Project: ${chalk.bold(projectId)}`);
+  if (issueId) {
+    console.log(`Issue:   ${chalk.bold(issueId)}`);
+    console.log(
+      chalk.yellow(
+        "Note: tracker issue context is not fetched in preview mode, so network-sourced issue details are omitted.",
+      ),
+    );
+  }
+  console.log();
+  console.log(chalk.bold("--- System Prompt ---"));
+  console.log(systemPrompt);
+  if (taskPrompt) {
+    console.log();
+    console.log(chalk.bold("--- Task Prompt ---"));
+    console.log(taskPrompt);
+  }
 }
 
 /**
@@ -212,10 +267,7 @@ async function spawnSession(
     spinner.text = "Spawning session via core";
 
     // Validate and sanitize prompt (strip newlines to prevent metadata injection)
-    const sanitizedPrompt = prompt?.replace(/[\r\n]/g, " ").trim() || undefined;
-    if (sanitizedPrompt && sanitizedPrompt.length > 4096) {
-      throw new Error("Prompt must be at most 4096 characters");
-    }
+    const sanitizedPrompt = sanitizeSpawnPrompt(prompt);
 
     recordActivityEvent({
       projectId,
@@ -305,6 +357,10 @@ export function registerSpawn(program: Command): void {
     .option("--claim-pr <pr>", "Immediately claim an existing PR for the spawned session")
     .option("--assign-on-github", "Assign the claimed PR to the authenticated GitHub user")
     .option(
+      "--preview-prompt",
+      "Build and print the composed agent prompt without creating a session",
+    )
+    .option(
       "--prompt <text>",
       "Initial prompt/instructions for the agent (use instead of an issue)",
     )
@@ -316,6 +372,7 @@ export function registerSpawn(program: Command): void {
           agent?: string;
           claimPr?: string;
           assignOnGithub?: boolean;
+          previewPrompt?: boolean;
           prompt?: string;
         },
         command: Command,
@@ -344,6 +401,16 @@ export function registerSpawn(program: Command): void {
         if (!opts.claimPr && opts.assignOnGithub) {
           console.error(chalk.red("--assign-on-github requires --claim-pr on `ao spawn`."));
           process.exit(1);
+        }
+
+        if (opts.previewPrompt) {
+          try {
+            previewSpawnPrompt(config, projectId, issueId, opts.prompt);
+          } catch (err) {
+            console.error(chalk.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
+            process.exit(1);
+          }
+          return;
         }
 
         const claimOptions: SpawnClaimOptions = {
