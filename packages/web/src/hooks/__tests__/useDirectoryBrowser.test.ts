@@ -74,7 +74,9 @@ describe("useDirectoryBrowser", () => {
 
     expect(result.current.browsePath).toBe("~");
     expect(result.current.locationInput).toBe("~");
-    expect(result.current.selectedBrowsePath).toBe("~");
+    // History-replay navigation no longer carries a selection — selecting is an explicit
+    // user action (click a row, type a path) so descend/back/forward leave selection clear.
+    expect(result.current.selectedBrowsePath).toBe("");
     expect(result.current.canGoForward).toBe(true);
     act(() => result.current.goForward());
     await waitFor(() => expect(result.current.browsePath).toBe("~/a"));

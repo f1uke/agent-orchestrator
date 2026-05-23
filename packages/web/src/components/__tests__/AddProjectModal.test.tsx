@@ -129,7 +129,7 @@ describe("AddProjectModal", () => {
 
     render(<AddProjectModal open onClose={vi.fn()} />);
 
-    const driveSelect = await screen.findByLabelText(/drive/i);
+    const driveSelect = await screen.findByLabelText(/location/i);
     fireEvent.change(driveSelect, { target: { value: "D:\\" } });
 
     await waitFor(() =>
@@ -137,7 +137,11 @@ describe("AddProjectModal", () => {
         `/api/filesystem/browse?path=${encodeURIComponent("D:\\")}`,
       ),
     );
-    await waitFor(() => expect(screen.getAllByText("D:\\").length).toBeGreaterThan(0));
+    // Drive switch navigates but no longer auto-selects (selection is an explicit user
+    // action — see useDirectoryBrowser). The location input is the canonical "where we are".
+    await waitFor(() =>
+      expect((screen.getByLabelText(/folder path/i) as HTMLInputElement).value).toBe("D:\\"),
+    );
     expect(await screen.findByRole("button", { name: /projects/i })).toBeInTheDocument();
   });
 

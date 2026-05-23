@@ -281,6 +281,110 @@ describe("DirectoryBrowser", () => {
     expect(browser.reset).not.toHaveBeenCalled();
   });
 
+  it("does not auto-select the descended folder on double-click", async () => {
+    const fetchMock = vi
+      .fn()
+      // initial reset → home
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          entries: [{ name: "workspace", isDirectory: true, isGitRepo: false, hasLocalConfig: false }],
+          roots: [],
+        }),
+      })
+      // descend into workspace (not a git repo)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          entries: [],
+          current: { isGitRepo: false, hasLocalConfig: false },
+          roots: [],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Harness />);
+
+    const row = (await screen.findByText("workspace")).closest("button");
+    expect(row).not.toBeNull();
+    fireEvent.doubleClick(row!);
+
+    // After descending, the current-folder row exists but must NOT be selected — the
+    // user navigated, they didn't pick. Otherwise the modal flashes a red
+    // "not a git repository" warning for every non-repo folder they pass through.
+    await waitFor(() => {
+      const current = screen.queryByRole("button", { name: "workspace, current folder" });
+      expect(current).not.toBeNull();
+      expect(current?.className).not.toContain("is-selected");
+    });
+  });
+
+  it("offers Home in the location dropdown and browses back to ~ when picked", () => {
+    const browser = {
+      browsePath: "C:\\Users",
+      selectedBrowsePath: "",
+      setSelectedBrowsePath: vi.fn(),
+      directoryEntries: [],
+      currentDirectory: null,
+      roots: [
+        { label: "C:", path: "C:\\" },
+        { label: "D:", path: "D:\\" },
+      ],
+      selectedRootPath: "C:\\",
+      locationInput: "C:\\Users",
+      setLocationInput: vi.fn(),
+      loading: false,
+      error: null,
+      parentPath: "C:\\",
+      canGoBack: true,
+      canGoForward: false,
+      browse: vi.fn(),
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+      goUp: vi.fn(),
+      refresh: vi.fn(),
+      reset: vi.fn(),
+    } satisfies UseDirectoryBrowser;
+
+    render(<DirectoryBrowser browser={browser} />);
+
+    const select = screen.getByLabelText("Location") as HTMLSelectElement;
+    // Home is the first option so it acts as the route back to ~ from any drive.
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["~", "C:\\", "D:\\"]);
+    fireEvent.change(select, { target: { value: "~" } });
+
+    expect(browser.browse).toHaveBeenCalledWith("~");
+  });
+
+  it("shows Home as the selected location when browsePath is ~", () => {
+    const browser = {
+      browsePath: "~",
+      selectedBrowsePath: "",
+      setSelectedBrowsePath: vi.fn(),
+      directoryEntries: [],
+      currentDirectory: null,
+      roots: [{ label: "C:", path: "C:\\" }],
+      selectedRootPath: "",
+      locationInput: "~",
+      setLocationInput: vi.fn(),
+      loading: false,
+      error: null,
+      parentPath: null,
+      canGoBack: false,
+      canGoForward: false,
+      browse: vi.fn(),
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+      goUp: vi.fn(),
+      refresh: vi.fn(),
+      reset: vi.fn(),
+    } satisfies UseDirectoryBrowser;
+
+    render(<DirectoryBrowser browser={browser} />);
+
+    expect((screen.getByLabelText("Location") as HTMLSelectElement).value).toBe("~");
+  });
+
   it("handles keyboard navigation when focus is on an ancestor container", async () => {
     vi.stubGlobal(
       "fetch",

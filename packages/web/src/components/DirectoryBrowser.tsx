@@ -151,15 +151,20 @@ export function DirectoryBrowser({ browser }: DirectoryBrowserProps) {
           </button>
           {browser.roots.length > 0 ? (
             <select
-              aria-label="Drive"
-              value={browser.selectedRootPath}
+              aria-label="Location"
+              // When on home, no drive root matches → the bare select shows "Home" as the
+              // current value. On a drive, selectedRootPath is the drive; picking "Home"
+              // (value="~") routes back to ~.
+              value={browser.browsePath === "~" ? "~" : browser.selectedRootPath}
               onChange={(event) => {
                 const nextPath = event.target.value;
-                if (nextPath) void browser.browse(nextPath, { selectedPath: nextPath });
+                if (!nextPath) return;
+                if (nextPath === "~") void browser.browse("~");
+                else void browser.browse(nextPath);
               }}
               className="add-project-modal__drive-select"
             >
-              <option value="">Drive</option>
+              <option value="~">Home</option>
               {browser.roots.map((root) => (
                 <option key={root.path} value={root.path}>
                   {root.label}

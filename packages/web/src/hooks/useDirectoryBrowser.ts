@@ -82,7 +82,10 @@ export function useDirectoryBrowser(): UseDirectoryBrowser {
     setBrowseEntries([]);
     setCurrentDirectory(null);
     setRoots([]);
-    setSelectedBrowsePath(selectedPath ?? path);
+    // Navigating to `path` (descend, breadcrumb, drive switch) must not auto-select it —
+    // a selection should only ever come from explicit user intent. Callers that DO want
+    // to seed a selection (refresh, reset, typed-path Enter) pass `selectedPath` explicitly.
+    setSelectedBrowsePath(selectedPath ?? "");
   }, []);
 
   const browse = useCallback(
@@ -116,7 +119,7 @@ export function useDirectoryBrowser(): UseDirectoryBrowser {
         const mode = options?.mode ?? "push";
         setBrowsePath(path);
         setLocationInput(path);
-        setSelectedBrowsePath(options?.selectedPath ?? path);
+        setSelectedBrowsePath(options?.selectedPath ?? "");
         setBrowseEntries(body?.entries ?? []);
         setCurrentDirectory(body?.current ?? null);
         setRoots(body?.roots ?? []);
