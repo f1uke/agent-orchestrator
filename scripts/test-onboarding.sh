@@ -25,8 +25,22 @@
 #
 # Usage:
 #   scripts/test-onboarding.sh [--version <latest|nightly|EXACT>] \
+#                              [--registry <url>] \
 #                              [--mode <fresh|coexist>] \
 #                              [--port <N>] [--keep] [-h|--help]
+#
+# Testing a BRANCH instead of a release:
+#   The grok-style packaging bugs this harness catches only exist in the
+#   PUBLISHED tarball, so a branch must be *published* somewhere first — a
+#   source build does not reproduce them. Two faithful routes:
+#     1. Merged to main: a per-commit nightly is auto-published. Run
+#          --version 0.x.y-nightly-<sha>     (see: npm view @aoagents/ao versions)
+#        to test that exact commit's real packaged artifact — no setup.
+#     2. Unmerged PR branch: publish it to a throwaway local registry
+#        (verdaccio) and point the harness there:
+#          npx verdaccio &   # http://localhost:4873
+#          pnpm -r publish --registry http://localhost:4873 --no-git-checks
+#          scripts/test-onboarding.sh --registry http://localhost:4873 --version <ver>
 #
 # Exit code 0 = pass, non-zero = fail.
 
@@ -39,6 +53,7 @@ VERSION="latest"
 MODE="fresh"
 FIXED_PORT=""
 KEEP=0
+REGISTRY=""
 
 usage() {
   sed -n '2,/^set -euo/p' "$0" | sed 's/^#\{0,1\} \{0,1\}//; /^set -euo/d'
@@ -53,6 +68,8 @@ while [ $# -gt 0 ]; do
     --mode=*) MODE="${1#*=}"; shift ;;
     --port) FIXED_PORT="${2:?--port needs a value}"; shift 2 ;;
     --port=*) FIXED_PORT="${1#*=}"; shift ;;
+    --registry) REGISTRY="${2:?--registry needs a value}"; shift 2 ;;
+    --registry=*) REGISTRY="${1#*=}"; shift ;;
     --keep) KEEP=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage 1 ;;
@@ -215,10 +232,18 @@ done
 ok "dashboard=$PORT terminal=$TERM_PORT directTerminal=$DIRECT_TERM_PORT"
 
 # ---------------------------------------------------------------------------
-# Install published package into the temp prefix.
+# Install the package into the temp prefix.
+# Default registry = npmjs. --registry points at a throwaway local registry
+# (verdaccio) so an unmerged branch can be tested with full packaging fidelity.
 # ---------------------------------------------------------------------------
-step "Installing $PKG_SPEC into temp prefix"
-npm install -g --prefix "$NPM_PREFIX" "$PKG_SPEC" >"$ROOT/npm-install.log" 2>&1 \
+REGISTRY_ARGS=()
+if [ -n "$REGISTRY" ]; then
+  REGISTRY_ARGS=(--registry "$REGISTRY")
+  step "Installing $PKG_SPEC from $REGISTRY into temp prefix"
+else
+  step "Installing $PKG_SPEC into temp prefix"
+fi
+npm install -g --prefix "$NPM_PREFIX" ${REGISTRY_ARGS[@]+"${REGISTRY_ARGS[@]}"} "$PKG_SPEC" >"$ROOT/npm-install.log" 2>&1 \
   || { cat "$ROOT/npm-install.log" >&2; die "npm install failed"; }
 [ -x "$NPM_PREFIX/bin/ao" ] || die "ao binary not found in temp prefix after install"
 ok "Installed"

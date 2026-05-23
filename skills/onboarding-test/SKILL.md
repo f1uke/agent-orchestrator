@@ -37,6 +37,38 @@ Exit code `0` = onboarding works. Non-zero = it does not — read the printed st
 that failed. Use `--keep` to leave the sandbox in place for debugging, and
 `--port N` to pin the dashboard port (otherwise a free one is auto-allocated).
 
+## Testing a branch instead of a release
+
+This harness deliberately tests the **published tarball**, because the bugs it
+catches (e.g. a plugin's `dist` requiring a `package.json` that the published
+`files` list omits) only exist in the packed artifact — a plain source/branch
+build resolves those paths fine and would give a false green. So a branch must
+be **published somewhere** first. Two faithful routes:
+
+1. **Merged to `main` — zero setup.** Every commit on main publishes a nightly:
+   ```bash
+   npm view @aoagents/ao versions          # find 0.x.y-nightly-<sha> for your commit
+   scripts/test-onboarding.sh --version 0.x.y-nightly-<sha> --mode fresh
+   ```
+   That installs and exercises the **real packaged artifact** of that exact
+   commit. This is how you confirm a merged fix (e.g. a release retarget) before
+   it reaches `latest`.
+
+2. **Unmerged PR branch — throwaway local registry.** Publish the branch's
+   packages to [verdaccio](https://verdaccio.org/) and point the harness at it
+   with `--registry`:
+   ```bash
+   npx verdaccio &                         # http://localhost:4873
+   pnpm -r publish --registry http://localhost:4873 --no-git-checks
+   scripts/test-onboarding.sh --registry http://localhost:4873 \
+     --version <the-version-you-published> --mode fresh
+   ```
+   `--registry` only changes where `npm install` pulls from — every isolation
+   guarantee below still holds.
+
+Do **not** try to onboarding-test a branch by `npm link`/source build: it cannot
+reproduce packaging bugs, which is the whole point of this harness.
+
 Requirements on the runner: `node`, `npm`, `git`, `curl` (all present on CI and
 dev machines). `tmux` is **not** required — the test uses `runtime: process`.
 
