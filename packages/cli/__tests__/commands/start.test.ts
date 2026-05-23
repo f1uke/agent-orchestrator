@@ -2389,9 +2389,6 @@ describe("start command — autoCreateConfig", () => {
     vi.mocked(detectAvailableAgents).mockResolvedValue([]);
     vi.mocked(detectAgentRuntime).mockResolvedValue("claude-code");
 
-    const { findFreePort } = await import("../../src/lib/web-dir.js");
-    vi.mocked(findFreePort).mockResolvedValue(3000);
-
     // start.ts uses `import { cwd } from "node:process"` which is intercepted
     // by the node:process mock defined at the top of this file.
     mockProcessCwd.mockReturnValue(tmpDir);

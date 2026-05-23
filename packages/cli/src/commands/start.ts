@@ -590,9 +590,6 @@ export async function autoCreateConfig(workingDir: string): Promise<Orchestrator
 
     console.log(chalk.green(`✓ Registered "${registeredProjectId}" in global config\n`));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.log(chalk.yellow("⚠ Could not register project in global config."));
-    console.log(chalk.dim(`  ${message}\n`));
     rmSync(outputPath, { force: true });
     throw err;
   }
