@@ -1177,6 +1177,8 @@ html.light .xterm .xterm-viewport:hover::-webkit-scrollbar-thumb:active {
   font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--color-text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .dashboard-app-header__brand-dot {
@@ -1199,6 +1201,10 @@ html.light .xterm .xterm-viewport:hover::-webkit-scrollbar-thumb:active {
   font-size: 12px;
   font-weight: 400;
   color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .dashboard-app-header__spacer {
