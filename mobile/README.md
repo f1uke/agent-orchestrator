@@ -6,7 +6,7 @@ session and drive it, review and merge PRs, and launch/open orchestrators — fr
 your phone, over your LAN or Tailscale.
 
 This is an [Expo](https://expo.dev) (React Native) app. It lives in the AO monorepo
-at `mobile/` but is a **standalone npm project** — it is *not* part of AO's pnpm
+at `mobile/` but is a **standalone npm project** — it is _not_ part of AO's pnpm
 workspace. Run all commands below from inside `mobile/`.
 
 ## Requirements — Expo Go is pinned to SDK 54
@@ -15,7 +15,7 @@ workspace. Run all commands below from inside `mobile/`.
 > **The Expo Go app supports only ONE Expo SDK at a time** (whatever the latest
 > store build targets). This project is **pinned to Expo SDK 54** to match the
 > Expo Go currently installed on the test phone. If your Expo Go shows
-> *"Project is incompatible with this version of Expo Go"*, your Expo Go and this
+> _"Project is incompatible with this version of Expo Go"_, your Expo Go and this
 > project's SDK don't match.
 >
 > - **Don't bump the Expo SDK** unless your Expo Go has updated to that SDK. When

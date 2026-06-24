@@ -20,8 +20,8 @@ orchestrator launch/open — over LAN or Tailscale.
 ## Expo SDK is pinned to 54 — do not bump
 
 Expo Go supports a **single** SDK at a time. This app is pinned to **SDK 54** to
-match the test phone's Expo Go. Symptoms of a mismatch: *"incompatible with this
-version of Expo Go."* Don't change the SDK unless the user's Expo Go updated.
+match the test phone's Expo Go. Symptoms of a mismatch: _"incompatible with this
+version of Expo Go."_ Don't change the SDK unless the user's Expo Go updated.
 Read **v54** docs (<https://docs.expo.dev/versions/v54.0.0/>) — APIs differ by SDK.
 Pinned: `expo 54`, `react 19.1.0`, `react-native 0.81.5`, `expo-router 6`,
 `react-native-webview 13.15.0` (react + webview match `@fressh` peers exactly).
