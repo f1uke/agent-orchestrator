@@ -4,6 +4,7 @@ import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider";
 import type { LinkItemType } from "fumadocs-ui/layouts/shared";
 import { source } from "@/lib/source";
+import { DocsClipboardFix } from "@/components/docs/DocsClipboardFix";
 import "./docs.css";
 
 function GithubIcon({ size = 16 }: { size?: number } = {}) {
@@ -76,10 +77,11 @@ async function GitHubStars() {
 
 export default function Layout({ children }: { children: ReactNode }) {
 	return (
-		<RootProvider theme={{ enabled: true, defaultTheme: "dark" }} search={{ options: { type: "static" } }}>
+		<RootProvider theme={{ enabled: false, defaultTheme: "dark" }} search={{ options: { type: "static" } }}>
 			<DocsLayout
 				tree={source.pageTree}
 				links={links}
+				themeSwitch={{ enabled: false }}
 				nav={{
 					title: (
 						<span className="flex items-center gap-2 font-semibold">
@@ -91,7 +93,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 								height={22}
 								className="h-[22px] w-[22px] rounded-[5px] object-cover"
 							/>
-							<span className="text-[var(--color-text-primary)]">AO</span>
+							<span className="text-[var(--color-text-primary)]">Agent Orchestrator</span>
 						</span>
 					),
 				}}
@@ -112,6 +114,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 					),
 				}}
 			>
+				<DocsClipboardFix />
 				{children}
 			</DocsLayout>
 		</RootProvider>

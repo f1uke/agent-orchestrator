@@ -140,6 +140,11 @@
 	color: var(--docs-accent) !important;
 }
 
+#nd-toc [class*="bg-fd-primary"] {
+	background-color: var(--docs-accent) !important;
+	box-shadow: 0 0 18px rgba(130, 170, 255, 0.35);
+}
+
 /* Breadcrumb: neutral gray */
 #nd-page nav a,
 #nd-page [aria-label="breadcrumb"] a {
@@ -180,7 +185,7 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   2. TYPOGRAPHY — Geist 13px body, JetBrains Mono code (dashboard match)
+   2. TYPOGRAPHY — readable technical docs, compact chrome
    ═══════════════════════════════════════════════════════════════════════════ */
 
 #nd-docs-layout {
@@ -190,10 +195,23 @@
 		system-ui,
 		-apple-system,
 		sans-serif;
-	font-size: 13px;
-	letter-spacing: -0.011em;
+	font-size: 16px;
+	line-height: 1.7;
+	letter-spacing: 0;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+}
+
+#nd-page {
+	font-size: 16px;
+	line-height: 1.7;
+}
+
+#nd-page .prose {
+	color: var(--color-text-secondary);
+	font-size: 16px;
+	line-height: 1.7;
+	letter-spacing: 0;
 }
 
 #nd-docs-layout code,
@@ -202,15 +220,17 @@
 	font-family: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
 }
 
-/* Sidebar — smaller text like dashboard */
+/* Sidebar — compact app chrome, not body typography */
 #nd-sidebar {
 	font-size: 12.5px;
+	letter-spacing: 0;
 }
 
 /* TOC — compact */
 #nd-toc,
 #nd-tocnav {
 	font-size: 11.5px;
+	line-height: 1.55;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -220,26 +240,44 @@
 #nd-docs-layout .prose h1 {
 	color: var(--color-text-primary);
 	font-weight: 700;
-	font-size: 1.65em;
+	font-size: clamp(2rem, 3vw, 2.75rem);
+	line-height: 1.08;
 	letter-spacing: -0.02em;
 }
 
 #nd-docs-layout .prose h2 {
 	color: var(--color-text-primary);
-	font-weight: 680;
-	font-size: 1.3em;
-	letter-spacing: -0.015em;
+	font-weight: 660;
+	font-size: clamp(1.35rem, 2vw, 1.65rem);
+	line-height: 1.22;
+	letter-spacing: -0.01em;
 }
 
 #nd-docs-layout .prose h3 {
 	color: var(--color-text-primary);
 	font-weight: 640;
-	font-size: 1.1em;
+	font-size: 1.125rem;
+	line-height: 1.32;
+	letter-spacing: 0;
 }
 
 #nd-docs-layout .prose h4 {
 	color: var(--color-text-primary);
 	font-weight: 620;
+	letter-spacing: 0;
+}
+
+#nd-docs-layout .prose p,
+#nd-docs-layout .prose li {
+	color: var(--color-text-secondary);
+	font-size: 1rem;
+	line-height: 1.74;
+	letter-spacing: 0;
+}
+
+#nd-docs-layout .prose strong {
+	color: var(--color-text-primary);
+	font-weight: 650;
 }
 
 /* Heading anchors — strip card border/bg */
@@ -266,7 +304,8 @@
 
 /* Tables — dashboard style: uppercase headers, dense */
 #nd-docs-layout .prose table {
-	font-size: 12.5px;
+	font-size: 14px;
+	line-height: 1.6;
 }
 
 #nd-docs-layout .prose th {
@@ -285,13 +324,13 @@
 
 /* Inline code */
 #nd-docs-layout :not(pre) > code {
-	font-size: 0.85em;
-	padding: 0.12em 0.4em;
-	border-radius: 4px;
+	font-size: 0.84em;
+	padding: 0.16em 0.42em;
+	border-radius: 5px;
 	background-color: var(--color-bg-subtle);
 	border: 1px solid var(--color-border-subtle);
 	color: var(--docs-accent);
-	font-weight: 450;
+	font-weight: 520;
 }
 
 /* No underlines in sidebar (desktop + mobile), TOC, or nav */
