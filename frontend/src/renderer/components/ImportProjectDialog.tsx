@@ -101,7 +101,11 @@ export function ImportProjectDialog({ children, onImport }: ImportProjectDialogP
 
 	return (
 		<>
-			{children({ open: openDialog, disabled: isChoosing || isImporting, label: isChoosing ? "Opening..." : "New project" })}
+			{children({
+				open: openDialog,
+				disabled: isChoosing || isImporting,
+				label: isChoosing ? "Opening..." : "New project",
+			})}
 			<Dialog.Root open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
 				<Dialog.Portal>
 					<Dialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-overlay-in" />
@@ -256,7 +260,8 @@ function ImportFolderStep({
 }) {
 	const isWorkspace = mode === "workspace";
 	const failedCount = repos.filter((repo) => !repo.valid).length;
-	const canImportWorkspace = isWorkspace && selectedPath !== null && repos.length > 0 && failedCount === 0 && !isImporting;
+	const canImportWorkspace =
+		isWorkspace && selectedPath !== null && repos.length > 0 && failedCount === 0 && !isImporting;
 	const canImportProject = !isWorkspace && selectedPath !== null && !isImporting;
 
 	return (
@@ -284,7 +289,13 @@ function ImportFolderStep({
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
 				{selectedPath ? (
-					<SelectedFolder mode={mode} repos={repos} selectedPath={selectedPath} failedCount={failedCount} onChoose={onChoose} />
+					<SelectedFolder
+						mode={mode}
+						repos={repos}
+						selectedPath={selectedPath}
+						failedCount={failedCount}
+						onChoose={onChoose}
+					/>
 				) : (
 					<button
 						type="button"
