@@ -173,13 +173,13 @@ export function LandingSocialProof() {
 			}
 		};
 
-	loadTwitterWidgets(target, renderTweets);
-	window.twttr?.ready?.(renderTweets);
+		loadTwitterWidgets(target, renderTweets);
+		window.twttr?.ready?.(renderTweets);
 
-	const timers = [350, 1000, 2200, 4200, 7000].map((delay) =>
-		window.setTimeout(() => {
-			window.twttr?.ready?.(renderTweets);
-			renderTweets();
+		const timers = [350, 1000, 2200, 4200, 7000].map((delay) =>
+			window.setTimeout(() => {
+				window.twttr?.ready?.(renderTweets);
+				renderTweets();
 			}, delay),
 		);
 
@@ -304,10 +304,7 @@ function TweetCard({
 			<div className="px-3 pb-4 pt-3">
 				<p className="mb-3 px-1 text-[13px] leading-relaxed text-[color:var(--fg-muted)]">{post.note}</p>
 				<div className="tweet-shell [&_.twitter-tweet]:mx-auto [&_.twitter-tweet]:max-w-full">
-					<div
-						ref={setTweetRef}
-						className="min-h-[240px]"
-					>
+					<div ref={setTweetRef} className="min-h-[240px]">
 						<TweetFallback post={post} url={url} />
 					</div>
 				</div>

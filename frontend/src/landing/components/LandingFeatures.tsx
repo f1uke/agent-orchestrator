@@ -227,18 +227,15 @@ export function LandingFeatures() {
 							style={{ fontSize: "clamp(34px, 3.45vw, 52px)" }}
 						>
 							Run the agent you already use.
-							<span
-								className="block text-[color:var(--fg-muted)]"
-								style={{ fontSize: "clamp(28px, 2.6vw, 42px)" }}
-							>
+							<span className="block text-[color:var(--fg-muted)]" style={{ fontSize: "clamp(28px, 2.6vw, 42px)" }}>
 								AO wraps the workflow around it.
 							</span>
 						</h2>
 					</div>
 					<div className="lg:col-span-5">
 						<p className="max-w-xl text-[15px] leading-relaxed text-[color:var(--fg-muted)]">
-							Claude Code, Codex, Cursor, OpenCode, Aider, Goose, Droid, Kilo and the rest stay native terminal
-							tools. AO standardizes launch, restore, hooks, activity and PR ownership through one adapter contract.
+							Claude Code, Codex, Cursor, OpenCode, Aider, Goose, Droid, Kilo and the rest stay native terminal tools.
+							AO standardizes launch, restore, hooks, activity and PR ownership through one adapter contract.
 						</p>
 					</div>
 				</div>
@@ -281,9 +278,7 @@ function FeatureNarrative({ worker, orchestrator }: { worker: AgentHarness; orch
 		<article className="surface relative overflow-hidden p-6 sm:p-7">
 			<div className="mb-8 flex items-center justify-between gap-4">
 				<div>
-					<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">
-						feature 01
-					</div>
+					<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">feature 01</div>
 					<h3 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[color:var(--fg)]">
 						Agent-agnostic by design.
 					</h3>
@@ -406,7 +401,9 @@ function AgentHarnessDemo({
 					<div className="mb-4 flex items-center justify-between gap-3">
 						<div>
 							<div className="text-lg font-semibold tracking-[-0.02em] text-[color:var(--fg)]">Launch preview</div>
-							<div className="font-mono text-[11px] text-[color:var(--fg-dim)]">same daemon route, different native CLI</div>
+							<div className="font-mono text-[11px] text-[color:var(--fg-dim)]">
+								same daemon route, different native CLI
+							</div>
 						</div>
 						<div className="rounded-md bg-[color:var(--accent-soft)] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--accent)]">
 							ready
@@ -470,7 +467,9 @@ function ContractRow({ label, value, sub }: { label: string; value: string; sub:
 				<div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--fg-dim)]">{label}</div>
 				<div className="mt-1 text-[15px] font-semibold text-[color:var(--fg)]">{value}</div>
 			</div>
-			<div className="max-w-[150px] text-right font-mono text-[11px] leading-snug text-[color:var(--fg-dim)]">{sub}</div>
+			<div className="max-w-[150px] text-right font-mono text-[11px] leading-snug text-[color:var(--fg-dim)]">
+				{sub}
+			</div>
 		</div>
 	);
 }
@@ -502,13 +501,17 @@ function AgentSelectLabel({ label, agent }: { label: string; agent: AgentHarness
 function AgentLogo({ agent, className }: { agent: AgentHarness; className: string }) {
 	if (!agent.logo) {
 		return (
-			<div className={`${className} flex items-center justify-center rounded-md bg-[color:var(--accent-soft)] text-xs font-bold`}>
+			<div
+				className={`${className} flex items-center justify-center rounded-md bg-[color:var(--accent-soft)] text-xs font-bold`}
+			>
 				{agent.name.slice(0, 1)}
 			</div>
 		);
 	}
 
-	return <img src={agent.logo} alt="" referrerPolicy="no-referrer" className={`${className} rounded-md object-contain`} />;
+	return (
+		<img src={agent.logo} alt="" referrerPolicy="no-referrer" className={`${className} rounded-md object-contain`} />
+	);
 }
 
 function TerminalLine({
@@ -588,14 +591,18 @@ function WorkspaceIsolationDemo({
 
 					<div className="flex-1 overflow-hidden px-3 py-4">
 						<div className="mb-3 flex items-center justify-between">
-							<span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--fg-dim)]">Projects</span>
+							<span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--fg-dim)]">
+								Projects
+							</span>
 							<span className="font-mono text-[13px] text-[color:var(--fg-dim)]">+</span>
 						</div>
 
 						<div className="rounded-lg bg-white/[0.045] px-3 py-2">
 							<div className="flex items-center justify-between gap-2">
 								<span className="truncate text-[13px] font-semibold text-[color:var(--fg)]">agent-orchestrator</span>
-								<span className="rounded-md bg-black/35 px-1.5 py-0.5 font-mono text-[10px] text-[color:var(--fg-dim)]">3</span>
+								<span className="rounded-md bg-black/35 px-1.5 py-0.5 font-mono text-[10px] text-[color:var(--fg-dim)]">
+									3
+								</span>
 							</div>
 						</div>
 
@@ -832,7 +839,9 @@ function FeedbackRoutingDemo({
 			<div className="flex items-center justify-between border-b border-[color:var(--border)] px-5 py-4">
 				<div>
 					<div className="text-sm font-semibold text-[color:var(--fg)]">Pull requests</div>
-					<div className="font-mono text-[11px] text-[color:var(--fg-dim)]">CI, reviews and comments mapped to sessions</div>
+					<div className="font-mono text-[11px] text-[color:var(--fg-dim)]">
+						CI, reviews and comments mapped to sessions
+					</div>
 				</div>
 				<div className="rounded-md border border-[color:var(--border)] bg-white/[0.03] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--fg-muted)]">
 					lifecycle
@@ -913,7 +922,10 @@ function FeedbackRoutingDemo({
 												<span className="h-1.5 w-1.5 rounded-full" style={{ background: check.color }} />
 												{check.name}
 											</span>
-											<span className="font-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: check.color }}>
+											<span
+												className="font-mono text-[10px] uppercase tracking-[0.14em]"
+												style={{ color: check.color }}
+											>
 												{check.state}
 											</span>
 										</div>
@@ -974,7 +986,9 @@ function DaemonControlDemo() {
 			<div className="flex items-center justify-between border-b border-[color:var(--border)] px-5 py-4">
 				<div>
 					<div className="text-sm font-semibold text-[color:var(--fg)]">Local control plane</div>
-					<div className="font-mono text-[11px] text-[color:var(--fg-dim)]">desktop and CLI talk to the same daemon</div>
+					<div className="font-mono text-[11px] text-[color:var(--fg-dim)]">
+						desktop and CLI talk to the same daemon
+					</div>
 				</div>
 				<div className="rounded-md border border-[color:var(--border)] bg-white/[0.03] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--fg-muted)]">
 					127.0.0.1
@@ -1094,7 +1108,9 @@ function DaemonNode({ title, body, active }: { title: string; body: string; acti
 	return (
 		<div className="rounded-xl border border-[color:var(--border)] bg-white/[0.025] p-3">
 			<div className="flex items-center gap-2">
-				<span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[color:var(--accent)]" : "bg-[color:var(--fg-dim)]"}`} />
+				<span
+					className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[color:var(--accent)]" : "bg-[color:var(--fg-dim)]"}`}
+				/>
 				<span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--fg-muted)]">{title}</span>
 			</div>
 			<div className="mt-2 text-[12px] leading-snug text-[color:var(--fg-dim)]">{body}</div>

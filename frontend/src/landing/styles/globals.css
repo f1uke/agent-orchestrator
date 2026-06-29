@@ -243,9 +243,7 @@ body::-webkit-scrollbar,
 	min-height: 240px;
 	border-radius: 14px;
 	border: 1px solid var(--border);
-	background:
-		linear-gradient(180deg, rgba(130, 170, 255, 0.035), transparent 36%),
-		#050607;
+	background: linear-gradient(180deg, rgba(130, 170, 255, 0.035), transparent 36%), #050607;
 	padding: 18px;
 	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
