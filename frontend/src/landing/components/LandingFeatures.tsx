@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 type AgentHarness = {
 	id: string;
@@ -240,8 +240,8 @@ export function LandingFeatures() {
 					</div>
 				</div>
 
-				<div className="relative space-y-10 pb-[18vh]">
-					<div className="landing-feature-stack-card sticky top-24 z-10 grid gap-5 lg:grid-cols-[0.78fr_1.22fr]">
+				<div className="relative space-y-16 pb-4">
+					<div className="landing-feature-stack-card grid gap-5 lg:grid-cols-[0.78fr_1.22fr]">
 						<FeatureNarrative worker={worker} orchestrator={orchestrator} />
 						<AgentHarnessDemo
 							worker={worker}
@@ -253,17 +253,17 @@ export function LandingFeatures() {
 						/>
 					</div>
 
-					<div className="landing-feature-stack-card landing-feature-stack-cover sticky top-24 z-20 grid gap-5 pt-10 lg:grid-cols-[1.18fr_0.82fr]">
+					<div className="landing-feature-stack-card grid gap-5 lg:grid-cols-[1.18fr_0.82fr]">
 						<WorkspaceIsolationDemo activeId={workspaceId} onSelect={setWorkspaceId} workspace={workspace} />
 						<WorkspaceNarrative workspace={workspace} />
 					</div>
 
-					<div className="landing-feature-stack-card landing-feature-stack-cover sticky top-24 z-30 grid gap-5 pt-10 lg:grid-cols-[0.82fr_1.18fr]">
+					<div className="landing-feature-stack-card grid gap-5 lg:grid-cols-[0.82fr_1.18fr]">
 						<FeedbackNarrative feedback={feedback} />
 						<FeedbackRoutingDemo activeId={feedbackId} onSelect={setFeedbackId} feedback={feedback} />
 					</div>
 
-					<div className="landing-feature-stack-card landing-feature-stack-cover sticky top-24 z-40 grid gap-5 pt-10 lg:grid-cols-[1.18fr_0.82fr]">
+					<div className="landing-feature-stack-card grid gap-5 lg:grid-cols-[1.18fr_0.82fr]">
 						<DaemonControlDemo />
 						<DaemonNarrative />
 					</div>
@@ -275,52 +275,22 @@ export function LandingFeatures() {
 
 function FeatureNarrative({ worker, orchestrator }: { worker: AgentHarness; orchestrator: AgentHarness }) {
 	return (
-		<article className="surface relative overflow-hidden p-6 sm:p-7">
-			<div className="mb-8 flex items-center justify-between gap-4">
-				<div>
-					<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">feature 01</div>
-					<h3 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[color:var(--fg)]">
-						Agent-agnostic by design.
-					</h3>
-				</div>
-				<div className="rounded-full border border-[color:var(--border)] bg-black/30 px-3 py-1.5 font-mono text-[11px] text-[color:var(--fg-muted)]">
-					23 harnesses
-				</div>
-			</div>
-
-			<div className="space-y-3">
-				<ContractRow label="worker" value={worker.name} sub={worker.delivery} />
-				<ContractRow label="orchestrator" value={orchestrator.name} sub="supervises sessions" />
-				<ContractRow label="runtime" value="tmux / conpty / process" sub="platform-native pane" />
-				<ContractRow label="workspace" value="git worktree" sub="per-session checkout" />
-			</div>
-
-			<div className="mt-7 border-t border-[color:var(--border)] pt-6">
-				<div className="mb-3 font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--fg-dim)]">
-					adapter surface
-				</div>
-				<div className="grid gap-2 sm:grid-cols-2">
-					<MiniStat title="Launch" value={worker.command.split(" ")[0]} />
-					<MiniStat title="Restore" value={worker.restore} />
-					<MiniStat title="Hooks" value={worker.hooks} />
-					<MiniStat title="Prompt" value={worker.delivery} />
-				</div>
-			</div>
-
-			<div className="mt-7 overflow-hidden rounded-lg border border-[color:var(--border)] bg-black/40">
-				<div className="flex items-center justify-between border-b border-[color:var(--border)] px-3 py-2">
-					<span className="font-mono text-[11px] text-[color:var(--fg-dim)]">agent-orchestrator.yaml</span>
-					<span className="h-2 w-2 rounded-full bg-[color:var(--status-ok)]" />
-				</div>
-				<pre className="overflow-hidden px-3 py-3 font-mono text-[11px] leading-relaxed text-[color:var(--fg-muted)]">
-					{`agents:
-  worker: ${worker.id}
-  orchestrator: ${orchestrator.id}
-workspace: worktree
-runtime: platform-native`}
-				</pre>
-			</div>
-		</article>
+		<FeatureCopy
+			eyebrow="Feature 01"
+			title="Bring your own agent."
+			accent="AO gives it a workflow."
+			meta="23 harnesses"
+		>
+			<p>
+				AO does not replace <FeatureStrong>{worker.name}</FeatureStrong>, <FeatureStrong>{orchestrator.name}</FeatureStrong>,
+				Cursor, Aider, or OpenCode. It launches the same terminal-native tools you already trust, then standardizes the
+				parts around them: <FeatureStrong>session restore, prompt delivery, hooks, runtime panes, and ownership.</FeatureStrong>
+			</p>
+			<p>
+				Pick one agent to write and another to supervise. AO keeps the contract stable while every CLI keeps its native
+				behavior.
+			</p>
+		</FeatureCopy>
 	);
 }
 
@@ -339,6 +309,8 @@ function AgentHarnessDemo({
 	onWorkerChange: (id: string) => void;
 	onOrchestratorChange: (id: string) => void;
 }) {
+	const [targetSlot, setTargetSlot] = useState<"worker" | "orchestrator">("worker");
+
 	return (
 		<article className="surface relative overflow-hidden bg-[#010102] p-0">
 			<div className="flex items-center justify-between border-b border-[color:var(--border)] px-5 py-4">
@@ -357,8 +329,18 @@ function AgentHarnessDemo({
 			<div className="grid gap-0 lg:grid-cols-[0.86fr_1fr]">
 				<div className="border-b border-[color:var(--border)] p-5 lg:border-b-0 lg:border-r">
 					<div className="mb-4 grid gap-3 sm:grid-cols-2">
-						<AgentSelectLabel label="Worker agent" agent={worker} />
-						<AgentSelectLabel label="Orchestrator agent" agent={orchestrator} />
+						<AgentSelectLabel
+							label="Worker agent"
+							agent={worker}
+							active={targetSlot === "worker"}
+							onClick={() => setTargetSlot("worker")}
+						/>
+						<AgentSelectLabel
+							label="Orchestrator agent"
+							agent={orchestrator}
+							active={targetSlot === "orchestrator"}
+							onClick={() => setTargetSlot("orchestrator")}
+						/>
 					</div>
 
 					<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -366,8 +348,14 @@ function AgentHarnessDemo({
 							<button
 								key={agent.id}
 								type="button"
-								onClick={() => onWorkerChange(agent.id)}
-								onDoubleClick={() => onOrchestratorChange(agent.id)}
+								onClick={() => {
+									setTargetSlot("worker");
+									onWorkerChange(agent.id);
+								}}
+								onDoubleClick={() => {
+									setTargetSlot("orchestrator");
+									onOrchestratorChange(agent.id);
+								}}
 								className={`group relative flex min-h-[82px] cursor-pointer flex-col items-start justify-between overflow-hidden rounded-lg border p-3 text-left transition duration-200 ease-out hover:-translate-y-0.5 hover:border-white/15 hover:bg-white/[0.045] ${
 									workerId === agent.id
 										? "border-white/18 bg-white/[0.055] shadow-[inset_0_0_0_1px_rgba(147,180,248,0.16)]"
@@ -393,7 +381,7 @@ function AgentHarnessDemo({
 					</div>
 
 					<div className="mt-4 text-[12px] leading-relaxed text-[color:var(--fg-dim)]">
-						Click to set the worker. Double click to promote an agent into the orchestrator slot.
+						Click an agent to set the worker. Double-click an agent to promote it into the orchestrator slot.
 					</div>
 				</div>
 
@@ -460,41 +448,32 @@ function AgentHarnessDemo({
 	);
 }
 
-function ContractRow({ label, value, sub }: { label: string; value: string; sub: string }) {
+function AgentSelectLabel({
+	label,
+	agent,
+	active,
+	onClick,
+}: {
+	label: string;
+	agent: AgentHarness;
+	active: boolean;
+	onClick: () => void;
+}) {
 	return (
-		<div className="group flex items-center justify-between gap-4 rounded-lg border border-[color:var(--border)] bg-white/[0.025] px-4 py-3 transition duration-200 hover:border-[color:var(--accent-glow)] hover:bg-white/[0.045]">
-			<div>
-				<div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--fg-dim)]">{label}</div>
-				<div className="mt-1 text-[15px] font-semibold text-[color:var(--fg)]">{value}</div>
-			</div>
-			<div className="max-w-[150px] text-right font-mono text-[11px] leading-snug text-[color:var(--fg-dim)]">
-				{sub}
-			</div>
-		</div>
-	);
-}
-
-function MiniStat({ title, value }: { title: string; value: string }) {
-	return (
-		<div className="rounded-lg border border-[color:var(--border)] bg-black/25 p-3">
-			<div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--fg-dim)]">{title}</div>
-			<div className="mt-1 truncate text-[13px] font-medium text-[color:var(--fg)]">{value}</div>
-		</div>
-	);
-}
-
-function AgentSelectLabel({ label, agent }: { label: string; agent: AgentHarness }) {
-	return (
-		<div>
+		<button type="button" onClick={onClick} className="block w-full cursor-pointer text-left">
 			<div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--fg-dim)]">{label}</div>
-			<div className="flex items-center gap-2 rounded-lg border border-[color:var(--border)] bg-white/[0.035] px-3 py-2">
+			<div
+				className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition duration-200 ${
+					active ? "border-[color:var(--accent)] bg-[color:var(--accent-soft)]" : "border-[color:var(--border)] bg-white/[0.035]"
+				}`}
+			>
 				<AgentLogo agent={agent} className="h-6 w-6" />
 				<div className="min-w-0">
 					<div className="truncate text-[13px] font-semibold text-[color:var(--fg)]">{agent.name}</div>
 					<div className="truncate font-mono text-[10px] text-[color:var(--fg-dim)]">{agent.id}</div>
 				</div>
 			</div>
-		</div>
+		</button>
 	);
 }
 
@@ -577,6 +556,8 @@ function WorkspaceIsolationDemo({
 	onSelect: (id: string) => void;
 	workspace: (typeof workspaceSessions)[number];
 }) {
+	const [actionState, setActionState] = useState("session attached");
+
 	return (
 		<article className="surface relative min-h-[640px] overflow-hidden bg-[#010102] p-0">
 			<div className="grid h-full min-h-[640px] grid-cols-[220px_1fr]">
@@ -653,10 +634,18 @@ function WorkspaceIsolationDemo({
 							</div>
 						</div>
 						<div className="flex gap-2">
-							<button className="rounded-md border border-[color:var(--border)] bg-white/[0.03] px-3 py-2 text-[12px] font-medium text-[color:var(--fg-muted)]">
+							<button
+								type="button"
+								onClick={() => setActionState(`${workspace.id} restored`)}
+								className="cursor-pointer rounded-md border border-[color:var(--border)] bg-white/[0.03] px-3 py-2 text-[12px] font-medium text-[color:var(--fg-muted)] transition hover:border-white/20 hover:bg-white/[0.06]"
+							>
 								Restore
 							</button>
-							<button className="rounded-md bg-[color:var(--accent)] px-3 py-2 text-[12px] font-semibold text-[#061126]">
+							<button
+								type="button"
+								onClick={() => setActionState(`PR opened for ${workspace.branch}`)}
+								className="cursor-pointer rounded-md bg-[color:var(--accent)] px-3 py-2 text-[12px] font-semibold text-[#061126] transition hover:brightness-110"
+							>
 								Open PR
 							</button>
 						</div>
@@ -691,6 +680,7 @@ function WorkspaceIsolationDemo({
 											<TerminalLine key={file} text={` M ${file}`} />
 										))}
 										<TerminalLine success text="main checkout untouched; session owns this diff" />
+										<TerminalLine success text={`action        ${actionState}`} />
 									</div>
 								</div>
 							</div>
@@ -750,35 +740,22 @@ function WorkspaceIsolationDemo({
 
 function WorkspaceNarrative({ workspace }: { workspace: (typeof workspaceSessions)[number] }) {
 	return (
-		<article className="surface relative overflow-hidden p-6 sm:p-7">
-			<div className="mb-8">
-				<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">feature 02</div>
-				<h3 className="mt-2 max-w-md text-3xl font-semibold leading-[1.05] tracking-[-0.04em] text-[color:var(--fg)]">
-					Every agent gets its own checkout.
-				</h3>
-				<p className="mt-4 text-[15px] leading-relaxed text-[color:var(--fg-muted)]">
-					AO spawns each task into a separate git worktree with its own runtime pane, branch and session metadata. One
-					agent can fail CI while another keeps moving without branch collisions or stash cleanup.
-				</p>
-			</div>
-
-			<div className="space-y-3">
-				<ContractRow label="selected session" value={workspace.id} sub={workspace.status} />
-				<ContractRow label="branch owner" value={workspace.agent} sub={workspace.branch} />
-				<ContractRow label="main checkout" value="left clean" sub="no cross-agent edits" />
-			</div>
-
-			<div className="mt-7 border-t border-[color:var(--border)] pt-6">
-				<div className="mb-3 font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--fg-dim)]">
-					why it matters
-				</div>
-				<div className="grid gap-2">
-					<MiniStat title="No collisions" value="one branch per session" />
-					<MiniStat title="Fast cleanup" value="remove the worktree" />
-					<MiniStat title="PR ownership" value="facts stay attached" />
-				</div>
-			</div>
-		</article>
+		<FeatureCopy
+			eyebrow="Feature 02"
+			title="Every task gets its own checkout."
+			accent="Your main repo stays clean."
+			meta={workspace.id}
+		>
+			<p>
+				Each AO session runs in a separate <FeatureStrong>git worktree</FeatureStrong> with its own branch, terminal pane,
+				changed files, and owner. The selected session here belongs to <FeatureStrong>{workspace.agent}</FeatureStrong> on{" "}
+				<FeatureStrong>{workspace.branch}</FeatureStrong>.
+			</p>
+			<p>
+				That means one agent can fail CI, another can keep shipping, and cleanup is just removing the session worktree.
+				No stash juggling. No branch collisions.
+			</p>
+		</FeatureCopy>
 	);
 }
 
@@ -793,35 +770,21 @@ function InspectorFact({ label, value }: { label: string; value: string }) {
 
 function FeedbackNarrative({ feedback }: { feedback: (typeof feedbackSessions)[number] }) {
 	return (
-		<article className="surface relative overflow-hidden p-6 sm:p-7">
-			<div className="mb-8">
-				<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">feature 03</div>
-				<h3 className="mt-2 max-w-md text-3xl font-semibold leading-[1.05] tracking-[-0.04em] text-[color:var(--fg)]">
-					PR feedback goes back to the right agent.
-				</h3>
-				<p className="mt-4 text-[15px] leading-relaxed text-[color:var(--fg-muted)]">
-					AO does not just show a board. It watches PR state, CI checks, reviews, mergeability and pending comments,
-					then routes the actionable fact to the session that owns the work.
-				</p>
-			</div>
-
-			<div className="space-y-3">
-				<ContractRow label="selected PR" value={feedback.number} sub={feedback.state} />
-				<ContractRow label="owning agent" value={feedback.agent} sub={feedback.session} />
-				<ContractRow label="branch" value={feedback.branch} sub="tracked by SCM" />
-			</div>
-
-			<div className="mt-7 border-t border-[color:var(--border)] pt-6">
-				<div className="mb-3 font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--fg-dim)]">
-					routing loop
-				</div>
-				<div className="grid gap-2">
-					<MiniStat title="Observe" value="CI, review, comments" />
-					<MiniStat title="Resolve owner" value={feedback.session} />
-					<MiniStat title="Send nudge" value={`ao send ${feedback.session}`} />
-				</div>
-			</div>
-		</article>
+		<FeatureCopy
+			eyebrow="Feature 03"
+			title="Reviews route back to the owner."
+			accent="Not to a random terminal."
+			meta={feedback.number}
+		>
+			<p>
+				AO watches <FeatureStrong>checks, reviews, comments, mergeability, and PR state</FeatureStrong>, then resolves the
+				session that owns the branch. For this PR, feedback goes back to <FeatureStrong>{feedback.agent}</FeatureStrong> in{" "}
+				<FeatureStrong>{feedback.session}</FeatureStrong>.
+			</p>
+			<p>
+				The agent gets the actionable context, not a vague “CI failed” notification you have to manually trace.
+			</p>
+		</FeatureCopy>
 	);
 }
 
@@ -834,6 +797,8 @@ function FeedbackRoutingDemo({
 	onSelect: (id: string) => void;
 	feedback: (typeof feedbackSessions)[number];
 }) {
+	const [sentSession, setSentSession] = useState<string | null>(null);
+
 	return (
 		<article className="surface relative min-h-[640px] overflow-hidden bg-[#010102] p-0">
 			<div className="flex items-center justify-between border-b border-[color:var(--border)] px-5 py-4">
@@ -901,8 +866,12 @@ function FeedbackRoutingDemo({
 								{feedback.branch} {"->"} {feedback.agent} session {feedback.session}
 							</div>
 						</div>
-						<button className="rounded-md bg-[color:var(--accent)] px-3 py-2 text-[12px] font-semibold text-[#061126]">
-							Send to agent
+						<button
+							type="button"
+							onClick={() => setSentSession(feedback.session)}
+							className="cursor-pointer rounded-md bg-[color:var(--accent)] px-3 py-2 text-[12px] font-semibold text-[#061126] transition hover:brightness-110"
+						>
+							{sentSession === feedback.session ? "Sent" : "Send to agent"}
 						</button>
 					</div>
 
@@ -964,7 +933,7 @@ function FeedbackRoutingDemo({
 								<TerminalLine text={`owner         ${feedback.agent}`} />
 								<TerminalLine text={`session       ${feedback.session}`} />
 								<TerminalLine accent text={`message       ${feedback.nudge}`} />
-								<TerminalLine success text="feedback routed to the running worker pane" />
+								<TerminalLine success text={sentSession === feedback.session ? "feedback routed to the running worker pane" : "ready to route feedback"} />
 							</div>
 						</div>
 					</div>
@@ -1072,36 +1041,60 @@ function DaemonControlDemo() {
 
 function DaemonNarrative() {
 	return (
-		<article className="surface relative overflow-hidden p-6 sm:p-7">
-			<div className="mb-8">
-				<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">feature 04</div>
-				<h3 className="mt-2 max-w-md text-3xl font-semibold leading-[1.05] tracking-[-0.04em] text-[color:var(--fg)]">
-					One local daemon runs the whole loop.
+		<FeatureCopy
+			eyebrow="Feature 04"
+			title="Desktop and CLI share one brain."
+			accent="A local daemon owns the loop."
+			meta="127.0.0.1"
+		>
+			<p>
+				The Electron app and <FeatureStrong>ao</FeatureStrong> CLI are clients of the same loopback daemon. It owns{" "}
+				<FeatureStrong>sessions, worktrees, terminals, durable facts, and live events</FeatureStrong>.
+			</p>
+			<p>
+				Start work from the CLI, inspect it in the desktop app, and route feedback back through the same local control
+				plane.
+			</p>
+		</FeatureCopy>
+	);
+}
+
+function FeatureCopy({
+	eyebrow,
+	title,
+	accent,
+	children,
+	meta,
+}: {
+	eyebrow: string;
+	title: string;
+	accent: string;
+	children: ReactNode;
+	meta?: string;
+}) {
+	return (
+		<article className="relative flex min-h-[640px] flex-col justify-center overflow-hidden border border-[color:var(--border)] bg-[#0b0b0b] p-7 sm:p-10">
+			<div className="max-w-[34rem]">
+				<div className="mb-5 flex items-center gap-3">
+					<div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--accent)]">{eyebrow}</div>
+					{meta ? (
+						<div className="rounded-full border border-[color:var(--border)] bg-black/35 px-2.5 py-1 font-mono text-[10px] text-[color:var(--fg-dim)]">
+							{meta}
+						</div>
+					) : null}
+				</div>
+				<h3 className="text-4xl font-semibold leading-[1.02] tracking-[-0.045em] text-[color:var(--fg)] sm:text-5xl">
+					{title}
+					<span className="block text-[color:var(--fg-muted)]">{accent}</span>
 				</h3>
-				<p className="mt-4 text-[15px] leading-relaxed text-[color:var(--fg-muted)]">
-					The desktop app and `ao` CLI both drive the same loopback daemon. It starts sessions, stores durable facts,
-					streams changes, attaches terminals and keeps the product local-first.
-				</p>
-			</div>
-
-			<div className="space-y-3">
-				<ContractRow label="CLI" value="ao start / spawn / send" sub="thin HTTP client" />
-				<ContractRow label="daemon" value="127.0.0.1 control plane" sub="owns lifecycle" />
-				<ContractRow label="desktop" value="Electron + live terminal" sub="same backend" />
-			</div>
-
-			<div className="mt-7 border-t border-[color:var(--border)] pt-6">
-				<div className="mb-3 font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--fg-dim)]">
-					system pieces
-				</div>
-				<div className="grid gap-2">
-					<MiniStat title="Storage" value="SQLite facts" />
-					<MiniStat title="Events" value="CDC + SSE" />
-					<MiniStat title="Runtime" value="tmux / conpty" />
-				</div>
+				<div className="mt-7 space-y-4 text-[17px] leading-[1.55] text-[color:var(--fg-muted)]">{children}</div>
 			</div>
 		</article>
 	);
+}
+
+function FeatureStrong({ children }: { children: ReactNode }) {
+	return <span className="font-medium text-[color:var(--fg)]">{children}</span>;
 }
 
 function DaemonNode({ title, body, active }: { title: string; body: string; active?: boolean }) {

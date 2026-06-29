@@ -38,7 +38,7 @@ export function LandingAgentsBar() {
 					<div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
 						<span className="serial-num font-mono text-xs">Coverage</span>
 						<h2 className="font-display text-2xl font-bold leading-none tracking-tight text-[color:var(--fg)] sm:text-3xl">
-							One Daemon. <span className="text-[color:var(--fg-muted)]">23 agent harnesses.</span>
+							One Daemon. <span className="text-[color:var(--fg-muted)]">23 Agent Harnesses.</span>
 						</h2>
 					</div>
 					<p className="max-w-md font-mono text-xs leading-relaxed text-[color:var(--fg-dim)]">

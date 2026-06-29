@@ -2,15 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-function ArrowUpRightIcon({ className = "" }: { className?: string }) {
-	return (
-		<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-			<path d="M7 7h10v10" />
-			<path d="M7 17 17 7" />
-		</svg>
-	);
-}
-
 function DownloadIcon({ className = "" }: { className?: string }) {
 	return (
 		<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -87,7 +78,7 @@ function getPlatformLabel() {
 
 export function LandingNav() {
 	const [open, setOpen] = useState(false);
-	const [installLabel, setInstallLabel] = useState("Install AO");
+	const [installLabel, setInstallLabel] = useState(getPlatformLabel);
 
 	useEffect(() => {
 		setInstallLabel(getPlatformLabel());
@@ -157,7 +148,6 @@ export function LandingNav() {
 					>
 						<DownloadIcon className="h-4 w-4" />
 						<span>{installLabel}</span>
-						<ArrowUpRightIcon className="h-3.5 w-3.5 opacity-80 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
 					</a>
 				</div>
 
