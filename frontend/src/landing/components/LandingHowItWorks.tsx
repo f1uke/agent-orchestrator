@@ -50,7 +50,7 @@ export function LandingHowItWorks() {
 		<section
 			id="how"
 			data-testid="how-it-works"
-			className="relative border-t border-[color:var(--border)] bg-[color:var(--bg-deep)] py-24 sm:py-32"
+			className="relative border-t border-[color:var(--border)] bg-[color:var(--bg)] py-24 sm:py-32"
 		>
 			<div className="container-page">
 				<div className="mb-14 grid items-end gap-8 lg:grid-cols-12">

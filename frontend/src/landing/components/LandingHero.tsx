@@ -276,8 +276,9 @@ function HeroDashboardMockup() {
 	}
 
 	return (
-		<div className="relative mx-auto mt-6 w-full max-w-[1600px]" data-testid="hero-dashboard-interactive">
-			<div className="relative overflow-hidden rounded-[6px] border border-[rgba(255,255,255,0.08)] bg-[#0a0b0d] shadow-[0_34px_120px_-76px_rgba(0,0,0,1)]">
+		<div className="hero-laptop relative mx-auto mt-6 w-full max-w-[1600px]" data-testid="hero-dashboard-interactive">
+			<div className="hero-laptop-screen">
+				<div className="hero-laptop-display">
 				<div
 					className="grid min-h-[640px] text-left text-[#f4f5f7] transition-[grid-template-columns] duration-200"
 					style={{
@@ -286,7 +287,7 @@ function HeroDashboardMockup() {
 							'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Helvetica Neue", sans-serif',
 					}}
 				>
-					<aside className="flex min-h-[640px] overflow-hidden flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#08090b]">
+					<aside className="flex min-h-[640px] overflow-hidden flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#11100b]">
 						<div
 							className={`flex shrink-0 items-center gap-2.5 pt-3.5 ${
 								sidebarOpen ? "px-5 pb-[18px]" : "justify-center px-1.5 pb-2"
@@ -346,7 +347,7 @@ function HeroDashboardMockup() {
 												onClick={() => toggleProject(project.id)}
 												className={`relative flex h-9 w-full items-center gap-[9px] rounded-[5px] px-1.5 py-0 pr-[84px] text-left text-[13px] font-medium transition-colors before:absolute before:bottom-2 before:left-0 before:top-2 before:w-px before:rounded-full ${
 													activeProject === project.id
-														? "bg-white/[0.07] text-[#f4f5f7] before:bg-[#4d8dff]"
+														? "bg-white/[0.07] text-[#f4f5f7] before:bg-[#b0bdd8]"
 														: "text-[#9ba1aa] before:bg-transparent hover:bg-white/[0.04] hover:text-[#f4f5f7]"
 												}`}
 											>
@@ -389,7 +390,7 @@ function HeroDashboardMockup() {
 															}}
 															className={`relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[5px] pl-2.5 pr-1.5 text-left transition-colors before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-px before:rounded-full ${
 																activeCard === session.title
-																	? "text-[#f4f5f7] before:bg-[#4d8dff]"
+																	? "text-[#f4f5f7] before:bg-[#b0bdd8]"
 																	: "text-[#9ba1aa] before:bg-transparent hover:text-[#f4f5f7]"
 															}`}
 														>
@@ -435,7 +436,7 @@ function HeroDashboardMockup() {
 						</div>
 					</aside>
 
-					<div className="flex min-w-0 flex-col bg-[#0a0b0d]">
+					<div className="flex min-w-0 flex-col bg-[#14120d]">
 						<div className="flex items-center gap-3 px-[18px] pt-[22px]">
 							<div className="flex min-w-0 items-baseline gap-3">
 								<h2 className="text-[21px] font-bold tracking-[-0.025em] text-[#f4f5f7]">Board</h2>
@@ -447,7 +448,7 @@ function HeroDashboardMockup() {
 								<button
 									type="button"
 									onClick={() => setActiveCard("New task drafted")}
-									className="hero-pressable inline-flex h-[34px] items-center gap-1.5 rounded-[7px] border border-[rgba(255,255,255,0.06)] bg-[#1b1d22] px-[15px] text-[13px] font-semibold leading-none text-[#9ba1aa] hover:bg-[#15171b] hover:text-[#f4f5f7]"
+									className="hero-pressable inline-flex h-[34px] items-center gap-1.5 rounded-[7px] border border-[rgba(255,255,255,0.07)] bg-[#211d14] px-[15px] text-[13px] font-semibold leading-none text-[#9ba1aa] hover:bg-[#252116] hover:text-[#f4f5f7]"
 								>
 									<PlusIcon className="h-3.5 w-3.5" />
 									New task
@@ -455,7 +456,7 @@ function HeroDashboardMockup() {
 								<button
 									type="button"
 									onClick={() => setActiveCard("Spawn Orchestrator")}
-									className="hero-pressable inline-flex h-[34px] items-center gap-1.5 rounded-[7px] bg-[#4d8dff] px-[15px] text-[13px] font-semibold leading-none text-white hover:brightness-110"
+									className="hero-pressable inline-flex h-[34px] items-center gap-1.5 rounded-[7px] bg-[#9faccc] px-[15px] text-[13px] font-semibold leading-none text-[#11140c] hover:brightness-110"
 								>
 									<NetworkIcon className="h-3.5 w-3.5" />
 									Spawn Orchestrator
@@ -470,7 +471,7 @@ function HeroDashboardMockup() {
 										key={column.title}
 										className="flex min-w-0 flex-col overflow-hidden rounded-[13px]"
 										style={{
-											background: `linear-gradient(180deg, ${column.glow}, transparent 130px), rgba(255,255,255,0.018)`,
+											background: `linear-gradient(180deg, ${column.glow}, transparent 130px), rgba(255,255,255,0.028)`,
 										}}
 									>
 										<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[14px]">
@@ -501,7 +502,7 @@ function HeroDashboardMockup() {
 														key={card.title}
 														type="button"
 														onClick={() => setActiveCard(card.title)}
-														className={`w-full rounded-[7px] border bg-[#15171b] text-left transition-colors hover:border-[rgba(255,255,255,0.10)] ${
+														className={`w-full rounded-[7px] border bg-[#1a1812] text-left transition-colors hover:border-[rgba(255,255,255,0.10)] ${
 															activeCard === card.title
 																? "border-[rgba(77,141,255,0.48)]"
 																: "border-[rgba(255,255,255,0.06)]"
@@ -544,6 +545,7 @@ function HeroDashboardMockup() {
 							</div>
 						</div>
 					</div>
+				</div>
 				</div>
 			</div>
 		</div>
@@ -659,7 +661,7 @@ export function LandingHero() {
 						<a
 							href="/docs/installation"
 							className="hero-pressable group inline-flex h-12 w-full items-center justify-center gap-2 rounded-[6px] border border-transparent bg-[color:var(--accent)] px-6 text-[15px] font-semibold shadow-[0_12px_32px_-18px_var(--accent-glow)] hover:brightness-[1.07] hover:shadow-[0_18px_44px_-16px_var(--accent-glow)] sm:w-auto"
-							style={{ color: "#000000" }}
+							style={{ color: "#11140c" }}
 						>
 							<DownloadIcon className="h-4 w-4" />
 							Install Agent Orchestrator

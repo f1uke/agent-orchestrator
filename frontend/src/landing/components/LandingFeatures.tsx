@@ -179,10 +179,10 @@ const daemonChecks = [
 ];
 
 const FEATURE_META = [
-	{ eyebrow: "Feature 01", title: "Bring your own agent.", accent: "AO gives it a workflow." },
-	{ eyebrow: "Feature 02", title: "Every task gets its own checkout.", accent: "Your main repo stays clean." },
-	{ eyebrow: "Feature 03", title: "Reviews route back to the owner.", accent: "Not to a random terminal." },
-	{ eyebrow: "Feature 04", title: "Desktop and CLI share one brain.", accent: "A local daemon owns the loop." },
+	{ eyebrow: "Agent harness", title: "Bring your own agent.", accent: "AO gives it a workflow." },
+	{ eyebrow: "Worktrees", title: "Every task gets its own checkout.", accent: "Your main repo stays clean." },
+	{ eyebrow: "Review routing", title: "Reviews route back to the owner.", accent: "Not to a random terminal." },
+	{ eyebrow: "Local daemon", title: "Desktop and CLI share one brain.", accent: "A local daemon owns the loop." },
 ];
 
 export function LandingFeatures() {
@@ -253,7 +253,7 @@ export function LandingFeatures() {
 
 	// Fluid swap between features: outgoing fades out while the incoming text
 	// rises line-by-line and the mockup settles in with a soft scale. Runs on
-	// active change; the first run just reveals feature 1 without animating.
+	// active change; the first run just reveals the initial panel without animating.
 	useEffect(() => {
 		const root = pinRef.current;
 		if (!root) return;
@@ -415,7 +415,7 @@ function MobileMockup({ children }: { children: ReactNode }) {
 function FeatureNarrative({ worker, orchestrator }: { worker: AgentHarness; orchestrator: AgentHarness }) {
 	return (
 		<FeatureCopy
-			eyebrow="Feature 01"
+			eyebrow="Agent harness"
 			title="Bring your own agent."
 			accent="AO gives it a workflow."
 			meta="23 harnesses"
@@ -652,7 +652,7 @@ function WorkspaceIsolationDemo({
 	return (
 		<article className="surface relative max-h-[500px] overflow-hidden p-0">
 			<div className="grid h-full min-h-[500px] grid-cols-[220px_1fr]">
-				<aside className="flex min-h-0 flex-col border-r border-[color:var(--border)] bg-[#050506]">
+				<aside className="flex min-h-0 flex-col border-r border-[color:var(--border)] bg-[color:var(--bg-card)]">
 					<div className="landing-card-header flex items-center justify-between px-4 py-4">
 						<div className="flex min-w-0 items-center gap-2.5">
 							<img src="/ao-logo-transparent.png" alt="" className="h-6 w-6 object-contain" />
@@ -787,7 +787,7 @@ function WorkspaceIsolationDemo({
 function WorkspaceNarrative({ workspace }: { workspace: (typeof workspaceSessions)[number] }) {
 	return (
 		<FeatureCopy
-			eyebrow="Feature 02"
+			eyebrow="Worktrees"
 			title="Every task gets its own checkout."
 			accent="Your main repo stays clean."
 			meta={workspace.id}
@@ -812,7 +812,7 @@ function InspectorFact({ label, value }: { label: string; value: string }) {
 function FeedbackNarrative({ feedback }: { feedback: (typeof feedbackSessions)[number] }) {
 	return (
 		<FeatureCopy
-			eyebrow="Feature 03"
+			eyebrow="Review routing"
 			title="Reviews route back to the owner."
 			accent="Not to a random terminal."
 			meta={feedback.number}
@@ -851,7 +851,7 @@ function FeedbackRoutingDemo({
 			</div>
 
 			<div className="grid min-h-[424px] grid-cols-[280px_1fr]">
-				<aside className="border-r border-[color:var(--border)] bg-[#050506] p-4">
+				<aside className="border-r border-[color:var(--border)] bg-[color:var(--bg-card)] p-4">
 					<div className="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--fg-dim)]">
 						Open PRs
 					</div>
@@ -985,7 +985,7 @@ function DaemonControlDemo() {
 					</div>
 				</div>
 
-				<aside className="bg-[#050506] p-4">
+				<aside className="bg-[color:var(--bg-card)] p-4">
 					<div className="mb-4 flex items-center gap-3">
 						<img src="/ao-logo-transparent.png" alt="" className="h-8 w-8 object-contain" />
 						<div>
@@ -1021,7 +1021,7 @@ function DaemonControlDemo() {
 function DaemonNarrative() {
 	return (
 		<FeatureCopy
-			eyebrow="Feature 04"
+			eyebrow="Local daemon"
 			title="Desktop and CLI share one brain."
 			accent="A local daemon owns the loop."
 			meta="127.0.0.1"

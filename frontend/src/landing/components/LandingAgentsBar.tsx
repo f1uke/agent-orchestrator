@@ -31,7 +31,7 @@ export function LandingAgentsBar() {
 		<section
 			id="agents"
 			data-testid="agents-marquee"
-			className="landing-reveal relative overflow-hidden border-y border-[color:var(--border)] bg-[color:var(--bg-deep)]"
+			className="landing-reveal relative overflow-hidden border-y border-[color:var(--border)] bg-[color:var(--bg)]"
 		>
 			<div className="container-page pt-12 pb-10">
 				<div className="mx-auto flex max-w-[1120px] flex-wrap items-baseline justify-between gap-8">
@@ -49,8 +49,8 @@ export function LandingAgentsBar() {
 
 			<div className="container-page pb-12">
 				<div className="relative mx-auto max-w-3xl overflow-hidden">
-					<div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-[color:var(--bg-deep)] to-transparent" />
-					<div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-[color:var(--bg-deep)] to-transparent" />
+					<div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-[color:var(--bg)] to-transparent" />
+					<div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-[color:var(--bg)] to-transparent" />
 					<div className="agents-marquee-track flex w-max items-end gap-4">
 						{marqueeAgents.map((agent, index) => (
 							<div
