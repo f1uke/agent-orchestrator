@@ -14,7 +14,7 @@ import (
 const issueContextBodyLimit = 12000
 
 func (s *Service) withIssueContext(ctx context.Context, cfg ports.SpawnConfig, project domain.ProjectRecord) ports.SpawnConfig {
-	if cfg.IssueContext != "" || cfg.IssueID == "" || s.tracker == nil {
+	if cfg.IssueContext != "" || cfg.Prompt != "" || cfg.IssueID == "" || s.tracker == nil {
 		return cfg
 	}
 	if cfg.Kind != "" && cfg.Kind != domain.KindWorker {
@@ -38,6 +38,17 @@ func (s *Service) trackerIDForIssue(project domain.ProjectRecord, issueID domain
 	issue := strings.TrimPrefix(strings.TrimSpace(string(issueID)), "#")
 	if issue == "" {
 		return domain.TrackerID{}, false
+	}
+	if !strings.Contains(issue, "://") {
+		if provider, native, ok := strings.Cut(issue, ":"); ok {
+			if !strings.EqualFold(strings.TrimSpace(provider), string(domain.TrackerProviderGitHub)) {
+				return domain.TrackerID{}, false
+			}
+			if native, ok := canonicalGitHubIssueNative(strings.TrimSpace(native)); ok {
+				return domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: native}, true
+			}
+			return domain.TrackerID{}, false
+		}
 	}
 	if native, ok := canonicalGitHubIssueNative(issue); ok {
 		return domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: native}, true

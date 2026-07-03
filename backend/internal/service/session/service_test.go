@@ -426,6 +426,50 @@ func TestSpawnEnrichesIssueContextFromTracker(t *testing.T) {
 	}
 }
 
+func TestSpawnEnrichesIssueContextFromCanonicalTrackerID(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
+	fc := &fakeCommander{}
+	tracker := &fakeTracker{issue: domain.Issue{
+		ID:    domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: "acme/repo#42"},
+		Title: "Fix generated prompts",
+	}}
+	svc := NewWithDeps(Deps{Manager: fc, Store: st, Tracker: tracker})
+
+	if _, err := svc.Spawn(context.Background(), ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, IssueID: "github:acme/repo#42"}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if len(tracker.ids) != 1 || tracker.ids[0].Provider != domain.TrackerProviderGitHub || tracker.ids[0].Native != "acme/repo#42" {
+		t.Fatalf("tracker ids = %+v, want github acme/repo#42", tracker.ids)
+	}
+	if !strings.Contains(fc.spawnedCfg.IssueContext, "Title: Fix generated prompts") {
+		t.Fatalf("IssueContext missing title:\n%s", fc.spawnedCfg.IssueContext)
+	}
+}
+
+func TestSpawnIssueContextSkipsWhenPromptAlreadyProvided(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", RepoOriginURL: "https://github.com/acme/repo.git"}
+	fc := &fakeCommander{}
+	tracker := &fakeTracker{}
+	svc := NewWithDeps(Deps{Manager: fc, Store: st, Tracker: tracker})
+
+	if _, err := svc.Spawn(context.Background(), ports.SpawnConfig{
+		ProjectID: "mer",
+		Kind:      domain.KindWorker,
+		IssueID:   "42",
+		Prompt:    "Work on tracker issue github:acme/repo#42.\n\nTitle: Already included.",
+	}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if len(tracker.ids) != 0 {
+		t.Fatalf("tracker calls = %d, want 0", len(tracker.ids))
+	}
+	if fc.spawnedCfg.IssueContext != "" {
+		t.Fatalf("IssueContext = %q, want empty", fc.spawnedCfg.IssueContext)
+	}
+}
+
 func TestSpawnIssueContextFetchFailureFallsBack(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", RepoOriginURL: "https://github.com/acme/repo"}
@@ -441,6 +485,24 @@ func TestSpawnIssueContextFetchFailureFallsBack(t *testing.T) {
 	}
 	if fc.spawnedCfg.IssueContext != "" {
 		t.Fatalf("IssueContext = %q, want fallback empty context", fc.spawnedCfg.IssueContext)
+	}
+}
+
+func TestSpawnIssueContextSkipsNumericIssueWithoutGitHubRepo(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
+	fc := &fakeCommander{}
+	tracker := &fakeTracker{}
+	svc := NewWithDeps(Deps{Manager: fc, Store: st, Tracker: tracker})
+
+	if _, err := svc.Spawn(context.Background(), ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, IssueID: "42"}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if len(tracker.ids) != 0 {
+		t.Fatalf("tracker calls = %d, want 0", len(tracker.ids))
+	}
+	if fc.spawnedCfg.IssueContext != "" {
+		t.Fatalf("IssueContext = %q, want empty", fc.spawnedCfg.IssueContext)
 	}
 }
 

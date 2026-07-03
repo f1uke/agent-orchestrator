@@ -12,7 +12,7 @@ import (
 type projectCapture struct {
 	method string
 	path   string
-	body   string
+	body   []byte
 }
 
 func projectServer(t *testing.T, status int, respBody string) (*httptest.Server, *projectCapture) {
@@ -29,13 +29,70 @@ func projectServer(t *testing.T, status int, respBody string) (*httptest.Server,
 		if err != nil {
 			t.Errorf("read request body: %v", err)
 		}
-		capture.body = string(data)
+		capture.body = data
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, respBody)
 	}))
 	t.Cleanup(srv.Close)
 	return srv, capture
+}
+
+func TestProjectSetConfig_TrackerIntakeFlags(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "project", "set-config", "demo", "--tracker-intake", "--tracker-repo", "acme/demo", "--tracker-assignee", "alice")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if capture.method != http.MethodPut || capture.path != "/api/v1/projects/demo/config" {
+		t.Fatalf("request = %s %s, want PUT /api/v1/projects/demo/config", capture.method, capture.path)
+	}
+	var got setConfigRequest
+	if err := json.Unmarshal(capture.body, &got); err != nil {
+		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+	}
+	if !got.Config.TrackerIntake.Enabled || got.Config.TrackerIntake.Provider != "github" || got.Config.TrackerIntake.Repo != "acme/demo" || got.Config.TrackerIntake.Assignee != "alice" {
+		t.Fatalf("tracker intake request = %#v", got.Config.TrackerIntake)
+	}
+}
+
+func TestProjectSetConfig_TrackerIntakeJSON(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "project", "set-config", "demo", "--config-json", `{"trackerIntake":{"enabled":true,"provider":"github","assignee":"alice"}}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var got setConfigRequest
+	if err := json.Unmarshal(capture.body, &got); err != nil {
+		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+	}
+	if !got.Config.TrackerIntake.Enabled || got.Config.TrackerIntake.Provider != "github" || got.Config.TrackerIntake.Assignee != "alice" {
+		t.Fatalf("tracker intake request = %#v", got.Config.TrackerIntake)
+	}
+}
+
+func TestBuildProjectConfigTrackerIntakeFlags(t *testing.T) {
+	got, err := buildProjectConfig(projectSetConfigOptions{
+		trackerIntake:   true,
+		trackerRepo:     "acme/demo",
+		trackerAssignee: "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TrackerIntake.Enabled || got.TrackerIntake.Provider != "github" || got.TrackerIntake.Repo != "acme/demo" || got.TrackerIntake.Assignee != "alice" {
+		t.Fatalf("tracker intake config = %#v", got.TrackerIntake)
+	}
 }
 
 func TestProjectList_Success(t *testing.T) {
@@ -192,7 +249,7 @@ func TestProjectSetConfig_RulesFlags(t *testing.T) {
 		t.Fatalf("request = %s %s, want PUT /api/v1/projects/demo/config", capture.method, capture.path)
 	}
 	var got setConfigRequest
-	if err := json.Unmarshal([]byte(capture.body), &got); err != nil {
+	if err := json.Unmarshal(capture.body, &got); err != nil {
 		t.Fatalf("decode request body: %v\nbody=%s", err, capture.body)
 	}
 	if got.Config.AgentRules != "Run tests." || got.Config.AgentRulesFile != "docs/rules.md" || got.Config.OrchestratorRules != "Delegate." {

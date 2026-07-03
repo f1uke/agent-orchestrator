@@ -34,9 +34,10 @@ type lifecycleStack struct {
 	// LCM is the Lifecycle Manager (the canonical write path). It is exposed so
 	// startSession can share the same reducer the reaper drives, rather than
 	// standing up a second store+LCM pair that would diverge under writes.
-	LCM        *lifecycle.Manager
-	reaperDone <-chan struct{}
-	scmDone    <-chan struct{}
+	LCM         *lifecycle.Manager
+	reaperDone  <-chan struct{}
+	scmDone     <-chan struct{}
+	trackerDone <-chan struct{}
 }
 
 // startLifecycle constructs the Lifecycle Manager over the store and starts the
@@ -55,6 +56,9 @@ func (l *lifecycleStack) Stop() {
 	<-l.reaperDone
 	if l.scmDone != nil {
 		<-l.scmDone
+	}
+	if l.trackerDone != nil {
+		<-l.trackerDone
 	}
 }
 
@@ -76,7 +80,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, tracker ports.Tracker, telemetry ports.EventSink, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -110,10 +114,6 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	scmProvider, err := newGitHubSCMProvider(log)
 	if err != nil {
 		logSCMProviderDisabled(log, err)
-	}
-	tracker, err := newGitHubTracker()
-	if err != nil {
-		logTrackerDisabled(log, err)
 	}
 	sessionSvc := sessionsvc.NewWithDeps(sessionsvc.Deps{
 		Manager:   mgr,
