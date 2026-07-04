@@ -20,6 +20,7 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { cn } from "../lib/utils";
+import { PRSummaryParts } from "./PRSummaryDisplay";
 import { useUiStore } from "../stores/ui-store";
 
 type SessionsBoardProps = {
@@ -372,26 +373,31 @@ type BoardPRGroup = { status: BoardPRLifecycleStatus; prs: SessionPRSummary[] };
 
 function BoardPRGroup({ group }: { group: BoardPRGroup }) {
 	return (
-		<span
+		<div
 			aria-label={`${group.prs.map((pr) => `#${pr.number}`).join(", ")} ${group.status.label}`}
-			className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1"
+			className="flex min-w-0 flex-col gap-1"
 		>
-			<span>PR</span>
-			{group.prs.map((pr, index) => (
-				<span key={pr.number}>
-					<a
-						className="text-passive underline-offset-2 transition-colors hover:text-foreground hover:underline"
-						href={prBrowserUrl(pr)}
-						rel="noreferrer"
-						target="_blank"
-					>
-						#{pr.number}
-					</a>
-					{index < group.prs.length - 1 ? "," : null}
-				</span>
+			<span className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+				<span>PR</span>
+				{group.prs.map((pr, index) => (
+					<span key={pr.number}>
+						<a
+							className="text-passive underline-offset-2 transition-colors hover:text-foreground hover:underline"
+							href={prBrowserUrl(pr)}
+							rel="noreferrer"
+							target="_blank"
+						>
+							#{pr.number}
+						</a>
+						{index < group.prs.length - 1 ? "," : null}
+					</span>
+				))}
+				<span className={cn("font-medium", group.status.className)}>{group.status.label}</span>
+			</span>
+			{group.prs.map((pr) => (
+				<PRSummaryParts key={`${pr.number}-summary`} maxLinks={2} pr={pr} />
 			))}
-			<span className={cn("font-medium", group.status.className)}>{group.status.label}</span>
-		</span>
+		</div>
 	);
 }
 
