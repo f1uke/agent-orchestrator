@@ -6,9 +6,9 @@
 // "copilot", installed via npm "@github/copilot"), NOT the older `gh copilot`
 // suggest/explain extension.
 //
-// Launch runs the CLI in non-interactive ("programmatic") mode with `-p
-// <prompt>` so it executes the task and exits. Permission modes map onto the
-// CLI's allow flags (`--allow-tool`, `--allow-all-tools`, `--allow-all`).
+// Launch runs the CLI in interactive mode so AO can keep a durable terminal
+// pane attached to the session. Permission modes map onto the CLI's allow flags
+// (`--allow-tool`, `--allow-all-tools`, `--allow-all`).
 // Restore continues an existing session via `--resume <agentSessionId>`; the
 // native session id (a UUID under ~/.copilot/session-state/) is captured by the
 // SessionStart hook AO installs (see hooks.go).
@@ -75,13 +75,14 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 	return ports.ConfigSpec{}, nil
 }
 
-// GetLaunchCommand builds the argv to start a new headless Copilot session:
+// GetLaunchCommand builds the argv to start a new interactive Copilot session:
 //
-//	[env COPILOT_CUSTOM_INSTRUCTIONS_DIRS=<ao-dir>[,<existing>]] copilot [permission flags] [-p <prompt>]
+//	[env COPILOT_CUSTOM_INSTRUCTIONS_DIRS=<ao-dir>[,<existing>]] copilot [permission flags]
 //
-// The prompt is delivered with `-p`, which runs the prompt in non-interactive
-// mode and exits when done. Copilot CLI custom instructions are directory-based,
-// so AO writes an AGENTS.md into the AO prompt artifact directory and points
+// The prompt is delivered after the process starts; using `-p` runs Copilot in
+// programmatic mode and exits when done, which leaves AO's terminal pane blank
+// or dead. Copilot CLI custom instructions are directory-based, so AO writes an
+// AGENTS.md into the AO prompt artifact directory and points
 // COPILOT_CUSTOM_INSTRUCTIONS_DIRS at it when standing instructions are present.
 func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (cmd []string, err error) {
 	binary, err := p.copilotBinary(ctx)
@@ -97,20 +98,16 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	cmd = append(cmd, binary)
 	appendApprovalFlags(&cmd, cfg.Permissions)
 
-	if cfg.Prompt != "" {
-		cmd = append(cmd, "-p", cfg.Prompt)
-	}
-
 	return cmd, nil
 }
 
-// GetPromptDeliveryStrategy reports that Copilot receives its prompt in the
-// launch command itself (via `-p`).
+// GetPromptDeliveryStrategy reports that Copilot receives its prompt after the
+// interactive process starts.
 func (p *Plugin) GetPromptDeliveryStrategy(ctx context.Context, cfg ports.LaunchConfig) (ports.PromptDeliveryStrategy, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	return ports.PromptDeliveryInCommand, nil
+	return ports.PromptDeliveryAfterStart, nil
 }
 
 // GetRestoreCommand rebuilds the argv that continues an existing Copilot
@@ -205,6 +202,9 @@ func ResolveCopilotBinary(ctx context.Context) (string, error) {
 	}
 
 	if path, err := exec.LookPath("copilot"); err == nil && path != "" {
+		if native := copilotNativeBinaryForLoader(path); native != "" {
+			return native, nil
+		}
 		return path, nil
 	}
 
@@ -217,11 +217,15 @@ func ResolveCopilotBinary(ctx context.Context) (string, error) {
 			filepath.Join(home, ".copilot", "bin", "copilot"),
 			filepath.Join(home, ".npm", "bin", "copilot"),
 			filepath.Join(home, ".local", "bin", "copilot"),
+			filepath.Join(home, "Library", "Application Support", "Code", "User", "globalStorage", "github.copilot-chat", "copilotCli", "copilot"),
 		)
 	}
 
 	for _, candidate := range candidates {
 		if fileExists(candidate) {
+			if native := copilotNativeBinaryForLoader(candidate); native != "" {
+				return native, nil
+			}
 			return candidate, nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -230,6 +234,25 @@ func ResolveCopilotBinary(ctx context.Context) (string, error) {
 	}
 
 	return "", fmt.Errorf("copilot: %w", ports.ErrAgentBinaryNotFound)
+}
+
+func copilotNativeBinaryForLoader(path string) string {
+	if path == "" || runtime.GOOS == "windows" {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || filepath.Base(resolved) != "npm-loader.js" {
+		return ""
+	}
+	platform := runtime.GOOS
+	if platform == "darwin" {
+		platform = "darwin"
+	}
+	native := filepath.Join(filepath.Dir(resolved), "node_modules", ".bin", "copilot-"+platform+"-"+runtime.GOARCH)
+	if fileExists(native) {
+		return native
+	}
+	return ""
 }
 
 func (p *Plugin) copilotBinary(ctx context.Context) (string, error) {

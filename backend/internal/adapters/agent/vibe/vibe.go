@@ -80,13 +80,15 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 
 // GetLaunchCommand builds the argv to start a new non-interactive Vibe session:
 //
-//	vibe --trust --output text [--agent <profile-or-ao-agent>] [--auto-approve] -p <prompt>
+//	vibe --trust --output text [--workdir <path>] [--agent <profile-or-ao-agent>] [--auto-approve] -p <prompt>
 //
 // The prompt is delivered through `-p` (programmatic mode), so AO uses
 // in-command delivery. `--trust` skips the trust prompt for automation and
-// `--output text` pins the output format. Vibe exposes no CLI system-prompt
-// flag, so AO writes a workspace-local custom agent and selects it with --agent
-// when standing instructions are present.
+// `--output text` pins the output format. `--workdir` is passed explicitly
+// because Vibe validates its own working directory in addition to the process
+// cwd AO sets through the runtime. Vibe exposes no CLI system-prompt flag, so
+// AO writes a workspace-local custom agent and selects it with --agent when
+// standing instructions are present.
 func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (cmd []string, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -101,6 +103,7 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		return nil, err
 	}
 	cmd = []string{binary, "--trust", "--output", "text"}
+	appendWorkdirFlag(&cmd, cfg.WorkspacePath)
 	if agentName != "" {
 		cmd = append(cmd, "--agent", agentName)
 		appendCustomAgentApprovalFlags(&cmd, cfg.Permissions)
@@ -149,6 +152,7 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 		return nil, false, err
 	}
 	cmd = []string{binary, "--trust", "--output", "text"}
+	appendWorkdirFlag(&cmd, cfg.Session.WorkspacePath)
 	if agentName != "" {
 		cmd = append(cmd, "--agent", agentName)
 		appendCustomAgentApprovalFlags(&cmd, cfg.Permissions)
@@ -166,6 +170,12 @@ func (p *Plugin) SessionInfo(ctx context.Context, session ports.SessionRef) (por
 		return ports.SessionInfo{}, false, err
 	}
 	return ports.SessionInfo{}, false, nil
+}
+
+func appendWorkdirFlag(cmd *[]string, workspacePath string) {
+	if workspacePath != "" {
+		*cmd = append(*cmd, "--workdir", workspacePath)
+	}
 }
 
 // appendAgentFlags maps AO permission modes onto Vibe's builtin `--agent`
