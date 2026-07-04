@@ -24,7 +24,13 @@ const themeScript = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="en" suppressHydrationWarning className={`${inter.variable} ${inter.className}`}>
+		<html
+			lang="en"
+			suppressHydrationWarning
+			className={`${inter.variable} ${inter.className} dark`}
+			data-theme="dark"
+			style={{ colorScheme: "dark" }}
+		>
 			<head>
 				<script dangerouslySetInnerHTML={{ __html: themeScript }} />
 			</head>

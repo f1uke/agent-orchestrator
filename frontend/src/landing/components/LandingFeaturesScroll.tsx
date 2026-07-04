@@ -540,7 +540,7 @@ function AgentHarnessDemo({
 	const visibleAgents = primaryAgents.filter((agent) => ["claude-code", "codex", "cursor", "goose"].includes(agent.id));
 
 	return (
-		<article className="surface relative h-[520px] w-full overflow-hidden p-0">
+		<article className="surface relative w-full overflow-hidden p-0 lg:h-[520px]">
 			<div className="landing-card-header flex items-center justify-between px-5 py-3.5">
 				<div className="flex items-center gap-3">
 					<img src="/ao-logo-transparent.png" alt="" className="h-7 w-7 object-contain" />
@@ -554,7 +554,7 @@ function AgentHarnessDemo({
 				</div>
 			</div>
 
-			<div className="grid h-[calc(520px-69px)] gap-0 lg:grid-cols-[0.68fr_1fr]">
+			<div className="grid gap-0 lg:h-[calc(520px-69px)] lg:grid-cols-[0.68fr_1fr]">
 				<div className="flex min-h-0 flex-col border-b border-[color:var(--border)] p-4 lg:border-b-0 lg:border-r">
 					<div className="mb-3 grid gap-2 sm:grid-cols-2">
 						<AgentSelectLabel
