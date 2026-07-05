@@ -97,6 +97,7 @@ export function PRSummaryParts({
 		>
 			{parts.map((part) => {
 				const links = part.links.slice(0, maxLinks);
+				const overflowLabel = overflowPartLabel(part.links.length - links.length, part.overflowNoun);
 				return (
 					<div key={part.key} className={cn("min-w-0", stacked ? "flex flex-col" : "inline-flex flex-wrap gap-x-1")}>
 						<div className="min-w-0 truncate">
@@ -104,12 +105,12 @@ export function PRSummaryParts({
 							<span className={cn("font-medium", toneClass[part.tone])}>{part.status}</span>
 							{part.summary ? <span className="text-passive"> · {part.summary}</span> : null}
 						</div>
-						{links.length > 0 || part.overflowLabel ? (
+						{links.length > 0 || overflowLabel ? (
 							<div className={cn("flex min-w-0 flex-wrap gap-x-1.5 gap-y-1", stacked ? "mt-0.5" : "")}>
 								{links.map((link, index) => (
 									<SummaryLink interactive={interactiveLinks} key={`${part.key}-${index}-${link.label}`} link={link} />
 								))}
-								{part.overflowLabel ? <span className="text-passive">{part.overflowLabel}</span> : null}
+								{overflowLabel ? <span className="text-passive">{overflowLabel}</span> : null}
 							</div>
 						) : null}
 					</div>
@@ -117,6 +118,13 @@ export function PRSummaryParts({
 			})}
 		</div>
 	);
+}
+
+function overflowPartLabel(extra: number, noun?: string): string | undefined {
+	if (extra <= 0) {
+		return undefined;
+	}
+	return noun ? `+${extra} ${pluralize(noun, extra)}` : `+${extra}`;
 }
 
 function SummaryLink({ interactive, link }: { interactive: boolean; link: PRSummaryLink }) {

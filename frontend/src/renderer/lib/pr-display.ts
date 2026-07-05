@@ -42,6 +42,7 @@ export type PRSummaryPart = {
 	summary?: string;
 	links: PRSummaryLink[];
 	overflowLabel?: string;
+	overflowNoun?: string;
 	tone: PRDisplayTone;
 };
 
@@ -124,6 +125,7 @@ export function prSummaryParts(pr: SessionPRSummary): PRSummaryPart[] {
 			summary: ciSummary(pr),
 			links: ciLinks(pr),
 			overflowLabel: pr.ci.state === "failing" ? overflowLabel(pr.ci.failingChecks.length, 3, "check") : undefined,
+			overflowNoun: "check",
 			tone: ciTone(pr.ci.state),
 		},
 		{
@@ -133,6 +135,7 @@ export function prSummaryParts(pr: SessionPRSummary): PRSummaryPart[] {
 			summary: mergeSummary(pr),
 			links: mergeLinks(pr),
 			overflowLabel: mergeOverflowLabel(pr),
+			overflowNoun: mergeOverflowNoun(pr),
 			tone: mergeabilityTone(pr.mergeability.state),
 		},
 		{
@@ -145,6 +148,7 @@ export function prSummaryParts(pr: SessionPRSummary): PRSummaryPart[] {
 				pr.state === "draft" || pr.review.decision === "review_required"
 					? undefined
 					: overflowLabel(pr.review.unresolvedBy.length, 3, "reviewer"),
+			overflowNoun: "reviewer",
 			tone: reviewTone(pr.review.decision, pr.review.hasUnresolvedHumanComments),
 		},
 	];
@@ -248,6 +252,10 @@ function mergeOverflowLabel(pr: SessionPRSummary): string | undefined {
 		return overflowLabel(pr.mergeability.reasons.length, 3, "reason");
 	}
 	return undefined;
+}
+
+function mergeOverflowNoun(pr: SessionPRSummary): string {
+	return (pr.mergeability.conflictFiles ?? []).length > 0 ? "file" : "reason";
 }
 
 function toCIState(value: string): SessionPRSummary["ci"]["state"] {
