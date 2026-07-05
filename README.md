@@ -118,19 +118,19 @@ Download the latest desktop build for your platform:
 
 <table>
   <tr>
-    <td width="27.5%">
+    <td width="33%">
       <a href="https://x.com/agent_wrapper/status/2026329204405723180">
-        <img src="screenshots/tweet2.png" width="100%" alt="Agent Orchestrator journey screenshot one" />
+        <img src="screenshots/first.png" width="100%" alt="Agent Orchestrator journey screenshot one" />
       </a>
     </td>
-    <td width="42.5%">
+    <td width="37.5%">
       <a href="https://x.com/agent_wrapper/status/2025986105485733945">
-        <img src="screenshots/tweet1.png" width="100%" alt="Agent Orchestrator journey screenshot two" />
+        <img src="screenshots/second.png" width="100%" alt="Agent Orchestrator journey screenshot two" />
       </a>
     </td>
-    <td width="30%">
-      <a href="https://x.com/agent_wrapper/status/2064157228400341312">
-        <img src="screenshots/tweet3.png" width="100%" alt="Agent Orchestrator journey screenshot three" />
+    <td width="29.5%">
+      <a href="https://x.com/agent_wrapper/status/2024885035774738700">
+        <img src="screenshots/image.png" width="100%" alt="Agent Orchestrator journey screenshot three" />
       </a>
     </td>
   </tr>
