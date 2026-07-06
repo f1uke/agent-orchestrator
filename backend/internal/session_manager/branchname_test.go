@@ -30,10 +30,13 @@ func TestSanitizeBranchName(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		{"clean", "feature/STAR-2271-ecoupon-result", "feature/star-2271-ecoupon-result", true},
-		{"backticked with prose", "`feature/STAR-2271-x`\nSure, here you go!", "feature/star-2271-x", true},
-		{"label prefix", "branch: bugfix/ABC-1-fix-crash", "bugfix/abc-1-fix-crash", true},
-		{"spaces and junk", "feature/STAR 2271  e coupon!!", "feature/star-2271-e-coupon", true},
+		{"clean keeps jira key uppercase", "feature/STAR-2271-ecoupon-result", "feature/STAR-2271-ecoupon-result", true},
+		{"backticked with prose", "`feature/STAR-2271-x`\nSure, here you go!", "feature/STAR-2271-x", true},
+		{"label prefix", "branch: bugfix/ABC-1-fix-crash", "bugfix/ABC-1-fix-crash", true},
+		{"spaces and junk", "feature/STAR 2271  e coupon!!", "feature/STAR-2271-e-coupon", true},
+		{"key with digit in project", "feature/star2-15-add-thing", "feature/STAR2-15-add-thing", true},
+		{"dedup suffix stays lowercase", "feature/star-2271-result-2", "feature/STAR-2271-result-2", true},
+		{"no key leaves desc lowercase", "chore/cleanup-old-files", "chore/cleanup-old-files", true},
 		{"no gitflow prefix", "star-2271-result", "", false},
 		{"bad type", "release/STAR-1-x", "", false},
 		{"dotdot", "feature/STAR..1", "", false},
@@ -60,6 +63,11 @@ func TestEnsureUniqueBranch(t *testing.T) {
 	}
 	if got := ensureUniqueBranch(existing, "feature/star-2271-x"); got != "feature/star-2271-x-3" {
 		t.Fatalf("collision suffix wrong: %q", got)
+	}
+	// An uppercase Jira key must still collide with the lowercased existing set
+	// (case-insensitive filesystems), and the returned name keeps its casing.
+	if got := ensureUniqueBranch(existing, "feature/STAR-2271-x"); got != "feature/STAR-2271-x-3" {
+		t.Fatalf("mixed-case collision suffix wrong: %q", got)
 	}
 }
 

@@ -18,6 +18,11 @@ var (
 	allowedTypes      = map[string]bool{"feature": true, "bugfix": true, "hotfix": true, "chore": true}
 	nonBranchChars    = regexp.MustCompile(`[^a-z0-9/-]+`)
 	repeatedSlashDash = regexp.MustCompile(`[-]{2,}`)
+	// leadingJiraKeyRe matches a lowercased Jira key at the START of the branch's
+	// segment after the type slash (e.g. the "star-2271" in "star-2271-ecoupon"),
+	// so only the card key is re-uppercased and later "-2" de-dup suffixes or
+	// hyphenated words in the description are left untouched.
+	leadingJiraKeyRe = regexp.MustCompile(`^[a-z][a-z0-9]*-\d+`)
 )
 
 // extractJiraKey returns the first Jira-style key (e.g. STAR-2271) found across
@@ -90,18 +95,28 @@ func sanitizeBranchName(raw string) (string, bool) {
 	if strings.TrimSpace(line[slash+1:]) == "" {
 		return "", false
 	}
+	// Restore Jira-card casing: uppercase the key sitting right after the type
+	// slash so the branch (and the worktree that mirrors it) reads
+	// "feature/STAR-2271-x" like the Jira card, not "feature/star-2271-x".
+	rest := line[slash+1:]
+	if m := leadingJiraKeyRe.FindString(rest); m != "" {
+		line = line[:slash+1] + strings.ToUpper(m) + rest[len(m):]
+	}
 	return line, true
 }
 
 // ensureUniqueBranch returns candidate, or candidate-2, candidate-3, ... until it
 // is not present in existing. Keys in existing are bare branch names (no refs/…).
 func ensureUniqueBranch(existing map[string]bool, candidate string) string {
-	if !existing[candidate] {
+	// Compare case-insensitively: existing names are lowercased and the candidate
+	// now carries an uppercase Jira key, but macOS/Windows worktree directories
+	// (and git's ref case-folding) collide regardless of case.
+	if !existing[strings.ToLower(candidate)] {
 		return candidate
 	}
 	for n := 2; n < 1000; n++ {
 		next := fmt.Sprintf("%s-%d", candidate, n)
-		if !existing[next] {
+		if !existing[strings.ToLower(next)] {
 			return next
 		}
 	}
