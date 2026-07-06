@@ -881,6 +881,43 @@ func TestPoll_ReviewHashDrivesPersistenceAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestPoll_ApprovalsCountChangeRoundTripsThroughRefreshReviews(t *testing.T) {
+	store := testStoreWithSession()
+	local := knownPR(1)
+	local.ReviewHash = "old"
+	local.Review = domain.ReviewChangesRequest
+	local.ApprovalsCount = 2
+	local.ApprovalRuleConfigured = true
+	store.prs["p-1"] = []domain.PullRequest{local}
+	review := ports.SCMReviewObservation{
+		Decision:               string(domain.ReviewChangesRequest),
+		ApprovalsCount:         3,
+		ApprovalRuleConfigured: false,
+	}
+	provider := &fakeProvider{repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo", NotModified: true}}, observations: map[string]ports.SCMObservation{}, reviews: map[string]ports.SCMReviewObservation{prKey(testRepo, 1): review}}
+	lc := &fakeLifecycle{}
+	obs := newTestObserver(store, provider, lc, time.Unix(200, 0).UTC())
+	obs.Cache.RepoPRListETag[prKey(testRepo, 0)] = "repo"
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.writes) == 0 {
+		t.Fatalf("approvals-count change not persisted: %#v", store.writes)
+	}
+	if store.writes[0].pr.ApprovalsCount != 3 {
+		t.Fatalf("persisted PR ApprovalsCount = %d, want 3 (refreshReviews must copy review.ApprovalsCount onto obs.Review)", store.writes[0].pr.ApprovalsCount)
+	}
+	if store.writes[0].pr.ApprovalRuleConfigured {
+		t.Fatalf("persisted PR ApprovalRuleConfigured = true, want false (refreshReviews must copy review.ApprovalRuleConfigured onto obs.Review)")
+	}
+	if len(lc.observed) != 1 || !lc.observed[0].Changed.Review {
+		t.Fatalf("approvals count change from 2 to 3 must flip Changed.Review: %#v", lc.observed)
+	}
+	if lc.observed[0].Review.ApprovalsCount != 3 {
+		t.Fatalf("observation delivered to lifecycle has ApprovalsCount = %d, want 3", lc.observed[0].Review.ApprovalsCount)
+	}
+}
+
 func TestPoll_PartialReviewRefreshUsesMergeMode(t *testing.T) {
 	store := testStoreWithSession()
 	local := knownPR(1)

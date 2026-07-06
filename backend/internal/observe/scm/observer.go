@@ -879,6 +879,8 @@ func (o *Observer) refreshReviews(ctx context.Context, subjects map[string]*subj
 		obs.Review.Reviews = review.Reviews
 		obs.Review.Threads = review.Threads
 		obs.Review.Partial = review.Partial
+		obs.Review.ApprovalsCount = review.ApprovalsCount
+		obs.Review.ApprovalRuleConfigured = review.ApprovalRuleConfigured
 		obs.ObservedAt = now
 		observations[pkey] = obs
 		subjectsByPR[pkey] = s
@@ -1044,13 +1046,17 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 
 func observationFromLocal(repo ports.SCMRepo, pr domain.PullRequest, checks []domain.PullRequestCheck) ports.SCMObservation {
 	return ports.SCMObservation{
-		Fetched:      true,
-		Provider:     firstNonEmpty(pr.Provider, repo.Provider),
-		Host:         firstNonEmpty(pr.Host, repo.Host),
-		Repo:         firstNonEmpty(pr.Repo, repoFullName(repo)),
-		PR:           ports.SCMPRObservation{URL: pr.URL, Number: pr.Number, State: normalizePRState(pr.Draft, pr.Merged, pr.Closed), Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, SourceBranch: pr.SourceBranch, TargetBranch: pr.TargetBranch, HeadSHA: pr.HeadSHA, Title: pr.Title, Additions: pr.Additions, Deletions: pr.Deletions, ChangedFiles: pr.ChangedFiles, Author: pr.Author, BaseSHA: pr.BaseSHA, MergeCommitSHA: pr.MergeCommitSHA, ProviderState: pr.ProviderState, ProviderMergeable: pr.ProviderMergeable, ProviderMergeStateStatus: pr.ProviderMergeStateStatus, HTMLURL: pr.HTMLURL, CreatedAtProvider: pr.CreatedAtProvider, UpdatedAtProvider: pr.UpdatedAtProvider, MergedAtProvider: pr.MergedAtProvider, ClosedAtProvider: pr.ClosedAtProvider},
-		CI:           ciObservationFromLocal(pr, checks),
-		Review:       ports.SCMReviewObservation{Decision: string(pr.Review)},
+		Fetched:  true,
+		Provider: firstNonEmpty(pr.Provider, repo.Provider),
+		Host:     firstNonEmpty(pr.Host, repo.Host),
+		Repo:     firstNonEmpty(pr.Repo, repoFullName(repo)),
+		PR:       ports.SCMPRObservation{URL: pr.URL, Number: pr.Number, State: normalizePRState(pr.Draft, pr.Merged, pr.Closed), Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, SourceBranch: pr.SourceBranch, TargetBranch: pr.TargetBranch, HeadSHA: pr.HeadSHA, Title: pr.Title, Additions: pr.Additions, Deletions: pr.Deletions, ChangedFiles: pr.ChangedFiles, Author: pr.Author, BaseSHA: pr.BaseSHA, MergeCommitSHA: pr.MergeCommitSHA, ProviderState: pr.ProviderState, ProviderMergeable: pr.ProviderMergeable, ProviderMergeStateStatus: pr.ProviderMergeStateStatus, HTMLURL: pr.HTMLURL, CreatedAtProvider: pr.CreatedAtProvider, UpdatedAtProvider: pr.UpdatedAtProvider, MergedAtProvider: pr.MergedAtProvider, ClosedAtProvider: pr.ClosedAtProvider},
+		CI:       ciObservationFromLocal(pr, checks),
+		Review: ports.SCMReviewObservation{
+			Decision:               string(pr.Review),
+			ApprovalsCount:         pr.ApprovalsCount,
+			ApprovalRuleConfigured: pr.ApprovalRuleConfigured,
+		},
 		Mergeability: mergeabilityObservationFromLocal(pr),
 	}
 }
