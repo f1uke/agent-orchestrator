@@ -283,6 +283,22 @@ func TestTrackerRepoUsesConfiguredRepo(t *testing.T) {
 	}
 }
 
+func TestMultiTrackerResolver(t *testing.T) {
+	gh := &fakeTracker{}
+	gl := &fakeTracker{}
+	r := MultiTrackerResolver{Adapters: map[domain.TrackerProvider]ports.Tracker{
+		domain.TrackerProviderGitHub: gh,
+		domain.TrackerProviderGitLab: gl,
+	}}
+	got, err := r.Resolve(domain.TrackerProviderGitLab)
+	if err != nil || got != ports.Tracker(gl) {
+		t.Fatalf("resolve gitlab => %v err=%v", got, err)
+	}
+	if _, err := r.Resolve("linear"); err == nil {
+		t.Fatalf("expected error for unknown provider")
+	}
+}
+
 func singleResolver(tracker ports.Tracker) TrackerResolver {
 	return SingleTrackerResolver{Provider: domain.TrackerProviderGitHub, Adapter: tracker}
 }

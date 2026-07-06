@@ -68,6 +68,26 @@ func (s SingleTrackerResolver) Resolve(provider domain.TrackerProvider) (ports.T
 	return nil, fmt.Errorf("tracker intake: no adapter for provider %q", provider)
 }
 
+// MultiTrackerResolver routes to a different tracker adapter per provider. It
+// exists so a single deployment can run issue intake against both GitHub and
+// GitLab projects at once.
+type MultiTrackerResolver struct {
+	Adapters map[domain.TrackerProvider]ports.Tracker
+}
+
+// Resolve returns the adapter registered for provider, defaulting an empty
+// provider to GitHub to match the rest of this package's handling of unset
+// providers (see SingleTrackerResolver.Resolve and CanonicalIssueID).
+func (r MultiTrackerResolver) Resolve(provider domain.TrackerProvider) (ports.Tracker, error) {
+	if provider == "" {
+		provider = domain.TrackerProviderGitHub
+	}
+	if adapter, ok := r.Adapters[provider]; ok {
+		return adapter, nil
+	}
+	return nil, fmt.Errorf("tracker intake: no adapter for provider %q", provider)
+}
+
 // Config holds optional observer knobs. Zero values use production defaults.
 type Config struct {
 	Tick           time.Duration
