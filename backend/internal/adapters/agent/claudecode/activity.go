@@ -20,13 +20,15 @@ func DeriveActivityState(event string, payload []byte) (domain.ActivityState, bo
 	switch event {
 	case "user-prompt-submit":
 		return domain.ActivityActive, true
-	case "pre-tool-use", "post-tool-use":
+	case "pre-tool-use", "post-tool-use", "post-tool-use-failure":
 		// A tool is about to run / just ran, so the agent is demonstrably busy.
 		// These fire for tool calls inside Task sub-agents too, which is what
 		// keeps a session "working" during a long sub-agent run. They are also
 		// the signal that clears a stale waiting_input: a permission prompt
 		// answered directly in the TUI produces no hook of its own, so without
 		// these the sticky waiting_input outlives the approval indefinitely.
+		// A tool that fails (e.g. a nonzero bash exit) fires PostToolUseFailure
+		// INSTEAD of PostToolUse, so liveness needs both completion variants.
 		// Ordering is safe for real prompts: PreToolUse completes before the
 		// permission check, so its "active" always lands before the prompt's
 		// Notification sets waiting_input.

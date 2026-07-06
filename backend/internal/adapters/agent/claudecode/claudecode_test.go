@@ -238,6 +238,14 @@ func TestGetAgentHooksInstallsClaudeHooks(t *testing.T) {
 	if countClaudeHookCommand(config.Hooks["PostToolUse"], "ao hooks claude-code post-tool-use") != 1 {
 		t.Fatalf("PostToolUse hook not installed: %#v", config.Hooks["PostToolUse"])
 	}
+	// A tool that fails (e.g. a nonzero bash exit) fires PostToolUseFailure
+	// INSTEAD of PostToolUse, so liveness needs both.
+	if m := matcherForCommand(config.Hooks["PostToolUseFailure"], "ao hooks claude-code post-tool-use-failure"); m != nil {
+		t.Fatalf("PostToolUseFailure matcher = %v, want none", m)
+	}
+	if countClaudeHookCommand(config.Hooks["PostToolUseFailure"], "ao hooks claude-code post-tool-use-failure") != 1 {
+		t.Fatalf("PostToolUseFailure hook not installed: %#v", config.Hooks["PostToolUseFailure"])
+	}
 }
 
 func TestUninstallHooksRemovesClaudeHooks(t *testing.T) {
