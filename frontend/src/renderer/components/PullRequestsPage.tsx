@@ -11,6 +11,7 @@ import {
 import { comparePRDisplaySummaries, prDiffSummary, sessionPRDisplaySummaries } from "../lib/pr-display";
 import type { WorkspaceSession } from "../types/workspace";
 import { DashboardSubhead } from "./DashboardSubhead";
+import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { PRSummaryParts } from "./PRSummaryDisplay";
@@ -148,9 +149,12 @@ function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
 				<PRSummaryParts className="mt-1" maxLinks={2} pr={row.pr} />
 			</TableCell>
 			<TableCell>
-				<Badge variant="outline" className={cn("h-5 px-1.5 text-[10px] font-medium", stateTone[row.pr.state])}>
-					{row.pr.state}
-				</Badge>
+				<div className="flex items-center gap-1.5">
+					<Badge variant="outline" className={cn("h-5 px-1.5 text-[10px] font-medium", stateTone[row.pr.state])}>
+						{row.pr.state}
+					</Badge>
+					<ProviderBadge provider={row.pr.provider} />
+				</div>
 			</TableCell>
 			<TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
 				{note ? (

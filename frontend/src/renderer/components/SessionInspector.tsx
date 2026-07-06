@@ -11,6 +11,7 @@ import type { SessionActivityState, WorkspaceSession } from "../types/workspace"
 import { canonicalTrackerIssueId, sortedPRs } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
+import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -219,6 +220,7 @@ function PRSummaryCard({ pr }: { pr: SessionPRSummary }) {
 				<Badge variant="outline" className={cn("h-5 px-1.5 text-[10px] font-medium", prStateTone[pr.state])}>
 					{pr.state}
 				</Badge>
+				<ProviderBadge provider={pr.provider} />
 				<a
 					href={prBrowserUrl(pr)}
 					target="_blank"
