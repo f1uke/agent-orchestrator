@@ -62,7 +62,7 @@ func TestClientDoRESTSendsPrivateToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("PRIVATE-TOKEN")
 		w.Header().Set("ETag", `"abc"`)
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer srv.Close()
@@ -91,7 +91,7 @@ func TestClientRESTURLSingleEscapesProjectPath(t *testing.T) {
 	var gotEscapedPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotEscapedPath = r.URL.EscapedPath()
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer srv.Close()
@@ -101,7 +101,7 @@ func TestClientRESTURLSingleEscapesProjectPath(t *testing.T) {
 	// for repo "group/sub/proj": url.PathEscape the project id, then join it
 	// into the merge_requests list path.
 	path := "projects/" + url.PathEscape("group/sub/proj") + "/merge_requests"
-	if _, err := c.doREST(context.Background(), http.MethodGet, path, nil, nil); err != nil {
+	if _, err := c.doREST(context.Background(), path, nil); err != nil {
 		t.Fatalf("doREST: %v", err)
 	}
 	if !strings.Contains(gotEscapedPath, "group%2Fsub%2Fproj") {
@@ -121,13 +121,13 @@ func TestClientRESTURLPlainASCIIPathsUnaffected(t *testing.T) {
 			var gotPath string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath = r.URL.Path
-				w.WriteHeader(200)
+				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{}`))
 			}))
 			defer srv.Close()
 
 			c := NewClient(ClientOptions{APIBase: srv.URL, Token: StaticTokenSource("t")})
-			if _, err := c.doREST(context.Background(), http.MethodGet, path, nil, nil); err != nil {
+			if _, err := c.doREST(context.Background(), path, nil); err != nil {
 				t.Fatalf("doREST: %v", err)
 			}
 			want := "/" + path
@@ -144,7 +144,7 @@ func TestClientDoRESTMaps304(t *testing.T) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 	c := NewClient(ClientOptions{APIBase: srv.URL, Token: StaticTokenSource("t")})

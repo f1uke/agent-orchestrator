@@ -59,6 +59,7 @@ func (p *Provider) ParseRepository(remote string) (ports.SCMRepo, bool) {
 	return ports.SCMRepo{}, false
 }
 
+// RepoPRListGuard routes to the child provider named by repo.Provider.
 func (p *Provider) RepoPRListGuard(ctx context.Context, repo ports.SCMRepo, etag string) (ports.SCMGuardResult, error) {
 	child, err := p.lookup(repo.Provider)
 	if err != nil {
@@ -67,6 +68,7 @@ func (p *Provider) RepoPRListGuard(ctx context.Context, repo ports.SCMRepo, etag
 	return child.RepoPRListGuard(ctx, repo, etag)
 }
 
+// ListOpenPRsByRepo routes to the child provider named by repo.Provider.
 func (p *Provider) ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([]ports.SCMPRObservation, error) {
 	child, err := p.lookup(repo.Provider)
 	if err != nil {
@@ -75,6 +77,7 @@ func (p *Provider) ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([
 	return child.ListOpenPRsByRepo(ctx, repo)
 }
 
+// CommitChecksGuard routes to the child provider named by repo.Provider.
 func (p *Provider) CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, headSHA, etag string) (ports.SCMGuardResult, error) {
 	child, err := p.lookup(repo.Provider)
 	if err != nil {
@@ -99,6 +102,7 @@ func (p *Provider) FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef)
 	return child.FetchPullRequests(ctx, refs)
 }
 
+// FetchFailedCheckLogTail routes to the child provider named by repo.Provider.
 func (p *Provider) FetchFailedCheckLogTail(ctx context.Context, repo ports.SCMRepo, check ports.SCMCheckObservation) (string, error) {
 	child, err := p.lookup(repo.Provider)
 	if err != nil {
@@ -107,6 +111,7 @@ func (p *Provider) FetchFailedCheckLogTail(ctx context.Context, repo ports.SCMRe
 	return child.FetchFailedCheckLogTail(ctx, repo, check)
 }
 
+// FetchReviewThreads routes to the child provider named by ref.Repo.Provider.
 func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error) {
 	child, err := p.lookup(ref.Repo.Provider)
 	if err != nil {

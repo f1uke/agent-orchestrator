@@ -118,7 +118,7 @@ func (t *Tracker) Get(ctx context.Context, id domain.TrackerID) (domain.Issue, e
 	}
 	path := "/projects/" + url.PathEscape(projectPath) + "/issues/" + strconv.Itoa(iid)
 
-	resp, err := t.do(ctx, http.MethodGet, path, nil)
+	resp, err := t.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return domain.Issue{}, err
 	}
@@ -209,7 +209,7 @@ func (t *Tracker) List(ctx context.Context, repo domain.TrackerRepo, filter doma
 	q.Set("per_page", strconv.Itoa(perPage))
 
 	path := "/projects/" + url.PathEscape(projectPath) + "/issues?" + q.Encode()
-	resp, err := t.do(ctx, http.MethodGet, path, nil)
+	resp, err := t.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func (t *Tracker) List(ctx context.Context, repo domain.TrackerRepo, filter doma
 // project — those may still fail with ErrAuthFailed even after a
 // successful Preflight.
 func (t *Tracker) Preflight(ctx context.Context) error {
-	_, err := t.do(ctx, http.MethodGet, "/user", nil)
+	_, err := t.do(ctx, http.MethodGet, "/user")
 	return err
 }
 
@@ -251,8 +251,8 @@ func (t *Tracker) Preflight(ctx context.Context) error {
 // "group%2Fsub%2Fproj"); assigning that pre-escaped segment to url.URL.Path
 // and letting url.URL.String() re-escape it would corrupt "%2F" into
 // "%252F" on the wire. See doc.go and TestTrackerGet_NestedGroupPathIsSingleEncoded.
-func (t *Tracker) do(ctx context.Context, method, path string, body any) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, t.apiBase+path, nil)
+func (t *Tracker) do(ctx context.Context, method, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, t.apiBase+path, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("gitlab tracker: build request: %w", err)
 	}

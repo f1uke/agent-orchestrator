@@ -9,8 +9,10 @@ import (
 type TrackerProvider string
 
 // TrackerProviderGitHub and TrackerProviderGitLab are the supported issue-tracker providers.
-const TrackerProviderGitHub TrackerProvider = "github"
-const TrackerProviderGitLab TrackerProvider = "gitlab"
+const (
+	TrackerProviderGitHub TrackerProvider = "github"
+	TrackerProviderGitLab TrackerProvider = "gitlab"
+)
 
 // TrackerID identifies one issue. Native is the provider's own canonical form
 // ("owner/repo#123" for GitHub) and is parsed by the adapter.
@@ -86,8 +88,9 @@ type TrackerIntakeConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
 	// Provider defaults to github when Enabled is true.
 	Provider TrackerProvider `json:"provider,omitempty" enum:"github,gitlab"`
-	// Repo is the GitHub-native repository key ("owner/repo"). When empty, the
-	// intake loop derives it from the project's repo origin URL. GitHub only.
+	// Repo is the provider-native repository key: GitHub "owner/repo" or a
+	// GitLab nested "group/sub/proj" path. When empty, the intake loop derives
+	// it from the project's repo origin URL.
 	Repo string `json:"repo,omitempty"`
 	// Assignee narrows eligible issues to one assignee. Provider-specific values
 	// such as "*" are passed through unchanged.

@@ -77,11 +77,11 @@ func (c *Client) doRESTWithETag(ctx context.Context, path string, q url.Values, 
 	return c.doRESTWithETagAndMethod(ctx, http.MethodGet, path, q, etag, nil)
 }
 
-// doREST performs one REST request with no ETag pre-condition. For
-// non-GET methods, a non-nil body is JSON-encoded and sent as the request
-// body.
-func (c *Client) doREST(ctx context.Context, method, path string, q url.Values, body any) (restResponse, error) {
-	return c.doRESTWithETagAndMethod(ctx, method, path, q, "", body)
+// doREST performs one GET request with no ETag pre-condition. Round 1 is
+// read-only, so every call site passes http.MethodGet; non-GET requests go
+// through doRESTWithETagAndMethod directly once a future round needs writes.
+func (c *Client) doREST(ctx context.Context, path string, q url.Values) (restResponse, error) {
+	return c.doRESTWithETagAndMethod(ctx, http.MethodGet, path, q, "", nil)
 }
 
 func (c *Client) doRESTWithETagAndMethod(ctx context.Context, method, path string, q url.Values, etag string, body any) (restResponse, error) {

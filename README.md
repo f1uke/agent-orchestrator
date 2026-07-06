@@ -210,6 +210,22 @@ All configuration is environment-driven. The daemon takes no config file.
 | `AO_DATA_DIR`         | `~/.ao/data`         | SQLite data directory       |
 | `AO_AGENT`            | `claude-code`        | Compatibility agent adapter |
 | `GITHUB_TOKEN`        | -                    | GitHub auth token           |
+| `AO_GITLAB_HOST`      | -                    | GitLab host(s), see below   |
+| `AO_GITLAB_TOKEN`     | -                    | GitLab auth token           |
+
+### GitLab (self-hosted)
+
+GitLab support is opt-in and additive: **if `AO_GITLAB_HOST` is unset, behavior
+is unchanged** and only GitHub is wired, exactly as before this feature existed.
+
+| Variable          | Purpose                                                                                                                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AO_GITLAB_HOST`   | Enables GitLab. Sets both the composite provider's host matcher and the REST API base (`https://<host>/api/v4`). Comma-separated values are accepted, but **round 1 wires only the first host** in the list. |
+| `AO_GITLAB_TOKEN` / `GITLAB_TOKEN` | Auth token for the configured host. If unset, the daemon falls back to the `glab` CLI login (`glab auth status --show-token`) for that host.                                     |
+
+Round-1 scope: MR/pipeline observation and review-thread/decision tracking, plus
+issue intake, are **read-only**. Posting reviews back to GitLab is deferred to a
+later round.
 
 ### Health Checks
 

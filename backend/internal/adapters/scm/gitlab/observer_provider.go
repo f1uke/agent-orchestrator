@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -107,7 +106,7 @@ func (p *Provider) ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([
 	q := url.Values{}
 	q.Set("state", "opened")
 	q.Set("per_page", "100")
-	resp, err := p.client.doREST(ctx, http.MethodGet, mrListPath(repo), q, nil)
+	resp, err := p.client.doREST(ctx, mrListPath(repo), q)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +271,7 @@ func (p *Provider) FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef)
 
 func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) (ports.SCMObservation, error) {
 	mrPath := "projects/" + projectID(ref.Repo) + "/merge_requests/" + strconv.Itoa(ref.Number)
-	resp, err := p.client.doREST(ctx, http.MethodGet, mrPath, nil, nil)
+	resp, err := p.client.doREST(ctx, mrPath, nil)
 	if err != nil {
 		return ports.SCMObservation{}, err
 	}
@@ -281,7 +280,7 @@ func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) 
 		return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode MR detail: %w", err)
 	}
 
-	resp, err = p.client.doREST(ctx, http.MethodGet, mrPath+"/pipelines", nil, nil)
+	resp, err = p.client.doREST(ctx, mrPath+"/pipelines", nil)
 	if err != nil {
 		return ports.SCMObservation{}, err
 	}
@@ -294,7 +293,7 @@ func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) 
 	var jobs []restJob
 	if pipeline.ID != 0 {
 		jobsPath := "projects/" + projectID(ref.Repo) + "/pipelines/" + strconv.Itoa(pipeline.ID) + "/jobs"
-		resp, err = p.client.doREST(ctx, http.MethodGet, jobsPath, nil, nil)
+		resp, err = p.client.doREST(ctx, jobsPath, nil)
 		if err != nil {
 			return ports.SCMObservation{}, err
 		}
@@ -323,7 +322,7 @@ func (p *Provider) FetchFailedCheckLogTail(ctx context.Context, repo ports.SCMRe
 		return "", nil
 	}
 	tracePath := "projects/" + projectID(repo) + "/jobs/" + check.ProviderID + "/trace"
-	resp, err := p.client.doREST(ctx, http.MethodGet, tracePath, nil, nil)
+	resp, err := p.client.doREST(ctx, tracePath, nil)
 	if err != nil {
 		return "", err
 	}
@@ -466,7 +465,7 @@ type restApprovals struct {
 func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error) {
 	mrPath := "projects/" + projectID(ref.Repo) + "/merge_requests/" + strconv.Itoa(ref.Number)
 
-	resp, err := p.client.doREST(ctx, http.MethodGet, mrPath+"/discussions", nil, nil)
+	resp, err := p.client.doREST(ctx, mrPath+"/discussions", nil)
 	if err != nil {
 		return ports.SCMReviewObservation{}, err
 	}
@@ -475,7 +474,7 @@ func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (
 		return ports.SCMReviewObservation{}, fmt.Errorf("gitlab scm: decode MR discussions: %w", err)
 	}
 
-	resp, err = p.client.doREST(ctx, http.MethodGet, mrPath+"/approvals", nil, nil)
+	resp, err = p.client.doREST(ctx, mrPath+"/approvals", nil)
 	if err != nil {
 		return ports.SCMReviewObservation{}, err
 	}
