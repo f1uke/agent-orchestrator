@@ -48,8 +48,10 @@ type spawnRequest struct {
 
 type spawnResult struct {
 	Session struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		ProjectID string `json:"projectId"`
+		Branch    string `json:"branch"`
 	} `json:"session"`
 }
 
@@ -139,7 +141,13 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			// On Windows: ConPTY has no user-facing attach CLI; use the AO dashboard.
 			var attach string
 			if runtime.GOOS != "windows" {
-				attach = fmt.Sprintf("tmux attach -t %s", tmux.SessionName(res.Session.ID))
+				// Reuse the runtime's own naming so the hint matches the actual
+				// tmux session (branch-mirroring name; falls back to the id).
+				name, nameErr := tmux.SessionNameFor(res.Session.ProjectID, res.Session.Branch, res.Session.ID)
+				if nameErr != nil {
+					name = res.Session.ID
+				}
+				attach = fmt.Sprintf("tmux attach -t %s", name)
 			} else {
 				attach = "Attach from the AO dashboard (ConPTY sessions have no CLI attach command)"
 			}
