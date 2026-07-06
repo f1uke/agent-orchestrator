@@ -563,11 +563,16 @@ func approvalDecision(a restApprovals) string {
 }
 
 // isBotUsername is a best-effort bot signal for GitLab authors. GitLab's
-// note/approval author payloads carry no explicit bot flag (unlike GitHub's
-// __typename/type), so this falls back to GitLab's own bot-username
-// convention (e.g. "project_123_bot", "support-bot").
+// note/approval author payload (UserBasic) carries no typed bot flag, so we
+// match GitLab's bot-account username convention rather than a raw "bot"
+// substring. The bare strings.Contains(login, "bot") approach was dropped
+// from the GitHub adapter (see scm/github/provider.go) because logins like
+// "robothon"/"lambot123" tripped it; underscore-delimited matching avoids
+// that while still catching project_<id>_bot_<hex> / group_<id>_bot_<hex>
+// and *_bot service accounts.
 func isBotUsername(username string) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(username)), "bot")
+	u := strings.ToLower(strings.TrimSpace(username))
+	return strings.HasSuffix(u, "_bot") || strings.Contains(u, "_bot_")
 }
 
 // parseGitLabTime parses a GitLab REST timestamp (RFC3339), returning the
