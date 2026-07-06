@@ -2103,6 +2103,8 @@ components:
           additionalProperties:
             type: string
           type: object
+        minApprovals:
+          type: integer
         orchestrator:
           $ref: '#/components/schemas/RoleOverride'
         postCreate:

@@ -767,6 +767,7 @@ export interface components {
             env?: {
                 [key: string]: string;
             };
+            minApprovals?: number;
             orchestrator?: components["schemas"]["RoleOverride"];
             postCreate?: string[];
             reviewers?: components["schemas"]["DomainReviewerConfig"][];

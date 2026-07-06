@@ -117,6 +117,27 @@ func TestResolveReviewerHarness(t *testing.T) {
 	}
 }
 
+func TestResolveMinApprovals(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"unset defaults to 3", 0, 3},
+		{"negative defaults to 3", -2, 3},
+		{"explicit 1", 1, 1},
+		{"explicit 5", 5, 5},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ProjectConfig{MinApprovals: c.in}.ResolveMinApprovals()
+			if got != c.want {
+				t.Fatalf("got %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
 func TestProjectConfigIsZero(t *testing.T) {
 	if !(ProjectConfig{}).IsZero() {
 		t.Fatal("empty config should be zero")

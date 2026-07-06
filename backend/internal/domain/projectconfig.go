@@ -45,6 +45,11 @@ type ProjectConfig struct {
 	// read-only toward the tracker in v1: matching issues spawn sessions, but the
 	// tracker is not commented on or transitioned.
 	TrackerIntake TrackerIntakeConfig `json:"trackerIntake,omitempty"`
+
+	// MinApprovals is the minimum number of approvals AO treats as "ready" when
+	// the SCM has no approval rule of its own (see PullRequest.ApprovalRuleConfigured).
+	// 0 = unset → DefaultMinApprovals. GitLab only in this version.
+	MinApprovals int `json:"minApprovals,omitempty"`
 }
 
 // ReviewerConfig names one reviewer agent by harness. The harness is drawn from
@@ -75,6 +80,18 @@ type RoleOverride struct {
 
 // DefaultBranchName is the base branch used when a project configures none.
 const DefaultBranchName = "main"
+
+// DefaultMinApprovals is the fallback approval floor when a project sets none.
+const DefaultMinApprovals = 3
+
+// ResolveMinApprovals returns the effective approval floor, defaulting unset or
+// non-positive values to DefaultMinApprovals.
+func (c ProjectConfig) ResolveMinApprovals() int {
+	if c.MinApprovals <= 0 {
+		return DefaultMinApprovals
+	}
+	return c.MinApprovals
+}
 
 // DefaultProjectConfig returns the config a project has when it sets nothing:
 // branch "main". Every other field defaults to its zero value (no
