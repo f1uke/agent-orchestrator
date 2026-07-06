@@ -420,6 +420,156 @@ func mergeability(mr restMR) ports.SCMMergeabilityObservation {
 	return out
 }
 
+// restDiscussion is the subset of GitLab's MR discussions REST v4 payload
+// normalized into ports.SCMReviewThreadObservation. A "discussion" is
+// GitLab's grouping of one or more notes that share a single thread (e.g. a
+// diff comment and its replies).
+type restDiscussion struct {
+	ID    string     `json:"id"`
+	Notes []restNote `json:"notes"`
+}
+
+// restNote is one note within a discussion. Resolvable is true only for
+// diff-anchored review comments (plain MR comments are never resolvable),
+// so it doubles as the signal for whether a discussion is a review thread
+// at all versus ordinary conversation.
+type restNote struct {
+	ID         int    `json:"id"`
+	Body       string `json:"body"`
+	Resolvable bool   `json:"resolvable"`
+	Resolved   bool   `json:"resolved"`
+	Author     struct {
+		Username string `json:"username"`
+	} `json:"author"`
+	Position *struct {
+		NewPath string `json:"new_path"`
+		NewLine int    `json:"new_line"`
+	} `json:"position"`
+}
+
+// restApprovals is the subset of GitLab's MR approvals REST v4 payload used
+// to derive the normalized review decision.
+type restApprovals struct {
+	ApprovalsLeft int `json:"approvals_left"`
+	ApprovedBy    []struct {
+		User struct {
+			Username string `json:"username"`
+		} `json:"user"`
+	} `json:"approved_by"`
+}
+
+// FetchReviewThreads fetches review discussions and the approval decision
+// for one merge request via GitLab's REST v4 API. GitLab has no cheap
+// partial/incremental discussions endpoint, so unlike GitHub's cursor-paged
+// review threads, this always returns a full per-poll snapshot (Partial:
+// false) for round 1.
+func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error) {
+	mrPath := "projects/" + projectID(ref.Repo) + "/merge_requests/" + strconv.Itoa(ref.Number)
+
+	resp, err := p.client.doREST(ctx, http.MethodGet, mrPath+"/discussions", nil, nil)
+	if err != nil {
+		return ports.SCMReviewObservation{}, err
+	}
+	var discussions []restDiscussion
+	if err := json.Unmarshal(resp.Body, &discussions); err != nil {
+		return ports.SCMReviewObservation{}, fmt.Errorf("gitlab scm: decode MR discussions: %w", err)
+	}
+
+	resp, err = p.client.doREST(ctx, http.MethodGet, mrPath+"/approvals", nil, nil)
+	if err != nil {
+		return ports.SCMReviewObservation{}, err
+	}
+	var approvals restApprovals
+	if err := json.Unmarshal(resp.Body, &approvals); err != nil {
+		return ports.SCMReviewObservation{}, fmt.Errorf("gitlab scm: decode MR approvals: %w", err)
+	}
+
+	threads := make([]ports.SCMReviewThreadObservation, 0, len(discussions))
+	for _, d := range discussions {
+		thread, ok := discussionToThread(d)
+		if !ok {
+			continue
+		}
+		threads = append(threads, thread)
+	}
+
+	return ports.SCMReviewObservation{
+		Decision: approvalDecision(approvals),
+		Threads:  threads,
+		Partial:  false,
+	}, nil
+}
+
+// discussionToThread normalizes one discussion into a review thread. It
+// returns ok=false for discussions with no notes or with no resolvable note,
+// since only diff-anchored, resolvable notes represent a review thread as
+// opposed to an ordinary MR comment.
+func discussionToThread(d restDiscussion) (thread ports.SCMReviewThreadObservation, ok bool) {
+	if len(d.Notes) == 0 {
+		return ports.SCMReviewThreadObservation{}, false
+	}
+
+	hasResolvable := false
+	resolved := true
+	allBot := true
+	comments := make([]ports.SCMReviewCommentObservation, 0, len(d.Notes))
+	for _, n := range d.Notes {
+		if n.Resolvable {
+			hasResolvable = true
+			if !n.Resolved {
+				resolved = false
+			}
+		}
+		isBot := isBotUsername(n.Author.Username)
+		if !isBot {
+			allBot = false
+		}
+		comments = append(comments, ports.SCMReviewCommentObservation{
+			ID:     strconv.Itoa(n.ID),
+			Author: n.Author.Username,
+			Body:   n.Body,
+			IsBot:  isBot,
+		})
+	}
+	if !hasResolvable {
+		return ports.SCMReviewThreadObservation{}, false
+	}
+
+	var path string
+	var line int
+	if first := d.Notes[0]; first.Position != nil {
+		path = first.Position.NewPath
+		line = first.Position.NewLine
+	}
+
+	return ports.SCMReviewThreadObservation{
+		ID:       d.ID,
+		Path:     path,
+		Line:     line,
+		Resolved: resolved,
+		IsBot:    allBot,
+		Comments: comments,
+	}, true
+}
+
+// approvalDecision maps GitLab's approvals payload onto AO's normalized
+// review decision: "approved" once no approvals remain outstanding and at
+// least one approval has been recorded, else empty (no decision yet).
+func approvalDecision(a restApprovals) string {
+	if a.ApprovalsLeft == 0 && len(a.ApprovedBy) > 0 {
+		return "approved"
+	}
+	return ""
+}
+
+// isBotUsername is a best-effort bot signal for GitLab authors. GitLab's
+// note/approval author payloads carry no explicit bot flag (unlike GitHub's
+// __typename/type), so this falls back to GitLab's own bot-username
+// convention (e.g. "project_123_bot", "support-bot").
+func isBotUsername(username string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(username)), "bot")
+}
+
 // parseGitLabTime parses a GitLab REST timestamp (RFC3339), returning the
 // zero time for blank/unparseable values instead of erroring, since these
 // fields are optional (e.g. merged_at/closed_at are empty for open MRs).

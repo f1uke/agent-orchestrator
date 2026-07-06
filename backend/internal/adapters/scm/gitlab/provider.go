@@ -5,7 +5,15 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	scmobserve "github.com/aoagents/agent-orchestrator/backend/internal/observe/scm"
 )
+
+// Compile-time assertion that Provider implements the full 7-method
+// observe/scm.Provider interface (ParseRepository, RepoPRListGuard,
+// ListOpenPRsByRepo, CommitChecksGuard, FetchPullRequests,
+// FetchFailedCheckLogTail, FetchReviewThreads).
+var _ scmobserve.Provider = (*Provider)(nil)
 
 // ProviderOptions configures a Provider. Production code typically sets
 // Token, APIBase, and Host; tests inject a pre-built Client pointed at
