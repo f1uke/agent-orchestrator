@@ -471,8 +471,10 @@ type restNote struct {
 // restApprovals is the subset of GitLab's MR approvals REST v4 payload used
 // to derive the normalized review decision.
 type restApprovals struct {
-	ApprovalsLeft int `json:"approvals_left"`
-	ApprovedBy    []struct {
+	ApprovalsLeft     int  `json:"approvals_left"`
+	ApprovalsRequired int  `json:"approvals_required"`
+	HasApprovalRules  bool `json:"has_approval_rules"`
+	ApprovedBy        []struct {
 		User struct {
 			Username string `json:"username"`
 		} `json:"user"`
@@ -515,9 +517,11 @@ func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (
 	}
 
 	return ports.SCMReviewObservation{
-		Decision: approvalDecision(approvals),
-		Threads:  threads,
-		Partial:  false,
+		Decision:               approvalDecision(approvals),
+		ApprovalsCount:         len(approvals.ApprovedBy),
+		ApprovalRuleConfigured: approvalRuleConfigured(approvals),
+		Threads:                threads,
+		Partial:                false,
 	}, nil
 }
 
@@ -573,14 +577,26 @@ func discussionToThread(d restDiscussion) (thread ports.SCMReviewThreadObservati
 	}, true
 }
 
-// approvalDecision maps GitLab's approvals payload onto AO's normalized
-// review decision: "approved" once no approvals remain outstanding and at
-// least one approval has been recorded, else empty (no decision yet).
+// approvalDecision maps GitLab's approvals payload onto AO's normalized review
+// decision. When GitLab enforces an approval rule, "approved" means no approvals
+// remain outstanding and at least one is recorded. When there is NO rule
+// (approvals_left is trivially 0), GitLab cannot express a floor, so we return no
+// decision and let AO's per-project MinApprovals threshold decide from
+// ApprovalsCount at status-derivation time.
 func approvalDecision(a restApprovals) string {
+	if !approvalRuleConfigured(a) {
+		return ""
+	}
 	if a.ApprovalsLeft == 0 && len(a.ApprovedBy) > 0 {
 		return "approved"
 	}
 	return ""
+}
+
+// approvalRuleConfigured reports whether GitLab enforces an approval rule of its
+// own for this MR.
+func approvalRuleConfigured(a restApprovals) bool {
+	return a.ApprovalsRequired > 0 || a.HasApprovalRules
 }
 
 // isBotUsername is a best-effort bot signal for GitLab authors. GitLab's

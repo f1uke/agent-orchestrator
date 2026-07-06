@@ -288,7 +288,7 @@ func pullRequestFacts(pr domain.PullRequest, comments []domain.PullRequestCommen
 			break
 		}
 	}
-	return domain.PRFacts{URL: pr.URL, Number: pr.Number, Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, CI: pr.CI, Review: pr.Review, Mergeability: pr.Mergeability, ReviewComments: unresolved, UpdatedAt: pr.UpdatedAt}
+	return domain.PRFacts{URL: pr.URL, Number: pr.Number, Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, CI: pr.CI, Review: pr.Review, Mergeability: pr.Mergeability, ReviewComments: unresolved, UpdatedAt: pr.UpdatedAt, ApprovalsCount: pr.ApprovalsCount, ApprovalRuleConfigured: pr.ApprovalRuleConfigured}
 }
 
 func sortPRFacts(prs []domain.PRFacts) {

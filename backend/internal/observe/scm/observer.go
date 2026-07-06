@@ -879,6 +879,8 @@ func (o *Observer) refreshReviews(ctx context.Context, subjects map[string]*subj
 		obs.Review.Reviews = review.Reviews
 		obs.Review.Threads = review.Threads
 		obs.Review.Partial = review.Partial
+		obs.Review.ApprovalsCount = review.ApprovalsCount
+		obs.Review.ApprovalRuleConfigured = review.ApprovalRuleConfigured
 		obs.ObservedAt = now
 		observations[pkey] = obs
 		subjectsByPR[pkey] = s
@@ -965,6 +967,12 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 	if opts.reviewFetched || reviewObservedAt.IsZero() {
 		reviewObservedAt = obs.ObservedAt
 	}
+	approvalsCount := local.ApprovalsCount
+	approvalRuleConfigured := local.ApprovalRuleConfigured
+	if opts.reviewFetched && !opts.preserveLocalReviewDecision {
+		approvalsCount = obs.Review.ApprovalsCount
+		approvalRuleConfigured = obs.Review.ApprovalRuleConfigured
+	}
 	pr := domain.PullRequest{
 		URL:                      firstNonEmpty(obs.PR.URL, obs.PR.HTMLURL),
 		SessionID:                sessionID,
@@ -974,6 +982,8 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 		Closed:                   obs.PR.Closed,
 		CI:                       domain.CIState(firstNonEmpty(obs.CI.Summary, string(domain.CIUnknown))),
 		Review:                   reviewDecision,
+		ApprovalsCount:           approvalsCount,
+		ApprovalRuleConfigured:   approvalRuleConfigured,
 		Mergeability:             domain.Mergeability(firstNonEmpty(obs.Mergeability.State, string(domain.MergeUnknown))),
 		UpdatedAt:                now,
 		Provider:                 obs.Provider,
@@ -1036,13 +1046,17 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 
 func observationFromLocal(repo ports.SCMRepo, pr domain.PullRequest, checks []domain.PullRequestCheck) ports.SCMObservation {
 	return ports.SCMObservation{
-		Fetched:      true,
-		Provider:     firstNonEmpty(pr.Provider, repo.Provider),
-		Host:         firstNonEmpty(pr.Host, repo.Host),
-		Repo:         firstNonEmpty(pr.Repo, repoFullName(repo)),
-		PR:           ports.SCMPRObservation{URL: pr.URL, Number: pr.Number, State: normalizePRState(pr.Draft, pr.Merged, pr.Closed), Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, SourceBranch: pr.SourceBranch, TargetBranch: pr.TargetBranch, HeadSHA: pr.HeadSHA, Title: pr.Title, Additions: pr.Additions, Deletions: pr.Deletions, ChangedFiles: pr.ChangedFiles, Author: pr.Author, BaseSHA: pr.BaseSHA, MergeCommitSHA: pr.MergeCommitSHA, ProviderState: pr.ProviderState, ProviderMergeable: pr.ProviderMergeable, ProviderMergeStateStatus: pr.ProviderMergeStateStatus, HTMLURL: pr.HTMLURL, CreatedAtProvider: pr.CreatedAtProvider, UpdatedAtProvider: pr.UpdatedAtProvider, MergedAtProvider: pr.MergedAtProvider, ClosedAtProvider: pr.ClosedAtProvider},
-		CI:           ciObservationFromLocal(pr, checks),
-		Review:       ports.SCMReviewObservation{Decision: string(pr.Review)},
+		Fetched:  true,
+		Provider: firstNonEmpty(pr.Provider, repo.Provider),
+		Host:     firstNonEmpty(pr.Host, repo.Host),
+		Repo:     firstNonEmpty(pr.Repo, repoFullName(repo)),
+		PR:       ports.SCMPRObservation{URL: pr.URL, Number: pr.Number, State: normalizePRState(pr.Draft, pr.Merged, pr.Closed), Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, SourceBranch: pr.SourceBranch, TargetBranch: pr.TargetBranch, HeadSHA: pr.HeadSHA, Title: pr.Title, Additions: pr.Additions, Deletions: pr.Deletions, ChangedFiles: pr.ChangedFiles, Author: pr.Author, BaseSHA: pr.BaseSHA, MergeCommitSHA: pr.MergeCommitSHA, ProviderState: pr.ProviderState, ProviderMergeable: pr.ProviderMergeable, ProviderMergeStateStatus: pr.ProviderMergeStateStatus, HTMLURL: pr.HTMLURL, CreatedAtProvider: pr.CreatedAtProvider, UpdatedAtProvider: pr.UpdatedAtProvider, MergedAtProvider: pr.MergedAtProvider, ClosedAtProvider: pr.ClosedAtProvider},
+		CI:       ciObservationFromLocal(pr, checks),
+		Review: ports.SCMReviewObservation{
+			Decision:               string(pr.Review),
+			ApprovalsCount:         pr.ApprovalsCount,
+			ApprovalRuleConfigured: pr.ApprovalRuleConfigured,
+		},
 		Mergeability: mergeabilityObservationFromLocal(pr),
 	}
 }
@@ -1213,12 +1227,21 @@ func ciSemanticHash(ci ports.SCMCIObservation) string {
 
 func reviewSemanticHash(review ports.SCMReviewObservation) string {
 	type reviewHashPayload struct {
-		Decision string
-		Reviews  []ports.SCMReviewSummaryObservation
-		Threads  []ports.SCMReviewThreadObservation
-		Partial  bool `json:",omitempty"`
+		Decision               string
+		ApprovalsCount         int
+		ApprovalRuleConfigured bool
+		Reviews                []ports.SCMReviewSummaryObservation
+		Threads                []ports.SCMReviewThreadObservation
+		Partial                bool `json:",omitempty"`
 	}
-	return stableHash(reviewHashPayload{Decision: review.Decision, Reviews: review.Reviews, Threads: review.Threads, Partial: review.Partial})
+	return stableHash(reviewHashPayload{
+		Decision:               review.Decision,
+		ApprovalsCount:         review.ApprovalsCount,
+		ApprovalRuleConfigured: review.ApprovalRuleConfigured,
+		Reviews:                review.Reviews,
+		Threads:                review.Threads,
+		Partial:                review.Partial,
+	})
 }
 
 func threadSemanticHash(th ports.SCMReviewThreadObservation) string {

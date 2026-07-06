@@ -79,3 +79,56 @@ func TestListPRFactsForSessionProjectsAllPRsNewestFirst(t *testing.T) {
 		t.Fatalf("no-PR session = %d facts, want 0", len(got))
 	}
 }
+
+// TestListPRFactsForSession_ApprovalFacts is the persistence round-trip for
+// the min-approvals threshold feature: approvals_count and
+// approval_rule_configured must survive the observer write path
+// (WriteSCMObservation, the source of truth for tracked PRs) and the
+// ListPRFactsForSession projection.
+func TestListPRFactsForSession_ApprovalFacts(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+	r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+	now := time.Now().UTC().Truncate(time.Second)
+
+	pr := domain.PullRequest{
+		URL:                    "https://gitlab.example.com/g/p/-/merge_requests/1",
+		SessionID:              r.ID,
+		Number:                 1,
+		ApprovalsCount:         3,
+		ApprovalRuleConfigured: false,
+		UpdatedAt:              now,
+	}
+	if err := s.WriteSCMObservation(ctx, pr, nil, nil, nil, nil, ports.ReviewWritePreserve); err != nil {
+		t.Fatalf("write scm observation: %v", err)
+	}
+
+	facts, err := s.ListPRFactsForSession(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("want 1 fact, got %d", len(facts))
+	}
+	if facts[0].ApprovalsCount != 3 || facts[0].ApprovalRuleConfigured {
+		t.Fatalf("got count=%d ruleConfigured=%v, want 3/false", facts[0].ApprovalsCount, facts[0].ApprovalRuleConfigured)
+	}
+
+	// GetPR (the domain.PullRequest read path used by claim_pr.go's in-memory
+	// PRFacts builder) must carry the same facts, including the true branch of
+	// ApprovalRuleConfigured.
+	pr.ApprovalRuleConfigured = true
+	pr.ApprovalsCount = 5
+	pr.UpdatedAt = now.Add(time.Second)
+	if err := s.WriteSCMObservation(ctx, pr, nil, nil, nil, nil, ports.ReviewWritePreserve); err != nil {
+		t.Fatalf("write scm observation (update): %v", err)
+	}
+	got, ok, err := s.GetPR(ctx, pr.URL)
+	if err != nil || !ok {
+		t.Fatalf("get pr: ok=%v err=%v", ok, err)
+	}
+	if got.ApprovalsCount != 5 || !got.ApprovalRuleConfigured {
+		t.Fatalf("GetPR approval facts = count=%d ruleConfigured=%v, want 5/true", got.ApprovalsCount, got.ApprovalRuleConfigured)
+	}
+}

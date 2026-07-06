@@ -184,6 +184,10 @@ type SCMCheckObservation struct {
 type SCMReviewObservation struct {
 	// Decision is AO's normalized review decision.
 	Decision string
+	// ApprovalsCount is the number of distinct approvers the SCM reports.
+	ApprovalsCount int
+	// ApprovalRuleConfigured is true when the SCM enforces an approval rule.
+	ApprovalRuleConfigured bool
 	// Reviews contains submitted review summaries fetched on the slower review cadence.
 	Reviews []SCMReviewSummaryObservation
 	// Threads contains normalized review threads fetched on the slower review cadence.

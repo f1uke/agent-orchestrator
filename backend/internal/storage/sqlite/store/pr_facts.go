@@ -35,18 +35,20 @@ func (s *Store) ListPRFactsForSession(ctx context.Context, id domain.SessionID) 
 	out := make([]domain.PRFacts, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, domain.PRFacts{
-			URL:            r.URL,
-			Number:         int(r.Number),
-			Draft:          r.PRState == domain.PRStateDraft,
-			Merged:         r.PRState == domain.PRStateMerged,
-			Closed:         r.PRState == domain.PRStateClosed,
-			CI:             r.CIState,
-			Review:         r.ReviewDecision,
-			Mergeability:   r.Mergeability,
-			ReviewComments: r.ReviewComments,
-			SourceBranch:   r.SourceBranch,
-			TargetBranch:   r.TargetBranch,
-			UpdatedAt:      r.UpdatedAt,
+			URL:                    r.URL,
+			Number:                 int(r.Number),
+			Draft:                  r.PRState == domain.PRStateDraft,
+			Merged:                 r.PRState == domain.PRStateMerged,
+			Closed:                 r.PRState == domain.PRStateClosed,
+			CI:                     r.CIState,
+			Review:                 r.ReviewDecision,
+			Mergeability:           r.Mergeability,
+			ReviewComments:         r.ReviewComments,
+			SourceBranch:           r.SourceBranch,
+			TargetBranch:           r.TargetBranch,
+			UpdatedAt:              r.UpdatedAt,
+			ApprovalsCount:         int(r.ApprovalsCount),
+			ApprovalRuleConfigured: r.ApprovalRuleConfigured != 0,
 		})
 	}
 	return out, nil
@@ -55,15 +57,17 @@ func (s *Store) ListPRFactsForSession(ctx context.Context, id domain.SessionID) 
 func prFactsFromGen(r gen.GetDisplayPRFactsBySessionRow) domain.PRFacts {
 	state := r.PRState
 	return domain.PRFacts{
-		URL:            r.URL,
-		Number:         int(r.Number),
-		Draft:          state == domain.PRStateDraft,
-		Merged:         state == domain.PRStateMerged,
-		Closed:         state == domain.PRStateClosed,
-		CI:             r.CIState,
-		Review:         r.ReviewDecision,
-		Mergeability:   r.Mergeability,
-		ReviewComments: r.ReviewComments,
-		UpdatedAt:      r.UpdatedAt,
+		URL:                    r.URL,
+		Number:                 int(r.Number),
+		Draft:                  state == domain.PRStateDraft,
+		Merged:                 state == domain.PRStateMerged,
+		Closed:                 state == domain.PRStateClosed,
+		CI:                     r.CIState,
+		Review:                 r.ReviewDecision,
+		Mergeability:           r.Mergeability,
+		ReviewComments:         r.ReviewComments,
+		UpdatedAt:              r.UpdatedAt,
+		ApprovalsCount:         int(r.ApprovalsCount),
+		ApprovalRuleConfigured: r.ApprovalRuleConfigured != 0,
 	}
 }
