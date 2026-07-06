@@ -11,10 +11,11 @@ import (
 )
 
 func TestSpawnEnvProjectVarsCannotOverrideInternal(t *testing.T) {
-	env := spawnEnv("mer-1", "mer", "issue-9", "/data", map[string]string{
+	env := spawnEnv("mer-1", "mer", "issue-9", "/data", "/data/running.json", map[string]string{
 		"FOO":        "bar",
 		EnvSessionID: "hacked", // a project must not override AO-internal vars
 		EnvProjectID: "hacked",
+		EnvRunFile:   "hacked",
 	})
 	if env["FOO"] != "bar" {
 		t.Fatalf("FOO = %q, want bar", env["FOO"])
@@ -24,6 +25,26 @@ func TestSpawnEnvProjectVarsCannotOverrideInternal(t *testing.T) {
 	}
 	if env[EnvProjectID] != "mer" {
 		t.Fatalf("AO_PROJECT_ID = %q, want mer (internal wins)", env[EnvProjectID])
+	}
+	if env[EnvRunFile] != "/data/running.json" {
+		t.Fatalf("AO_RUN_FILE = %q, want /data/running.json (internal wins)", env[EnvRunFile])
+	}
+}
+
+// spawnEnv must point the session's hook CLIs at the daemon that spawned it:
+// the CLI resolves the daemon from the run file, and without AO_RUN_FILE in the
+// session env a daemon running under a non-default run file has its hook
+// callbacks silently posted to whatever daemon owns the DEFAULT run file.
+func TestSpawnEnvInjectsRunFile(t *testing.T) {
+	env := spawnEnv("mer-1", "mer", "", "/data", "/custom/running.json", nil)
+	if env[EnvRunFile] != "/custom/running.json" {
+		t.Fatalf("AO_RUN_FILE = %q, want /custom/running.json", env[EnvRunFile])
+	}
+
+	// No run file configured → no key, so the CLI's own default resolution applies.
+	env = spawnEnv("mer-1", "mer", "", "/data", "", nil)
+	if v, ok := env[EnvRunFile]; ok {
+		t.Fatalf("AO_RUN_FILE = %q, want absent when unconfigured", v)
 	}
 }
 
