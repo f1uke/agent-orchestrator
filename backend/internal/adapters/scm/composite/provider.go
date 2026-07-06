@@ -86,20 +86,60 @@ func (p *Provider) CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, he
 	return child.CommitChecksGuard(ctx, repo, headSHA, etag)
 }
 
-// FetchPullRequests routes the whole batch by the first ref's Repo.Provider.
-// Refs could in principle span providers, but the observer already groups
-// refs per repo (and therefore per provider) before batching, so routing on
-// the first ref is safe for round 1. Revisit if a future caller ever mixes
-// providers within one batch.
+// FetchPullRequests splits the batch by ref.Repo.Provider and fetches each
+// provider's group separately. The observer's batches are built by ranging a
+// map of all tracked PRs across every project (github and gitlab interleaved,
+// in random map order) and slicing the result into fixed-size chunks with no
+// per-provider grouping (see selectRefreshCandidates/chunks in
+// internal/observe/scm/observer.go); a single chunk can therefore contain refs
+// for more than one provider. Routing the whole batch by refs[0].Repo.Provider
+// would silently send another provider's refs to the wrong child, which
+// 404s and looks like a refresh failure.
+//
+// A ref whose Repo.Provider matches no configured child is a caller/config
+// bug (e.g. a stored PR row from a provider no longer configured). Rather
+// than failing the whole batch — which would starve every other, valid ref
+// in the same chunk — that ref gets a single Fetched:false observation
+// (never inferred as closed) and processing continues for the remaining
+// groups. If a known child's FetchPullRequests call itself errors, that
+// error is returned immediately: the observer's caller (Poll) already
+// tolerates a batch-level error by marking every ref in the chunk as a
+// refresh failure and retrying next tick, so there is no need to degrade a
+// child transport error into per-ref Fetched:false here.
 func (p *Provider) FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
-	child, err := p.lookup(refs[0].Repo.Provider)
-	if err != nil {
-		return nil, err
+
+	// Group refs by provider name while preserving first-seen provider order,
+	// so results are assembled deterministically regardless of map iteration.
+	var order []string
+	byProvider := make(map[string][]ports.SCMPRRef, len(refs))
+	for _, ref := range refs {
+		name := ref.Repo.Provider
+		if _, ok := byProvider[name]; !ok {
+			order = append(order, name)
+		}
+		byProvider[name] = append(byProvider[name], ref)
 	}
-	return child.FetchPullRequests(ctx, refs)
+
+	out := make([]ports.SCMObservation, 0, len(refs))
+	for _, name := range order {
+		group := byProvider[name]
+		child, err := p.lookup(name)
+		if err != nil {
+			for range group {
+				out = append(out, ports.SCMObservation{Fetched: false})
+			}
+			continue
+		}
+		obs, err := child.FetchPullRequests(ctx, group)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, obs...)
+	}
+	return out, nil
 }
 
 // FetchFailedCheckLogTail routes to the child provider named by repo.Provider.

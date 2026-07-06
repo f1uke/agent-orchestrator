@@ -17,6 +17,14 @@
 // calls return a clear "composite scm: no provider %q" error (or the zero
 // value alongside it) rather than silently picking an arbitrary provider.
 //
+// FetchPullRequests is the one exception to both the "route as a whole" and
+// "unknown provider errors" rules above: its input batch can contain refs
+// from more than one provider (the observer builds it from an unordered,
+// cross-project map), so it splits the batch per provider name instead of
+// routing on refs[0], and an unmatched provider yields a Fetched:false
+// observation for just that ref rather than failing the whole call. See its
+// doc comment for the rationale.
+//
 // # Out of scope
 //
 // This package contains no HTTP or provider-specific logic; it is a thin
