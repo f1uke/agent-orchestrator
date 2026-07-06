@@ -33,7 +33,7 @@ const waitingInputGrace = 45 * time.Second
 // status is the worst-wins aggregate across its open PRs; stacked children whose
 // parent is still open are exempt from the aggregation since they cannot merge
 // until the parent does. Merged/closed PRs only matter once no open PR remains.
-func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool) domain.SessionStatus {
+func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) domain.SessionStatus {
 	if rec.IsTerminated {
 		if anyMerged(prs) {
 			return domain.StatusMerged
@@ -47,7 +47,7 @@ func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time,
 
 	open := openPRs(prs)
 	if len(open) > 0 {
-		return aggregatePRStatus(open)
+		return aggregatePRStatus(open, minApprovals)
 	}
 	if anyMerged(prs) {
 		return domain.StatusMerged
@@ -106,11 +106,11 @@ func anyMerged(prs []domain.PRFacts) bool {
 // so a broken child is not hidden behind the stack. If no PR contributes any
 // signal (a degenerate stack with no visible root), it falls back to aggregating
 // the raw status across all open PRs so the session never goes dark.
-func aggregatePRStatus(open []domain.PRFacts) domain.SessionStatus {
+func aggregatePRStatus(open []domain.PRFacts, minApprovals int) domain.SessionStatus {
 	stacks := buildStacks(open)
 	candidates := make([]domain.SessionStatus, 0, len(open))
 	for _, p := range open {
-		s := prPipelineStatus(p)
+		s := prPipelineStatus(p, minApprovals)
 		if stacks[p.URL].Blocked && !isActionableChildSignal(s) {
 			continue
 		}
@@ -118,7 +118,7 @@ func aggregatePRStatus(open []domain.PRFacts) domain.SessionStatus {
 	}
 	if len(candidates) == 0 {
 		for _, p := range open {
-			candidates = append(candidates, prPipelineStatus(p))
+			candidates = append(candidates, prPipelineStatus(p, minApprovals))
 		}
 	}
 	worst := candidates[0]
@@ -166,7 +166,7 @@ func statusSeverity(s domain.SessionStatus) int {
 	}
 }
 
-func prPipelineStatus(pr domain.PRFacts) domain.SessionStatus {
+func prPipelineStatus(pr domain.PRFacts, minApprovals int) domain.SessionStatus {
 	switch {
 	case pr.CI == domain.CIFailing:
 		return domain.StatusCIFailed
@@ -180,6 +180,9 @@ func prPipelineStatus(pr domain.PRFacts) domain.SessionStatus {
 		return domain.StatusApproved
 	case pr.Review == domain.ReviewRequired:
 		return domain.StatusReviewPending
+	case !pr.ApprovalRuleConfigured && pr.ApprovalsCount >= minApprovals:
+		// No SCM rule of its own: AO's per-project floor decides readiness.
+		return domain.StatusApproved
 	default:
 		return domain.StatusPROpen
 	}

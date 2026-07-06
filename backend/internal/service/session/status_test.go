@@ -93,7 +93,7 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveStatus(tt.rec, tt.pr, statusNow, !tt.hookless); got != tt.want {
+			if got := deriveStatus(tt.rec, tt.pr, statusNow, !tt.hookless, domain.DefaultMinApprovals); got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
@@ -137,7 +137,7 @@ func TestAggregateStackedChildSignals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveStatus(statusRec(domain.ActivityIdle, false), tt.prs, statusNow, true); got != tt.want {
+			if got := deriveStatus(statusRec(domain.ActivityIdle, false), tt.prs, statusNow, true, domain.DefaultMinApprovals); got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
@@ -156,5 +156,43 @@ func TestHarnessSignalsCapabilityGate(t *testing.T) {
 	}
 	if s.harnessSignals(domain.HarnessAmp) {
 		t.Fatal("harnessSignals(amp) = true with codex-only predicate")
+	}
+}
+
+func TestPRPipelineStatus_MinApprovalsThreshold(t *testing.T) {
+	base := domain.PRFacts{
+		URL:          "https://gitlab.example.com/g/p/-/merge_requests/1",
+		Number:       1,
+		CI:           domain.CIPassing,
+		Mergeability: domain.MergeUnknown,
+	}
+
+	// No rule, count >= threshold → approved.
+	pr := base
+	pr.ApprovalRuleConfigured = false
+	pr.ApprovalsCount = 3
+	if got := prPipelineStatus(pr, 3); got != domain.StatusApproved {
+		t.Fatalf("count 3 / min 3: got %s, want approved", got)
+	}
+
+	// No rule, count < threshold → stays pr_open (In review).
+	pr.ApprovalsCount = 2
+	if got := prPipelineStatus(pr, 3); got != domain.StatusPROpen {
+		t.Fatalf("count 2 / min 3: got %s, want pr_open", got)
+	}
+
+	// Rule configured → threshold ignored; GitLab's decision (here none) wins → pr_open.
+	pr.ApprovalRuleConfigured = true
+	pr.ApprovalsCount = 1
+	if got := prPipelineStatus(pr, 3); got != domain.StatusPROpen {
+		t.Fatalf("rule configured: got %s, want pr_open", got)
+	}
+
+	// Threshold met but an unresolved thread still wins (worst-wins).
+	pr.ApprovalRuleConfigured = false
+	pr.ApprovalsCount = 3
+	pr.ReviewComments = true
+	if got := prPipelineStatus(pr, 3); got != domain.StatusChangesRequested {
+		t.Fatalf("unresolved thread: got %s, want changes_requested", got)
 	}
 }
