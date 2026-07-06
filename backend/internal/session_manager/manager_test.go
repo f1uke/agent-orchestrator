@@ -271,9 +271,23 @@ type fakeWorkspace struct {
 	// sharedLog, when non-nil, receives entries alongside calls so ordering
 	// tests can compare workspace calls against store calls in one sequence.
 	sharedLog *[]string
+	// failFirstCreate, when true, makes only the FIRST Create call fail (e.g.
+	// simulating a branch-checked-out-elsewhere collision); every later call
+	// succeeds normally. Zero value (false) preserves existing test behavior.
+	failFirstCreate bool
+	// createCalls counts Create invocations (1-indexed).
+	createCalls int
+	// createdBranches records the requested branch on every Create call, in
+	// call order, so tests can assert on retry behavior.
+	createdBranches []string
 }
 
 func (w *fakeWorkspace) Create(_ context.Context, cfg ports.WorkspaceConfig) (ports.WorkspaceInfo, error) {
+	w.createCalls++
+	w.createdBranches = append(w.createdBranches, cfg.Branch)
+	if w.failFirstCreate && w.createCalls == 1 {
+		return ports.WorkspaceInfo{}, fmt.Errorf("fake: branch checked out elsewhere")
+	}
 	if w.createErr != nil {
 		return ports.WorkspaceInfo{}, w.createErr
 	}
@@ -2134,4 +2148,37 @@ func TestSpawnBranchNaming(t *testing.T) {
 			t.Fatalf("want fallback ao/, got %q", ws.lastCfg.Branch)
 		}
 	})
+}
+
+// TestSpawnAutoNamedBranchCollisionRetriesWithDefault covers the core invariant
+// that auto-naming must never fail a spawn the default name would have
+// succeeded at. It drives the auto-naming path via the genBranchName test seam
+// (no subprocess), forces the first workspace.Create call to reject the
+// AI-generated name (simulating a collision the de-dup listing missed, e.g.
+// from a transient git error), and asserts Spawn recovers by retrying once
+// with the session-unique default branch.
+func TestSpawnAutoNamedBranchCollisionRetriesWithDefault(t *testing.T) {
+	m, _, _, ws := newManager()
+	ws.failFirstCreate = true
+	m.genBranchName = func(context.Context, ports.Agent, ports.SpawnConfig, domain.ProjectRecord) (string, bool) {
+		return "feature/collide", true
+	}
+
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true})
+	if err != nil {
+		t.Fatalf("Spawn returned error, want auto-naming collision to be recovered: %v", err)
+	}
+
+	if len(ws.createdBranches) != 2 {
+		t.Fatalf("want exactly 2 workspace.Create attempts, got %d: %v", len(ws.createdBranches), ws.createdBranches)
+	}
+	if ws.createdBranches[0] != "feature/collide" {
+		t.Fatalf("first Create attempt should use the AI-generated name, got %q", ws.createdBranches[0])
+	}
+	if !strings.HasPrefix(ws.createdBranches[1], "ao/") {
+		t.Fatalf("second Create attempt should use the ao/ default fallback, got %q", ws.createdBranches[1])
+	}
+	if rec.Metadata.Branch != ws.createdBranches[1] {
+		t.Fatalf("committed session metadata branch = %q, want the successful retry branch %q", rec.Metadata.Branch, ws.createdBranches[1])
+	}
 }

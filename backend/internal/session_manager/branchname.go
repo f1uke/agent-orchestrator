@@ -105,7 +105,8 @@ func ensureUniqueBranch(existing map[string]bool, candidate string) string {
 			return next
 		}
 	}
-	return candidate // pathological; caller still falls back on collision via workspace.Create error
+	return candidate // pathological (1000 consecutive collisions); caller retries with the
+	// session-unique default branch when workspace.Create rejects this name
 }
 
 func branchNameTimeout() time.Duration {
@@ -170,7 +171,7 @@ func (m *Manager) existingBranchNames(ctx context.Context, project domain.Projec
 		if s == "" || s == "origin" { // git shortens refs/remotes/origin/HEAD to bare "origin"
 			continue
 		}
-		set[strings.TrimPrefix(s, "origin/")] = true
+		set[strings.ToLower(strings.TrimPrefix(s, "origin/"))] = true
 	}
 	return set
 }

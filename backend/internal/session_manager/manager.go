@@ -123,6 +123,10 @@ type Manager struct {
 	// workspace hook commands resolve back to this daemon. Tests inject a stub.
 	executable func() (string, error)
 	logger     *slog.Logger
+	// genBranchName overrides generateBranchName in tests so the auto-naming
+	// path can be exercised without executing a real agent CLI. Nil in
+	// production (falls back to the real method).
+	genBranchName func(ctx context.Context, agent ports.Agent, cfg ports.SpawnConfig, project domain.ProjectRecord) (string, bool)
 }
 
 // Deps are the collaborators a Session Manager needs; New wires them together.
@@ -223,11 +227,17 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	id := rec.ID
 
 	branch := cfg.Branch
+	autoNamed := false
 	if branch == "" {
 		if cfg.AutoNameBranch && cfg.Kind != domain.KindOrchestrator {
 			if agent, ok := m.agents.Agent(cfg.Harness); ok {
-				if name, ok := m.generateBranchName(ctx, agent, cfg, project); ok {
+				gen := m.genBranchName
+				if gen == nil {
+					gen = m.generateBranchName
+				}
+				if name, ok := gen(ctx, agent, cfg, project); ok {
 					branch = ensureUniqueBranch(m.existingBranchNames(ctx, project), name)
+					autoNamed = branch != ""
 				}
 			}
 		}
@@ -239,14 +249,25 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if base == "" {
 		base = project.Config.WithDefaults().DefaultBranch
 	}
-	ws, err := m.workspace.Create(ctx, ports.WorkspaceConfig{
+	wsCfg := ports.WorkspaceConfig{
 		ProjectID:     cfg.ProjectID,
 		SessionID:     id,
 		Kind:          cfg.Kind,
 		SessionPrefix: sessionPrefix(project),
 		Branch:        branch,
 		BaseBranch:    base,
-	})
+	}
+	ws, err := m.workspace.Create(ctx, wsCfg)
+	if err != nil && autoNamed {
+		// An AI-generated branch name can collide with an existing branch the
+		// de-dup listing missed (e.g. a transient git error emptied the set).
+		// Auto-naming must never fail a spawn the default name would succeed at,
+		// so retry once with the session-unique default before giving up.
+		m.logger.Warn("spawn: auto-named branch rejected, retrying with default name",
+			"sessionID", id, "branch", branch, "error", err)
+		wsCfg.Branch = defaultSessionBranch(id, cfg.Kind, sessionPrefix(project))
+		ws, err = m.workspace.Create(ctx, wsCfg)
+	}
 	if err != nil {
 		// Nothing observable exists yet — no worktree, no runtime — so the seed
 		// row is deleted outright instead of accumulating as a terminated orphan
