@@ -120,6 +120,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 					prompt: cleanPrompt,
 					branch: cleanBranch || undefined,
 					baseBranch: cleanBase || undefined,
+					autoNameBranch: cleanBranch === "" ? true : undefined,
 				},
 			});
 			if (apiError) throw new Error(apiErrorMessage(apiError, "Unable to start task"));
@@ -201,42 +202,41 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 							/>
 						</div>
 
-						<div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
-							<div className="space-y-1.5">
-								<RequiredAgentField
-									id={agentId}
-									label="Agent"
-									placeholder="Project default"
-									value={agent}
-									authorized={agentCatalog?.authorized}
-									installed={agentCatalog?.installed}
-									supported={agentCatalog?.supported}
-									disabled={agentsQuery.isFetching && agentCatalog === undefined}
-									onChange={(value) => {
-										setAgent(value);
-										setAgentTouched(true);
-									}}
-								/>
-								<button
-									type="button"
-									className="text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
-									disabled={refreshAgentsMutation.isPending}
-									onClick={() => refreshAgentsMutation.mutate()}
-								>
-									{refreshAgentsMutation.isPending ? "Refreshing agents..." : "Refresh agents"}
-								</button>
-							</div>
-							<div className="space-y-1.5">
-								<label className="text-[12px] font-medium text-muted-foreground" htmlFor={branchId}>
-									New branch name
-								</label>
-								<Input
-									id={branchId}
-									placeholder="optional — auto-named if blank"
-									value={branch}
-									onChange={(event) => setBranch(event.target.value)}
-								/>
-							</div>
+						<div className="space-y-1.5">
+							<label className="text-[12px] font-medium text-muted-foreground" htmlFor={branchId}>
+								New branch name
+							</label>
+							<Input
+								id={branchId}
+								placeholder="optional — AI names it if blank"
+								value={branch}
+								onChange={(event) => setBranch(event.target.value)}
+							/>
+						</div>
+
+						<div className="space-y-1.5">
+							<RequiredAgentField
+								id={agentId}
+								label="Agent"
+								placeholder="Project default"
+								value={agent}
+								authorized={agentCatalog?.authorized}
+								installed={agentCatalog?.installed}
+								supported={agentCatalog?.supported}
+								disabled={agentsQuery.isFetching && agentCatalog === undefined}
+								onChange={(value) => {
+									setAgent(value);
+									setAgentTouched(true);
+								}}
+							/>
+							<button
+								type="button"
+								className="text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
+								disabled={refreshAgentsMutation.isPending}
+								onClick={() => refreshAgentsMutation.mutate()}
+							>
+								{refreshAgentsMutation.isPending ? "Refreshing agents..." : "Refresh agents"}
+							</button>
 						</div>
 
 						{error && (
@@ -261,7 +261,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 							</Dialog.Close>
 							<Button type="submit" disabled={isSubmitting || !projectId}>
 								{isSubmitting ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
-								{isSubmitting ? "Starting..." : "Start task"}
+								{isSubmitting ? (branch.trim() === "" ? "Naming branch…" : "Starting…") : "Start task"}
 							</Button>
 						</div>
 					</form>

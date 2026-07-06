@@ -99,11 +99,57 @@ describe("NewTaskDialog", () => {
 				issueId: "Fix fallback renderer",
 				prompt: "Restore the fallback renderer after WebGL init fails.",
 				branch: undefined,
+				autoNameBranch: true,
 			},
 		});
 		expect(onCreated).toHaveBeenCalledWith("task-1");
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	}, 10_000);
+
+	it("auto-names the branch when the new-branch-name field is left blank", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText("Title"), "T");
+		await user.type(screen.getByLabelText("Brief"), "B");
+		await user.click(screen.getByRole("button", { name: "Start task" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(spawnBody().branch).toBeUndefined();
+		expect(spawnBody().autoNameBranch).toBe(true);
+	});
+
+	it("uses the typed branch name and skips auto-naming", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText("Title"), "T");
+		await user.type(screen.getByLabelText("Brief"), "B");
+		await user.type(screen.getByLabelText("New branch name"), "feature/foo");
+		await user.click(screen.getByRole("button", { name: "Start task" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(spawnBody().branch).toBe("feature/foo");
+		expect(spawnBody().autoNameBranch).toBeUndefined();
+	});
+
+	it("renders the Start from, New branch name, and Agent fields in that order", async () => {
+		renderDialog();
+		await waitForAgentCatalog();
+
+		const startFrom = screen.getByLabelText("Start from");
+		const newBranchName = screen.getByLabelText("New branch name");
+		const agentField = screen.getByRole("combobox", { name: "Agent" });
+
+		expect(
+			startFrom.compareDocumentPosition(newBranchName) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			newBranchName.compareDocumentPosition(agentField) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
 
 	it("initializes Start from to the project default branch and includes baseBranch in the payload", async () => {
 		getMock.mockReset().mockImplementation(async (path: string) => {
