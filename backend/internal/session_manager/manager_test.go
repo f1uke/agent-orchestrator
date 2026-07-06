@@ -391,6 +391,32 @@ func TestSpawn_ResolvesProjectConfig(t *testing.T) {
 	}
 }
 
+func TestSpawn_UsesBaseBranch(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{
+		DefaultBranch: "develop",
+		Worker:        domain.RoleOverride{Harness: domain.HarnessClaudeCode},
+	}}
+	rt := &fakeRuntime{}
+	ws := &fakeWorkspace{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, BaseBranch: "STAR-2270"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if ws.lastCfg.BaseBranch != "STAR-2270" {
+		t.Fatalf("base = %q, want STAR-2270", ws.lastCfg.BaseBranch)
+	}
+
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if ws.lastCfg.BaseBranch != "develop" {
+		t.Fatalf("fallback base = %q, want develop", ws.lastCfg.BaseBranch)
+	}
+}
+
 func TestSpawn_RejectsMissingRoleHarness(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}

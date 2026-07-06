@@ -2648,6 +2648,8 @@ components:
       type: object
     SpawnSessionRequest:
       properties:
+        baseBranch:
+          type: string
         branch:
           type: string
         displayName:

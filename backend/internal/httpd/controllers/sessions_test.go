@@ -31,6 +31,10 @@ type fakeSessionService struct {
 	spawnErr        error
 	claimErr        error
 	listPRErr       error
+	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
+	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
+	// in the response.
+	lastSpawnCfg ports.SpawnConfig
 }
 
 func newFakeSessionService() *fakeSessionService {
@@ -57,6 +61,7 @@ func (f *fakeSessionService) List(_ context.Context, filter sessionsvc.ListFilte
 }
 
 func (f *fakeSessionService) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.Session, error) {
+	f.lastSpawnCfg = cfg
 	if f.spawnErr != nil {
 		return domain.Session{}, f.spawnErr
 	}
@@ -680,6 +685,21 @@ func TestSessionsAPI_SpawnBranchNotFetchedReturnsTypedError(t *testing.T) {
 
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","branch":"feature/missing","prompt":"fix"}`)
 	assertErrorCode(t, body, status, http.StatusBadRequest, "BRANCH_NOT_FETCHED")
+}
+
+// TestSessionsAPI_SpawnDecodesBaseBranch asserts a spawn request's baseBranch
+// field reaches the session service's SpawnConfig unchanged.
+func TestSessionsAPI_SpawnDecodesBaseBranch(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","baseBranch":"STAR-2270"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST session = %d, want 201; body=%s", status, body)
+	}
+	if svc.lastSpawnCfg.BaseBranch != "STAR-2270" {
+		t.Fatalf("SpawnConfig.BaseBranch = %q, want STAR-2270", svc.lastSpawnCfg.BaseBranch)
+	}
 }
 
 // TestSessionsAPI_SpawnRejectsOverlongDisplayName asserts the spawn endpoint

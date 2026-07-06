@@ -17,7 +17,10 @@ type SpawnConfig struct {
 	Kind      domain.SessionKind
 	Harness   domain.AgentHarness
 	Branch    string
-	Prompt    string
+	// BaseBranch is the branch the new worktree is created from. Empty falls
+	// back to the project's configured default branch.
+	BaseBranch string
+	Prompt     string
 	// DisplayName is the user-facing sidebar label. Empty falls back to the
 	// session id in the read model (e.g. orchestrator sessions).
 	DisplayName string

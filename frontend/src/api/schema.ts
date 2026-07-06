@@ -974,6 +974,7 @@ export interface components {
             orchestrator: components["schemas"]["OrchestratorResponse"];
         };
         SpawnSessionRequest: {
+            baseBranch?: string;
             branch?: string;
             displayName?: string;
             /** @enum {string} */

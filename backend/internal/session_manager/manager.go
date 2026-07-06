@@ -226,13 +226,17 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if branch == "" {
 		branch = defaultSessionBranch(id, cfg.Kind, sessionPrefix(project))
 	}
+	base := cfg.BaseBranch
+	if base == "" {
+		base = project.Config.WithDefaults().DefaultBranch
+	}
 	ws, err := m.workspace.Create(ctx, ports.WorkspaceConfig{
 		ProjectID:     cfg.ProjectID,
 		SessionID:     id,
 		Kind:          cfg.Kind,
 		SessionPrefix: sessionPrefix(project),
 		Branch:        branch,
-		BaseBranch:    project.Config.WithDefaults().DefaultBranch,
+		BaseBranch:    base,
 	})
 	if err != nil {
 		// Nothing observable exists yet — no worktree, no runtime — so the seed
