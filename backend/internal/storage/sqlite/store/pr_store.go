@@ -361,6 +361,8 @@ func genPRParams(r domain.PullRequest) gen.UpsertPRParams {
 		ObservedAt:               nullTime(r.ObservedAt),
 		CIObservedAt:             nullTime(r.CIObservedAt),
 		ReviewObservedAt:         nullTime(r.ReviewObservedAt),
+		ApprovalsCount:           int64(r.ApprovalsCount),
+		ApprovalRuleConfigured:   boolInt(r.ApprovalRuleConfigured),
 	}
 }
 

@@ -73,6 +73,8 @@ type PR struct {
 	CIObservedAt             sql.NullTime
 	ReviewObservedAt         sql.NullTime
 	LastNudgeSignature       string
+	ApprovalsCount           int64
+	ApprovalRuleConfigured   int64
 }
 
 type PRCheck struct {

@@ -19,6 +19,9 @@ type PRFacts struct {
 	SourceBranch   string
 	TargetBranch   string
 	UpdatedAt      time.Time
+
+	ApprovalsCount         int
+	ApprovalRuleConfigured bool
 }
 
 // PullRequest is the app-level representation of one tracked pull request as
@@ -35,6 +38,12 @@ type PullRequest struct {
 	Review       ReviewDecision
 	Mergeability Mergeability
 	UpdatedAt    time.Time
+
+	// ApprovalsCount is the number of distinct approvers the SCM reports.
+	ApprovalsCount int
+	// ApprovalRuleConfigured is true when the SCM enforces an approval rule of
+	// its own. When false, AO's per-project MinApprovals floor decides readiness.
+	ApprovalRuleConfigured bool
 
 	Provider string
 	Host     string

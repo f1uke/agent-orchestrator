@@ -6,9 +6,10 @@ INSERT INTO pr (
     is_draft, is_merged, is_closed,
     provider_state, provider_mergeable, provider_merge_state_status, html_url,
     created_at_provider, updated_at_provider, merged_at_provider, closed_at_provider,
-    metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at
+    metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at,
+    approvals_count, approval_rule_configured
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (url) DO UPDATE SET
     number = excluded.number,
     pr_state = excluded.pr_state,
@@ -45,7 +46,9 @@ ON CONFLICT (url) DO UPDATE SET
     review_hash = excluded.review_hash,
     observed_at = excluded.observed_at,
     ci_observed_at = excluded.ci_observed_at,
-    review_observed_at = excluded.review_observed_at;
+    review_observed_at = excluded.review_observed_at,
+    approvals_count = excluded.approvals_count,
+    approval_rule_configured = excluded.approval_rule_configured;
 
 -- name: UpsertLegacyPR :exec
 INSERT INTO pr (
@@ -86,6 +89,8 @@ SELECT
     pr.review_decision,
     pr.ci_state,
     pr.mergeability,
+    pr.approvals_count,
+    pr.approval_rule_configured,
     pr.updated_at,
     EXISTS (
         SELECT 1
@@ -112,6 +117,8 @@ SELECT
     pr.review_decision,
     pr.ci_state,
     pr.mergeability,
+    pr.approvals_count,
+    pr.approval_rule_configured,
     pr.source_branch,
     pr.target_branch,
     pr.updated_at,
