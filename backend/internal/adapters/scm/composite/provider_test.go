@@ -59,3 +59,47 @@ func TestParseRoutesByHost(t *testing.T) {
 		t.Fatalf("github route len=%d", len(prs2))
 	}
 }
+
+func TestUnknownProviderRoutingErrors(t *testing.T) {
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
+	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
+
+	unknown := ports.SCMRepo{Provider: "nonexistent", Repo: "o/n"}
+
+	prs, err := c.ListOpenPRsByRepo(context.Background(), unknown)
+	if err == nil {
+		t.Fatalf("ListOpenPRsByRepo: expected error for unknown provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("ListOpenPRsByRepo error %q does not mention unknown provider name", err.Error())
+	}
+	if prs != nil {
+		t.Fatalf("ListOpenPRsByRepo: expected nil result on error, got %+v", prs)
+	}
+
+	review, err := c.FetchReviewThreads(context.Background(), ports.SCMPRRef{Repo: unknown, Number: 1})
+	if err == nil {
+		t.Fatalf("FetchReviewThreads: expected error for unmatched ref.Repo.Provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("FetchReviewThreads error %q does not mention unknown provider name", err.Error())
+	}
+	if review.Decision != "" || review.Reviews != nil || review.Threads != nil || review.Partial {
+		t.Fatalf("FetchReviewThreads: expected zero-value result on error, got %+v", review)
+	}
+}
+
+func TestParseRepositoryNoMatch(t *testing.T) {
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
+	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
+
+	repo, ok := c.ParseRepository("https://bitbucket.org/o/n.git")
+	if ok {
+		t.Fatalf("ParseRepository: expected ok=false for unmatched remote, got ok=true repo=%+v", repo)
+	}
+	if repo != (ports.SCMRepo{}) {
+		t.Fatalf("ParseRepository: expected zero-value SCMRepo, got %+v", repo)
+	}
+}
