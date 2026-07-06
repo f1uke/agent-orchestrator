@@ -28,7 +28,7 @@ func TestWorkspaceIntegrationCreateRestoreDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if info.Path != filepath.Join(ws.managedRoot, "proj", "sess") || info.Branch != cfg.Branch || info.SessionID != cfg.SessionID || info.ProjectID != cfg.ProjectID {
+	if info.Path != filepath.Join(ws.managedRoot, "proj", "feature", "one") || info.Branch != cfg.Branch || info.SessionID != cfg.SessionID || info.ProjectID != cfg.ProjectID {
 		t.Fatalf("info = %#v", info)
 	}
 	if _, err := os.Stat(filepath.Join(info.Path, "README.md")); err != nil {

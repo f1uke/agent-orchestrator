@@ -102,11 +102,11 @@ func TestManagedPathSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "sess"})
+	path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "sess", Branch: "feature/STAR-2271-x"})
 	if err != nil {
 		t.Fatalf("managed path: %v", err)
 	}
-	if want := filepath.Join(ws.managedRoot, "proj", "sess"); path != want {
+	if want := filepath.Join(ws.managedRoot, "proj", "feature", "STAR-2271-x"); path != want {
 		t.Fatalf("path = %q, want %q", path, want)
 	}
 	if _, err := ws.validateManagedPath(filepath.Join(root, "..", "outside")); !errors.Is(err, ErrUnsafePath) {
@@ -115,6 +115,52 @@ func TestManagedPathSafety(t *testing.T) {
 	if _, err := ws.validateManagedPath("relative/path"); !errors.Is(err, ErrUnsafePath) {
 		t.Fatalf("relative error = %v, want ErrUnsafePath", err)
 	}
+}
+
+func TestWorkerManagedPathMirrorsBranch(t *testing.T) {
+	root := t.TempDir()
+	ws, err := New(Options{ManagedRoot: root, RepoResolver: StaticRepoResolver{"proj": root}})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	t.Run("nested gitflow branch", func(t *testing.T) {
+		path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "proj-1", Branch: "feature/STAR-2271-ecoupon-result"})
+		if err != nil {
+			t.Fatalf("managed path: %v", err)
+		}
+		if want := filepath.Join(ws.managedRoot, "proj", "feature", "STAR-2271-ecoupon-result"); path != want {
+			t.Fatalf("path = %q, want %q", path, want)
+		}
+	})
+
+	t.Run("default ao branch nests", func(t *testing.T) {
+		path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "proj-1", Branch: "ao/proj-1/root"})
+		if err != nil {
+			t.Fatalf("managed path: %v", err)
+		}
+		if want := filepath.Join(ws.managedRoot, "proj", "ao", "proj-1", "root"); path != want {
+			t.Fatalf("path = %q, want %q", path, want)
+		}
+	})
+
+	t.Run("unsafe characters are sanitized to dashes", func(t *testing.T) {
+		path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "proj-1", Branch: "feature/foo bar@baz!"})
+		if err != nil {
+			t.Fatalf("managed path: %v", err)
+		}
+		if want := filepath.Join(ws.managedRoot, "proj", "feature", "foo-bar-baz"); path != want {
+			t.Fatalf("path = %q, want %q", path, want)
+		}
+	})
+
+	t.Run("traversal segment rejected", func(t *testing.T) {
+		for _, branch := range []string{"feature/../../etc", "../escape", "feature/.."} {
+			if _, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "proj-1", Branch: branch}); !errors.Is(err, ErrUnsafePath) {
+				t.Fatalf("branch %q: error = %v, want ErrUnsafePath", branch, err)
+			}
+		}
+	})
 }
 
 func TestOrchestratorManagedPath(t *testing.T) {
@@ -272,7 +318,7 @@ func TestRestoreRefusesNonEmptyUnregisteredPath(t *testing.T) {
 	ws.run = func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("worktree " + repo + "\nbranch refs/heads/main\n"), nil
 	}
-	path := filepath.Join(ws.managedRoot, "proj", "sess")
+	path := filepath.Join(ws.managedRoot, "proj", "feature", "one")
 	if err := mkdirFile(path, "keep.txt"); err != nil {
 		t.Fatalf("seed path: %v", err)
 	}

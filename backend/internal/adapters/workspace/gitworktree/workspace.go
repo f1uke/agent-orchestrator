@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -670,9 +671,47 @@ func (w *Workspace) managedPath(cfg ports.WorkspaceConfig) (string, error) {
 		prefix := resolvedSessionPrefix(cfg)
 		path = filepath.Join(w.managedRoot, string(cfg.ProjectID), "orchestrator", prefix+"-orchestrator")
 	} else {
-		path = filepath.Join(w.managedRoot, string(cfg.ProjectID), string(cfg.SessionID))
+		// A worker's worktree directory mirrors its branch so the folder is
+		// recognisable (e.g. branch "feature/STAR-2271-x" -> ".../feature/STAR-2271-x").
+		segs, err := branchPathSegments(cfg.Branch)
+		if err != nil {
+			return "", err
+		}
+		parts := make([]string, 0, len(segs)+2)
+		parts = append(parts, w.managedRoot, string(cfg.ProjectID))
+		parts = append(parts, segs...)
+		path = filepath.Join(parts...)
 	}
 	return w.validateManagedPath(path)
+}
+
+// unsafeSegmentChars matches any run of characters not allowed in a worktree
+// directory segment. Git ref names are far more permissive than what we want on
+// disk, so anything outside this conservative set collapses to a single dash.
+var unsafeSegmentChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// branchPathSegments turns a branch name into filesystem-safe nested path
+// segments so a worker's worktree directory mirrors its branch. Every segment is
+// sanitized to a conservative charset and rejected if it collapses to empty or a
+// path-traversal component ("." / ".."), so a hostile branch name can never
+// escape the managed root (validateManagedPath is the final backstop).
+func branchPathSegments(branch string) ([]string, error) {
+	raw := strings.Split(branch, "/")
+	segs := make([]string, 0, len(raw))
+	for _, part := range raw {
+		s := strings.Trim(unsafeSegmentChars.ReplaceAllString(strings.TrimSpace(part), "-"), "-")
+		if s == "" {
+			return nil, fmt.Errorf("%w: branch %q yields an empty path segment", ErrUnsafePath, branch)
+		}
+		if err := validatePathComponent("branch segment", s); err != nil {
+			return nil, err
+		}
+		segs = append(segs, s)
+	}
+	if len(segs) == 0 {
+		return nil, fmt.Errorf("%w: branch %q has no path segments", ErrUnsafePath, branch)
+	}
+	return segs, nil
 }
 
 // resolvedSessionPrefix returns cfg.SessionPrefix when set, otherwise the first
