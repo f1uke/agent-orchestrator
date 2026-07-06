@@ -223,6 +223,29 @@ func TestGetAgentHooksInstallsClaudeHooks(t *testing.T) {
 	if m := matcherForCommand(config.Hooks["SessionEnd"], "ao hooks claude-code session-end"); m != nil {
 		t.Fatalf("SessionEnd matcher = %v, want none", m)
 	}
+	// PreToolUse and PostToolUse install with no matcher so they fire for every
+	// tool — including tool calls inside Task sub-agents, which are the liveness
+	// signal that clears a stale waiting_input.
+	if m := matcherForCommand(config.Hooks["PreToolUse"], "ao hooks claude-code pre-tool-use"); m != nil {
+		t.Fatalf("PreToolUse matcher = %v, want none", m)
+	}
+	if m := matcherForCommand(config.Hooks["PostToolUse"], "ao hooks claude-code post-tool-use"); m != nil {
+		t.Fatalf("PostToolUse matcher = %v, want none", m)
+	}
+	if countClaudeHookCommand(config.Hooks["PreToolUse"], "ao hooks claude-code pre-tool-use") != 1 {
+		t.Fatalf("PreToolUse hook not installed: %#v", config.Hooks["PreToolUse"])
+	}
+	if countClaudeHookCommand(config.Hooks["PostToolUse"], "ao hooks claude-code post-tool-use") != 1 {
+		t.Fatalf("PostToolUse hook not installed: %#v", config.Hooks["PostToolUse"])
+	}
+	// A tool that fails (e.g. a nonzero bash exit) fires PostToolUseFailure
+	// INSTEAD of PostToolUse, so liveness needs both.
+	if m := matcherForCommand(config.Hooks["PostToolUseFailure"], "ao hooks claude-code post-tool-use-failure"); m != nil {
+		t.Fatalf("PostToolUseFailure matcher = %v, want none", m)
+	}
+	if countClaudeHookCommand(config.Hooks["PostToolUseFailure"], "ao hooks claude-code post-tool-use-failure") != 1 {
+		t.Fatalf("PostToolUseFailure hook not installed: %#v", config.Hooks["PostToolUseFailure"])
+	}
 }
 
 func TestUninstallHooksRemovesClaudeHooks(t *testing.T) {

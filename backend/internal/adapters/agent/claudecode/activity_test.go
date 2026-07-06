@@ -15,6 +15,9 @@ func TestDeriveActivityState(t *testing.T) {
 		wantOK  bool
 	}{
 		{"user prompt -> active", "user-prompt-submit", `{}`, domain.ActivityActive, true},
+		{"pre tool use -> active", "pre-tool-use", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
+		{"post tool use -> active", "post-tool-use", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
+		{"post tool use failure -> active", "post-tool-use-failure", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
 		{"stop -> idle", "stop", `{}`, domain.ActivityIdle, true},
 		{"notification idle_prompt -> waiting_input", "notification", `{"notification_type":"idle_prompt"}`, domain.ActivityWaitingInput, true},
 		{"notification permission_prompt -> waiting_input", "notification", `{"notification_type":"permission_prompt"}`, domain.ActivityWaitingInput, true},
