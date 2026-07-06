@@ -442,6 +442,8 @@ func prRowFromGen(p gen.PR) domain.PullRequest {
 		ObservedAt:               timeFromNull(p.ObservedAt),
 		CIObservedAt:             timeFromNull(p.CIObservedAt),
 		ReviewObservedAt:         timeFromNull(p.ReviewObservedAt),
+		ApprovalsCount:           int(p.ApprovalsCount),
+		ApprovalRuleConfigured:   p.ApprovalRuleConfigured != 0,
 	}
 }
 

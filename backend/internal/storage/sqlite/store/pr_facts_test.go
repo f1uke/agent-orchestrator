@@ -114,4 +114,21 @@ func TestListPRFactsForSession_ApprovalFacts(t *testing.T) {
 	if facts[0].ApprovalsCount != 3 || facts[0].ApprovalRuleConfigured {
 		t.Fatalf("got count=%d ruleConfigured=%v, want 3/false", facts[0].ApprovalsCount, facts[0].ApprovalRuleConfigured)
 	}
+
+	// GetPR (the domain.PullRequest read path used by claim_pr.go's in-memory
+	// PRFacts builder) must carry the same facts, including the true branch of
+	// ApprovalRuleConfigured.
+	pr.ApprovalRuleConfigured = true
+	pr.ApprovalsCount = 5
+	pr.UpdatedAt = now.Add(time.Second)
+	if err := s.WriteSCMObservation(ctx, pr, nil, nil, nil, nil, ports.ReviewWritePreserve); err != nil {
+		t.Fatalf("write scm observation (update): %v", err)
+	}
+	got, ok, err := s.GetPR(ctx, pr.URL)
+	if err != nil || !ok {
+		t.Fatalf("get pr: ok=%v err=%v", ok, err)
+	}
+	if got.ApprovalsCount != 5 || !got.ApprovalRuleConfigured {
+		t.Fatalf("GetPR approval facts = count=%d ruleConfigured=%v, want 5/true", got.ApprovalsCount, got.ApprovalRuleConfigured)
+	}
 }
