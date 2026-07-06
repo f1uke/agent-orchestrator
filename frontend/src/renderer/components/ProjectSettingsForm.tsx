@@ -69,10 +69,20 @@ export function ProjectSettingsForm({ projectId }: { projectId: string }) {
 	);
 }
 
+// Project carries no typed provider/host field (see components["schemas"]["Project"]):
+// only id/kind/name/path/repo/config/workspaceRepos, where "kind" is
+// single_repo|workspace (workspace shape), not an SCM provider. The daemon
+// resolves GitLab vs GitHub server-side from the git origin host (see
+// gitlab.Provider.Host in backend/internal/adapters/scm/gitlab/provider.go),
+// so mirror that here client-side purely for display, the same way
+// deriveGitHubRepo (IntakeFields.tsx) already parses project.repo.
+const isGitLab = (repo: string | undefined) => /gitlab/i.test(repo ?? "");
+
 function SettingsBody({ project, projectId, onSaved }: { project: Project; projectId: string; onSaved: () => void }) {
 	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
 	const config = project.config ?? {};
+	const isGitLabProject = isGitLab(project.repo);
 	const workspace = workspaceQuery.data?.find((item) => item.id === projectId);
 	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
 	const intake: TrackerIntakeConfig = config.trackerIntake ?? {};
@@ -87,6 +97,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 		intakeEnabled: intake.enabled ?? false,
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
+		minApprovals: config.minApprovals != null ? String(config.minApprovals) : "",
 	});
 	const [savedAt, setSavedAt] = useState<number | null>(null);
 	const [replacementError, setReplacementError] = useState<string | null>(null);
@@ -137,6 +148,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 				}),
 				reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,
 				trackerIntake: buildIntake(intakeForm),
+				minApprovals: form.minApprovals.trim() === "" ? undefined : Number(form.minApprovals),
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
 				params: { path: { id: projectId } },
@@ -223,6 +235,22 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							placeholder="ao"
 						/>
 					</Field>
+					{isGitLabProject && (
+						<Field label="Minimum approvals" htmlFor="minApprovals">
+							<input
+								id="minApprovals"
+								type="number"
+								min={1}
+								className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
+								value={form.minApprovals}
+								onChange={(e) => setForm((f) => ({ ...f, minApprovals: e.target.value }))}
+								placeholder="3"
+							/>
+							<p className="text-[11px] text-muted-foreground">
+								Applies only when the GitLab repo has no approval rule of its own. Default 3.
+							</p>
+						</Field>
+					)}
 				</CardContent>
 			</Card>
 

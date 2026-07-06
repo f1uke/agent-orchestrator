@@ -136,6 +136,7 @@ describe("ProjectSettingsForm", () => {
 		expect(screen.getByLabelText("Default branch")).toHaveValue("develop");
 		expect(screen.getByLabelText("Session prefix")).toHaveValue("po");
 		expect(screen.getByLabelText("Model override")).toHaveValue("claude-opus-4-5");
+		expect(screen.queryByLabelText("Minimum approvals")).not.toBeInTheDocument();
 
 		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
 		const orchestratorAgent = screen.getByRole("combobox", { name: "Default orchestrator agent" });
@@ -187,6 +188,56 @@ describe("ProjectSettingsForm", () => {
 		});
 		expect(await screen.findByText("Saved.")).toBeInTheDocument();
 	}, 20_000);
+
+	it("shows a minimum-approvals field for GitLab projects only, and saves a typed value", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@gitlab.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		const minApprovals = await screen.findByLabelText("Minimum approvals");
+		expect(minApprovals).toHaveValue(null);
+		expect(
+			screen.getByText("Applies only when the GitLab repo has no approval rule of its own. Default 3."),
+		).toBeInTheDocument();
+
+		await userEvent.type(minApprovals, "4");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.minApprovals).toBe(4);
+	});
+
+	it("hides the minimum-approvals field for a GitHub project", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
+		expect(screen.queryByLabelText("Minimum approvals")).not.toBeInTheDocument();
+	});
 
 	it("shows the daemon validation message when save fails", async () => {
 		mockProject({
