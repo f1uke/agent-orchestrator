@@ -113,6 +113,17 @@ function isTerminalPasteShortcut(event: KeyboardEvent): boolean {
 	return isWindowsPlatform() && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey;
 }
 
+// Shift+Enter: a bare line feed instead of xterm's default carriage return.
+// xterm maps Shift+Enter to the same \r as plain Enter, so a TUI in the PTY
+// (e.g. Claude Code) reads it as submit rather than newline. Sending \n mirrors
+// what iTerm2 wires up via Claude Code's /terminal-setup. Guard on keydown so a
+// single press emits once (the handler also fires on keyup); plain Enter and any
+// modifier combo (Ctrl/Alt/Meta+Enter) fall through untouched.
+function isTerminalNewlineShortcut(event: KeyboardEvent): boolean {
+	if (event.type !== "keydown" || event.key !== "Enter") return false;
+	return event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+}
+
 function consumeTerminalShortcut(event: KeyboardEvent): void {
 	event.preventDefault();
 	event.stopPropagation();
@@ -363,6 +374,11 @@ export function XtermTerminal(props: XtermTerminalProps) {
 				consumeTerminalShortcut(event);
 				suppressNativePasteOnce();
 				pasteFromClipboard();
+				return false;
+			}
+			if (isTerminalNewlineShortcut(event)) {
+				consumeTerminalShortcut(event);
+				emitUserInput("\n", "shortcut");
 				return false;
 			}
 			const normalized = normalizedTerminalShortcut(event);
