@@ -1145,6 +1145,8 @@ Message workers with `+"`ao send`"+`, for example:
 
 To discover any other AO command, run `+"`ao --help`"+` (and `+"`ao <command> --help`"+` for details on one).
 
+If a plugin such as Superpowers is available, use its planning skills (brainstorming, writing plans) to shape a task, but delegate ALL implementation to `+"`ao spawn`"+` workers — never run subagent-driven-development or dispatch in-session subagents to do the work yourself. In-session subagents are invisible on the board and get no worktree, branch, or PR, so their work escapes AO's tracking. Hand the finished plan to a worker instead.
+
 Use workers for focused implementation tasks, track their progress, synthesize their results, and only step into implementation directly for true emergencies or small coordination fixes.`, project, project)
 }
 
