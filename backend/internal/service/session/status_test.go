@@ -27,6 +27,16 @@ func silentRec(age time.Duration) domain.SessionRecord {
 	}
 }
 
+// idleAgedRec builds a session that HAS signalled (its Stop landed idle) and has
+// then sat idle for `age`, used to exercise the sustained-idle → needs-input
+// promotion.
+func idleAgedRec(age time.Duration) domain.SessionRecord {
+	return domain.SessionRecord{
+		Activity:      domain.Activity{State: domain.ActivityIdle, LastActivityAt: statusNow.Add(-age)},
+		FirstSignalAt: statusNow.Add(-age),
+	}
+}
+
 func statusPR(facts domain.PRFacts) []domain.PRFacts { return []domain.PRFacts{facts} }
 
 func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
@@ -51,6 +61,17 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 		{"pr-open", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{}), false, domain.StatusPROpen},
 		{"working", statusRec(domain.ActivityActive, false), nil, false, domain.StatusWorking},
 		{"idle", statusRec(domain.ActivityIdle, false), nil, false, domain.StatusIdle},
+
+		// A signalled session that has sat idle past the grace with no PR is
+		// treated as waiting for the human (the agent stopped and is waiting).
+		{"idle-past-grace-no-pr-needs-you", idleAgedRec(2 * waitingInputGrace), nil, false, domain.StatusNeedsInput},
+		// Still within the grace: a brief between-turns pause stays idle.
+		{"idle-within-grace-stays-idle", idleAgedRec(waitingInputGrace / 2), nil, false, domain.StatusIdle},
+		// The promotion must NOT clobber PR status: a finished worker that opened
+		// a PR keeps its review/merge signal even after sitting idle past grace.
+		{"idle-past-grace-mergeable-pr-stays-mergeable", idleAgedRec(2 * waitingInputGrace), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable},
+		{"idle-past-grace-review-pending-pr-stays-review", idleAgedRec(2 * waitingInputGrace), statusPR(domain.PRFacts{Review: domain.ReviewRequired}), false, domain.StatusReviewPending},
+		{"idle-past-grace-ci-failing-pr-stays-ci-failed", idleAgedRec(2 * waitingInputGrace), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusCIFailed},
 
 		// A live session whose hook-capable agent never signaled is no_signal
 		// once the grace passes — never a confident idle.

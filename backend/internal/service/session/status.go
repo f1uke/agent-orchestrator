@@ -15,6 +15,15 @@ import (
 // pipeline, and the dashboard must not claim a confident "idle".
 const noSignalGrace = 90 * time.Second
 
+// waitingInputGrace is how long a session that HAS signalled may sit idle (its
+// turn ended via a Stop hook) before AO treats it as waiting for the human.
+// Claude Code's idle "waiting for input" Notification is unreliable/often
+// absent, so AO promotes a sustained idle to needs-input itself rather than
+// depending on it. Kept short enough to feel responsive, long enough that a
+// brief between-turns pause — or a Stop hook that immediately continues the
+// agent — reverts to active before it ever promotes (no false "needs you").
+const waitingInputGrace = 45 * time.Second
+
 // deriveStatus computes the display status. signalCapable says whether this
 // session's harness has an activity hook pipeline at all; only then can
 // prolonged silence mean the pipeline is broken (no_signal) rather than the
@@ -46,6 +55,18 @@ func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time,
 
 	if rec.Activity.State == domain.ActivityActive {
 		return domain.StatusWorking
+	}
+
+	// A session that produced at least one signal (its turn ended with a Stop →
+	// idle) and has then stayed idle past the grace is almost certainly waiting
+	// for the human — surface it as needs-input even when Claude Code never sends
+	// the idle Notification. This sits AFTER the open-PR branch above, so a
+	// finished worker that opened a PR keeps its review/merge status; only a
+	// PR-less idle session (e.g. an agent that asked a question and stopped)
+	// promotes here.
+	if rec.Activity.State == domain.ActivityIdle && !rec.FirstSignalAt.IsZero() &&
+		now.Sub(rec.Activity.LastActivityAt) > waitingInputGrace {
+		return domain.StatusNeedsInput
 	}
 
 	// No hook callback has ever arrived for this spawn/restore even though the
