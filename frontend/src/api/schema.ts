@@ -974,6 +974,7 @@ export interface components {
             orchestrator: components["schemas"]["OrchestratorResponse"];
         };
         SpawnSessionRequest: {
+            autoNameBranch?: boolean;
             baseBranch?: string;
             branch?: string;
             displayName?: string;

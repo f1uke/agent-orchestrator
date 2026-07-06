@@ -159,7 +159,10 @@ type SpawnSessionRequest struct {
 	// BaseBranch is the branch the new worktree is created from. Empty falls
 	// back to the project's configured default branch.
 	BaseBranch string `json:"baseBranch,omitempty"`
-	Prompt     string `json:"prompt,omitempty" maxLength:"4096"`
+	// AutoNameBranch asks the manager to generate a gitflow branch name via
+	// the session's agent (one-shot) when Branch is empty.
+	AutoNameBranch bool   `json:"autoNameBranch,omitempty"`
+	Prompt         string `json:"prompt,omitempty" maxLength:"4096"`
 	// DisplayName is the sidebar label for the session, capped at 20 characters.
 	// `ao spawn --name` always sets it; other clients (e.g. the desktop new-task
 	// dialog) may omit it and fall back to the session id in the read model.

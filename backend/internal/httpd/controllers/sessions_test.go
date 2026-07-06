@@ -702,6 +702,21 @@ func TestSessionsAPI_SpawnDecodesBaseBranch(t *testing.T) {
 	}
 }
 
+// TestSessionsAPI_SpawnDecodesAutoNameBranch asserts a spawn request's
+// autoNameBranch field reaches the session service's SpawnConfig unchanged.
+func TestSessionsAPI_SpawnDecodesAutoNameBranch(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","autoNameBranch":true}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST session = %d, want 201; body=%s", status, body)
+	}
+	if !svc.lastSpawnCfg.AutoNameBranch {
+		t.Fatalf("SpawnConfig.AutoNameBranch = %v, want true", svc.lastSpawnCfg.AutoNameBranch)
+	}
+}
+
 // TestSessionsAPI_SpawnRejectsOverlongDisplayName asserts the spawn endpoint
 // caps displayName at 20 characters even though the field itself is optional
 // (the desktop new-task dialog omits it). `ao spawn` enforces the same limit

@@ -2648,6 +2648,8 @@ components:
       type: object
     SpawnSessionRequest:
       properties:
+        autoNameBranch:
+          type: boolean
         baseBranch:
           type: string
         branch:
