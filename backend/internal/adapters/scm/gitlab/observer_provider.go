@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -409,14 +410,35 @@ func normalizeCIStatus(pipelineStatus string) string {
 // merge_status doesn't otherwise call it out.
 func mergeability(mr restMR) ports.SCMMergeabilityObservation {
 	out := ports.SCMMergeabilityObservation{
-		State:     mr.MergeStatus,
-		Mergeable: mr.MergeStatus == "can_be_merged",
+		State:     normalizeMergeStatus(mr.MergeStatus, mr.HasConflicts),
+		Mergeable: mr.MergeStatus == "can_be_merged" && !mr.HasConflicts,
 	}
 	if mr.HasConflicts {
 		out.Conflict = true
 		out.Blockers = append(out.Blockers, "merge conflict")
 	}
 	return out
+}
+
+// normalizeMergeStatus maps GitLab's raw merge_status vocabulary (plus the
+// independently-reported has_conflicts flag) onto AO's domain.Mergeability
+// enum. This mirrors the github adapter, which also emits domain enum values:
+// the observer casts State straight into domain.Mergeability, and the status
+// pipeline only reaches "Ready to merge" when it equals domain.MergeMergeable.
+// Emitting GitLab's raw "can_be_merged" would never match, stranding mergeable
+// MRs in the "In review" column.
+func normalizeMergeStatus(mergeStatus string, hasConflicts bool) string {
+	if hasConflicts {
+		return string(domain.MergeConflicting)
+	}
+	switch strings.ToLower(strings.TrimSpace(mergeStatus)) {
+	case "can_be_merged":
+		return string(domain.MergeMergeable)
+	case "cannot_be_merged":
+		return string(domain.MergeBlocked)
+	default: // "unchecked", "checking", "", or any future/unknown value
+		return string(domain.MergeUnknown)
+	}
 }
 
 // restDiscussion is the subset of GitLab's MR discussions REST v4 payload
