@@ -13,6 +13,11 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
+// ciFailureLogTailLines is the number of trailing lines of a failed job's
+// trace to surface, mirroring the github adapter's const of the same name
+// (backend/internal/adapters/scm/github/provider.go).
+const ciFailureLogTailLines = 20
+
 // ParseRepository normalizes a GitLab remote/origin URL into a
 // provider-neutral repository key. It accepts SSH
 // (git@host:group/sub/proj.git) and HTTPS
@@ -308,6 +313,36 @@ func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) 
 		CI:           ciObservation(pipeline, jobs),
 		Mergeability: mergeability(mr),
 	}, nil
+}
+
+// FetchFailedCheckLogTail fetches and tails a failed GitLab job's trace.
+// GitLab serves job traces as plain text (not JSON), so the raw response
+// body is used directly rather than JSON-decoded.
+func (p *Provider) FetchFailedCheckLogTail(ctx context.Context, repo ports.SCMRepo, check ports.SCMCheckObservation) (string, error) {
+	if check.ProviderID == "" {
+		return "", nil
+	}
+	tracePath := "projects/" + projectID(repo) + "/jobs/" + check.ProviderID + "/trace"
+	resp, err := p.client.doREST(ctx, http.MethodGet, tracePath, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	return lastNLines(string(resp.Body), ciFailureLogTailLines), nil
+}
+
+// lastNLines returns the last n newline-separated lines of s, normalizing
+// CRLF to LF and trimming surrounding whitespace first. If s has n or fewer
+// lines, it is returned unchanged (minus the trim/normalize).
+func lastNLines(s string, n int) string {
+	s = strings.ReplaceAll(strings.TrimSpace(s), "\r\n", "\n")
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // latestPipelineForSHA returns the newest pipeline (by id) whose sha matches
