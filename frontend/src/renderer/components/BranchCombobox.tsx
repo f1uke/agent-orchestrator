@@ -13,47 +13,67 @@ type BranchComboboxProps = {
 export function BranchCombobox({ branches, value, onChange, id, placeholder }: BranchComboboxProps) {
 	const [query, setQuery] = useState(value);
 	const [open, setOpen] = useState(false);
+	const [hasTyped, setHasTyped] = useState(false);
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		setQuery(value);
 	}, [value]);
 
+	useEffect(() => {
+		if (!open) return;
+		const handlePointerDown = (event: MouseEvent) => {
+			if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+				setOpen(false);
+				setHasTyped(false);
+			}
+		};
+		document.addEventListener("mousedown", handlePointerDown);
+		return () => document.removeEventListener("mousedown", handlePointerDown);
+	}, [open]);
+
 	const needle = query.trim().toLowerCase();
-	const filtered = needle ? branches.filter((branch) => branch.toLowerCase().includes(needle)) : branches;
+	const filtered = hasTyped && needle ? branches.filter((branch) => branch.toLowerCase().includes(needle)) : branches;
 
 	const selectBranch = (branch: string) => {
 		setQuery(branch);
 		onChange(branch);
 		setOpen(false);
+		setHasTyped(false);
 	};
 
 	return (
 		<div ref={containerRef} className="relative">
 			<Input
 				id={id}
-				role="textbox"
 				autoComplete="off"
 				placeholder={placeholder}
 				value={query}
 				onFocus={(event) => {
 					event.target.select();
 					setOpen(true);
+					setHasTyped(false);
 				}}
 				onClick={(event) => {
 					event.currentTarget.select();
 					setOpen(true);
+					setHasTyped(false);
 				}}
 				onChange={(event) => {
 					const next = event.target.value;
 					setQuery(next);
 					onChange(next);
 					setOpen(true);
+					setHasTyped(true);
 				}}
-				onBlur={() => setOpen(false)}
+				onBlur={() => {
+					setOpen(false);
+					setHasTyped(false);
+				}}
 				onKeyDown={(event) => {
 					if (event.key === "Escape") {
 						setOpen(false);
+						setHasTyped(false);
 					}
 				}}
 			/>

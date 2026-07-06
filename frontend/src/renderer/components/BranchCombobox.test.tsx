@@ -12,4 +12,13 @@ describe("BranchCombobox", () => {
 		await userEvent.click(screen.getByText("origin/STAR-2270"));
 		expect(onChange).toHaveBeenCalledWith("origin/STAR-2270");
 	});
+
+	it("shows the full branch list on first open, before typing", async () => {
+		const onChange = vi.fn();
+		render(<BranchCombobox branches={["develop", "main", "origin/STAR-2270"]} value="develop" onChange={onChange} />);
+		await userEvent.click(screen.getByRole("textbox"));
+		expect(screen.getByText("develop")).toBeInTheDocument();
+		expect(screen.getByText("main")).toBeInTheDocument();
+		expect(screen.getByText("origin/STAR-2270")).toBeInTheDocument();
+	});
 });
