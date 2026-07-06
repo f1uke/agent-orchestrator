@@ -23,6 +23,13 @@ var claudeStartupMatcher = "startup"
 var claudeManagedHooks = []hooksjson.HookSpec{
 	{Event: "SessionStart", Matcher: &claudeStartupMatcher, Command: claudeHookCommandPrefix + "session-start"},
 	{Event: "UserPromptSubmit", Command: claudeHookCommandPrefix + "user-prompt-submit"},
+	// Pre/PostToolUse install without a matcher so they fire for every tool,
+	// including tool calls inside Task sub-agents (verified: those fire the
+	// session's hooks with the same session_id). They report "active", keeping
+	// the session working during long in-turn stretches — a sub-agent run, a
+	// permission approved in the TUI — that emit none of the other hooks.
+	{Event: "PreToolUse", Command: claudeHookCommandPrefix + "pre-tool-use"},
+	{Event: "PostToolUse", Command: claudeHookCommandPrefix + "post-tool-use"},
 	{Event: "Stop", Command: claudeHookCommandPrefix + "stop"},
 	{Event: "Notification", Command: claudeHookCommandPrefix + "notification"},
 	{Event: "SessionEnd", Command: claudeHookCommandPrefix + "session-end"},

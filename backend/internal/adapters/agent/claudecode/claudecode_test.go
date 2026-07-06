@@ -223,6 +223,21 @@ func TestGetAgentHooksInstallsClaudeHooks(t *testing.T) {
 	if m := matcherForCommand(config.Hooks["SessionEnd"], "ao hooks claude-code session-end"); m != nil {
 		t.Fatalf("SessionEnd matcher = %v, want none", m)
 	}
+	// PreToolUse and PostToolUse install with no matcher so they fire for every
+	// tool — including tool calls inside Task sub-agents, which are the liveness
+	// signal that clears a stale waiting_input.
+	if m := matcherForCommand(config.Hooks["PreToolUse"], "ao hooks claude-code pre-tool-use"); m != nil {
+		t.Fatalf("PreToolUse matcher = %v, want none", m)
+	}
+	if m := matcherForCommand(config.Hooks["PostToolUse"], "ao hooks claude-code post-tool-use"); m != nil {
+		t.Fatalf("PostToolUse matcher = %v, want none", m)
+	}
+	if countClaudeHookCommand(config.Hooks["PreToolUse"], "ao hooks claude-code pre-tool-use") != 1 {
+		t.Fatalf("PreToolUse hook not installed: %#v", config.Hooks["PreToolUse"])
+	}
+	if countClaudeHookCommand(config.Hooks["PostToolUse"], "ao hooks claude-code post-tool-use") != 1 {
+		t.Fatalf("PostToolUse hook not installed: %#v", config.Hooks["PostToolUse"])
+	}
 }
 
 func TestUninstallHooksRemovesClaudeHooks(t *testing.T) {
