@@ -12,10 +12,13 @@ import (
 
 // newTestProvider builds a Provider whose Client points at an httptest fake
 // server, bypassing token preflight so tests don't need a real token source.
+// apiBase gets "/api/v4" appended, mirroring production APIBase values (e.g.
+// "https://gitlab.example.com/api/v4") so fake servers that register REST v4
+// paths (as GitLab actually serves them) match real request paths.
 func newTestProvider(t *testing.T, apiBase string) *Provider {
 	t.Helper()
 	p, err := NewProvider(ProviderOptions{
-		Client:             NewClient(ClientOptions{APIBase: apiBase, Token: StaticTokenSource("t")}),
+		Client:             NewClient(ClientOptions{APIBase: apiBase + "/api/v4", Token: StaticTokenSource("t")}),
 		Host:               "gitlab.finnomena.com",
 		SkipTokenPreflight: true,
 	})

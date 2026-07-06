@@ -228,6 +228,163 @@ func normalizeMRState(state string, draft bool) (stateStr string, draftB, merged
 	return
 }
 
+// restPipeline is the subset of GitLab's pipeline REST v4 payload used to
+// pick the pipeline matching a merge request's head SHA and to derive the
+// normalized CI summary.
+type restPipeline struct {
+	ID     int    `json:"id"`
+	SHA    string `json:"sha"`
+	Status string `json:"status"`
+}
+
+// restJob is the subset of GitLab's pipeline job REST v4 payload normalized
+// into ports.SCMCheckObservation.
+type restJob struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	WebURL string `json:"web_url"`
+}
+
+// FetchPullRequests fetches normalized PR/CI/mergeability metadata for each
+// ref via GitLab's REST v4 API: MR detail, then the MR's pipelines (matched
+// to the MR's head SHA), then that pipeline's jobs. Refs are fetched
+// independently so one ref's fetch failure does not fail the whole batch;
+// a failing ref yields an unfetched observation (Fetched: false) rather than
+// being dropped or inferred as closed, per the observer's contract.
+func (p *Provider) FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error) {
+	out := make([]ports.SCMObservation, 0, len(refs))
+	for _, ref := range refs {
+		obs, err := p.fetchOnePullRequest(ctx, ref)
+		if err != nil {
+			out = append(out, ports.SCMObservation{Fetched: false})
+			continue
+		}
+		out = append(out, obs)
+	}
+	return out, nil
+}
+
+func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) (ports.SCMObservation, error) {
+	mrPath := "projects/" + projectID(ref.Repo) + "/merge_requests/" + strconv.Itoa(ref.Number)
+	resp, err := p.client.doREST(ctx, http.MethodGet, mrPath, nil, nil)
+	if err != nil {
+		return ports.SCMObservation{}, err
+	}
+	var mr restMR
+	if err := json.Unmarshal(resp.Body, &mr); err != nil {
+		return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode MR detail: %w", err)
+	}
+
+	resp, err = p.client.doREST(ctx, http.MethodGet, mrPath+"/pipelines", nil, nil)
+	if err != nil {
+		return ports.SCMObservation{}, err
+	}
+	var pipelines []restPipeline
+	if err := json.Unmarshal(resp.Body, &pipelines); err != nil {
+		return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode MR pipelines: %w", err)
+	}
+	pipeline := latestPipelineForSHA(pipelines, mr.SHA)
+
+	var jobs []restJob
+	if pipeline.ID != 0 {
+		jobsPath := "projects/" + projectID(ref.Repo) + "/pipelines/" + strconv.Itoa(pipeline.ID) + "/jobs"
+		resp, err = p.client.doREST(ctx, http.MethodGet, jobsPath, nil, nil)
+		if err != nil {
+			return ports.SCMObservation{}, err
+		}
+		if err := json.Unmarshal(resp.Body, &jobs); err != nil {
+			return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode pipeline jobs: %w", err)
+		}
+	}
+
+	return ports.SCMObservation{
+		Fetched:      true,
+		ObservedAt:   time.Now(),
+		Provider:     "gitlab",
+		Host:         ref.Repo.Host,
+		Repo:         ref.Repo.Repo,
+		PR:           mrToObservation(mr),
+		CI:           ciObservation(pipeline, jobs),
+		Mergeability: mergeability(mr),
+	}, nil
+}
+
+// latestPipelineForSHA returns the newest pipeline (by id) whose sha matches
+// headSHA, or the zero restPipeline if none match. GitLab's pipelines
+// endpoint is not guaranteed to be sorted, so this always compares ids
+// rather than assuming the first match is newest.
+func latestPipelineForSHA(pipelines []restPipeline, headSHA string) restPipeline {
+	var latest restPipeline
+	for _, pl := range pipelines {
+		if pl.SHA != headSHA {
+			continue
+		}
+		if pl.ID > latest.ID {
+			latest = pl
+		}
+	}
+	return latest
+}
+
+// ciObservation normalizes one pipeline plus its jobs into the
+// provider-neutral CI DTO. jobs may be empty when the matched pipeline has
+// no jobs yet or no pipeline matched the MR's head SHA.
+func ciObservation(pipeline restPipeline, jobs []restJob) ports.SCMCIObservation {
+	checks := make([]ports.SCMCheckObservation, 0, len(jobs))
+	failed := make([]ports.SCMCheckObservation, 0)
+	for _, job := range jobs {
+		check := ports.SCMCheckObservation{
+			Name:       job.Name,
+			Status:     job.Status,
+			Conclusion: job.Status,
+			URL:        job.WebURL,
+			ProviderID: strconv.Itoa(job.ID),
+		}
+		checks = append(checks, check)
+		if job.Status == "failed" || job.Status == "canceled" {
+			failed = append(failed, check)
+		}
+	}
+	return ports.SCMCIObservation{
+		Summary:      normalizeCIStatus(pipeline.Status),
+		HeadSHA:      pipeline.SHA,
+		Checks:       checks,
+		FailedChecks: failed,
+	}
+}
+
+// normalizeCIStatus maps GitLab's pipeline `status` enum onto AO's
+// normalized CI summary: unknown, pending, passing, or failing.
+func normalizeCIStatus(pipelineStatus string) string {
+	switch strings.ToLower(strings.TrimSpace(pipelineStatus)) {
+	case "success":
+		return "passing"
+	case "failed":
+		return "failing"
+	case "running", "pending", "created", "scheduled":
+		return "pending"
+	default:
+		return "unknown"
+	}
+}
+
+// mergeability normalizes a merge request's merge_status/has_conflicts into
+// AO's mergeability verdict. GitLab reports has_conflicts independently of
+// merge_status, so conflicts are surfaced as an explicit blocker even when
+// merge_status doesn't otherwise call it out.
+func mergeability(mr restMR) ports.SCMMergeabilityObservation {
+	out := ports.SCMMergeabilityObservation{
+		State:     mr.MergeStatus,
+		Mergeable: mr.MergeStatus == "can_be_merged",
+	}
+	if mr.HasConflicts {
+		out.Conflict = true
+		out.Blockers = append(out.Blockers, "merge conflict")
+	}
+	return out
+}
+
 // parseGitLabTime parses a GitLab REST timestamp (RFC3339), returning the
 // zero time for blank/unparseable values instead of erroring, since these
 // fields are optional (e.g. merged_at/closed_at are empty for open MRs).
