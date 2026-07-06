@@ -2097,3 +2097,41 @@ func TestReconcileReap_TerminatedAndDeadTmuxLeftAlone(t *testing.T) {
 		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
 	}
 }
+
+func TestSpawnBranchNaming(t *testing.T) {
+	t.Run("flag off keeps ao default", func(t *testing.T) {
+		m, _, _, ws := newManager()
+		_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(ws.lastCfg.Branch, "ao/") {
+			t.Fatalf("want ao/ default, got %q", ws.lastCfg.Branch)
+		}
+	})
+
+	t.Run("orchestrator ignores flag", func(t *testing.T) {
+		m, _, _, ws := newManager()
+		_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator, AutoNameBranch: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(ws.lastCfg.Branch, "-orchestrator") {
+			t.Fatalf("orchestrator name expected, got %q", ws.lastCfg.Branch)
+		}
+	})
+
+	t.Run("unsupported harness falls back", func(t *testing.T) {
+		// fakeAgents resolves every harness to fakeAgent, which does not
+		// implement ports.OneShotNamer, so this exercises the fallback path
+		// without executing any subprocess.
+		m, _, _, ws := newManager()
+		_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true, IssueID: "STAR-1 thing"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(ws.lastCfg.Branch, "ao/") {
+			t.Fatalf("want fallback ao/, got %q", ws.lastCfg.Branch)
+		}
+	})
+}

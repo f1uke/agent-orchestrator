@@ -17,6 +17,11 @@ type SpawnConfig struct {
 	Kind      domain.SessionKind
 	Harness   domain.AgentHarness
 	Branch    string
+	// AutoNameBranch asks the manager to generate a gitflow branch name via the
+	// session's agent (one-shot) when Branch is empty. Non-dialog callers leave
+	// it false to keep the ao/<id>/root default. Best-effort: any failure falls
+	// back to the default name.
+	AutoNameBranch bool
 	// BaseBranch is the branch the new worktree is created from. Empty falls
 	// back to the project's configured default branch.
 	BaseBranch string

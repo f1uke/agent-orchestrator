@@ -224,7 +224,16 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 
 	branch := cfg.Branch
 	if branch == "" {
-		branch = defaultSessionBranch(id, cfg.Kind, sessionPrefix(project))
+		if cfg.AutoNameBranch && cfg.Kind != domain.KindOrchestrator {
+			if agent, ok := m.agents.Agent(cfg.Harness); ok {
+				if name, ok := m.generateBranchName(ctx, agent, cfg, project); ok {
+					branch = ensureUniqueBranch(m.existingBranchNames(ctx, project), name)
+				}
+			}
+		}
+		if branch == "" {
+			branch = defaultSessionBranch(id, cfg.Kind, sessionPrefix(project))
+		}
 	}
 	base := cfg.BaseBranch
 	if base == "" {
