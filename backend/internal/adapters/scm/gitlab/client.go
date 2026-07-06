@@ -163,12 +163,27 @@ func (c *Client) invalidateToken() {
 	}
 }
 
+// restURL joins path onto the client's API base. path may already contain
+// percent-escaped segments (e.g. projectID() escapes "/" in a nested GitLab
+// group path as "%2F" so GitLab sees a single path segment). url.URL.String
+// re-escapes whatever it finds in the decoded Path field, so a naive
+// TrimSuffix+concat into base.Path alone would double-escape those '%'
+// signs into "%25" and 404 against a real server. Setting RawPath to the
+// pre-escaped join (with Path set to its unescaped form) makes
+// EscapedPath() return RawPath verbatim — since it is a valid encoding of
+// Path — so String() emits the intended single-escaped wire path.
 func (c *Client) restURL(path string, q url.Values) (string, error) {
 	base, err := url.Parse(c.apiBase)
 	if err != nil {
 		return "", err
 	}
-	base.Path = strings.TrimSuffix(base.Path, "/") + "/" + strings.TrimPrefix(path, "/")
+	rawJoined := strings.TrimSuffix(base.EscapedPath(), "/") + "/" + strings.TrimPrefix(path, "/")
+	base.RawPath = rawJoined
+	if unescaped, err := url.PathUnescape(rawJoined); err == nil {
+		base.Path = unescaped
+	} else {
+		base.Path = rawJoined
+	}
 	if q != nil {
 		base.RawQuery = q.Encode()
 	}

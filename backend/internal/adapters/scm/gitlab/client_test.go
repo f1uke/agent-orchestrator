@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -75,6 +77,64 @@ func TestClientDoRESTSendsPrivateToken(t *testing.T) {
 	}
 	if resp.ETag != `"abc"` {
 		t.Fatalf("ETag = %q", resp.ETag)
+	}
+}
+
+// TestClientRESTURLSingleEscapesProjectPath guards against double
+// URL-encoding of a pre-escaped path segment. observer_provider.go's
+// projectID() builds "group%2Fsub%2Fproj" via url.PathEscape before handing
+// it to restURL; restURL must not re-escape the '%' into "%25" or the
+// resulting wire path 404s against a real GitLab server for any project
+// whose path contains '/'. httptest's r.URL.Path single-decodes, which is
+// why this must assert on r.URL.EscapedPath() instead.
+func TestClientRESTURLSingleEscapesProjectPath(t *testing.T) {
+	var gotEscapedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(ClientOptions{APIBase: srv.URL, Token: StaticTokenSource("t")})
+	// Mirrors how observer_provider.go's projectID/mrListPath build the path
+	// for repo "group/sub/proj": url.PathEscape the project id, then join it
+	// into the merge_requests list path.
+	path := "projects/" + url.PathEscape("group/sub/proj") + "/merge_requests"
+	if _, err := c.doREST(context.Background(), http.MethodGet, path, nil, nil); err != nil {
+		t.Fatalf("doREST: %v", err)
+	}
+	if !strings.Contains(gotEscapedPath, "group%2Fsub%2Fproj") {
+		t.Fatalf("EscapedPath() = %q, want it to contain group%%2Fsub%%2Fproj", gotEscapedPath)
+	}
+	if strings.Contains(gotEscapedPath, "group%252Fsub%252Fproj") {
+		t.Fatalf("EscapedPath() = %q, project path was double-escaped", gotEscapedPath)
+	}
+}
+
+// TestClientRESTURLPlainASCIIPathsUnaffected confirms the RawPath fix does
+// not alter behavior for paths that need no escaping.
+func TestClientRESTURLPlainASCIIPathsUnaffected(t *testing.T) {
+	tests := []string{"user", "projects/x/jobs/11/trace"}
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			var gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.WriteHeader(200)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+
+			c := NewClient(ClientOptions{APIBase: srv.URL, Token: StaticTokenSource("t")})
+			if _, err := c.doREST(context.Background(), http.MethodGet, path, nil, nil); err != nil {
+				t.Fatalf("doREST: %v", err)
+			}
+			want := "/" + path
+			if gotPath != want {
+				t.Fatalf("Path = %q, want %q", gotPath, want)
+			}
+		})
 	}
 }
 

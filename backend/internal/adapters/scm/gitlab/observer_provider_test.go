@@ -41,7 +41,7 @@ func TestListOpenPRsByRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOpenPRsByRepo: %v", err)
 	}
-	if len(prs) != 1 || prs[0].Number != 7 || prs[0].State != "open" || !prs[0].Draft {
+	if len(prs) != 1 || prs[0].Number != 7 || prs[0].State != "draft" || !prs[0].Draft {
 		t.Fatalf("got %+v", prs)
 	}
 	if prs[0].SourceBranch != "feat" || prs[0].TargetBranch != "main" || prs[0].HeadSHA != "deadbeef" {

@@ -200,9 +200,17 @@ func mrToObservation(mr restMR) ports.SCMPRObservation {
 
 // normalizeMRState maps GitLab's merge_request `state` enum plus the
 // separate `draft` flag onto AO's normalized state string and booleans:
-// "opened" -> open, "merged" -> merged, "locked"/"closed" -> closed. draft
-// passes through unchanged since GitLab tracks it independently of state.
+// merged -> "merged", locked/closed -> "closed", else draft -> "draft",
+// else "opened" -> "open". This mirrors the GitHub adapter's
+// normalizePRState (backend/internal/adapters/scm/github/observer_provider.go)
+// and the ports.SCMPRObservation.State doc ("draft, open, merged, or
+// closed"), since consumers (backend/internal/storage/sqlite/store/pr_facts.go)
+// derive draft solely from State == domain.PRStateDraft — keeping draft
+// only as a side boolean would lose the draft signal in the display path.
+// The Draft/Merged/Closed booleans on the observation are unaffected: Draft
+// stays true for a draft MR regardless of how State is folded.
 func normalizeMRState(state string, draft bool) (stateStr string, draftB, mergedB, closedB bool) {
+	draftB = draft
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "merged":
 		stateStr = "merged"
@@ -211,9 +219,12 @@ func normalizeMRState(state string, draft bool) (stateStr string, draftB, merged
 		stateStr = "closed"
 		closedB = true
 	default: // "opened" and any unrecognized state
-		stateStr = "open"
+		if draft {
+			stateStr = "draft"
+		} else {
+			stateStr = "open"
+		}
 	}
-	draftB = draft
 	return
 }
 
