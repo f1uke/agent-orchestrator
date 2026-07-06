@@ -7,6 +7,54 @@ import (
 	"testing"
 )
 
+// invalidatingTokenSource is a fake TokenSource that also implements
+// tokenInvalidator, recording how many times InvalidateToken is called so
+// tests can assert whether the Client invalidated on a given response.
+type invalidatingTokenSource struct {
+	token           string
+	invalidateCalls int
+}
+
+func (s *invalidatingTokenSource) Token(context.Context) (string, error) {
+	return s.token, nil
+}
+
+func (s *invalidatingTokenSource) InvalidateToken() {
+	s.invalidateCalls++
+}
+
+func TestClientDoRESTInvalidatesTokenOnAuthFailure(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantCalls  int
+	}{
+		{name: "401 unauthorized invalidates token", statusCode: http.StatusUnauthorized, wantCalls: 1},
+		{name: "403 forbidden invalidates token", statusCode: http.StatusForbidden, wantCalls: 1},
+		{name: "404 not found does not invalidate token", statusCode: http.StatusNotFound, wantCalls: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(`{"message":"nope"}`))
+			}))
+			defer srv.Close()
+
+			src := &invalidatingTokenSource{token: "tok-123"}
+			c := NewClient(ClientOptions{APIBase: srv.URL, Token: src})
+			_, err := c.doRESTWithETag(context.Background(), "projects/x/merge_requests", nil, "")
+			if err == nil {
+				t.Fatalf("expected error for status %d, got nil", tt.statusCode)
+			}
+			if src.invalidateCalls != tt.wantCalls {
+				t.Fatalf("InvalidateToken called %d times; want %d", src.invalidateCalls, tt.wantCalls)
+			}
+		})
+	}
+}
+
 func TestClientDoRESTSendsPrivateToken(t *testing.T) {
 	var gotToken string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

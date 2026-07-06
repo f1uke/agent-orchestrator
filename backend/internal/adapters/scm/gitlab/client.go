@@ -176,12 +176,14 @@ func (c *Client) restURL(path string, q url.Values) (string, error) {
 }
 
 // ErrAuthFailed is returned when GitLab responds with an auth-class
-// failure (401).
+// failure (401 or 403). Unlike GitHub, GitLab does not overload 403 for
+// rate-limiting (GitLab uses 429 for that), so no rate-limit carve-out is
+// needed here.
 var ErrAuthFailed = errors.New("gitlab scm: authentication failed")
 
 func classifyError(resp *http.Response, body []byte) error {
 	msg := gitlabMessage(body)
-	if resp.StatusCode == http.StatusUnauthorized {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("%w: %s", ErrAuthFailed, msg)
 	}
 	return fmt.Errorf("gitlab scm: %d %s", resp.StatusCode, msg)
