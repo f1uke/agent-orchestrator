@@ -340,6 +340,16 @@ func trackerRepo(project domain.ProjectRecord, cfg domain.TrackerIntakeConfig) (
 	if provider == "" {
 		provider = domain.TrackerProviderGitHub
 	}
+	if provider == domain.TrackerProviderGitLab {
+		native := strings.TrimSpace(cfg.Repo)
+		if native == "" {
+			native = parseGitLabRepoNative(project.RepoOriginURL)
+		}
+		if native == "" {
+			return domain.TrackerRepo{}, false
+		}
+		return domain.TrackerRepo{Provider: domain.TrackerProviderGitLab, Native: native}, true
+	}
 	if provider != domain.TrackerProviderGitHub {
 		return domain.TrackerRepo{}, false
 	}
@@ -351,6 +361,42 @@ func trackerRepo(project domain.ProjectRecord, cfg domain.TrackerIntakeConfig) (
 		return domain.TrackerRepo{}, false
 	}
 	return domain.TrackerRepo{Provider: provider, Native: native}, true
+}
+
+// parseGitLabRepoNative extracts a project path (e.g. "group/sub/proj") from a
+// remote URL. Unlike parseGitHubRepoNative, it does not gate on a specific host:
+// the caller already knows the project's provider is GitLab. GitLab supports
+// nested groups, so the full path is preserved rather than truncated to two
+// segments.
+func parseGitLabRepoNative(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return ""
+	}
+	var path string
+	if strings.HasPrefix(remote, "git@") {
+		if _, rest, ok := strings.Cut(remote, ":"); ok {
+			path = rest
+		} else {
+			return ""
+		}
+	} else if u, err := url.Parse(remote); err == nil && u.Host != "" {
+		path = u.Path
+	} else {
+		path = remote
+	}
+	path = strings.Trim(strings.TrimSpace(path), "/")
+	path = strings.TrimSuffix(path, ".git")
+	if path == "" || !strings.Contains(path, "/") {
+		return ""
+	}
+	segments := strings.Split(path, "/")
+	for _, seg := range segments {
+		if strings.TrimSpace(seg) == "" {
+			return ""
+		}
+	}
+	return path
 }
 
 func parseGitHubRepoNative(remote string) string {

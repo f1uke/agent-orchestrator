@@ -283,6 +283,103 @@ func TestTrackerRepoUsesConfiguredRepo(t *testing.T) {
 	}
 }
 
+func TestTrackerRepoResolvesGitLabFromOrigin(t *testing.T) {
+	project := domain.ProjectRecord{
+		ID:            "demo",
+		RepoOriginURL: "git@gitlab.finnomena.com:group/sub/proj.git",
+		Config: domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{
+			Enabled:  true,
+			Provider: domain.TrackerProviderGitLab,
+			Assignee: "x",
+		}},
+	}
+	repo, ok := trackerRepo(project, project.Config.TrackerIntake.WithDefaults())
+	if !ok {
+		t.Fatal("trackerRepo ok = false")
+	}
+	if repo.Provider != domain.TrackerProviderGitLab {
+		t.Fatalf("repo.Provider = %q, want gitlab", repo.Provider)
+	}
+	if repo.Native != "group/sub/proj" {
+		t.Fatalf("repo.Native = %q, want group/sub/proj", repo.Native)
+	}
+}
+
+func TestTrackerRepoUsesConfiguredRepoForGitLab(t *testing.T) {
+	project := domain.ProjectRecord{
+		ID:            "demo",
+		RepoOriginURL: "git@gitlab.finnomena.com:wrong/repo.git",
+		Config: domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{
+			Enabled:  true,
+			Provider: domain.TrackerProviderGitLab,
+			Repo:     "a/b/c",
+			Assignee: "x",
+		}},
+	}
+	repo, ok := trackerRepo(project, project.Config.TrackerIntake.WithDefaults())
+	if !ok {
+		t.Fatal("trackerRepo ok = false")
+	}
+	if repo.Native != "a/b/c" {
+		t.Fatalf("repo.Native = %q, want a/b/c", repo.Native)
+	}
+}
+
+func TestTrackerRepoGitHubUnchanged(t *testing.T) {
+	project := domain.ProjectRecord{
+		ID:            "demo",
+		RepoOriginURL: "https://github.com/acme/demo.git",
+		Config: domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{
+			Enabled:  true,
+			Assignee: "alice",
+		}},
+	}
+	repo, ok := trackerRepo(project, project.Config.TrackerIntake.WithDefaults())
+	if !ok {
+		t.Fatal("trackerRepo ok = false")
+	}
+	if repo.Provider != domain.TrackerProviderGitHub || repo.Native != "acme/demo" {
+		t.Fatalf("repo = %+v, want github acme/demo", repo)
+	}
+}
+
+func TestTrackerRepoUnknownProviderRejected(t *testing.T) {
+	project := domain.ProjectRecord{
+		ID:            "demo",
+		RepoOriginURL: "https://example.com/acme/demo.git",
+		Config: domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{
+			Enabled:  true,
+			Provider: "linear",
+			Assignee: "alice",
+		}},
+	}
+	if _, ok := trackerRepo(project, project.Config.TrackerIntake); ok {
+		t.Fatal("trackerRepo ok = true, want false for unknown provider")
+	}
+}
+
+func TestParseGitLabRepoNative(t *testing.T) {
+	cases := []struct {
+		name   string
+		remote string
+		want   string
+	}{
+		{"ssh nested", "git@gitlab.finnomena.com:group/sub/proj.git", "group/sub/proj"},
+		{"https nested", "https://gitlab.finnomena.com/group/sub/proj", "group/sub/proj"},
+		{"https nested with git suffix", "https://gitlab.finnomena.com/group/sub/proj.git", "group/sub/proj"},
+		{"bare path", "group/sub/proj", "group/sub/proj"},
+		{"empty", "", ""},
+		{"invalid single segment", "onlyone", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseGitLabRepoNative(tc.remote); got != tc.want {
+				t.Fatalf("parseGitLabRepoNative(%q) = %q, want %q", tc.remote, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMultiTrackerResolver(t *testing.T) {
 	gh := &fakeTracker{}
 	gl := &fakeTracker{}
