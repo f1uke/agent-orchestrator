@@ -66,6 +66,9 @@ beforeEach(() => {
 				error: undefined,
 			};
 		}
+		if (path === "/api/v1/projects/{id}/branches") {
+			return { data: { branches: [] }, error: undefined };
+		}
 		return {
 			data: { status: "ok", project: { id: "proj-1", config: { worker: { agent: "claude-code" } } } },
 			error: undefined,
@@ -101,6 +104,48 @@ describe("NewTaskDialog", () => {
 		expect(onCreated).toHaveBeenCalledWith("task-1");
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	}, 10_000);
+
+	it("initializes Start from to the project default branch and includes baseBranch in the payload", async () => {
+		getMock.mockReset().mockImplementation(async (path: string) => {
+			if (path === "/api/v1/agents") {
+				return {
+					data: {
+						supported: [{ id: "claude-code", label: "Claude Code" }],
+						installed: [{ id: "claude-code", label: "Claude Code", authStatus: "authorized" }],
+						authorized: [{ id: "claude-code", label: "Claude Code", authStatus: "authorized" }],
+					},
+					error: undefined,
+				};
+			}
+			if (path === "/api/v1/projects/{id}/branches") {
+				return { data: { branches: ["main", "develop", "origin/STAR-2270"] }, error: undefined };
+			}
+			return {
+				data: {
+					status: "ok",
+					project: { id: "proj-1", defaultBranch: "main", config: { worker: { agent: "claude-code" } } },
+				},
+				error: undefined,
+			};
+		});
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		const startFrom = screen.getByLabelText("Start from");
+		await waitFor(() => expect(startFrom).toHaveValue("main"));
+
+		await user.click(startFrom);
+		await user.type(startFrom, "develop");
+		await user.click(await screen.findByText("develop"));
+
+		await user.type(screen.getByLabelText("Title"), "T");
+		await user.type(screen.getByLabelText("Brief"), "B");
+		await user.click(screen.getByRole("button", { name: "Start task" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(spawnBody().baseBranch).toBe("develop");
+	});
 
 	it("sends the chosen harness when the user overrides the default", async () => {
 		renderDialog();

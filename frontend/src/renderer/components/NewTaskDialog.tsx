@@ -4,12 +4,14 @@ import { Loader2, X } from "lucide-react";
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { BranchCombobox } from "./BranchCombobox";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { captureRendererEvent } from "../lib/telemetry";
 import type { AgentProvider } from "../types/workspace";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
+import { useProjectBranches } from "../hooks/useProjectBranches";
 
 type Project = components["schemas"]["Project"];
 
@@ -25,10 +27,13 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 	const titleId = useId();
 	const promptId = useId();
 	const branchId = useId();
+	const baseId = useId();
 	const agentId = useId();
 	const [title, setTitle] = useState("");
 	const [prompt, setPrompt] = useState("");
 	const [branch, setBranch] = useState("");
+	const [base, setBase] = useState("");
+	const [baseTouched, setBaseTouched] = useState(false);
 	const [agent, setAgent] = useState("");
 	const [agentTouched, setAgentTouched] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,13 +60,21 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		onSuccess: (next) => queryClient.setQueryData(agentsQueryKey, next),
 	});
 	const defaultWorkerAgent = projectQuery.data?.config?.worker?.agent ?? "";
+	const defaultBaseBranch = projectQuery.data?.defaultBranch ?? "";
 	const agentCatalog = agentsQuery.data;
+	const { branches: fetchedBranches } = useProjectBranches(open ? projectId : undefined);
+	const branches =
+		defaultBaseBranch && !fetchedBranches.includes(defaultBaseBranch)
+			? [defaultBaseBranch, ...fetchedBranches]
+			: fetchedBranches;
 
 	useEffect(() => {
 		if (!open) {
 			setTitle("");
 			setPrompt("");
 			setBranch("");
+			setBase("");
+			setBaseTouched(false);
 			setAgent("");
 			setAgentTouched(false);
 			setError(undefined);
@@ -75,6 +88,12 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		}
 	}, [open, agentTouched, defaultWorkerAgent]);
 
+	useEffect(() => {
+		if (open && !baseTouched && defaultBaseBranch) {
+			setBase(defaultBaseBranch);
+		}
+	}, [open, baseTouched, defaultBaseBranch]);
+
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!projectId || isSubmitting) return;
@@ -82,6 +101,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		const cleanTitle = title.trim();
 		const cleanPrompt = prompt.trim();
 		const cleanBranch = branch.trim();
+		const cleanBase = base.trim();
 		if (!cleanTitle || !cleanPrompt) {
 			setError("Title and brief are required.");
 			return;
@@ -99,6 +119,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 					issueId: cleanTitle,
 					prompt: cleanPrompt,
 					branch: cleanBranch || undefined,
+					baseBranch: cleanBase || undefined,
 				},
 			});
 			if (apiError) throw new Error(apiErrorMessage(apiError, "Unable to start task"));
@@ -165,6 +186,21 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 							/>
 						</div>
 
+						<div className="space-y-1.5">
+							<label className="text-[12px] font-medium text-muted-foreground" htmlFor={baseId}>
+								Start from
+							</label>
+							<BranchCombobox
+								id={baseId}
+								branches={branches}
+								value={base}
+								onChange={(value) => {
+									setBase(value);
+									setBaseTouched(true);
+								}}
+							/>
+						</div>
+
 						<div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
 							<div className="space-y-1.5">
 								<RequiredAgentField
@@ -192,11 +228,11 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 							</div>
 							<div className="space-y-1.5">
 								<label className="text-[12px] font-medium text-muted-foreground" htmlFor={branchId}>
-									Branch
+									New branch name
 								</label>
 								<Input
 									id={branchId}
-									placeholder="optional"
+									placeholder="optional — auto-named if blank"
 									value={branch}
 									onChange={(event) => setBranch(event.target.value)}
 								/>
