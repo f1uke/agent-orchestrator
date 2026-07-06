@@ -578,6 +578,33 @@ paths:
       summary: Fetch one project; discriminates ok vs degraded
       tags:
       - projects
+  /api/v1/projects/{id}/branches:
+    get:
+      operationId: listProjectBranches
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectBranchesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: List branch names for a project's repository
+      tags:
+      - projects
   /api/v1/projects/{id}/config:
     put:
       operationId: setProjectConfig
@@ -2056,6 +2083,15 @@ components:
       - path
       - repo
       - defaultBranch
+      type: object
+    ProjectBranchesResponse:
+      properties:
+        branches:
+          items:
+            type: string
+          type: array
+      required:
+      - branches
       type: object
     ProjectConfig:
       properties:

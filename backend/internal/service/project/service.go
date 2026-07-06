@@ -36,6 +36,13 @@ type Manager interface {
 	// Remove unregisters a project, stopping its sessions and reclaiming
 	// managed workspaces.
 	Remove(ctx context.Context, id domain.ProjectID) (RemoveResult, error)
+
+	// ListBranches returns the project repo's branch names (short form) drawn
+	// from refs/heads and refs/remotes/origin, deduped preserving first-seen
+	// order, with origin/HEAD dropped. Returns (nil, nil) — an empty list, not
+	// an error — when the project is unknown or its repo is otherwise
+	// unavailable, so the New Task branch dropdown degrades gracefully.
+	ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error)
 }
 
 // SessionTeardowner is the narrow session-service surface project removal
@@ -136,6 +143,47 @@ func (m *Service) Get(ctx context.Context, id domain.ProjectID) (GetResult, erro
 		p.WorkspaceRepos = workspaceReposFromRecords(repos)
 	}
 	return GetResult{Status: "ok", Project: &p}, nil
+}
+
+// ListBranches returns the deduped short branch names for a project's repo,
+// drawn from local heads plus origin's remote-tracking branches, with
+// origin/HEAD removed. It never returns an error for a missing/unregistered
+// project or an unreadable repo — those degrade to an empty list so the New
+// Task dialog's branch dropdown can render regardless.
+func (m *Service) ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error) {
+	if err := validateProjectID(id); err != nil {
+		return nil, nil
+	}
+	row, ok, err := m.store.GetProject(ctx, string(id))
+	if err != nil || !ok || !row.ArchivedAt.IsZero() {
+		return nil, nil
+	}
+	// Emit both the full ref name and its short form: git's shortening quirk
+	// collapses refs/remotes/origin/HEAD to the bare "origin" (not
+	// "origin/HEAD"), so origin/HEAD must be identified via the full ref name
+	// rather than by matching the short-form text.
+	out, err := gitOutput(ctx, row.Path, "for-each-ref", "--format=%(refname)\t%(refname:short)", "refs/heads", "refs/remotes/origin")
+	if err != nil {
+		return nil, nil
+	}
+	seen := make(map[string]bool)
+	var branches []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		full, short, ok := strings.Cut(line, "\t")
+		if !ok || full == "refs/remotes/origin/HEAD" {
+			continue
+		}
+		if seen[short] {
+			continue
+		}
+		seen[short] = true
+		branches = append(branches, short)
+	}
+	return branches, nil
 }
 
 // Add registers a local git repository as a project.

@@ -137,6 +137,7 @@ var schemaNames = map[string]string{
 	// httpd/controllers (wire envelopes)
 	"ControllersListProjectsResponse":             "ListProjectsResponse",
 	"ControllersProjectResponse":                  "ProjectResponse",
+	"ControllersProjectBranchesResponse":          "ProjectBranchesResponse",
 	"ControllersAgentIDParam":                     "AgentIDParam",
 	"ControllersGetProjectResponse":               "ProjectGetResponse",
 	"ControllersProjectOrDegraded":                "ProjectOrDegraded",
@@ -467,7 +468,7 @@ func eventOperations() []operation {
 	}
 }
 
-// projectOperations declares the 4 canonical /projects operations. The set must
+// projectOperations declares the 5 canonical /projects operations. The set must
 // stay 1:1 with the routes ProjectsController.Register mounts —
 // TestRouteSpecParity fails the build otherwise.
 func projectOperations() []operation {
@@ -498,6 +499,15 @@ func projectOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.GetProjectResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/branches", id: "listProjectBranches", tag: "projects",
+			summary:    "List branch names for a project's repository",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ProjectBranchesResponse{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
 		},

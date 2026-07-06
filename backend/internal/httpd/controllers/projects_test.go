@@ -197,6 +197,109 @@ func TestProjectsAPI_ListAddGet(t *testing.T) {
 
 }
 
+func TestProjectsAPI_Branches(t *testing.T) {
+
+	srv := newTestServer(t)
+
+	repo := gitRepo(t, "branchy")
+
+	if out, err := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "init").CombinedOutput(); err != nil {
+
+		t.Fatalf("git commit: %v (%s)", err, out)
+
+	}
+
+	if out, err := exec.Command("git", "-C", repo, "branch", "feature/x").CombinedOutput(); err != nil {
+
+		t.Fatalf("git branch: %v (%s)", err, out)
+
+	}
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/projects", `{"path":`+quote(repo)+`,"projectId":"branchy"}`)
+
+	if status != http.StatusCreated {
+
+		t.Fatalf("seed create = %d, want 201; body=%s", status, body)
+
+	}
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/projects/branchy/branches", "")
+
+	if status != http.StatusOK {
+
+		t.Fatalf("GET branches = %d, want 200; body=%s", status, body)
+
+	}
+
+	assertJSON(t, headers)
+
+	var got struct {
+		Branches []string `json:"branches"`
+	}
+
+	mustJSON(t, body, &got)
+
+	foundMain, foundFeature := false, false
+
+	for _, b := range got.Branches {
+
+		if b == "main" {
+			foundMain = true
+		}
+
+		if b == "feature/x" {
+			foundFeature = true
+		}
+
+	}
+
+	if !foundMain || !foundFeature {
+
+		t.Fatalf("branches = %v, want main and feature/x", got.Branches)
+
+	}
+
+	// Unknown project degrades to an empty list, not an error.
+	body, status, headers = doRequest(t, srv, "GET", "/api/v1/projects/ghost/branches", "")
+
+	if status != http.StatusOK {
+
+		t.Fatalf("GET branches (ghost) = %d, want 200; body=%s", status, body)
+
+	}
+
+	assertJSON(t, headers)
+
+	var gotGhost struct {
+		Branches []string `json:"branches"`
+	}
+
+	mustJSON(t, body, &gotGhost)
+
+	if len(gotGhost.Branches) != 0 {
+
+		t.Fatalf("branches (ghost) = %v, want empty", gotGhost.Branches)
+
+	}
+
+}
+
+func TestProjectsRoutes_BranchesDefaultsToStubWithoutManager(t *testing.T) {
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+
+	t.Cleanup(srv.Close)
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/projects/p1/branches", "")
+
+	assertJSON(t, headers)
+
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+
+}
+
 func TestProjectsAPI_AddValidationAndConflicts(t *testing.T) {
 
 	srv := newTestServer(t)

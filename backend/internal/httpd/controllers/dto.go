@@ -101,6 +101,11 @@ func newGetProjectResponse(res projectsvc.GetResult) (GetProjectResponse, error)
 	}, nil
 }
 
+// ProjectBranchesResponse is the body of GET /api/v1/projects/{id}/branches.
+type ProjectBranchesResponse struct {
+	Branches []string `json:"branches"`
+}
+
 // SessionIDParam is the {sessionId} path parameter shared by session routes.
 type SessionIDParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`

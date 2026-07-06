@@ -556,6 +556,68 @@ func TestManager_AddPopulatesRepoOriginURL(t *testing.T) {
 	}
 }
 
+// contains reports whether s contains needle.
+func contains(s []string, needle string) bool {
+	for _, v := range s {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func TestListBranches(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepo(t)
+	run := func(args ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "test")
+	run("commit", "--allow-empty", "-m", "init")
+	run("branch", "feature/x")
+	// Fabricate a remote-tracking branch plus origin/HEAD (no real remote), to
+	// exercise the refs/remotes/origin half of the ref spec and confirm
+	// origin/HEAD is dropped from the result.
+	run("update-ref", "refs/remotes/origin/main", "HEAD")
+	run("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("branchy")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	got, err := m.ListBranches(ctx, "branchy")
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	if !contains(got, "main") || !contains(got, "feature/x") {
+		t.Fatalf("branches = %v", got)
+	}
+	if contains(got, "origin/HEAD") {
+		t.Fatalf("branches = %v, want origin/HEAD dropped", got)
+	}
+	// git's for-each-ref shortens refs/remotes/origin/HEAD to the bare "origin"
+	// (not "origin/HEAD"); the bogus "origin" entry must not leak through either.
+	if contains(got, "origin") {
+		t.Fatalf("branches = %v, want bare \"origin\" (shortened origin/HEAD) dropped", got)
+	}
+	if !contains(got, "origin/main") {
+		t.Fatalf("branches = %v, want origin/main present", got)
+	}
+
+	// Unknown/unregistered project degrades gracefully: empty, no error.
+	got, err = m.ListBranches(ctx, "ghost")
+	if err != nil {
+		t.Fatalf("ListBranches(ghost): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListBranches(ghost) = %v, want empty", got)
+	}
+}
+
 func TestManager_GetUpdateRemoveErrors(t *testing.T) {
 	ctx := context.Background()
 	m := newManager(t)
