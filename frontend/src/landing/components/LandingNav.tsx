@@ -76,7 +76,14 @@ const navLinks = [
 function getPlatformLabel() {
 	if (typeof navigator === "undefined") return "Install AO";
 
+	const isSmallViewport = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 	const platform = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
+	const isPortableDevice =
+		isSmallViewport ||
+		/android|iphone|ipad|ipod|mobile|tablet/.test(platform) ||
+		(platform.includes("mac") && navigator.maxTouchPoints > 1);
+
+	if (isPortableDevice) return "Setup guide";
 	if (platform.includes("mac")) return "Install for macOS";
 	if (platform.includes("win")) return "Install for Windows";
 	if (platform.includes("linux") || platform.includes("x11")) return "Install for Linux";
@@ -85,12 +92,16 @@ function getPlatformLabel() {
 
 export function LandingNav() {
 	const [open, setOpen] = useState(false);
-	const [installLabel, setInstallLabel] = useState(getPlatformLabel);
+	const [installLabel, setInstallLabel] = useState("Install AO");
 	const navRef = useRef<HTMLDivElement>(null);
 	const innerRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
-		setInstallLabel(getPlatformLabel());
+		const updatePlatformLabel = () => setInstallLabel(getPlatformLabel());
+
+		updatePlatformLabel();
+		window.addEventListener("resize", updatePlatformLabel);
+		return () => window.removeEventListener("resize", updatePlatformLabel);
 	}, []);
 
 	useGSAP(() => {

@@ -13,7 +13,7 @@ export function LandingVideo() {
 		<section
 			id="see-it"
 			data-testid="video-section"
-			className="landing-reveal relative border-t border-white/[0.04] pt-[clamp(56px,7vw,96px)] pb-[clamp(48px,6vw,72px)]"
+			className="landing-reveal relative border-t border-white/[0.04] pt-16 pb-8 sm:pt-[clamp(56px,7vw,96px)] sm:pb-[clamp(48px,6vw,72px)]"
 		>
 			<div className="container-page">
 				<div className="landing-section-header mx-auto max-w-[1180px] text-left">

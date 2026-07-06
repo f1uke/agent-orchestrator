@@ -473,8 +473,8 @@ export function LandingFeaturesScroll() {
 			</div>
 
 			{/* Mobile / tablet: simple stacked list, each with its own scaled mockup. */}
-			<div className="container-page pt-14 pb-20 lg:hidden">
-				<div className="gsap-reveal mx-auto mt-20 flex max-w-[1200px] items-center gap-4 px-1 text-left">
+			<div className="container-page pt-8 pb-16 lg:hidden">
+				<div className="gsap-reveal mx-auto flex max-w-[1200px] items-center gap-4 px-1 text-left">
 					<div className="h-px flex-1 bg-gradient-to-r from-transparent via-[color:var(--border-strong)] to-[color:var(--border-strong)]" />
 					<div className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.18em] text-[color:var(--fg-dim)]">
 						FEATURES

@@ -42,7 +42,7 @@ function GithubIcon({ className = "" }: { className?: string }) {
 export function LandingFooter() {
 	return (
 		<footer data-testid="footer" className="landing-reveal border-t border-[color:var(--border)] bg-[color:var(--bg)]">
-			<div className="container-page py-24">
+			<div className="container-page py-12 sm:py-24">
 				<div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
 					<div className="max-w-md">
 						<a href="/" className="inline-flex items-center gap-3">

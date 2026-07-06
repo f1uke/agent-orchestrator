@@ -161,11 +161,11 @@ export function LandingSocialProof() {
 			ref={containerRef}
 			id="testimonials"
 			data-testid="social-proof"
-			className="landing-section relative overflow-hidden border-t border-[color:var(--border)]"
+			className="relative overflow-hidden border-t border-[color:var(--border)] pt-16 pb-8 sm:pt-[clamp(100px,12vw,180px)] sm:pb-[clamp(100px,12vw,180px)]"
 		>
 			<div className="container-page">
 				<div className="mx-auto max-w-[1320px]">
-					<div className="landing-section-header grid items-end gap-8 lg:grid-cols-12">
+					<div className="mb-8 grid items-end gap-8 sm:mb-[clamp(64px,8vw,100px)] lg:grid-cols-12">
 						<div className="lg:col-span-7">
 							<div className="landing-eyebrow mb-4">In the wild</div>
 							<h2 className="landing-heading">
@@ -173,7 +173,7 @@ export function LandingSocialProof() {
 							</h2>
 						</div>
 						<div className="lg:col-span-5">
-							<p className="landing-body-compact pb-17">
+							<p className="landing-body-compact pb-0 sm:pb-17">
 								Real posts from builders, researchers, and early users - pulled straight from X.
 							</p>
 						</div>
