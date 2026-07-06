@@ -33,25 +33,27 @@
 
 - [ ] **Step 1: Write the failing test** in `claudecode_test.go`
 
+Note: the provider type is `*Plugin`; existing tests construct it as `&Plugin{resolvedBinary: "claude"}` so `claudeBinary(ctx)` returns the cached `"claude"` without env resolution (no skip needed). `ports` is already imported in this test file.
+
 ```go
 func TestOneShotArgv(t *testing.T) {
-	p := New() // same constructor existing tests use
-	var namer ports.OneShotNamer = p // must satisfy the interface at compile time
+	p := &Plugin{resolvedBinary: "claude"}
+	var namer ports.OneShotNamer = p // compile-time proof the interface is satisfied
 	argv, ok, err := namer.OneShotArgv(context.Background(), "name this branch")
 	if err != nil {
-		t.Skipf("claude binary not resolvable in this env: %v", err) // env-dependent; shape-only assert
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !ok {
 		t.Fatal("claude-code must support one-shot naming")
 	}
-	if len(argv) < 4 {
-		t.Fatalf("argv too short: %v", argv)
+	if len(argv) != 5 {
+		t.Fatalf("want 5-element argv, got %v", argv)
 	}
-	if argv[len(argv)-3] != "-p" || argv[len(argv)-2] != "name this branch" {
-		t.Fatalf("argv must end with -p <prompt> --output-format text: %v", argv)
+	if argv[0] != "claude" {
+		t.Fatalf("argv[0] must be the resolved binary, got %q", argv[0])
 	}
-	if argv[len(argv)-1] != "text" {
-		t.Fatalf("argv must set --output-format text: %v", argv)
+	if argv[1] != "-p" || argv[2] != "name this branch" || argv[3] != "--output-format" || argv[4] != "text" {
+		t.Fatalf("argv must be [binary -p <prompt> --output-format text], got %v", argv)
 	}
 }
 ```
@@ -81,7 +83,7 @@ Ensure `context` is imported in `agent.go`.
 ```go
 // OneShotArgv runs a single prompt non-interactively via `claude -p`. Used by the
 // session manager to generate a branch name at spawn; failure is non-fatal there.
-func (p *Provider) OneShotArgv(ctx context.Context, prompt string) ([]string, bool, error) {
+func (p *Plugin) OneShotArgv(ctx context.Context, prompt string) ([]string, bool, error) {
 	binary, err := p.claudeBinary(ctx) // existing cached resolver (ResolveClaudeBinary)
 	if err != nil {
 		return nil, false, err
@@ -89,8 +91,6 @@ func (p *Provider) OneShotArgv(ctx context.Context, prompt string) ([]string, bo
 	return []string{binary, "-p", prompt, "--output-format", "text"}, true, nil
 }
 ```
-
-(If the provider type is not named `Provider`, match the existing receiver used by `GetLaunchCommand` in this file.)
 
 - [ ] **Step 5: Run test to verify it passes**
 
