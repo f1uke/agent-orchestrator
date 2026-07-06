@@ -294,7 +294,11 @@ func SessionName(id string) string {
 	return sanitizedSessionName(id)
 }
 
-func sanitizedSessionName(raw string) string {
+// sanitizeName collapses raw into tmux's safe charset ([A-Za-z0-9_-]): every
+// other run of characters (including "." and ":", which tmux treats as target
+// syntax) becomes a single dash. Dashes are trimmed, an empty result becomes
+// "session", and the result is capped at maxLen.
+func sanitizeName(raw string, maxLen int) string {
 	var b strings.Builder
 	lastDash := false
 	for _, r := range raw {
@@ -313,11 +317,41 @@ func sanitizedSessionName(raw string) string {
 	if base == "" {
 		base = "session"
 	}
-	if len(base) > 32 {
-		base = strings.TrimRight(base[:32], "-")
+	if len(base) > maxLen {
+		base = strings.TrimRight(base[:maxLen], "-")
 	}
+	return base
+}
+
+func sanitizedSessionName(raw string) string {
+	base := sanitizeName(raw, 32)
 	sum := sha256.Sum256([]byte(raw))
 	return base + "-" + hex.EncodeToString(sum[:4])
+}
+
+// branchNameMaxLen caps a branch-mirroring tmux name. It is looser than the 32
+// used for hashed ids because these names carry no hash suffix and readability
+// (the whole branch) is the point.
+const branchNameMaxLen = 64
+
+// branchSessionName mirrors a session's branch into a tmux session name: the
+// project id joined to the branch, sanitized and flattened with dashes. tmux's
+// namespace is flat and global, so the project id prefix keeps names unique
+// across projects (a branch is unique within a project).
+func branchSessionName(projectID, branch string) string {
+	return sanitizeName(projectID+"/"+branch, branchNameMaxLen)
+}
+
+// SessionNameFor returns the tmux session name for a session. A session with a
+// branch (worker or orchestrator) gets a branch-mirroring name so `tmux ls`
+// lines up with the branch and its worktree directory. A session without a
+// branch (e.g. the reviewer pane, which uses a synthetic id) falls back to
+// session-id naming, which also carries the empty-id guard.
+func SessionNameFor(projectID, branch, sessionID string) (string, error) {
+	if projectID != "" && branch != "" {
+		return branchSessionName(projectID, branch), nil
+	}
+	return tmuxSessionName(domain.SessionID(sessionID))
 }
 
 func handleID(handle ports.RuntimeHandle) (string, error) {

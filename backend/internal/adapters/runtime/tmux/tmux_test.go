@@ -137,6 +137,60 @@ func TestSessionNameMatchesCreateNaming(t *testing.T) {
 	}
 }
 
+func TestSessionNameForMirrorsBranch(t *testing.T) {
+	cases := []struct {
+		name      string
+		projectID string
+		branch    string
+		sessionID string
+		want      string
+	}{
+		{"gitflow branch", "mer", "feature/STAR-2271-x", "mer-1", "mer-feature-STAR-2271-x"},
+		{"default ao branch", "mer", "ao/mer-1/root", "mer-1", "mer-ao-mer-1-root"},
+		{"orchestrator branch", "mer", "ao/mer12-orchestrator", "mer-1", "mer-ao-mer12-orchestrator"},
+		{"unsafe chars collapse to dashes", "mer", "feature/foo bar@baz.1", "mer-1", "mer-feature-foo-bar-baz-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SessionNameFor(tc.projectID, tc.branch, tc.sessionID)
+			if err != nil {
+				t.Fatalf("SessionNameFor: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("SessionNameFor = %q, want %q", got, tc.want)
+			}
+			if !sessionIDPattern.MatchString(got) {
+				t.Fatalf("name %q fails tmux-safe pattern", got)
+			}
+		})
+	}
+}
+
+func TestSessionNameForFallsBackToSessionID(t *testing.T) {
+	// No branch: fall back to session-id naming (short conforming id passes through).
+	got, err := SessionNameFor("mer", "", "mer-1")
+	if err != nil {
+		t.Fatalf("SessionNameFor: %v", err)
+	}
+	if got != "mer-1" {
+		t.Fatalf("SessionNameFor = %q, want mer-1 fallback", got)
+	}
+	// Missing project id also falls back.
+	got, err = SessionNameFor("", "feature/x", "mer-1")
+	if err != nil {
+		t.Fatalf("SessionNameFor: %v", err)
+	}
+	if got != "mer-1" {
+		t.Fatalf("SessionNameFor = %q, want mer-1 fallback", got)
+	}
+}
+
+func TestSessionNameForRejectsEmpty(t *testing.T) {
+	if _, err := SessionNameFor("", "", ""); err == nil {
+		t.Fatal("SessionNameFor with no branch and empty session id: want error, got nil")
+	}
+}
+
 // -- env key validation --
 
 func TestCreateRejectsInvalidEnvKeys(t *testing.T) {
