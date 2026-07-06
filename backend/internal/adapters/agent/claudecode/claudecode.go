@@ -286,6 +286,16 @@ func (p *Plugin) AuthStatus(ctx context.Context) (ports.AgentAuthStatus, error) 
 	return ports.AgentAuthStatusUnknown, nil
 }
 
+// OneShotArgv runs a single prompt non-interactively via `claude -p`. Used by the
+// session manager to generate a branch name at spawn; failure is non-fatal there.
+func (p *Plugin) OneShotArgv(ctx context.Context, prompt string) ([]string, bool, error) {
+	binary, err := p.claudeBinary(ctx) // existing cached resolver (ResolveClaudeBinary)
+	if err != nil {
+		return nil, false, err
+	}
+	return []string{binary, "-p", prompt, "--output-format", "text"}, true, nil
+}
+
 func claudeAuthStatusFromOutput(out []byte) (ports.AgentAuthStatus, bool) {
 	start := bytes.IndexByte(out, '{')
 	end := bytes.LastIndexByte(out, '}')

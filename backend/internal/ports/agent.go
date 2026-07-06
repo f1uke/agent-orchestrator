@@ -64,6 +64,15 @@ type AgentAuthChecker interface {
 	AuthStatus(ctx context.Context) (AgentAuthStatus, error)
 }
 
+// OneShotNamer is implemented by agent adapters that can answer a single
+// non-interactive prompt (e.g. `claude -p`). Adapters that only run
+// interactive sessions do not implement it; callers must handle ok == false.
+type OneShotNamer interface {
+	// OneShotArgv returns the argv to run the given prompt non-interactively.
+	// ok == false means this harness has no one-shot mode (caller falls back).
+	OneShotArgv(ctx context.Context, prompt string) (argv []string, ok bool, err error)
+}
+
 // AgentBinaryResolver is the optional capability adapters expose when their
 // binary can be checked without constructing a real session launch command.
 type AgentBinaryResolver interface {

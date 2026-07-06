@@ -704,6 +704,27 @@ func TestGetLaunchCommandOmitsToolFlagsWhenUnset(t *testing.T) {
 	}
 }
 
+func TestOneShotArgv(t *testing.T) {
+	p := &Plugin{resolvedBinary: "claude"}
+	var namer ports.OneShotNamer = p // compile-time proof the interface is satisfied
+	argv, ok, err := namer.OneShotArgv(context.Background(), "name this branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("claude-code must support one-shot naming")
+	}
+	if len(argv) != 5 {
+		t.Fatalf("want 5-element argv, got %v", argv)
+	}
+	if argv[0] != "claude" {
+		t.Fatalf("argv[0] must be the resolved binary, got %q", argv[0])
+	}
+	if argv[1] != "-p" || argv[2] != "name this branch" || argv[3] != "--output-format" || argv[4] != "text" {
+		t.Fatalf("argv must be [binary -p <prompt> --output-format text], got %v", argv)
+	}
+}
+
 func contains(values []string, needle string) bool {
 	for _, v := range values {
 		if v == needle {
