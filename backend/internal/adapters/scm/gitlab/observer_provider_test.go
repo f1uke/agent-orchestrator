@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,6 +27,49 @@ func newTestProvider(t *testing.T, apiBase string) *Provider {
 		t.Fatalf("NewProvider: %v", err)
 	}
 	return p
+}
+
+// TestApprovalDecision locks in the new no-rule-defers-to-AO semantics:
+// approvalDecision only ever says "approved" when GitLab itself enforces an
+// approval rule; otherwise it returns "" and leaves the call to AO's
+// per-project MinApprovals threshold (via ApprovalsCount).
+func TestApprovalDecision(t *testing.T) {
+	approver := func(n int) []struct {
+		User struct {
+			Username string `json:"username"`
+		} `json:"user"`
+	} {
+		out := make([]struct {
+			User struct {
+				Username string `json:"username"`
+			} `json:"user"`
+		}, n)
+		for i := range out {
+			out[i].User.Username = "u" + strconv.Itoa(i)
+		}
+		return out
+	}
+
+	// No rule → always "" regardless of count (threshold decides later).
+	noRule := restApprovals{ApprovalsLeft: 0, ApprovalsRequired: 0, HasApprovalRules: false, ApprovedBy: approver(3)}
+	if got := approvalDecision(noRule); got != "" {
+		t.Fatalf("no-rule: got %q, want \"\"", got)
+	}
+	if got := approvalRuleConfigured(noRule); got {
+		t.Fatalf("no-rule: ruleConfigured got true, want false")
+	}
+
+	// Rule present and satisfied → "approved" (unchanged behaviour).
+	satisfied := restApprovals{ApprovalsLeft: 0, ApprovalsRequired: 2, HasApprovalRules: true, ApprovedBy: approver(2)}
+	if got := approvalDecision(satisfied); got != "approved" {
+		t.Fatalf("rule satisfied: got %q, want approved", got)
+	}
+
+	// Rule present, unsatisfied → "".
+	pending := restApprovals{ApprovalsLeft: 1, ApprovalsRequired: 2, HasApprovalRules: true, ApprovedBy: approver(1)}
+	if got := approvalDecision(pending); got != "" {
+		t.Fatalf("rule pending: got %q, want \"\"", got)
+	}
 }
 
 func TestListOpenPRsByRepo(t *testing.T) {

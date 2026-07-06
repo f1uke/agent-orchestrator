@@ -25,8 +25,18 @@ func TestFetchReviewThreads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchReviewThreads: %v", err)
 	}
-	if rev.Decision != "approved" {
-		t.Fatalf("decision=%q want approved", rev.Decision)
+	// This fixture carries no approval-rule fields (approvals_required=0,
+	// has_approval_rules=false), so per the new no-rule-defers-to-AO
+	// semantics, Decision is "" and AO's per-project MinApprovals threshold
+	// is expected to decide from ApprovalsCount instead.
+	if rev.Decision != "" {
+		t.Fatalf("decision=%q want \"\" (no approval rule configured)", rev.Decision)
+	}
+	if rev.ApprovalsCount != 1 {
+		t.Fatalf("ApprovalsCount=%d want 1", rev.ApprovalsCount)
+	}
+	if rev.ApprovalRuleConfigured {
+		t.Fatalf("ApprovalRuleConfigured=true want false (fixture has no rule fields)")
 	}
 	if len(rev.Threads) != 1 || rev.Threads[0].Path != "main.go" || rev.Threads[0].Line != 42 {
 		t.Fatalf("threads wrong: %+v", rev.Threads)

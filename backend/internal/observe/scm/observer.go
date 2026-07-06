@@ -965,6 +965,12 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 	if opts.reviewFetched || reviewObservedAt.IsZero() {
 		reviewObservedAt = obs.ObservedAt
 	}
+	approvalsCount := local.ApprovalsCount
+	approvalRuleConfigured := local.ApprovalRuleConfigured
+	if opts.reviewFetched && !opts.preserveLocalReviewDecision {
+		approvalsCount = obs.Review.ApprovalsCount
+		approvalRuleConfigured = obs.Review.ApprovalRuleConfigured
+	}
 	pr := domain.PullRequest{
 		URL:                      firstNonEmpty(obs.PR.URL, obs.PR.HTMLURL),
 		SessionID:                sessionID,
@@ -974,6 +980,8 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 		Closed:                   obs.PR.Closed,
 		CI:                       domain.CIState(firstNonEmpty(obs.CI.Summary, string(domain.CIUnknown))),
 		Review:                   reviewDecision,
+		ApprovalsCount:           approvalsCount,
+		ApprovalRuleConfigured:   approvalRuleConfigured,
 		Mergeability:             domain.Mergeability(firstNonEmpty(obs.Mergeability.State, string(domain.MergeUnknown))),
 		UpdatedAt:                now,
 		Provider:                 obs.Provider,
@@ -1213,12 +1221,21 @@ func ciSemanticHash(ci ports.SCMCIObservation) string {
 
 func reviewSemanticHash(review ports.SCMReviewObservation) string {
 	type reviewHashPayload struct {
-		Decision string
-		Reviews  []ports.SCMReviewSummaryObservation
-		Threads  []ports.SCMReviewThreadObservation
-		Partial  bool `json:",omitempty"`
+		Decision               string
+		ApprovalsCount         int
+		ApprovalRuleConfigured bool
+		Reviews                []ports.SCMReviewSummaryObservation
+		Threads                []ports.SCMReviewThreadObservation
+		Partial                bool `json:",omitempty"`
 	}
-	return stableHash(reviewHashPayload{Decision: review.Decision, Reviews: review.Reviews, Threads: review.Threads, Partial: review.Partial})
+	return stableHash(reviewHashPayload{
+		Decision:               review.Decision,
+		ApprovalsCount:         review.ApprovalsCount,
+		ApprovalRuleConfigured: review.ApprovalRuleConfigured,
+		Reviews:                review.Reviews,
+		Threads:                review.Threads,
+		Partial:                review.Partial,
+	})
 }
 
 func threadSemanticHash(th ports.SCMReviewThreadObservation) string {
