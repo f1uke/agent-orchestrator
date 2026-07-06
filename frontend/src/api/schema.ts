@@ -990,7 +990,7 @@ export interface components {
             assignee?: string;
             enabled?: boolean;
             /** @enum {string} */
-            provider?: "github";
+            provider?: "github" | "gitlab";
             repo?: string;
         };
         TriggerReviewResponse: {

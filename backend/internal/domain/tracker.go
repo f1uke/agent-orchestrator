@@ -8,8 +8,9 @@ import (
 // TrackerProvider identifies an issue-tracker provider implementation.
 type TrackerProvider string
 
-// TrackerProviderGitHub is the only supported issue-tracker provider.
+// TrackerProviderGitHub and TrackerProviderGitLab are the supported issue-tracker providers.
 const TrackerProviderGitHub TrackerProvider = "github"
+const TrackerProviderGitLab TrackerProvider = "gitlab"
 
 // TrackerID identifies one issue. Native is the provider's own canonical form
 // ("owner/repo#123" for GitHub) and is parsed by the adapter.
@@ -84,7 +85,7 @@ type ListFilter struct {
 type TrackerIntakeConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
 	// Provider defaults to github when Enabled is true.
-	Provider TrackerProvider `json:"provider,omitempty" enum:"github"`
+	Provider TrackerProvider `json:"provider,omitempty" enum:"github,gitlab"`
 	// Repo is the GitHub-native repository key ("owner/repo"). When empty, the
 	// intake loop derives it from the project's repo origin URL. GitHub only.
 	Repo string `json:"repo,omitempty"`
@@ -108,7 +109,7 @@ func (c TrackerIntakeConfig) Validate() error {
 		return nil
 	}
 	c = c.WithDefaults()
-	if c.Enabled && c.Provider != TrackerProviderGitHub {
+	if c.Enabled && c.Provider != TrackerProviderGitHub && c.Provider != TrackerProviderGitLab {
 		return fmt.Errorf("trackerIntake.provider: unsupported provider %q", c.Provider)
 	}
 	if err := validateNoWhitespaceField("trackerIntake.repo", c.Repo); err != nil {
