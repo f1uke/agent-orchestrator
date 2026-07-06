@@ -322,6 +322,8 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	}
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
 		SessionID:     id,
+		ProjectID:     cfg.ProjectID,
+		Branch:        ws.Branch,
 		WorkspacePath: ws.Path,
 		Argv:          argv,
 		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, project.Config.Env),
@@ -628,6 +630,8 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	}
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
 		SessionID:     id,
+		ProjectID:     rec.ProjectID,
+		Branch:        ws.Branch,
 		WorkspacePath: ws.Path,
 		Argv:          argv,
 		Env:           m.runtimeEnv(id, rec.ProjectID, rec.IssueID, project.Config.Env),

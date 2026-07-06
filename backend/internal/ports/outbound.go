@@ -89,6 +89,8 @@ type Runtime interface {
 // (e.g. a prompt) without the caller guessing the target shell's quoting.
 type RuntimeConfig struct {
 	SessionID     domain.SessionID
+	ProjectID     domain.ProjectID
+	Branch        string
 	WorkspacePath string
 	Argv          []string
 	Env           map[string]string

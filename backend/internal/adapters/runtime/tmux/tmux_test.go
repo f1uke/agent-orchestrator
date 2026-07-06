@@ -264,6 +264,28 @@ func TestCreateIssuesNewSessionAndStatusOff(t *testing.T) {
 	}
 }
 
+func TestCreateNamesSessionAfterBranch(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{nil, nil, nil, nil}
+
+	h, err := r.Create(context.Background(), ports.RuntimeConfig{
+		SessionID:     "mer-1",
+		ProjectID:     "mer",
+		Branch:        "feature/STAR-2271-x",
+		WorkspacePath: "/tmp/ws",
+		Argv:          []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if h.ID != "mer-feature-STAR-2271-x" {
+		t.Fatalf("handle ID = %q, want mer-feature-STAR-2271-x", h.ID)
+	}
+	if joined := strings.Join(fr.calls[0].args, " "); !strings.Contains(joined, "-s mer-feature-STAR-2271-x") {
+		t.Fatalf("new-session args missing branch-based -s: %v", fr.calls[0].args)
+	}
+}
+
 func TestCreateLaunchCommandContainsKeepAliveShell(t *testing.T) {
 	r, fr := newTestRuntime(0)
 	fr.outputs = [][]byte{nil, nil, nil}

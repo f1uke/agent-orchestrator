@@ -431,6 +431,19 @@ func TestSpawn_UsesBaseBranch(t *testing.T) {
 	}
 }
 
+func TestSpawnPassesProjectAndBranchToRuntime(t *testing.T) {
+	m, _, rt, _ := newManager()
+	if _, err := m.Spawn(context.Background(), ports.SpawnConfig{ProjectID: "proj", Kind: domain.KindWorker, Branch: "feature/x", Harness: domain.HarnessClaudeCode}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if rt.lastCfg.ProjectID != "proj" {
+		t.Fatalf("runtime ProjectID = %q, want proj", rt.lastCfg.ProjectID)
+	}
+	if rt.lastCfg.Branch != "feature/x" {
+		t.Fatalf("runtime Branch = %q, want feature/x", rt.lastCfg.Branch)
+	}
+}
+
 func TestSpawn_RejectsMissingRoleHarness(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
