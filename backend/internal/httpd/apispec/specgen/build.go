@@ -71,6 +71,8 @@ func Build() ([]byte, error) {
 			"Server-sent CDC event stream with durable replay"),
 		*(&openapi31.Tag{Name: "import"}).WithDescription(
 			"Legacy AO project import (availability probe and run)"),
+		*(&openapi31.Tag{Name: "settings"}).WithDescription(
+			"User-editable daemon settings (auto-reclaim, etc.)"),
 	}
 
 	for _, op := range operations() {
@@ -150,6 +152,8 @@ var schemaNames = map[string]string{
 	"ControllersRenameSessionRequest":             "RenameSessionRequest",
 	"ControllersRenameSessionResponse":            "RenameSessionResponse",
 	"ControllersRestoreSessionResponse":           "RestoreSessionResponse",
+	"ControllersDeleteSessionQuery":               "DeleteSessionQuery",
+	"ControllersDeleteSessionResponse":            "DeleteSessionResponse",
 	"ControllersCleanupSessionsResponse":          "CleanupSessionsResponse",
 	"ControllersCleanupSkippedSession":            "CleanupSkippedSession",
 	"ControllersKillSessionResponse":              "KillSessionResponse",
@@ -201,6 +205,9 @@ var schemaNames = map[string]string{
 	// httpd/controllers: import wire envelopes
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
+	// httpd/controllers: settings wire envelopes
+	"ControllersReclaimSettingsResponse":   "ReclaimSettingsResponse",
+	"ControllersSetReclaimSettingsRequest": "SetReclaimSettingsRequest",
 	// legacyimport report
 	"LegacyimportReport": "ImportReport",
 	// service/project entities + DTOs
@@ -288,6 +295,7 @@ func operations() []operation {
 	ops = append(ops, agentOperations()...)
 	ops = append(ops, projectOperations()...)
 	ops = append(ops, sessionOperations()...)
+	ops = append(ops, settingsOperations()...)
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, notificationOperations()...)
@@ -561,6 +569,17 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}", id: "deleteSession", tag: "sessions",
+			summary:    "Permanently delete a finished session (keeps the git branch)",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.DeleteSessionQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.DeleteSessionResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/preview", id: "getSessionPreview", tag: "sessions",
 			summary:    "Discover a browser preview URL for a session workspace",
 			pathParams: []any{controllers.SessionIDParam{}},
@@ -744,6 +763,32 @@ func sessionOperations() []operation {
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
+// settingsOperations declares the user-editable daemon settings surface (just
+// auto-reclaim for now). Both routes are backed by controllers.SettingsService
+// (satisfied by *reclaimsettings.Store).
+func settingsOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/settings/reclaim", id: "getReclaimSettings", tag: "settings",
+			summary: "Fetch the auto-reclaim settings",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReclaimSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/reclaim", id: "setReclaimSettings", tag: "settings",
+			summary: "Replace the auto-reclaim settings",
+			reqBody: controllers.SetReclaimSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReclaimSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
 			},
 		},
 	}

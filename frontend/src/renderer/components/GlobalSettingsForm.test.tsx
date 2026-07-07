@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GlobalSettingsForm } from "./GlobalSettingsForm";
@@ -7,6 +7,7 @@ import { GlobalSettingsForm } from "./GlobalSettingsForm";
 const {
 	getMock,
 	postMock,
+	putMock,
 	getMigration,
 	setMigration,
 	getUpdate,
@@ -20,6 +21,7 @@ const {
 } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	postMock: vi.fn(),
+	putMock: vi.fn(),
 	getMigration: vi.fn(),
 	setMigration: vi.fn(),
 	getUpdate: vi.fn(),
@@ -33,7 +35,7 @@ const {
 }));
 
 vi.mock("../lib/api-client", () => ({
-	apiClient: { GET: getMock, POST: postMock },
+	apiClient: { GET: getMock, POST: postMock, PUT: putMock },
 	apiErrorMessage: (e: unknown, fb = "Request failed") =>
 		e instanceof Error ? e.message : ((e as { message?: string })?.message ?? fb),
 }));
@@ -62,11 +64,23 @@ function renderForm() {
 	return qc;
 }
 
+const reclaimGetPayload = { data: { enabled: true, graceMinutes: 15 }, error: undefined };
+
+// GlobalSettingsForm now composes AutoReclaimSection alongside MigrationSection,
+// and both hit apiClient.GET on different paths ("/api/v1/settings/reclaim" vs
+// "/api/v1/import"). getMock has to branch on the requested path instead of
+// returning one shared payload, or AutoReclaimSection silently receives the
+// migration payload cast as reclaim settings.
+function mockGetByPath(importPayload: unknown) {
+	getMock.mockImplementation(async (path: string) => (path === "/api/v1/settings/reclaim" ? reclaimGetPayload : importPayload));
+}
+
 beforeEach(() => {
-	for (const m of [getMock, postMock, getMigration, setMigration, getUpdate, setUpdate]) m.mockReset();
+	for (const m of [getMock, postMock, putMock, getMigration, setMigration, getUpdate, setUpdate]) m.mockReset();
 	getMigration.mockResolvedValue({ status: "pending" });
-	getMock.mockResolvedValue({ data: { available: true, legacyRoot: "/home/u/.agent-orchestrator" }, error: undefined });
+	mockGetByPath({ data: { available: true, legacyRoot: "/home/u/.agent-orchestrator" }, error: undefined });
 	postMock.mockResolvedValue({ data: { report: { projectsImported: 2, projectsSkipped: 1 } }, error: undefined });
+	putMock.mockResolvedValue(reclaimGetPayload);
 	setMigration.mockResolvedValue(undefined);
 	getUpdate.mockResolvedValue({ enabled: true, channel: "latest", nightlyAck: false });
 	setUpdate.mockResolvedValue(undefined);
@@ -89,7 +103,10 @@ describe("GlobalSettingsForm", () => {
 		getUpdate.mockResolvedValue({ enabled: true, channel: "nightly", nightlyAck: true });
 		renderForm();
 		expect(await screen.findByText(/Nightly builds are cut every day/i)).toBeInTheDocument();
-		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		// Scope to the Updates card: AutoReclaimSection has its own "Save changes"
+		// button now that both cards are mounted together.
+		const updatesCard = screen.getByText("Updates").closest('[data-slot="card"]') as HTMLElement;
+		await userEvent.click(within(updatesCard).getByRole("button", { name: "Save changes" }));
 		await waitFor(() =>
 			expect(setUpdate).toHaveBeenCalledWith(expect.objectContaining({ channel: "nightly", enabled: true })),
 		);
@@ -127,7 +144,7 @@ describe("GlobalSettingsForm", () => {
 	});
 
 	it("disables Run when no legacy install is available", async () => {
-		getMock.mockResolvedValue({ data: { available: false, legacyRoot: "" }, error: undefined });
+		mockGetByPath({ data: { available: false, legacyRoot: "" }, error: undefined });
 		renderForm();
 		expect(await screen.findByText("None found")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Run migration" })).toBeDisabled();

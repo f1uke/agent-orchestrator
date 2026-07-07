@@ -50,6 +50,7 @@ type commander interface {
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error)
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (deleted, killed bool, err error)
+	PurgeSession(ctx context.Context, id domain.SessionID, force bool) error
 }
 
 // RollbackOutcome reports what happened in a rollback: either the seed row was
@@ -406,6 +407,61 @@ func (s *Service) RollbackSpawn(ctx context.Context, id domain.SessionID) (Rollb
 	return RollbackOutcome{Deleted: deleted, Killed: killed}, nil
 }
 
+// Reclaim tears a finished session down (tmux + worktree) while keeping its
+// branch, so it stays restorable. It reuses Kill's teardown; the auto-reclaim
+// loop is the caller that distinguishes this from a user-initiated kill.
+func (s *Service) Reclaim(ctx context.Context, id domain.SessionID) error {
+	_, err := s.manager.Kill(ctx, id)
+	return toAPIError(err)
+}
+
+// ListReclaimable returns worker sessions whose display status is merged or
+// terminated AND that still hold a runtime handle or worktree — i.e. sessions
+// with resources left to reclaim. Already-torn-down sessions are excluded.
+func (s *Service) ListReclaimable(ctx context.Context) ([]domain.SessionID, error) {
+	recs, err := s.store.ListAllSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.SessionID, 0, len(recs))
+	for _, rec := range recs {
+		if rec.Kind == domain.KindOrchestrator {
+			continue
+		}
+		if rec.Metadata.RuntimeHandleID == "" && rec.Metadata.WorkspacePath == "" {
+			continue
+		}
+		sess, err := s.toSession(ctx, rec)
+		if err != nil {
+			continue // a single unreadable row must not sink the pass
+		}
+		if sess.Status == domain.StatusMerged || sess.Status == domain.StatusTerminated {
+			out = append(out, rec.ID)
+		}
+	}
+	return out, nil
+}
+
+// Delete permanently removes a finished (merged or terminated) session from AO,
+// keeping its git branch. A dirty worktree is refused unless force is set.
+func (s *Service) Delete(ctx context.Context, id domain.SessionID, force bool) error {
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil {
+		return toAPIError(err)
+	}
+	if !ok {
+		return toAPIError(sessionmanager.ErrNotFound)
+	}
+	sess, err := s.toSession(ctx, rec)
+	if err != nil {
+		return err
+	}
+	if sess.Status != domain.StatusMerged && sess.Status != domain.StatusTerminated {
+		return toAPIError(sessionmanager.ErrNotTerminal)
+	}
+	return toAPIError(s.manager.PurgeSession(ctx, id, force))
+}
+
 // Send delegates agent messaging to the internal manager.
 func (s *Service) Send(ctx context.Context, id domain.SessionID, message string) error {
 	return toAPIError(s.manager.Send(ctx, id, message))
@@ -575,6 +631,10 @@ func toAPIError(err error) error {
 		return apierr.Invalid("AGENT_BINARY_NOT_FOUND", err.Error(), nil)
 	case errors.Is(err, ports.ErrRuntimePrerequisite):
 		return apierr.Invalid("RUNTIME_PREREQUISITE_MISSING", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrNotTerminal):
+		return apierr.Conflict("SESSION_NOT_TERMINAL", "Session is not finished (merged or terminated)", nil)
+	case errors.Is(err, ports.ErrWorkspaceDirty):
+		return apierr.Conflict("SESSION_WORKSPACE_DIRTY", "Session worktree has uncommitted changes; delete with force to discard them", nil)
 	default:
 		return err
 	}

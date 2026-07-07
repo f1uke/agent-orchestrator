@@ -31,6 +31,10 @@ type fakeSessionService struct {
 	spawnErr        error
 	claimErr        error
 	listPRErr       error
+	deleteCalled    bool
+	deleteID        domain.SessionID
+	deleteForce     bool
+	deleteErr       error
 }
 
 func newFakeSessionService() *fakeSessionService {
@@ -148,6 +152,17 @@ func (f *fakeSessionService) Rename(_ context.Context, id domain.SessionID, disp
 
 func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message string) error {
 	f.sent = message
+	return nil
+}
+
+func (f *fakeSessionService) Delete(_ context.Context, id domain.SessionID, force bool) error {
+	f.deleteCalled = true
+	f.deleteID = id
+	f.deleteForce = force
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	delete(f.sessions, id)
 	return nil
 }
 
@@ -816,6 +831,56 @@ func TestSessionsAPI_CleanupWithoutProjectFilter(t *testing.T) {
 	}
 	if len(svc.cleanupProjects) != 1 || svc.cleanupProjects[0] != "" {
 		t.Fatalf("cleanupProjects = %#v, want empty project filter", svc.cleanupProjects)
+	}
+}
+
+func TestDeleteSession_CallsServiceAndReturnsOK(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/ao-1?force=true", "")
+	if status != http.StatusOK {
+		t.Fatalf("delete = %d, want 200; body=%s", status, body)
+	}
+	var resp struct {
+		OK        bool   `json:"ok"`
+		SessionID string `json:"sessionId"`
+	}
+	mustJSON(t, body, &resp)
+	if !resp.OK || resp.SessionID != "ao-1" {
+		t.Fatalf("delete response = %#v", resp)
+	}
+	if !svc.deleteCalled || svc.deleteID != "ao-1" || !svc.deleteForce {
+		t.Fatalf("Delete not called as expected: %+v", svc)
+	}
+	if _, ok := svc.sessions["ao-1"]; ok {
+		t.Fatalf("session ao-1 still present after delete")
+	}
+}
+
+// TestDeleteSession_NotTerminalReturnsConflict asserts a service-side
+// SESSION_NOT_TERMINAL error (a session that is not merged/terminated) surfaces
+// as 409, mirroring how other typed apierr failures round-trip through
+// envelope.WriteError (see TestSessionsAPI_SpawnBranchNotFetchedReturnsTypedError).
+func TestDeleteSession_NotTerminalReturnsConflict(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.deleteErr = apierr.Conflict("SESSION_NOT_TERMINAL", "Session is not finished (merged or terminated)", nil)
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/ao-1", "")
+	assertErrorCode(t, body, status, http.StatusConflict, "SESSION_NOT_TERMINAL")
+}
+
+func TestDeleteSession_WithoutForceDefaultsFalse(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/ao-1", "")
+	if status != http.StatusOK {
+		t.Fatalf("delete = %d, want 200; body=%s", status, body)
+	}
+	if svc.deleteForce {
+		t.Fatalf("deleteForce = true, want false when force is omitted")
 	}
 }
 

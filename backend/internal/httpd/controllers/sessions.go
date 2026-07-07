@@ -38,6 +38,7 @@ type SessionService interface {
 	Get(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
+	Delete(ctx context.Context, id domain.SessionID, force bool) error
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (sessionsvc.RollbackOutcome, error)
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
@@ -69,6 +70,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions", c.spawn)
 	r.Post("/sessions/cleanup", c.cleanup)
 	r.Get("/sessions/{sessionId}", c.get)
+	r.Delete("/sessions/{sessionId}", c.delete)
 	r.Get("/sessions/{sessionId}/preview", c.preview)
 	r.Post("/sessions/{sessionId}/preview", c.setPreview)
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
@@ -153,6 +155,22 @@ func (c *SessionsController) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(sess)})
+}
+
+// delete permanently removes a finished (merged or terminated) session,
+// keeping its git branch. force=true discards an uncommitted worktree instead
+// of refusing (SessionService.Delete maps that refusal to a 409).
+func (c *SessionsController) delete(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}")
+		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	if err := c.Svc.Delete(r.Context(), sessionID(r), force); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, DeleteSessionResponse{OK: true, SessionID: sessionID(r)})
 }
 
 func (c *SessionsController) preview(w http.ResponseWriter, r *http.Request) {
