@@ -234,6 +234,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		},
 		FirstSignalAt: nullTimeToTime(row.FirstSignalAt),
 		IsTerminated:  row.IsTerminated,
+		Reactivated:   row.Reactivated,
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -262,6 +263,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		ActivityLastAt:  activity.LastActivityAt,
 		FirstSignalAt:   timeToNullTime(rec.FirstSignalAt),
 		IsTerminated:    rec.IsTerminated,
+		Reactivated:     rec.Reactivated,
 		Branch:          rec.Metadata.Branch,
 		WorkspacePath:   rec.Metadata.WorkspacePath,
 		RuntimeHandleID: rec.Metadata.RuntimeHandleID,
@@ -286,6 +288,7 @@ func recordToUpdate(rec domain.SessionRecord) gen.UpdateSessionParams {
 		ActivityLastAt:  activity.LastActivityAt,
 		FirstSignalAt:   timeToNullTime(rec.FirstSignalAt),
 		IsTerminated:    rec.IsTerminated,
+		Reactivated:     rec.Reactivated,
 		Branch:          rec.Metadata.Branch,
 		WorkspacePath:   rec.Metadata.WorkspacePath,
 		RuntimeHandleID: rec.Metadata.RuntimeHandleID,

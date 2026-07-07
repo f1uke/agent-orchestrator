@@ -248,6 +248,11 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 		return fmt.Errorf("lifecycle: MarkSpawned for unknown session %q", id)
 	}
 	now := m.clock()
+	// A spawn that revives a terminated record is a restore/reopen: mark it
+	// reactivated so status derivation surfaces it as needs_input (the "Needs you"
+	// zone) rather than letting a previously-merged PR pin it to Done. A fresh
+	// spawn reads is_terminated=false here, so it stays reactivated=false.
+	rec.Reactivated = rec.IsTerminated
 	rec.IsTerminated = false
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}
 	// Each spawn/restore must re-prove its hook pipeline: clear the receipt so

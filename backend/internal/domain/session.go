@@ -56,9 +56,16 @@ type SessionRecord struct {
 	// activity state. Zero means no hook has ever reported, which deriveStatus
 	// surfaces as StatusNoSignal after a grace period. Internal fact, not part
 	// of the API read model.
-	FirstSignalAt time.Time       `json:"-"`
-	IsTerminated  bool            `json:"isTerminated"`
-	Metadata      SessionMetadata `json:"-"`
+	FirstSignalAt time.Time `json:"-"`
+	IsTerminated  bool      `json:"isTerminated"`
+	// Reactivated marks a session brought back from a terminal state by
+	// `ao session restore` (the board Reopen action). It stays set while the
+	// session is live so status derivation surfaces a reopened session as
+	// needs_input (the "Needs you" zone) instead of letting a previously-merged PR
+	// pin it to Done, until it takes on new work or is finished again. Internal
+	// durable fact, not part of the API read model.
+	Reactivated bool            `json:"-"`
+	Metadata    SessionMetadata `json:"-"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	UpdatedAt     time.Time       `json:"updatedAt"`
 }
