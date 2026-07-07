@@ -57,6 +57,82 @@ export function toSessionActivity(
 	};
 }
 
+export type StatusReason =
+	| "working"
+	| "waiting_input"
+	| "active_stale"
+	| "idle_aged"
+	| "idle"
+	| "no_signal"
+	| "pr_pipeline"
+	| "terminated"
+	| "merged"
+	| "unknown";
+
+const statusReasons = new Set<StatusReason>([
+	"working",
+	"waiting_input",
+	"active_stale",
+	"idle_aged",
+	"idle",
+	"no_signal",
+	"pr_pipeline",
+	"terminated",
+	"merged",
+]);
+
+/** Normalizes the daemon's reason code; undefined when absent (e.g. mock data). */
+export function toStatusReason(reason?: string): StatusReason | undefined {
+	if (!reason) return undefined;
+	return statusReasons.has(reason as StatusReason) ? (reason as StatusReason) : "unknown";
+}
+
+/** Plain-language explanation of WHY a session shows its current status. */
+export const statusReasonLabel: Record<StatusReason, string> = {
+	working: "Agent active",
+	waiting_input: "Agent requested input",
+	active_stale: "No activity for a while — assumed waiting (a turn's Stop hook may have been lost)",
+	idle_aged: "Turn ended and went quiet — assumed waiting",
+	idle: "Recently active",
+	no_signal: "No hook has reported since launch",
+	pr_pipeline: "Status from the pull request pipeline",
+	terminated: "Session ended",
+	merged: "Work merged",
+	unknown: "",
+};
+
+// Only timeout-based readings count down, and only ever to these targets.
+const transitionTargetLabel: Partial<Record<SessionStatus, string>> = {
+	needs_input: "Needs input",
+	no_signal: "No signal",
+};
+
+/** Compact human duration for a countdown, e.g. "45s", "4m", "2h". */
+export function formatCountdown(ms: number): string {
+	const s = Math.round(ms / 1000);
+	if (s < 60) return `${s}s`;
+	const m = Math.round(s / 60);
+	if (m < 60) return `${m}m`;
+	return `${Math.round(m / 60)}h`;
+}
+
+/**
+ * Countdown caption to the next status flip (e.g. "→ Needs input in 4m"), or ""
+ * when there is no pending timed transition or it is already due. `now` (ms since
+ * epoch) is passed in so the function stays pure and testable.
+ */
+export function formatNextTransition(
+	session: Pick<WorkspaceSession, "nextTransitionAt" | "nextTransitionTo">,
+	now: number,
+): string {
+	if (!session.nextTransitionAt || !session.nextTransitionTo) return "";
+	const target = transitionTargetLabel[session.nextTransitionTo];
+	if (!target) return "";
+	const ms = Date.parse(session.nextTransitionAt) - now;
+	if (Number.isNaN(ms) || ms <= 0) return "";
+	return `→ ${target} in ${formatCountdown(ms)}`;
+}
+
 export type AgentProvider =
 	| "codex"
 	| "claude-code"
@@ -124,6 +200,12 @@ export type WorkspaceSession = {
 	kind?: SessionKind;
 	branch: string;
 	status: SessionStatus;
+	/** Machine reason for the current {@link status}, derived by the daemon. */
+	statusReason?: StatusReason;
+	/** ISO timestamp when the current timeout-based status will flip, if pending. */
+	nextTransitionAt?: string;
+	/** What {@link status} becomes at {@link nextTransitionAt} (needs_input / no_signal). */
+	nextTransitionTo?: SessionStatus;
 	/** ISO timestamp from the daemon — used for relative time in the inspector. */
 	createdAt?: string;
 	/** ISO timestamp from the daemon. */
