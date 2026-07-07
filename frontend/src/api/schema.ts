@@ -672,6 +672,7 @@ export interface components {
             terminalHandleId?: string;
             /** Format: date-time */
             updatedAt: string;
+            workspacePath?: string;
         };
         DegradedProject: {
             id: string;

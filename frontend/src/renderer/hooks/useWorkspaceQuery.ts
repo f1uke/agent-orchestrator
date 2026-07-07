@@ -58,6 +58,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				provider: toAgentProvider(session.harness),
 				kind: session.kind === "orchestrator" ? "orchestrator" : session.kind === "worker" ? "worker" : undefined,
 				branch: session.branch ?? `session/${session.id}`,
+				workspacePath: session.workspacePath,
 				status: toSessionStatus(session.status, session.isTerminated),
 				statusReason: toStatusReason(session.statusReason),
 				nextTransitionAt: session.nextTransitionAt ?? undefined,

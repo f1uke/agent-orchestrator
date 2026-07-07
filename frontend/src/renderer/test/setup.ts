@@ -63,6 +63,13 @@ if (typeof window !== "undefined") {
 			writeText: async () => undefined,
 			readText: async () => "",
 		},
+		openIn: {
+			detectTargets: async () => ({ hasVSCode: false }),
+			finder: async () => undefined,
+			terminal: async () => undefined,
+			editor: async () => undefined,
+			xcode: async () => undefined,
+		},
 		daemon: {
 			getStatus: async () => ({ state: "stopped" }),
 			start: async () => ({ state: "starting" }),

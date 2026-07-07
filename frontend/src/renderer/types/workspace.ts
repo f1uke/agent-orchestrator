@@ -201,6 +201,12 @@ export type WorkspaceSession = {
 	provider: AgentProvider;
 	kind?: SessionKind;
 	branch: string;
+	/**
+	 * The session's working directory on disk — the git worktree for a worker,
+	 * the project root for an orchestrator. Drives the terminal's "Open in…" menu.
+	 * Absent when the daemon did not report it (fall back to the project root).
+	 */
+	workspacePath?: string;
 	status: SessionStatus;
 	/** Machine reason for the current {@link status}, derived by the daemon. */
 	statusReason?: StatusReason;
