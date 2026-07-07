@@ -118,7 +118,9 @@ type stack struct {
 	msg   *captureMessenger
 }
 
-func newStack(t *testing.T) *stack {
+func newStack(t *testing.T) *stack { return newStackWithIdleClose(t, 0, nil) }
+
+func newStackWithIdleClose(t *testing.T, idleTTL time.Duration, clock func() time.Time) *stack {
 	t.Helper()
 	ctx := context.Background()
 	store, err := sqlite.Open(t.TempDir())
@@ -142,7 +144,7 @@ func newStack(t *testing.T) *stack {
 	prm := prsvc.New(prsvc.Deps{Writer: store, Lifecycle: lcm})
 	rt := &stubRuntime{}
 	ws := &stubWorkspace{}
-	mgr := sessionmanager.New(sessionmanager.Deps{Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg, Lifecycle: lcm, LookPath: func(string) (string, error) { return "/usr/bin/true", nil }})
+	mgr := sessionmanager.New(sessionmanager.Deps{Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg, Lifecycle: lcm, LookPath: func(string) (string, error) { return "/usr/bin/true", nil }, IdleCloseTTL: idleTTL, Clock: clock})
 	sm := sessionsvc.New(mgr, store)
 	return &stack{store: store, sm: sm, mgr: mgr, lcm: lcm, prm: prm, rt: rt, ws: ws, msg: msg}
 }
@@ -216,15 +218,14 @@ func TestRestoreRoundTripPreservesMetadata(t *testing.T) {
 //     => Reconcile must call Destroy on its handle.
 func TestReconcile_TerminatesDeadLiveSessionAndReapsLeakedTmux(t *testing.T) {
 	ctx := context.Background()
-	st := newStack(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	st := newStackWithIdleClose(t, time.Hour, func() time.Time { return now })
 
 	// Script liveness: handle "hdl-A" is dead; handle "hdl-B" is alive.
 	st.rt.aliveByHandle = map[string]bool{
 		"hdl-A": false,
 		"hdl-B": true,
 	}
-
-	now := time.Now().UTC()
 
 	// Seed session A: live in the DB (is_terminated=0) but runtime is gone.
 	// WorkspacePath and Branch must be non-empty so reconcileLive actually probes
@@ -259,8 +260,8 @@ func TestReconcile_TerminatesDeadLiveSessionAndReapsLeakedTmux(t *testing.T) {
 			WorkspacePath:   "/ws/mer-b",
 			RuntimeHandleID: "hdl-B",
 		},
-		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
-		CreatedAt: now,
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-2 * time.Hour)},
+		CreatedAt: now.Add(-2 * time.Hour),
 		UpdatedAt: now,
 	}
 	recB, err = st.store.CreateSession(ctx, recB)
