@@ -4,10 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
 
-const { navigateMock, workspaceQueryMock, deleteMock } = vi.hoisted(() => ({
+const { navigateMock, workspaceQueryMock, deleteMock, postMock } = vi.hoisted(() => ({
 	navigateMock: vi.fn(),
 	workspaceQueryMock: vi.fn(),
 	deleteMock: vi.fn(),
+	postMock: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -20,8 +21,12 @@ vi.mock("../hooks/useWorkspaceQuery", () => ({
 }));
 
 vi.mock("../lib/api-client", () => ({
-	apiClient: { DELETE: deleteMock },
-	apiErrorMessage: (error: unknown, fallback = "Request failed") => (error instanceof Error ? error.message : fallback),
+	apiClient: { DELETE: deleteMock, POST: postMock },
+	apiErrorMessage: (error: unknown, fallback = "Request failed") => {
+		if (error instanceof Error) return error.message;
+		if (error && typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message);
+		return fallback;
+	},
 }));
 
 import { SessionsBoard } from "./SessionsBoard";
@@ -55,6 +60,7 @@ function renderBoard() {
 beforeEach(() => {
 	navigateMock.mockReset();
 	deleteMock.mockReset();
+	postMock.mockReset();
 	workspaceQueryMock.mockReset().mockReturnValue({ data: [], isError: false });
 });
 
@@ -83,6 +89,56 @@ describe("SessionsBoard", () => {
 				params: { path: { sessionId: "sess-1" }, query: { force: false } },
 			}),
 		);
+	});
+
+	it("reopens a done session by restoring it", async () => {
+		postMock.mockResolvedValue({ error: undefined });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [doneSession("sess-1")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: /Done \/ Terminated/i }));
+		await userEvent.click(screen.getByRole("button", { name: "Reopen session" }));
+
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/restore", {
+				params: { path: { sessionId: "sess-1" } },
+			}),
+		);
+	});
+
+	it("treats an already-active merged session as reopened without surfacing an error", async () => {
+		// A merged session still live on disk is not terminated, so restore is a no-op
+		// (SESSION_NOT_RESTORABLE); the daemon auto-claims the newer PR behind the
+		// scenes, so the chip must not show a failure.
+		postMock.mockResolvedValue({ error: { code: "SESSION_NOT_RESTORABLE", message: "Session is not restorable" } });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [{ ...doneSession("m1"), status: "merged" }] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: /Done \/ Terminated/i }));
+		await userEvent.click(screen.getByRole("button", { name: "Reopen session" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(screen.queryByText(/not restorable/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/Reopen failed/i)).not.toBeInTheDocument();
+	});
+
+	it("shows no Reopen action once a session leaves the done bucket", () => {
+		// After reopen, restore + auto-claim flip the session to an active status; it
+		// then renders in a column, not the done bar, so its Reopen chip disappears.
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [{ ...doneSession("sess-1"), status: "pr_open" }] }],
+			isError: false,
+		});
+		renderBoard();
+
+		expect(screen.queryByText(/Done \/ Terminated/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Reopen session" })).not.toBeInTheDocument();
 	});
 
 	it("clears all done sessions", async () => {
