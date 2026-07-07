@@ -2245,6 +2245,46 @@ func TestCloseIdleSessions_IdleAlive_DestroysTmuxTerminatesKeepsWorktree(t *test
 	}
 }
 
+// TestCloseIdleSessions_TerminatedSibling_KeepsSharedTmuxAlive locks in the fix
+// for the app-reopen bug: a project's orchestrators all share ONE runtime handle
+// (the branch-mirrored tmux name), so several terminated records and the one live
+// session collide on the same handle. An OLD terminated sibling idle past the TTL
+// must NOT probe+destroy that shared handle, because the tmux alive under it
+// belongs to the currently-live session — destroying it kills the live session on
+// every reopen. Only a live session, when itself idle, may close its own tmux.
+func TestCloseIdleSessions_TerminatedSibling_KeepsSharedTmuxAlive(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	const shared = "proj-ao-proj-orchestrator"
+	rt.aliveByHandle[shared] = true // the live session's tmux, under the shared name
+	// Old terminated sibling, idle 8h (well past the 1h TTL), shares the handle.
+	st.sessions["old"] = domain.SessionRecord{
+		ID: "old", ProjectID: "mer", IsTerminated: true,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: shared},
+		Activity: domain.Activity{State: domain.ActivityExited, LastActivityAt: now.Add(-8 * time.Hour)},
+	}
+	// Live session, active a minute ago (NOT idle), owns the shared tmux.
+	st.sessions["live"] = domain.SessionRecord{
+		ID: "live", ProjectID: "mer", IsTerminated: false,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: shared, WorkspacePath: "/ws/live", Branch: "ao/live/root"},
+		Activity:  domain.Activity{State: domain.ActivityActive, LastActivityAt: now.Add(-1 * time.Minute)},
+		CreatedAt: now.Add(-1 * time.Minute),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("shared tmux must NOT be destroyed by an idle terminated sibling; Destroy calls = %d ids=%v, want 0", rt.destroyed, rt.destroyedIDs)
+	}
+	if st.sessions["live"].IsTerminated {
+		t.Fatal("live session sharing the handle must stay running after the sweep")
+	}
+}
+
+// TestCloseIdleSessions_TerminatedLeftover_DestroysTmuxOnly covers the genuine
+// orphan: a terminated session whose tmux leaked (still alive) with NO live
+// session sharing its handle. The sweep reaps that tmux but does not re-mark the
+// already-terminated record.
 func TestCloseIdleSessions_TerminatedLeftover_DestroysTmuxOnly(t *testing.T) {
 	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 	m, st, rt, _, lcm := newIdleManager(time.Hour, now)
