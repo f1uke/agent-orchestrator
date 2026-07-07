@@ -63,6 +63,12 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 	}{
 		{"terminated", statusRec(domain.ActivityExited, true), nil, false, domain.StatusTerminated},
 		{"merged-pr", statusRec(domain.ActivityIdle, true), statusPR(domain.PRFacts{Merged: true}), false, domain.StatusMerged},
+		// A restored/continued (non-terminated) session whose first PR merged and
+		// which then opened a NEW PR must leave the merged/done bucket: the open PR
+		// outranks the merged one. This is the read-side half of the restored-session
+		// auto-claim — once the observer attributes the new open PR, the card lands in
+		// an active zone with no manual claim-pr.
+		{"open-pr-beats-merged-leaves-done", statusRec(domain.ActivityIdle, false), []domain.PRFacts{{Merged: true}, {}}, false, domain.StatusPROpen},
 		{"needs-input", statusRec(domain.ActivityWaitingInput, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusNeedsInput},
 		{"ci-failed", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusCIFailed},
 		{"draft", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{Draft: true}), false, domain.StatusDraft},
