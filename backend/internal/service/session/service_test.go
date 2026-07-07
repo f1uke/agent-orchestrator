@@ -205,11 +205,14 @@ type fakeCommander struct {
 	retired         []domain.SessionID
 	sent            []domain.SessionID
 	cleanupProjects []domain.ProjectID
+	purged          []domain.SessionID
+	purgedForce     []bool
 	killErr         error
 	retireErr       error
 	sendErr         error
 	cleanupErr      error
 	spawnErr        error
+	purgeErr        error
 	spawnRecord     domain.SessionRecord
 	spawned         bool
 	killsAtSpawn    int
@@ -262,6 +265,14 @@ func (f *fakeCommander) Cleanup(_ context.Context, project domain.ProjectID) (se
 }
 func (f *fakeCommander) RollbackSpawn(context.Context, domain.SessionID) (bool, bool, error) {
 	return false, false, nil
+}
+func (f *fakeCommander) PurgeSession(_ context.Context, id domain.SessionID, force bool) error {
+	if f.purgeErr != nil {
+		return f.purgeErr
+	}
+	f.purged = append(f.purged, id)
+	f.purgedForce = append(f.purgedForce, force)
+	return nil
 }
 
 // TestCleanupMapsManagerResult: the service forwards both reclaimed and
@@ -993,4 +1004,145 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestListReclaimable_SelectsFinishedWorkersWithResources covers the
+// auto-reclaim candidate set: worker sessions displayed as merged or
+// terminated that still hold a runtime handle or worktree. Orchestrators,
+// still-working sessions, and already-torn-down terminals are excluded.
+func TestListReclaimable_SelectsFinishedWorkersWithResources(t *testing.T) {
+	st := newFakeStore()
+	// merged worker, still has worktree -> included
+	st.sessions["sess-merged"] = domain.SessionRecord{ID: "sess-merged", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/a"}}
+	st.pr["sess-merged"] = domain.PRFacts{URL: "pr1", Merged: true}
+	// terminated worker, still has worktree -> included
+	st.sessions["sess-term"] = domain.SessionRecord{ID: "sess-term", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/b"}}
+	// terminated worker, already torn down (no handle, no worktree) -> excluded
+	st.sessions["sess-done"] = domain.SessionRecord{ID: "sess-done", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true}
+	// working worker -> excluded
+	st.sessions["sess-live"] = domain.SessionRecord{ID: "sess-live", ProjectID: "mer", Kind: domain.KindWorker, Activity: domain.Activity{State: domain.ActivityActive}, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/c"}}
+	// orchestrator, terminated -> excluded (worker-only auto-reclaim)
+	st.sessions["proj-orchestrator"] = domain.SessionRecord{ID: "proj-orchestrator", ProjectID: "mer", Kind: domain.KindOrchestrator, IsTerminated: true, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/d"}}
+
+	svc := &Service{store: st}
+	got, err := svc.ListReclaimable(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[domain.SessionID]bool{"sess-merged": true, "sess-term": true}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want keys %v", got, want)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Fatalf("unexpected candidate %s", id)
+		}
+	}
+}
+
+// TestReclaim_DelegatesToKill: Reclaim reuses Kill's teardown (tmux + worktree,
+// branch kept) so the auto-reclaim loop shares the exact same teardown path a
+// user-initiated kill uses.
+func TestReclaim_DelegatesToKill(t *testing.T) {
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc}
+	if err := svc.Reclaim(context.Background(), "sess-1"); err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+	if len(fc.killed) != 1 || fc.killed[0] != "sess-1" {
+		t.Fatalf("killed = %v, want [sess-1]", fc.killed)
+	}
+}
+
+// TestDelete_NonTerminal_ReturnsConflict: Delete refuses a session that is
+// still working, mapping sessionmanager.ErrNotTerminal to a 409.
+func TestDelete_NonTerminal_ReturnsConflict(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-live"] = domain.SessionRecord{ID: "sess-live", ProjectID: "mer", Kind: domain.KindWorker, Activity: domain.Activity{State: domain.ActivityActive}, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/c"}}
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc, store: st}
+
+	err := svc.Delete(context.Background(), "sess-live", false)
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "SESSION_NOT_TERMINAL" {
+		t.Fatalf("err = %v, want apierr.Conflict SESSION_NOT_TERMINAL", err)
+	}
+	if len(fc.purged) != 0 {
+		t.Fatalf("purged = %v, want none for a non-terminal session", fc.purged)
+	}
+}
+
+// TestDelete_Terminal_DelegatesToPurge: a merged/terminated session delegates
+// to manager.PurgeSession with the caller's force flag.
+func TestDelete_Terminal_DelegatesToPurge(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-term"] = domain.SessionRecord{ID: "sess-term", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/b"}}
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc, store: st}
+
+	if err := svc.Delete(context.Background(), "sess-term", true); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if len(fc.purged) != 1 || fc.purged[0] != "sess-term" {
+		t.Fatalf("purged = %v, want [sess-term]", fc.purged)
+	}
+	if len(fc.purgedForce) != 1 || !fc.purgedForce[0] {
+		t.Fatalf("purgedForce = %v, want [true]", fc.purgedForce)
+	}
+}
+
+// TestDelete_UnknownSession_ReturnsNotFound: a nonexistent id maps to 404
+// before any manager call.
+func TestDelete_UnknownSession_ReturnsNotFound(t *testing.T) {
+	st := newFakeStore()
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc, store: st}
+
+	err := svc.Delete(context.Background(), "ghost", false)
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindNotFound || e.Code != "SESSION_NOT_FOUND" {
+		t.Fatalf("err = %v, want apierr.NotFound SESSION_NOT_FOUND", err)
+	}
+	if len(fc.purged) != 0 {
+		t.Fatalf("purged = %v, want none for an unknown session", fc.purged)
+	}
+}
+
+// TestDelete_WorkspaceDirty_ReturnsConflict: the manager's ErrWorkspaceDirty
+// (a non-force purge on a dirty worktree) maps to a 409 the UI can offer to
+// retry with force, rather than a 500.
+func TestDelete_WorkspaceDirty_ReturnsConflict(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-term"] = domain.SessionRecord{ID: "sess-term", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true, Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/b"}}
+	fc := &fakeCommander{purgeErr: fmt.Errorf("purge sess-term: %w", ports.ErrWorkspaceDirty)}
+	svc := &Service{manager: fc, store: st}
+
+	err := svc.Delete(context.Background(), "sess-term", false)
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "SESSION_WORKSPACE_DIRTY" {
+		t.Fatalf("err = %v, want apierr.Conflict SESSION_WORKSPACE_DIRTY", err)
+	}
+}
+
+// TestToAPIErrorMapsNotTerminalAndWorkspaceDirty: direct coverage of the two
+// new toAPIError cases this task adds.
+func TestToAPIErrorMapsNotTerminalAndWorkspaceDirty(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantKind apierr.Kind
+		wantCode string
+	}{
+		{"not terminal", fmt.Errorf("delete sess-1: %w", sessionmanager.ErrNotTerminal), apierr.KindConflict, "SESSION_NOT_TERMINAL"},
+		{"workspace dirty", fmt.Errorf("purge sess-1: %w", ports.ErrWorkspaceDirty), apierr.KindConflict, "SESSION_WORKSPACE_DIRTY"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mapped := toAPIError(tc.err)
+			var e *apierr.Error
+			if !errors.As(mapped, &e) || e.Kind != tc.wantKind || e.Code != tc.wantCode {
+				t.Fatalf("mapped = %v, want %s %s", mapped, tc.wantCode, e)
+			}
+		})
+	}
 }

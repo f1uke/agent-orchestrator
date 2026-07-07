@@ -30,6 +30,8 @@ type fakeStore struct {
 	// sharedLog, when non-nil, receives an ordered call entry for each
 	// UpsertSessionWorktree invocation so ordering tests can compare across fakes.
 	sharedLog *[]string
+	// purged records every session ID PurgeSession was called with.
+	purged map[domain.SessionID]bool
 }
 
 func newFakeStore() *fakeStore {
@@ -117,6 +119,15 @@ func (f *fakeStore) DeleteSessionWorktrees(_ context.Context, id domain.SessionI
 	if f.sharedLog != nil {
 		*f.sharedLog = append(*f.sharedLog, "DeleteSessionWorktrees:"+string(id))
 	}
+	delete(f.worktrees, id)
+	return nil
+}
+func (f *fakeStore) PurgeSession(_ context.Context, id domain.SessionID) error {
+	if f.purged == nil {
+		f.purged = map[domain.SessionID]bool{}
+	}
+	f.purged[id] = true
+	delete(f.sessions, id)
 	delete(f.worktrees, id)
 	return nil
 }
@@ -650,6 +661,76 @@ func TestKill_OtherWorkspaceErrorStillFails(t *testing.T) {
 		t.Fatalf("kill err = %v, want workspace error surfaced", err)
 	}
 }
+
+// TestPurgeSession_CleanWorktree_TearsDownAndPurges: a clean terminal session's
+// runtime and worktree are torn down like Kill, then the row is hard-deleted.
+func TestPurgeSession_CleanWorktree_TearsDownAndPurges(t *testing.T) {
+	m, st, rt, ws := newManager()
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", IsTerminated: true,
+		Metadata: domain.SessionMetadata{Branch: "feat/x", WorkspacePath: "/ws/mer-1", RuntimeHandleID: "h1"},
+	}
+
+	if err := m.PurgeSession(ctx, "mer-1", false); err != nil {
+		t.Fatalf("PurgeSession: %v", err)
+	}
+	if rt.destroyed != 1 {
+		t.Fatal("runtime not destroyed")
+	}
+	if ws.destroyed != 1 {
+		t.Fatal("worktree not destroyed")
+	}
+	if !st.purged["mer-1"] {
+		t.Fatal("row not purged")
+	}
+}
+
+// TestPurgeSession_DirtyWorktree_NoForce_Refuses: a dirty worktree refuses the
+// purge (ErrWorkspaceDirty) unless force is set, and the row must survive.
+func TestPurgeSession_DirtyWorktree_NoForce_Refuses(t *testing.T) {
+	m, st, _, ws := newManager()
+	ws.destroyErr = ports.ErrWorkspaceDirty
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", IsTerminated: true,
+		Metadata: domain.SessionMetadata{Branch: "feat/x", WorkspacePath: "/ws/mer-1"},
+	}
+
+	err := m.PurgeSession(ctx, "mer-1", false)
+	if !errors.Is(err, ports.ErrWorkspaceDirty) {
+		t.Fatalf("PurgeSession err = %v, want ErrWorkspaceDirty", err)
+	}
+	if st.purged["mer-1"] {
+		t.Fatal("row purged despite dirty refusal")
+	}
+}
+
+// TestPurgeSession_DirtyWorktree_Force_ForceDestroysAndPurges: with force set,
+// a dirty worktree is force-destroyed instead of refused, and the row is purged.
+func TestPurgeSession_DirtyWorktree_Force_ForceDestroysAndPurges(t *testing.T) {
+	m, st, _, ws := newManager()
+	ws.destroyErr = ports.ErrWorkspaceDirty
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", IsTerminated: true,
+		Metadata: domain.SessionMetadata{Branch: "feat/x", WorkspacePath: "/ws/mer-1"},
+	}
+
+	if err := m.PurgeSession(ctx, "mer-1", true); err != nil {
+		t.Fatalf("PurgeSession(force): %v", err)
+	}
+	forceDestroyed := false
+	for _, c := range ws.calls {
+		if c == "ForceDestroy:mer-1" {
+			forceDestroyed = true
+		}
+	}
+	if !forceDestroyed {
+		t.Fatalf("worktree not force-destroyed, calls=%v", ws.calls)
+	}
+	if !st.purged["mer-1"] {
+		t.Fatal("row not purged")
+	}
+}
+
 func TestRestore_ReopensTerminal(t *testing.T) {
 	m, st, rt, _ := newManager()
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x"})
