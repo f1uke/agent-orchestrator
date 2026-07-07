@@ -10,7 +10,7 @@ import (
 func TestLoadDefaults(t *testing.T) {
 	// Clear every recognised var so we observe pure defaults regardless of the
 	// surrounding environment.
-	for _, k := range []string{"AO_PORT", "AO_REQUEST_TIMEOUT", "AO_SHUTDOWN_TIMEOUT", "AO_RUN_FILE", "AO_DATA_DIR", "AO_AGENT", "AO_ALLOWED_ORIGINS", "AO_TELEMETRY_EVENTS", "AO_TELEMETRY_METRICS", "AO_TELEMETRY_REMOTE", "AO_TELEMETRY_POSTHOG_KEY", "AO_TELEMETRY_POSTHOG_HOST"} {
+	for _, k := range []string{"AO_PORT", "AO_REQUEST_TIMEOUT", "AO_SHUTDOWN_TIMEOUT", "AO_SESSION_IDLE_CLOSE", "AO_RUN_FILE", "AO_DATA_DIR", "AO_AGENT", "AO_ALLOWED_ORIGINS", "AO_TELEMETRY_EVENTS", "AO_TELEMETRY_METRICS", "AO_TELEMETRY_REMOTE", "AO_TELEMETRY_POSTHOG_KEY", "AO_TELEMETRY_POSTHOG_HOST"} {
 		t.Setenv(k, "")
 	}
 
@@ -29,6 +29,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.ShutdownTimeout != DefaultShutdownTimeout {
 		t.Errorf("ShutdownTimeout = %s, want %s", cfg.ShutdownTimeout, DefaultShutdownTimeout)
+	}
+	if cfg.SessionIdleClose != DefaultSessionIdleClose {
+		t.Errorf("SessionIdleClose = %s, want %s", cfg.SessionIdleClose, DefaultSessionIdleClose)
 	}
 	if cfg.RunFilePath == "" {
 		t.Error("RunFilePath is empty, want a resolved default path")
@@ -155,6 +158,35 @@ func TestLoadAllowedOrigins(t *testing.T) {
 			if cfg.AllowedOrigins[i] != origin {
 				t.Errorf("AllowedOrigins[%d] = %q, want %q", i, cfg.AllowedOrigins[i], origin)
 			}
+		}
+	})
+}
+
+func TestLoadSessionIdleClose(t *testing.T) {
+	t.Run("override", func(t *testing.T) {
+		t.Setenv("AO_SESSION_IDLE_CLOSE", "48h")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.SessionIdleClose != 48*time.Hour {
+			t.Errorf("SessionIdleClose = %s, want 48h", cfg.SessionIdleClose)
+		}
+	})
+	t.Run("zero disables", func(t *testing.T) {
+		t.Setenv("AO_SESSION_IDLE_CLOSE", "0")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.SessionIdleClose != 0 {
+			t.Errorf("SessionIdleClose = %s, want 0 (disabled)", cfg.SessionIdleClose)
+		}
+	})
+	t.Run("malformed errors", func(t *testing.T) {
+		t.Setenv("AO_SESSION_IDLE_CLOSE", "banana")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() = nil error for malformed AO_SESSION_IDLE_CLOSE, want error")
 		}
 	})
 }
