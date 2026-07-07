@@ -128,6 +128,24 @@ describe("SessionsBoard", () => {
 		expect(screen.queryByText(/Reopen failed/i)).not.toBeInTheDocument();
 	});
 
+	it("surfaces a reopen failure without offering to delete the session", async () => {
+		// A restore that genuinely fails (e.g. INTERNAL_ERROR) must show a reopen
+		// error on its own — never delete's inline "Delete anyway", which would let a
+		// mis-click permanently delete a session the user only tried to reopen.
+		postMock.mockResolvedValue({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [doneSession("sess-1")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: /Done \/ Terminated/i }));
+		await userEvent.click(screen.getByRole("button", { name: "Reopen session" }));
+
+		await waitFor(() => expect(screen.getByText(/Couldn.t reopen/i)).toBeInTheDocument());
+		expect(screen.queryByRole("button", { name: "Delete anyway" })).not.toBeInTheDocument();
+	});
+
 	it("shows no Reopen action once a session leaves the done bucket", () => {
 		// After reopen, restore + auto-claim flip the session to an active status; it
 		// then renders in a column, not the done bar, so its Reopen chip disappears.

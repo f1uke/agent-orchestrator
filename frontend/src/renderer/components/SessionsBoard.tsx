@@ -279,6 +279,10 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 	const queryClient = useQueryClient();
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// Reopen tracks its own error separately from delete: a reopen failure must not
+	// render delete's inline "Delete anyway" affordance (clicking that would force a
+	// permanent delete the user never asked for).
+	const [reopenError, setReopenError] = useState<string | null>(null);
 
 	// Reopen re-activates a done session behind the scenes so its card leaves the
 	// done bucket. A terminated (or terminated-then-merged) session is restored;
@@ -299,11 +303,11 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 			}
 		},
 		onSuccess: () => {
-			setError(null);
+			setReopenError(null);
 			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 		},
 		onError: (e) => {
-			setError(e instanceof Error ? e.message : "Reopen failed");
+			setReopenError(e instanceof Error ? e.message : "Reopen failed");
 		},
 	});
 
@@ -358,7 +362,10 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 						aria-label="Reopen session"
 						className="rounded p-1 text-passive hover:text-foreground"
 						disabled={reopen.isPending}
-						onClick={() => reopen.mutate()}
+						onClick={() => {
+							setReopenError(null);
+							reopen.mutate();
+						}}
 						type="button"
 					>
 						<RotateCw className="h-3 w-3" aria-hidden="true" />
@@ -390,6 +397,11 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 					>
 						Delete anyway
 					</button>
+				</span>
+			)}
+			{reopenError && (
+				<span className="text-[10px] text-error" role="alert">
+					Couldn’t reopen: {reopenError}
 				</span>
 			)}
 		</div>

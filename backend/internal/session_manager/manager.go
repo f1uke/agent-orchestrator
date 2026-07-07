@@ -655,6 +655,22 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	if meta.WorkspacePath == "" || meta.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", id, ErrIncompleteHandle)
 	}
+	// A session can be terminated in the store while its runtime is still alive:
+	// e.g. its PR merged and the reaper/reclaim marked it done, but the agent
+	// process is still attached. Relaunching would then collide with the existing
+	// runtime (`tmux new-session` fails "duplicate session", surfacing as an opaque
+	// 500). If the runtime is definitively alive, adopt it instead — clear the
+	// terminal state with no relaunch and no teardown of the running agent. Only a
+	// genuinely dead runtime falls through to the relaunch path below. A probe error
+	// is not proof of death, so it also falls through rather than adopting.
+	if handleID := strings.TrimSpace(meta.RuntimeHandleID); handleID != "" {
+		if alive, err := m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID}); err == nil && alive {
+			if err := m.lcm.MarkSpawned(ctx, id, meta); err != nil {
+				return domain.SessionRecord{}, fmt.Errorf("restore %s: adopt live runtime: %w", id, err)
+			}
+			return m.getRecord(ctx, id)
+		}
+	}
 	// Resumability is decided inside restoreArgv, not here. A promptless session
 	// can still be fully resumable when the harness pins a deterministic session id
 	// (Claude Code). restoreArgv returns ErrNotResumable only for a promptless,
