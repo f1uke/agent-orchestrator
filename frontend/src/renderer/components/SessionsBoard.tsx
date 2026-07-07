@@ -280,6 +280,33 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
+	// Reopen re-activates a done session behind the scenes so its card leaves the
+	// done bucket. A terminated (or terminated-then-merged) session is restored;
+	// once it is live again the daemon's SCM observer auto-claims any newer open PR
+	// on its worktree branch, which re-derives the status into an active zone — so
+	// the UI never has to know the PR number or call claim-pr itself. A merged
+	// session that is still live on disk is not terminated, so restore reports
+	// SESSION_NOT_RESTORABLE; that is a no-op success here (it is already active and
+	// the observer handles the PR), not a failure to surface.
+	const reopen = useMutation({
+		mutationFn: async () => {
+			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/restore", {
+				params: { path: { sessionId: session.id } },
+			});
+			if (apiError) {
+				if ((apiError as { code?: string }).code === "SESSION_NOT_RESTORABLE") return;
+				throw new Error(apiErrorMessage(apiError, "Unable to reopen session"));
+			}
+		},
+		onSuccess: () => {
+			setError(null);
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
+		onError: (e) => {
+			setError(e instanceof Error ? e.message : "Reopen failed");
+		},
+	});
+
 	const del = useMutation({
 		mutationFn: async (force: boolean) => {
 			const { error: apiError } = await apiClient.DELETE("/api/v1/sessions/{sessionId}", {
@@ -326,17 +353,28 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 					</button>
 				</>
 			) : (
-				<button
-					aria-label="Delete session"
-					className="rounded p-1 text-passive hover:text-error"
-					onClick={() => {
-						setError(null);
-						setConfirming(true);
-					}}
-					type="button"
-				>
-					<Trash2 className="h-3 w-3" aria-hidden="true" />
-				</button>
+				<>
+					<button
+						aria-label="Reopen session"
+						className="rounded p-1 text-passive hover:text-foreground"
+						disabled={reopen.isPending}
+						onClick={() => reopen.mutate()}
+						type="button"
+					>
+						<RotateCw className="h-3 w-3" aria-hidden="true" />
+					</button>
+					<button
+						aria-label="Delete session"
+						className="rounded p-1 text-passive hover:text-error"
+						onClick={() => {
+							setError(null);
+							setConfirming(true);
+						}}
+						type="button"
+					>
+						<Trash2 className="h-3 w-3" aria-hidden="true" />
+					</button>
+				</>
 			)}
 			{error && (
 				<span className="flex items-center gap-1 text-[10px] text-error">

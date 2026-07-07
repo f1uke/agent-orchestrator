@@ -77,6 +77,13 @@ type Config struct {
 	Logger *slog.Logger
 	// CacheMax bounds each in-memory ETag/review cache. Zero uses DefaultCacheMax.
 	CacheMax int
+	// WorktreeBranch resolves a session worktree's current git branch from its
+	// on-disk path. Nil uses the real `git symbolic-ref` reader. Injected in tests.
+	// Discovery consults it so a session that moved to a new branch (for example a
+	// restored/continued session opening its next PR after the first one merged)
+	// still has that PR auto-attributed, even though Metadata.Branch only ever
+	// holds the spawn-time branch snapshot.
+	WorktreeBranch func(path string) string
 }
 
 // ObserverCache stores provider ETags and review polling timestamps in memory.
@@ -139,12 +146,15 @@ type Observer struct {
 	disabled bool
 	// Cache holds bounded in-memory provider ETags and review poll timestamps.
 	Cache ObserverCache
+	// worktreeBranch resolves a session worktree's live current git branch so
+	// discovery can attribute PRs a session opened after switching branches.
+	worktreeBranch func(path string) string
 }
 
 // New constructs an Observer with default cadence/cache settings for zero
 // values in cfg.
 func New(provider Provider, store Store, lifecycle Lifecycle, cfg Config) *Observer {
-	o := &Observer{provider: provider, store: store, lifecycle: lifecycle, tick: cfg.Tick, reviewInterval: cfg.ReviewInterval, clock: cfg.Clock, logger: cfg.Logger, Cache: newCache(cfg.CacheMax)}
+	o := &Observer{provider: provider, store: store, lifecycle: lifecycle, tick: cfg.Tick, reviewInterval: cfg.ReviewInterval, clock: cfg.Clock, logger: cfg.Logger, worktreeBranch: cfg.WorktreeBranch, Cache: newCache(cfg.CacheMax)}
 	if o.tick <= 0 {
 		o.tick = DefaultTickInterval
 	}
@@ -156,6 +166,9 @@ func New(provider Provider, store Store, lifecycle Lifecycle, cfg Config) *Obser
 	}
 	if o.logger == nil {
 		o.logger = slog.Default()
+	}
+	if o.worktreeBranch == nil {
+		o.worktreeBranch = resolveWorktreeBranch
 	}
 	return o
 }
@@ -471,8 +484,18 @@ func (o *Observer) discoverSubjects(ctx context.Context) (map[string]*subject, [
 			o.logger.Debug("scm observer: project has no supported SCM origin", "project", proj.ID, "origin", proj.RepoOriginURL)
 			continue
 		}
+		// Metadata.Branch is only the spawn-time branch snapshot. A session that
+		// switched branches after spawn — most importantly a restored/continued
+		// session that opens its next PR on a new branch after the first one merged —
+		// would otherwise never have that PR attributed, leaving the card stuck in the
+		// merged/done bucket. Add the worktree's live branch as an extra attribution
+		// candidate so the new PR is auto-claimed without a manual `ao session claim-pr`.
+		liveBranch := o.worktreeBranch(sess.Metadata.WorkspacePath)
 		for _, repo := range scanRepos[sess.ProjectID] {
 			sessionRepos = append(sessionRepos, sessionRepo{session: sess, repo: repo, headRepo: origin, branch: branch})
+			if liveBranch != "" && liveBranch != branch {
+				sessionRepos = append(sessionRepos, sessionRepo{session: sess, repo: repo, headRepo: origin, branch: liveBranch})
+			}
 		}
 		prs, err := o.store.ListPRsBySession(ctx, sess.ID)
 		if err != nil {
@@ -1332,6 +1355,24 @@ func normalizePRState(draft, merged, closed bool) string {
 // project.Add resolved origin URLs at add time.
 func resolveGitOriginURL(path string) string {
 	out, err := aoprocess.Command("git", "-C", path, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// resolveWorktreeBranch returns the branch currently checked out in the git
+// worktree at path via `git symbolic-ref --short HEAD`, or "" on any error or a
+// detached HEAD. Metadata.Branch is only the spawn-time branch snapshot, so the
+// observer consults the live worktree branch to attribute PRs a session opened
+// after switching branches (e.g. a restored/continued session whose first PR
+// merged and whose next PR is on a new branch that does not descend from the
+// stored one).
+func resolveWorktreeBranch(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	out, err := aoprocess.Command("git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
 	if err != nil {
 		return ""
 	}

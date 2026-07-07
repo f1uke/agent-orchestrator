@@ -529,6 +529,62 @@ func TestPoll_DiscoversSiblingUnderRootSessionNamespace(t *testing.T) {
 	}
 }
 
+// A session whose original branch already merged is restored and continues on a
+// NEW branch in the same worktree, opening a NEW PR. The new branch does not
+// descend from the stored (merged) session branch, so branch-snapshot attribution
+// alone misses it and the card stays stuck at "merged" (the done bucket).
+// Discovery must consult the worktree's live git branch so the new open PR is
+// auto-claimed for the session — no manual `ao session claim-pr`.
+func TestPoll_ClaimsNewPROnLiveWorktreeBranchAfterRestore(t *testing.T) {
+	store := &fakeStore{
+		sessions: []domain.SessionRecord{{ID: "p-1", ProjectID: "p", Metadata: domain.SessionMetadata{Branch: "ao/p-1/open-in-menu", WorkspacePath: "/wt/p-1"}}},
+		projects: map[string]domain.ProjectRecord{"p": {ID: "p", RepoOriginURL: "https://github.com/o/r.git"}},
+		prs: map[domain.SessionID][]domain.PullRequest{
+			// The original PR merged: it is filtered out of refresh subjects yet keeps
+			// the session in the merged/done bucket until a new open PR is attributed.
+			"p-1": {{URL: "https://github.com/o/r/pull/10", SessionID: "p-1", Number: 10, Merged: true, SourceBranch: "ao/p-1/open-in-menu", Provider: "github", Host: "github.com", Repo: "o/r"}},
+		},
+		checks: map[string][]domain.PullRequestCheck{},
+	}
+	newObs := testObs(15)
+	newObs.PR.SourceBranch = "ao/p-1/xcode-versioned-bundle"
+	provider := &fakeProvider{
+		repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "v2"}},
+		openPRs: map[string][]ports.SCMPRObservation{prKey(testRepo, 0): {
+			{URL: "https://github.com/o/r/pull/15", Number: 15, SourceBranch: "ao/p-1/xcode-versioned-bundle", HeadRepo: "o/r", TargetBranch: "main", HeadSHA: "sha15"},
+		}},
+		observations: map[string]ports.SCMObservation{prKey(testRepo, 15): newObs},
+	}
+	lc := &fakeLifecycle{}
+	obs := New(provider, store, lc, Config{
+		Clock:    func() time.Time { return time.Unix(1, 0).UTC() },
+		Tick:     time.Hour,
+		Logger:   quietSlog(),
+		CacheMax: 128,
+		WorktreeBranch: func(path string) string {
+			if path == "/wt/p-1" {
+				return "ao/p-1/xcode-versioned-bundle"
+			}
+			return ""
+		},
+	})
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	claimed := false
+	for _, w := range store.writes {
+		if w.pr.Number == 15 && w.pr.SessionID == "p-1" && w.pr.SourceBranch == "ao/p-1/xcode-versioned-bundle" {
+			claimed = true
+		}
+	}
+	if !claimed {
+		t.Fatalf("new PR #15 on the live worktree branch was not auto-claimed for the session; writes=%#v", store.writes)
+	}
+	if len(lc.observed) != 1 {
+		t.Fatalf("lifecycle observations = %d, want 1 (the newly claimed PR)", len(lc.observed))
+	}
+}
+
 // A PR whose head branch matches a session branch but lives in a fork (its head
 // repo differs from the project repo) must not be auto-attributed: its commits
 // are not the session's work. It is neither fetched nor persisted.
