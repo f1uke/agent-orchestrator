@@ -140,8 +140,16 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 	// first to ARRIVE may match the seeded state — e.g. a turn's "active"
 	// POST is lost and its Stop hook lands idle on the idle-seeded row.
 	if sameActivity(rec.Activity, act) && !rec.FirstSignalAt.IsZero() {
-		m.mu.Unlock()
-		return nil
+		// An active repeat is the exception: it is a liveness heartbeat that
+		// must refresh LastActivityAt so a genuinely working session never ages
+		// into the stale-active grace (only a lost closing Stop should let
+		// active go stale). It changes no state, so the CDC trigger stays quiet
+		// and no notification/telemetry fires below. Every other same-state
+		// repeat carries no new fact and is dropped.
+		if act.State != domain.ActivityActive {
+			m.mu.Unlock()
+			return nil
+		}
 	}
 	next.Activity = act
 	if next.FirstSignalAt.IsZero() {

@@ -883,17 +883,40 @@ func TestActivity_FirstSignalStampsReceipt(t *testing.T) {
 	}
 }
 
-func TestActivity_SameStateRepeatAfterReceiptIsNoOp(t *testing.T) {
+func TestActivity_NonActiveSameStateRepeatAfterReceiptIsNoOp(t *testing.T) {
 	m, st, _ := newManager()
-	rec := working("mer-1")
-	rec.FirstSignalAt = time.Now()
+	rec := domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer",
+		Activity:      domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()},
+		FirstSignalAt: time.Now(),
+	}
 	st.sessions["mer-1"] = rec
 	before := st.sessions["mer-1"]
-	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityActive}); err != nil {
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if st.sessions["mer-1"] != before {
-		t.Fatalf("same-state repeat after receipt must not rewrite: %+v", st.sessions["mer-1"])
+		t.Fatalf("non-active same-state repeat after receipt must not rewrite: %+v", st.sessions["mer-1"])
+	}
+}
+
+// A repeat active signal is a liveness heartbeat: even though the state is
+// unchanged it must refresh LastActivityAt, so a genuinely working session that
+// keeps re-reporting active never ages into the stale-active grace. Only a lost
+// closing Stop (no further active) should let active go stale.
+func TestActivity_ActiveRepeatRefreshesLiveness(t *testing.T) {
+	m, st, _ := newManager()
+	seed := time.Now().Add(-10 * time.Minute)
+	rec := working("mer-1")
+	rec.Activity.LastActivityAt = seed
+	rec.FirstSignalAt = seed
+	st.sessions["mer-1"] = rec
+	fresh := time.Now()
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityActive, Timestamp: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"].Activity.LastActivityAt; !got.Equal(fresh) {
+		t.Fatalf("active repeat did not refresh liveness: LastActivityAt = %v, want %v", got, fresh)
 	}
 }
 

@@ -24,6 +24,17 @@ const noSignalGrace = 90 * time.Second
 // agent — reverts to active before it ever promotes (no false "needs you").
 const waitingInputGrace = 45 * time.Second
 
+// activeStaleGrace is how long a session may sit in the active state with no
+// refreshing signal before AO stops trusting the "working" reading. active is
+// the one activity state a lost hook can strand: a turn reports active, then its
+// closing Stop never lands (a hung agent, a dropped callback, a daemon restart
+// mid-turn) and nothing ever demotes it. Every genuinely working session keeps
+// re-reporting active — a per-tool-use hook, or at minimum a UserPromptSubmit —
+// so a gap this long means the feed died, not that the agent is busy. Kept well
+// above the longest plausible single tool run (an iOS build, a full test suite)
+// so a real between-signals lull never trips it.
+const activeStaleGrace = 15 * time.Minute
+
 // deriveStatus computes the display status. signalCapable says whether this
 // session's harness has an activity hook pipeline at all; only then can
 // prolonged silence mean the pipeline is broken (no_signal) rather than the
@@ -54,7 +65,15 @@ func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time,
 	}
 
 	if rec.Activity.State == domain.ActivityActive {
-		return domain.StatusWorking
+		if now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
+			return domain.StatusWorking
+		}
+		// active but no signal has refreshed it within the grace: the turn's
+		// closing Stop was lost and nothing else demoted it, so the session is
+		// not really working. Surface it as waiting-for-human — the same fate as
+		// a sustained idle — rather than a permanent false "working". (Open PRs
+		// were already handled above, so this only affects PR-less sessions.)
+		return domain.StatusNeedsInput
 	}
 
 	// A session that produced at least one signal (its turn ended with a Stop →
