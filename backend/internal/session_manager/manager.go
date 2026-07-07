@@ -928,12 +928,27 @@ func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("close idle: list sessions: %w", err)
 	}
+	// A project's orchestrators SHARE one runtime handle (the branch-mirrored
+	// tmux name), so several terminated records and the one live session collide
+	// on the same handle. Collect the handles a live (non-terminated) session
+	// still owns so closeIdle never reaps a tmux that a live session is using —
+	// the app-reopen bug where an ancient idle terminated sibling destroyed the
+	// live orchestrator's tmux.
+	liveHandles := make(map[string]bool)
+	for _, rec := range recs {
+		if rec.IsTerminated {
+			continue
+		}
+		if h := runtimeHandle(rec.Metadata); h.ID != "" {
+			liveHandles[h.ID] = true
+		}
+	}
 	now := m.clock()
 	for _, rec := range recs {
 		if now.Sub(idleReference(rec)) <= m.idleCloseTTL {
 			continue
 		}
-		if err := m.closeIdle(ctx, rec); err != nil {
+		if err := m.closeIdle(ctx, rec, liveHandles); err != nil {
 			m.logger.Error("close idle: failed, skipping", "sessionID", rec.ID, "error", err)
 		}
 	}
@@ -942,21 +957,24 @@ func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 
 // closeIdle destroys a session's runtime (if any survives) and marks it
 // terminated, deliberately keeping the worktree so the session stays restorable.
-func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord) error {
+// liveHandles is the set of runtime handles a live (non-terminated) session still
+// owns; because handles are shared across a project's orchestrators, a terminated
+// record must not reap a tmux that a live session is using.
+func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveHandles map[string]bool) error {
 	handle := runtimeHandle(rec.Metadata)
-	if handle.ID != "" {
-		alive, err := m.runtime.IsAlive(ctx, handle)
-		if err != nil {
-			return fmt.Errorf("close idle %s: probe: %w", rec.ID, err)
-		}
-		if alive {
-			if err := m.runtime.Destroy(ctx, handle); err != nil {
-				return fmt.Errorf("close idle %s: destroy: %w", rec.ID, err)
-			}
-		}
-	}
 	if rec.IsTerminated {
+		// The record's runtime was torn down when it ended; a tmux still alive
+		// under its shared handle belongs to a live session unless none owns it.
+		// Reap a genuinely-leaked tmux (no live owner); otherwise leave it — it is
+		// the live session's tmux and destroying it would kill it on reopen.
+		if !liveHandles[handle.ID] {
+			return m.reapRuntimeIfAlive(ctx, rec.ID, handle)
+		}
 		return nil
+	}
+	// Live session idle past the TTL: destroy its own runtime, keep the worktree.
+	if err := m.reapRuntimeIfAlive(ctx, rec.ID, handle); err != nil {
+		return err
 	}
 	// Clear any shutdown-restore marker so boot never auto-relaunches it: the
 	// user restores on demand. The worktree is deliberately kept on disk.
@@ -965,6 +983,25 @@ func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord) error
 	}
 	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
 		return fmt.Errorf("close idle %s: mark terminated: %w", rec.ID, err)
+	}
+	return nil
+}
+
+// reapRuntimeIfAlive destroys the runtime under handle if it is still alive. A
+// blank handle or a dead runtime is a no-op. Used by the idle sweep to tear down
+// tmux without disturbing the worktree.
+func (m *Manager) reapRuntimeIfAlive(ctx context.Context, sessionID domain.SessionID, handle ports.RuntimeHandle) error {
+	if handle.ID == "" {
+		return nil
+	}
+	alive, err := m.runtime.IsAlive(ctx, handle)
+	if err != nil {
+		return fmt.Errorf("close idle %s: probe: %w", sessionID, err)
+	}
+	if alive {
+		if err := m.runtime.Destroy(ctx, handle); err != nil {
+			return fmt.Errorf("close idle %s: destroy: %w", sessionID, err)
+		}
 	}
 	return nil
 }
