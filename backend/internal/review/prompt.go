@@ -12,37 +12,28 @@ import (
 // command carrying the ids) lives in the prompt, so it is also what AO injects
 // into an already-running reviewer to review a new commit.
 //
+// Step 1 (posting the review) is provider-aware: GitHub pull requests use
+// `gh api`, GitLab merge requests use `glab mr note`. The provider is derived
+// from each task's URL shape (a GitLab MR URL carries "/-/merge_requests/"), so
+// no extra field has to be threaded through the review engine.
+//
 // The texts are self-contained — they carry the ids the reviewer needs to
 // submit — so no environment variables are required.
 func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 	systemPrompt = `## Code reviewer role
 
-You are an AO code reviewer. You review the requested pull request changes in the current checkout — do not start unrelated work. Inspect what each PR changed by diffing the checkout against the PR's base branch, and review for correctness bugs, missing error handling, security issues, test coverage, and clear deviations from the surrounding code's conventions. Prefer a few high-confidence findings over nitpicks.
+You are an AO code reviewer. You review the requested pull/merge request changes in the current checkout — do not start unrelated work. Inspect what each PR/MR changed by diffing the checkout against its base branch, and review for correctness bugs, missing error handling, security issues, test coverage, and clear deviations from the surrounding code's conventions. Prefer a few high-confidence findings over nitpicks.
 
-Post your review as a comment on the pull request, stating clearly whether it needs changes or is ready, with inline comments for specific findings. Do not push commits, edit files, or modify the branch — review only.`
+Post your review as comments on the pull request or merge request, stating clearly whether it needs changes or is ready, with inline comments for specific findings. Do not push commits, edit files, or modify the branch — review only.`
 
-	queueText := reviewQueueText(spec)
-	prompt = fmt.Sprintf(`Review the requested pull request(s) for worker session %s.
-%s
-
-Complete every review task in the queue autonomously. Do not ask the user whether to continue to the next PR, and do not stop after the first PR unless the provider or checkout is genuinely unusable for every queued task.
-
-Do these steps in order:
-1. For each PR below, post a separate review on that pull request and capture its id in one call. Post with `+"`gh api`"+` rather than `+"`gh pr review`"+`: it is the only way to attach inline comments, and its response carries the created review's id, so AO can tell the worker exactly which review to address. Send the review as a JSON body so the inline comments form a proper array of objects:
-
-    printf '%%s' '{ "event": "COMMENT", "body": "<summary>", "comments": [ { "path": "<file>", "line": <n>, "body": "<finding>" } ] }' | gh api --method POST repos/{owner}/{repo}/pulls/{number}/reviews --input - --jq '.id'
-
-   - Substitute the PR's owner/repo/number. Add one object to "comments" per inline finding; omit the field for a review with no inline comments.
-	   - Keep the JSON on one line and shell-escape any single quotes in review text before passing it to printf; do not use a heredoc because reviewer panes run through an interactive PTY.
-   - Always use "event": "COMMENT": reviews are posted from the PR author's own account, and GitHub rejects both APPROVE and REQUEST_CHANGES on your own PR. State in the body whether you are requesting changes or approving; the machine-readable verdict goes to AO in step 2.
-   - The printed number is the review id. If the call fails on the provider, leave the id empty.
-2. After every PR has its own GitHub review from step 1, record AO's bookkeeping for those already-posted reviews using one command. Pass JSON on stdin so nothing is ever written into the worktree (a file there could be committed onto the worker's branch). Include one object per PR/run from the queue:
-
-    printf '%%s' '{ "reviews": [ { "runId": "<run-id>", "verdict": "<approved|changes_requested>", "githubReviewId": "<id-from-step-1-or-empty>", "body": "<your full review markdown>" } ] }' | ao review submit --session %s --reviews -
-
-Only if step 1 genuinely fails on the provider for a PR, still include that run in step 2 with an empty githubReviewId so the result is recorded.`,
-		spec.WorkerID, queueText, spec.WorkerID)
-	return prompt, systemPrompt
+	var b strings.Builder
+	fmt.Fprintf(&b, "Review the requested pull/merge request(s) for worker session %s.\n", spec.WorkerID)
+	b.WriteString(reviewQueueText(spec))
+	b.WriteString("\n\nComplete every review task in the queue autonomously. Do not ask the user whether to continue to the next task, and do not stop after the first one unless the provider or checkout is genuinely unusable for every queued task.\n\n")
+	b.WriteString("Do these steps in order:\n")
+	b.WriteString(reviewStep1(spec))
+	b.WriteString(reviewStep2(string(spec.WorkerID)))
+	return b.String(), systemPrompt
 }
 
 func reviewQueueText(spec LaunchSpec) string {
@@ -50,9 +41,90 @@ func reviewQueueText(spec LaunchSpec) string {
 		return fmt.Sprintf("\nReview task queue:\n* 1. %s (head commit %s, run %s)\n", spec.PRURL, spec.TargetSHA, spec.RunID)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nAO created %d review tasks for this worker session. Review every queued PR, then submit all results together.\n\nReview task queue:\n", len(spec.ReviewQueue))
+	fmt.Fprintf(&b, "\nAO created %d review tasks for this worker session. Review every queued PR/MR, then submit all results together.\n\nReview task queue:\n", len(spec.ReviewQueue))
 	for i, task := range spec.ReviewQueue {
 		fmt.Fprintf(&b, "* %d. %s (head commit %s, run %s)\n", i+1, task.PRURL, task.TargetSHA, task.RunID)
 	}
 	return b.String()
+}
+
+// reviewURLIsGitLab reports whether a review target URL is a GitLab merge
+// request, keyed on the "/-/merge_requests/" path marker (host-agnostic for
+// self-hosted GitLab). Anything else is treated as a GitHub pull request.
+func reviewURLIsGitLab(u string) bool {
+	return strings.Contains(u, "/-/merge_requests/")
+}
+
+// reviewQueueProviders reports which providers appear in the queue (or the
+// single PRURL). It defaults to GitHub when no URL is present so an empty spec
+// still yields a usable prompt.
+func reviewQueueProviders(spec LaunchSpec) (github, gitlab bool) {
+	urls := make([]string, 0, len(spec.ReviewQueue)+1)
+	if len(spec.ReviewQueue) == 0 {
+		urls = append(urls, spec.PRURL)
+	}
+	for _, t := range spec.ReviewQueue {
+		urls = append(urls, t.PRURL)
+	}
+	for _, u := range urls {
+		if u == "" {
+			continue
+		}
+		if reviewURLIsGitLab(u) {
+			gitlab = true
+		} else {
+			github = true
+		}
+	}
+	if !github && !gitlab {
+		github = true
+	}
+	return github, gitlab
+}
+
+// reviewStep1 selects the provider-appropriate "post the review" instructions.
+// A queue is single-provider in practice (one worker session = one repo), but a
+// mixed queue is handled by emitting both blocks with a routing note.
+func reviewStep1(spec LaunchSpec) string {
+	github, gitlab := reviewQueueProviders(spec)
+	switch {
+	case gitlab && !github:
+		return gitlabReviewStep1
+	case github && gitlab:
+		return "Each task uses the tool that matches its URL: a github.com pull URL uses the `gh api` flow below; a GitLab merge-request URL (its path contains \"/-/merge_requests/\") uses the `glab mr note` flow below.\n\n" + githubReviewStep1 + "\n" + gitlabReviewStep1
+	default:
+		return githubReviewStep1
+	}
+}
+
+// githubReviewStep1 is the original GitHub review-posting flow, preserved
+// verbatim so GitHub behavior is unchanged.
+const githubReviewStep1 = "1. For each PR below, post a separate review on that pull request and capture its id in one call. Post with `gh api` rather than `gh pr review`: it is the only way to attach inline comments, and its response carries the created review's id, so AO can tell the worker exactly which review to address. Send the review as a JSON body so the inline comments form a proper array of objects:\n\n" +
+	"    printf '%s' '{ \"event\": \"COMMENT\", \"body\": \"<summary>\", \"comments\": [ { \"path\": \"<file>\", \"line\": <n>, \"body\": \"<finding>\" } ] }' | gh api --method POST repos/{owner}/{repo}/pulls/{number}/reviews --input - --jq '.id'\n\n" +
+	"   - Substitute the PR's owner/repo/number. Add one object to \"comments\" per inline finding; omit the field for a review with no inline comments.\n" +
+	"   - Keep the JSON on one line and shell-escape any single quotes in review text before passing it to printf; do not use a heredoc because reviewer panes run through an interactive PTY.\n" +
+	"   - Always use \"event\": \"COMMENT\": reviews are posted from the PR author's own account, and GitHub rejects both APPROVE and REQUEST_CHANGES on your own PR. State in the body whether you are requesting changes or approving; the machine-readable verdict goes to AO in step 2.\n" +
+	"   - The printed number is the review id. If the call fails on the provider, leave the id empty.\n"
+
+// gitlabReviewStep1 posts the review to a GitLab merge request with `glab mr
+// note` (glab >= 1.94.0 supports diff/line comments natively). The MR URL
+// carries everything needed: REPO is the path before "/-/" and IID is the
+// number after "/-/merge_requests/".
+const gitlabReviewStep1 = "1. For each merge request below, post your review with `glab mr note` (glab supports diff/line comments natively). From the MR URL `https://<host>/<group>/<project>/-/merge_requests/<iid>`, set REPO=`<group>/<project>` (the path before \"/-/\") and IID=`<iid>` (the number after \"/-/merge_requests/\").\n\n" +
+	"   - Post the review summary as a non-blocking note, stating clearly whether you are requesting changes or approving:\n\n" +
+	"       glab mr note create <IID> -R <REPO> --resolvable=false -m '<summary markdown>'\n\n" +
+	"   - For each inline finding, add a diff comment anchored to the exact line so the worker can resolve it:\n\n" +
+	"       glab mr note create <IID> -R <REPO> --file '<path>' --line <n> -m '<finding>'\n\n" +
+	"     Use `--old-line <n>` for a removed line, or `--line A:B` for a range. If a diff comment is rejected because the line is not part of the MR diff, fold that finding into the summary note as \"<path>:<line> — <finding>\" instead of failing.\n" +
+	"   - Keep each -m message on one line and shell-escape any single quotes; or pipe multi-line text via stdin (printf '%s' '<summary>' | glab mr note create <IID> -R <REPO> --resolvable=false). Do not use a heredoc; reviewer panes run through an interactive PTY.\n" +
+	"   - `glab mr note create` does not print a review id, so use an empty githubReviewId for GitLab merge requests in step 2. The machine-readable verdict still goes to AO in step 2.\n"
+
+// reviewStep2 is the provider-neutral bookkeeping step. The githubReviewId field
+// name is an opaque id kept for wire/storage compatibility; it is empty for
+// GitLab merge requests.
+func reviewStep2(workerID string) string {
+	return fmt.Sprintf("2. After every task's review is posted in step 1, record AO's bookkeeping for those already-posted reviews using one command. Pass JSON on stdin so nothing is ever written into the worktree (a file there could be committed onto the worker's branch). Include one object per PR/MR run from the queue:\n\n"+
+		"    printf '%%s' '{ \"reviews\": [ { \"runId\": \"<run-id>\", \"verdict\": \"<approved|changes_requested>\", \"githubReviewId\": \"<id-from-step-1-or-empty>\", \"body\": \"<your full review markdown>\" } ] }' | ao review submit --session %s --reviews -\n\n"+
+		"Only if step 1 genuinely fails on the provider for a task, still include that run in step 2 with an empty githubReviewId so the result is recorded.",
+		workerID)
 }

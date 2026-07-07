@@ -80,6 +80,11 @@ func TestBashAllowlistCoversPromptRequiredCommands(t *testing.T) {
 			allowed: true,
 		},
 		{
+			name:    "gitlab diff comment",
+			command: `glab mr note create 42 -R group/sub/proj --file main.go --line 10 -m 'finding'`,
+			allowed: true,
+		},
+		{
 			name:    "local review submit",
 			command: `printf '%s' '{ "reviews": [] }' | ao review submit --session sess-1 --reviews -`,
 			allowed: true,

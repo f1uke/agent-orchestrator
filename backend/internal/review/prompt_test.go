@@ -7,6 +7,51 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
+func TestReviewTextsGitLabUsesGlab(t *testing.T) {
+	spec := launchSpec()
+	spec.PRURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	spec.ReviewQueue = []ports.ReviewTask{
+		{RunID: "run-1", PRURL: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42", TargetSHA: "sha1"},
+	}
+	prompt, _ := reviewTexts(spec)
+	for _, want := range []string{
+		"glab mr note create",
+		"--file",
+		"--line",
+		"--resolvable=false",
+		"ao review submit --session mer-1 --reviews -",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("gitlab prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	// A GitLab-only queue must not tell the reviewer to use the GitHub tool.
+	if strings.Contains(prompt, "gh api") || strings.Contains(prompt, "/pulls/") {
+		t.Fatalf("gitlab prompt should not reference gh api / pulls:\n%s", prompt)
+	}
+}
+
+func TestReviewTextsGitHubUsesGhApi(t *testing.T) {
+	spec := launchSpec()
+	spec.PRURL = "https://github.com/o/r/pull/7"
+	spec.ReviewQueue = []ports.ReviewTask{
+		{RunID: "run-1", PRURL: "https://github.com/o/r/pull/7", TargetSHA: "sha1"},
+	}
+	prompt, _ := reviewTexts(spec)
+	for _, want := range []string{
+		"gh api --method POST repos/{owner}/{repo}/pulls/{number}/reviews",
+		"ao review submit --session mer-1 --reviews -",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("github prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	// A GitHub-only queue must not reference the GitLab tool.
+	if strings.Contains(prompt, "glab") {
+		t.Fatalf("github prompt should not reference glab:\n%s", prompt)
+	}
+}
+
 func TestReviewTextsIncludesMultiPRQueue(t *testing.T) {
 	spec := launchSpec()
 	spec.RunID = "run-2"
@@ -21,12 +66,12 @@ func TestReviewTextsIncludesMultiPRQueue(t *testing.T) {
 	prompt, _ := reviewTexts(spec)
 	for _, want := range []string{
 		"AO created 2 review tasks",
-		"Review every queued PR, then submit all results together",
+		"Review every queued PR/MR, then submit all results together",
 		"Complete every review task in the queue autonomously",
-		"Do not ask the user whether to continue to the next PR",
+		"Do not ask the user whether to continue to the next task",
 		"* 1. https://github.com/o/r/pull/1 (head commit sha1, run run-1)",
 		"* 2. https://github.com/o/r/pull/2 (head commit sha2, run run-2)",
-		"After every PR has its own GitHub review from step 1",
+		"record AO's bookkeeping",
 		"printf '%s'",
 		"do not use a heredoc",
 		"ao review submit --session mer-1 --reviews -",
