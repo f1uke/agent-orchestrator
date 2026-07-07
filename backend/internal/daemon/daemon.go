@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
+	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
@@ -131,6 +132,22 @@ func Run() error {
 		return fmt.Errorf("wire session service: %w", err)
 	}
 	lcStack.trackerDone = startTrackerIntake(ctx, store, sessionSvc, log)
+
+	// Auto-reclaim: a settings-backed poll loop that tears down finished worker
+	// sessions (tmux + worktree, branch kept) once they have sat past the
+	// configured grace period. Constructed here so a settings-store failure is
+	// cleaned up the same way the session-wiring failure above is.
+	reclaimSettings, err := reclaimsettings.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("reclaim settings: %w", err)
+	}
+	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, log)
+
 	previewDone := preview.NewPoller(store, sessionSvc, "http://"+cfg.Addr(), preview.PollerConfig{Logger: log}).Start(ctx)
 	agentSvc := agentsvc.New()
 	go func() {
@@ -151,10 +168,12 @@ func Run() error {
 		Events:             cdcPipe.Broadcaster,
 		Activity:           lcStack.LCM,
 		Telemetry:          telemetrySink,
+		Settings:           reclaimSettings,
 	})
 	if err != nil {
 		stop()
 		<-previewDone
+		<-reclaimerDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -201,6 +220,7 @@ func Run() error {
 	// runs before the cancel: a non-signal exit path would hang otherwise.
 	stop()
 	<-previewDone
+	<-reclaimerDone
 	lcStack.Stop()
 	if err := cdcPipe.Stop(); err != nil {
 		log.Error("cdc pipeline shutdown", "err", err)
