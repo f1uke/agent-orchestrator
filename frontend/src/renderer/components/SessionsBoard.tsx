@@ -360,6 +360,7 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 				<>
 					<button
 						aria-label="Reopen session"
+						title="Reopen session"
 						className="rounded p-1 text-passive hover:text-foreground"
 						disabled={reopen.isPending}
 						onClick={() => {
@@ -372,6 +373,7 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 					</button>
 					<button
 						aria-label="Delete session"
+						title="Delete session"
 						className="rounded p-1 text-passive hover:text-error"
 						onClick={() => {
 							setError(null);
