@@ -2085,6 +2085,46 @@ func TestReconcile_AdoptAcrossDaemonRestart(t *testing.T) {
 	}
 }
 
+// TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched locks in the fix for
+// the final-review finding: a session whose runtime died with the daemon AND
+// is idle past the auto-close TTL must be closed like CloseIdleSessions would
+// (terminated, worktree kept in place) instead of being captured into a
+// preserve ref and relaunched by RestoreAll on this same boot. Relaunching an
+// idle-past-TTL session on reboot would contradict the auto-close contract.
+func TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, ws, _ := newIdleManager(time.Hour, now)
+	// Handle "hX" is intentionally absent from rt.aliveByHandle so IsAlive
+	// reports false: the "runtime gone" branch runs.
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", IsTerminated: false,
+		Metadata: domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX"},
+		Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-2 * time.Hour)},
+	}
+
+	if err := m.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if !st.sessions["s1"].IsTerminated {
+		t.Fatal("idle-past-TTL dead-runtime session must end up terminated")
+	}
+	if ws.stashCalls != 0 {
+		t.Fatalf("stashCalls = %d, want 0 (idle session must not be captured)", ws.stashCalls)
+	}
+	for _, c := range ws.calls {
+		if c == "ForceDestroy:s1" {
+			t.Fatalf("worktree must be kept for an idle-past-TTL dead-runtime session; calls = %v", ws.calls)
+		}
+	}
+	if rows := st.worktrees["s1"]; len(rows) != 0 {
+		t.Fatalf("no restore marker expected, got %+v", rows)
+	}
+	if rt.created != 0 {
+		t.Fatalf("rt.created = %d, want 0 (must not be relaunched by RestoreAll)", rt.created)
+	}
+}
+
 func newIdleManager(ttl time.Duration, now time.Time) (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace, *fakeLCM) {
 	st := newFakeStore()
 	rt := &fakeRuntime{aliveByHandle: map[string]bool{}}

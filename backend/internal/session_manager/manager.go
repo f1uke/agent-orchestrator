@@ -763,6 +763,11 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 // it on this same boot, resuming history. Crash recovery thus matches graceful
 // restart instead of silently abandoning the session.
 //
+// Exception: a gone-runtime session that is ALSO idle past the auto-close TTL
+// is closed the way CloseIdleSessions would (marked terminated, worktree left
+// in place, no restore marker) instead of captured and relaunched — a session
+// the user let go idle must stay closed across a reboot, not come back.
+//
 // If the work capture fails we mark terminated WITHOUT a marker and leave the
 // worktree intact: better to skip the relaunch than to tear down un-preserved
 // work or relaunch onto an inconsistent worktree.
@@ -781,7 +786,18 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 			return nil // adopt: the session survived the crash.
 		}
 	}
-	// Runtime is gone: capture uncommitted work first.
+	// Runtime is gone. If the session is idle past the auto-close TTL, close it
+	// the way CloseIdleSessions would instead of capturing + relaunching: mark it
+	// terminated and leave the worktree in place (its uncommitted work sits on
+	// disk for on-demand Restore) with no restore marker, so this boot does not
+	// relaunch a session the user let go idle past the window.
+	if m.idleCloseTTL > 0 && m.clock().Sub(idleReference(rec)) > m.idleCloseTTL {
+		if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+			return fmt.Errorf("reconcile %s: mark terminated (idle): %w", rec.ID, err)
+		}
+		return nil
+	}
+	// Not idle: capture uncommitted work first so RestoreAll can relaunch it.
 	ws := workspaceInfo(rec)
 	ref, err := m.workspace.StashUncommitted(ctx, ws)
 	if err != nil {
