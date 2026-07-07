@@ -79,6 +79,23 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 	if len(open) > 0 {
 		return statusResult{Status: aggregatePRStatus(open, minApprovals), Reason: domain.ReasonPRPipeline}
 	}
+	// A reactivated session (brought back via Reopen/restore) is waiting for you to
+	// direct it: surface it as needs_input so it returns to the board in the "Needs
+	// you" zone rather than being pinned to Done by a previously-merged PR — until it
+	// takes on new work (an open PR already won above) or is finished again
+	// (terminated already won above). An actively-working one still shows working.
+	if rec.Reactivated {
+		if rec.Activity.State == domain.ActivityActive && now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
+			at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
+			return statusResult{
+				Status:           domain.StatusWorking,
+				Reason:           domain.ReasonWorking,
+				NextTransitionAt: &at,
+				NextTransitionTo: domain.StatusNeedsInput,
+			}
+		}
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonWaitingInput}
+	}
 	if anyMerged(prs) {
 		return statusResult{Status: domain.StatusMerged, Reason: domain.ReasonMerged}
 	}

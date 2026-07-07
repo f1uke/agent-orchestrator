@@ -16,7 +16,7 @@ import (
 const getSession = `-- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
-    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision
+    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated
 FROM sessions WHERE id = ?
 `
 
@@ -44,6 +44,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.FirstSignalAt,
 		&i.PreviewURL,
 		&i.PreviewRevision,
+		&i.Reactivated,
 	)
 	return i, err
 }
@@ -51,10 +52,10 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 const insertSession = `-- name: InsertSession :exec
 INSERT INTO sessions (
     id, project_id, num, issue_id, kind, harness, display_name,
-    activity_state, activity_last_at, first_signal_at, is_terminated,
+    activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -69,6 +70,7 @@ type InsertSessionParams struct {
 	ActivityLastAt  time.Time
 	FirstSignalAt   sql.NullTime
 	IsTerminated    bool
+	Reactivated     bool
 	Branch          string
 	WorkspacePath   string
 	RuntimeHandleID string
@@ -93,6 +95,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.ActivityLastAt,
 		arg.FirstSignalAt,
 		arg.IsTerminated,
+		arg.Reactivated,
 		arg.Branch,
 		arg.WorkspacePath,
 		arg.RuntimeHandleID,
@@ -109,7 +112,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 const listAllSessions = `-- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
-    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision
+    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated
 FROM sessions ORDER BY project_id, num
 `
 
@@ -143,6 +146,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.FirstSignalAt,
 			&i.PreviewURL,
 			&i.PreviewRevision,
+			&i.Reactivated,
 		); err != nil {
 			return nil, err
 		}
@@ -160,7 +164,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
-    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision
+    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -194,6 +198,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.FirstSignalAt,
 			&i.PreviewURL,
 			&i.PreviewRevision,
+			&i.Reactivated,
 		); err != nil {
 			return nil, err
 		}
@@ -285,7 +290,7 @@ func (q *Queries) SetSessionPreviewURL(ctx context.Context, arg SetSessionPrevie
 const updateSession = `-- name: UpdateSession :exec
 UPDATE sessions SET
     issue_id = ?, kind = ?, harness = ?, display_name = ?,
-    activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?,
+    activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
     preview_url = ?, preview_revision = ?, updated_at = ?
 WHERE id = ?
@@ -300,6 +305,7 @@ type UpdateSessionParams struct {
 	ActivityLastAt  time.Time
 	FirstSignalAt   sql.NullTime
 	IsTerminated    bool
+	Reactivated     bool
 	Branch          string
 	WorkspacePath   string
 	RuntimeHandleID string
@@ -321,6 +327,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.ActivityLastAt,
 		arg.FirstSignalAt,
 		arg.IsTerminated,
+		arg.Reactivated,
 		arg.Branch,
 		arg.WorkspacePath,
 		arg.RuntimeHandleID,

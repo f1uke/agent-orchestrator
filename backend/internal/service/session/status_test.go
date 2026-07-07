@@ -129,6 +129,38 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 	}
 }
 
+// A session brought back from a terminal state via Reopen (restore) is marked
+// reactivated. It must return to the board — surfaced as needs_input (the "Needs
+// you" zone) — instead of staying pinned to Done by a previously-merged PR, until
+// it takes on new work or is finished again. An actively-working one shows
+// working, an open PR still wins, and a genuinely terminal session is unaffected.
+func TestReactivatedSessionSurfacesAsNeedsYou(t *testing.T) {
+	reactivated := func(activity domain.ActivityState, terminated bool) domain.SessionRecord {
+		r := statusRec(activity, terminated)
+		r.Reactivated = true
+		return r
+	}
+	tests := []struct {
+		name string
+		rec  domain.SessionRecord
+		prs  []domain.PRFacts
+		want domain.SessionStatus
+	}{
+		{"reactivated-merged-idle-needs-you", reactivated(domain.ActivityIdle, false), statusPR(domain.PRFacts{Merged: true}), domain.StatusNeedsInput},
+		{"reactivated-no-pr-needs-you", reactivated(domain.ActivityIdle, false), nil, domain.StatusNeedsInput},
+		{"reactivated-active-shows-working", reactivated(domain.ActivityActive, false), statusPR(domain.PRFacts{Merged: true}), domain.StatusWorking},
+		{"reactivated-open-pr-wins", reactivated(domain.ActivityIdle, false), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), domain.StatusMergeable},
+		{"reactivated-but-terminated-stays-merged", reactivated(domain.ActivityIdle, true), statusPR(domain.PRFacts{Merged: true}), domain.StatusMerged},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deriveStatus(tt.rec, tt.prs, statusNow, true, domain.DefaultMinApprovals); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A recap / auto-summary turn ends the turn (a Stop hook -> idle); Claude Code
 // then emits an idle_prompt Notification while the session sits quiet. That
 // notification is INFORMATIONAL and must not make an idle, finished session look

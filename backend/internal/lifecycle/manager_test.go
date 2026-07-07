@@ -920,6 +920,26 @@ func TestActivity_ActiveRepeatRefreshesLiveness(t *testing.T) {
 	}
 }
 
+func TestMarkSpawnedMarksReactivationFromTerminalState(t *testing.T) {
+	m, st, _ := newManager()
+	// Reviving a terminated session (restore / board Reopen) is a reactivation.
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", IsTerminated: true}
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"]; !got.Reactivated {
+		t.Fatalf("reviving a terminated session must set Reactivated, got %+v", got)
+	}
+	// A fresh spawn (was not terminated) must not be marked reactivated.
+	st.sessions["fresh-1"] = domain.SessionRecord{ID: "fresh-1", ProjectID: "mer", IsTerminated: false}
+	if err := m.MarkSpawned(ctx, "fresh-1", domain.SessionMetadata{RuntimeHandleID: "h2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["fresh-1"]; got.Reactivated {
+		t.Fatalf("a fresh spawn must not be reactivated, got %+v", got)
+	}
+}
+
 func TestMarkSpawnedClearsFirstSignal(t *testing.T) {
 	m, st, _ := newManager()
 	rec := working("mer-1")
