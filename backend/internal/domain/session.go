@@ -67,7 +67,16 @@ type SessionRecord struct {
 // plus the derived display Status.
 type Session struct {
 	SessionRecord
-	Status           SessionStatus `json:"status" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
+	Status SessionStatus `json:"status" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
+	// StatusReason names the derivation rule that produced Status, so the UI can
+	// explain WHY (e.g. a needs_input from a lost-hook timeout vs a real agent
+	// prompt). Derived on read, never stored.
+	StatusReason StatusReason `json:"statusReason,omitempty" enum:"working,waiting_input,active_stale,idle_aged,idle,no_signal,pr_pipeline,terminated,merged"`
+	// NextTransitionAt is when the current timeout-based reading will flip if no
+	// new signal arrives; nil when the status is sticky/terminal. NextTransitionTo
+	// is what it becomes. Both derived on read.
+	NextTransitionAt *time.Time    `json:"nextTransitionAt,omitempty"`
+	NextTransitionTo SessionStatus `json:"nextTransitionTo,omitempty" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
 	TerminalHandleID string        `json:"terminalHandleId,omitempty"`
 	// PRs are the session's attributed pull requests (one session can own many).
 	// They feed status derivation and are surfaced on the API read model. Not

@@ -35,66 +35,102 @@ const waitingInputGrace = 45 * time.Second
 // so a real between-signals lull never trips it.
 const activeStaleGrace = 15 * time.Minute
 
-// deriveStatus computes the display status. signalCapable says whether this
-// session's harness has an activity hook pipeline at all; only then can
-// prolonged silence mean the pipeline is broken (no_signal) rather than the
-// permanent, normal silence of a hook-less harness.
+// statusResult is the full outcome of the status derivation: the display Status
+// plus WHY it was chosen and, for timeout-based readings, when/what it will flip
+// to next. All fields are derived on read from durable facts; none is stored.
+type statusResult struct {
+	Status           domain.SessionStatus
+	Reason           domain.StatusReason
+	NextTransitionAt *time.Time
+	NextTransitionTo domain.SessionStatus
+}
+
+// deriveStatus computes the display status. It delegates to deriveStatusDetail
+// and drops the reason/countdown, preserving the original signature for callers
+// and tests that only need the status.
+func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) domain.SessionStatus {
+	return deriveStatusDetail(rec, prs, now, signalCapable, minApprovals).Status
+}
+
+// deriveStatusDetail computes the display status AND the reason that produced it,
+// plus the pending timeout transition where one applies. The Status it returns
+// is identical to the historical deriveStatus for every input — it only adds the
+// explanatory metadata. signalCapable says whether this session's harness has an
+// activity hook pipeline at all; only then can prolonged silence mean the
+// pipeline is broken (no_signal) rather than a hook-less harness's normal quiet.
 //
 // A session may own several PRs at once (independent or stacked). The PR-derived
 // status is the worst-wins aggregate across its open PRs; stacked children whose
 // parent is still open are exempt from the aggregation since they cannot merge
 // until the parent does. Merged/closed PRs only matter once no open PR remains.
-func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) domain.SessionStatus {
+func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) statusResult {
 	if rec.IsTerminated {
 		if anyMerged(prs) {
-			return domain.StatusMerged
+			return statusResult{Status: domain.StatusMerged, Reason: domain.ReasonMerged}
 		}
-		return domain.StatusTerminated
+		return statusResult{Status: domain.StatusTerminated, Reason: domain.ReasonTerminated}
 	}
 
 	if rec.Activity.State == domain.ActivityWaitingInput {
-		return domain.StatusNeedsInput
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonWaitingInput}
 	}
 
 	open := openPRs(prs)
 	if len(open) > 0 {
-		return aggregatePRStatus(open, minApprovals)
+		return statusResult{Status: aggregatePRStatus(open, minApprovals), Reason: domain.ReasonPRPipeline}
 	}
 	if anyMerged(prs) {
-		return domain.StatusMerged
+		return statusResult{Status: domain.StatusMerged, Reason: domain.ReasonMerged}
 	}
 
 	if rec.Activity.State == domain.ActivityActive {
 		if now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
-			return domain.StatusWorking
+			at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
+			return statusResult{
+				Status:           domain.StatusWorking,
+				Reason:           domain.ReasonWorking,
+				NextTransitionAt: &at,
+				NextTransitionTo: domain.StatusNeedsInput,
+			}
 		}
-		// active but no signal has refreshed it within the grace: the turn's
-		// closing Stop was lost and nothing else demoted it, so the session is
-		// not really working. Surface it as waiting-for-human — the same fate as
-		// a sustained idle — rather than a permanent false "working". (Open PRs
-		// were already handled above, so this only affects PR-less sessions.)
-		return domain.StatusNeedsInput
+		// active but no signal refreshed it within the grace: the turn's closing
+		// Stop was lost and nothing else demoted it, so surface it as
+		// waiting-for-human rather than a permanent false "working".
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonActiveStale}
 	}
 
-	// A session that produced at least one signal (its turn ended with a Stop →
-	// idle) and has then stayed idle past the grace is almost certainly waiting
-	// for the human — surface it as needs-input even when Claude Code never sends
-	// the idle Notification. This sits AFTER the open-PR branch above, so a
-	// finished worker that opened a PR keeps its review/merge status; only a
-	// PR-less idle session (e.g. an agent that asked a question and stopped)
-	// promotes here.
 	if rec.Activity.State == domain.ActivityIdle && !rec.FirstSignalAt.IsZero() &&
 		now.Sub(rec.Activity.LastActivityAt) > waitingInputGrace {
-		return domain.StatusNeedsInput
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonIdleAged}
 	}
 
-	// No hook callback has ever arrived for this spawn/restore even though the
-	// harness has a hook pipeline. The seeded LastActivityAt marks the launch,
-	// so once the grace passes the honest status is "no signal", not "idle".
 	if signalCapable && rec.FirstSignalAt.IsZero() && now.Sub(rec.Activity.LastActivityAt) > noSignalGrace {
-		return domain.StatusNoSignal
+		return statusResult{Status: domain.StatusNoSignal, Reason: domain.ReasonNoSignal}
 	}
-	return domain.StatusIdle
+
+	// Fresh idle: report idle now, and where a promotion is pending compute when
+	// and to what it will flip so the UI can count down to it.
+	at, to := idleCountdown(rec, signalCapable)
+	return statusResult{Status: domain.StatusIdle, Reason: domain.ReasonIdle, NextTransitionAt: at, NextTransitionTo: to}
+}
+
+// idleCountdown returns the pending transition for a fresh idle session (one the
+// branches above did not already promote): a signalled idle will promote to
+// needs_input at last+waitingInputGrace; an unsignalled but hook-capable idle
+// will degrade to no_signal at last+noSignalGrace; a hook-less idle never flips.
+func idleCountdown(rec domain.SessionRecord, signalCapable bool) (*time.Time, domain.SessionStatus) {
+	if rec.Activity.State != domain.ActivityIdle {
+		return nil, ""
+	}
+	if !rec.FirstSignalAt.IsZero() {
+		at := rec.Activity.LastActivityAt.Add(waitingInputGrace)
+		return &at, domain.StatusNeedsInput
+	}
+	if signalCapable {
+		at := rec.Activity.LastActivityAt.Add(noSignalGrace)
+		return &at, domain.StatusNoSignal
+	}
+	return nil, ""
 }
 
 // openPRs returns the PRs that are neither merged nor closed, preserving order.
