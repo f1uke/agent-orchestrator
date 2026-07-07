@@ -2166,44 +2166,159 @@ func TestReconcile_AdoptAcrossDaemonRestart(t *testing.T) {
 	}
 }
 
-func TestReconcileReap_TerminatedButAliveTmuxDestroyed(t *testing.T) {
-	st := newFakeStore()
-	rt := &fakeRuntime{aliveByHandle: map[string]bool{"t1": true}}
-	ws := &fakeWorkspace{}
-	lcm := &fakeLCM{store: st}
-	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
-
-	rec := domain.SessionRecord{
-		ID: "t1", ProjectID: "p1", IsTerminated: true,
-		Metadata: domain.SessionMetadata{RuntimeHandleID: "t1"},
+// TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched locks in the fix for
+// the final-review finding: a session whose runtime died with the daemon AND
+// is idle past the auto-close TTL must be closed like CloseIdleSessions would
+// (terminated, worktree kept in place) instead of being captured into a
+// preserve ref and relaunched by RestoreAll on this same boot. Relaunching an
+// idle-past-TTL session on reboot would contradict the auto-close contract.
+func TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, ws, _ := newIdleManager(time.Hour, now)
+	// Handle "hX" is intentionally absent from rt.aliveByHandle so IsAlive
+	// reports false: the "runtime gone" branch runs.
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", IsTerminated: false,
+		Metadata: domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX"},
+		Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-2 * time.Hour)},
 	}
 
-	if err := m.reconcileReap(context.Background(), rec); err != nil {
-		t.Fatalf("reconcileReap: %v", err)
+	if err := m.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
 	}
-	if len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != "t1" {
-		t.Fatalf("destroyedIDs = %v, want [t1]", rt.destroyedIDs)
+
+	if !st.sessions["s1"].IsTerminated {
+		t.Fatal("idle-past-TTL dead-runtime session must end up terminated")
+	}
+	if ws.stashCalls != 0 {
+		t.Fatalf("stashCalls = %d, want 0 (idle session must not be captured)", ws.stashCalls)
+	}
+	for _, c := range ws.calls {
+		if c == "ForceDestroy:s1" {
+			t.Fatalf("worktree must be kept for an idle-past-TTL dead-runtime session; calls = %v", ws.calls)
+		}
+	}
+	if rows := st.worktrees["s1"]; len(rows) != 0 {
+		t.Fatalf("no restore marker expected, got %+v", rows)
+	}
+	if rt.created != 0 {
+		t.Fatalf("rt.created = %d, want 0 (must not be relaunched by RestoreAll)", rt.created)
 	}
 }
 
-func TestReconcileReap_TerminatedAndDeadTmuxLeftAlone(t *testing.T) {
+func newIdleManager(ttl time.Duration, now time.Time) (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace, *fakeLCM) {
 	st := newFakeStore()
-	rt := &fakeRuntime{aliveByHandle: map[string]bool{}} // t2 not alive
+	rt := &fakeRuntime{aliveByHandle: map[string]bool{}}
 	ws := &fakeWorkspace{}
 	lcm := &fakeLCM{store: st}
-	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+	m := New(Deps{
+		Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st,
+		Messenger: &fakeMessenger{}, Lifecycle: lcm,
+		LookPath:     func(string) (string, error) { return "/bin/true", nil },
+		IdleCloseTTL: ttl,
+		Clock:        func() time.Time { return now },
+	})
+	return m, st, rt, ws, lcm
+}
 
-	rec := domain.SessionRecord{
-		ID: "t2", ProjectID: "p1", IsTerminated: true,
-		Metadata: domain.SessionMetadata{RuntimeHandleID: "t2"},
+func TestCloseIdleSessions_IdleAlive_DestroysTmuxTerminatesKeepsWorktree(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, ws, _ := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h1"] = true
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer",
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h1", WorkspacePath: "/ws/s1"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-2 * time.Hour)},
+		CreatedAt: now.Add(-3 * time.Hour),
 	}
-	if err := m.reconcileReap(context.Background(), rec); err != nil {
-		t.Fatalf("reconcileReap: %v", err)
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != "h1" {
+		t.Fatalf("destroyedIDs = %v, want [h1]", rt.destroyedIDs)
+	}
+	if !st.sessions["s1"].IsTerminated {
+		t.Fatal("idle session must be marked terminated")
+	}
+	if ws.destroyed != 0 {
+		t.Fatalf("worktree must be kept; workspace Destroy called %d times", ws.destroyed)
+	}
+}
+
+func TestCloseIdleSessions_TerminatedLeftover_DestroysTmuxOnly(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, lcm := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h2"] = true
+	st.sessions["s2"] = domain.SessionRecord{
+		ID: "s2", ProjectID: "mer", IsTerminated: true,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "h2"},
+		Activity: domain.Activity{State: domain.ActivityExited, LastActivityAt: now.Add(-2 * time.Hour)},
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 1 {
+		t.Fatalf("Destroy calls = %d, want 1", rt.destroyed)
+	}
+	if lcm.terminated["s2"] != 0 {
+		t.Fatalf("already-terminated session must not be re-marked; MarkTerminated calls = %d", lcm.terminated["s2"])
+	}
+}
+
+func TestCloseIdleSessions_NotIdle_LeftAlone(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h3"] = true
+	st.sessions["s3"] = domain.SessionRecord{
+		ID: "s3", ProjectID: "mer",
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h3"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-30 * time.Minute)},
+		CreatedAt: now.Add(-30 * time.Minute),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
 	}
 	if rt.destroyed != 0 {
-		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+		t.Fatalf("recent session must be untouched; Destroy calls = %d, want 0", rt.destroyed)
+	}
+	if st.sessions["s3"].IsTerminated {
+		t.Fatal("recent session must not be terminated")
+	}
+}
+
+func TestCloseIdleSessions_Disabled_NoOp(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(0, now) // ttl <= 0 disables
+	rt.aliveByHandle["h4"] = true
+	st.sessions["s4"] = domain.SessionRecord{
+		ID: "s4", ProjectID: "mer",
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h4"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-1000 * time.Hour)},
+		CreatedAt: now.Add(-1000 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("disabled sweep must not destroy; Destroy calls = %d, want 0", rt.destroyed)
+	}
+}
+
+func TestCloseIdleSessions_NoSignalUsesCreatedAt(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h5"] = true
+	st.sessions["s5"] = domain.SessionRecord{
+		ID: "s5", ProjectID: "mer",
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h5"},
+		Activity:  domain.Activity{}, // no signal yet: LastActivityAt zero
+		CreatedAt: now.Add(-10 * time.Minute),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("freshly created session must not be closed; Destroy calls = %d, want 0", rt.destroyed)
 	}
 }
 

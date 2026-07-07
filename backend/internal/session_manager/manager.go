@@ -127,6 +127,9 @@ type Manager struct {
 	dataDir   string
 	runFile   string
 	clock     func() time.Time
+	// idleCloseTTL is the inactivity window after which CloseIdleSessions closes
+	// a session. Zero disables the sweep.
+	idleCloseTTL time.Duration
 	// lookPath is exec.LookPath in production; tests substitute a stub so
 	// they don't need real binaries on PATH. Returns ports.ErrAgentBinaryNotFound
 	// when the binary is missing so the sentinel propagates through toAPIError.
@@ -158,6 +161,8 @@ type Deps struct {
 	// default run file. Empty omits the export (see EnvRunFile).
 	RunFile string
 	Clock   func() time.Time
+	// IdleCloseTTL is the inactivity window for CloseIdleSessions. 0 disables it.
+	IdleCloseTTL time.Duration
 	// LookPath overrides exec.LookPath for the pre-launch agent-binary check.
 	// Production wiring leaves this nil and the manager defaults to
 	// exec.LookPath; tests inject a stub so they need not seed real binaries.
@@ -175,18 +180,19 @@ type Deps struct {
 // time.Now when Deps.Clock is nil.
 func New(d Deps) *Manager {
 	m := &Manager{
-		runtime:    d.Runtime,
-		agents:     d.Agents,
-		workspace:  d.Workspace,
-		store:      d.Store,
-		messenger:  d.Messenger,
-		lcm:        d.Lifecycle,
-		dataDir:    d.DataDir,
-		runFile:    d.RunFile,
-		clock:      d.Clock,
-		lookPath:   d.LookPath,
-		executable: d.Executable,
-		logger:     d.Logger,
+		runtime:      d.Runtime,
+		agents:       d.Agents,
+		workspace:    d.Workspace,
+		store:        d.Store,
+		messenger:    d.Messenger,
+		lcm:          d.Lifecycle,
+		dataDir:      d.DataDir,
+		runFile:      d.RunFile,
+		clock:        d.Clock,
+		idleCloseTTL: d.IdleCloseTTL,
+		lookPath:     d.LookPath,
+		executable:   d.Executable,
+		logger:       d.Logger,
 	}
 	if m.clock == nil {
 		// UTC so spawn-stamped CreatedAt/UpdatedAt match every other session
@@ -806,6 +812,11 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 // it on this same boot, resuming history. Crash recovery thus matches graceful
 // restart instead of silently abandoning the session.
 //
+// Exception: a gone-runtime session that is ALSO idle past the auto-close TTL
+// is closed the way CloseIdleSessions would (marked terminated, worktree left
+// in place, no restore marker) instead of captured and relaunched — a session
+// the user let go idle must stay closed across a reboot, not come back.
+//
 // If the work capture fails we mark terminated WITHOUT a marker and leave the
 // worktree intact: better to skip the relaunch than to tear down un-preserved
 // work or relaunch onto an inconsistent worktree.
@@ -824,7 +835,18 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 			return nil // adopt: the session survived the crash.
 		}
 	}
-	// Runtime is gone: capture uncommitted work first.
+	// Runtime is gone. If the session is idle past the auto-close TTL, close it
+	// the way CloseIdleSessions would instead of capturing + relaunching: mark it
+	// terminated and leave the worktree in place (its uncommitted work sits on
+	// disk for on-demand Restore) with no restore marker, so this boot does not
+	// relaunch a session the user let go idle past the window.
+	if m.idleCloseTTL > 0 && m.clock().Sub(idleReference(rec)) > m.idleCloseTTL {
+		if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+			return fmt.Errorf("reconcile %s: mark terminated (idle): %w", rec.ID, err)
+		}
+		return nil
+	}
+	// Not idle: capture uncommitted work first so RestoreAll can relaunch it.
 	ws := workspaceInfo(rec)
 	ref, err := m.workspace.StashUncommitted(ctx, ws)
 	if err != nil {
@@ -860,37 +882,16 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 	return nil
 }
 
-// reconcileReap kills the leaked tmux session of a session the DB already marks
-// terminated. This covers the teardown that marked the row terminated but failed
-// to kill the runtime (e.g. ForceDestroy/Destroy errored after MarkTerminated).
-// Destroy is idempotent, so an already-gone session is a no-op.
-func (m *Manager) reconcileReap(ctx context.Context, rec domain.SessionRecord) error {
-	handle := runtimeHandle(rec.Metadata)
-	if handle.ID == "" {
-		return nil
-	}
-	alive, err := m.runtime.IsAlive(ctx, handle)
-	if err != nil {
-		return fmt.Errorf("reconcile reap %s: probe: %w", rec.ID, err)
-	}
-	if !alive {
-		return nil
-	}
-	if err := m.runtime.Destroy(ctx, handle); err != nil {
-		return fmt.Errorf("reconcile reap %s: destroy: %w", rec.ID, err)
-	}
-	return nil
-}
-
 // Reconcile is the boot-time consistency pass. It replaces the bare RestoreAll
 // call so that however the previous daemon died (clean shutdown, SIGKILL, or
 // crash), live reality matches the DB:
 //
 //  1. Live pass: for each non-terminated session, adopt it if its runtime
 //     survived, else capture work and mark terminated (reconcileLive).
-//  2. Reap pass: for each terminated session whose runtime leaked, kill it
-//     (reconcileReap). Runs before restore so a restored session does not
-//     collide with a leaked tmux of the same name.
+//  2. Idle sweep: close sessions idle past the configured TTL — destroy their
+//     tmux and mark them terminated while KEEPING the worktree, so a normally
+//     terminated session's tmux survives app reopen and only ages out on
+//     inactivity (CloseIdleSessions). Replaces the old immediate reap.
 //  3. Restore pass: relaunch shutdown-saved sessions (existing RestoreAll).
 //
 // Best-effort throughout: a per-session failure is logged and never aborts the
@@ -908,15 +909,74 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 			m.logger.Error("reconcile: live pass failed, skipping", "sessionID", rec.ID, "error", err)
 		}
 	}
-	for _, rec := range recs {
-		if !rec.IsTerminated {
-			continue
-		}
-		if err := m.reconcileReap(ctx, rec); err != nil {
-			m.logger.Error("reconcile: reap pass failed, skipping", "sessionID", rec.ID, "error", err)
-		}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		m.logger.Error("reconcile: idle sweep failed", "error", err)
 	}
 	return m.RestoreAll(ctx)
+}
+
+// CloseIdleSessions auto-closes every session idle longer than the configured
+// TTL: it destroys the session's runtime (tmux) and marks it terminated while
+// KEEPING its worktree on disk, so the session stays restorable via the existing
+// Restore path. A non-positive TTL disables the sweep. Best-effort: a per-session
+// failure is logged and never aborts the pass.
+func (m *Manager) CloseIdleSessions(ctx context.Context) error {
+	if m.idleCloseTTL <= 0 {
+		return nil
+	}
+	recs, err := m.store.ListAllSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("close idle: list sessions: %w", err)
+	}
+	now := m.clock()
+	for _, rec := range recs {
+		if now.Sub(idleReference(rec)) <= m.idleCloseTTL {
+			continue
+		}
+		if err := m.closeIdle(ctx, rec); err != nil {
+			m.logger.Error("close idle: failed, skipping", "sessionID", rec.ID, "error", err)
+		}
+	}
+	return nil
+}
+
+// closeIdle destroys a session's runtime (if any survives) and marks it
+// terminated, deliberately keeping the worktree so the session stays restorable.
+func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord) error {
+	handle := runtimeHandle(rec.Metadata)
+	if handle.ID != "" {
+		alive, err := m.runtime.IsAlive(ctx, handle)
+		if err != nil {
+			return fmt.Errorf("close idle %s: probe: %w", rec.ID, err)
+		}
+		if alive {
+			if err := m.runtime.Destroy(ctx, handle); err != nil {
+				return fmt.Errorf("close idle %s: destroy: %w", rec.ID, err)
+			}
+		}
+	}
+	if rec.IsTerminated {
+		return nil
+	}
+	// Clear any shutdown-restore marker so boot never auto-relaunches it: the
+	// user restores on demand. The worktree is deliberately kept on disk.
+	if err := m.store.DeleteSessionWorktrees(ctx, rec.ID); err != nil {
+		return fmt.Errorf("close idle %s: clear restore marker: %w", rec.ID, err)
+	}
+	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+		return fmt.Errorf("close idle %s: mark terminated: %w", rec.ID, err)
+	}
+	return nil
+}
+
+// idleReference is the timestamp idle time is measured from: the last activity
+// signal, or the session's creation time when no signal has arrived yet (so a
+// freshly-spawned, not-yet-reporting session is not closed immediately).
+func idleReference(rec domain.SessionRecord) time.Time {
+	if !rec.Activity.LastActivityAt.IsZero() {
+		return rec.Activity.LastActivityAt
+	}
+	return rec.CreatedAt
 }
 
 // RestoreAll relaunches every terminated session that was saved by the last

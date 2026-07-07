@@ -206,6 +206,14 @@ func Run() error {
 		}()
 	}
 
+	// Auto-close idle sessions while the daemon runs. Disabled (interval 0) when
+	// AO_SESSION_IDLE_CLOSE <= 0; boot-time closing already ran inside Reconcile.
+	sweepInterval := time.Duration(0)
+	if cfg.SessionIdleClose > 0 {
+		sweepInterval = idleSweepIntervalDefault
+	}
+	idleSweepDone := startIdleSweep(ctx, sweepInterval, sessMgr.CloseIdleSessions, log)
+
 	runErr := srv.Run(ctx)
 
 	// Both graceful shutdown paths (SIGTERM and POST /shutdown) funnel through
@@ -220,6 +228,7 @@ func Run() error {
 	// runs before the cancel: a non-signal exit path would hang otherwise.
 	stop()
 	<-previewDone
+	<-idleSweepDone
 	<-reclaimerDone
 	lcStack.Stop()
 	if err := cdcPipe.Stop(); err != nil {

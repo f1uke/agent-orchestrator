@@ -73,6 +73,7 @@ func (l *lifecycleStack) Stop() {
 type sessionLifecycle interface {
 	Reconcile(ctx context.Context) error
 	RestoreAll(ctx context.Context) error
+	CloseIdleSessions(ctx context.Context) error
 }
 
 // startSession builds the controller-facing session service: a session manager
@@ -102,15 +103,16 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		return nil, nil, nil, fmt.Errorf("session workspace: %w", err)
 	}
 	mgr := sessionmanager.New(sessionmanager.Deps{
-		Runtime:   runtime,
-		Agents:    agents,
-		Workspace: ws,
-		Store:     store,
-		Messenger: messenger,
-		Lifecycle: lcm,
-		DataDir:   cfg.DataDir,
-		RunFile:   cfg.RunFilePath,
-		Logger:    log,
+		Runtime:      runtime,
+		Agents:       agents,
+		Workspace:    ws,
+		Store:        store,
+		Messenger:    messenger,
+		Lifecycle:    lcm,
+		DataDir:      cfg.DataDir,
+		RunFile:      cfg.RunFilePath,
+		Logger:       log,
+		IdleCloseTTL: cfg.SessionIdleClose,
 	})
 	scmProvider, err := newGitHubSCMProvider(log)
 	if err != nil {

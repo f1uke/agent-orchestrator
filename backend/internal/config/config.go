@@ -29,6 +29,9 @@ const (
 	// DefaultShutdownTimeout is the hard cap on graceful shutdown. After this
 	// the process exits even if connections are still draining.
 	DefaultShutdownTimeout = 10 * time.Second
+	// DefaultSessionIdleClose is the inactivity window after which an idle
+	// session is auto-closed. Zero (via AO_SESSION_IDLE_CLOSE=0) disables it.
+	DefaultSessionIdleClose = 24 * time.Hour
 	// DefaultAgent is the compatibility value used when AO_AGENT is unset. The
 	// daemon validates it at startup, but worker/orchestrator spawns resolve from
 	// explicit requests or project role config instead of falling back to it.
@@ -80,6 +83,10 @@ type Config struct {
 	RequestTimeout time.Duration
 	// ShutdownTimeout is the hard graceful-shutdown deadline.
 	ShutdownTimeout time.Duration
+	// SessionIdleClose is the inactivity window after which an idle session is
+	// auto-closed: its tmux is destroyed and the session is marked terminated,
+	// but its worktree is kept so it stays restorable. 0 disables auto-close.
+	SessionIdleClose time.Duration
 	// RunFilePath is where the PID + port handshake file (running.json) is
 	// written so the Electron supervisor can discover and reap the daemon.
 	RunFilePath string
@@ -111,6 +118,7 @@ func (c Config) Addr() string {
 //	AO_PORT              bind port           (default 3001)
 //	AO_REQUEST_TIMEOUT   per-request timeout (Go duration > 0, default 60s)
 //	AO_SHUTDOWN_TIMEOUT  shutdown deadline   (Go duration > 0, default 10s)
+//	AO_SESSION_IDLE_CLOSE  idle auto-close window (Go duration, 0 disables, default 24h)
 //	AO_RUN_FILE          running.json path   (default ~/.ao/running.json)
 //	AO_DATA_DIR          durable state dir   (default ~/.ao/data)
 //	AO_AGENT             compatibility agent id (default claude-code)
@@ -124,12 +132,13 @@ func (c Config) Addr() string {
 // The bind host is not configurable: the daemon is loopback-only by design.
 func Load() (Config, error) {
 	cfg := Config{
-		Host:            LoopbackHost,
-		Port:            DefaultPort,
-		RequestTimeout:  DefaultRequestTimeout,
-		ShutdownTimeout: DefaultShutdownTimeout,
-		Agent:           DefaultAgent,
-		AllowedOrigins:  DefaultAllowedOrigins,
+		Host:             LoopbackHost,
+		Port:             DefaultPort,
+		RequestTimeout:   DefaultRequestTimeout,
+		ShutdownTimeout:  DefaultShutdownTimeout,
+		SessionIdleClose: DefaultSessionIdleClose,
+		Agent:            DefaultAgent,
+		AllowedOrigins:   DefaultAllowedOrigins,
 		Telemetry: TelemetryConfig{
 			Remote:      TelemetryRemoteOff,
 			PostHogHost: DefaultTelemetryPostHogHost,
@@ -161,6 +170,14 @@ func Load() (Config, error) {
 			return Config{}, err
 		}
 		cfg.ShutdownTimeout = d
+	}
+
+	if raw := os.Getenv("AO_SESSION_IDLE_CLOSE"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid AO_SESSION_IDLE_CLOSE %q: %w", raw, err)
+		}
+		cfg.SessionIdleClose = d
 	}
 
 	if raw := os.Getenv("AO_AGENT"); raw != "" {
