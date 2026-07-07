@@ -214,6 +214,68 @@ func TestDoctorChecksGitHubTokenFromGHCLI(t *testing.T) {
 	}
 }
 
+func gitlabDoctorServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user" {
+			t.Fatalf("unexpected gitlab probe: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("PRIVATE-TOKEN"); got == "" {
+			t.Fatalf("missing PRIVATE-TOKEN header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+}
+
+func TestDoctorChecksGitLabTokenFromEnv(t *testing.T) {
+	setConfigEnv(t)
+	srv := gitlabDoctorServer(t, http.StatusOK, `{"username":"gitlab-me"}`)
+	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("git version 2.43.0\n"), nil
+	})
+	t.Setenv("AO_GITLAB_HOST", "gitlab.finnomena.com")
+	t.Setenv("AO_GITLAB_TOKEN", "env-gitlab-token")
+	c.deps.HTTPClient = srv.Client()
+	c.deps.DoctorGitLabRESTBase = srv.URL
+
+	check := findDoctorCheck(t, c.runDoctor(context.Background()), "gitlab-token")
+	if check.Level != doctorPass || !strings.Contains(check.Message, "AO_GITLAB_TOKEN") || !strings.Contains(check.Message, "gitlab-me") {
+		t.Fatalf("gitlab-token check = %+v, want PASS with source and user", check)
+	}
+}
+
+func TestDoctorFailsRejectedGitLabToken(t *testing.T) {
+	setConfigEnv(t)
+	srv := gitlabDoctorServer(t, http.StatusUnauthorized, `{"message":"401 Unauthorized"}`)
+	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("git version 2.43.0\n"), nil
+	})
+	t.Setenv("AO_GITLAB_HOST", "gitlab.finnomena.com")
+	t.Setenv("AO_GITLAB_TOKEN", "bad-token")
+	c.deps.HTTPClient = srv.Client()
+	c.deps.DoctorGitLabRESTBase = srv.URL
+
+	check := findDoctorCheck(t, c.runDoctor(context.Background()), "gitlab-token")
+	if check.Level != doctorFail || !strings.Contains(check.Message, "rejected by GitLab") {
+		t.Fatalf("gitlab-token check = %+v, want FAIL rejected", check)
+	}
+}
+
+func TestDoctorSkipsGitLabWhenHostUnset(t *testing.T) {
+	setConfigEnv(t)
+	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("git version 2.43.0\n"), nil
+	})
+	// doctorContext clears AO_GITLAB_HOST; the GitLab probe must not run.
+	for _, check := range c.runDoctor(context.Background()) {
+		if check.Name == "gitlab-token" {
+			t.Fatalf("gitlab-token check present without AO_GITLAB_HOST: %+v", check)
+		}
+	}
+}
+
 func TestDoctorWarnsWhenGitHubTokenMissing(t *testing.T) {
 	setConfigEnv(t)
 	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
@@ -314,6 +376,10 @@ func clearDoctorGitHubEnv(t *testing.T) {
 	t.Setenv("AO_GITHUB_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
+	// Keep GitLab unconfigured by default so the GitLab probe stays off unless a
+	// test opts in; otherwise a leaked AO_GITLAB_HOST would add a stray check.
+	t.Setenv("AO_GITLAB_HOST", "")
+	t.Setenv("AO_GITLAB_TOKEN", "")
 }
 
 // TestDoctorChecksAOBinaryIdentity covers the `ao-binary` check: workspace

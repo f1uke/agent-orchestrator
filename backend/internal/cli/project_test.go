@@ -91,6 +91,28 @@ func TestBuildProjectConfigTrackerIntakeFlags(t *testing.T) {
 	}
 }
 
+func TestBuildProjectConfigTrackerProviderGitLab(t *testing.T) {
+	got, err := buildProjectConfig(projectSetConfigOptions{
+		trackerIntake:   true,
+		trackerProvider: "gitlab",
+		trackerRepo:     "group/sub/proj",
+		trackerAssignee: "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TrackerIntake.Enabled || got.TrackerIntake.Provider != "gitlab" || got.TrackerIntake.Repo != "group/sub/proj" {
+		t.Fatalf("tracker intake config = %#v", got.TrackerIntake)
+	}
+}
+
+func TestBuildProjectConfigTrackerProviderInvalidIsUsageError(t *testing.T) {
+	_, err := buildProjectConfig(projectSetConfigOptions{trackerIntake: true, trackerProvider: "bitbucket"})
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("err=%v exit=%d, want usage error for unknown provider", err, ExitCode(err))
+	}
+}
+
 func TestProjectList_Success(t *testing.T) {
 	cfg := setConfigEnv(t)
 	srv, capture := projectServer(t, http.StatusOK, `{"projects":[{"id":"zeta","name":"Zeta","sessionPrefix":"zeta"},{"id":"alpha","name":"Alpha","sessionPrefix":"alpha","resolveError":"config missing"}]}`)

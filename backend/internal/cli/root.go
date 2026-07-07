@@ -73,6 +73,9 @@ type Deps struct {
 	// DoctorGitHubRESTBase lets tests point the doctor GitHub token probe at
 	// httptest without mutating package-global state.
 	DoctorGitHubRESTBase string
+	// DoctorGitLabRESTBase lets tests point the doctor GitLab token probe at
+	// httptest. Empty in production, where it is derived from AO_GITLAB_HOST.
+	DoctorGitLabRESTBase string
 	Now                  func() time.Time
 	Sleep                func(time.Duration)
 }

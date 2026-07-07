@@ -53,20 +53,30 @@ func bodyForIntent(intent Intent) string {
 		if s := sessionLabel(intent); s != "session" {
 			return fmt.Sprintf("%s has no known blocking CI or review feedback.", s)
 		}
-		return "The pull request has no known blocking CI or review feedback."
+		return fmt.Sprintf("The %s has no known blocking CI or review feedback.", prNoun(intent))
 	case domain.NotificationPRMerged:
 		if title := strings.TrimSpace(intent.PRTitle); title != "" {
 			return fmt.Sprintf("%s was merged.", title)
 		}
-		return "The pull request was merged."
+		return fmt.Sprintf("The %s was merged.", prNoun(intent))
 	case domain.NotificationPRClosedUnmerged:
 		if title := strings.TrimSpace(intent.PRTitle); title != "" {
 			return fmt.Sprintf("%s was closed without merging.", title)
 		}
-		return "The pull request was closed without merging."
+		return fmt.Sprintf("The %s was closed without merging.", prNoun(intent))
 	default:
 		return ""
 	}
+}
+
+// prNoun picks the provider-appropriate noun for a change request from the URL
+// shape: a GitLab merge request (its URL carries "/-/merge_requests/") versus a
+// GitHub pull request.
+func prNoun(intent Intent) string {
+	if strings.Contains(intent.PRURL, "/-/merge_requests/") {
+		return "merge request"
+	}
+	return "pull request"
 }
 
 func sessionLabel(intent Intent) string {
