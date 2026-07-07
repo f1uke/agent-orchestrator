@@ -45,6 +45,7 @@ type ListFilter struct {
 type commander interface {
 	Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string) error
@@ -383,6 +384,17 @@ func (s *Service) lockOrchestratorProject(projectID domain.ProjectID) func() {
 // Restore relaunches a terminated session and returns the API-facing read model.
 func (s *Service) Restore(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	rec, err := s.manager.Restore(ctx, id)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// Restart tears a session down and relaunches it in place (kill-then-restore),
+// keeping the same session id and native transcript so the agent resumes its
+// conversation with a freshly recomputed system prompt.
+func (s *Service) Restart(ctx context.Context, id domain.SessionID) (domain.Session, error) {
+	rec, err := s.manager.Restart(ctx, id)
 	if err != nil {
 		return domain.Session{}, toAPIError(err)
 	}

@@ -2,7 +2,8 @@ import { ChevronLeft, Maximize2, Minimize2, Shield } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
 import type { Theme } from "../stores/ui-store";
 import type { TerminalTarget } from "../types/terminal";
-import { isOrchestratorSession, type WorkspaceSession } from "../types/workspace";
+import { isOrchestratorSession, sessionIsActive, type WorkspaceSession } from "../types/workspace";
+import { RestartSessionButton } from "./RestartSessionButton";
 import { TerminalPane } from "./TerminalPane";
 
 type CenterPaneProps = {
@@ -139,6 +140,13 @@ export function CenterPane({ session, theme, daemonReady, terminalTarget, onSele
 							<Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
 						)}
 					</button>
+					{/* Restart the live session in place: reloads the system prompt while
+					    resuming the conversation. Shown for both orchestrator and worker
+					    terminals, never on the reviewer terminal or a terminated session
+					    (which has its own Restore control). */}
+					{session && target.kind !== "reviewer" && sessionIsActive(session) ? (
+						<RestartSessionButton session={session} />
+					) : null}
 				</div>
 			</div>
 			{target.kind === "reviewer" ? (

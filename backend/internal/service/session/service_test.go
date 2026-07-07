@@ -202,18 +202,21 @@ func TestSessionRenameMissingSessionReturnsNotFound(t *testing.T) {
 // clean-orchestrator ordering without wiring a real session engine.
 type fakeCommander struct {
 	killed          []domain.SessionID
+	restarted       []domain.SessionID
 	retired         []domain.SessionID
 	sent            []domain.SessionID
 	cleanupProjects []domain.ProjectID
 	purged          []domain.SessionID
 	purgedForce     []bool
 	killErr         error
+	restartErr      error
 	retireErr       error
 	sendErr         error
 	cleanupErr      error
 	spawnErr        error
 	purgeErr        error
 	spawnRecord     domain.SessionRecord
+	restartRecord   domain.SessionRecord
 	spawned         bool
 	killsAtSpawn    int
 }
@@ -238,6 +241,13 @@ func (f *fakeCommander) Kill(_ context.Context, id domain.SessionID) (bool, erro
 	}
 	f.killed = append(f.killed, id)
 	return true, nil
+}
+func (f *fakeCommander) Restart(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	if f.restartErr != nil {
+		return domain.SessionRecord{}, f.restartErr
+	}
+	f.restarted = append(f.restarted, id)
+	return f.restartRecord, nil
 }
 func (f *fakeCommander) RetireForReplacement(_ context.Context, id domain.SessionID) error {
 	if f.retireErr != nil {
@@ -1051,6 +1061,41 @@ func TestReclaim_DelegatesToKill(t *testing.T) {
 	}
 	if len(fc.killed) != 1 || fc.killed[0] != "sess-1" {
 		t.Fatalf("killed = %v, want [sess-1]", fc.killed)
+	}
+}
+
+// TestRestart_DelegatesToManager: the session service forwards a restart to the
+// manager's atomic Restart (kill-then-restore) and returns the relaunched read
+// model.
+func TestRestart_DelegatesToManager(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-1"] = domain.SessionRecord{ID: "sess-1", ProjectID: "mer", Kind: domain.KindWorker}
+	fc := &fakeCommander{restartRecord: domain.SessionRecord{ID: "sess-1", ProjectID: "mer", Kind: domain.KindWorker}}
+	svc := &Service{manager: fc, store: st}
+
+	sess, err := svc.Restart(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if len(fc.restarted) != 1 || fc.restarted[0] != "sess-1" {
+		t.Fatalf("restarted = %v, want [sess-1]", fc.restarted)
+	}
+	if sess.ID != "sess-1" {
+		t.Fatalf("returned session id = %q, want sess-1", sess.ID)
+	}
+}
+
+// TestRestart_MapsManagerError: a manager restart failure (e.g. an
+// unrestorable session) is mapped through the API-error translation, not
+// returned raw.
+func TestRestart_MapsManagerError(t *testing.T) {
+	fc := &fakeCommander{restartErr: sessionmanager.ErrNotRestorable}
+	svc := &Service{manager: fc, store: newFakeStore()}
+
+	_, err := svc.Restart(context.Background(), "sess-1")
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindConflict {
+		t.Fatalf("err = %v, want apierr.Conflict", err)
 	}
 }
 

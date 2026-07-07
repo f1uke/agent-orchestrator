@@ -5,6 +5,9 @@ import { CenterPane } from "./CenterPane";
 
 // The terminal body pulls in xterm/SSE machinery irrelevant to the toolbar under test.
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div>terminal body</div> }));
+// The restart control pulls in react-query machinery irrelevant to the toolbar
+// under test; stub it so we can assert only on where it is (and isn't) shown.
+vi.mock("./RestartSessionButton", () => ({ RestartSessionButton: () => <div>restart control</div> }));
 
 const worker = {
 	id: "sess-1",
@@ -34,5 +37,39 @@ describe("CenterPane toolbar session label", () => {
 	it("shows 'No session' when there is no session", () => {
 		render(<CenterPane theme="dark" daemonReady />);
 		expect(screen.getByText("No session")).toBeInTheDocument();
+	});
+});
+
+describe("CenterPane restart control", () => {
+	it("offers restart for an active session", () => {
+		render(<CenterPane session={worker} theme="dark" daemonReady />);
+		expect(screen.getByText("restart control")).toBeInTheDocument();
+	});
+
+	it("offers restart for an active orchestrator session", () => {
+		render(<CenterPane session={{ ...worker, id: "sess-orch", kind: "orchestrator" }} theme="dark" daemonReady />);
+		expect(screen.getByText("restart control")).toBeInTheDocument();
+	});
+
+	it("hides restart for a terminated session", () => {
+		render(<CenterPane session={{ ...worker, status: "terminated" }} theme="dark" daemonReady />);
+		expect(screen.queryByText("restart control")).not.toBeInTheDocument();
+	});
+
+	it("hides restart when there is no session", () => {
+		render(<CenterPane theme="dark" daemonReady />);
+		expect(screen.queryByText("restart control")).not.toBeInTheDocument();
+	});
+
+	it("hides restart on the reviewer terminal", () => {
+		render(
+			<CenterPane
+				session={worker}
+				theme="dark"
+				daemonReady
+				terminalTarget={{ kind: "reviewer", handleId: "h-1", harness: "claude-code" }}
+			/>,
+		);
+		expect(screen.queryByText("restart control")).not.toBeInTheDocument();
 	});
 });
