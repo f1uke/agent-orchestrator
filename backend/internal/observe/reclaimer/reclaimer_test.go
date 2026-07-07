@@ -14,7 +14,9 @@ type fakeSvc struct {
 	reclaimed  []domain.SessionID
 }
 
-func (f *fakeSvc) ListReclaimable(context.Context) ([]domain.SessionID, error) { return f.candidates, nil }
+func (f *fakeSvc) ListReclaimable(context.Context) ([]domain.SessionID, error) {
+	return f.candidates, nil
+}
 func (f *fakeSvc) Reclaim(_ context.Context, id domain.SessionID) error {
 	f.reclaimed = append(f.reclaimed, id)
 	return nil
