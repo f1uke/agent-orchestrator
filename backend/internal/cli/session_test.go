@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 type sessionRequestLog struct {
@@ -539,5 +541,39 @@ func TestSessionClaimPR_GHFallbackWhenProjectRepoMissing(t *testing.T) {
 	}
 	if ghDir != "/repo/demo" || !strings.Contains(out, "claimed PR #142") {
 		t.Fatalf("ghDir=%q out=%s", ghDir, out)
+	}
+}
+
+func TestWriteSessionDetailsIncludesReason(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	sess := sessionDTO{
+		ID:           "demo-1",
+		ProjectID:    "demo",
+		Kind:         "worker",
+		Status:       "needs_input",
+		StatusReason: "active_stale",
+		Activity:     sessionActivity{State: "active"},
+	}
+	if err := writeSessionDetails(cmd, sess); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "reason: active_stale") {
+		t.Fatalf("output missing reason line:\n%s", out)
+	}
+}
+
+func TestWriteSessionDetailsOmitsEmptyReason(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	sess := sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "working"}
+	if err := writeSessionDetails(cmd, sess); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	if strings.Contains(buf.String(), "reason:") {
+		t.Fatalf("empty reason should be omitted:\n%s", buf.String())
 	}
 }
