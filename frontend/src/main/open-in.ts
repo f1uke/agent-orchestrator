@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { type OpenInTargets, resolveOpenTargets } from "./open-in-targets";
+import { isXcodeAppName, type OpenInTargets, resolveOpenTargets } from "./open-in-targets";
 
 // The macOS locations a .app bundle can live. Detection is a cheap existsSync
 // against these rather than a Spotlight (`mdfind`) query, which can be slow and
@@ -13,6 +13,21 @@ const APP_DIRS = ["/Applications", path.join(os.homedir(), "Applications"), "/Sy
 /** Whether an app bundle named `<appName>.app` exists in a standard location. */
 export function isAppInstalled(appName: string): boolean {
 	return APP_DIRS.some((dir) => existsSync(path.join(dir, `${appName}.app`)));
+}
+
+/**
+ * Whether Xcode is installed. Unlike {@link isAppInstalled}, this scans the app
+ * directories rather than probing a fixed `Xcode.app`, so versioned/side-by-side
+ * bundles like `Xcode-26.3.0.app` or `Xcode-beta.app` are recognized too.
+ */
+export function isXcodeInstalled(): boolean {
+	return APP_DIRS.some((dir) => {
+		try {
+			return readdirSync(dir).some(isXcodeAppName);
+		} catch {
+			return false;
+		}
+	});
 }
 
 /**
@@ -32,7 +47,7 @@ export async function detectOpenTargets(dir: string): Promise<OpenInTargets> {
 		dir,
 		entries,
 		vscodeInstalled: isAppInstalled("Visual Studio Code"),
-		xcodeInstalled: isAppInstalled("Xcode"),
+		xcodeInstalled: isXcodeInstalled(),
 	});
 }
 

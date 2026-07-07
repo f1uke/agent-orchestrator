@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveOpenTargets } from "./open-in-targets";
+import { isXcodeAppName, resolveOpenTargets } from "./open-in-targets";
 
 const DIR = "/Users/dev/project";
 
@@ -83,5 +83,23 @@ describe("resolveOpenTargets", () => {
 
 		const absent = resolveOpenTargets({ dir: DIR, entries: [], vscodeInstalled: false, xcodeInstalled: false });
 		expect(absent.hasVSCode).toBe(false);
+	});
+});
+
+describe("isXcodeAppName", () => {
+	it("matches the canonical Xcode.app", () => {
+		expect(isXcodeAppName("Xcode.app")).toBe(true);
+	});
+
+	it("matches versioned and side-by-side bundles (multiple Xcodes installed)", () => {
+		expect(isXcodeAppName("Xcode-26.3.0.app")).toBe(true);
+		expect(isXcodeAppName("Xcode-beta.app")).toBe(true);
+	});
+
+	it("rejects the Xcodes version-manager app and other lookalikes", () => {
+		expect(isXcodeAppName("Xcodes.app")).toBe(false);
+		expect(isXcodeAppName("NotXcode.app")).toBe(false);
+		expect(isXcodeAppName("Xcode.txt")).toBe(false);
+		expect(isXcodeAppName("Xcode")).toBe(false);
 	});
 });
