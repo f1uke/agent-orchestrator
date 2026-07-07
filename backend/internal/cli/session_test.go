@@ -577,3 +577,26 @@ func TestWriteSessionDetailsOmitsEmptyReason(t *testing.T) {
 		t.Fatalf("empty reason should be omitted:\n%s", buf.String())
 	}
 }
+
+// The reason rides the existing --json path (which re-marshals sessionDTO), so
+// pin the omitempty contract: a reason-less session's JSON is byte-identical to
+// before, and a reason is emitted when present.
+func TestSessionDTOJSONOmitsEmptyReason(t *testing.T) {
+	b, err := json.Marshal(sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "working"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "statusReason") {
+		t.Fatalf("empty statusReason should be omitted from JSON:\n%s", b)
+	}
+}
+
+func TestSessionDTOJSONIncludesReason(t *testing.T) {
+	b, err := json.Marshal(sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "needs_input", StatusReason: "active_stale"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"statusReason":"active_stale"`) {
+		t.Fatalf("reason should be present in JSON:\n%s", b)
+	}
+}

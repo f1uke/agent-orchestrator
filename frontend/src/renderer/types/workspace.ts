@@ -109,11 +109,13 @@ const transitionTargetLabel: Partial<Record<SessionStatus, string>> = {
 
 /** Compact human duration for a countdown, e.g. "45s", "4m", "2h". */
 export function formatCountdown(ms: number): string {
-	const s = Math.round(ms / 1000);
+	// floor, not round: a countdown must never name a unit the clock hasn't
+	// reached (59s should read "59s", not "1m").
+	const s = Math.floor(ms / 1000);
 	if (s < 60) return `${s}s`;
-	const m = Math.round(s / 60);
+	const m = Math.floor(s / 60);
 	if (m < 60) return `${m}m`;
-	return `${Math.round(m / 60)}h`;
+	return `${Math.floor(m / 60)}h`;
 }
 
 /**
