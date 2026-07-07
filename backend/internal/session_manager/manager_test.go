@@ -745,6 +745,39 @@ func TestRestore_ReopensTerminal(t *testing.T) {
 		t.Fatal("restore should relaunch")
 	}
 }
+
+// A session can be terminated in the store while its runtime is still alive —
+// e.g. its PR merged (reaper/reclaim marked it done) but the agent process is
+// still attached. Relaunching would collide with the existing runtime
+// (`tmux new-session` fails "duplicate session" -> HTTP 500). Restore must adopt
+// the live runtime instead: clear the terminal state with no relaunch and no
+// teardown of the running agent.
+func TestRestore_AdoptsLiveRuntimeWithoutRelaunch(t *testing.T) {
+	m, st, rt, ws := newManager()
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x", RuntimeHandleID: "live-1"})
+	rt.aliveByHandle = map[string]bool{"live-1": true}
+
+	s, err := m.Restore(ctx, "mer-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.created != 0 {
+		t.Fatalf("live runtime must be adopted, not relaunched: runtime created = %d, want 0", rt.created)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("adopting a live runtime must not tear it down: destroyed = %d, want 0", rt.destroyed)
+	}
+	if len(ws.calls) != 0 {
+		t.Fatalf("adopting a live runtime must not churn the workspace: calls = %v", ws.calls)
+	}
+	if s.IsTerminated {
+		t.Fatal("restored session must be live, not terminated")
+	}
+	if s.Metadata.RuntimeHandleID != "live-1" {
+		t.Fatalf("adopted runtime handle = %q, want live-1 (the existing runtime)", s.Metadata.RuntimeHandleID)
+	}
+}
+
 func TestRestore_AppliesProjectAgentConfig(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{AgentConfig: domain.AgentConfig{Model: "restore-model"}}}
