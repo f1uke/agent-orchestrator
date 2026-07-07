@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest, Play, Shield, Terminal } from "lucide-react";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -8,7 +8,7 @@ import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { prBrowserUrl, sessionPRDisplaySummaries } from "../lib/pr-display";
 import type { SessionActivityState, WorkspaceSession } from "../types/workspace";
-import { canonicalTrackerIssueId, sortedPRs } from "../types/workspace";
+import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ProviderBadge } from "./ProviderBadge";
@@ -243,6 +243,15 @@ function PRSummaryCard({ pr }: { pr: SessionPRSummary }) {
 type TimelineTone = "now" | "good" | "warn" | "neutral";
 
 function ActivityTimeline({ session }: { session: WorkspaceSession }) {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!session.nextTransitionAt) return;
+		const id = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(id);
+	}, [session.nextTransitionAt]);
+	const why = session.statusReason ? statusReasonLabel[session.statusReason] : "";
+	const countdown = formatNextTransition(session, now);
+	const activityCaption = [why, countdown].filter(Boolean).join(" · ");
 	const events: { tone: TimelineTone; node: ReactNode; ts: string | null }[] = [];
 
 	events.push({
@@ -279,20 +288,25 @@ function ActivityTimeline({ session }: { session: WorkspaceSession }) {
 	events.push({
 		tone: "now",
 		node: (
-			<span className="inline-flex flex-wrap items-center gap-1.5">
-				<span className="inspector-timeline__badge">
-					<InspectorActivityPill state={session.activity?.state ?? "unknown"} />
-				</span>
-				{session.status === "no_signal" ? (
+			<span className="inline-flex flex-col gap-1">
+				<span className="inline-flex flex-wrap items-center gap-1.5">
 					<span className="inspector-timeline__badge">
-						<TimelinePill {...ACTIVITY_WARNING_PILL.no_signal} />
+						<InspectorActivityPill state={session.activity?.state ?? "unknown"} />
 					</span>
+					{session.status === "no_signal" ? (
+						<span className="inspector-timeline__badge">
+							<TimelinePill {...ACTIVITY_WARNING_PILL.no_signal} />
+						</span>
+					) : null}
+					{scmTimelineStates(session).map((state) => (
+						<span key={state} className="inspector-timeline__badge">
+							<InspectorScmPill state={state} />
+						</span>
+					))}
+				</span>
+				{activityCaption ? (
+					<span className="text-[11px] leading-snug text-[var(--fg-muted)]">{activityCaption}</span>
 				) : null}
-				{scmTimelineStates(session).map((state) => (
-					<span key={state} className="inspector-timeline__badge">
-						<InspectorScmPill state={state} />
-					</span>
-				))}
 			</span>
 		),
 		ts: session.activity?.lastActivityAt ? formatTimeCompact(session.activity.lastActivityAt) : null,
