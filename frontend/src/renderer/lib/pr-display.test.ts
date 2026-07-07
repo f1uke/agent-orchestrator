@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
-import { prBrowserUrl, prDiffSummary, prStatusRows, prSummaryParts } from "./pr-display";
+import {
+	prBrowserUrl,
+	prDiffSummary,
+	prKindLabel,
+	prNoun,
+	prNounPlural,
+	prRef,
+	prStatusRows,
+	prSummaryParts,
+	prTitleLabel,
+	providerFromPRURL,
+} from "./pr-display";
 
 const summary = (overrides: Partial<SessionPRSummary> = {}): SessionPRSummary => ({
 	url: "https://github.com/acme/repo/pull/7",
@@ -66,6 +77,71 @@ describe("prBrowserUrl", () => {
 				}),
 			),
 		).toBe("https://github.com/acme/repo/pull/7");
+	});
+
+	it("normalizes a GitLab MR URL (nested group, sub-tab, query) to the canonical MR page", () => {
+		expect(
+			prBrowserUrl(
+				summary({
+					provider: "gitlab",
+					url: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42/diffs?tab=x",
+					htmlUrl: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42/diffs?tab=x",
+				}),
+			),
+		).toBe("https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42");
+	});
+});
+
+describe("provider-aware PR/MR labels", () => {
+	it("abbreviates the change-request kind per provider", () => {
+		expect(prKindLabel("github")).toBe("PR");
+		expect(prKindLabel("gitlab")).toBe("MR");
+	});
+
+	it("uses # for GitHub refs and ! for GitLab refs", () => {
+		expect(prRef("github", 42)).toBe("#42");
+		expect(prRef("gitlab", 42)).toBe("!42");
+	});
+
+	it("combines kind and ref into a title label", () => {
+		expect(prTitleLabel("github", 42)).toBe("PR #42");
+		expect(prTitleLabel("gitlab", 42)).toBe("MR !42");
+	});
+
+	it("spells out the provider-specific noun", () => {
+		expect(prNoun("github")).toBe("pull request");
+		expect(prNoun("gitlab")).toBe("merge request");
+		expect(prNounPlural("gitlab")).toBe("merge requests");
+	});
+});
+
+describe("providerFromPRURL", () => {
+	it("detects a GitLab merge request URL by its path marker", () => {
+		expect(providerFromPRURL("https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42")).toBe("gitlab");
+	});
+
+	it("defaults to github for a pull URL", () => {
+		expect(providerFromPRURL("https://github.com/acme/repo/pull/7")).toBe("github");
+	});
+});
+
+describe("GitLab MR conflict link", () => {
+	it("points at the merge request conflicts subpage", () => {
+		const parts = prSummaryParts(
+			summary({
+				provider: "gitlab",
+				url: "https://gitlab.finnomena.com/group/proj/-/merge_requests/9",
+				htmlUrl: "https://gitlab.finnomena.com/group/proj/-/merge_requests/9",
+				mergeability: {
+					state: "conflicting",
+					reasons: [],
+					prUrl: "https://gitlab.finnomena.com/group/proj/-/merge_requests/9",
+					conflictFiles: [],
+				},
+			}),
+		);
+		const merge = parts.find((part) => part.key === "merge");
+		expect(merge?.links[0]?.href).toBe("https://gitlab.finnomena.com/group/proj/-/merge_requests/9/conflicts");
 	});
 });
 

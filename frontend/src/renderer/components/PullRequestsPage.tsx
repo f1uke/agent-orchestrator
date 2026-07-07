@@ -8,7 +8,7 @@ import {
 	sessionScmSummaryQueryOptions,
 	type SessionPRSummary,
 } from "../hooks/useSessionScmSummary";
-import { comparePRDisplaySummaries, prDiffSummary, sessionPRDisplaySummaries } from "../lib/pr-display";
+import { comparePRDisplaySummaries, prDiffSummary, prRef, sessionPRDisplaySummaries } from "../lib/pr-display";
 import type { WorkspaceSession } from "../types/workspace";
 import { DashboardSubhead } from "./DashboardSubhead";
 import { ProviderBadge } from "./ProviderBadge";
@@ -133,7 +133,9 @@ function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
 
 	return (
 		<TableRow className="cursor-pointer" onClick={onOpen}>
-			<TableCell className="font-mono text-[12px] text-muted-foreground">#{row.pr.number}</TableCell>
+			<TableCell className="font-mono text-[12px] text-muted-foreground">
+				{prRef(row.pr.provider, row.pr.number)}
+			</TableCell>
 			<TableCell className="max-w-0">
 				<div className="truncate text-[13px] text-foreground">{row.pr.title || row.session.title}</div>
 				<div className="truncate font-mono text-[10px] text-passive">

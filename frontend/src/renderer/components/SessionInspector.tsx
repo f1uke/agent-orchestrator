@@ -6,7 +6,14 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
-import { prBrowserUrl, sessionPRDisplaySummaries } from "../lib/pr-display";
+import {
+	prBrowserUrl,
+	prNoun,
+	prRef,
+	prTitleLabel,
+	providerFromPRURL,
+	sessionPRDisplaySummaries,
+} from "../lib/pr-display";
 import type { SessionActivityState, WorkspaceSession } from "../types/workspace";
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
@@ -178,7 +185,13 @@ function Section({
 function SummaryView({ session }: { session: WorkspaceSession }) {
 	const query = useSessionScmSummary(session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, query.data);
-	const prSectionTitle = prSummaries.length > 1 ? `Pull requests (${prSummaries.length})` : "Pull request";
+	// Singular title follows the one PR's provider ("Pull request" / "Merge
+	// request"); a mixed list keeps the generic plural.
+	const singularNoun = prSummaries.length === 1 ? prNoun(prSummaries[0].provider) : "pull request";
+	const prSectionTitle =
+		prSummaries.length > 1
+			? `Pull requests (${prSummaries.length})`
+			: `${singularNoun[0].toUpperCase()}${singularNoun.slice(1)}`;
 	const branchLabel = session.branch || `session/${session.id}`;
 	const issueId = canonicalTrackerIssueId(session.issueId);
 
@@ -218,7 +231,7 @@ function PRSummaryCard({ pr }: { pr: SessionPRSummary }) {
 		<div className="rounded-[7px] border border-border bg-surface px-3 py-2.5">
 			<div className="flex items-center gap-2">
 				<GitPullRequest className="h-3.5 w-3.5 shrink-0 text-passive" aria-hidden="true" />
-				<span className="text-[12.5px] font-medium text-foreground">PR #{pr.number}</span>
+				<span className="text-[12.5px] font-medium text-foreground">{prTitleLabel(pr.provider, pr.number)}</span>
 				<Badge variant="outline" className={cn("h-5 px-1.5 text-[10px] font-medium", prStateTone[pr.state])}>
 					{pr.state}
 				</Badge>
@@ -266,7 +279,7 @@ function ActivityTimeline({ session }: { session: WorkspaceSession }) {
 			tone: "neutral",
 			node: (
 				<>
-					Draft <b>PR #{pr.number}</b>
+					Draft <b>{prTitleLabel(providerFromPRURL(pr.url), pr.number)}</b>
 				</>
 			),
 			ts: null,
@@ -278,7 +291,7 @@ function ActivityTimeline({ session }: { session: WorkspaceSession }) {
 			tone: "neutral",
 			node: (
 				<>
-					Opened <b>PR #{pr.number}</b>
+					Opened <b>{prTitleLabel(providerFromPRURL(pr.url), pr.number)}</b>
 				</>
 			),
 			ts: null,
@@ -317,7 +330,7 @@ function ActivityTimeline({ session }: { session: WorkspaceSession }) {
 			tone: "good",
 			node: (
 				<>
-					Merged <b>PR #{pr.number}</b>
+					Merged <b>{prTitleLabel(providerFromPRURL(pr.url), pr.number)}</b>
 				</>
 			),
 			ts: null,
@@ -674,7 +687,8 @@ function ReviewPanel({
 
 function ReviewStateRow({ reviewState }: { reviewState: PRReviewState }) {
 	const verdict = reviewVerdict(reviewState);
-	const title = reviewState.title?.trim() || `PR #${reviewState.prNumber}`;
+	const provider = providerFromPRURL(reviewState.prUrl);
+	const title = reviewState.title?.trim() || prTitleLabel(provider, reviewState.prNumber);
 	return (
 		<div
 			className={cn(
@@ -690,7 +704,7 @@ function ReviewStateRow({ reviewState }: { reviewState: PRReviewState }) {
 					<a href={reviewState.prUrl} target="_blank" rel="noopener noreferrer">
 						{title}
 					</a>
-					<span className="reviewer-row__number">#{reviewState.prNumber}</span>
+					<span className="reviewer-row__number">{prRef(provider, reviewState.prNumber)}</span>
 				</div>
 			</div>
 			<span className={cn("reviewer-row__verdict", `reviewer-row__verdict--${verdict.tone}`)}>{verdict.label}</span>

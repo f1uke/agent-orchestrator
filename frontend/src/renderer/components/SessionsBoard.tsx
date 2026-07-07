@@ -11,6 +11,7 @@ import {
 	canonicalTrackerIssueId,
 	newestActiveOrchestrator,
 	orchestratorHealth,
+	primaryPR,
 	workerSessions,
 } from "../types/workspace";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
@@ -21,7 +22,7 @@ import { NewTaskDialog } from "./NewTaskDialog";
 import { Button } from "./ui/button";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
-import { prBrowserUrl, sessionPRDisplaySummaries } from "../lib/pr-display";
+import { prBrowserUrl, prKindLabel, prRef, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 
@@ -584,12 +585,15 @@ type BoardPRLifecycleStatus = { label: "closed" | "open" | "draft" | "merged"; c
 type BoardPRGroup = { status: BoardPRLifecycleStatus; prs: SessionPRSummary[] };
 
 function BoardPRGroup({ group }: { group: BoardPRGroup }) {
+	// A group is one lifecycle status within one session, so its PRs share a
+	// provider in practice; label the kind from the first PR ("PR" / "MR").
+	const kind = group.prs.length > 0 ? prKindLabel(group.prs[0].provider) : "PR";
 	return (
 		<span
-			aria-label={`${group.prs.map((pr) => `#${pr.number}`).join(", ")} ${group.status.label}`}
+			aria-label={`${group.prs.map((pr) => prRef(pr.provider, pr.number)).join(", ")} ${group.status.label}`}
 			className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1"
 		>
-			<span>PR</span>
+			<span>{kind}</span>
 			{group.prs.map((pr, index) => (
 				<span key={pr.number}>
 					<a
@@ -598,7 +602,7 @@ function BoardPRGroup({ group }: { group: BoardPRGroup }) {
 						rel="noreferrer"
 						target="_blank"
 					>
-						#{pr.number}
+						{prRef(pr.provider, pr.number)}
 					</a>
 					{index < group.prs.length - 1 ? "," : null}
 				</span>
@@ -650,6 +654,9 @@ function agentLabel(provider: WorkspaceSession["provider"]): string {
 }
 
 function sessionBadge(session: WorkspaceSession): { label: string; className: string } {
+	// "PR"/"MR" follows the session's primary change request; other statuses are
+	// provider-neutral.
+	const kind = prKindLabel(providerFromPRURL(primaryPR(session)?.url));
 	switch (session.status) {
 		case "needs_input":
 			return { label: "Input needed", className: "text-warning" };
@@ -662,9 +669,9 @@ function sessionBadge(session: WorkspaceSession): { label: string; className: st
 		case "review_pending":
 			return { label: "Review pending", className: "text-muted-foreground" };
 		case "draft":
-			return { label: "Draft PR", className: "text-muted-foreground" };
+			return { label: `Draft ${kind}`, className: "text-muted-foreground" };
 		case "pr_open":
-			return { label: "PR open", className: "text-muted-foreground" };
+			return { label: `${kind} open`, className: "text-muted-foreground" };
 		case "approved":
 			return { label: "Approved", className: "text-success" };
 		case "mergeable":

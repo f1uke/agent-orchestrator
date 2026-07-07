@@ -55,6 +55,41 @@ export function prBrowserUrl(pr: SessionPRSummary): string {
 	return prBaseUrl(pr) ?? pr.htmlUrl ?? pr.url;
 }
 
+// providerFromPRURL derives the SCM provider from a PR/MR URL shape. Self-hosted
+// GitLab merge requests carry the host-agnostic `/-/merge_requests/` path marker;
+// everything else is treated as GitHub, matching the backend default.
+export function providerFromPRURL(url: string | null | undefined): SessionPRSummary["provider"] {
+	return url?.includes(gitlabMRPathMarker) ? "gitlab" : "github";
+}
+
+const gitlabMRPathMarker = "/-/merge_requests/";
+
+type PRProvider = SessionPRSummary["provider"];
+
+// prKindLabel abbreviates the change-request kind: GitHub "PR", GitLab "MR".
+export function prKindLabel(provider: PRProvider): "PR" | "MR" {
+	return provider === "gitlab" ? "MR" : "PR";
+}
+
+// prNoun / prNounPlural spell out the provider-specific term for prose.
+export function prNoun(provider: PRProvider): string {
+	return provider === "gitlab" ? "merge request" : "pull request";
+}
+
+export function prNounPlural(provider: PRProvider): string {
+	return `${prNoun(provider)}s`;
+}
+
+// prRef renders the provider's reference form: GitHub "#42", GitLab "!42".
+export function prRef(provider: PRProvider, number: number): string {
+	return `${provider === "gitlab" ? "!" : "#"}${number}`;
+}
+
+// prTitleLabel combines the kind and reference, e.g. "PR #42" / "MR !42".
+export function prTitleLabel(provider: PRProvider, number: number): string {
+	return `${prKindLabel(provider)} ${prRef(provider, number)}`;
+}
+
 export function sessionPRDisplaySummaries(
 	session: WorkspaceSession,
 	summaries: SessionPRSummary[] = [],
@@ -76,7 +111,7 @@ function sessionPRFactToSummary(session: WorkspaceSession, pr: PullRequestFacts)
 		number: pr.number,
 		title: session.title,
 		state: pr.state,
-		provider: "github",
+		provider: providerFromPRURL(pr.url),
 		repo: session.workspaceName,
 		author: "",
 		sourceBranch: session.branch,
@@ -213,7 +248,7 @@ function reviewLinks(pr: SessionPRSummary): PRSummaryLink[] {
 	}
 	const links = pr.review.unresolvedBy.slice(0, 3).map((reviewer) => reviewAttentionLink(pr, reviewer));
 	if (links.length === 0 && pr.review.decision === "changes_requested") {
-		links.push({ label: "PR", href: prBrowserUrl(pr), title: "Open pull request" });
+		links.push({ label: prKindLabel(pr.provider), href: prBrowserUrl(pr), title: `Open ${prNoun(pr.provider)}` });
 	}
 	return links;
 }
@@ -450,6 +485,15 @@ function prURL(pr: SessionPRSummary): string | undefined {
 	}
 	try {
 		const url = new URL(raw);
+		// GitLab MRs live under an arbitrarily nested group/project path followed by
+		// the `/-/merge_requests/<iid>` marker; capture everything before the marker.
+		const gitlab = url.pathname.match(/^(\/.+?)\/-\/merge_requests\/(\d+)(?:\/.*)?$/);
+		if (gitlab) {
+			url.pathname = `${gitlab[1]}/-/merge_requests/${gitlab[2]}`;
+			url.search = "";
+			url.hash = "";
+			return url.toString();
+		}
 		const match = url.pathname.match(/^(\/[^/]+\/[^/]+)\/(?:pull|issues)\/(\d+)(?:\/.*)?$/);
 		if (!match) {
 			return undefined;
@@ -500,7 +544,7 @@ function reviewAttentionLink(
 	return {
 		label: reviewerLabel(reviewer),
 		href: prBrowserUrl(pr),
-		title: `Open pull request for ${reviewerDisplayName(reviewer)}`,
+		title: `Open ${prNoun(pr.provider)} for ${reviewerDisplayName(reviewer)}`,
 	};
 }
 
