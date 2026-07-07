@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GlobalSettingsForm } from "./GlobalSettingsForm";
@@ -89,7 +89,10 @@ describe("GlobalSettingsForm", () => {
 		getUpdate.mockResolvedValue({ enabled: true, channel: "nightly", nightlyAck: true });
 		renderForm();
 		expect(await screen.findByText(/Nightly builds are cut every day/i)).toBeInTheDocument();
-		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		// Scope to the Updates card: AutoReclaimSection has its own "Save changes"
+		// button now that both cards are mounted together.
+		const updatesCard = screen.getByText("Updates").closest('[data-slot="card"]') as HTMLElement;
+		await userEvent.click(within(updatesCard).getByRole("button", { name: "Save changes" }));
 		await waitFor(() =>
 			expect(setUpdate).toHaveBeenCalledWith(expect.objectContaining({ channel: "nightly", enabled: true })),
 		);
