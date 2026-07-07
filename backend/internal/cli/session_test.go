@@ -544,6 +544,44 @@ func TestSessionClaimPR_GHFallbackWhenProjectRepoMissing(t *testing.T) {
 	}
 }
 
+func TestSessionClaimGitLabMR(t *testing.T) {
+	cfg := setConfigEnv(t)
+	const mrURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	var gotPR string
+	log := &sessionRequestLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.append(r)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions/demo-1":
+			_, _ = io.WriteString(w, `{"session":`+sessionJSON("demo-1", "demo", "worker", "working", false)+`}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"git@gitlab.finnomena.com:group/sub/proj.git","defaultBranch":"main"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/pr/claim":
+			var req claimPRRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			gotPR = req.PR
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","prs":[{"url":`+jsonQuote(req.PR)+`,"number":42,"state":"open","ci":"passing","review":"review_required","mergeability":"mergeable","reviewComments":false,"updatedAt":"2026-06-04T12:00:00Z"}],"branchChanged":false,"takenOverFrom":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	// A URL with a trailing sub-tab must be normalized to the canonical MR URL.
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "session", "claim-pr", "demo-1", mrURL+"/commits")
+	if err != nil {
+		t.Fatalf("claim gitlab MR failed: %v stderr=%s", err, errOut)
+	}
+	if gotPR != mrURL {
+		t.Fatalf("forwarded PR = %q, want normalized %q", gotPR, mrURL)
+	}
+	if !strings.Contains(out, "claimed PR #42") || !strings.Contains(out, mrURL) {
+		t.Fatalf("claim output = %s", out)
+	}
+}
+
 func TestWriteSessionDetailsIncludesReason(t *testing.T) {
 	var buf strings.Builder
 	cmd := &cobra.Command{}

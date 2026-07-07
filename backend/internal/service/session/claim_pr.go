@@ -86,7 +86,7 @@ func (s *Service) ClaimPR(ctx context.Context, id domain.SessionID, ref string, 
 	if err != nil {
 		return ClaimPRResult{}, err
 	}
-	if err := requireSameGitHubRepo(prURL, project.RepoOriginURL); err != nil {
+	if err := requireSameRepo(prURL, project.RepoOriginURL); err != nil {
 		return ClaimPRResult{}, err
 	}
 	if s.scm == nil || s.prClaimer == nil {
@@ -176,6 +176,16 @@ func (s *Service) enrichClaimReviews(ctx context.Context, ref ports.SCMPRRef, ob
 func scmRepoForClaim(provider scmProvider, projectOrigin, prURL string) (ports.SCMRepo, error) {
 	if repo, ok := provider.ParseRepository(projectOrigin); ok {
 		return repo, nil
+	}
+	// The project origin could not be parsed (e.g. it was never recorded), so
+	// derive the repository from the PR/MR URL itself, mirroring the origin
+	// path a ParseRepository would have produced.
+	if isGitLabMRURL(prURL) {
+		host, projectPath, _, err := parseGitLabMRURL(prURL)
+		if err != nil {
+			return ports.SCMRepo{}, ErrInvalidPRRef
+		}
+		return gitlabSCMRepoFromPath(host, projectPath), nil
 	}
 	owner, name, _, err := parseGitHubPRURL(prURL)
 	if err != nil {
@@ -321,7 +331,18 @@ func claimedFirst(prs []domain.PRFacts, prURL string) []domain.PRFacts {
 }
 
 func normalizePRRef(ref, repoOrigin string) (string, int, error) {
-	ref = strings.TrimPrefix(strings.TrimSpace(ref), "#")
+	trimmed := strings.TrimSpace(ref)
+	// A GitLab merge-request URL is self-describing (host + project path + IID),
+	// so it needs no repo origin to resolve. Detect it before the GitHub paths,
+	// which only understand a bare number or a github.com pull URL.
+	if isGitLabMRURL(trimmed) {
+		host, projectPath, iid, err := parseGitLabMRURL(trimmed)
+		if err != nil {
+			return "", 0, ErrInvalidPRRef
+		}
+		return canonicalGitLabMRURL(host, projectPath, iid), iid, nil
+	}
+	ref = strings.TrimPrefix(trimmed, "#")
 	if ref == "" {
 		return "", 0, ErrInvalidPRRef
 	}
@@ -337,6 +358,21 @@ func normalizePRRef(ref, repoOrigin string) (string, int, error) {
 		return "", 0, ErrInvalidPRRef
 	}
 	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, n), n, nil
+}
+
+// requireSameRepo dispatches the project-scope guard by PR/MR URL shape: a
+// GitLab merge-request URL is checked against the origin as a GitLab remote,
+// everything else as a GitHub repo. A blank origin skips the check (the project
+// has no recorded remote to compare against), matching the GitHub-only behavior
+// that preceded GitLab support.
+func requireSameRepo(prURL, repoOrigin string) error {
+	if strings.TrimSpace(repoOrigin) == "" {
+		return nil
+	}
+	if isGitLabMRURL(prURL) {
+		return requireSameGitLabRepo(prURL, repoOrigin)
+	}
+	return requireSameGitHubRepo(prURL, repoOrigin)
 }
 
 func requireSameGitHubRepo(prURL, repoOrigin string) error {
@@ -401,6 +437,121 @@ func githubRepoFromURL(raw string) (string, string, error) {
 		return "", "", ErrInvalidPRRef
 	}
 	return parts[0], strings.TrimSuffix(parts[1], ".git"), nil
+}
+
+// gitlabMRPathMarker separates a GitLab project path from the merge-request
+// segment in a web URL, e.g. ".../group/proj/-/merge_requests/123". GitLab uses
+// the "/-/" delimiter so nested group paths never collide with route keywords.
+const gitlabMRPathMarker = "/-/merge_requests/"
+
+// isGitLabMRURL reports whether raw looks like a GitLab merge-request URL. It is
+// deliberately host-agnostic (Finnomena runs self-hosted GitLab, not
+// gitlab.com), keying only on the "/-/merge_requests/" path marker. Structural
+// validity is left to parseGitLabMRURL.
+func isGitLabMRURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(u.Path, gitlabMRPathMarker)
+}
+
+// parseGitLabMRURL extracts the host, project path, and merge-request IID from a
+// GitLab MR URL. Any trailing sub-tab ("/diffs", "/commits"), trailing slash, or
+// query string after the IID is ignored. The project path must have at least two
+// segments (namespace/project), matching the GitLab SCM adapter's ParseRepository.
+func parseGitLabMRURL(raw string) (host, projectPath string, iid int, err error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", 0, err
+	}
+	if !strings.EqualFold(u.Scheme, "https") && !strings.EqualFold(u.Scheme, "http") {
+		return "", "", 0, ErrInvalidPRRef
+	}
+	host = strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", "", 0, ErrInvalidPRRef
+	}
+	before, after, found := strings.Cut(strings.Trim(u.Path, "/"), gitlabMRPathMarker)
+	if !found {
+		return "", "", 0, ErrInvalidPRRef
+	}
+	projectPath = strings.Trim(before, "/")
+	if projectPath == "" || len(strings.Split(projectPath, "/")) < 2 {
+		return "", "", 0, ErrInvalidPRRef
+	}
+	iidField, _, _ := strings.Cut(after, "/")
+	iid, convErr := strconv.Atoi(iidField)
+	if convErr != nil || iid <= 0 {
+		return "", "", 0, ErrInvalidPRRef
+	}
+	return host, projectPath, iid, nil
+}
+
+// canonicalGitLabMRURL rebuilds a normalized https MR URL from its parts, so a
+// stored/compared URL is stable regardless of scheme, trailing slash, sub-tab,
+// or query in the caller's input.
+func canonicalGitLabMRURL(host, projectPath string, iid int) string {
+	return "https://" + host + "/" + projectPath + gitlabMRPathMarker + strconv.Itoa(iid)
+}
+
+// gitlabRepoFromURL normalizes a GitLab remote/origin (SSH
+// git@host:group/proj.git or HTTPS https://host/group/proj(.git)) into its host
+// and namespace/project path. It mirrors the GitLab SCM adapter's
+// ParseRepository: arbitrarily nested groups are preserved and at least two path
+// segments are required.
+func gitlabRepoFromURL(raw string) (host, projectPath string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", ErrInvalidPRRef
+	}
+	if strings.HasPrefix(raw, "git@") {
+		h, p, found := strings.Cut(strings.TrimPrefix(raw, "git@"), ":")
+		if !found {
+			return "", "", ErrInvalidPRRef
+		}
+		host, projectPath = h, p
+	} else {
+		u, perr := url.Parse(raw)
+		if perr != nil {
+			return "", "", perr
+		}
+		host, projectPath = u.Hostname(), u.Path
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	projectPath = strings.TrimSuffix(strings.Trim(projectPath, "/"), ".git")
+	if host == "" || projectPath == "" || len(strings.Split(projectPath, "/")) < 2 {
+		return "", "", ErrInvalidPRRef
+	}
+	return host, projectPath, nil
+}
+
+// gitlabSCMRepoFromPath builds a provider-neutral SCMRepo from a GitLab host and
+// namespace/project path, mirroring the GitLab adapter's ParseRepository so the
+// resulting ref routes to the GitLab child in the composite provider.
+func gitlabSCMRepoFromPath(host, projectPath string) ports.SCMRepo {
+	projectPath = strings.Trim(projectPath, "/")
+	segments := strings.Split(projectPath, "/")
+	name := segments[len(segments)-1]
+	owner := strings.Join(segments[:len(segments)-1], "/")
+	return ports.SCMRepo{Provider: "gitlab", Host: strings.ToLower(host), Owner: owner, Name: name, Repo: projectPath}
+}
+
+// requireSameGitLabRepo verifies the MR URL's host and project path match the
+// session project's GitLab origin, returning ErrProjectMismatch otherwise.
+func requireSameGitLabRepo(prURL, repoOrigin string) error {
+	prHost, prPath, _, err := parseGitLabMRURL(prURL)
+	if err != nil {
+		return ErrInvalidPRRef
+	}
+	roHost, roPath, err := gitlabRepoFromURL(repoOrigin)
+	if err != nil {
+		return ErrInvalidPRRef
+	}
+	if !strings.EqualFold(prHost, roHost) || !strings.EqualFold(prPath, roPath) {
+		return ErrProjectMismatch
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {
