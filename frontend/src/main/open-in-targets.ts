@@ -51,6 +51,16 @@ export function resolveOpenTargets({
 	};
 }
 
+/**
+ * Whether a `.app` bundle name is an Xcode install. Matches the canonical
+ * `Xcode.app` plus versioned / side-by-side bundles like `Xcode-26.3.0.app` or
+ * `Xcode-beta.app` (common when several Xcode versions are installed), while
+ * excluding lookalikes such as `Xcodes.app` (the Xcode version-manager app).
+ */
+export function isXcodeAppName(name: string): boolean {
+	return name === "Xcode.app" || /^Xcode-.+\.app$/.test(name);
+}
+
 function detectXcodeTarget(dir: string, entries: string[]): XcodeTarget | undefined {
 	// Sort so a directory with multiple candidates resolves deterministically.
 	const workspaces = entries.filter((entry) => entry.endsWith(".xcworkspace")).sort();
