@@ -3,6 +3,7 @@ import type { BrowserNavState, BrowserRect } from "./main/browser-view-host";
 import type { DaemonStatus } from "./shared/daemon-status";
 import type { TelemetryBootstrap } from "./shared/telemetry";
 import type { MigrationState } from "./main/app-state";
+import type { NativeNotificationClickPayload, NativeNotificationInput } from "./main/native-notifications";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 
 export type BrowserBoundsInput = {
@@ -60,10 +61,11 @@ const api = {
 		},
 	},
 	notifications: {
-		show: (notification: { id: string; title: string; body?: string }) =>
+		show: (notification: NativeNotificationInput) =>
 			ipcRenderer.invoke("notifications:show", notification) as Promise<void>,
-		onClick: (listener: (id: string) => void) => {
-			const wrapped = (_event: Electron.IpcRendererEvent, id: string) => listener(id);
+		onClick: (listener: (payload: NativeNotificationClickPayload) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, payload: NativeNotificationClickPayload) =>
+				listener(payload);
 			ipcRenderer.on("notifications:click", wrapped);
 			return () => {
 				ipcRenderer.off("notifications:click", wrapped);

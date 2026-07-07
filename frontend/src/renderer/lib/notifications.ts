@@ -1,9 +1,22 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
+import type { NativeNotificationRoute } from "../../main/native-notifications";
 import { aoBridge } from "./bridge";
 import { apiClient, apiErrorMessage, getApiBaseUrl, subscribeApiBaseUrl } from "./api-client";
 
 export type NotificationDTO = components["schemas"]["NotificationResponse"];
+
+// Routing descriptor carried into the native notification so a click can
+// navigate straight from the OS toast — even after the app was reopened and the
+// unread-notification cache no longer holds this entry.
+export function notificationRoute(notification: NotificationDTO): NativeNotificationRoute {
+	return {
+		kind: notification.target.kind,
+		prUrl: notification.target.prUrl,
+		sessionId: notification.target.sessionId || notification.sessionId,
+		projectId: notification.projectId,
+	};
+}
 
 export const unreadNotificationsQueryKey = ["notifications", "unread"] as const;
 
@@ -95,6 +108,7 @@ export function createNotificationsTransport(queryClient: QueryClient) {
 								id: notification.id,
 								title: notification.title,
 								body: notification.body || undefined,
+								route: notificationRoute(notification),
 							});
 						}
 					});

@@ -50,6 +50,7 @@ import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view
 import { connectSupervisor, type SupervisorLinkHandle } from "./main/supervisor-link";
 import { shouldLinkOnAttach } from "./main/daemon-owner";
 import { readMigrationState, updateMigration, writeAppStateMarker, type MigrationState } from "./main/app-state";
+import { createNativeNotifier, type NativeNotificationInput } from "./main/native-notifications";
 
 // Globals injected at compile time by @electron-forge/plugin-vite.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -878,20 +879,36 @@ ipcMain.handle("updates:install", () => {
 	quitAndInstallUpdate();
 });
 
-ipcMain.handle("notifications:show", (_event, notification: { id: string; title: string; body?: string }) => {
-	if (!notification.id || !notification.title || !ElectronNotification.isSupported()) return;
-	const toast = new ElectronNotification({
-		title: notification.title,
-		body: notification.body,
-	});
-	toast.on("click", () => {
-		if (!mainWindow) return;
+// Native notifications are owned by createNativeNotifier (see
+// main/native-notifications.ts). It retains each live notification so it is not
+// garbage-collected before the user clicks it, and surfaces macOS delivery
+// failures (e.g. an unsigned binary) through logError instead of dropping them
+// silently. On click it focuses the window and forwards the id + route to the
+// renderer, which navigates to the target and marks the notification read.
+const nativeNotifier = createNativeNotifier({
+	isSupported: () => ElectronNotification.isSupported(),
+	createNotification: ({ title, body }) => {
+		const notification = new ElectronNotification({ title, body });
+		return {
+			show: () => notification.show(),
+			close: () => notification.close(),
+			onClick: (listener) => notification.on("click", listener),
+			onClose: (listener) => notification.on("close", listener),
+			onFailed: (listener) => notification.on("failed", (_event, error) => listener(error)),
+		};
+	},
+	onActivate: (notification) => {
+		if (!mainWindow || mainWindow.isDestroyed()) return;
 		if (mainWindow.isMinimized()) mainWindow.restore();
 		mainWindow.show();
 		mainWindow.focus();
-		mainWindow.webContents.send("notifications:click", notification.id);
-	});
-	toast.show();
+		mainWindow.webContents.send("notifications:click", { id: notification.id, route: notification.route });
+	},
+	logError: (message, error) => console.error(`AO: ${message}`, error),
+});
+
+ipcMain.handle("notifications:show", (_event, notification: NativeNotificationInput) => {
+	nativeNotifier.show(notification);
 });
 
 // Auto-update only runs for packaged builds reading the GitHub Releases feed

@@ -7,9 +7,15 @@ import {
 	useMarkNotificationReadMutation,
 	useNotificationsQuery,
 } from "../hooks/useNotificationsQuery";
+import type { NativeNotificationClickPayload, NativeNotificationRoute } from "../../main/native-notifications";
 import { aoBridge } from "../lib/bridge";
 import { formatTimeCompact } from "../lib/format-time";
-import { createNotificationsTransport, type NotificationDTO, unreadNotificationsQueryKey } from "../lib/notifications";
+import {
+	createNotificationsTransport,
+	type NotificationDTO,
+	notificationRoute,
+	unreadNotificationsQueryKey,
+} from "../lib/notifications";
 import { captureRendererEvent } from "../lib/telemetry";
 import { cn } from "../lib/utils";
 import {
@@ -34,21 +40,20 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 	const notifications = useMemo(() => notificationsQuery.data ?? [], [notificationsQuery.data]);
 	const unreadCount = notifications.length;
 
-	const openTarget = useCallback(
-		(notification: NotificationDTO) => {
-			const target = notification.target;
-			if (target.kind === "pr" && target.prUrl) {
+	const openRoute = useCallback(
+		(route: NativeNotificationRoute) => {
+			if (route.kind === "pr" && route.prUrl) {
 				void captureRendererEvent("ao.renderer.notification_opened", { target: "pr" });
-				window.open(target.prUrl, "_blank", "noopener,noreferrer");
+				window.open(route.prUrl, "_blank", "noopener,noreferrer");
 				return;
 			}
-			const sessionId = target.sessionId || notification.sessionId;
+			const sessionId = route.sessionId;
 			if (!sessionId) return;
 			void captureRendererEvent("ao.renderer.notification_opened", { target: "session" });
-			if (notification.projectId) {
+			if (route.projectId) {
 				void navigate({
 					to: "/projects/$projectId/sessions/$sessionId",
-					params: { projectId: notification.projectId, sessionId },
+					params: { projectId: route.projectId, sessionId },
 				});
 				return;
 			}
@@ -57,27 +62,42 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 		[navigate],
 	);
 
+	const openTarget = useCallback(
+		(notification: NotificationDTO) => openRoute(notificationRoute(notification)),
+		[openRoute],
+	);
+
+	const markOneRead = useCallback(
+		async (id: string) => {
+			setActionError(null);
+			void captureRendererEvent("ao.renderer.notification_mark_read_requested", { scope: "single" });
+			try {
+				await markRead.mutateAsync(id);
+				void captureRendererEvent("ao.renderer.notification_mark_read_succeeded", { scope: "single" });
+			} catch (error) {
+				void captureRendererEvent("ao.renderer.notification_mark_read_failed", { scope: "single" });
+				setActionError(error instanceof Error ? error.message : "Could not mark notification read");
+			}
+		},
+		[markRead],
+	);
+
 	useEffect(() => createNotificationsTransport(queryClient).connect(), [queryClient]);
 
 	useEffect(() => {
-		return aoBridge.notifications.onClick((id) => {
-			const current = queryClient.getQueryData<NotificationDTO[]>(unreadNotificationsQueryKey) ?? [];
-			const notification = current.find((item) => item.id === id);
-			if (notification) openTarget(notification);
+		return aoBridge.notifications.onClick((payload: NativeNotificationClickPayload) => {
+			// Mark read immediately on click — no second action required. This uses
+			// only the id, so it works even when the unread cache no longer holds it.
+			void markOneRead(payload.id);
+			// Navigate to the target. Prefer the route in the click payload; fall back
+			// to the cached notification when an older payload omits it.
+			const cached = (queryClient.getQueryData<NotificationDTO[]>(unreadNotificationsQueryKey) ?? []).find(
+				(item) => item.id === payload.id,
+			);
+			const route = payload.route ?? (cached ? notificationRoute(cached) : undefined);
+			if (route) openRoute(route);
 		});
-	}, [openTarget, queryClient]);
-
-	const markOneRead = async (id: string) => {
-		setActionError(null);
-		void captureRendererEvent("ao.renderer.notification_mark_read_requested", { scope: "single" });
-		try {
-			await markRead.mutateAsync(id);
-			void captureRendererEvent("ao.renderer.notification_mark_read_succeeded", { scope: "single" });
-		} catch (error) {
-			void captureRendererEvent("ao.renderer.notification_mark_read_failed", { scope: "single" });
-			setActionError(error instanceof Error ? error.message : "Could not mark notification read");
-		}
-	};
+	}, [markOneRead, openRoute, queryClient]);
 
 	const markAll = async () => {
 		setActionError(null);
