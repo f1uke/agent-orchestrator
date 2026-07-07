@@ -356,6 +356,45 @@ func TestPRObservation_AutoNudgeNudgeSanitizesCommentBody(t *testing.T) {
 	}
 }
 
+func TestPRObservation_CIFailingAndReviewBothNudge(t *testing.T) {
+	m, st, msg := newManager()
+	// main-fluke gates the review nudge behind the auto-nudge opt-in; enable it so
+	// this exercises #2458's fix (CI no longer suppresses the review nudge).
+	rec := working("mer-1")
+	on := true
+	rec.AutoNudgeComments = &on
+	st.sessions["mer-1"] = rec
+	o := ports.PRObservation{
+		Fetched:  true,
+		URL:      "pr1",
+		CI:       domain.CIFailing,
+		Checks:   []ports.PRCheckObservation{{Name: "build", CommitHash: "c1", Status: domain.PRCheckFailed, LogTail: "boom"}},
+		Review:   domain.ReviewChangesRequest,
+		Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}},
+	}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	// Both actionable items fire — neither is suppressed by the other — in queue
+	// order (CI first, then review).
+	if len(msg.msgs) != 2 {
+		t.Fatalf("want CI and review nudges, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+	if !strings.Contains(msg.msgs[0], "boom") {
+		t.Fatalf("first nudge should carry the CI failure, got %q", msg.msgs[0])
+	}
+	if !strings.Contains(msg.msgs[1], "fix this") {
+		t.Fatalf("second nudge should carry the review feedback, got %q", msg.msgs[1])
+	}
+	// Re-observing the identical state re-nudges nothing: per-item dedup is intact.
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 2 {
+		t.Fatalf("re-observation should not re-nudge, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+}
+
 func TestPRObservation_CINudgeSanitizesLogTailControlChars(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")

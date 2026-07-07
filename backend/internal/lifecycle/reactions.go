@@ -112,6 +112,17 @@ type reactionPayload struct {
 	Attempts map[string]int    `json:"attempts,omitempty"`
 }
 
+// pendingNudge is one actionable PR nudge queued by ApplyPRObservation. Queuing
+// each condition's nudge (instead of sending inline and returning) keeps the
+// conditions independent — none can suppress another — and centralizes the
+// send + dedup in a single loop.
+type pendingNudge struct {
+	key         string
+	sig         string
+	msg         string
+	maxAttempts int
+}
+
 // ApplyPRObservation reacts to a fetched PR observation after the PR service has
 // persisted it. It does not write PR rows; it owns PR-driven lifecycle effects
 // and sends actionable agent nudges such as rebase, fix-CI, and
@@ -142,19 +153,20 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput {
 		return nil
 	}
+	// Queue every applicable nudge so one PR condition cannot hide another.
+	var nudges []pendingNudge
+
 	if o.CI == domain.CIFailing {
-		for _, ch := range o.Checks {
-			if ch.Status == domain.PRCheckFailed {
-				logTail := ""
-				if ch.LogTail != "" {
-					// LogTail is raw CI job output; sanitize before it reaches the
-					// agent's live pane so embedded escape sequences can't drive the
-					// terminal (the dedup signature stays on the raw bytes).
-					logTail = domain.SanitizeControlChars(ch.LogTail)
-				}
-				msg := m.renderNudge(messagetemplates.NameCIFailing, messagetemplates.CIFailingData{LogTail: logTail})
-				return m.sendOnce(ctx, id, o.URL, "ci:"+o.URL+":"+ch.Name, ch.CommitHash+":"+ch.LogTail, msg, 0)
+		if ch, ok := firstFailedCheck(o.Checks); ok {
+			logTail := ""
+			if ch.LogTail != "" {
+				// LogTail is raw CI job output; sanitize before it reaches the
+				// agent's live pane so embedded escape sequences can't drive the
+				// terminal (the dedup signature stays on the raw bytes).
+				logTail = domain.SanitizeControlChars(ch.LogTail)
 			}
+			msg := m.renderNudge(messagetemplates.NameCIFailing, messagetemplates.CIFailingData{LogTail: logTail})
+			nudges = append(nudges, pendingNudge{key: "ci:" + o.URL + ":" + ch.Name, sig: ch.CommitHash + ":" + ch.LogTail, msg: msg, maxAttempts: 0})
 		}
 	}
 	// Auto-nudge the worker when its PR has unresolved human review comments (or
@@ -173,7 +185,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if sig == "" {
 			sig = string(o.Review)
 		}
-		return m.sendOnce(ctx, id, o.URL, "review:"+o.URL, sig, msg, reviewMaxNudge)
+		nudges = append(nudges, pendingNudge{key: "review:" + o.URL, sig: sig, msg: msg, maxAttempts: reviewMaxNudge})
 	}
 	if o.Mergeability == domain.MergeConflicting {
 		// Only the bottom of a stack is eligible for the rebase nudge. A PR
@@ -185,11 +197,16 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if err != nil {
 			return err
 		}
-		if blocked {
-			return nil
+		if !blocked {
+			msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{})
+			nudges = append(nudges, pendingNudge{key: "merge-conflict:" + o.URL, sig: string(o.Mergeability), msg: msg, maxAttempts: 0})
 		}
-		msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{})
-		return m.sendOnce(ctx, id, o.URL, "merge-conflict:"+o.URL, string(o.Mergeability), msg, 0)
+	}
+
+	for _, n := range nudges {
+		if err := m.sendOnce(ctx, id, o.URL, n.key, n.sig, n.msg, n.maxAttempts); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -536,6 +553,20 @@ func firstSCMNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// firstFailedCheck returns the first check in a failed state, preserving the
+// original CI-nudge behavior of surfacing a single failing check. Extracting it
+// lets the CI branch queue its nudge and fall through instead of returning from
+// inside the loop, so review/merge-conflict feedback for the same PR is no
+// longer skipped.
+func firstFailedCheck(checks []ports.PRCheckObservation) (ports.PRCheckObservation, bool) {
+	for _, ch := range checks {
+		if ch.Status == domain.PRCheckFailed {
+			return ch, true
+		}
+	}
+	return ports.PRCheckObservation{}, false
 }
 
 func hasUnresolvedComments(comments []ports.PRCommentObservation) bool {
