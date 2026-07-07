@@ -291,7 +291,10 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 			setConfirming(false);
 			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 		},
-		onError: (e) => setError(e instanceof Error ? e.message : "Delete failed"),
+		onError: (e) => {
+			setConfirming(false);
+			setError(e instanceof Error ? e.message : "Delete failed");
+		},
 	});
 
 	return (
@@ -313,7 +316,10 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 					<button
 						aria-label="Cancel delete"
 						className="text-[11px] text-passive"
-						onClick={() => setConfirming(false)}
+						onClick={() => {
+							setConfirming(false);
+							setError(null);
+						}}
 						type="button"
 					>
 						Cancel
@@ -376,9 +382,15 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 		},
 		onSuccess: () => {
 			setOpen(false);
-			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 		},
 		onError: (e) => setError(e instanceof Error ? e.message : "Clear failed"),
+		// Refresh the workspace query whether or not every deletion succeeded, so
+		// sessions that WERE deleted (a partial-failure run still deletes some)
+		// drop out of the done-bar instead of lingering as stale rows until the
+		// next unrelated refetch.
+		onSettled: () => {
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
 	});
 
 	return (
