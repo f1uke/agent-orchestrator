@@ -68,6 +68,13 @@ daemon), then the current working directory matched against registered project
 paths. If `AO_SESSION_ID` is set but the session cannot be fetched, pass
 `--project` explicitly.
 
+`ao spawn` requires `--from <branch>`: the source branch the session worktree is
+created from (the desktop "Start from" field). Omitting it fails fast with a
+usage error before any daemon call. `--branch` is the optional new branch name;
+leaving it blank asks the daemon to AI-name the branch from the task — the same
+`baseBranch` + `autoNameBranch` request the desktop New task modal sends — so the
+CLI and UI take an identical spawn path.
+
 If `--agent` / `--harness` is omitted, `ao spawn` uses the resolved project's
 `worker.agent` config. Before spawning, the CLI refreshes the advisory agent
 catalog and fails early when the selected agent is unsupported, not installed,

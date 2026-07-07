@@ -26,6 +26,7 @@ const maxDisplayNameLen = 20
 type spawnOptions struct {
 	project        string
 	harness        string
+	from           string
 	branch         string
 	prompt         string
 	issue          string
@@ -38,12 +39,18 @@ type spawnOptions struct {
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
 // POST /api/v1/sessions. The CLI keeps its own copy so it need not import httpd.
 type spawnRequest struct {
-	ProjectID   string `json:"projectId"`
-	IssueID     string `json:"issueId,omitempty"`
-	Harness     string `json:"harness,omitempty"`
-	Branch      string `json:"branch,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
-	DisplayName string `json:"displayName,omitempty"`
+	ProjectID string `json:"projectId"`
+	IssueID   string `json:"issueId,omitempty"`
+	Harness   string `json:"harness,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	// BaseBranch is the branch the new worktree is created from (the UI's
+	// "Start from" field). `ao spawn` requires it via --from.
+	BaseBranch string `json:"baseBranch,omitempty"`
+	// AutoNameBranch asks the daemon to AI-name the new branch from the task
+	// when Branch is empty, matching the UI's "AI names it if blank" behavior.
+	AutoNameBranch bool   `json:"autoNameBranch,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
+	DisplayName    string `json:"displayName,omitempty"`
 }
 
 type spawnResult struct {
@@ -77,6 +84,14 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if explicitName := strings.TrimSpace(opts.name); utf8.RuneCountInString(explicitName) > maxDisplayNameLen {
 				return usageError{fmt.Errorf("--name must be %d characters or fewer", maxDisplayNameLen)}
 			}
+			// --from is required and names the branch the worktree is created from
+			// (the UI "Start from" field). Reject a missing base fast, before any
+			// daemon round-trip, so misuse exits 2 rather than spawning off an
+			// unintended default branch.
+			baseBranch := strings.TrimSpace(opts.from)
+			if baseBranch == "" {
+				return usageError{fmt.Errorf("--from is required: name the branch the worktree starts from, e.g. --from main")}
+			}
 
 			project, err := ctx.resolveSpawnProject(cmd.Context(), opts.project)
 			if err != nil {
@@ -103,13 +118,18 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 			}
+			// A blank --branch mirrors the UI: ask the daemon to AI-name the new
+			// branch from the task; a non-empty value is honored verbatim.
+			newBranch := strings.TrimSpace(opts.branch)
 			req := spawnRequest{
-				ProjectID:   opts.project,
-				IssueID:     opts.issue,
-				Harness:     opts.harness,
-				Branch:      opts.branch,
-				Prompt:      opts.prompt,
-				DisplayName: name,
+				ProjectID:      opts.project,
+				IssueID:        opts.issue,
+				Harness:        opts.harness,
+				Branch:         newBranch,
+				BaseBranch:     baseBranch,
+				AutoNameBranch: newBranch == "",
+				Prompt:         opts.prompt,
+				DisplayName:    name,
 			}
 			var res spawnResult
 			if err := ctx.postJSON(cmd.Context(), "sessions", req, &res); err != nil {
@@ -166,7 +186,8 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	})
 	f.StringVar(&opts.project, "project", "", "Project id to spawn the session in (default: AO_PROJECT_ID or current registered repo)")
 	f.StringVar(&opts.harness, "harness", "", "Agent harness / --agent: claude-code, codex, aider, opencode, grok, droid, amp, agy, crush, cursor, qwen, copilot, goose, auggie, continue, devin, cline, kimi, kiro, kilocode, vibe, pi, autohand (default: project worker.agent; required if the project has none)")
-	f.StringVar(&opts.branch, "branch", "", "Branch for the session worktree (default: ao/<session-id>/root)")
+	f.StringVar(&opts.from, "from", "", "REQUIRED source branch the worktree is created from, e.g. main (matches the UI \"Start from\" field)")
+	f.StringVar(&opts.branch, "branch", "", "New branch name for the session worktree (default: AI-named from the task, like the UI when left blank)")
 	f.StringVar(&opts.prompt, "prompt", "", "Initial prompt for the agent")
 	f.StringVar(&opts.issue, "issue", "", "Issue id to associate with the session")
 	f.StringVar(&opts.name, "name", "", "Display name shown in the sidebar (default: derived from --prompt, max 20 characters)")

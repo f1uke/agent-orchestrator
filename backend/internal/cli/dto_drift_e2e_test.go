@@ -218,6 +218,7 @@ func TestE2E_SpawnAndProjectAddDTORoundTrip(t *testing.T) {
 			"spawn",
 			"--project", "mer",
 			"--harness", "codex",
+			"--from", "main",
 			"--branch", "feat/x",
 			"--prompt", "hi",
 			"--issue", "ISS-1",
@@ -236,6 +237,9 @@ func TestE2E_SpawnAndProjectAddDTORoundTrip(t *testing.T) {
 		}
 		if got.Branch != "feat/x" {
 			t.Errorf("Branch = %q, want %q", got.Branch, "feat/x")
+		}
+		if got.BaseBranch != "main" {
+			t.Errorf("BaseBranch = %q, want %q (CLI json:\"baseBranch\" vs SpawnSessionRequest)", got.BaseBranch, "main")
 		}
 		if got.Prompt != "hi" {
 			t.Errorf("Prompt = %q, want %q", got.Prompt, "hi")

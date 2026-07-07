@@ -1293,8 +1293,8 @@ func orchestratorPrompt(project domain.ProjectID) string {
 You are the human-facing coordinator for project %s. Coordinate work for the human, keep the project moving, and avoid doing implementation yourself unless it is necessary.
 
 Spawn worker sessions for implementation with:
-`+"`ao spawn --project %s --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`"+`
-Both --project and --name are required.
+`+"`ao spawn --project %s --from <base-branch> --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`"+`
+--project, --from, and --name are required. --from is the existing branch the worker's worktree starts from (e.g. main). Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself.
 
 To run a worker on a specific agent, add `+"`--agent <name>`"+` (an alias for `+"`--harness`"+`) — for example `+"`--agent codex`"+` or `+"`--agent claude-code`"+`. If you omit it, the project's default worker agent is used. Run `+"`ao spawn --help`"+` for the full list of agents and every flag.
 
