@@ -34,8 +34,11 @@ func DeriveActivityState(event string, payload []byte) (domain.ActivityState, bo
 		// Notification sets waiting_input.
 		return domain.ActivityActive, true
 	case "stop":
-		// End of a turn: the agent is idle but alive (not exited). A following
-		// Notification(idle_prompt) upgrades this to the sticky waiting_input.
+		// End of a turn: the agent is idle but alive (not exited). This is how a
+		// recap/auto-summary turn ends too — informational, not a request for
+		// input. A sustained idle is promoted to needs-input by the status deriver
+		// (waitingInputGrace), which correctly keeps its hands off an open PR; a
+		// later Notification(idle_prompt) carries no new signal (see below).
 		return domain.ActivityIdle, true
 	case "notification":
 		return notificationState(payload)
@@ -46,17 +49,27 @@ func DeriveActivityState(event string, payload []byte) (domain.ActivityState, bo
 	}
 }
 
-// notificationState reports waiting_input only for the notification types that
-// mean "the agent is blocked on the user": a pending tool-permission prompt or
-// an idle prompt awaiting the next instruction. Other types (auth_success,
-// elicitation_*) carry no activity meaning, as does a malformed payload.
+// notificationState reports waiting_input only for a permission_prompt: a
+// pending tool-permission decision genuinely blocks the agent on the human, and
+// waiting_input is sticky so it survives until answered.
+//
+// idle_prompt is deliberately NOT treated as waiting_input. It only means the
+// agent has been sitting idle at the prompt — the same state a Stop hook already
+// recorded, and exactly what a recap/auto-summary turn leaves behind. Promoting
+// it to the sticky waiting_input made an idle, finished session look like it was
+// "requesting input": it short-circuited the status deriver ahead of the open-PR
+// check and demoted a ready-to-merge PR back to needs_input on every recap.
+// Leaving it as plain idle lets the deriver's sustained-idle promotion
+// (waitingInputGrace) surface "your turn" for sessions with no PR, while an open
+// PR keeps its pipeline status. Other types (auth_success, elicitation_*) carry
+// no activity meaning, as does a malformed payload.
 func notificationState(payload []byte) (domain.ActivityState, bool) {
 	var p struct {
 		NotificationType string `json:"notification_type"`
 	}
 	_ = json.Unmarshal(payload, &p)
 	switch p.NotificationType {
-	case "idle_prompt", "permission_prompt":
+	case "permission_prompt":
 		return domain.ActivityWaitingInput, true
 	default:
 		return "", false

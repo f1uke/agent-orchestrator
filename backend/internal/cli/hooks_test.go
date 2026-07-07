@@ -61,8 +61,10 @@ func TestHooks_NotificationReportsWaitingInput(t *testing.T) {
 	srv, capture := activityServer(t, http.StatusOK, `{"ok":true,"sessionId":"ao-7","state":"waiting_input"}`)
 	writeRunFileFor(t, cfg, srv)
 
+	// A permission_prompt genuinely blocks the agent on the human, so it reports
+	// waiting_input. An idle_prompt does not (see TestHooks_IdlePromptIsNoOp).
 	_, errOut, err := executeCLI(t, Deps{
-		In:           strings.NewReader(`{"notification_type":"idle_prompt"}`),
+		In:           strings.NewReader(`{"notification_type":"permission_prompt"}`),
 		ProcessAlive: func(int) bool { return true },
 	}, "hooks", "claude-code", "notification")
 	if err != nil {
@@ -73,6 +75,29 @@ func TestHooks_NotificationReportsWaitingInput(t *testing.T) {
 	}
 	if got := capturedState(t, capture); got != "waiting_input" {
 		t.Errorf("state = %q, want waiting_input", got)
+	}
+}
+
+// A recap / auto-summary turn ends the turn and Claude Code emits an idle_prompt
+// Notification while the session sits quiet. It is informational — the agent is
+// not requesting input — so the hook reports nothing to the daemon and the
+// session keeps whatever status its durable facts already imply (e.g. a
+// ready-to-merge PR).
+func TestHooks_IdlePromptIsNoOp(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{
+		In:           strings.NewReader(`{"notification_type":"idle_prompt"}`),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "claude-code", "notification")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capture.hits != 0 {
+		t.Errorf("expected no daemon call for an informational idle_prompt, got %d", capture.hits)
 	}
 }
 
@@ -173,7 +198,7 @@ func TestHooks_NoSessionIDIsNoOp(t *testing.T) {
 	writeRunFileFor(t, cfg, srv)
 
 	_, _, err := executeCLI(t, Deps{
-		In:           strings.NewReader(`{"notification_type":"idle_prompt"}`),
+		In:           strings.NewReader(`{"notification_type":"permission_prompt"}`),
 		ProcessAlive: func(int) bool { return true },
 	}, "hooks", "claude-code", "notification")
 	if err != nil {
