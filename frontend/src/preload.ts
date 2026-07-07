@@ -4,6 +4,7 @@ import type { DaemonStatus } from "./shared/daemon-status";
 import type { TelemetryBootstrap } from "./shared/telemetry";
 import type { MigrationState } from "./main/app-state";
 import type { NativeNotificationClickPayload, NativeNotificationInput } from "./main/native-notifications";
+import type { OpenInTargets } from "./main/open-in-targets";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 
 export type BrowserBoundsInput = {
@@ -25,6 +26,13 @@ const api = {
 	clipboard: {
 		writeText: (text: string) => ipcRenderer.invoke("clipboard:writeText", text) as Promise<void>,
 		readText: () => ipcRenderer.invoke("clipboard:readText") as Promise<string>,
+	},
+	openIn: {
+		detectTargets: (dir: string) => ipcRenderer.invoke("openIn:detectTargets", dir) as Promise<OpenInTargets>,
+		finder: (dir: string) => ipcRenderer.invoke("openIn:finder", dir) as Promise<void>,
+		terminal: (dir: string) => ipcRenderer.invoke("openIn:terminal", dir) as Promise<void>,
+		editor: (dir: string) => ipcRenderer.invoke("openIn:editor", dir) as Promise<void>,
+		xcode: (targetPath: string) => ipcRenderer.invoke("openIn:xcode", targetPath) as Promise<void>,
 	},
 	daemon: {
 		getStatus: () => ipcRenderer.invoke("daemon:getStatus") as Promise<DaemonStatus>,

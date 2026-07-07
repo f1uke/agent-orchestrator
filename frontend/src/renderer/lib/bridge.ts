@@ -15,6 +15,13 @@ export const aoBridge: AoBridge =
 			},
 			readText: async () => (navigator.clipboard?.readText ? navigator.clipboard.readText() : ""),
 		},
+		openIn: {
+			detectTargets: async () => ({ hasVSCode: false }),
+			finder: async () => undefined,
+			terminal: async () => undefined,
+			editor: async () => undefined,
+			xcode: async () => undefined,
+		},
 		daemon: {
 			getStatus: async () => ({
 				state: "stopped",

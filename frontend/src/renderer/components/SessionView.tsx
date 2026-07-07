@@ -50,6 +50,10 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const [inspectorView, setInspectorView] = useState<InspectorView>("summary");
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
+	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
+	// did not report one (e.g. an orchestrator), fall back to the project root.
+	const workspace = session ? workspaces.find((w) => w.id === session.workspaceId) : undefined;
+	const directory = session?.workspacePath ?? workspace?.path;
 	const isOrchestrator = session ? isOrchestratorSession(session) : false;
 	// Orchestrator sessions are terminal-only; only worker sessions have the rail.
 	const hasInspector = !isOrchestrator;
@@ -193,6 +197,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					) : (
 						<CenterPane
 							daemonReady={daemonStatus.state === "ready"}
+							directory={directory}
 							onSelectWorkerTerminal={() => setTerminalTarget({ kind: "worker" })}
 							session={session}
 							terminalTarget={terminalTarget}

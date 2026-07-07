@@ -138,6 +138,11 @@ type DeleteSessionQuery struct {
 type SessionView struct {
 	domain.Session
 	Branch string `json:"branch,omitempty"`
+	// WorkspacePath is the session's working directory on disk — the git worktree
+	// for a worker, the project root for an orchestrator. Surfaced (curated from
+	// the json:"-" domain Metadata) so the desktop app can offer "Open in…"
+	// actions (Finder/Terminal/editor) on it. Empty (omitted) when unknown.
+	WorkspacePath string `json:"workspacePath,omitempty"`
 	// PreviewURL is the browser preview target the desktop app opens for this
 	// session, set via POST /sessions/{sessionId}/preview. Empty (omitted) when
 	// no preview has been requested. Pulled from the json:"-" domain Metadata.

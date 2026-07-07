@@ -290,8 +290,11 @@ func TestSessionsAPI_ListSpawnGetAndActions(t *testing.T) {
 	if _, ok := rawList.Sessions[0]["metadata"]; ok {
 		t.Fatalf("list leaked metadata: %s", body)
 	}
-	if _, ok := rawList.Sessions[0]["workspacePath"]; ok {
-		t.Fatalf("list leaked workspacePath: %s", body)
+	// workspacePath is intentionally surfaced (curated from Metadata) so the
+	// desktop app can offer "Open in…" actions on the session's worktree; the
+	// rest of Metadata (prompt, runtime handle) stays private.
+	if got := rawList.Sessions[0]["workspacePath"]; got != "/tmp/private-worktree" {
+		t.Fatalf("workspacePath = %v, want /tmp/private-worktree; body=%s", got, body)
 	}
 	if _, ok := rawList.Sessions[0]["prompt"]; ok {
 		t.Fatalf("list leaked prompt: %s", body)

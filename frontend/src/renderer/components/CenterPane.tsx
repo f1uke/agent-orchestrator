@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type WheelEvent } from "react
 import type { Theme } from "../stores/ui-store";
 import type { TerminalTarget } from "../types/terminal";
 import { isOrchestratorSession, sessionIsActive, type WorkspaceSession } from "../types/workspace";
+import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
 import { TerminalPane } from "./TerminalPane";
 
@@ -12,6 +13,12 @@ type CenterPaneProps = {
 	daemonReady: boolean;
 	terminalTarget?: TerminalTarget;
 	onSelectWorkerTerminal?: () => void;
+	/**
+	 * The working directory to open from the toolbar's "Open in…" menu — the
+	 * session's worktree, or the project root as a fallback. Undefined hides the
+	 * menu. Shared by the orchestrator and worker terminals.
+	 */
+	directory?: string;
 };
 
 const terminalFontSizeStorageKey = "ao.terminal.fontSize";
@@ -33,7 +40,14 @@ function initialTerminalFontSize(): number {
 	return clampTerminalFontSize(parsed);
 }
 
-export function CenterPane({ session, theme, daemonReady, terminalTarget, onSelectWorkerTerminal }: CenterPaneProps) {
+export function CenterPane({
+	session,
+	theme,
+	daemonReady,
+	terminalTarget,
+	onSelectWorkerTerminal,
+	directory,
+}: CenterPaneProps) {
 	const paneRef = useRef<HTMLDivElement | null>(null);
 	const wheelZoomRemainderRef = useRef(0);
 	const lastWheelZoomAtRef = useRef(0);
@@ -105,6 +119,7 @@ export function CenterPane({ session, theme, daemonReady, terminalTarget, onSele
 					</span>
 				</div>
 				<div className="terminal-toolbar__controls">
+					<OpenInMenu directory={directory} />
 					<button
 						aria-label="Decrease terminal font size"
 						className="terminal-toolbar__control"

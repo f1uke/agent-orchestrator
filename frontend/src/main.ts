@@ -51,6 +51,7 @@ import { connectSupervisor, type SupervisorLinkHandle } from "./main/supervisor-
 import { shouldLinkOnAttach } from "./main/daemon-owner";
 import { readMigrationState, updateMigration, writeAppStateMarker, type MigrationState } from "./main/app-state";
 import { createNativeNotifier, type NativeNotificationInput } from "./main/native-notifications";
+import { detectOpenTargets, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
 
 // Globals injected at compile time by @electron-forge/plugin-vite.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -843,6 +844,19 @@ ipcMain.handle("clipboard:writeText", (_event, text: string) => {
 	}
 });
 ipcMain.handle("clipboard:readText", () => clipboard.readText());
+
+// "Open in…" terminal-toolbar menu (macOS only). Detection is best-effort and
+// never throws; launches reject on failure so the renderer can toast without
+// crashing the main process.
+ipcMain.handle("openIn:detectTargets", (_event, dir: string) => detectOpenTargets(dir));
+ipcMain.handle("openIn:finder", async (_event, dir: string) => {
+	if (process.platform !== "darwin" || !dir) return;
+	const error = await shell.openPath(dir);
+	if (error) throw new Error(error);
+});
+ipcMain.handle("openIn:terminal", (_event, dir: string) => openInTerminal(dir));
+ipcMain.handle("openIn:editor", (_event, dir: string) => openInEditor(dir));
+ipcMain.handle("openIn:xcode", (_event, targetPath: string) => openInXcode(targetPath));
 
 ipcMain.handle("appState:getMigration", async (): Promise<MigrationState> => {
 	const runFile = runFilePath();
