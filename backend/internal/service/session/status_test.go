@@ -37,6 +37,17 @@ func idleAgedRec(age time.Duration) domain.SessionRecord {
 	}
 }
 
+// activeAgedRec builds a session whose last signal was active but which has then
+// gone silent for `age` with no refreshing signal — the shape left behind when a
+// turn's closing Stop hook is lost (a hung agent, a dropped hook, a daemon
+// restart mid-turn). Used to exercise the stale-active demotion.
+func activeAgedRec(age time.Duration) domain.SessionRecord {
+	return domain.SessionRecord{
+		Activity:      domain.Activity{State: domain.ActivityActive, LastActivityAt: statusNow.Add(-age)},
+		FirstSignalAt: statusNow.Add(-age),
+	}
+}
+
 func statusPR(facts domain.PRFacts) []domain.PRFacts { return []domain.PRFacts{facts} }
 
 func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
@@ -61,6 +72,17 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 		{"pr-open", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{}), false, domain.StatusPROpen},
 		{"working", statusRec(domain.ActivityActive, false), nil, false, domain.StatusWorking},
 		{"idle", statusRec(domain.ActivityIdle, false), nil, false, domain.StatusIdle},
+
+		// An active session whose signals stopped past the grace almost certainly
+		// lost its closing Stop (a hung agent, a dropped hook) and is not really
+		// working — surface it as waiting-for-human instead of a permanent false
+		// "working". Within the grace it stays working so a long tool call between
+		// activity signals never flips it.
+		{"active-past-grace-no-pr-needs-you", activeAgedRec(2 * activeStaleGrace), nil, false, domain.StatusNeedsInput},
+		{"active-within-grace-stays-working", activeAgedRec(activeStaleGrace / 2), nil, false, domain.StatusWorking},
+		// An open PR is derived before the active reading, so a stale active with a
+		// PR keeps its PR status rather than promoting to needs-input.
+		{"active-past-grace-open-pr-stays-pr", activeAgedRec(2 * activeStaleGrace), statusPR(domain.PRFacts{}), false, domain.StatusPROpen},
 
 		// A signalled session that has sat idle past the grace with no PR is
 		// treated as waiting for the human (the agent stopped and is waiting).
