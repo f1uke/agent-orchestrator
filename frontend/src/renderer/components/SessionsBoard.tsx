@@ -1,7 +1,8 @@
 import { type KeyboardEvent, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, Plus, RotateCw } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { AlertTriangle, Plus, RotateCw, Trash2 } from "lucide-react";
 import { DashboardSubhead } from "./DashboardSubhead";
 import {
 	type AttentionZone,
@@ -14,8 +15,10 @@ import {
 } from "../types/workspace";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { OrchestratorIcon } from "./icons";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { Button } from "./ui/button";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, sessionPRDisplaySummaries } from "../lib/pr-display";
@@ -225,36 +228,32 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 					    37px (not the 35.5px its text-[13px] implies) because the
 					    unlayered `button { font: inherit }` in styles.css outranks
 					    Tailwind's layered text utilities, leaving it at 14px/21px. */}
-					<button
-						aria-expanded={doneExpanded}
-						className="group flex min-h-[51px] w-full items-center gap-2 py-2 text-muted-foreground transition-colors hover:text-foreground"
-						onClick={() => setDoneExpanded((v) => !v)}
-						type="button"
-					>
-						<svg
-							aria-hidden="true"
-							className={cn("h-3 w-3 shrink-0 transition-transform duration-150", doneExpanded && "rotate-90")}
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2"
-							viewBox="0 0 24 24"
+					<div className="flex min-h-[51px] w-full items-center gap-2 py-2">
+						<button
+							aria-expanded={doneExpanded}
+							className="group flex flex-1 items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+							onClick={() => setDoneExpanded((v) => !v)}
+							type="button"
 						>
-							<path d="m9 18 6-6-6-6" />
-						</svg>
-						<span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.05em]">Done / Terminated</span>
-						<span className="ml-auto shrink-0 font-mono text-[10px] text-passive">{done.length}</span>
-					</button>
+							<svg
+								aria-hidden="true"
+								className={cn("h-3 w-3 shrink-0 transition-transform duration-150", doneExpanded && "rotate-90")}
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2"
+								viewBox="0 0 24 24"
+							>
+								<path d="m9 18 6-6-6-6" />
+							</svg>
+							<span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.05em]">Done / Terminated</span>
+							<span className="ml-auto shrink-0 font-mono text-[10px] text-passive">{done.length}</span>
+						</button>
+						{done.length > 0 && <ClearAllButton sessions={done} />}
+					</div>
 					{doneExpanded && (
 						<div className="flex flex-wrap gap-2 pb-2.5 pt-1">
 							{done.map((s) => (
-								<button
-									key={s.id}
-									className="rounded-[7px] border border-border bg-surface px-2.5 py-1.5 text-left transition-colors hover:border-border-strong"
-									onClick={() => openSession(s)}
-									type="button"
-								>
-									<span className="text-[12px] text-muted-foreground">{s.title}</span>
-								</button>
+								<DoneChip key={s.id} session={s} onOpen={() => openSession(s)} />
 							))}
 						</div>
 					)}
@@ -267,6 +266,156 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				onOpenChange={setIsNewTaskOpen}
 			/>
 		</div>
+	);
+}
+
+// A finished/terminated session's chip in the done-bar. Deleting is
+// permanent (unlike kill, which just stops a running worker), so it mirrors
+// TopbarKillButton's inline arm-confirm rather than firing on a single click.
+// Default force=false preserves an uncommitted worktree; a dirty-worktree
+// refusal surfaces the daemon's error and offers "Delete anyway" (force=true)
+// instead of silently discarding work.
+function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
+	const queryClient = useQueryClient();
+	const [confirming, setConfirming] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const del = useMutation({
+		mutationFn: async (force: boolean) => {
+			const { error: apiError } = await apiClient.DELETE("/api/v1/sessions/{sessionId}", {
+				params: { path: { sessionId: session.id }, query: { force } },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError));
+		},
+		onSuccess: () => {
+			setConfirming(false);
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
+		onError: (e) => setError(e instanceof Error ? e.message : "Delete failed"),
+	});
+
+	return (
+		<div className="flex items-center gap-1 rounded-[7px] border border-border bg-surface pl-2.5 pr-1 py-1.5 transition-colors hover:border-border-strong">
+			<button className="text-left text-[12px] text-muted-foreground" onClick={onOpen} type="button">
+				{session.title}
+			</button>
+			{confirming ? (
+				<>
+					<button
+						aria-label="Confirm delete"
+						className="text-[11px] text-error"
+						disabled={del.isPending}
+						onClick={() => del.mutate(false)}
+						type="button"
+					>
+						Confirm
+					</button>
+					<button
+						aria-label="Cancel delete"
+						className="text-[11px] text-passive"
+						onClick={() => setConfirming(false)}
+						type="button"
+					>
+						Cancel
+					</button>
+				</>
+			) : (
+				<button
+					aria-label="Delete session"
+					className="rounded p-1 text-passive hover:text-error"
+					onClick={() => {
+						setError(null);
+						setConfirming(true);
+					}}
+					type="button"
+				>
+					<Trash2 className="h-3 w-3" aria-hidden="true" />
+				</button>
+			)}
+			{error && (
+				<span className="flex items-center gap-1 text-[10px] text-error">
+					{error}
+					{/* A dirty-worktree refusal (SESSION_WORKSPACE_DIRTY) is the expected
+					    reason; offer a force delete that discards uncommitted changes. */}
+					<button
+						aria-label="Delete anyway"
+						className="underline hover:text-error"
+						disabled={del.isPending}
+						onClick={() => del.mutate(true)}
+						type="button"
+					>
+						Delete anyway
+					</button>
+				</span>
+			)}
+		</div>
+	);
+}
+
+// "Clear all" empties the whole done bucket. There is no bulk-delete endpoint,
+// so this fires one DELETE per session (force=false, same as a single chip) and
+// reports how many failed rather than partially retrying. Confirmed via a
+// Radix dialog (mirrors RestoreUnavailableDialog) since it is destructive and
+// scoped to N sessions rather than one.
+function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
+	const queryClient = useQueryClient();
+	const [open, setOpen] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const clear = useMutation({
+		mutationFn: async () => {
+			const results = await Promise.allSettled(
+				sessions.map((s) =>
+					apiClient.DELETE("/api/v1/sessions/{sessionId}", {
+						params: { path: { sessionId: s.id }, query: { force: false } },
+					}),
+				),
+			);
+			const failed = results.filter((r) => r.status === "rejected" || (r.value && "error" in r.value && r.value.error));
+			if (failed.length > 0) throw new Error(`${failed.length} session(s) could not be deleted (uncommitted changes?)`);
+		},
+		onSuccess: () => {
+			setOpen(false);
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
+		onError: (e) => setError(e instanceof Error ? e.message : "Clear failed"),
+	});
+
+	return (
+		<>
+			<button
+				aria-label="Clear all"
+				className="shrink-0 font-mono text-[10px] text-passive hover:text-error"
+				onClick={(e) => {
+					e.stopPropagation();
+					setError(null);
+					setOpen(true);
+				}}
+				type="button"
+			>
+				Clear all
+			</button>
+			<Dialog.Root open={open} onOpenChange={setOpen}>
+				<Dialog.Portal>
+					<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+					<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
+						<Dialog.Title className="text-sm font-medium text-foreground">Clear all finished sessions</Dialog.Title>
+						<Dialog.Description className="mt-2 text-[13px] text-muted-foreground">
+							Permanently remove {sessions.length} finished session(s) from AO. Their git branches are kept.
+						</Dialog.Description>
+						{error && <div className="mt-3 text-[12px] text-error">{error}</div>}
+						<div className="mt-4 flex justify-end gap-2">
+							<Button variant="ghost" onClick={() => setOpen(false)} disabled={clear.isPending}>
+								Cancel
+							</Button>
+							<Button onClick={() => clear.mutate()} disabled={clear.isPending}>
+								Delete all
+							</Button>
+						</div>
+					</Dialog.Content>
+				</Dialog.Portal>
+			</Dialog.Root>
+		</>
 	);
 }
 
