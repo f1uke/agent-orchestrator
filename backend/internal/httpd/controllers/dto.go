@@ -124,6 +124,12 @@ type CleanupSessionsQuery struct {
 	Project string `query:"project,omitempty" description:"Project id filter. When omitted, clean terminated sessions across all projects."`
 }
 
+// DeleteSessionQuery carries the force flag for DELETE /api/v1/sessions/{sessionId}.
+type DeleteSessionQuery struct {
+	// Force discards uncommitted worktree changes instead of refusing.
+	Force bool `query:"force,omitempty" description:"When true, discard uncommitted worktree changes instead of refusing."`
+}
+
 // SessionView is the session wire shape: the domain read model plus the
 // display-safe branch name and the session's attributed pull requests in the
 // curated SessionPRFacts shape. One session can own many PRs (e.g. a stack), so
@@ -212,6 +218,12 @@ type KillSessionResponse struct {
 	OK        bool             `json:"ok"`
 	SessionID domain.SessionID `json:"sessionId"`
 	Freed     bool             `json:"freed,omitempty"`
+}
+
+// DeleteSessionResponse is the body of DELETE /api/v1/sessions/{sessionId}.
+type DeleteSessionResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
 }
 
 // RollbackSessionResponse is the body of POST /api/v1/sessions/{sessionId}/rollback.
@@ -555,4 +567,17 @@ type ResolveCommentsRequest struct {
 type ResolveCommentsResponse struct {
 	OK       bool `json:"ok"`
 	Resolved int  `json:"resolved"`
+}
+
+// ReclaimSettingsResponse mirrors reclaimsettings.Settings on the wire. It is
+// the body of GET/PUT /api/v1/settings/reclaim.
+type ReclaimSettingsResponse struct {
+	Enabled      bool `json:"enabled"`
+	GraceMinutes int  `json:"graceMinutes"`
+}
+
+// SetReclaimSettingsRequest is the body of PUT /api/v1/settings/reclaim.
+type SetReclaimSettingsRequest struct {
+	Enabled      bool `json:"enabled"`
+	GraceMinutes int  `json:"graceMinutes"`
 }

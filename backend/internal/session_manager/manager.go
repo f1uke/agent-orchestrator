@@ -43,6 +43,9 @@ var (
 	// with the system prompt only). Workers without a task and without a native
 	// session id have nothing meaningful to restore.
 	ErrNotResumable = errors.New("session: nothing to resume from")
+	// ErrNotTerminal means a delete was requested for a session that is not
+	// finished (neither merged nor terminated). The API maps it to 409.
+	ErrNotTerminal = errors.New("session: not terminal")
 )
 
 // Env vars a spawned process reads to learn who it is.
@@ -107,6 +110,9 @@ type Store interface {
 	// Kill and successful RestoreAll must remove these rows to prevent
 	// resurrecting sessions the user intentionally terminated.
 	DeleteSessionWorktrees(ctx context.Context, id domain.SessionID) error
+	// PurgeSession hard-deletes a session row and its cascading dependents,
+	// regardless of state. Callers gate on terminal status; the branch is kept.
+	PurgeSession(ctx context.Context, id domain.SessionID) error
 }
 
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
@@ -529,6 +535,49 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 		freed = true
 	}
 	return freed, nil
+}
+
+// PurgeSession tears the session down like Kill, then hard-deletes its row and
+// cascading dependents. A dirty worktree is refused (ErrWorkspaceDirty) unless
+// force is set, in which case it is force-destroyed. The git branch is never
+// removed — only the runtime, the worktree directory, and DB rows are. Callers
+// (the session service) must gate this on terminal status.
+func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force bool) error {
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return fmt.Errorf("purge %s: %w", id, err)
+	}
+	if !ok {
+		return nil // already gone: benign race
+	}
+	handle := runtimeHandle(rec.Metadata)
+	ws := workspaceInfo(rec)
+
+	if !rec.IsTerminated {
+		if err := m.lcm.MarkTerminated(ctx, id); err != nil {
+			return fmt.Errorf("purge %s: %w", id, err)
+		}
+	}
+	if handle.ID != "" {
+		if err := m.runtime.Destroy(ctx, handle); err != nil {
+			return fmt.Errorf("purge %s: runtime: %w", id, err)
+		}
+	}
+	if ws.Path != "" {
+		if err := m.workspace.Destroy(ctx, ws); err != nil {
+			if errors.Is(err, ports.ErrWorkspaceDirty) {
+				if !force {
+					return fmt.Errorf("purge %s: %w", id, ports.ErrWorkspaceDirty)
+				}
+				if ferr := m.workspace.ForceDestroy(ctx, ws); ferr != nil {
+					return fmt.Errorf("purge %s: force destroy: %w", id, ferr)
+				}
+			} else {
+				return fmt.Errorf("purge %s: workspace: %w", id, err)
+			}
+		}
+	}
+	return m.store.PurgeSession(ctx, id)
 }
 
 // RetireForReplacement terminates a live orchestrator and releases its branch
