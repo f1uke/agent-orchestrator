@@ -802,6 +802,51 @@ paths:
       tags:
       - sessions
   /api/v1/sessions/{sessionId}:
+    delete:
+      operationId: deleteSession
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: When true, discard uncommitted worktree changes instead of refusing.
+        in: query
+        name: force
+        schema:
+          description: When true, discard uncommitted worktree changes instead of
+            refusing.
+          type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteSessionResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Permanently delete a finished session (keeps the git branch)
+      tags:
+      - sessions
     get:
       operationId: getSession
       parameters:
@@ -1529,6 +1574,55 @@ paths:
       summary: Clean up terminated session workspaces
       tags:
       - sessions
+  /api/v1/settings/reclaim:
+    get:
+      operationId: getReclaimSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReclaimSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the auto-reclaim settings
+      tags:
+      - settings
+    put:
+      operationId: setReclaimSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetReclaimSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReclaimSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the auto-reclaim settings
+      tags:
+      - settings
 components:
   schemas:
     APIError:
@@ -1737,6 +1831,16 @@ components:
       - kind
       - path
       - resolveError
+      type: object
+    DeleteSessionResponse:
+      properties:
+        ok:
+          type: boolean
+        sessionId:
+          type: string
+      required:
+      - ok
+      - sessionId
       type: object
     DomainActivity:
       properties:
@@ -2135,6 +2239,16 @@ components:
       - path
       - kind
       - sessionPrefix
+      type: object
+    ReclaimSettingsResponse:
+      properties:
+        enabled:
+          type: boolean
+        graceMinutes:
+          type: integer
+      required:
+      - enabled
+      - graceMinutes
       type: object
     RemoveProjectResult:
       properties:
@@ -2586,6 +2700,16 @@ components:
       required:
       - config
       type: object
+    SetReclaimSettingsRequest:
+      properties:
+        enabled:
+          type: boolean
+        graceMinutes:
+          type: integer
+      required:
+      - enabled
+      - graceMinutes
+      type: object
     SetSessionPreviewRequest:
       properties:
         url:
@@ -2750,3 +2874,5 @@ tags:
   name: events
 - description: Legacy AO project import (availability probe and run)
   name: import
+- description: User-editable daemon settings (auto-reclaim, etc.)
+  name: settings
