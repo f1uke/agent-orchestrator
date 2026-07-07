@@ -153,6 +153,7 @@ var schemaNames = map[string]string{
 	"ControllersRenameSessionRequest":             "RenameSessionRequest",
 	"ControllersRenameSessionResponse":            "RenameSessionResponse",
 	"ControllersRestoreSessionResponse":           "RestoreSessionResponse",
+	"ControllersRestartSessionResponse":           "RestartSessionResponse",
 	"ControllersDeleteSessionQuery":               "DeleteSessionQuery",
 	"ControllersDeleteSessionResponse":            "DeleteSessionResponse",
 	"ControllersCleanupSessionsResponse":          "CleanupSessionsResponse",
@@ -691,6 +692,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.RestoreSessionResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/restart", id: "restartSession", tag: "sessions",
+			summary:    "Restart a session (kill then restore), keeping the conversation and recomputing the system prompt",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.RestartSessionResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},

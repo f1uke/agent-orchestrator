@@ -768,6 +768,70 @@ func TestRestore_RefusesLiveSession(t *testing.T) {
 		t.Fatalf("want ErrNotRestorable, got %v", err)
 	}
 }
+
+// TestRestart_KillsLiveSessionThenRestores: Restart is the atomic
+// kill-then-restore a live session uses to pick up a freshly recomputed system
+// prompt without losing its conversation. The old runtime/workspace are torn
+// down and the session relaunches under the SAME id, marked live again.
+func TestRestart_KillsLiveSessionThenRestores(t *testing.T) {
+	m, st, rt, ws := newManager()
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer",
+		Metadata: domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x", RuntimeHandleID: "h1"},
+		Activity: domain.Activity{State: domain.ActivityActive},
+	}
+
+	rec, err := m.Restart(ctx, "mer-1")
+	if err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if rt.destroyed != 1 || ws.destroyed != 1 {
+		t.Fatalf("kill leg should tear down runtime+workspace, got runtime=%d workspace=%d", rt.destroyed, ws.destroyed)
+	}
+	if rt.created != 1 {
+		t.Fatalf("restore leg should relaunch, runtime created = %d, want 1", rt.created)
+	}
+	if rec.ID != "mer-1" {
+		t.Fatalf("restarted id = %q, want mer-1 (restart keeps the same session)", rec.ID)
+	}
+	if rec.IsTerminated {
+		t.Fatal("restarted session must be live, not terminated")
+	}
+	if rec.Activity.State != domain.ActivityIdle {
+		t.Fatalf("restarted activity = %q, want idle", rec.Activity.State)
+	}
+}
+
+// TestRestart_TerminatedSessionRestoresWithoutRekill: a restart of an
+// already-terminated session is just a restore — there is nothing live to tear
+// down, so the kill leg is skipped.
+func TestRestart_TerminatedSessionRestoresWithoutRekill(t *testing.T) {
+	m, st, rt, ws := newManager()
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x"})
+
+	rec, err := m.Restart(ctx, "mer-1")
+	if err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if rt.destroyed != 0 || ws.destroyed != 0 {
+		t.Fatalf("already terminated: nothing to kill, got runtime=%d workspace=%d", rt.destroyed, ws.destroyed)
+	}
+	if rt.created != 1 {
+		t.Fatalf("restore leg should relaunch, runtime created = %d, want 1", rt.created)
+	}
+	if rec.IsTerminated {
+		t.Fatal("restarted session must be live")
+	}
+}
+
+// TestRestart_UnknownSessionErrors: an unknown session surfaces ErrNotFound, not
+// a nil-record success or an opaque teardown error.
+func TestRestart_UnknownSessionErrors(t *testing.T) {
+	m, _, _, _ := newManager()
+	if _, err := m.Restart(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Restart unknown = %v, want ErrNotFound", err)
+	}
+}
 func TestCleanup_ReclaimsTerminalWorkspaces(t *testing.T) {
 	m, st, _, ws := newManager()
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1"})

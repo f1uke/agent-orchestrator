@@ -120,6 +120,14 @@ func (f *fakeSessionService) Restore(_ context.Context, id domain.SessionID) (do
 	return s, nil
 }
 
+func (f *fakeSessionService) Restart(_ context.Context, id domain.SessionID) (domain.Session, error) {
+	s := f.sessions[id]
+	s.IsTerminated = false
+	s.Status = domain.StatusIdle
+	f.sessions[id] = s
+	return s, nil
+}
+
 func (f *fakeSessionService) Kill(_ context.Context, id domain.SessionID) (bool, error) {
 	s := f.sessions[id]
 	s.IsTerminated = true
@@ -673,6 +681,28 @@ func TestSessionsAPI_ClearPreviewNotFound(t *testing.T) {
 
 	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/missing-1/preview", "")
 	assertErrorCode(t, body, status, http.StatusNotFound, "SESSION_NOT_FOUND")
+}
+
+// TestSessionsAPI_RestartRelaunchesSession: POST /sessions/{id}/restart returns
+// 200 with the relaunched session view, echoing the session id.
+func TestSessionsAPI_RestartRelaunchesSession(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/restart", "")
+	if status != http.StatusOK {
+		t.Fatalf("restart = %d, want 200; body=%s", status, body)
+	}
+	var restarted struct {
+		OK        bool   `json:"ok"`
+		SessionID string `json:"sessionId"`
+		Session   struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	mustJSON(t, body, &restarted)
+	if !restarted.OK || restarted.SessionID != "ao-1" || restarted.Session.ID != "ao-1" {
+		t.Fatalf("restart response = %#v", restarted)
+	}
 }
 
 func TestSessionsAPI_SetPreviewEmptyURLNoEntry(t *testing.T) {

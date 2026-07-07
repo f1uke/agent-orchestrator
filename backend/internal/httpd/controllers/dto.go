@@ -220,6 +220,13 @@ type KillSessionResponse struct {
 	Freed     bool             `json:"freed,omitempty"`
 }
 
+// RestartSessionResponse is the body of POST /api/v1/sessions/{sessionId}/restart.
+type RestartSessionResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+	Session   SessionView      `json:"session"`
+}
+
 // DeleteSessionResponse is the body of DELETE /api/v1/sessions/{sessionId}.
 type DeleteSessionResponse struct {
 	OK        bool             `json:"ok"`

@@ -714,6 +714,31 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	return m.getRecord(ctx, id)
 }
 
+// Restart tears a session down and relaunches it in place, keeping the same
+// session id and native agent transcript. It exists so a running agent can pick
+// up a freshly recomputed system prompt (e.g. after the orchestrator/worker
+// prompt changed) without losing its conversation: the Restore leg recomputes
+// the system prompt and resumes via the harness's native --resume.
+//
+// A live session is killed first (Kill preserves a dirty worktree and recreates
+// a clean one from the branch on restore, so no committed or uncommitted work is
+// lost); an already-terminated session skips the kill and restores directly.
+func (m *Manager) Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", id, err)
+	}
+	if !ok {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", id, ErrNotFound)
+	}
+	if !rec.IsTerminated {
+		if _, err := m.Kill(ctx, id); err != nil {
+			return domain.SessionRecord{}, err
+		}
+	}
+	return m.Restore(ctx, id)
+}
+
 func (m *Manager) getRecord(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
