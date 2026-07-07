@@ -1,8 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationCenter } from "./NotificationCenter";
+import type { NativeNotificationClickPayload } from "../../main/native-notifications";
 import type { NotificationDTO } from "../lib/notifications";
+
+const { navigateMock, markReadMock } = vi.hoisted(() => ({
+	navigateMock: vi.fn(),
+	markReadMock: vi.fn().mockResolvedValue(undefined),
+}));
 
 const notifications: NotificationDTO[] = [
 	{
@@ -31,11 +37,11 @@ const notifications: NotificationDTO[] = [
 	},
 ];
 
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock }));
 
 vi.mock("../hooks/useNotificationsQuery", () => ({
 	useMarkAllNotificationsReadMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
-	useMarkNotificationReadMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
+	useMarkNotificationReadMutation: () => ({ isPending: false, mutateAsync: markReadMock }),
 	useNotificationsQuery: () => ({ data: notifications, isError: false }),
 }));
 
@@ -43,6 +49,22 @@ vi.mock("../lib/notifications", async (importOriginal) => ({
 	...((await importOriginal()) as object),
 	createNotificationsTransport: () => ({ connect: () => undefined }),
 }));
+
+vi.mock("../lib/telemetry", () => ({ captureRendererEvent: vi.fn() }));
+
+let clickListener: ((payload: NativeNotificationClickPayload) => void) | undefined;
+
+beforeEach(() => {
+	clickListener = undefined;
+	navigateMock.mockClear();
+	markReadMock.mockClear();
+	// aoBridge holds the same object as window.ao, so mutating the property here is
+	// visible to the component; capture the listener it registers on mount.
+	window.ao!.notifications.onClick = (listener) => {
+		clickListener = listener as (payload: NativeNotificationClickPayload) => void;
+		return () => undefined;
+	};
+});
 
 function renderNotificationCenter() {
 	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -67,5 +89,20 @@ describe("NotificationCenter", () => {
 		expect(count).not.toHaveClass("bg-warning");
 		expect(count).not.toHaveClass("rounded-full");
 		expect(count).not.toHaveClass("text-background");
+	});
+
+	it("marks read and navigates to the target when a native notification is clicked", async () => {
+		renderNotificationCenter();
+		expect(clickListener).toBeDefined();
+
+		await act(async () => {
+			clickListener?.({ id: "ntf_1", route: { kind: "session", sessionId: "sess-1", projectId: "proj-1" } });
+		});
+
+		expect(markReadMock).toHaveBeenCalledWith("ntf_1");
+		expect(navigateMock).toHaveBeenCalledWith({
+			to: "/projects/$projectId/sessions/$sessionId",
+			params: { projectId: "proj-1", sessionId: "sess-1" },
+		});
 	});
 });
