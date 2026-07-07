@@ -1,7 +1,6 @@
 package reclaimsettings
 
 import (
-	"path/filepath"
 	"testing"
 )
 
@@ -29,7 +28,6 @@ func TestSet_PersistsAndReloads(t *testing.T) {
 	if got := st2.Get(); got.Enabled || got.GraceMinutes != 30 {
 		t.Fatalf("reloaded = %+v, want {false 30}", got)
 	}
-	_ = filepath.Join(dir, "reclaim-settings.json")
 }
 
 func TestSet_NegativeGrace_Rejected(t *testing.T) {

@@ -3,14 +3,18 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	sqlitestore "github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/store"
 )
 
 // TestPurgeSession_RemovesTerminalRowAndCascades covers the hard-delete path
 // used to reclaim finished sessions: the session row itself must disappear,
 // and dependent rows without their own explicit cleanup (session_worktrees,
 // which relies on the sessions FK's ON DELETE CASCADE) must cascade away too.
+// telemetry_event has no FK at all, so it needs its own explicit delete inside
+// PurgeSession's transaction; this test also guards against that orphaning.
 func TestPurgeSession_RemovesTerminalRowAndCascades(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -39,6 +43,23 @@ func TestPurgeSession_RemovesTerminalRowAndCascades(t *testing.T) {
 	}
 	sessID := got[0].ID
 
+	// Seed a telemetry row referencing this session (no FK, so it would
+	// otherwise orphan silently on purge).
+	projectID := domain.ProjectID("proj-1")
+	if err := s.CreateTelemetryEvent(ctx, sqlitestore.TelemetryEventRecord{
+		ID:          "tev_1",
+		OccurredAt:  time.Now().UTC().Truncate(time.Second),
+		Name:        "ao.session.reclaimed",
+		Source:      "daemon",
+		Level:       "info",
+		ProjectID:   &projectID,
+		SessionID:   &sessID,
+		RequestID:   "req_1",
+		PayloadJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("CreateTelemetryEvent: %v", err)
+	}
+
 	if err := s.PurgeSession(ctx, sessID); err != nil {
 		t.Fatalf("PurgeSession: %v", err)
 	}
@@ -52,5 +73,12 @@ func TestPurgeSession_RemovesTerminalRowAndCascades(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("worktree rows not cascaded: %d", len(rows))
+	}
+	tevRows, err := s.ListTelemetryEventsSince(ctx, time.Now().UTC().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tevRows) != 0 {
+		t.Fatalf("telemetry_event rows not purged: %+v", tevRows)
 	}
 }

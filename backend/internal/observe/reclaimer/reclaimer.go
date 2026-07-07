@@ -33,11 +33,16 @@ type Config struct {
 	Logger *slog.Logger
 }
 
-// Reclaimer holds the grace clock: first-seen timestamps per candidate session.
+// Reclaimer holds the grace clock: first-seen timestamps per candidate
+// session, plus a set of sessions already reclaimed so a stale candidate
+// (ListReclaimable keeps listing it because Kill never clears
+// WorkspacePath/RuntimeHandleID — and must not, Restore needs WorkspacePath)
+// is not reclaimed again on every subsequent tick.
 type Reclaimer struct {
 	svc       reclaimService
 	settings  settingsReader
 	firstSeen map[domain.SessionID]time.Time
+	reclaimed map[domain.SessionID]bool
 	tick      time.Duration
 	clock     func() time.Time
 	logger    *slog.Logger
@@ -49,6 +54,7 @@ func New(svc reclaimService, settings settingsReader, cfg Config) *Reclaimer {
 		svc:       svc,
 		settings:  settings,
 		firstSeen: map[domain.SessionID]time.Time{},
+		reclaimed: map[domain.SessionID]bool{},
 		tick:      cfg.Tick,
 		clock:     cfg.Clock,
 		logger:    cfg.Logger,
@@ -89,13 +95,27 @@ func (r *Reclaimer) Tick(ctx context.Context) error {
 		current[id] = true
 	}
 	// Drop clock entries for sessions no longer eligible so grace restarts if
-	// they return.
+	// they return. Also drop reclaimed-marks for sessions no longer eligible:
+	// if one later leaves candidacy (e.g. restored) and comes back, it must be
+	// reclaimable again.
 	for id := range r.firstSeen {
 		if !current[id] {
 			delete(r.firstSeen, id)
 		}
 	}
+	for id := range r.reclaimed {
+		if !current[id] {
+			delete(r.reclaimed, id)
+		}
+	}
 	for _, id := range candidates {
+		// Kill never clears WorkspacePath/RuntimeHandleID (Restore needs
+		// WorkspacePath), so ListReclaimable keeps listing an already-torn-down
+		// session as a candidate forever. Skip it here instead so it is not
+		// reclaimed (and logged) again every grace period.
+		if r.reclaimed[id] {
+			continue
+		}
 		seen, ok := r.firstSeen[id]
 		if !ok {
 			r.firstSeen[id] = now
@@ -108,6 +128,7 @@ func (r *Reclaimer) Tick(ctx context.Context) error {
 			}
 			r.logger.Info("reclaimer: reclaimed finished session", "session", id)
 			delete(r.firstSeen, id)
+			r.reclaimed[id] = true
 		}
 	}
 	return nil

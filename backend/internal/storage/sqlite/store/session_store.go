@@ -150,9 +150,12 @@ WHERE id = ?
 
 // PurgeSession hard-deletes a session row and everything that FK-cascades from
 // it (PRs, worktree rows, notifications, review rows). change_log has no cascade
-// (RESTRICT), so its rows are deleted first inside the same transaction. Unlike
-// DeleteSession this has NO seed-state guard: callers (the session service) gate
-// on terminal status. The git branch is untouched — only DB rows are removed.
+// (RESTRICT), so its rows are deleted first inside the same transaction.
+// telemetry_event.session_id also has no FK at all, so its rows would
+// otherwise orphan silently; they are deleted in the same transaction too.
+// Unlike DeleteSession this has NO seed-state guard: callers (the session
+// service) gate on terminal status. The git branch is untouched — only DB
+// rows are removed.
 func (s *Store) PurgeSession(ctx context.Context, id domain.SessionID) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -161,10 +164,14 @@ func (s *Store) PurgeSession(ctx context.Context, id domain.SessionID) error {
 		return fmt.Errorf("purge session %s: begin: %w", id, err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Both deletes run via raw ExecContext to sidestep sqlc 1.31's SQLite-parser
-	// bug (see DeleteSession above for the documented workaround context).
+	// All three deletes run via raw ExecContext to sidestep sqlc 1.31's
+	// SQLite-parser bug (see DeleteSession above for the documented workaround
+	// context).
 	if _, err := tx.ExecContext(ctx, `DELETE FROM change_log WHERE session_id = ?`, id); err != nil {
 		return fmt.Errorf("purge session %s: change_log: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM telemetry_event WHERE session_id = ?`, id); err != nil {
+		return fmt.Errorf("purge session %s: telemetry_event: %w", id, err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("purge session %s: sessions: %w", id, err)
