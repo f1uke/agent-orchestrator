@@ -181,6 +181,71 @@ func TestHarnessSignalsCapabilityGate(t *testing.T) {
 	}
 }
 
+func TestDeriveStatusDetailReason(t *testing.T) {
+	tests := []struct {
+		name       string
+		rec        domain.SessionRecord
+		pr         []domain.PRFacts
+		hookless   bool
+		wantStatus domain.SessionStatus
+		wantReason domain.StatusReason
+		// wantNextTo is "" when no timed transition is pending.
+		wantNextTo domain.SessionStatus
+	}{
+		{"working", statusRec(domain.ActivityActive, false), nil, false, domain.StatusWorking, domain.ReasonWorking, domain.StatusNeedsInput},
+		{"active-stale", activeAgedRec(2 * activeStaleGrace), nil, false, domain.StatusNeedsInput, domain.ReasonActiveStale, ""},
+		{"waiting-input", statusRec(domain.ActivityWaitingInput, false), nil, false, domain.StatusNeedsInput, domain.ReasonWaitingInput, ""},
+		{"idle-aged", idleAgedRec(2 * waitingInputGrace), nil, false, domain.StatusNeedsInput, domain.ReasonIdleAged, ""},
+		{"idle-fresh-signalled", idleAgedRec(waitingInputGrace / 2), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNeedsInput},
+		{"idle-fresh-never-signalled", silentRec(10 * time.Second), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNoSignal},
+		{"no-signal", silentRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal, domain.ReasonNoSignal, ""},
+		{"hookless-idle", silentRec(2 * noSignalGrace), nil, true, domain.StatusIdle, domain.ReasonIdle, ""},
+		{"pr-open", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{}), false, domain.StatusPROpen, domain.ReasonPRPipeline, ""},
+		{"terminated", statusRec(domain.ActivityExited, true), nil, false, domain.StatusTerminated, domain.ReasonTerminated, ""},
+		{"merged", statusRec(domain.ActivityIdle, true), statusPR(domain.PRFacts{Merged: true}), false, domain.StatusMerged, domain.ReasonMerged, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveStatusDetail(tt.rec, tt.pr, statusNow, !tt.hookless, domain.DefaultMinApprovals)
+			if got.Status != tt.wantStatus {
+				t.Fatalf("status: got %q want %q", got.Status, tt.wantStatus)
+			}
+			if got.Reason != tt.wantReason {
+				t.Fatalf("reason: got %q want %q", got.Reason, tt.wantReason)
+			}
+			if tt.wantNextTo == "" {
+				if got.NextTransitionAt != nil {
+					t.Fatalf("nextTransitionAt: got %v want nil", got.NextTransitionAt)
+				}
+				return
+			}
+			if got.NextTransitionAt == nil {
+				t.Fatalf("nextTransitionAt: got nil want non-nil")
+			}
+			if got.NextTransitionTo != tt.wantNextTo {
+				t.Fatalf("nextTransitionTo: got %q want %q", got.NextTransitionTo, tt.wantNextTo)
+			}
+		})
+	}
+}
+
+func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
+	// active within grace flips to needs_input at last + activeStaleGrace.
+	active := activeAgedRec(activeStaleGrace / 2)
+	got := deriveStatusDetail(active, nil, statusNow, true, domain.DefaultMinApprovals)
+	wantAt := active.Activity.LastActivityAt.Add(activeStaleGrace)
+	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
+		t.Fatalf("active nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
+	}
+	// idle-fresh (signalled) flips to needs_input at last + waitingInputGrace.
+	idle := idleAgedRec(waitingInputGrace / 2)
+	got = deriveStatusDetail(idle, nil, statusNow, true, domain.DefaultMinApprovals)
+	wantAt = idle.Activity.LastActivityAt.Add(waitingInputGrace)
+	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
+		t.Fatalf("idle nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
+	}
+}
+
 func TestPRPipelineStatus_MinApprovalsThreshold(t *testing.T) {
 	base := domain.PRFacts{
 		URL:          "https://gitlab.example.com/g/p/-/merge_requests/1",

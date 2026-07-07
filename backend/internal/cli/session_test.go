@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 type sessionRequestLog struct {
@@ -539,5 +541,62 @@ func TestSessionClaimPR_GHFallbackWhenProjectRepoMissing(t *testing.T) {
 	}
 	if ghDir != "/repo/demo" || !strings.Contains(out, "claimed PR #142") {
 		t.Fatalf("ghDir=%q out=%s", ghDir, out)
+	}
+}
+
+func TestWriteSessionDetailsIncludesReason(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	sess := sessionDTO{
+		ID:           "demo-1",
+		ProjectID:    "demo",
+		Kind:         "worker",
+		Status:       "needs_input",
+		StatusReason: "active_stale",
+		Activity:     sessionActivity{State: "active"},
+	}
+	if err := writeSessionDetails(cmd, sess); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "reason: active_stale") {
+		t.Fatalf("output missing reason line:\n%s", out)
+	}
+}
+
+func TestWriteSessionDetailsOmitsEmptyReason(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	sess := sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "working"}
+	if err := writeSessionDetails(cmd, sess); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	if strings.Contains(buf.String(), "reason:") {
+		t.Fatalf("empty reason should be omitted:\n%s", buf.String())
+	}
+}
+
+// The reason rides the existing --json path (which re-marshals sessionDTO), so
+// pin the omitempty contract: a reason-less session's JSON is byte-identical to
+// before, and a reason is emitted when present.
+func TestSessionDTOJSONOmitsEmptyReason(t *testing.T) {
+	b, err := json.Marshal(sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "working"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "statusReason") {
+		t.Fatalf("empty statusReason should be omitted from JSON:\n%s", b)
+	}
+}
+
+func TestSessionDTOJSONIncludesReason(t *testing.T) {
+	b, err := json.Marshal(sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "needs_input", StatusReason: "active_stale"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"statusReason":"active_stale"`) {
+		t.Fatalf("reason should be present in JSON:\n%s", b)
 	}
 }

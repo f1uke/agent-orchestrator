@@ -51,6 +51,7 @@ type sessionDTO struct {
 	CreatedAt    time.Time       `json:"createdAt"`
 	UpdatedAt    time.Time       `json:"updatedAt"`
 	Status       string          `json:"status"`
+	StatusReason string          `json:"statusReason,omitempty"`
 }
 
 type sessionActivity struct {
@@ -714,6 +715,7 @@ func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 		{"name", sess.DisplayName},
 		{"role", sessionRole(sess)},
 		{"status", sess.Status},
+		{"reason", sess.StatusReason},
 		{"activity", sess.Activity.State},
 		{"harness", sess.Harness},
 		{"issue", sess.IssueID},

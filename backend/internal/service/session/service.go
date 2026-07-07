@@ -589,7 +589,16 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if project, ok, perr := s.store.GetProject(ctx, string(rec.ProjectID)); perr == nil && ok {
 		minApprovals = project.Config.ResolveMinApprovals()
 	}
-	return domain.Session{SessionRecord: rec, Status: deriveStatus(rec, prs, s.now(), s.harnessSignals(rec.Harness), minApprovals), TerminalHandleID: rec.Metadata.RuntimeHandleID, PRs: prs}, nil
+	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), minApprovals)
+	return domain.Session{
+		SessionRecord:    rec,
+		Status:           detail.Status,
+		StatusReason:     detail.Reason,
+		NextTransitionAt: detail.NextTransitionAt,
+		NextTransitionTo: detail.NextTransitionTo,
+		TerminalHandleID: rec.Metadata.RuntimeHandleID,
+		PRs:              prs,
+	}, nil
 }
 
 // now tolerates a zero-value Service (tests construct the struct literally

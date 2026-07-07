@@ -620,6 +620,10 @@ export interface components {
             isTerminated: boolean;
             issueId?: string;
             kind: string;
+            /** Format: date-time */
+            nextTransitionAt?: null | string;
+            /** @enum {string} */
+            nextTransitionTo?: "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** Format: int64 */
             previewRevision?: number;
             previewUrl?: string;
@@ -627,6 +631,8 @@ export interface components {
             prs: components["schemas"]["SessionPRFacts"][];
             /** @enum {string} */
             status: "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
+            /** @enum {string} */
+            statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged";
             terminalHandleId?: string;
             /** Format: date-time */
             updatedAt: string;

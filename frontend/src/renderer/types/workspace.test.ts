@@ -3,12 +3,15 @@ import {
 	attentionZone,
 	canonicalTrackerIssueId,
 	findProjectOrchestrator,
+	formatNextTransition,
 	newestActiveOrchestrator,
 	orchestratorHealth,
 	sessionIsActive,
 	sessionNeedsAttention,
+	statusReasonLabel,
 	toAgentProvider,
 	toSessionStatus,
+	toStatusReason,
 	workerDisplayStatus,
 	workerStatusPulses,
 	openPRs,
@@ -337,5 +340,44 @@ describe("attentionZone", () => {
 	it("prioritizes merge as the highest-ROI zone", () => {
 		// merge is checked before action/pending so an approved PR always surfaces.
 		expect(attentionZone(sessionWith({ status: "approved" }))).toBe("merge");
+	});
+});
+
+describe("toStatusReason", () => {
+	it("passes through known reasons, maps unknown to 'unknown', and undefined to undefined", () => {
+		expect(toStatusReason("active_stale")).toBe("active_stale");
+		expect(toStatusReason("waiting_input")).toBe("waiting_input");
+		expect(toStatusReason("bogus")).toBe("unknown");
+		expect(toStatusReason(undefined)).toBeUndefined();
+	});
+});
+
+describe("statusReasonLabel", () => {
+	it("has a non-empty label for every real reason code", () => {
+		for (const r of [
+			"working", "waiting_input", "active_stale", "idle_aged",
+			"idle", "no_signal", "pr_pipeline", "terminated", "merged",
+		] as const) {
+			expect(statusReasonLabel[r].length).toBeGreaterThan(0);
+		}
+	});
+});
+
+describe("formatNextTransition", () => {
+	const now = Date.parse("2026-01-01T00:00:00Z");
+
+	it("formats a pending flip with target and duration", () => {
+		expect(
+			formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "needs_input" }, now),
+		).toBe("→ Needs input in 4m");
+		expect(
+			formatNextTransition({ nextTransitionAt: "2026-01-01T00:00:30Z", nextTransitionTo: "no_signal" }, now),
+		).toBe("→ No signal in 30s");
+	});
+
+	it("is empty when already due, missing, or targeting a non-countdown status", () => {
+		expect(formatNextTransition({ nextTransitionAt: "2025-12-31T23:59:00Z", nextTransitionTo: "needs_input" }, now)).toBe("");
+		expect(formatNextTransition({}, now)).toBe("");
+		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "working" }, now)).toBe("");
 	});
 });

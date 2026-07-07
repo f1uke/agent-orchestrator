@@ -1703,6 +1703,27 @@ components:
           type: string
         kind:
           type: string
+        nextTransitionAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        nextTransitionTo:
+          enum:
+          - working
+          - pr_open
+          - draft
+          - ci_failed
+          - review_pending
+          - changes_requested
+          - approved
+          - mergeable
+          - merged
+          - needs_input
+          - idle
+          - terminated
+          - no_signal
+          type: string
         previewRevision:
           format: int64
           type: integer
@@ -1729,6 +1750,18 @@ components:
           - idle
           - terminated
           - no_signal
+          type: string
+        statusReason:
+          enum:
+          - working
+          - waiting_input
+          - active_stale
+          - idle_aged
+          - idle
+          - no_signal
+          - pr_pipeline
+          - terminated
+          - merged
           type: string
         terminalHandleId:
           type: string
