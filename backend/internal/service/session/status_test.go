@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/claudecode"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
@@ -119,6 +120,38 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A recap / auto-summary turn ends the turn (a Stop hook -> idle); Claude Code
+// then emits an idle_prompt Notification while the session sits quiet. That
+// notification is INFORMATIONAL and must not make an idle, finished session look
+// like it is "waiting on the human": it must never demote an open, ready-to-merge
+// PR back to needs_input. Only a genuine block (permission_prompt) is real
+// pending input and still surfaces as needs_input.
+func TestRecapNotificationDoesNotDemoteReadyPR(t *testing.T) {
+	prs := statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable})
+
+	// The recap left the session idle (its Stop hook), then an idle_prompt
+	// Notification landed. Feed the state Claude Code actually derives for that
+	// notification into the status derivation alongside the ready PR.
+	recap := statusRec(domain.ActivityIdle, false)
+	if state, ok := claudecode.DeriveActivityState("notification", []byte(`{"notification_type":"idle_prompt"}`)); ok {
+		recap.Activity.State = state
+	}
+	if got := deriveStatus(recap, prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusMergeable {
+		t.Fatalf("recap over an open mergeable PR: status = %q, want %q (a recap must not flip a ready PR to needs_input)", got, domain.StatusMergeable)
+	}
+
+	// A genuine tool-permission prompt IS real pending input: it still surfaces as
+	// needs_input, even over a mergeable PR.
+	state, ok := claudecode.DeriveActivityState("notification", []byte(`{"notification_type":"permission_prompt"}`))
+	if !ok || state != domain.ActivityWaitingInput {
+		t.Fatalf("permission_prompt must derive waiting_input; got (%q, %v)", state, ok)
+	}
+	blocked := statusRec(state, false)
+	if got := deriveStatus(blocked, prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusNeedsInput {
+		t.Fatalf("genuine permission prompt over a PR: status = %q, want %q", got, domain.StatusNeedsInput)
 	}
 }
 

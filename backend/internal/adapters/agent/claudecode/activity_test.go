@@ -19,7 +19,7 @@ func TestDeriveActivityState(t *testing.T) {
 		{"post tool use -> active", "post-tool-use", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
 		{"post tool use failure -> active", "post-tool-use-failure", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
 		{"stop -> idle", "stop", `{}`, domain.ActivityIdle, true},
-		{"notification idle_prompt -> waiting_input", "notification", `{"notification_type":"idle_prompt"}`, domain.ActivityWaitingInput, true},
+		{"notification idle_prompt -> no signal (informational)", "notification", `{"notification_type":"idle_prompt"}`, "", false},
 		{"notification permission_prompt -> waiting_input", "notification", `{"notification_type":"permission_prompt"}`, domain.ActivityWaitingInput, true},
 		{"notification auth_success -> no signal", "notification", `{"notification_type":"auth_success"}`, "", false},
 		{"notification empty type -> no signal", "notification", `{}`, "", false},
