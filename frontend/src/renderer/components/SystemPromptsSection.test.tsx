@@ -65,4 +65,44 @@ describe("SystemPromptsSection", () => {
 			}),
 		);
 	});
+
+	it("preserves an unsaved edit in one kind when another kind is saved and refetched", async () => {
+		let getCallCount = 0;
+		getMock.mockReset().mockImplementation(async () => {
+			getCallCount += 1;
+			const workerOverride = getCallCount === 1 ? "WORKER OVERRIDE" : "NEW WORKER";
+			return {
+				data: {
+					prompts: [
+						{ kind: "orchestrator", default: "ORCH DEFAULT {{.ProjectID}}", override: null },
+						{ kind: "worker", default: "WORKER DEFAULT", override: workerOverride },
+						{ kind: "reviewer", default: "REVIEWER DEFAULT", override: null },
+					],
+				},
+				error: undefined,
+			};
+		});
+		putMock.mockReset().mockResolvedValue({ data: { prompts: [] }, error: undefined });
+
+		renderSection();
+		const worker = (await screen.findByLabelText(/worker/i)) as HTMLTextAreaElement;
+		const reviewer = (await screen.findByLabelText(/reviewer/i)) as HTMLTextAreaElement;
+		await waitFor(() => expect(worker.value).toBe("WORKER OVERRIDE"));
+
+		// Edit both worker and reviewer, but only save worker.
+		await userEvent.clear(worker);
+		await userEvent.type(worker, "NEW WORKER");
+		await userEvent.clear(reviewer);
+		await userEvent.type(reviewer, "UNSAVED REVIEWER EDIT");
+
+		await userEvent.click(screen.getAllByRole("button", { name: /save/i })[1]);
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		// Wait for the post-invalidation refetch to complete.
+		await waitFor(() => expect(getCallCount).toBeGreaterThan(1));
+
+		// Saved kind syncs to its new server value; the untouched-save kind keeps
+		// the user's unsaved edit instead of being wiped by the refetch.
+		await waitFor(() => expect(worker.value).toBe("NEW WORKER"));
+		expect(reviewer.value).toBe("UNSAVED REVIEWER EDIT");
+	});
 });

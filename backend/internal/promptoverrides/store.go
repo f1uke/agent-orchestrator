@@ -65,11 +65,13 @@ func (s *Store) SetBase(k prompts.Kind, text string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cur.Base == nil {
-		s.cur.Base = map[prompts.Kind]string{}
+	candidate := s.copyBaseLocked()
+	candidate[k] = text
+	if err := s.persistLocked(candidate); err != nil {
+		return err
 	}
-	s.cur.Base[k] = text
-	return s.persistLocked()
+	s.cur.Base = candidate
+	return nil
 }
 
 // ClearBase removes a kind's override, restoring the built-in default.
@@ -79,14 +81,30 @@ func (s *Store) ClearBase(k prompts.Kind) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.cur.Base, k)
-	return s.persistLocked()
+	candidate := s.copyBaseLocked()
+	delete(candidate, k)
+	if err := s.persistLocked(candidate); err != nil {
+		return err
+	}
+	s.cur.Base = candidate
+	return nil
 }
 
-// persistLocked writes the current overrides atomically (temp+rename). Callers
-// hold s.mu.
-func (s *Store) persistLocked() error {
-	b, err := json.Marshal(s.cur)
+// copyBaseLocked returns a mutable copy of s.cur.Base for building a candidate
+// state. Callers hold s.mu.
+func (s *Store) copyBaseLocked() map[prompts.Kind]string {
+	out := make(map[prompts.Kind]string, len(s.cur.Base))
+	for k, v := range s.cur.Base {
+		out[k] = v
+	}
+	return out
+}
+
+// persistLocked writes the given candidate base map to disk atomically
+// (temp+rename), without mutating s.cur. Callers hold s.mu and, on success,
+// are responsible for assigning the candidate to s.cur.
+func (s *Store) persistLocked(base map[prompts.Kind]string) error {
+	b, err := json.Marshal(Overrides{Base: base})
 	if err != nil {
 		return fmt.Errorf("promptoverrides: marshal: %w", err)
 	}

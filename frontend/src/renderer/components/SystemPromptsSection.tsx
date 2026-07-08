@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -33,10 +33,23 @@ export function SystemPromptsSection() {
 		},
 	});
 	const [drafts, setDrafts] = useState<Record<string, string>>({});
+	// Tracks the last-known server value per kind so a refetch (triggered by
+	// saving/resetting ANY kind) only resyncs a kind's draft when the user
+	// hasn't touched it since that snapshot — unsaved edits in other kinds
+	// survive the invalidation-driven refetch.
+	const serverSnapshot = useRef<Record<string, string>>({});
 	useEffect(() => {
-		if (query.data) {
-			setDrafts(Object.fromEntries(query.data.map((p) => [p.kind, p.override ?? p.default])));
-		}
+		if (!query.data) return;
+		setDrafts((prev) => {
+			const next = { ...prev };
+			for (const p of query.data) {
+				const serverValue = p.override ?? p.default;
+				const isDirty = prev[p.kind] !== undefined && prev[p.kind] !== serverSnapshot.current[p.kind];
+				if (!isDirty) next[p.kind] = serverValue;
+				serverSnapshot.current[p.kind] = serverValue;
+			}
+			return next;
+		});
 	}, [query.data]);
 
 	const save = useMutation({
