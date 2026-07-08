@@ -69,6 +69,7 @@ if (typeof window !== "undefined") {
 			terminal: async () => undefined,
 			editor: async () => undefined,
 			xcode: async () => undefined,
+			xcodegen: async () => ({ status: "no-specs", root: "" }),
 		},
 		daemon: {
 			getStatus: async () => ({ state: "stopped" }),

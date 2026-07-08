@@ -43,7 +43,7 @@ import {
 	resolveDaemonFromRunFile,
 } from "./shared/daemon-attach";
 import { shouldReplacePortHolder } from "./shared/daemon-takeover";
-import { buildDaemonEnv, resolveShellEnv, type ShellRunner } from "./shared/shell-env";
+import { buildDaemonEnv, resolveShellEnv, type ShellRunner, withFallbackPath } from "./shared/shell-env";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/posthog-config";
 import { buildTelemetryBootstrap } from "./shared/telemetry";
 import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view-host";
@@ -52,6 +52,7 @@ import { shouldLinkOnAttach } from "./main/daemon-owner";
 import { readMigrationState, updateMigration, writeAppStateMarker, type MigrationState } from "./main/app-state";
 import { createNativeNotifier, type NativeNotificationInput } from "./main/native-notifications";
 import { detectOpenTargets, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
+import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
 
 // Globals injected at compile time by @electron-forge/plugin-vite.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -857,6 +858,16 @@ ipcMain.handle("openIn:finder", async (_event, dir: string) => {
 ipcMain.handle("openIn:terminal", (_event, dir: string) => openInTerminal(dir));
 ipcMain.handle("openIn:editor", (_event, dir: string) => openInEditor(dir));
 ipcMain.handle("openIn:xcode", (_event, targetPath: string) => openInXcode(targetPath));
+// Recursively find every project.yml under the session dir and run `xcodegen
+// generate` in each. xcodegen is typically a Homebrew binary, so a Finder/Dock
+// launch needs the login-shell PATH (or the static floor) to resolve it — the
+// same env recovery the daemon uses.
+ipcMain.handle("openIn:xcodegen", async (_event, dir: string): Promise<RunXcodegenResult> => {
+	if (!dir) return { status: "no-specs", root: "" };
+	await ensureShellEnv();
+	const env: NodeJS.ProcessEnv = { ...process.env, PATH: withFallbackPath(cachedShellEnv?.PATH ?? process.env.PATH) };
+	return runXcodegen(dir, { env });
+});
 
 ipcMain.handle("appState:getMigration", async (): Promise<MigrationState> => {
 	const runFile = runFilePath();

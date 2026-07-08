@@ -5,6 +5,7 @@ import type { TelemetryBootstrap } from "./shared/telemetry";
 import type { MigrationState } from "./main/app-state";
 import type { NativeNotificationClickPayload, NativeNotificationInput } from "./main/native-notifications";
 import type { OpenInTargets } from "./main/open-in-targets";
+import type { RunXcodegenResult } from "./main/run-xcodegen";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 
 export type BrowserBoundsInput = {
@@ -33,6 +34,7 @@ const api = {
 		terminal: (dir: string) => ipcRenderer.invoke("openIn:terminal", dir) as Promise<void>,
 		editor: (dir: string) => ipcRenderer.invoke("openIn:editor", dir) as Promise<void>,
 		xcode: (targetPath: string) => ipcRenderer.invoke("openIn:xcode", targetPath) as Promise<void>,
+		xcodegen: (dir: string) => ipcRenderer.invoke("openIn:xcodegen", dir) as Promise<RunXcodegenResult>,
 	},
 	daemon: {
 		getStatus: () => ipcRenderer.invoke("daemon:getStatus") as Promise<DaemonStatus>,

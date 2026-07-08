@@ -1,4 +1,4 @@
-import { Code2, FolderOpen, Hammer, Share, SquareTerminal } from "lucide-react";
+import { Code2, FolderOpen, Hammer, Share, SquareTerminal, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenInTargets } from "../../main/open-in-targets";
 import { aoBridge } from "../lib/bridge";
@@ -9,6 +9,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultSheet";
 
 type OpenInMenuProps = {
 	/** The working directory to open. When absent, the menu renders nothing. */
@@ -36,6 +37,8 @@ export function OpenInMenu({ directory }: OpenInMenuProps) {
 	const [targets, setTargets] = useState<OpenInTargets | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
 	const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const [xcodegenOpen, setXcodegenOpen] = useState(false);
+	const [xcodegenState, setXcodegenState] = useState<XcodegenViewState | null>(null);
 
 	// Detect conditional targets when the menu opens (and whenever the directory
 	// changes while open). Terminal + Finder are always shown, so an empty/failed
@@ -78,6 +81,20 @@ export function OpenInMenu({ directory }: OpenInMenuProps) {
 		});
 	};
 
+	// Open the results panel immediately in a running state, then fill it in when
+	// the recursive search + generate resolves (or surface an unexpected failure).
+	const runXcodegen = () => {
+		setXcodegenState({ phase: "running" });
+		setXcodegenOpen(true);
+		aoBridge.openIn
+			.xcodegen(directory)
+			.then((result) => setXcodegenState({ phase: "done", result }))
+			.catch((error) => {
+				console.error('"Run xcodegen" failed:', error);
+				setXcodegenState({ phase: "error" });
+			});
+	};
+
 	const xcode = targets?.xcode;
 
 	return (
@@ -115,8 +132,14 @@ export function OpenInMenu({ directory }: OpenInMenuProps) {
 							Open in Visual Studio Code
 						</DropdownMenuItem>
 					)}
+					<DropdownMenuSeparator />
+					<DropdownMenuItem onSelect={runXcodegen}>
+						<Wrench aria-hidden="true" />
+						Run xcodegen
+					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
+			<XcodegenResultSheet open={xcodegenOpen} onOpenChange={setXcodegenOpen} state={xcodegenState} />
 			{toast && (
 				<div
 					className="fixed bottom-5 left-1/2 z-[100] -translate-x-1/2 rounded-lg border border-border bg-popover px-3.5 py-2 text-[13px] text-foreground shadow-[var(--shadow)]"
