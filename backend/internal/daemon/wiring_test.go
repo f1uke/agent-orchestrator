@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -157,7 +158,11 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawnconfirm.NewStore: %v", err)
 	}
-	svc, reviewSvc, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, log)
+	promptOverrides, err := promptoverrides.NewStore(cfg.DataDir)
+	if err != nil {
+		t.Fatalf("promptoverrides.NewStore: %v", err)
+	}
+	svc, reviewSvc, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -194,7 +199,11 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawnconfirm.NewStore: %v", err)
 	}
-	svc, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, log)
+	promptOverrides, err := promptoverrides.NewStore(cfg.DataDir)
+	if err != nil {
+		t.Fatalf("promptoverrides.NewStore: %v", err)
+	}
+	svc, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}

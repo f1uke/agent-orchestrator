@@ -1,12 +1,15 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 )
@@ -25,12 +28,21 @@ type SpawnConfirmService interface {
 	Set(spawnconfirm.Settings) error
 }
 
+// SystemPromptsService is the prompt-override store surface the controller needs.
+// *promptoverrides.Store satisfies this directly.
+type SystemPromptsService interface {
+	Get() promptoverrides.Overrides
+	SetBase(prompts.Kind, string) error
+	ClearBase(prompts.Kind) error
+}
+
 // SettingsController serves the global auto-reclaim settings. Nil keeps the
 // routes registered but returns OpenAPI-backed 501s, matching every other
 // controller in this package.
 type SettingsController struct {
-	Svc          SettingsService
-	SpawnConfirm SpawnConfirmService
+	Svc           SettingsService
+	SpawnConfirm  SpawnConfirmService
+	SystemPrompts SystemPromptsService
 }
 
 // Register mounts the settings routes on the supplied router.
@@ -39,6 +51,9 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/reclaim", c.set)
 	r.Get("/settings/spawn-confirm", c.getSpawnConfirm)
 	r.Put("/settings/spawn-confirm", c.setSpawnConfirm)
+	r.Get("/settings/prompts", c.getPrompts)
+	r.Put("/settings/prompts/{kind}", c.setPrompt)
+	r.Delete("/settings/prompts/{kind}", c.clearPrompt)
 }
 
 func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
@@ -93,4 +108,61 @@ func (c *SettingsController) setSpawnConfirm(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SpawnConfirmSettingsResponse{Enabled: next.Enabled})
+}
+
+func (c *SettingsController) getPrompts(w http.ResponseWriter, r *http.Request) {
+	if c.SystemPrompts == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/prompts")
+		return
+	}
+	ov := c.SystemPrompts.Get()
+	items := make([]SystemPromptItem, 0, len(prompts.KnownKinds()))
+	for _, k := range prompts.KnownKinds() {
+		item := SystemPromptItem{Kind: string(k), Default: prompts.DefaultBase(k)}
+		if v, ok := ov.Base[k]; ok {
+			v := v
+			item.Override = &v
+		}
+		items = append(items, item)
+	}
+	envelope.WriteJSON(w, http.StatusOK, SystemPromptsResponse{Prompts: items})
+}
+
+func (c *SettingsController) setPrompt(w http.ResponseWriter, r *http.Request) {
+	if c.SystemPrompts == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/prompts/{kind}")
+		return
+	}
+	kind := prompts.Kind(chi.URLParam(r, "kind"))
+	if !kind.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", fmt.Sprintf("unknown prompt kind %q", kind), nil)
+		return
+	}
+	var in SetSystemPromptRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if err := c.SystemPrompts.SetBase(kind, in.Base); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	c.getPrompts(w, r)
+}
+
+func (c *SettingsController) clearPrompt(w http.ResponseWriter, r *http.Request) {
+	if c.SystemPrompts == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/settings/prompts/{kind}")
+		return
+	}
+	kind := prompts.Kind(chi.URLParam(r, "kind"))
+	if !kind.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", fmt.Sprintf("unknown prompt kind %q", kind), nil)
+		return
+	}
+	if err := c.SystemPrompts.ClearBase(kind); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	c.getPrompts(w, r)
 }

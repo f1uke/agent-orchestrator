@@ -19,6 +19,8 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
 // ErrInvalid and ErrNotFound let the transport layer map failures to 422/404.
@@ -64,6 +66,11 @@ type Deps struct {
 	Projects Projects
 	Launcher Launcher
 
+	// PromptOverrides returns the current global per-kind base overrides, read at
+	// trigger time so an edit takes effect on the next reviewer (re)launch. Nil
+	// defaults to the built-in reviewer base — the safe default for a bare Engine.
+	PromptOverrides func() promptoverrides.Overrides
+
 	// Clock and NewID are injectable for deterministic tests.
 	Clock func() time.Time
 	NewID func() string
@@ -71,13 +78,14 @@ type Deps struct {
 
 // Engine is the core code-review engine.
 type Engine struct {
-	store    Store
-	sessions Sessions
-	prs      PRs
-	projects Projects
-	launcher Launcher
-	clock    func() time.Time
-	newID    func() string
+	store           Store
+	sessions        Sessions
+	prs             PRs
+	projects        Projects
+	launcher        Launcher
+	promptOverrides func() promptoverrides.Overrides
+	clock           func() time.Time
+	newID           func() string
 
 	// triggerMu guards triggerLocks; triggerLocks holds one mutex per worker
 	// session so concurrent Trigger calls for the same worker serialise (see
@@ -97,14 +105,15 @@ func New(d Deps) *Engine {
 		newID = uuid.NewString
 	}
 	return &Engine{
-		store:        d.Store,
-		sessions:     d.Sessions,
-		prs:          d.PRs,
-		projects:     d.Projects,
-		launcher:     d.Launcher,
-		clock:        clock,
-		newID:        newID,
-		triggerLocks: make(map[domain.SessionID]*sync.Mutex),
+		store:           d.Store,
+		sessions:        d.Sessions,
+		prs:             d.PRs,
+		projects:        d.Projects,
+		launcher:        d.Launcher,
+		promptOverrides: d.PromptOverrides,
+		clock:           clock,
+		newID:           newID,
+		triggerLocks:    make(map[domain.SessionID]*sync.Mutex),
 	}
 }
 
@@ -194,10 +203,11 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 		return TriggerResult{}, err
 	}
 
-	harness, err := e.reviewerHarness(ctx, worker)
+	projCfg, err := e.projectConfig(ctx, worker)
 	if err != nil {
 		return TriggerResult{}, err
 	}
+	harness := projCfg.ResolveReviewerHarness(worker.Harness)
 
 	now := e.clock()
 	reviewRow, err = e.upsertReview(ctx, worker, harness, reviewRow.ReviewerHandleID, now)
@@ -272,6 +282,12 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 
 	handleID := ""
 	queue := reviewQueue(created)
+	// Resolve the reviewer's effective global base (override else default) and the
+	// project's per-project addition once; reviewTexts appends the review-only
+	// floor + confidentiality guard when it assembles the system prompt.
+	spec := reviewLaunchSpec(worker, harness, created[0], queue, 0)
+	spec.ReviewerBase = e.reviewerBase()
+	spec.ReviewerAddition = projCfg.SystemPromptAdditions.Reviewer
 	if hasReview && reviewRow.ReviewerHandleID != "" {
 		alive, err := e.launcher.Alive(ctx, reviewRow.ReviewerHandleID)
 		if err != nil {
@@ -282,13 +298,13 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 		}
 	}
 	if handleID == "" {
-		h, err := e.launcher.Spawn(ctx, reviewLaunchSpec(worker, harness, created[0], queue, 0))
+		h, err := e.launcher.Spawn(ctx, spec)
 		if err != nil {
 			return TriggerResult{}, failRuns(0, fmt.Errorf("launch reviewer: %w", err))
 		}
 		handleID = h
 	} else {
-		if err := e.launcher.Notify(ctx, handleID, reviewLaunchSpec(worker, harness, created[0], queue, 0)); err != nil {
+		if err := e.launcher.Notify(ctx, handleID, spec); err != nil {
 			return TriggerResult{}, failRuns(0, fmt.Errorf("notify reviewer: %w", err))
 		}
 	}
@@ -374,18 +390,36 @@ func (e *Engine) List(ctx stdctx.Context, workerID domain.SessionID) (SessionRev
 	return SessionReviews{ReviewerHandleID: handle, Runs: runs, Reviews: Plan(prs, runs)}, nil
 }
 
-// reviewerHarness resolves which harness reviews the worker's PR: a configured
-// reviewer wins, otherwise claude-code is used, per domain.ResolveReviewerHarness.
-func (e *Engine) reviewerHarness(ctx stdctx.Context, worker domain.SessionRecord) (domain.ReviewerHarness, error) {
-	var cfg domain.ProjectConfig
-	if e.projects != nil {
-		if proj, ok, err := e.projects.GetProject(ctx, string(worker.ProjectID)); err != nil {
-			return "", err
-		} else if ok {
-			cfg = proj.Config
+// projectConfig loads the worker's project config once, nil-safe: no projects
+// port (or an unregistered project) yields the zero config. Both the reviewer
+// harness (ResolveReviewerHarness) and the reviewer prompt addition
+// (SystemPromptAdditions.Reviewer) read from it, so Trigger fetches the project
+// a single time.
+func (e *Engine) projectConfig(ctx stdctx.Context, worker domain.SessionRecord) (domain.ProjectConfig, error) {
+	if e.projects == nil {
+		return domain.ProjectConfig{}, nil
+	}
+	proj, ok, err := e.projects.GetProject(ctx, string(worker.ProjectID))
+	if err != nil {
+		return domain.ProjectConfig{}, err
+	}
+	if !ok {
+		return domain.ProjectConfig{}, nil
+	}
+	return proj.Config, nil
+}
+
+// reviewerBase returns the effective global reviewer base: the stored override
+// when set, otherwise the built-in default. A nil promptOverrides (bare Engine
+// or wiring that omits the store) falls back to the default — the safe default.
+func (e *Engine) reviewerBase() string {
+	base := prompts.DefaultBase(prompts.KindReviewer)
+	if e.promptOverrides != nil {
+		if ov, ok := e.promptOverrides().Base[prompts.KindReviewer]; ok {
+			base = ov
 		}
 	}
-	return cfg.ResolveReviewerHarness(worker.Harness), nil
+	return base
 }
 
 func (e *Engine) upsertReview(ctx stdctx.Context, worker domain.SessionRecord, harness domain.ReviewerHarness, handleID string, now time.Time) (domain.Review, error) {

@@ -189,6 +189,33 @@ describe("ProjectSettingsForm", () => {
 		expect(await screen.findByText("Saved.")).toBeInTheDocument();
 	}, 20_000);
 
+	it("edits per-kind additional prompts and saves them without dropping hidden config", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				env: { FOO: "bar" },
+				systemPromptAdditions: { worker: "existing worker note" },
+			},
+		});
+		renderSettings();
+		const worker = (await screen.findByLabelText(/worker additional prompt/i)) as HTMLTextAreaElement;
+		await waitFor(() => expect(worker.value).toBe("existing worker note"));
+		await userEvent.clear(worker);
+		await userEvent.type(worker, "new worker note");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.systemPromptAdditions).toEqual({ orchestrator: undefined, worker: "new worker note", reviewer: undefined });
+		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
+	});
+
 	it("shows a minimum-approvals field for GitLab projects only, and saves a typed value", async () => {
 		mockProject({
 			id: "proj-1",

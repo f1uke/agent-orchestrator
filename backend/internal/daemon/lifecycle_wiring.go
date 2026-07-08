@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -83,7 +84,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -118,6 +119,10 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// The orchestrator prompt reads this at spawn/restore so a toggle of the
 		// global gate takes effect on the next (re)launch of an orchestrator.
 		SpawnConfirmEnabled: func() bool { return spawnConfirm.Get().Enabled },
+		// The worker/orchestrator base is assembled from these global overrides at
+		// (re)launch, so an edit through the settings API takes effect on the next
+		// spawn/restore without a daemon restart.
+		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },
 	})
 	// The PR-claim path shares the observer's provider set so a claimed GitLab
 	// merge request resolves through the same GitLab client + auth as background
@@ -152,6 +157,9 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		PRs:      store,
 		Projects: store,
 		Launcher: reviewcore.NewLauncher(reviewers, runtime),
+		// The reviewer base is assembled from the same global overrides at launch,
+		// so an edit through the settings API takes effect on the next review run.
+		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },
 	})
 	reviewSvc := reviewsvc.New(reviewEngine, store, reviewsvc.WithLifecycleReducer(lcm))
 	return sessionSvc, reviewSvc, mgr, nil

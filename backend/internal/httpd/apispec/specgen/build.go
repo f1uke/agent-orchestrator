@@ -213,6 +213,9 @@ var schemaNames = map[string]string{
 	"ControllersSetReclaimSettingsRequest":      "SetReclaimSettingsRequest",
 	"ControllersSpawnConfirmSettingsResponse":   "SpawnConfirmSettingsResponse",
 	"ControllersSetSpawnConfirmSettingsRequest": "SetSpawnConfirmSettingsRequest",
+	"ControllersSystemPromptItem":               "SystemPromptItem",
+	"ControllersSystemPromptsResponse":          "SystemPromptsResponse",
+	"ControllersSetSystemPromptRequest":         "SetSystemPromptRequest",
 	// legacyimport report
 	"LegacyimportReport": "ImportReport",
 	// service/project entities + DTOs
@@ -830,6 +833,35 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetSpawnConfirmSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SpawnConfirmSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/prompts", id: "getSystemPrompts", tag: "settings",
+			summary: "Fetch the editable system prompts (default + override per kind)",
+			resps: []respUnit{
+				{http.StatusOK, controllers.SystemPromptsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/prompts/{kind}", id: "setSystemPrompt", tag: "settings",
+			summary:    "Set the global base override for a prompt kind",
+			pathParams: []any{controllers.PromptKindParam{}},
+			reqBody:    controllers.SetSystemPromptRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SystemPromptsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/settings/prompts/{kind}", id: "clearSystemPrompt", tag: "settings",
+			summary:    "Reset a prompt kind to its built-in default",
+			pathParams: []any{controllers.PromptKindParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SystemPromptsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

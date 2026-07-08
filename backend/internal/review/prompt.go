@@ -3,6 +3,8 @@ package review
 import (
 	"fmt"
 	"strings"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
 // reviewTexts returns the user-facing prompt and the system prompt to deliver to
@@ -20,11 +22,18 @@ import (
 // The texts are self-contained — they carry the ids the reviewer needs to
 // submit — so no environment variables are required.
 func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
-	systemPrompt = `## Code reviewer role
-
-You are an AO code reviewer. You review the requested pull/merge request changes in the current checkout — do not start unrelated work. Inspect what each PR/MR changed by diffing the checkout against its base branch, and review for correctness bugs, missing error handling, security issues, test coverage, and clear deviations from the surrounding code's conventions. Prefer a few high-confidence findings over nitpicks.
-
-Post your review as comments on the pull request or merge request, stating clearly whether it needs changes or is ready, with inline comments for specific findings. Do not push commits, edit files, or modify the branch — review only.`
+	// Assemble the reviewer system prompt in one place: the effective global base
+	// (override resolved by the Engine, else the built-in default), the project's
+	// per-project addition, then AO's protected review-only floor and the
+	// always-last confidentiality guard.
+	base := spec.ReviewerBase
+	if strings.TrimSpace(base) == "" {
+		base = prompts.DefaultBase(prompts.KindReviewer)
+	}
+	systemPrompt = base +
+		prompts.Section(spec.ReviewerAddition) +
+		prompts.CoordinationFloor(prompts.KindReviewer) +
+		prompts.ConfidentialityGuard
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Review the requested pull/merge request(s) for worker session %s.\n", spec.WorkerID)

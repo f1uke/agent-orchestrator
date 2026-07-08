@@ -99,20 +99,29 @@ type gitConventionConfig struct {
 	BranchPrefix string `json:"branchPrefix,omitempty"`
 }
 
+// systemPromptAdditions mirrors domain.SystemPromptAdditions for the CLI client
+// so --config-json round-trips the per-kind additions.
+type systemPromptAdditions struct {
+	Orchestrator string `json:"orchestrator,omitempty"`
+	Worker       string `json:"worker,omitempty"`
+	Reviewer     string `json:"reviewer,omitempty"`
+}
+
 // projectConfig mirrors the daemon's typed domain.ProjectConfig for the CLI
 // client. The CLI sets common fields via flags and the whole object via
 // --config-json.
 type projectConfig struct {
-	DefaultBranch string              `json:"defaultBranch,omitempty"`
-	SessionPrefix string              `json:"sessionPrefix,omitempty"`
-	Env           map[string]string   `json:"env,omitempty"`
-	Symlinks      []string            `json:"symlinks,omitempty"`
-	PostCreate    []string            `json:"postCreate,omitempty"`
-	AgentConfig   agentConfig         `json:"agentConfig,omitempty"`
-	Worker        roleOverride        `json:"worker,omitempty"`
-	Orchestrator  roleOverride        `json:"orchestrator,omitempty"`
-	TrackerIntake trackerIntakeConfig `json:"trackerIntake,omitempty"`
-	GitConvention gitConventionConfig `json:"gitConvention,omitempty"`
+	DefaultBranch         string                `json:"defaultBranch,omitempty"`
+	SessionPrefix         string                `json:"sessionPrefix,omitempty"`
+	Env                   map[string]string     `json:"env,omitempty"`
+	Symlinks              []string              `json:"symlinks,omitempty"`
+	PostCreate            []string              `json:"postCreate,omitempty"`
+	AgentConfig           agentConfig           `json:"agentConfig,omitempty"`
+	Worker                roleOverride          `json:"worker,omitempty"`
+	Orchestrator          roleOverride          `json:"orchestrator,omitempty"`
+	TrackerIntake         trackerIntakeConfig   `json:"trackerIntake,omitempty"`
+	GitConvention         gitConventionConfig   `json:"gitConvention,omitempty"`
+	SystemPromptAdditions systemPromptAdditions `json:"systemPromptAdditions,omitempty"`
 }
 
 // setConfigRequest mirrors the daemon's SetConfigInput body for

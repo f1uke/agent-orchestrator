@@ -22,6 +22,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Textarea } from "./ui/textarea";
 
 type Project = components["schemas"]["Project"];
 type ProjectConfig = components["schemas"]["ProjectConfig"];
@@ -128,6 +129,9 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
 		minApprovals: config.minApprovals != null ? String(config.minApprovals) : "",
+		orchestratorPrompt: config.systemPromptAdditions?.orchestrator ?? "",
+		workerPrompt: config.systemPromptAdditions?.worker ?? "",
+		reviewerPrompt: config.systemPromptAdditions?.reviewer ?? "",
 	});
 	const [savedAt, setSavedAt] = useState<number | null>(null);
 	const [replacementError, setReplacementError] = useState<string | null>(null);
@@ -189,6 +193,11 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 				trackerIntake: buildIntake(intakeForm),
 				gitConvention: buildGitConvention(form.gitWorkflow, form.branchPrefix),
 				minApprovals: form.minApprovals.trim() === "" ? undefined : Number(form.minApprovals),
+				systemPromptAdditions: blankToUndefined({
+					orchestrator: form.orchestratorPrompt || undefined,
+					worker: form.workerPrompt || undefined,
+					reviewer: form.reviewerPrompt || undefined,
+				}),
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
 				params: { path: { id: projectId } },
@@ -427,6 +436,38 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 						onChange={patchIntake}
 						repoPreview={{ value: effectiveIntakeRepo, url: intakeRepoURL }}
 					/>
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-[13px]">Additional system prompts</CardTitle>
+				</CardHeader>
+				<CardContent className="flex flex-col gap-4">
+					<p className="text-[12px] text-muted-foreground">
+						Extra text appended on top of the global base for this project. Leave blank to append nothing.
+					</p>
+					<Field label="Orchestrator additional prompt" htmlFor="add-orchestrator">
+						<Textarea
+							id="add-orchestrator"
+							value={form.orchestratorPrompt}
+							onChange={(e) => setForm((f) => ({ ...f, orchestratorPrompt: e.target.value }))}
+						/>
+					</Field>
+					<Field label="Worker additional prompt" htmlFor="add-worker">
+						<Textarea
+							id="add-worker"
+							value={form.workerPrompt}
+							onChange={(e) => setForm((f) => ({ ...f, workerPrompt: e.target.value }))}
+						/>
+					</Field>
+					<Field label="Reviewer additional prompt" htmlFor="add-reviewer">
+						<Textarea
+							id="add-reviewer"
+							value={form.reviewerPrompt}
+							onChange={(e) => setForm((f) => ({ ...f, reviewerPrompt: e.target.value }))}
+						/>
+					</Field>
 				</CardContent>
 			</Card>
 
