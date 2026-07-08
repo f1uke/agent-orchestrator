@@ -23,6 +23,7 @@ import { Button } from "./ui/button";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, prKindLabel, prRef, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
+import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 
@@ -99,7 +100,8 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 		const zone = attentionZone(session);
 		(byZone.get(zone) ?? byZone.set(zone, []).get(zone)!).push(session);
 	}
-	const done = byZone.get("done") ?? [];
+	// Most-recently-moved first, so the session just archived sits at the front.
+	const done = sortDoneRecentFirst(byZone.get("done") ?? []);
 	// Collapsed by default, like agent-orchestrator's done-bar: finished and
 	// killed sessions cost one quiet line under the board until expanded.
 	const [doneExpanded, setDoneExpanded] = useState(false);
@@ -270,6 +272,14 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	);
 }
 
+// Done (merged) reads success-green; terminated (killed) reads passive-gray, so
+// the two archive states are tellable apart at a glance. Dot + lowercase label
+// mirrors the board card's status idiom.
+const DONE_DISPOSITION: Record<DoneDisposition, { label: string; className: string }> = {
+	done: { label: "done", className: "text-success" },
+	terminated: { label: "terminated", className: "text-passive" },
+};
+
 // A finished/terminated session's chip in the done-bar. Deleting is
 // permanent (unlike kill, which just stops a running worker), so it mirrors
 // TopbarKillButton's inline arm-confirm rather than firing on a single click.
@@ -329,11 +339,25 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 		},
 	});
 
+	const disposition = DONE_DISPOSITION[doneDisposition(session)];
 	return (
 		<div className="flex items-center gap-1 rounded-[7px] border border-border bg-surface pl-2.5 pr-1 py-1.5 transition-colors hover:border-border-strong">
-			<button className="text-left text-[12px] text-muted-foreground" onClick={onOpen} type="button">
-				{session.title}
-			</button>
+			<div className="flex min-w-0 flex-col gap-0.5">
+				<button className="text-left text-[12px] text-muted-foreground" onClick={onOpen} type="button">
+					{session.title}
+				</button>
+				{/* Second line: how it finished (done vs terminated) + when it moved here. */}
+				<span className="flex items-center gap-1 text-[10px] leading-none">
+					<span className={cn("inline-flex items-center gap-1 font-medium", disposition.className)}>
+						<span className="h-[5px] w-[5px] rounded-full bg-current" aria-hidden="true" />
+						{disposition.label}
+					</span>
+					<span className="text-passive" aria-hidden="true">
+						·
+					</span>
+					<span className="font-mono text-passive">{formatMovedAgo(session.updatedAt)}</span>
+				</span>
+			</div>
 			{confirming ? (
 				<>
 					<button
