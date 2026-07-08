@@ -1196,6 +1196,37 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 			}
 		}
 	})
+
+	// The static base's reconciliation wording must sit coherently alongside the
+	// dynamically injected convention section: the assembled prompt carries both
+	// the injected convention AND the base's complementary-not-competing framing.
+	t.Run("gitflow prompt composes base reconciliation with the injected convention", func(t *testing.T) {
+		cfg := domain.ProjectConfig{DefaultBranch: "develop", GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}}
+
+		orch := build(newMgr(cfg, false), domain.KindOrchestrator)
+		for _, want := range []string{
+			"Git branch convention (gitflow)",              // injected section
+			"one worker, one on-convention branch, one PR", // base reconciliation (point 1)
+			"a separate worker session",                    // base reconciliation (point 2)
+			"complementary, not competing",                 // base reconciliation (point 3)
+		} {
+			if !strings.Contains(orch, want) {
+				t.Fatalf("assembled orchestrator prompt missing %q:\n%s", want, orch)
+			}
+		}
+
+		worker := build(newMgr(cfg, true), domain.KindWorker)
+		for _, want := range []string{
+			"This project follows gitflow",                              // injected section
+			"your working branch is already the branch chosen at spawn", // base reconciliation (point 1)
+			"nest a branch under an existing branch ref",                // base: the Git D/F constraint
+			"complementary, not competing",                              // base reconciliation (point 3)
+		} {
+			if !strings.Contains(worker, want) {
+				t.Fatalf("assembled worker prompt missing %q:\n%s", want, worker)
+			}
+		}
+	})
 }
 
 // TestSystemPrompt_SpawnConfirm: when the global spawn-confirm gate is ON

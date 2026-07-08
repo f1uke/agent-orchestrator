@@ -30,6 +30,55 @@ func TestDefaultBase_WorkerAndReviewerNonEmptyNoPlaceholder(t *testing.T) {
 	}
 }
 
+// TestWorkerDefault_ReconcilesGitflow: the worker base must make the gitflow
+// branch convention and AO's session-namespace tracking read as complementary,
+// not contradictory. It must state the common one-PR case (working branch is the
+// on-convention branch), keep every extra branch in the session namespace, be
+// honest about the Git directory/file ref constraint (you cannot nest a branch
+// under an existing branch ref — so a type-prefixed working branch has no room
+// for children), and point to a separate session for independent work.
+func TestWorkerDefault_ReconcilesGitflow(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	for _, want := range []string{
+		"your working branch is already the branch chosen at spawn", // common case (point 1)
+		"stay in your session's namespace",                          // namespace tracking requirement (point 3)
+		"nest a branch under an existing branch ref",                // the Git D/F constraint (correctness)
+		"spawn a separate session",                                  // escape hatch for independent work (point 2)
+		"complementary, not competing",                              // convention + namespace compose (point 3)
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("worker default missing reconciliation wording %q:\n%s", want, base)
+		}
+	}
+	// The impossible-in-Git example must be gone: never instruct nesting a branch
+	// beneath a type-prefixed working branch.
+	if strings.Contains(base, "feature/<topic>/<sub-topic>") {
+		t.Fatalf("worker default still describes an impossible nested branch:\n%s", base)
+	}
+}
+
+// TestOrchestratorDefault_ReconcilesGitflow: the orchestrator base must tell the
+// dispatcher the common one-worker/one-branch/one-PR path is on-convention, to
+// spawn a separate worker for a different branch type instead of nesting, and
+// that the project convention and AO's namespace tracking are complementary. It
+// must stay generic (no literal "gitflow") so custom-convention projects don't
+// see gitflow-specific copy — the concrete convention is injected separately.
+func TestOrchestratorDefault_ReconcilesGitflow(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"one worker, one on-convention branch, one PR", // common case (point 1)
+		"a separate worker session",                    // different-type escape hatch (point 2)
+		"complementary, not competing",                 // convention + namespace compose (point 3)
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing reconciliation wording %q:\n%s", want, base)
+		}
+	}
+	if strings.Contains(base, "gitflow") {
+		t.Fatalf("orchestrator default must stay generic (no literal \"gitflow\"); the convention is injected separately:\n%s", base)
+	}
+}
+
 func TestRenderBase_SubstitutesProjectID(t *testing.T) {
 	got := RenderBase("coordinator for "+ProjectIDPlaceholder+" now", "proj-1")
 	if got != "coordinator for proj-1 now" {
