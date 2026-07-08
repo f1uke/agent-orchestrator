@@ -169,7 +169,6 @@ func TestCIObservationNormalizesJobStatus(t *testing.T) {
 	if got := byName["deploy"].Conclusion; got != "canceled" {
 		t.Fatalf("Conclusion = %q, want raw 'canceled'", got)
 	}
-	// failed + canceled are the failing set.
 	if len(ci.FailedChecks) != 2 {
 		t.Fatalf("FailedChecks = %d, want 2 (failed + canceled): %+v", len(ci.FailedChecks), ci.FailedChecks)
 	}
