@@ -46,6 +46,7 @@ func newTestRuntime(chunkSize int) (*Runtime, *fakeRunner) {
 	fr := &fakeRunner{}
 	r := New(Options{Binary: "tmux-test", Timeout: time.Second, Shell: "/bin/sh", ChunkSize: chunkSize})
 	r.runner = fr
+	r.sleep = func(time.Duration) {} // don't burn real time on the send delays
 	return r, fr
 }
 
@@ -542,6 +543,49 @@ func TestSendMessageChunksAndSendsEnter(t *testing.T) {
 	}
 	if got, want := fr.calls[3].args, sendEnterArgs("sess-1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Enter args = %#v, want %#v", got, want)
+	}
+}
+
+// TestSendMessageDelaysBetweenChunksAndBeforeEnter pins the timing contract that
+// makes ao send auto-submit reliably: the whole message is delivered, then a
+// pause, then Enter — so the submit key lands after the TUI has ingested the
+// paste instead of being swallowed into the paste-burst and left unsubmitted.
+// A pause also separates consecutive chunks. Mirrors the conpty reference path.
+func TestSendMessageDelaysBetweenChunksAndBeforeEnter(t *testing.T) {
+	const chunkDelay = 15 * time.Millisecond
+	const enterDelay = 300 * time.Millisecond
+	fr := &fakeRunner{}
+	r := New(Options{
+		Binary: "tmux-test", Timeout: time.Second, Shell: "/bin/sh",
+		ChunkSize: 5, ChunkDelay: chunkDelay, EnterDelay: enterDelay,
+	})
+	r.runner = fr
+
+	// Record each nap alongside how many runner calls preceded it, so the test
+	// asserts ordering relative to the send-keys calls, not just the durations.
+	type nap struct {
+		callsBefore int
+		dur         time.Duration
+	}
+	var naps []nap
+	r.sleep = func(d time.Duration) { naps = append(naps, nap{callsBefore: len(fr.calls), dur: d}) }
+
+	// "hello世界" at chunkSize=5 => chunks "hello", "世", "界" (3) + Enter (call idx 3).
+	if err := r.SendMessage(context.Background(), ports.RuntimeHandle{ID: "sess-1"}, "hello世界"); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	want := []nap{
+		{callsBefore: 1, dur: chunkDelay}, // after chunk 1, before chunk 2
+		{callsBefore: 2, dur: chunkDelay}, // after chunk 2, before chunk 3
+		{callsBefore: 3, dur: enterDelay}, // after the last chunk, before Enter
+	}
+	if !reflect.DeepEqual(naps, want) {
+		t.Fatalf("naps = %#v, want %#v", naps, want)
+	}
+	// The enter-delay nap must be the one immediately before the Enter call.
+	if got := fr.calls[3].args; !reflect.DeepEqual(got, sendEnterArgs("sess-1")) {
+		t.Fatalf("call[3] = %#v, want Enter %#v", got, sendEnterArgs("sess-1"))
 	}
 }
 

@@ -23,6 +23,16 @@ import (
 const (
 	defaultTimeout    = 5 * time.Second
 	defaultChunkBytes = 16 * 1024
+
+	// defaultChunkDelay is the pause between literal send-keys chunks, and
+	// defaultEnterDelay the pause before the submitting Enter. They give the
+	// TUI in the pane (e.g. Claude Code) time to ingest the whole message
+	// before the submit key arrives, so the Enter registers as "submit"
+	// instead of being swallowed into the paste-burst and left unsubmitted.
+	// Values mirror the conpty/pty-client.ts reference path
+	// (PTY_INPUT_CHUNK_DELAY_MS / PTY_INPUT_ENTER_DELAY_MS).
+	defaultChunkDelay = 15 * time.Millisecond
+	defaultEnterDelay = 300 * time.Millisecond
 )
 
 var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -32,20 +42,25 @@ var getenv = os.Getenv
 // Options configures a tmux Runtime. Every field has a sensible default (see
 // New), so the zero value is usable.
 type Options struct {
-	Binary    string        // default "tmux" (resolved via exec.LookPath)
-	Shell     string        // default $SHELL else /bin/sh
-	Timeout   time.Duration // default 5s
-	ChunkSize int           // default 16*1024
+	Binary     string        // default "tmux" (resolved via exec.LookPath)
+	Shell      string        // default $SHELL else /bin/sh
+	Timeout    time.Duration // default 5s
+	ChunkSize  int           // default 16*1024
+	ChunkDelay time.Duration // pause between send-keys chunks; default 15ms
+	EnterDelay time.Duration // pause before the submitting Enter; default 300ms
 }
 
 // Runtime runs agent sessions inside tmux sessions, driving them via the tmux
 // CLI. It implements ports.Runtime.
 type Runtime struct {
-	binary    string
-	shell     string
-	timeout   time.Duration
-	chunkSize int
-	runner    runner
+	binary     string
+	shell      string
+	timeout    time.Duration
+	chunkSize  int
+	chunkDelay time.Duration
+	enterDelay time.Duration
+	runner     runner
+	sleep      func(time.Duration) // seam for tests; defaults to time.Sleep
 }
 
 var _ ports.Runtime = (*Runtime)(nil)
@@ -90,12 +105,23 @@ func New(opts Options) *Runtime {
 	if chunkSize <= 0 {
 		chunkSize = defaultChunkBytes
 	}
+	chunkDelay := opts.ChunkDelay
+	if chunkDelay <= 0 {
+		chunkDelay = defaultChunkDelay
+	}
+	enterDelay := opts.EnterDelay
+	if enterDelay <= 0 {
+		enterDelay = defaultEnterDelay
+	}
 	return &Runtime{
-		binary:    binary,
-		shell:     shellPath,
-		timeout:   timeout,
-		chunkSize: chunkSize,
-		runner:    execRunner{},
+		binary:     binary,
+		shell:      shellPath,
+		timeout:    timeout,
+		chunkSize:  chunkSize,
+		chunkDelay: chunkDelay,
+		enterDelay: enterDelay,
+		runner:     execRunner{},
+		sleep:      time.Sleep,
 	}
 }
 
@@ -189,8 +215,19 @@ func (r *Runtime) IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool
 	return true, nil
 }
 
-// SendMessage sends literal text to the session (chunked via send-keys -l) then
-// presses Enter to submit.
+// SendMessage sends literal text to the session (chunked via send-keys -l),
+// then — after a short settle pause — presses Enter to submit.
+//
+// The pause is load-bearing, not cosmetic. A TUI in the pane (e.g. Claude Code)
+// treats a burst of input as a paste; if the submitting Enter arrives in that
+// same burst it is folded into the pasted block instead of acting as submit, so
+// the message lands as an un-submitted "[Pasted text]" and just sits there
+// (worst for multi-line messages). Delivering the whole message, waiting
+// enterDelay, then sending a distinct Enter keeps the submit key outside the
+// paste burst so it reliably submits. chunkDelay does the same between chunks
+// of a large message. This mirrors the conpty/pty-client.ts reference path
+// (PTY_INPUT_CHUNK_DELAY_MS / PTY_INPUT_ENTER_DELAY_MS), which the tmux port
+// had dropped.
 //
 // ponytail: send-keys -l chunked is simpler than load-buffer/paste-buffer; the
 // ceiling is very large messages may be slower, but chunk size defaults to 16 KB
@@ -200,11 +237,17 @@ func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, m
 	if err != nil {
 		return err
 	}
-	for _, chunk := range chunks(message, r.chunkSize) {
+	parts := chunks(message, r.chunkSize)
+	for i, chunk := range parts {
 		if _, err := r.run(ctx, sendKeysLiteralArgs(id, chunk)...); err != nil {
 			return fmt.Errorf("tmux runtime: send message %s: %w", id, err)
 		}
+		if i < len(parts)-1 {
+			r.sleep(r.chunkDelay) // between chunks only, not after the last
+		}
 	}
+	// Let the pane ingest the whole message before the submit key arrives.
+	r.sleep(r.enterDelay)
 	if _, err := r.run(ctx, sendEnterArgs(id)...); err != nil {
 		return fmt.Errorf("tmux runtime: send enter %s: %w", id, err)
 	}
