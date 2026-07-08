@@ -604,3 +604,28 @@ type SpawnConfirmSettingsResponse struct {
 type SetSpawnConfirmSettingsRequest struct {
 	Enabled bool `json:"enabled"`
 }
+
+// SystemPromptItem is one editable prompt kind on the wire: its built-in default
+// (for the editor + Reset) and the current override (null when using the default).
+type SystemPromptItem struct {
+	Kind     string  `json:"kind"`
+	Default  string  `json:"default"`
+	Override *string `json:"override"`
+}
+
+// SystemPromptsResponse is the body of GET /api/v1/settings/prompts.
+type SystemPromptsResponse struct {
+	Prompts []SystemPromptItem `json:"prompts"`
+}
+
+// SetSystemPromptRequest is the body of PUT /api/v1/settings/prompts/{kind}.
+type SetSystemPromptRequest struct {
+	Base string `json:"base"`
+}
+
+// PromptKindParam is the {kind} path parameter shared by the
+// /settings/prompts/{kind} routes. Handlers read it via chi.URLParam; it is
+// declared here so apispec.Build reflects it as the path parameter.
+type PromptKindParam struct {
+	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, or reviewer." enum:"orchestrator,worker,reviewer"`
+}

@@ -574,6 +574,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the editable system prompts (default + override per kind) */
+        get: operations["getSystemPrompts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/prompts/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the global base override for a prompt kind */
+        put: operations["setSystemPrompt"];
+        post?: never;
+        /** Reset a prompt kind to its built-in default */
+        delete: operations["clearSystemPrompt"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/reclaim": {
         parameters: {
             query?: never;
@@ -711,6 +746,11 @@ export interface components {
         DomainReviewerConfig: {
             harness: string;
         };
+        DomainSystemPromptAdditions: {
+            orchestrator?: string;
+            reviewer?: string;
+            worker?: string;
+        };
         GitConventionConfig: {
             branchPrefix?: string;
             /** @enum {string} */
@@ -844,6 +884,7 @@ export interface components {
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
             symlinks?: string[];
+            systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
             worker?: components["schemas"]["RoleOverride"];
         };
@@ -1054,6 +1095,9 @@ export interface components {
         SetSpawnConfirmSettingsRequest: {
             enabled: boolean;
         };
+        SetSystemPromptRequest: {
+            base: string;
+        };
         SpawnConfirmSettingsResponse: {
             enabled: boolean;
         };
@@ -1098,6 +1142,14 @@ export interface components {
             runId: string;
             /** @description Review verdict: approved or changes_requested. */
             verdict: string;
+        };
+        SystemPromptItem: {
+            default: string;
+            kind: string;
+            override: null | string;
+        };
+        SystemPromptsResponse: {
+            prompts: components["schemas"]["SystemPromptItem"][];
         };
         TrackerIntakeConfig: {
             assignee?: string;
@@ -3195,6 +3247,121 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSystemPrompts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemPromptsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSystemPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Editable prompt kind: orchestrator, worker, or reviewer. */
+                kind: "orchestrator" | "worker" | "reviewer";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSystemPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemPromptsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    clearSystemPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Editable prompt kind: orchestrator, worker, or reviewer. */
+                kind: "orchestrator" | "worker" | "reviewer";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemPromptsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

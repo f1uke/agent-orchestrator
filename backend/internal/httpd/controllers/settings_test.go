@@ -6,10 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 )
@@ -179,4 +182,84 @@ func TestSpawnConfirmController_PutInvalidJSON(t *testing.T) {
 
 type spawnConfirmSettingsBody struct {
 	Enabled bool `json:"enabled"`
+}
+
+type fakeSystemPromptsSvc struct {
+	ov      promptoverrides.Overrides
+	setKind prompts.Kind
+	setVal  string
+	cleared prompts.Kind
+	setErr  error
+}
+
+func (f *fakeSystemPromptsSvc) Get() promptoverrides.Overrides { return f.ov }
+func (f *fakeSystemPromptsSvc) SetBase(k prompts.Kind, v string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.setKind, f.setVal = k, v
+	if f.ov.Base == nil {
+		f.ov.Base = map[prompts.Kind]string{}
+	}
+	f.ov.Base[k] = v
+	return nil
+}
+func (f *fakeSystemPromptsSvc) ClearBase(k prompts.Kind) error {
+	f.cleared = k
+	delete(f.ov.Base, k)
+	return nil
+}
+
+func newPromptsTestServer(t *testing.T, svc *fakeSystemPromptsSvc) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{SystemPrompts: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestSystemPrompts_GetReturnsDefaultAndOverride(t *testing.T) {
+	svc := &fakeSystemPromptsSvc{ov: promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: "custom"}}}
+	srv := newPromptsTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/prompts", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	// worker item has override "custom"; orchestrator item has nil override and a
+	// non-empty default carrying the placeholder.
+	if !strings.Contains(string(body), `"custom"`) || !strings.Contains(string(body), prompts.ProjectIDPlaceholder) {
+		t.Fatalf("body missing expected content: %s", body)
+	}
+}
+
+func TestSystemPrompts_PutSetsOverride(t *testing.T) {
+	svc := &fakeSystemPromptsSvc{}
+	srv := newPromptsTestServer(t, svc)
+	_, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/prompts/worker", `{"base":"new base"}`)
+	if status != http.StatusOK || svc.setKind != prompts.KindWorker || svc.setVal != "new base" {
+		t.Fatalf("status=%d set=%q/%q", status, svc.setKind, svc.setVal)
+	}
+}
+
+func TestSystemPrompts_PutUnknownKind400(t *testing.T) {
+	srv := newPromptsTestServer(t, &fakeSystemPromptsSvc{})
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/prompts/bogus", `{"base":"x"}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_SETTINGS")
+}
+
+func TestSystemPrompts_DeleteClears(t *testing.T) {
+	svc := &fakeSystemPromptsSvc{ov: promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindReviewer: "x"}}}
+	srv := newPromptsTestServer(t, svc)
+	_, status, _ := doRequest(t, srv, "DELETE", "/api/v1/settings/prompts/reviewer", "")
+	if status != http.StatusOK || svc.cleared != prompts.KindReviewer {
+		t.Fatalf("status=%d cleared=%q", status, svc.cleared)
+	}
+}
+
+func TestSystemPrompts_StubbedWithoutService501(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/prompts", "")
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
 }

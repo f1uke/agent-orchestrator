@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
@@ -132,11 +133,26 @@ func Run() error {
 		return fmt.Errorf("spawn-confirm settings: %w", err)
 	}
 
+	// The global system-prompt overrides are read by both the session manager
+	// (worker/orchestrator base) and the review engine (reviewer base) at
+	// (re)launch time, and edited through the settings API. Built before the
+	// session manager so its getter can be threaded in. A missing/corrupt file
+	// degrades to built-in defaults (no overrides).
+	promptOverrides, err := promptoverrides.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("prompt overrides: %w", err)
+	}
+
 	// Wire the controller-facing session service over the same store + LCM, the
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, log)
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -184,6 +200,7 @@ func Run() error {
 		Telemetry:          telemetrySink,
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
+		SystemPrompts:      promptOverrides,
 	})
 	if err != nil {
 		stop()
