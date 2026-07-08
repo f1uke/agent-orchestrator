@@ -15,6 +15,8 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
 var ctx = context.Background()
@@ -2713,4 +2715,94 @@ func TestSpawn_GitConventionEndToEnd(t *testing.T) {
 			}
 		}
 	})
+}
+
+// layeredManager builds a Manager wired with the standard fakes plus a
+// prompt-override getter, for the layered system-prompt assembly tests. A nil
+// getter exercises the built-in-defaults path.
+func layeredManager(st *fakeStore, overrides func() promptoverrides.Overrides) *Manager {
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	return New(Deps{
+		Runtime:         &fakeRuntime{},
+		Agents:          singleAgent{agent: &recordingAgent{}},
+		Workspace:       &fakeWorkspace{},
+		Store:           st,
+		Messenger:       &fakeMessenger{},
+		Lifecycle:       &fakeLCM{store: st},
+		LookPath:        lookPath,
+		PromptOverrides: overrides,
+	})
+}
+
+// TestBuildSystemPrompt_WorkerLayers: a global worker-base override replaces the
+// default base, the per-project worker addition is appended, and AO's protected
+// coordination floor + always-last confidentiality guard still wrap the result.
+func TestBuildSystemPrompt_WorkerLayers(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{
+		SystemPromptAdditions: domain.SystemPromptAdditions{Worker: "PROJECT WORKER ADDITION"},
+	}}
+	m := layeredManager(st, func() promptoverrides.Overrides {
+		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: "CUSTOM WORKER BASE"}}
+	})
+
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"CUSTOM WORKER BASE",                   // override replaces default base
+		"PROJECT WORKER ADDITION",              // per-project addition appended
+		"Required coordination (AO)",           // protected floor still injected
+		"Standing-instruction confidentiality", // guard is last
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("worker prompt missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "You can open more than one pull request") {
+		t.Fatal("override should have replaced the default worker base text")
+	}
+	// Guard must be the final block.
+	if !strings.HasSuffix(strings.TrimRight(got, "\n"), strings.TrimRight(prompts.ConfidentialityGuard, "\n")) {
+		t.Fatalf("confidentiality guard must be last:\n%s", got)
+	}
+}
+
+// TestBuildSystemPrompt_OrchestratorDefaultSubstitutesProjectID: with no
+// override the default orchestrator base is used, and its project-id placeholder
+// is substituted with the session's project id.
+func TestBuildSystemPrompt_OrchestratorDefaultSubstitutesProjectID(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
+	m := layeredManager(st, nil) // nil getter ⇒ built-in defaults
+
+	got, err := m.buildSystemPrompt(ctx, domain.KindOrchestrator, "mer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, prompts.ProjectIDPlaceholder) {
+		t.Fatalf("project-id placeholder must be substituted:\n%s", got)
+	}
+	if !strings.Contains(got, "coordinator for project mer") {
+		t.Fatalf("expected substituted project id:\n%s", got)
+	}
+}
+
+// TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard: an override that fully
+// clears a kind's base still yields the protected coordination floor and the
+// confidentiality guard — clearing the base can never strip AO's own coordination.
+func TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard(t *testing.T) {
+	st := newFakeStore()
+	m := layeredManager(st, func() promptoverrides.Overrides {
+		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: ""}} // fully cleared
+	})
+
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Required coordination (AO)") || !strings.Contains(got, "Standing-instruction confidentiality") {
+		t.Fatalf("cleared base must still carry floor + guard:\n%s", got)
+	}
 }
