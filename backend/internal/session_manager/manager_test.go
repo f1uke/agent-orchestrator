@@ -1217,10 +1217,10 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 
 		worker := build(newMgr(cfg, true), domain.KindWorker)
 		for _, want := range []string{
-			"This project follows gitflow",  // injected section
-			"one session, one pull request", // base reconciliation (point 1)
-			"an accepted trade-off",         // base reconciliation (point 2)
-			"complementary, not competing",  // base reconciliation (point 3)
+			"This project follows gitflow",                              // injected section
+			"your working branch is already the branch chosen at spawn", // base reconciliation (point 1)
+			"nest a branch under an existing branch ref",                // base: the Git D/F constraint
+			"complementary, not competing",                              // base reconciliation (point 3)
 		} {
 			if !strings.Contains(worker, want) {
 				t.Fatalf("assembled worker prompt missing %q:\n%s", want, worker)

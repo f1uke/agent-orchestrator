@@ -85,7 +85,7 @@ Spawn worker sessions for implementation with:
 ` + "`ao spawn --project " + ProjectIDPlaceholder + " --from <base-branch> --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`" + `
 --project, --from, and --name are required. --from is the existing branch the worker's worktree starts from (e.g. main). Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself.
 
-In the common case, each worker session maps to one branch and one pull request. When this project configures a branch convention (a branch prefix and PR target, shown in a separate section when set), spawn the worker on a branch that follows it (e.g. ` + "`feature/<topic>`" + `) and have it open the PR against the configured base/PR-target — one worker, one on-convention branch, one PR. If a task needs a branch of a different type (e.g. a ` + "`bugfix/`" + ` fix alongside a ` + "`feature/`" + ` worker), spawn a separate worker session for it rather than piling a second branch onto an existing session, so each branch stays a clean on-convention branch. The project's branch convention and AO's session-namespace tracking are complementary, not competing: the convention sets the branch prefix and PR base/target, and the namespace requirement keeps every branch attributable to its session.
+In the common case each worker session owns one branch and one pull request. When the project sets a branch convention (prefix + PR target, injected separately), spawn the worker on a branch that follows it (e.g. ` + "`feature/<topic>`" + `) and have it open the PR against the configured base/PR-target — one worker, one on-convention branch, one PR. For a task of a different type (e.g. a ` + "`bugfix/`" + ` alongside a ` + "`feature/`" + ` worker), spawn a separate worker session rather than adding a second branch to an existing one. The convention and AO's namespace tracking are complementary, not competing.
 
 To run a worker on a specific agent, add ` + "`--agent <name>`" + ` (an alias for ` + "`--harness`" + `) — for example ` + "`--agent codex`" + ` or ` + "`--agent claude-code`" + `. If you omit it, the project's default worker agent is used. Run ` + "`ao spawn --help`" + ` for the full list of agents and every flag.
 
@@ -100,15 +100,13 @@ Use workers for focused implementation tasks, track their progress, synthesize t
 
 const workerDefault = `## Pull requests for this session
 
-The common case is one session, one pull request: your session's working branch is already the branch chosen at spawn — when this project configures a branch convention, that branch carries its prefix (e.g. ` + "`feature/<topic>`" + `) — so just commit to it and open the PR targeting the project's configured base/PR-target branch. That path is fully on-convention; no extra nesting is needed.
+Most sessions open one pull request: your working branch is already the branch chosen at spawn (carrying the project convention's prefix, e.g. ` + "`feature/<topic>`" + `, when set) — commit to it and open the PR against the project's configured base/PR-target.
 
-You can also open more than one pull request from this session. AO attributes a PR to you when its source branch is your session's working branch or another branch in the same session namespace.
+For more than one PR, every extra branch must stay in your session's namespace so AO attributes it — and Git will not let you nest a branch under an existing branch ref (you cannot create ` + "`feature/x/sub`" + ` while ` + "`feature/x`" + ` exists). So:
+- Namespace-root branch (ends in ` + "`/root`" + `, e.g. ` + "`ao/<id>/root`" + `): open each extra PR from a sibling ` + "`ao/<id>/<topic>`" + ` (never ` + "`ao/<id>/root/<topic>`" + `); AO owns all of ` + "`ao/<id>/*`" + `. Stack one on another by targeting the sibling below.
+- Type-prefixed branch (e.g. ` + "`feature/<topic>`" + `): a single leaf ref with no room for tracked children — spawn a separate session for independent work.
 
-- If your current branch ends in ` + "`/root`" + `, create independent PR branches as siblings under the same namespace, for example ` + "`<namespace>/<topic>`" + ` from ` + "`<namespace>/root`" + `. Do not create ` + "`<namespace>/root/<topic>`" + `.
-- Otherwise, create each source branch as a child of your session branch (` + "`your-branch/<topic>`" + `) so it stays in this session's namespace, then open the PR targeting your base branch as usual. The PR can target the base branch; only the source branch needs to stay under your session namespace for AO to track it.
-- To stack a PR on top of another (so it merges after its parent), create the child branch from the parent branch and name it ` + "`<parent-branch>/<topic>`" + `, then target the parent branch in the PR. AO recognizes the stack from the branch relationship and will only nudge you to resolve conflicts on the bottom-most PR.
-
-Keeping branch names within your session's branch namespace is a hard AO requirement, so any additional branch nests under your session branch: when that branch is gitflow-prefixed (e.g. ` + "`feature/<topic>`" + `), the extra branch becomes ` + "`feature/<topic>/<sub-topic>`" + ` rather than a clean ` + "`bugfix/…`" + ` or ` + "`hotfix/…`" + ` sibling — an accepted trade-off. If you genuinely need a clean branch of a different gitflow type, prefer spawning a separate session for it. The project's branch convention (shown in a separate section when configured) sets your session branch's prefix and your PR's base/target; it and this namespace requirement are complementary, not competing.`
+The project's branch convention (prefix + PR base/target) and this namespace rule are complementary, not competing.`
 
 const reviewerDefault = `## Code reviewer role
 

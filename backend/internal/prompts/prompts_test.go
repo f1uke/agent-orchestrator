@@ -33,21 +33,27 @@ func TestDefaultBase_WorkerAndReviewerNonEmptyNoPlaceholder(t *testing.T) {
 // TestWorkerDefault_ReconcilesGitflow: the worker base must make the gitflow
 // branch convention and AO's session-namespace tracking read as complementary,
 // not contradictory. It must state the common one-PR case (working branch is the
-// on-convention branch), the multi-branch nesting trade-off, the different-type
-// escape hatch (spawn a separate session), and the precedence/complementary note.
+// on-convention branch), keep every extra branch in the session namespace, be
+// honest about the Git directory/file ref constraint (you cannot nest a branch
+// under an existing branch ref — so a type-prefixed working branch has no room
+// for children), and point to a separate session for independent work.
 func TestWorkerDefault_ReconcilesGitflow(t *testing.T) {
 	base := DefaultBase(KindWorker)
 	for _, want := range []string{
-		"one session, one pull request", // common case (point 1)
-		"no extra nesting is needed",    // common case is fully gitflow-compatible
-		"an accepted trade-off",         // nesting under the gitflow branch (point 2)
-		"a separate session",            // clean different-type sibling escape hatch (point 2)
-		"hard",                          // namespace requirement is a hard constraint (point 3)
-		"complementary, not competing",  // convention + namespace compose (point 3)
+		"your working branch is already the branch chosen at spawn", // common case (point 1)
+		"stay in your session's namespace",                          // namespace tracking requirement (point 3)
+		"nest a branch under an existing branch ref",                // the Git D/F constraint (correctness)
+		"spawn a separate session",                                  // escape hatch for independent work (point 2)
+		"complementary, not competing",                              // convention + namespace compose (point 3)
 	} {
 		if !strings.Contains(base, want) {
 			t.Fatalf("worker default missing reconciliation wording %q:\n%s", want, base)
 		}
+	}
+	// The impossible-in-Git example must be gone: never instruct nesting a branch
+	// beneath a type-prefixed working branch.
+	if strings.Contains(base, "feature/<topic>/<sub-topic>") {
+		t.Fatalf("worker default still describes an impossible nested branch:\n%s", base)
 	}
 }
 
