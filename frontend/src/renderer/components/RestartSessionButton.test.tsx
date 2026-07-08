@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
 import { RestartSessionButton } from "./RestartSessionButton";
+import { registerTerminalFocus } from "../lib/terminal-focus";
 
 const { postMock } = vi.hoisted(() => ({
 	postMock: vi.fn(),
@@ -79,37 +80,25 @@ describe("RestartSessionButton", () => {
 		expect(postMock).not.toHaveBeenCalled();
 	});
 
-	it("does not pull focus back to the restart trigger when the confirm dialog is dismissed by an outside pointer press", async () => {
+	it("returns focus to the terminal (not the restart trigger) when the confirm dialog closes, so the user can keep typing", async () => {
+		const focus = vi.fn();
+		const unregister = registerTerminalFocus(focus);
 		const user = userEvent.setup();
-		const queryClient = new QueryClient({
-			defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-		});
-		render(
-			<QueryClientProvider client={queryClient}>
-				<RestartSessionButton session={worker} />
-				{/* Terminal stand-in: grabs focus on pointer-down like xterm does. */}
-				<div data-testid="terminal" onPointerDown={(event) => event.currentTarget.focus()} tabIndex={-1}>
-					terminal
-				</div>
-			</QueryClientProvider>,
-		);
+		renderButton();
 
 		const trigger = screen.getByRole("button", { name: "Restart session" });
 		await user.click(trigger);
 		expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
-		// An outside pointer press closes the dialog; the guard keeps focus on what
-		// was pressed instead of yanking it back to the trigger (which would leave a
-		// stray focus ring), so a single click both dismisses and lands where meant.
-		const terminal = screen.getByTestId("terminal");
-		fireEvent.pointerDown(terminal);
-		fireEvent.pointerUp(terminal);
+		await user.keyboard("{Escape}");
 
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		expect(focus).toHaveBeenCalled();
 		expect(trigger).not.toHaveFocus();
+		unregister();
 	});
 
-	it("returns focus to the restart trigger when the confirm dialog is closed with Escape (keyboard accessibility)", async () => {
+	it("falls back to returning focus to the trigger when no terminal is mounted", async () => {
 		const user = userEvent.setup();
 		renderButton();
 

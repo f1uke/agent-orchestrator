@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { XtermTerminal } from "./XtermTerminal";
+import { focusTerminal } from "../lib/terminal-focus";
 
 const state = vi.hoisted(() => ({
 	linkHandler: null as null | ((event: MouseEvent, uri: string) => void),
@@ -607,5 +608,25 @@ describe("XtermTerminal", () => {
 		host.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 
 		expect(state.lastTerminal!.focus).toHaveBeenCalled();
+	});
+
+	it("auto-focuses the terminal on mount when autoFocus is set, so switching sessions lands the caret in the terminal", () => {
+		render(<XtermTerminal theme="dark" autoFocus />);
+		expect(state.lastTerminal!.focus).toHaveBeenCalled();
+	});
+
+	it("does not auto-focus on mount by default (autoFocus off)", () => {
+		render(<XtermTerminal theme="dark" />);
+		expect(state.lastTerminal!.focus).not.toHaveBeenCalled();
+	});
+
+	it("registers itself as the active terminal so focusTerminal() returns the caret to it, and unregisters on unmount", () => {
+		const { unmount } = render(<XtermTerminal theme="dark" />);
+
+		expect(focusTerminal()).toBe(true);
+		expect(state.lastTerminal!.focus).toHaveBeenCalledTimes(1);
+
+		unmount();
+		expect(focusTerminal()).toBe(false);
 	});
 });

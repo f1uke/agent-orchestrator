@@ -5,7 +5,7 @@ import { useState } from "react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { captureRendererEvent } from "../lib/telemetry";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { useOverlayDismissFocus } from "../lib/overlay-focus";
+import { returnFocusToTerminal } from "../lib/terminal-focus";
 import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
 
@@ -45,11 +45,6 @@ export function RestartSessionButton({ session }: { session: WorkspaceSession })
 		setConfirmOpen(open);
 	};
 
-	// Terminal-adjacent trigger: an outside pointer press that closes the confirm
-	// dialog must not yank focus back to the restart button (stray ring) — keyboard
-	// closes still restore it. See overlay-focus.ts.
-	const dismissFocus = useOverlayDismissFocus();
-
 	return (
 		<Dialog.Root open={confirmOpen} onOpenChange={openConfirm}>
 			<Dialog.Trigger asChild>
@@ -66,7 +61,9 @@ export function RestartSessionButton({ session }: { session: WorkspaceSession })
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
 				<Dialog.Content
-					{...dismissFocus}
+					// Terminal-toolbar dialog: on close (Cancel, Esc, or an outside click)
+					// return the caret to the terminal so the user can keep typing.
+					onCloseAutoFocus={returnFocusToTerminal}
 					className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
 				>
 					<Dialog.Title className="text-sm font-medium text-foreground">Restart this session?</Dialog.Title>
