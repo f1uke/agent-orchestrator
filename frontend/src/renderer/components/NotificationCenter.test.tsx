@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationCenter } from "./NotificationCenter";
 import type { NativeNotificationClickPayload } from "../../main/native-notifications";
@@ -66,12 +67,23 @@ beforeEach(() => {
 	};
 });
 
-function renderNotificationCenter() {
+function renderNotificationCenter(extra?: React.ReactNode) {
 	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
 		<QueryClientProvider client={queryClient}>
 			<NotificationCenter />
+			{extra}
 		</QueryClientProvider>,
+	);
+}
+
+// Stand-in for the xterm surface: focusable, and it grabs focus on pointer-down
+// the way xterm's helper textarea does when you click the terminal.
+function Terminal() {
+	return (
+		<div data-testid="terminal" onPointerDown={(event) => event.currentTarget.focus()} tabIndex={-1}>
+			terminal
+		</div>
 	);
 }
 
@@ -89,6 +101,48 @@ describe("NotificationCenter", () => {
 		expect(count).not.toHaveClass("bg-warning");
 		expect(count).not.toHaveClass("rounded-full");
 		expect(count).not.toHaveClass("text-background");
+	});
+
+	it("does not disable outside pointer events while open, so a click can reach the terminal", async () => {
+		const user = userEvent.setup();
+		renderNotificationCenter();
+
+		await user.click(screen.getByRole("button", { name: "2 unread notifications" }));
+		expect(await screen.findByText("Notifications")).toBeInTheDocument();
+
+		// Modal menus set body { pointer-events: none }, which swallows the first
+		// click on the terminal. A non-modal menu leaves outside clicks alone.
+		expect(document.body.style.pointerEvents).not.toBe("none");
+	});
+
+	it("closes on a single outside click and lets that click focus the terminal, without stealing focus back to the bell", async () => {
+		const user = userEvent.setup();
+		renderNotificationCenter(<Terminal />);
+		const bell = screen.getByRole("button", { name: "2 unread notifications" });
+
+		await user.click(bell);
+		expect(await screen.findByText("Notifications")).toBeInTheDocument();
+
+		const terminal = screen.getByTestId("terminal");
+		await user.click(terminal);
+
+		await waitFor(() => expect(screen.queryByText("Notifications")).not.toBeInTheDocument());
+		expect(terminal).toHaveFocus();
+		expect(bell).not.toHaveFocus();
+	});
+
+	it("returns focus to the bell when closed with Escape (keyboard accessibility)", async () => {
+		const user = userEvent.setup();
+		renderNotificationCenter();
+		const bell = screen.getByRole("button", { name: "2 unread notifications" });
+
+		await user.click(bell);
+		expect(await screen.findByText("Notifications")).toBeInTheDocument();
+
+		await user.keyboard("{Escape}");
+
+		await waitFor(() => expect(screen.queryByText("Notifications")).not.toBeInTheDocument());
+		expect(bell).toHaveFocus();
 	});
 
 	it("marks read and navigates to the target when a native notification is clicked", async () => {
