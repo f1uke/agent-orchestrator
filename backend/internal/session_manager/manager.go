@@ -143,6 +143,9 @@ type Manager struct {
 	// path can be exercised without executing a real agent CLI. Nil in
 	// production (falls back to the real method).
 	genBranchName func(ctx context.Context, agent ports.Agent, cfg ports.SpawnConfig, project domain.ProjectRecord) (string, bool)
+	// spawnConfirmEnabled reports whether the orchestrator must confirm before
+	// spawning. Nil means "confirm" (the safe default).
+	spawnConfirmEnabled func() bool
 }
 
 // Deps are the collaborators a Session Manager needs; New wires them together.
@@ -174,25 +177,30 @@ type Deps struct {
 	// Logger receives spawn-time diagnostics (e.g. when the session PATH
 	// cannot be pinned to the daemon binary). Nil defaults to slog.Default().
 	Logger *slog.Logger
+	// SpawnConfirmEnabled reports whether the orchestrator must present a
+	// confirmation summary and wait for approval before running `ao spawn`.
+	// Nil defaults to enabled (confirm) — the safe default.
+	SpawnConfirmEnabled func() bool
 }
 
 // New builds a Session Manager from its dependencies, defaulting the clock to
 // time.Now when Deps.Clock is nil.
 func New(d Deps) *Manager {
 	m := &Manager{
-		runtime:      d.Runtime,
-		agents:       d.Agents,
-		workspace:    d.Workspace,
-		store:        d.Store,
-		messenger:    d.Messenger,
-		lcm:          d.Lifecycle,
-		dataDir:      d.DataDir,
-		runFile:      d.RunFile,
-		clock:        d.Clock,
-		idleCloseTTL: d.IdleCloseTTL,
-		lookPath:     d.LookPath,
-		executable:   d.Executable,
-		logger:       d.Logger,
+		runtime:             d.Runtime,
+		agents:              d.Agents,
+		workspace:           d.Workspace,
+		store:               d.Store,
+		messenger:           d.Messenger,
+		lcm:                 d.Lifecycle,
+		dataDir:             d.DataDir,
+		runFile:             d.RunFile,
+		clock:               d.Clock,
+		idleCloseTTL:        d.IdleCloseTTL,
+		lookPath:            d.LookPath,
+		executable:          d.Executable,
+		logger:              d.Logger,
+		spawnConfirmEnabled: d.SpawnConfirmEnabled,
 	}
 	if m.clock == nil {
 		// UTC so spawn-stamped CreatedAt/UpdatedAt match every other session
@@ -1293,7 +1301,9 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	var base string
 	switch kind {
 	case domain.KindOrchestrator:
-		base = orchestratorPrompt(projectID) + orchestratorGitConventionPrompt(conv, cfg.DefaultBranch)
+		base = orchestratorPrompt(projectID) +
+			orchestratorGitConventionPrompt(conv, cfg.DefaultBranch) +
+			orchestratorSpawnConfirmPrompt(m.confirmBeforeSpawn(), conv, cfg.DefaultBranch)
 	case domain.KindWorker:
 		orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)
 		if err != nil {
@@ -1420,6 +1430,42 @@ When the task has a Jira card key, put it uppercase right after the type, e.g. `
 This project prefixes every branch with `+"`%[2]s`"+`. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
 `+"`ao spawn --from %[1]s --branch %[2]s<topic> ...`"+`
 For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sSTAR-2270-ecoupon-list`"+` when the task has a Jira card key. Tell the worker to open its pull request against `+"`%[1]s`"+`. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
+}
+
+// confirmBeforeSpawn reports whether the orchestrator prompt should carry the
+// spawn-confirmation gate. A nil getter (e.g. a bare Manager in tests, or wiring
+// that omits the store) defaults to true so the safe "confirm" behavior holds.
+func (m *Manager) confirmBeforeSpawn() bool {
+	if m.spawnConfirmEnabled == nil {
+		return true
+	}
+	return m.spawnConfirmEnabled()
+}
+
+// orchestratorSpawnConfirmPrompt returns the confirmation-gate section injected
+// into the orchestrator prompt, or "" when the gate is disabled. When enabled it
+// tells the orchestrator to present a summary (task, source branch, new branch,
+// PR target) and wait for explicit approval before running `ao spawn`. The
+// new-branch line references the git-convention section injected just above when
+// a convention is active, reusing that feature's prefix rather than repeating
+// them. baseBranch is the project's DefaultBranch (base + PR target).
+func orchestratorSpawnConfirmPrompt(enabled bool, conv domain.GitConventionConfig, baseBranch string) string {
+	if !enabled {
+		return ""
+	}
+	newBranch := "the branch that will be created"
+	if conv.Active() {
+		newBranch = "the branch that will be created, following the git branch convention above (e.g. `feature/<topic>`)"
+	}
+	return fmt.Sprintf("\n\n"+`## Confirm before spawning
+
+Before you run `+"`ao spawn`"+`, present a short confirmation summary to the human and wait for their explicit approval. Do NOT spawn until they confirm. The summary must list:
+- **Task** — one line on what the worker will do
+- **Source branch** — the `+"`--from`"+` base branch (default `+"`%[1]s`"+`)
+- **New branch** — %[2]s
+- **PR target** — where the worker's pull request will merge (`+"`%[1]s`"+`)
+
+If the human asks for changes, revise and re-confirm. Run `+"`ao spawn`"+` only after they approve. This confirmation is conversational — ask in chat and wait; there is no separate UI dialog.`, baseBranch, newBranch)
 }
 
 // workerGitConventionPrompt returns the branch-convention section injected into the

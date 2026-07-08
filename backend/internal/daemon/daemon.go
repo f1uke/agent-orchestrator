@@ -28,6 +28,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
+	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
 )
@@ -118,11 +119,24 @@ func Run() error {
 	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, log)
 	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
 
+	// The spawn-confirm gate is a global setting the orchestrator prompt reads at
+	// spawn/restore time, so its store is built before the session manager and its
+	// getter handed in. A missing/corrupt file degrades to ON (confirm).
+	spawnConfirmSettings, err := spawnconfirm.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("spawn-confirm settings: %w", err)
+	}
+
 	// Wire the controller-facing session service over the same store + LCM, the
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, log)
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -169,6 +183,7 @@ func Run() error {
 		Activity:           lcStack.LCM,
 		Telemetry:          telemetrySink,
 		Settings:           reclaimSettings,
+		SpawnConfirm:       spawnConfirmSettings,
 	})
 	if err != nil {
 		stop()

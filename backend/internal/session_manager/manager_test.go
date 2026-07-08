@@ -1196,6 +1196,70 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 	})
 }
 
+// TestSystemPrompt_SpawnConfirm: when the global spawn-confirm gate is ON
+// (default) the orchestrator prompt carries a confirmation section naming the
+// source/new/PR-target branches; when OFF the section is absent. The gate never
+// affects worker prompts.
+func TestSystemPrompt_SpawnConfirm(t *testing.T) {
+	newMgr := func(cfg domain.ProjectConfig, enabled func() bool) *Manager {
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, SpawnConfirmEnabled: enabled})
+	}
+	build := func(m *Manager, kind domain.SessionKind) string {
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer")
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	t.Run("default nil getter confirms (ON)", func(t *testing.T) {
+		sp := build(newMgr(domain.ProjectConfig{DefaultBranch: "main-fluke"}, nil), domain.KindOrchestrator)
+		for _, want := range []string{"Confirm before spawning", "wait for their explicit approval", "Source branch", "New branch", "PR target", "`main-fluke`"} {
+			if !strings.Contains(sp, want) {
+				t.Fatalf("ON orchestrator prompt missing %q:\n%s", want, sp)
+			}
+		}
+	})
+
+	t.Run("convention active adds the prefix clause", func(t *testing.T) {
+		cfg := domain.ProjectConfig{DefaultBranch: "develop", GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}}
+		sp := build(newMgr(cfg, func() bool { return true }), domain.KindOrchestrator)
+		if !strings.Contains(sp, "following the git branch convention above") {
+			t.Fatalf("convention-active prompt missing prefix clause:\n%s", sp)
+		}
+	})
+
+	t.Run("no convention keeps a generic new-branch line", func(t *testing.T) {
+		sp := build(newMgr(domain.ProjectConfig{}, func() bool { return true }), domain.KindOrchestrator)
+		if strings.Contains(sp, "following the git branch convention above") {
+			t.Fatalf("no-convention prompt should not reference the convention:\n%s", sp)
+		}
+		if !strings.Contains(sp, "Confirm before spawning") {
+			t.Fatalf("no-convention prompt still needs the confirm section:\n%s", sp)
+		}
+	})
+
+	t.Run("OFF adds no confirm section", func(t *testing.T) {
+		sp := build(newMgr(domain.ProjectConfig{}, func() bool { return false }), domain.KindOrchestrator)
+		if strings.Contains(sp, "Confirm before spawning") {
+			t.Fatalf("OFF orchestrator prompt should have no confirm section:\n%s", sp)
+		}
+	})
+
+	t.Run("worker prompt never carries the confirm section", func(t *testing.T) {
+		for _, enabled := range []func() bool{nil, func() bool { return true }} {
+			sp := build(newMgr(domain.ProjectConfig{}, enabled), domain.KindWorker)
+			if strings.Contains(sp, "Confirm before spawning") {
+				t.Fatalf("worker prompt should have no confirm section:\n%s", sp)
+			}
+		}
+	})
+}
+
 // TestRestore_OrchestratorRederivesSystemPrompt: the system prompt is derived,
 // not persisted, so a restored orchestrator must get its role instructions
 // recomputed and handed to the agent's native resume command.

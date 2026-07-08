@@ -29,6 +29,7 @@ type APIDeps struct {
 	NotificationStream controllers.NotificationStream
 	Import             controllers.ImportService
 	Settings           controllers.SettingsService
+	SpawnConfirm       controllers.SpawnConfirmService
 	CDC                cdc.Source
 	Events             cdcSubscriber
 	Telemetry          ports.EventSink
@@ -69,7 +70,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
