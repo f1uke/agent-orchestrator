@@ -30,10 +30,10 @@ const waitingInputGrace = 45 * time.Second
 // closing Stop never lands (a hung agent, a dropped callback, a daemon restart
 // mid-turn) and nothing ever demotes it. Every genuinely working session keeps
 // re-reporting active — a per-tool-use hook, or at minimum a UserPromptSubmit —
-// so a gap this long means the feed died, not that the agent is busy. Kept well
-// above the longest plausible single tool run (an iOS build, a full test suite)
+// so a gap this long means the feed died, not that the agent is busy. Kept
+// above the longest plausible single tool run (a long build, a full test suite)
 // so a real between-signals lull never trips it.
-const activeStaleGrace = 15 * time.Minute
+const activeStaleGrace = 10 * time.Minute
 
 // statusResult is the full outcome of the status derivation: the display Status
 // plus WHY it was chosen and, for timeout-based readings, when/what it will flip
