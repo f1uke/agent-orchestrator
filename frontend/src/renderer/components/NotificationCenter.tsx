@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Bell, Check, CheckCheck, CircleAlert, ExternalLink, GitMerge, GitPullRequest, XCircle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	useMarkAllNotificationsReadMutation,
 	useMarkNotificationReadMutation,
@@ -37,6 +37,13 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 	const markRead = useMarkNotificationReadMutation();
 	const markAllRead = useMarkAllNotificationsReadMutation();
 	const [actionError, setActionError] = useState<string | null>(null);
+	// True when this open was dismissed by a pointer press outside the menu (e.g.
+	// clicking the terminal). In that case we must NOT pull focus back to the bell
+	// on close — the click already moved focus to what the user pressed, and a
+	// forced return leaves a stray focus ring and swallows the click's target.
+	// Keyboard closes (Esc/Tab) leave this false so focus still returns to the
+	// trigger, as menu-button accessibility expects.
+	const dismissedByPointerRef = useRef(false);
 	const notifications = useMemo(() => notificationsQuery.data ?? [], [notificationsQuery.data]);
 	const unreadCount = notifications.length;
 
@@ -112,7 +119,12 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 	};
 
 	return (
-		<DropdownMenu>
+		// Non-modal: an open notifications popover must not lock the page behind a
+		// pointer-events:none / focus-trap layer. That layer is what forced a second
+		// click — the first click on the terminal only dismissed the menu instead of
+		// also focusing it. Non-modal lets a single click both close the menu and
+		// land on the terminal.
+		<DropdownMenu modal={false}>
 			<DropdownMenuTrigger asChild>
 				<button
 					aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
@@ -128,7 +140,22 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 					) : null}
 				</button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-[380px] p-0" sideOffset={8}>
+			<DropdownMenuContent
+				align="end"
+				className="w-[380px] p-0"
+				onCloseAutoFocus={(event) => {
+					if (dismissedByPointerRef.current) {
+						dismissedByPointerRef.current = false;
+						// Keep focus wherever the outside click put it (e.g. the terminal)
+						// rather than yanking it back to the bell trigger.
+						event.preventDefault();
+					}
+				}}
+				onPointerDownOutside={() => {
+					dismissedByPointerRef.current = true;
+				}}
+				sideOffset={8}
+			>
 				<div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
 					<DropdownMenuLabel className="px-0 py-0">Notifications</DropdownMenuLabel>
 					<button
