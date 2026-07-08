@@ -96,6 +96,38 @@ func TestListOpenPRsByRepo(t *testing.T) {
 	}
 }
 
+// TestListOpenPRsByRepoCarriesHeadRepo locks in the branch-prefix attribution
+// contract: the observer's discoverNewPRs drops any open PR whose HeadRepo does
+// not match a session's push origin (see candidatesForHeadRepo in
+// internal/observe/scm/observer.go), so a GitLab same-project MR must report
+// HeadRepo == repo.Repo or it is never attributed and its card stays in WORKING.
+// A fork MR (source_project_id != target_project_id) reports an empty HeadRepo,
+// so it is left unattributed rather than misattributed to an origin session.
+func TestListOpenPRsByRepoCarriesHeadRepo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"iid":7,"state":"opened","source_branch":"feat","target_branch":"main","sha":"s1","web_url":"https://gl/mr/7","project_id":99,"source_project_id":99,"target_project_id":99},
+			{"iid":8,"state":"opened","source_branch":"forkfeat","target_branch":"main","sha":"s2","web_url":"https://gl/mr/8","project_id":99,"source_project_id":42,"target_project_id":99}
+		]`))
+	}))
+	defer srv.Close()
+	p := newTestProvider(t, srv.URL)
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+	prs, err := p.ListOpenPRsByRepo(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("ListOpenPRsByRepo: %v", err)
+	}
+	if len(prs) != 2 {
+		t.Fatalf("want 2 PRs, got %d: %+v", len(prs), prs)
+	}
+	if prs[0].HeadRepo != "group/sub/proj" {
+		t.Fatalf("same-project MR HeadRepo = %q, want group/sub/proj", prs[0].HeadRepo)
+	}
+	if prs[1].HeadRepo != "" {
+		t.Fatalf("fork MR HeadRepo = %q, want empty", prs[1].HeadRepo)
+	}
+}
+
 func TestRepoPRListGuard304(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("If-None-Match") == `"list-1"` {
