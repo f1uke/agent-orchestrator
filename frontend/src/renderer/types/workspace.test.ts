@@ -6,6 +6,7 @@ import {
 	formatNextTransition,
 	newestActiveOrchestrator,
 	orchestratorHealth,
+	projectRowActive,
 	sessionIsActive,
 	sessionNeedsAttention,
 	statusReasonLabel,
@@ -193,6 +194,45 @@ describe("findProjectOrchestrator", () => {
 		});
 		expect(newestActiveOrchestrator([oldUpdate, newUpdate])).toBe(newUpdate);
 		expect(newestActiveOrchestrator([newUpdate, sameTimesHigherID])).toBe(sameTimesHigherID);
+	});
+});
+
+describe("projectRowActive", () => {
+	function workspaceWith(sessions: WorkspaceSession[]): WorkspaceSummary {
+		return { id: "skills", name: "skills", path: "/tmp/skills", sessions };
+	}
+
+	it("highlights the project whose board is open (no session in the route)", () => {
+		expect(projectRowActive(workspaceWith([]), "skills", undefined)).toBe(true);
+	});
+
+	it("does not highlight a project that is not the open one", () => {
+		const ws = workspaceWith([]);
+		expect(projectRowActive(ws, "other", undefined)).toBe(false);
+		expect(projectRowActive(ws, undefined, undefined)).toBe(false);
+	});
+
+	it("highlights the owning project when its orchestrator session is open", () => {
+		// The orchestrator has no worker row of its own, so the project row must
+		// carry the active highlight — exactly like the board does.
+		const orch = sessionWith({ id: "skills-orchestrator", kind: "orchestrator", status: "working" });
+		expect(projectRowActive(workspaceWith([orch]), "skills", "skills-orchestrator")).toBe(true);
+	});
+
+	it("recognises an orchestrator via the id suffix when kind is absent", () => {
+		const orch = sessionWith({ id: "skills-orchestrator", status: "working" });
+		expect(projectRowActive(workspaceWith([orch]), "skills", "skills-orchestrator")).toBe(true);
+	});
+
+	it("leaves the project row inactive when a worker session is open", () => {
+		// A worker session highlights its own child row instead.
+		const worker = sessionWith({ id: "skills-3", kind: "worker", status: "working" });
+		expect(projectRowActive(workspaceWith([worker]), "skills", "skills-3")).toBe(false);
+	});
+
+	it("does not highlight when the open session belongs to a different project", () => {
+		const orch = sessionWith({ id: "skills-orchestrator", kind: "orchestrator", status: "working" });
+		expect(projectRowActive(workspaceWith([orch]), "other", "other-orchestrator")).toBe(false);
 	});
 });
 
