@@ -51,6 +51,10 @@ type ProjectConfig struct {
 	// (workflow none) leaves branch naming and prompts unchanged.
 	GitConvention GitConventionConfig `json:"gitConvention,omitempty"`
 
+	// SystemPromptAdditions is per-kind text appended on top of the global base
+	// for this project's sessions. Empty fields append nothing.
+	SystemPromptAdditions SystemPromptAdditions `json:"systemPromptAdditions,omitempty"`
+
 	// MinApprovals is the minimum number of approvals AO treats as "ready" when
 	// the SCM has no approval rule of its own (see PullRequest.ApprovalRuleConfigured).
 	// 0 = unset → DefaultMinApprovals. GitLab only in this version.
@@ -204,4 +208,13 @@ func validateRepoRelative(p string) error {
 		}
 	}
 	return nil
+}
+
+// SystemPromptAdditions is per-kind extra text appended after the global base
+// (and before AO's protected floor + dynamic injections) for a project. It is
+// free-form text and always valid.
+type SystemPromptAdditions struct {
+	Orchestrator string `json:"orchestrator,omitempty"`
+	Worker       string `json:"worker,omitempty"`
+	Reviewer     string `json:"reviewer,omitempty"`
 }

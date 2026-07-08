@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestProjectConfigValidate(t *testing.T) {
 	tests := []struct {
@@ -147,5 +150,30 @@ func TestProjectConfigIsZero(t *testing.T) {
 	}
 	if (ProjectConfig{Env: map[string]string{"A": "b"}}).IsZero() {
 		t.Fatal("config with env should not be zero")
+	}
+}
+
+func TestProjectConfig_SystemPromptAdditions_RoundTripAndZero(t *testing.T) {
+	var empty ProjectConfig
+	if !empty.IsZero() {
+		t.Fatal("empty config should be zero")
+	}
+	cfg := ProjectConfig{SystemPromptAdditions: SystemPromptAdditions{Worker: "extra worker note"}}
+	if cfg.IsZero() {
+		t.Fatal("config with a system-prompt addition must not be zero")
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ProjectConfig
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.SystemPromptAdditions.Worker != "extra worker note" {
+		t.Fatalf("round-trip lost the addition: %+v", back.SystemPromptAdditions)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("additions are free text and must validate: %v", err)
 	}
 }
