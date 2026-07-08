@@ -693,6 +693,11 @@ export interface components {
         DomainReviewerConfig: {
             harness: string;
         };
+        GitConventionConfig: {
+            branchPrefix?: string;
+            /** @enum {string} */
+            workflow?: "gitflow" | "custom";
+        };
         ImportReport: {
             dryRun: boolean;
             notes?: string[];
@@ -814,6 +819,7 @@ export interface components {
             env?: {
                 [key: string]: string;
             };
+            gitConvention?: components["schemas"]["GitConventionConfig"];
             minApprovals?: number;
             orchestrator?: components["schemas"]["RoleOverride"];
             postCreate?: string[];

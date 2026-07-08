@@ -430,6 +430,89 @@ describe("ProjectSettingsForm", () => {
 		expect(putMock).not.toHaveBeenCalled();
 	});
 
+	it("loads an existing git convention and saves the edited workflow and prefix", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				gitConvention: { workflow: "gitflow" },
+			},
+		});
+
+		renderSettings();
+
+		const workflow = await screen.findByRole("combobox", { name: "Branch workflow" });
+		expect(workflow).toHaveTextContent("gitflow");
+		// gitflow does not require a prefix, but the input is available.
+		expect(screen.getByLabelText("Branch prefix")).toHaveValue("");
+
+		await chooseOption(workflow, "custom");
+		await userEvent.type(screen.getByLabelText("Branch prefix"), "feat/");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.gitConvention).toEqual({ workflow: "custom", branchPrefix: "feat/" });
+	});
+
+	it("hides the branch-prefix input until a workflow is chosen and omits the convention when none", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
+		// None selected by default → no prefix input.
+		expect(screen.queryByLabelText("Branch prefix")).not.toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.gitConvention).toBeUndefined();
+	});
+
+	it("blocks save when a custom workflow has no branch prefix", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		const workflow = await screen.findByRole("combobox", { name: "Branch workflow" });
+		await chooseOption(workflow, "custom");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		expect(await screen.findByText("A custom git workflow requires a branch prefix.")).toBeInTheDocument();
+		expect(putMock).not.toHaveBeenCalled();
+	});
+
 	it("restarts when the saved orchestrator agent already differs from the running orchestrator", async () => {
 		getMock.mockResolvedValue({
 			data: {

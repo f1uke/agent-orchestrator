@@ -1131,6 +1131,71 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 	}
 }
 
+// TestSystemPrompt_GitConvention: a project's branch convention must be injected
+// into both the orchestrator prompt (the primary mechanism — it builds ao spawn)
+// and the worker prompt, and must be absent when no convention is configured.
+func TestSystemPrompt_GitConvention(t *testing.T) {
+	newMgr := func(cfg domain.ProjectConfig, withOrch bool) *Manager {
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		if withOrch {
+			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
+		}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	}
+	build := func(m *Manager, kind domain.SessionKind) string {
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer")
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	t.Run("gitflow orchestrator", func(t *testing.T) {
+		cfg := domain.ProjectConfig{DefaultBranch: "develop", GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}}
+		sp := build(newMgr(cfg, false), domain.KindOrchestrator)
+		for _, want := range []string{"Git branch convention", "gitflow", "feature/", "bugfix/", "hotfix/", "--from develop", "against `develop`"} {
+			if !strings.Contains(sp, want) {
+				t.Fatalf("orchestrator prompt missing %q:\n%s", want, sp)
+			}
+		}
+	})
+
+	t.Run("gitflow worker", func(t *testing.T) {
+		cfg := domain.ProjectConfig{DefaultBranch: "develop", GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}}
+		sp := build(newMgr(cfg, true), domain.KindWorker)
+		for _, want := range []string{"Git branch convention", "gitflow", "against `develop`"} {
+			if !strings.Contains(sp, want) {
+				t.Fatalf("worker prompt missing %q:\n%s", want, sp)
+			}
+		}
+	})
+
+	t.Run("custom uses the configured prefix", func(t *testing.T) {
+		cfg := domain.ProjectConfig{GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "feat"}}
+		sp := build(newMgr(cfg, false), domain.KindOrchestrator)
+		// Prefix is normalized to a trailing slash and the base defaults to main.
+		for _, want := range []string{"Git branch convention", "`feat/`", "--branch feat/<topic>", "against `main`"} {
+			if !strings.Contains(sp, want) {
+				t.Fatalf("custom orchestrator prompt missing %q:\n%s", want, sp)
+			}
+		}
+		if strings.Contains(sp, "gitflow") {
+			t.Fatalf("custom prompt should not mention gitflow:\n%s", sp)
+		}
+	})
+
+	t.Run("none adds no convention section", func(t *testing.T) {
+		for _, kind := range []domain.SessionKind{domain.KindOrchestrator, domain.KindWorker} {
+			sp := build(newMgr(domain.ProjectConfig{}, false), kind)
+			if strings.Contains(sp, "Git branch convention") {
+				t.Fatalf("%v prompt should have no convention section:\n%s", kind, sp)
+			}
+		}
+	})
+}
+
 // TestRestore_OrchestratorRederivesSystemPrompt: the system prompt is derived,
 // not persisted, so a restored orchestrator must get its role instructions
 // recomputed and handed to the agent's native resume command.
@@ -2529,4 +2594,59 @@ func TestSpawnAutoNamedBranchCollisionRetriesWithDefault(t *testing.T) {
 	if rec.Metadata.Branch != ws.createdBranches[1] {
 		t.Fatalf("committed session metadata branch = %q, want the successful retry branch %q", rec.Metadata.Branch, ws.createdBranches[1])
 	}
+}
+
+// TestSpawn_GitConventionEndToEnd drives the whole spawn path with a project that
+// configures a branch convention, asserting the two user-visible outcomes together:
+// an omitted --branch lands on a convention-prefixed branch, and the launched
+// agent's system prompt carries the convention text.
+func TestSpawn_GitConventionEndToEnd(t *testing.T) {
+	newConventionMgr := func(cfg domain.ProjectConfig) (*Manager, *recordingAgent, *fakeWorkspace) {
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		agent := &recordingAgent{}
+		ws := &fakeWorkspace{}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		return m, agent, ws
+	}
+
+	t.Run("custom worker: prefixed branch and convention in the launched prompt", func(t *testing.T) {
+		m, agent, ws := newConventionMgr(domain.ProjectConfig{
+			Worker:        domain.RoleOverride{Harness: domain.HarnessClaudeCode},
+			DefaultBranch: "develop",
+			GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "feat/"},
+		})
+		// Stand in for the AI namer: it emits a gitflow-typed name; the custom
+		// convention must rewrite the type segment to the fixed prefix.
+		m.genBranchName = func(context.Context, ports.Agent, ports.SpawnConfig, domain.ProjectRecord) (string, bool) {
+			return "feature/STAR-1-add-login", true
+		}
+		if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true}); err != nil {
+			t.Fatal(err)
+		}
+		if ws.lastCfg.Branch != "feat/STAR-1-add-login" {
+			t.Fatalf("auto-named branch = %q, want feat/STAR-1-add-login", ws.lastCfg.Branch)
+		}
+		if !strings.Contains(agent.lastLaunch.SystemPrompt, "prefixes branches with `feat/`") {
+			t.Fatalf("worker launch prompt missing convention:\n%s", agent.lastLaunch.SystemPrompt)
+		}
+	})
+
+	t.Run("gitflow orchestrator: convention in the launched prompt", func(t *testing.T) {
+		m, agent, _ := newConventionMgr(domain.ProjectConfig{
+			Orchestrator:  domain.RoleOverride{Harness: domain.HarnessClaudeCode},
+			DefaultBranch: "develop",
+			GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow},
+		})
+		if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator}); err != nil {
+			t.Fatal(err)
+		}
+		sp := agent.lastLaunch.SystemPrompt
+		for _, want := range []string{"gitflow", "--from develop", "feature/", "bugfix/", "hotfix/"} {
+			if !strings.Contains(sp, want) {
+				t.Fatalf("orchestrator launch prompt missing %q:\n%s", want, sp)
+			}
+		}
+	})
 }

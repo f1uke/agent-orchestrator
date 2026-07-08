@@ -113,6 +113,50 @@ func TestBuildProjectConfigTrackerProviderInvalidIsUsageError(t *testing.T) {
 	}
 }
 
+func TestProjectSetConfig_GitConventionFlags(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "project", "set-config", "demo", "--git-workflow", "custom", "--branch-prefix", "feat/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var got setConfigRequest
+	if err := json.Unmarshal(capture.body, &got); err != nil {
+		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+	}
+	if got.Config.GitConvention.Workflow != "custom" || got.Config.GitConvention.BranchPrefix != "feat/" {
+		t.Fatalf("git convention request = %#v", got.Config.GitConvention)
+	}
+}
+
+func TestBuildProjectConfigGitConventionFlags(t *testing.T) {
+	got, err := buildProjectConfig(projectSetConfigOptions{gitWorkflow: "Gitflow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Workflow is lowercased so "Gitflow" round-trips to the domain vocabulary.
+	if got.GitConvention.Workflow != "gitflow" {
+		t.Fatalf("git workflow = %q, want gitflow", got.GitConvention.Workflow)
+	}
+}
+
+func TestBuildProjectConfigGitWorkflowNoneNormalizesToEmpty(t *testing.T) {
+	// "none" is the CLI spelling of the default; it must store as unset so an
+	// otherwise-empty convention persists as NULL. Paired with another flag so the
+	// config is not entirely empty (which would trip the "provide a flag" guard).
+	got, err := buildProjectConfig(projectSetConfigOptions{gitWorkflow: "none", defaultBranch: "develop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GitConvention.Workflow != "" {
+		t.Fatalf("git workflow = %q, want empty (none)", got.GitConvention.Workflow)
+	}
+}
+
 func TestProjectList_Success(t *testing.T) {
 	cfg := setConfigEnv(t)
 	srv, capture := projectServer(t, http.StatusOK, `{"projects":[{"id":"zeta","name":"Zeta","sessionPrefix":"zeta"},{"id":"alpha","name":"Alpha","sessionPrefix":"alpha","resolveError":"config missing"}]}`)

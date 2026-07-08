@@ -1962,6 +1962,16 @@ components:
       required:
       - harness
       type: object
+    GitConventionConfig:
+      properties:
+        branchPrefix:
+          type: string
+        workflow:
+          enum:
+          - gitflow
+          - custom
+          type: string
+      type: object
     ImportReport:
       properties:
         dryRun:
@@ -2282,6 +2292,8 @@ components:
           additionalProperties:
             type: string
           type: object
+        gitConvention:
+          $ref: '#/components/schemas/GitConventionConfig'
         minApprovals:
           type: integer
         orchestrator:

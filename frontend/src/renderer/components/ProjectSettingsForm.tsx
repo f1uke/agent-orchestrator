@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 type Project = components["schemas"]["Project"];
 type ProjectConfig = components["schemas"]["ProjectConfig"];
 type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
+type GitConventionConfig = components["schemas"]["GitConventionConfig"];
 
 const PERMISSION_MODE_OPTIONS = [
 	{ value: "default", label: "Default" },
@@ -35,6 +36,22 @@ const PERMISSION_MODE_OPTIONS = [
 ] as const;
 
 const REVIEWER_OPTIONS = ["claude-code", "codex", "opencode"] as const;
+
+// "none" is the UI spelling of the default (unset) convention; it maps to an
+// undefined gitConvention so an otherwise-empty config still persists as unset.
+const GIT_WORKFLOW_OPTIONS = [
+	{ value: "none", label: "None" },
+	{ value: "gitflow", label: "gitflow" },
+	{ value: "custom", label: "custom" },
+] as const;
+
+// buildGitConvention turns the workflow + prefix fields into the typed convention,
+// or undefined when the workflow is none so the config field is omitted entirely.
+function buildGitConvention(workflow: string, branchPrefix: string): GitConventionConfig | undefined {
+	if (workflow !== "gitflow" && workflow !== "custom") return undefined;
+	const prefix = branchPrefix.trim();
+	return prefix ? { workflow, branchPrefix: prefix } : { workflow };
+}
 
 const projectQueryKey = (id: string) => ["project", id] as const;
 
@@ -94,9 +111,14 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 	const workspace = workspaceQuery.data?.find((item) => item.id === projectId);
 	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
 	const intake: TrackerIntakeConfig = config.trackerIntake ?? {};
+	const gitConvention: GitConventionConfig = config.gitConvention ?? {};
 	const [form, setForm] = useState({
 		defaultBranch: config.defaultBranch ?? project.defaultBranch ?? "",
 		sessionPrefix: config.sessionPrefix ?? "",
+		// Widen the enum to string so the shared string-based select handlers apply;
+		// buildGitConvention narrows it back to the typed workflow on save.
+		gitWorkflow: (gitConvention.workflow ?? "") as string,
+		branchPrefix: gitConvention.branchPrefix ?? "",
 		workerAgent: config.worker?.agent ?? "",
 		orchestratorAgent: config.orchestrator?.agent ?? "",
 		model: config.agentConfig?.model ?? "",
@@ -144,6 +166,8 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 	// Only link to the origin-derived repo; a manual override has no known web URL.
 	const intakeRepoURL = intakeRepoOverride ? undefined : deriveRepoWebURL(project.repo);
 	const intakeIncomplete = intakeNeedsRule(intakeForm);
+	// A custom workflow needs a branch prefix; gitflow defaults to feature/ server-side.
+	const gitConventionIncomplete = form.gitWorkflow === "custom" && form.branchPrefix.trim() === "";
 
 	const mutation = useMutation({
 		mutationFn: async () => {
@@ -163,6 +187,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 				}),
 				reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,
 				trackerIntake: buildIntake(intakeForm),
+				gitConvention: buildGitConvention(form.gitWorkflow, form.branchPrefix),
 				minApprovals: form.minApprovals.trim() === "" ? undefined : Number(form.minApprovals),
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
@@ -210,6 +235,10 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 				}
 				if (intakeIncomplete) {
 					setValidationError("Enabling intake requires an assignee.");
+					return;
+				}
+				if (gitConventionIncomplete) {
+					setValidationError("A custom git workflow requires a branch prefix.");
 					return;
 				}
 				setValidationError(null);
@@ -263,6 +292,41 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							/>
 							<p className="text-[11px] text-muted-foreground">
 								Applies only when the GitLab repo has no approval rule of its own. Default 3.
+							</p>
+						</Field>
+					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-[13px]">Git convention</CardTitle>
+				</CardHeader>
+				<CardContent className="flex flex-col gap-4">
+					<Field label="Branch workflow" htmlFor="gitWorkflow">
+						<GitWorkflowSelect
+							id="gitWorkflow"
+							value={form.gitWorkflow}
+							onChange={(v) => setForm((f) => ({ ...f, gitWorkflow: v }))}
+						/>
+						<p className="text-[11px] text-muted-foreground">
+							Prefixes auto-named worker branches and tells the orchestrator how to name them. None keeps the
+							current behavior.
+						</p>
+					</Field>
+					{(form.gitWorkflow === "gitflow" || form.gitWorkflow === "custom") && (
+						<Field label="Branch prefix" htmlFor="branchPrefix">
+							<input
+								id="branchPrefix"
+								className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
+								value={form.branchPrefix}
+								onChange={(e) => setForm((f) => ({ ...f, branchPrefix: e.target.value }))}
+								placeholder="feature/"
+							/>
+							<p className="text-[11px] text-muted-foreground">
+								{form.gitWorkflow === "custom"
+									? "Required. Every branch is forced under this prefix (e.g. feat/, story/)."
+									: "Optional. Default type prefix; gitflow still picks bugfix/ or hotfix/ per task."}
 							</p>
 						</Field>
 					)}
@@ -404,6 +468,32 @@ function PermissionModeSelect({
 			<SelectContent>
 				<SelectItem value="__default__">Project default</SelectItem>
 				{PERMISSION_MODE_OPTIONS.map((opt) => (
+					<SelectItem key={opt.value} value={opt.value}>
+						{opt.label}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+}
+
+function GitWorkflowSelect({
+	id,
+	value,
+	onChange,
+}: {
+	id: string;
+	value: string;
+	onChange: (value: string) => void;
+}) {
+	// Empty (unset) maps to the "none" option; selecting "none" clears the value.
+	return (
+		<Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
+			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				{GIT_WORKFLOW_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
 						{opt.label}
 					</SelectItem>
