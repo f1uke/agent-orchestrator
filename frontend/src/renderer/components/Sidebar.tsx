@@ -17,6 +17,7 @@ import { useRef, useState, type ReactNode } from "react";
 import {
 	attentionZone,
 	newestActiveOrchestrator,
+	projectRowActive,
 	sessionIsActive,
 	type WorkspaceSession,
 	type WorkspaceSummary,
@@ -421,7 +422,13 @@ function ProjectItem({
 	onToggle: () => void;
 	onRemoveProject: (projectId: string) => Promise<void>;
 }) {
-	const projectActive = selection.activeProjectId === workspace.id && !selection.activeSessionId;
+	// The board OR the project's orchestrator being open highlights this row; a
+	// worker session highlights its own child row instead (see projectRowActive).
+	const projectActive = projectRowActive(workspace, selection.activeProjectId, selection.activeSessionId);
+	// Whether the board itself is the open view. Drives the click affordance
+	// (re-click the board row to collapse the tree); a highlighted-because-of-
+	// orchestrator row still navigates to the board on click, as before.
+	const boardActive = selection.activeProjectId === workspace.id && !selection.activeSessionId;
 	const queryClient = useQueryClient();
 	const [removeError, setRemoveError] = useState<string | null>(null);
 	const [isRemoving, setIsRemoving] = useState(false);
@@ -459,7 +466,7 @@ function ProjectItem({
 		if (!expanded) {
 			onToggle();
 			selection.goProject(workspace.id);
-		} else if (projectActive) {
+		} else if (boardActive) {
 			onToggle();
 		} else {
 			selection.goProject(workspace.id);

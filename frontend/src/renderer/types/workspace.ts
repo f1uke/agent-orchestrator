@@ -334,6 +334,24 @@ export function findProjectOrchestrator(
 	return newestActiveOrchestrator(workspace?.sessions ?? []);
 }
 
+/**
+ * Whether the sidebar should highlight `workspace`'s project row as the active
+ * project, given the route's active project/session ids. True when the project's
+ * board is open (project route, no session) OR when the open session is that
+ * project's orchestrator — the orchestrator has no worker row of its own, so the
+ * project row carries the same active highlight the board uses. A worker session
+ * leaves the project row inactive (its own child row highlights instead).
+ */
+export function projectRowActive(
+	workspace: Pick<WorkspaceSummary, "id" | "sessions">,
+	activeProjectId: string | undefined,
+	activeSessionId: string | undefined,
+): boolean {
+	if (activeProjectId !== workspace.id) return false;
+	if (!activeSessionId) return true;
+	return workspace.sessions.some((session) => session.id === activeSessionId && isOrchestratorSession(session));
+}
+
 export function newestActiveOrchestrator(sessions: WorkspaceSession[]): WorkspaceSession | undefined {
 	const active = sessions.filter((session) => isOrchestratorSession(session) && sessionIsActive(session));
 	return active.reduce<WorkspaceSession | undefined>(
