@@ -81,6 +81,7 @@ func TestAllowlistCoversPromptRequiredPipedCommands(t *testing.T) {
 
 	for _, cmd := range []string{
 		"printf '%s' '{ \"event\": \"COMMENT\", \"body\": \"x\" }' | gh api --method POST repos/o/r/pulls/1/reviews --input - --jq '.id'",
+		"glab mr note create 42 -R group/sub/proj --file main.go --line 10 -m 'finding'",
 		"printf '%s' '{ \"reviews\": [] }' | ao review submit --session sess-1 --reviews -",
 	} {
 		if !compoundCommandCovered(agent.got.AllowedTools, cmd) {

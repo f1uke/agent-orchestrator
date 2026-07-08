@@ -125,6 +125,7 @@ type projectSetConfigOptions struct {
 	symlink           []string
 	postCreate        []string
 	trackerIntake     bool
+	trackerProvider   string
 	trackerRepo       string
 	trackerAssignee   string
 	configJSON        string
@@ -312,9 +313,10 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringArrayVar(&opts.env, "env", nil, "Env var KEY=VALUE forwarded into sessions (repeatable)")
 	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable)")
 	f.StringArrayVar(&opts.postCreate, "post-create", nil, "Command to run after workspace creation (repeatable)")
-	f.BoolVar(&opts.trackerIntake, "tracker-intake", false, "Enable GitHub issue intake for matching issues")
-	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "GitHub repo for issue intake (owner/repo; default: derive from git origin)")
-	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "GitHub issue assignee required for intake eligibility")
+	f.BoolVar(&opts.trackerIntake, "tracker-intake", false, "Enable issue-tracker intake for matching issues (see --tracker-provider)")
+	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
+	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
+	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
 	f.StringVar(&opts.configJSON, "config-json", "", "Full config as a JSON object (overrides field flags)")
 	f.BoolVar(&opts.clear, "clear", false, "Clear all config")
 	f.BoolVar(&opts.json, "json", false, "Output the updated project as JSON")
@@ -341,6 +343,10 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 	if err != nil {
 		return projectConfig{}, err
 	}
+	trackerProvider, err := resolveTrackerProvider(opts)
+	if err != nil {
+		return projectConfig{}, err
+	}
 	cfg := projectConfig{
 		DefaultBranch: opts.defaultBranch,
 		SessionPrefix: opts.sessionPrefix,
@@ -352,7 +358,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 		Orchestrator:  roleOverride{Agent: opts.orchestratorAgent},
 		TrackerIntake: trackerIntakeConfig{
 			Enabled:  opts.trackerIntake,
-			Provider: trackerProviderForFlags(opts),
+			Provider: trackerProvider,
 			Repo:     opts.trackerRepo,
 			Assignee: opts.trackerAssignee,
 		},
@@ -363,11 +369,22 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 	return cfg, nil
 }
 
-func trackerProviderForFlags(opts projectSetConfigOptions) string {
-	if opts.trackerIntake || opts.trackerRepo != "" || opts.trackerAssignee != "" {
-		return "github"
+// resolveTrackerProvider picks the issue-tracker provider from
+// --tracker-provider, defaulting to "github" when any tracker flag is set
+// without an explicit provider (keeps the pre-GitLab behavior). An unknown
+// value is a usage error.
+func resolveTrackerProvider(opts projectSetConfigOptions) (string, error) {
+	switch p := strings.ToLower(strings.TrimSpace(opts.trackerProvider)); p {
+	case "":
+		if opts.trackerIntake || opts.trackerRepo != "" || opts.trackerAssignee != "" {
+			return "github", nil
+		}
+		return "", nil
+	case "github", "gitlab":
+		return p, nil
+	default:
+		return "", usageError{fmt.Errorf("--tracker-provider must be github or gitlab, got %q", opts.trackerProvider)}
 	}
-	return ""
 }
 
 // parseEnvPairs turns repeated KEY=VALUE flags into a map.

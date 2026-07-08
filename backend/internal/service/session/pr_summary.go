@@ -123,6 +123,20 @@ func (s *Service) ListPRSummaries(ctx context.Context, id domain.SessionID) ([]P
 	return out, nil
 }
 
+// providerForPRSummary returns the stored provider, or derives it from the URL
+// shape when a (legacy/unpopulated) row has no provider: a GitLab merge-request
+// URL carries "/-/merge_requests/", anything else defaults to GitHub. This keeps
+// a GitLab MR from being mislabeled "github" in the display path.
+func providerForPRSummary(pr domain.PullRequest) string {
+	if p := strings.TrimSpace(pr.Provider); p != "" {
+		return p
+	}
+	if strings.Contains(pr.URL, "/-/merge_requests/") {
+		return "gitlab"
+	}
+	return "github"
+}
+
 func summarizePR(pr domain.PullRequest, checks []domain.PullRequestCheck, reviews []domain.PullRequestReview, threads []domain.PullRequestReviewThread, comments []domain.PullRequestComment) PRSummary {
 	return PRSummary{
 		URL:              pr.URL,
@@ -130,7 +144,7 @@ func summarizePR(pr domain.PullRequest, checks []domain.PullRequestCheck, review
 		Number:           pr.Number,
 		Title:            pr.Title,
 		State:            pullRequestState(pr),
-		Provider:         firstNonEmpty(pr.Provider, "github"),
+		Provider:         providerForPRSummary(pr),
 		Repo:             pr.Repo,
 		Author:           pr.Author,
 		SourceBranch:     pr.SourceBranch,

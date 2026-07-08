@@ -48,6 +48,7 @@ const (
 	doctorSectionTools          = "Tools"
 	doctorSectionAgents         = "Agent harnesses"
 	doctorSectionGitHub         = "GitHub"
+	doctorSectionGitLab         = "GitLab"
 	minGitVersion               = "2.25.0"
 	githubDoctorUserAgent       = "ao-agent-orchestrator/doctor"
 	defaultDoctorGitHubRESTBase = "https://api.github.com"
@@ -175,7 +176,25 @@ func (c *commandContext) runDoctor(ctx context.Context) []doctorCheck {
 		checks = append(checks, c.checkHarness(ctx, harness))
 	}
 	checks = append(checks, c.checkCodexLaunchFlags(ctx), c.checkGitHubToken(ctx))
+	// GitLab is only wired when AO_GITLAB_HOST names a host (see the daemon's
+	// buildSCMEntries). Only probe GitLab when it is configured, so GitHub-only
+	// setups get no spurious GitLab section. AO_GITLAB_HOST may list multiple
+	// hosts; the daemon uses the first, so doctor probes the first too.
+	if host := firstGitLabHost(os.Getenv("AO_GITLAB_HOST")); host != "" {
+		checks = append(checks, c.checkGitLabToken(ctx, host))
+	}
 	return checks
+}
+
+// firstGitLabHost returns the first non-empty, trimmed host from a
+// comma-separated AO_GITLAB_HOST value, or "" when none is configured.
+func firstGitLabHost(raw string) string {
+	for _, part := range strings.Split(raw, ",") {
+		if host := strings.TrimSpace(part); host != "" {
+			return host
+		}
+	}
+	return ""
 }
 
 // checkStore inspects the SQLite store WITHOUT opening or migrating it. The
@@ -495,6 +514,99 @@ func (c *commandContext) githubToken(ctx context.Context) (token, source string,
 		return "", "", errors.New("gh is installed but returned an empty auth token")
 	}
 	return token, "gh", nil
+}
+
+// checkGitLabToken validates that the configured GitLab host has a usable token
+// by probing its REST v4 /user endpoint, mirroring checkGitHubToken. It runs
+// only when AO_GITLAB_HOST is set.
+func (c *commandContext) checkGitLabToken(ctx context.Context, host string) doctorCheck {
+	token, source, err := c.gitlabToken(ctx, host)
+	if err != nil {
+		return doctorCheck{Level: doctorWarn, Section: doctorSectionGitLab, Name: "gitlab-token", Message: err.Error()}
+	}
+
+	base := strings.TrimRight(c.deps.DoctorGitLabRESTBase, "/")
+	if base == "" {
+		base = "https://" + host + "/api/v4"
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, base+"/user", http.NoBody)
+	if err != nil {
+		return doctorCheck{Level: doctorFail, Section: doctorSectionGitLab, Name: "gitlab-token", Message: err.Error()}
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", githubDoctorUserAgent)
+	req.Header.Set("PRIVATE-TOKEN", token)
+	resp, err := c.deps.HTTPClient.Do(req)
+	if err != nil {
+		return doctorCheck{Level: doctorFail, Section: doctorSectionGitLab, Name: "gitlab-token", Message: fmt.Sprintf("%s token validation failed: %v", source, err)}
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return doctorCheck{Level: doctorFail, Section: doctorSectionGitLab, Name: "gitlab-token", Message: fmt.Sprintf("%s token rejected by GitLab %s (HTTP %d)", source, host, resp.StatusCode)}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return doctorCheck{Level: doctorWarn, Section: doctorSectionGitLab, Name: "gitlab-token", Message: fmt.Sprintf("%s token probe returned HTTP %d", source, resp.StatusCode)}
+	}
+
+	var user struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return doctorCheck{Level: doctorFail, Section: doctorSectionGitLab, Name: "gitlab-token", Message: fmt.Sprintf("%s token probe decode failed: %v", source, err)}
+	}
+	login := user.Username
+	if login == "" {
+		login = "unknown user"
+	}
+	return doctorCheck{Level: doctorPass, Section: doctorSectionGitLab, Name: "gitlab-token", Message: fmt.Sprintf("%s token valid for %s on %s", source, login, host)}
+}
+
+// gitlabToken resolves a GitLab token for the doctor probe: AO_GITLAB_TOKEN
+// first, then `glab auth status --show-token --hostname <host>` (mirroring the
+// daemon's GlabTokenSource precedence).
+func (c *commandContext) gitlabToken(ctx context.Context, host string) (token, source string, err error) {
+	if v := strings.TrimSpace(os.Getenv("AO_GITLAB_TOKEN")); v != "" {
+		return v, "AO_GITLAB_TOKEN", nil
+	}
+	path, lookErr := c.deps.LookPath("glab")
+	if lookErr != nil || path == "" {
+		return "", "", errors.New("no GitLab token found (set AO_GITLAB_TOKEN or run `glab auth login`)")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	out, cmdErr := c.deps.CommandOutput(reqCtx, path, "auth", "status", "--show-token", "--hostname", host)
+	if cmdErr != nil {
+		return "", "", fmt.Errorf("glab is installed but no token was available (`glab auth status` failed: %w)", cmdErr)
+	}
+	if tok := parseGlabDoctorToken(string(out)); tok != "" {
+		return tok, "glab", nil
+	}
+	return "", "", errors.New("glab is installed but no token was found in `glab auth status --show-token`")
+}
+
+// parseGlabDoctorToken extracts the token from `glab auth status --show-token`
+// output, mirroring the daemon adapter's parser: the trimmed text after the
+// last colon on a line mentioning "Token", skipping masked (asterisked) tokens.
+func parseGlabDoctorToken(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "Token") {
+			continue
+		}
+		idx := strings.LastIndex(line, ":")
+		if idx < 0 {
+			continue
+		}
+		if tok := strings.TrimSpace(line[idx+1:]); tok != "" && !strings.Contains(tok, "*") {
+			return tok
+		}
+	}
+	return ""
 }
 
 var (
