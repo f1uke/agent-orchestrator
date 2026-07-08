@@ -880,6 +880,33 @@ func TestPoll_ReviewPollingRespectsInterval(t *testing.T) {
 	}
 }
 
+// TestPoll_ReviewPollingPeriodicForNonChangesRequested locks in that review
+// threads are re-polled on the review interval for ANY open PR, not only when
+// the decision is "changes requested". Review threads (unresolved comments,
+// resolutions) change with no accompanying metadata/CI change, and providers
+// like GitLab never surface a changes_requested decision — so gating periodic
+// re-polling on that decision froze GitLab MR review state after the first
+// fetch (an added comment never appeared).
+func TestPoll_ReviewPollingPeriodicForNonChangesRequested(t *testing.T) {
+	store := testStoreWithSession()
+	local := knownPR(1)
+	local.Review = domain.ReviewNone
+	local.ReviewHash = "old-review"
+	store.prs["p-1"] = []domain.PullRequest{local}
+	// Repo guard NotModified => no metadata refresh; isolates the review re-poll.
+	provider := &fakeProvider{repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo", NotModified: true}}, observations: map[string]ports.SCMObservation{}, reviews: map[string]ports.SCMReviewObservation{prKey(testRepo, 1): {Decision: string(domain.ReviewNone), Threads: []ports.SCMReviewThreadObservation{{ID: "t1", Path: "f.go", Line: 1, Comments: []ports.SCMReviewCommentObservation{{ID: "c1", Body: "please fix"}}}}}}}
+	obs := newTestObserver(store, provider, &fakeLifecycle{}, time.Unix(1000, 0).UTC())
+	obs.Cache.RepoPRListETag[prKey(testRepo, 0)] = "repo"
+	// Last poll well beyond the 120s review interval.
+	obs.Cache.LastReviewPollAt[prKey(testRepo, 1)] = time.Unix(800, 0).UTC()
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if provider.reviewCalls != 1 {
+		t.Fatalf("review not re-polled for a non-changes_requested PR past the interval: reviewCalls=%d", provider.reviewCalls)
+	}
+}
+
 func TestPoll_UnchangedHashesDoNotWriteOrNotify(t *testing.T) {
 	store := testStoreWithSession()
 	obsValue := testObs(1)
