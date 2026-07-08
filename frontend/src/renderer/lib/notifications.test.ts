@@ -139,6 +139,27 @@ describe("createNotificationsTransport", () => {
 		});
 	});
 
+	it("still shows a native banner when a REST refetch already put the notification in the cache", () => {
+		// Regression for native banners silently dropping while the app was
+		// focused: an unread-notifications refetch (daemon-status / reconnect
+		// invalidation) can land the notification in the cache before its
+		// notification_created event is processed. The banner must fire off the
+		// creation event, not off whether the cache insertion was new.
+		const qc = queryClient();
+		mergeUnreadNotification(qc, notification());
+
+		createNotificationsTransport(qc).connect();
+		EventSourceStub.instances[0].dispatch("notification_created", notification());
+
+		expect(showNotificationMock).toHaveBeenCalledTimes(1);
+		expect(showNotificationMock).toHaveBeenCalledWith({
+			id: "ntf_1",
+			title: "checkout-flow needs input",
+			body: "The agent is waiting for your response.",
+			route: { kind: "session", prUrl: undefined, sessionId: "mer-1", projectId: "mer" },
+		});
+	});
+
 	it("reconnects when the API base URL changes", () => {
 		createNotificationsTransport(queryClient()).connect();
 		const onBaseUrlChange = subscribeApiBaseUrlMock.mock.calls[0][0] as () => void;

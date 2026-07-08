@@ -73,6 +73,17 @@ export function createNotificationsTransport(queryClient: QueryClient) {
 			let retryTimer: ReturnType<typeof setTimeout> | undefined;
 			let source: EventSource | undefined;
 			let sourceBaseUrl: string | undefined;
+			// Ids we have already raised a native banner for. The banner must fire
+			// once per created notification, driven by the notification_created
+			// event — NOT by whether mergeUnreadNotification saw it as new. The
+			// unread-notifications cache is also populated by REST refetches
+			// (daemon-status / reconnect invalidations), so a refetch that landed
+			// the notification first would make the insertion non-new and silently
+			// swallow the banner (the "native banner missing while focused" bug).
+			// The stream is a live subscription with no Last-Event-ID replay, so an
+			// id we have not seen here is always a genuinely new notification;
+			// spans reconnects because it lives for the transport's lifetime.
+			const bannered = new Set<string>();
 
 			const invalidateUnread = () => {
 				void queryClient.invalidateQueries({ queryKey: unreadNotificationsQueryKey });
@@ -102,15 +113,15 @@ export function createNotificationsTransport(queryClient: QueryClient) {
 					source.addEventListener("notification_created", (event) => {
 						const notification = parseNotificationEvent(event);
 						if (!notification) return;
-						const inserted = mergeUnreadNotification(queryClient, notification);
-						if (inserted) {
-							void aoBridge.notifications.show({
-								id: notification.id,
-								title: notification.title,
-								body: notification.body || undefined,
-								route: notificationRoute(notification),
-							});
-						}
+						mergeUnreadNotification(queryClient, notification);
+						if (bannered.has(notification.id)) return;
+						bannered.add(notification.id);
+						void aoBridge.notifications.show({
+							id: notification.id,
+							title: notification.title,
+							body: notification.body || undefined,
+							route: notificationRoute(notification),
+						});
 					});
 				} catch {
 					source = undefined;
