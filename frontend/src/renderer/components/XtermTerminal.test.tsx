@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
 	lastTerminal: null as null | {
 		keyHandler?: (event: KeyboardEvent) => boolean;
 		wheelHandler?: (event: WheelEvent) => boolean;
+		focus: ReturnType<typeof vi.fn>;
 		selection: string;
 		options: Record<string, unknown>;
 		modes: { bracketedPasteMode: boolean; mouseTrackingMode: string };
@@ -31,6 +32,7 @@ vi.mock("@xterm/xterm", () => ({
 		selection = "";
 		keyHandler?: (event: KeyboardEvent) => boolean;
 		wheelHandler?: (event: WheelEvent) => boolean;
+		focus = vi.fn();
 		modes = { bracketedPasteMode: false, mouseTrackingMode: "vt200" };
 		dataListeners = new Set<(data: string) => void>();
 		keyListeners = new Set<(event: { key: string }) => void>();
@@ -595,5 +597,15 @@ describe("XtermTerminal", () => {
 		expect(state.lastTerminal!._core._selectionService.enable).toHaveBeenCalled();
 		expect(state.lastTerminal!._core.element.classList.remove).toHaveBeenCalledWith("enable-mouse-events");
 		expect(state.lastTerminal!._core._selectionService.shouldForceSelection({} as MouseEvent)).toBe(true);
+	});
+
+	it("focuses the terminal on a pointer press anywhere in the host, so one click is enough to type after using another control", () => {
+		const { container } = render(<XtermTerminal theme="dark" />);
+		const host = container.firstElementChild as HTMLElement;
+
+		expect(state.lastTerminal!.focus).not.toHaveBeenCalled();
+		host.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+		expect(state.lastTerminal!.focus).toHaveBeenCalled();
 	});
 });

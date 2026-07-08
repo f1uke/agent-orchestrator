@@ -396,6 +396,15 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			event.preventDefault();
 			event.stopPropagation();
 		};
+		// A pointer press anywhere in the terminal host focuses the terminal, so a
+		// single click is enough to start typing even when focus was elsewhere — a
+		// top-bar button, or a popover/dropdown/dialog that the same click just
+		// dismissed. xterm focuses its helper textarea when you press on its screen,
+		// but not reliably on host padding or right after an overlay yielded focus;
+		// this makes the whole surface reclaim focus on one click. It never
+		// preventDefaults, so drag-to-select is untouched.
+		const focusTerminal = () => term.focus();
+		host.addEventListener("mousedown", focusTerminal);
 		host.addEventListener("copy", copyInput);
 		window.addEventListener("keydown", copyShortcut, true);
 		const selectionChange = term.onSelectionChange(() => {
@@ -582,6 +591,7 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			observer.disconnect();
 			stabilizer.dispose();
 			window.removeEventListener("resize", fitTerminal);
+			host.removeEventListener("mousedown", focusTerminal);
 			host.removeEventListener("copy", copyInput);
 			window.removeEventListener("keydown", copyShortcut, true);
 			selectionChange.dispose();

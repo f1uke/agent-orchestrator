@@ -229,6 +229,21 @@ select {
 	cursor: not-allowed;
 }
 
+/*
+ * Focus rings are for keyboard navigation only. A plain mouse/touch press must
+ * never leave a lingering outline — only :focus-visible (keyboard, or an
+ * assistive modality) shows one. App-wide defense-in-depth so EVERY control
+ * behaves the same: the shadcn primitives already gate their ring on
+ * :focus-visible, but the hand-rolled topbar / inspector / card buttons fall
+ * back to the UA outline, and this suppresses it on non-keyboard focus. The
+ * keyboard ring (:focus-visible) is untouched, so tabbing still shows a clear
+ * indicator. Overlay triggers additionally rely on the shared dismiss-focus
+ * guard (see lib/overlay-focus.ts) so a mouse dismiss doesn't re-focus them.
+ */
+:focus:not(:focus-visible) {
+	outline: none;
+}
+
 .xterm {
 	height: 100%;
 }

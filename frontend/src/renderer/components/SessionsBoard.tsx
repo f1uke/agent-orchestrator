@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, Plus, RotateCw, Trash2 } from "lucide-react";
+import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { DashboardSubhead } from "./DashboardSubhead";
 import {
 	type AttentionZone,
@@ -470,6 +471,10 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 		},
 	});
 
+	// An outside pointer press that closes the confirm dialog must not yank focus
+	// back to the "Clear all" trigger (stray ring); keyboard closes still restore it.
+	const dismissFocus = useOverlayDismissFocus();
+
 	return (
 		<>
 			<button
@@ -487,7 +492,10 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 			<Dialog.Root open={open} onOpenChange={setOpen}>
 				<Dialog.Portal>
 					<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-					<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
+					<Dialog.Content
+						{...dismissFocus}
+						className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
+					>
 						<Dialog.Title className="text-sm font-medium text-foreground">Clear all finished sessions</Dialog.Title>
 						<Dialog.Description className="mt-2 text-[13px] text-muted-foreground">
 							Permanently remove {sessions.length} finished session(s) from AO. Their git branches are kept.

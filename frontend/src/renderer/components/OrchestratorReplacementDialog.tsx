@@ -1,6 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, RotateCw, X } from "lucide-react";
+import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { findProjectOrchestrator, type WorkspaceSummary } from "../types/workspace";
 
 type OrchestratorReplacementDialogProps = {
@@ -31,11 +32,18 @@ export function OrchestratorReplacementDialog({
 		});
 	};
 
+	// An outside pointer press that closes the dialog must not yank focus back to
+	// its trigger (stray ring); keyboard closes still restore it.
+	const dismissFocus = useOverlayDismissFocus();
+
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
+				<Dialog.Content
+					{...dismissFocus}
+					className="fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
+				>
 					<div className="flex items-start gap-3">
 						<div className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-surface-subtle text-warning">
 							<AlertTriangle className="size-4" aria-hidden="true" />

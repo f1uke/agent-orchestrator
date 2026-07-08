@@ -8,6 +8,7 @@ import { BranchCombobox } from "./BranchCombobox";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { captureRendererEvent } from "../lib/telemetry";
 import type { AgentProvider } from "../types/workspace";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
@@ -137,11 +138,18 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		}
 	};
 
+	// An outside pointer press that closes the dialog must not yank focus back to
+	// the "New task" trigger (stray ring); keyboard closes still restore it.
+	const dismissFocus = useOverlayDismissFocus();
+
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-overlay-in" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in">
+				<Dialog.Content
+					{...dismissFocus}
+					className="fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in"
+				>
 					<div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
 						<div className="min-w-0">
 							<Dialog.Title className="text-[15px] font-semibold text-foreground">New task</Dialog.Title>

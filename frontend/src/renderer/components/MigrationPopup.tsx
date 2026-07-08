@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "./ui/button";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { aoBridge } from "../lib/bridge";
+import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { migrationOfferQueryKey, useMigrationOffer } from "../hooks/useMigrationOffer";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 
@@ -19,6 +20,10 @@ export function MigrationPopup() {
 	const [skipped, setSkipped] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>();
+	// An outside pointer press that closes the popup must not yank focus back to
+	// its opener (stray ring); keyboard closes still restore it. Declared before
+	// the early return below so the hook runs on every render.
+	const dismissFocus = useOverlayDismissFocus();
 
 	const open = (offer.data?.show ?? false) && !skipped;
 	if (!open) return null;
@@ -66,7 +71,10 @@ export function MigrationPopup() {
 		>
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
+				<Dialog.Content
+					{...dismissFocus}
+					className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
+				>
 					<Dialog.Title className="text-sm font-medium text-foreground">
 						Import projects from your earlier AO?
 					</Dialog.Title>
