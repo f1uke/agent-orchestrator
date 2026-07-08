@@ -47,13 +47,27 @@ func (n Name) Valid() bool {
 }
 
 // ReviewCommentData is the render context for NameReviewCommentDispatch.
-type ReviewCommentData struct{ Comments string }
+// PRIdentity/PRURL identify which PR the feedback is on (a session may own
+// several); PRIdentity is empty only for the zero value, where the default
+// template falls back to "your PR".
+type ReviewCommentData struct {
+	PRIdentity string
+	PRURL      string
+	Comments   string
+}
 
 // CIFailingData is the render context for NameCIFailing.
-type CIFailingData struct{ LogTail string }
+type CIFailingData struct {
+	PRIdentity string
+	PRURL      string
+	LogTail    string
+}
 
-// MergeConflictData is the (empty) render context for NameMergeConflict.
-type MergeConflictData struct{}
+// MergeConflictData is the render context for NameMergeConflict.
+type MergeConflictData struct {
+	PRIdentity string
+	PRURL      string
+}
 
 // TrackerBotData is the render context for NameTrackerBotComment.
 type TrackerBotData struct{ Comments string }
@@ -86,12 +100,14 @@ type AOReviewerSingleData struct {
 // settings editor. Unknown names return nil.
 func Placeholders(n Name) []string {
 	switch n {
-	case NameReviewCommentDispatch, NameTrackerBotComment:
+	case NameReviewCommentDispatch:
+		return []string{"{{.PRIdentity}}", "{{.PRURL}}", "{{.Comments}}"}
+	case NameTrackerBotComment:
 		return []string{"{{.Comments}}"}
 	case NameCIFailing:
-		return []string{"{{.LogTail}}"}
+		return []string{"{{.PRIdentity}}", "{{.PRURL}}", "{{.LogTail}}"}
 	case NameMergeConflict:
-		return nil
+		return []string{"{{.PRIdentity}}", "{{.PRURL}}"}
 	case NameAOReviewerBatch:
 		return []string{"{{.Count}}", "{{range .Reviews}}", "{{.Index}}", "{{.PRURL}}", "{{.Verdict}}", "{{.TargetSHA}}", "{{.ReviewID}}", "{{.Body}}", "{{end}}"}
 	case NameAOReviewerSingle:
@@ -135,11 +151,11 @@ func Execute(tmplText string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-const reviewCommentDefault = "A reviewer left feedback on your PR. Address it and push.{{if .Comments}}\n\n{{.Comments}}{{end}}"
+const reviewCommentDefault = "A reviewer left feedback on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address it and push.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}{{if .Comments}}\n\n{{.Comments}}{{end}}"
 
-const ciFailingDefault = "CI is failing on your PR. Review the output below and push a fix.{{if .LogTail}}\n\nFailing output:\n{{.LogTail}}{{end}}"
+const ciFailingDefault = "CI is failing on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Review the output below and push a fix.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}{{if .LogTail}}\n\nFailing output:\n{{.LogTail}}{{end}}"
 
-const mergeConflictDefault = "Your PR has merge conflicts. Rebase onto the base branch and resolve them."
+const mergeConflictDefault = "{{if .PRIdentity}}There are merge conflicts on {{.PRIdentity}}.{{else}}Your PR has merge conflicts.{{end}} Rebase onto the base branch and resolve them.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}"
 
 const trackerBotDefault = "A bot left a new comment on your tracker issue. Address it and update the session.{{if .Comments}}\n\n{{.Comments}}{{end}}"
 
