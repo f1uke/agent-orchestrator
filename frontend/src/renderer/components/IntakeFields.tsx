@@ -8,17 +8,21 @@ type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 // IntakeForm is the flat, string-backed shape both the create sheet and the
 // project settings form edit. repo has no input today (it's derived from the
 // git origin server-side) but is plumbed so a value set via the CLI
-// (--tracker-repo) survives a UI save instead of being wiped.
+// (--tracker-repo) survives a UI save instead of being wiped. provider mirrors
+// the project's SCM (github vs a self-hosted GitLab); the settings form derives
+// it from the git origin host rather than asking, matching how the daemon
+// routes intake (observer.go trackerRepo).
 export type IntakeForm = {
 	enabled: boolean;
+	provider: TrackerProvider;
 	repo: string;
 	assignee: string;
 };
 
-// Only "github" is a valid TrackerIntakeConfig["provider"] today (see the
-// backend's openapi enum). Adding Linear/Jira later means: the backend enum
-// grows, IntakeFields gains a provider <Select> + per-provider scope fields,
-// and buildIntake switches the scope field it emits.
+// The tracker providers intake supports today (backend openapi enum
+// TrackerIntakeConfig.provider). Adding Linear/Jira later grows this union and
+// buildIntake switches the scope field it emits.
+type TrackerProvider = NonNullable<TrackerIntakeConfig["provider"]>;
 
 // intakeNeedsRule mirrors the backend guard (TrackerIntakeConfig.Validate):
 // enabling intake requires an assignee so it cannot drain an entire issue
@@ -33,18 +37,17 @@ export function intakeNeedsRule(form: IntakeForm): boolean {
 export function buildIntake(form: IntakeForm): TrackerIntakeConfig | undefined {
 	const next: TrackerIntakeConfig = {
 		enabled: form.enabled || undefined,
-		provider: form.enabled ? "github" : undefined,
+		provider: form.enabled ? form.provider : undefined,
 		repo: form.repo.trim() || undefined,
 		assignee: form.assignee.trim() || undefined,
 	};
 	return Object.values(next).some((v) => v !== undefined) ? next : undefined;
 }
 
-// deriveGitHubRepo mirrors the daemon's parseGitHubRepoNative (observer.go):
-// derive "owner/repo" from a git origin URL for display only. The daemon does
-// the authoritative derivation server-side at poll time; this is purely so a
-// settings card can show which repo intake will actually poll.
-export function deriveGitHubRepo(remote?: string): string | undefined {
+// originPath extracts the repository path (no host, no trailing ".git") from a
+// git origin URL in any of the common forms: git@host:group/proj.git,
+// https://host/group/proj.git, or ssh://git@host/group/proj.git.
+function originPath(remote?: string): string | undefined {
 	const trimmed = remote?.trim();
 	if (!trimmed) return undefined;
 	let path: string | undefined;
@@ -58,14 +61,80 @@ export function deriveGitHubRepo(remote?: string): string | undefined {
 		}
 	}
 	if (!path) return undefined;
-	const parts = path
-		.replace(/\.git$/, "")
-		.replace(/^\/+|\/+$/g, "")
-		.split("/");
+	const cleaned = path.replace(/\.git$/, "").replace(/^\/+|\/+$/g, "");
+	return cleaned || undefined;
+}
+
+// originHost extracts the hostname from a git origin URL (git@host:..., or any
+// URL form). Returns undefined when no host can be determined.
+export function originHost(remote?: string): string | undefined {
+	const trimmed = remote?.trim();
+	if (!trimmed) return undefined;
+	if (trimmed.startsWith("git@")) {
+		const host = trimmed.slice(4).split(":")[0].trim();
+		return host || undefined;
+	}
+	try {
+		return new URL(trimmed).host || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+// providerFromOrigin classifies a git origin as github or gitlab by inspecting
+// its host — not the whole URL, so a GitHub repo merely named "gitlab-*" is not
+// misread. github.com / GHES hosts are GitHub; a host containing "gitlab" is a
+// self-hosted GitLab. The frontend cannot know AO_GITLAB_HOST, so anything else
+// falls back to github (the daemon still routes authoritatively server-side).
+export function providerFromOrigin(remote?: string): TrackerProvider {
+	const host = originHost(remote)
+		?.toLowerCase()
+		.replace(/^www\./, "");
+	if (!host) return "github";
+	if (host === "github.com" || host.endsWith(".github.com") || host.endsWith(".ghe.io")) return "github";
+	if (host.includes("gitlab")) return "gitlab";
+	return "github";
+}
+
+// deriveGitHubRepo mirrors the daemon's parseGitHubRepoNative (observer.go):
+// derive "owner/repo" from a git origin URL for display only. The daemon does
+// the authoritative derivation server-side at poll time; this is purely so a
+// settings card can show which repo intake will actually poll.
+export function deriveGitHubRepo(remote?: string): string | undefined {
+	const path = originPath(remote);
+	if (!path) return undefined;
+	const parts = path.split("/");
 	if (parts.length < 2) return undefined;
 	const owner = parts[parts.length - 2].trim();
 	const repo = parts[parts.length - 1].trim();
 	return owner && repo ? `${owner}/${repo}` : undefined;
+}
+
+// deriveGitLabRepo mirrors the daemon's parseGitLabRepoNative (observer.go):
+// GitLab supports nested groups, so the full "group/sub/proj" path is preserved
+// rather than truncated to two segments.
+export function deriveGitLabRepo(remote?: string): string | undefined {
+	const path = originPath(remote);
+	if (!path || !path.includes("/")) return undefined;
+	const segments = path.split("/");
+	if (segments.some((seg) => seg.trim() === "")) return undefined;
+	return path;
+}
+
+// deriveTrackerRepo returns the provider-native repo key for display, matching
+// the daemon's per-provider derivation.
+export function deriveTrackerRepo(remote: string | undefined, provider: TrackerProvider): string | undefined {
+	return provider === "gitlab" ? deriveGitLabRepo(remote) : deriveGitHubRepo(remote);
+}
+
+// deriveRepoWebURL builds the browser URL for the intake repo (both providers),
+// used to link the repo-preview row. Returns undefined when the origin lacks a
+// host or a usable path.
+export function deriveRepoWebURL(remote?: string): string | undefined {
+	const host = originHost(remote);
+	if (!host) return undefined;
+	const path = deriveTrackerRepo(remote, providerFromOrigin(remote));
+	return path ? `https://${host}/${path}` : undefined;
 }
 
 // IntakeFields renders the shared "Tracker intake" controls: an enable checkbox
@@ -85,7 +154,7 @@ export function IntakeFields({
 }: {
 	form: IntakeForm;
 	onChange: (patch: Partial<IntakeForm>) => void;
-	repoPreview?: { value?: string };
+	repoPreview?: { value?: string; url?: string };
 	// compact drops the descriptive/help prose and folds the explanation into an
 	// info-icon tooltip — used by the create-project sheet, which stays minimal.
 	compact?: boolean;
@@ -120,7 +189,7 @@ export function IntakeFields({
 									<Info className="size-3.5" aria-hidden="true" />
 								</button>
 							</TooltipTrigger>
-							<TooltipContent>Auto-spawns a worker session for each matching GitHub issue.</TooltipContent>
+							<TooltipContent>Auto-spawns a worker session for each matching tracker issue.</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
 				)}
@@ -130,17 +199,21 @@ export function IntakeFields({
 					{repoPreview && (
 						<IntakeField label="Repository">
 							{repoPreview.value ? (
-								<a
-									href={`https://github.com/${repoPreview.value}`}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="text-[13px] text-accent hover:underline"
-								>
-									{repoPreview.value}
-								</a>
+								repoPreview.url ? (
+									<a
+										href={repoPreview.url}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-[13px] text-accent hover:underline"
+									>
+										{repoPreview.value}
+									</a>
+								) : (
+									<span className="text-[13px] text-foreground">{repoPreview.value}</span>
+								)
 							) : (
 								<span className="text-[13px] text-muted-foreground">
-									Could not detect a GitHub repo from this project's git origin.
+									Could not detect a tracker repo from this project's git origin.
 								</span>
 							)}
 						</IntakeField>

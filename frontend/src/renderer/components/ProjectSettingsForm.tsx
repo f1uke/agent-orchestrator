@@ -9,7 +9,15 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { newestActiveOrchestrator } from "../types/workspace";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import { DashboardSubhead } from "./DashboardSubhead";
-import { buildIntake, deriveGitHubRepo, IntakeFields, type IntakeForm, intakeNeedsRule } from "./IntakeFields";
+import {
+	buildIntake,
+	deriveRepoWebURL,
+	deriveTrackerRepo,
+	IntakeFields,
+	type IntakeForm,
+	intakeNeedsRule,
+	providerFromOrigin,
+} from "./IntakeFields";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Label } from "./ui/label";
@@ -73,16 +81,16 @@ export function ProjectSettingsForm({ projectId }: { projectId: string }) {
 // only id/kind/name/path/repo/config/workspaceRepos, where "kind" is
 // single_repo|workspace (workspace shape), not an SCM provider. The daemon
 // resolves GitLab vs GitHub server-side from the git origin host (see
-// gitlab.Provider.Host in backend/internal/adapters/scm/gitlab/provider.go),
-// so mirror that here client-side purely for display, the same way
-// deriveGitHubRepo (IntakeFields.tsx) already parses project.repo.
-const isGitLab = (repo: string | undefined) => /gitlab/i.test(repo ?? "");
+// gitlab.Provider.Host in backend/internal/adapters/scm/gitlab/provider.go), so
+// mirror that here client-side purely for display via providerFromOrigin, which
+// inspects the origin host rather than substring-matching the whole URL.
 
 function SettingsBody({ project, projectId, onSaved }: { project: Project; projectId: string; onSaved: () => void }) {
 	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
 	const config = project.config ?? {};
-	const isGitLabProject = isGitLab(project.repo);
+	const projectProvider = providerFromOrigin(project.repo);
+	const isGitLabProject = projectProvider === "gitlab";
 	const workspace = workspaceQuery.data?.find((item) => item.id === projectId);
 	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
 	const intake: TrackerIntakeConfig = config.trackerIntake ?? {};
@@ -112,11 +120,15 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 	});
 
 	// The Electron app only registers git projects today, so the daemon always has a usable
-	// git origin to derive owner/repo from (trackerRepo() in observer.go) when
+	// git origin to derive the repo/provider from (trackerRepo() in observer.go) when
 	// trackerIntake.repo is unset — there's no manual override input here. This mirrors that
 	// same derivation client-side purely for display (a link to the repo being polled).
+	// Intake provider follows the project's SCM, derived from the git origin, except when a
+	// provider was explicitly stored via the CLI (--tracker-provider), which is respected.
+	const intakeProvider = intake.provider ?? projectProvider;
 	const intakeForm: IntakeForm = {
 		enabled: form.intakeEnabled,
+		provider: intakeProvider,
 		repo: form.intakeRepo,
 		assignee: form.intakeAssignee,
 	};
@@ -127,7 +139,10 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 			intakeRepo: patch.repo ?? f.intakeRepo,
 			intakeAssignee: patch.assignee ?? f.intakeAssignee,
 		}));
-	const effectiveIntakeRepo = form.intakeRepo.trim() || deriveGitHubRepo(project.repo);
+	const intakeRepoOverride = form.intakeRepo.trim();
+	const effectiveIntakeRepo = intakeRepoOverride || deriveTrackerRepo(project.repo, intakeProvider);
+	// Only link to the origin-derived repo; a manual override has no known web URL.
+	const intakeRepoURL = intakeRepoOverride ? undefined : deriveRepoWebURL(project.repo);
 	const intakeIncomplete = intakeNeedsRule(intakeForm);
 
 	const mutation = useMutation({
@@ -343,7 +358,11 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 					<CardTitle className="text-[13px]">Tracker intake</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<IntakeFields form={intakeForm} onChange={patchIntake} repoPreview={{ value: effectiveIntakeRepo }} />
+					<IntakeFields
+						form={intakeForm}
+						onChange={patchIntake}
+						repoPreview={{ value: effectiveIntakeRepo, url: intakeRepoURL }}
+					/>
 				</CardContent>
 			</Card>
 

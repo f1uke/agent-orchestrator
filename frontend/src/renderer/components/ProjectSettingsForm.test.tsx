@@ -364,6 +364,43 @@ describe("ProjectSettingsForm", () => {
 		});
 	});
 
+	it("saves GitLab tracker intake, deriving the nested repo path and a self-hosted link", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@gitlab.finnomena.com:group/sub/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
+
+		// Nested GitLab group path is preserved (not truncated to two segments) and the
+		// preview links to the self-hosted host, not github.com.
+		expect(screen.getByRole("link", { name: "group/sub/project-one" })).toHaveAttribute(
+			"href",
+			"https://gitlab.finnomena.com/group/sub/project-one",
+		);
+		await userEvent.type(screen.getByLabelText("Assignee"), "octocat");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.trackerIntake).toEqual({
+			enabled: true,
+			provider: "gitlab",
+			assignee: "octocat",
+		});
+	});
+
 	it("blocks save when intake is enabled with no assignee", async () => {
 		getMock.mockResolvedValue({
 			data: {
