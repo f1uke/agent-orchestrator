@@ -46,6 +46,11 @@ type ProjectConfig struct {
 	// tracker is not commented on or transitioned.
 	TrackerIntake TrackerIntakeConfig `json:"trackerIntake,omitempty"`
 
+	// GitConvention is the project's branching convention: it prefixes auto-named
+	// branches and is injected into the orchestrator/worker system prompts. Unset
+	// (workflow none) leaves branch naming and prompts unchanged.
+	GitConvention GitConventionConfig `json:"gitConvention,omitempty"`
+
 	// MinApprovals is the minimum number of approvals AO treats as "ready" when
 	// the SCM has no approval rule of its own (see PullRequest.ApprovalRuleConfigured).
 	// 0 = unset → DefaultMinApprovals. GitLab only in this version.
@@ -110,6 +115,7 @@ func (c ProjectConfig) WithDefaults() ProjectConfig {
 		c.DefaultBranch = def.DefaultBranch
 	}
 	c.TrackerIntake = c.TrackerIntake.WithDefaults()
+	c.GitConvention = c.GitConvention.WithDefaults()
 	return c
 }
 
@@ -147,6 +153,9 @@ func (c ProjectConfig) Validate() error {
 		}
 	}
 	if err := c.TrackerIntake.Validate(); err != nil {
+		return err
+	}
+	if err := c.GitConvention.Validate(); err != nil {
 		return err
 	}
 	return nil

@@ -24,7 +24,7 @@ ao spawn [flags]
 
 `--agent` is an alias for `--harness`.
 
-`--from` is required and names the existing branch the worktree starts from — omitting it fails fast without spawning. Leave `--branch` blank to let AO name the new branch from the task (the same auto-naming the UI New task modal does when "New branch name" is left empty), or pass `--branch <name>` to set it yourself.
+`--from` is required and names the existing branch the worktree starts from — omitting it fails fast without spawning. Leave `--branch` blank to let AO name the new branch from the task (the same auto-naming the UI New task modal does when "New branch name" is left empty), or pass `--branch <name>` to set it yourself. When the project configures a git branch convention (gitflow or a custom prefix), an omitted `--branch` is auto-named on-convention; your standing orchestrator instructions describe the project's prefix, base branch, and PR target.
 
 Available harnesses: `claude-code`, `codex`, `aider`, `opencode`, `grok`, `droid`, `amp`, `agy`, `crush`, `cursor`, `qwen`, `copilot`, `goose`, `auggie`, `continue`, `devin`, `cline`, `kimi`, `kiro`, `kilocode`, `vibe`, `pi`, `autohand`.
 

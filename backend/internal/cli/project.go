@@ -93,6 +93,12 @@ type trackerIntakeConfig struct {
 	Assignee string `json:"assignee,omitempty"`
 }
 
+// gitConventionConfig mirrors domain.GitConventionConfig.
+type gitConventionConfig struct {
+	Workflow     string `json:"workflow,omitempty"`
+	BranchPrefix string `json:"branchPrefix,omitempty"`
+}
+
 // projectConfig mirrors the daemon's typed domain.ProjectConfig for the CLI
 // client. The CLI sets common fields via flags and the whole object via
 // --config-json.
@@ -106,6 +112,7 @@ type projectConfig struct {
 	Worker        roleOverride        `json:"worker,omitempty"`
 	Orchestrator  roleOverride        `json:"orchestrator,omitempty"`
 	TrackerIntake trackerIntakeConfig `json:"trackerIntake,omitempty"`
+	GitConvention gitConventionConfig `json:"gitConvention,omitempty"`
 }
 
 // setConfigRequest mirrors the daemon's SetConfigInput body for
@@ -128,6 +135,8 @@ type projectSetConfigOptions struct {
 	trackerProvider   string
 	trackerRepo       string
 	trackerAssignee   string
+	gitWorkflow       string
+	branchPrefix      string
 	configJSON        string
 	clear             bool
 	json              bool
@@ -272,7 +281,8 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 		Use:   "set-config <id>",
 		Short: "Set the per-project config",
 		Long: "Replace a project's per-project config (branch, session prefix, env, " +
-			"symlinks, post-create, agent model/permissions, role overrides, tracker intake). The config " +
+			"symlinks, post-create, agent model/permissions, role overrides, tracker intake, " +
+			"git convention). The config " +
 			"is resolved when a session spawns.\n\n" +
 			"Set fields via flags, pass the whole object with --config-json, or --clear " +
 			"to remove all config.",
@@ -317,6 +327,8 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
+	f.StringVar(&opts.gitWorkflow, "git-workflow", "", "Branch convention: none (default), gitflow, or custom")
+	f.StringVar(&opts.branchPrefix, "branch-prefix", "", "Branch prefix for auto-named branches (required for custom; default feature/ for gitflow)")
 	f.StringVar(&opts.configJSON, "config-json", "", "Full config as a JSON object (overrides field flags)")
 	f.BoolVar(&opts.clear, "clear", false, "Clear all config")
 	f.BoolVar(&opts.json, "json", false, "Output the updated project as JSON")
@@ -362,6 +374,15 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 			Repo:     opts.trackerRepo,
 			Assignee: opts.trackerAssignee,
 		},
+		GitConvention: gitConventionConfig{
+			Workflow:     strings.ToLower(strings.TrimSpace(opts.gitWorkflow)),
+			BranchPrefix: opts.branchPrefix,
+		},
+	}
+	// "none" is the CLI-friendly spelling of the default (empty) workflow; the
+	// daemon stores it as unset. Normalize so `--git-workflow none` round-trips.
+	if cfg.GitConvention.Workflow == "none" {
+		cfg.GitConvention.Workflow = ""
 	}
 	if reflect.DeepEqual(cfg, projectConfig{}) {
 		return projectConfig{}, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}

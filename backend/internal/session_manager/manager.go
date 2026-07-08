@@ -260,6 +260,10 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 					gen = m.generateBranchName
 				}
 				if name, ok := gen(ctx, agent, cfg, project); ok {
+					// Apply the project's branch convention (custom prefix) to the
+					// AI-named branch before de-duping, so an omitted --branch still
+					// lands on-convention.
+					name = applyConventionPrefix(name, project.Config.GitConvention)
 					branch = ensureUniqueBranch(m.existingBranchNames(ctx, project), name)
 					autoNamed = branch != ""
 				}
@@ -1276,19 +1280,30 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig) (p
 // rather than persisting them, so a restored worker points at the orchestrator
 // that is active now, not the one from its original spawn.
 func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID) (string, error) {
+	// Resolve the project's convention so the orchestrator/worker prompts carry the
+	// branch prefix and base branch. A missing project yields a zero config, which
+	// resolves to no convention (prompts unchanged from the pre-convention default).
+	project, err := m.loadProject(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	cfg := project.Config.WithDefaults()
+	conv := cfg.GitConvention
+
 	var base string
 	switch kind {
 	case domain.KindOrchestrator:
-		base = orchestratorPrompt(projectID)
+		base = orchestratorPrompt(projectID) + orchestratorGitConventionPrompt(conv, cfg.DefaultBranch)
 	case domain.KindWorker:
 		orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)
 		if err != nil {
 			return "", err
 		}
+		worker := workerMultiPRPrompt() + workerGitConventionPrompt(conv, cfg.DefaultBranch)
 		if ok {
-			base = workerOrchestratorPrompt(orchestratorID) + "\n\n" + workerMultiPRPrompt()
+			base = workerOrchestratorPrompt(orchestratorID) + "\n\n" + worker
 		} else {
-			base = workerMultiPRPrompt()
+			base = worker
 		}
 	}
 	if base == "" {
@@ -1378,6 +1393,53 @@ You can open more than one pull request from this session. AO attributes a PR to
 - To stack a PR on top of another (so it merges after its parent), create the child branch from the parent branch and name it ` + "`<parent-branch>/<topic>`" + `, then target the parent branch in the PR. AO recognizes the stack from the branch relationship and will only nudge you to resolve conflicts on the bottom-most PR.
 
 Keep branch names within your session's branch namespace so AO can track every PR you open.`
+}
+
+// orchestratorGitConventionPrompt returns the branch-convention section injected
+// into the orchestrator prompt, or "" when the project sets no convention. This is
+// the primary mechanism: the orchestrator builds every `ao spawn`, so it must know
+// the project's prefix, base branch, and PR target to pass the right --branch/--from
+// and brief the worker. baseBranch is the project's DefaultBranch (base + PR target).
+func orchestratorGitConventionPrompt(conv domain.GitConventionConfig, baseBranch string) string {
+	if !conv.Active() {
+		return ""
+	}
+	if conv.Workflow == domain.GitWorkflowGitflow {
+		return fmt.Sprintf("\n\n"+`## Git branch convention (gitflow)
+
+This project follows gitflow. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
+`+"`ao spawn --from %[1]s --branch <type>/<topic> ...`"+`
+- `+"`feature/<topic>`"+` — new features and enhancements
+- `+"`bugfix/<topic>`"+` — bug fixes
+- `+"`hotfix/<topic>`"+` — urgent production fixes
+When the task has a Jira card key, put it uppercase right after the type, e.g. `+"`feature/STAR-2270-ecoupon-list`"+`. Tell the worker to open its pull request against `+"`%[1]s`"+`. If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
+	}
+	prefix := conv.NormalizedBranchPrefix()
+	return fmt.Sprintf("\n\n"+`## Git branch convention
+
+This project prefixes every branch with `+"`%[2]s`"+`. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
+`+"`ao spawn --from %[1]s --branch %[2]s<topic> ...`"+`
+For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sSTAR-2270-ecoupon-list`"+` when the task has a Jira card key. Tell the worker to open its pull request against `+"`%[1]s`"+`. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
+}
+
+// workerGitConventionPrompt returns the branch-convention section injected into the
+// worker prompt, or "" when the project sets no convention. It is a short standing
+// note so a worker independently keeps any branches it creates on-convention and
+// targets the right base; the namespace rules in workerMultiPRPrompt still govern
+// how sibling/stacked branches are named.
+func workerGitConventionPrompt(conv domain.GitConventionConfig, baseBranch string) string {
+	if !conv.Active() {
+		return ""
+	}
+	if conv.Workflow == domain.GitWorkflowGitflow {
+		return fmt.Sprintf("\n\n"+`## Git branch convention
+
+This project follows gitflow: name branches by type (`+"`feature/…`"+`, `+"`bugfix/…`"+`, `+"`hotfix/…`"+`) and open your pull requests against `+"`%s`"+`.`, baseBranch)
+	}
+	prefix := conv.NormalizedBranchPrefix()
+	return fmt.Sprintf("\n\n"+`## Git branch convention
+
+This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create under that prefix and open your pull requests against `+"`%[1]s`"+`.`, baseBranch, prefix)
 }
 
 // spawnEnv builds the runtime environment: the per-project env vars first, then

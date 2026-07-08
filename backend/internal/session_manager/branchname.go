@@ -105,6 +105,27 @@ func sanitizeBranchName(raw string) (string, bool) {
 	return line, true
 }
 
+// applyConventionPrefix rewrites a sanitized auto-named branch to satisfy the
+// project's git convention. For a custom workflow it replaces the namer's type
+// segment (feature/, bugfix/, …) with the configured fixed prefix while preserving
+// the Jira key and description; for gitflow and none it returns the name unchanged,
+// since the namer already emits a gitflow type. The input is a name that already
+// passed sanitizeBranchName, so the output is composed of safe ref characters.
+func applyConventionPrefix(sanitized string, cfg domain.GitConventionConfig) string {
+	if cfg.Workflow != domain.GitWorkflowCustom {
+		return sanitized
+	}
+	prefix := cfg.NormalizedBranchPrefix()
+	if prefix == "" {
+		return sanitized
+	}
+	rest := sanitized
+	if slash := strings.IndexByte(sanitized, '/'); slash >= 0 {
+		rest = sanitized[slash+1:]
+	}
+	return prefix + rest
+}
+
 // ensureUniqueBranch returns candidate, or candidate-2, candidate-3, ... until it
 // is not present in existing. Keys in existing are bare branch names (no refs/…).
 func ensureUniqueBranch(existing map[string]bool, candidate string) string {

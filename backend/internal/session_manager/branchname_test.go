@@ -1,6 +1,63 @@
 package sessionmanager
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+)
+
+func TestApplyConventionPrefix(t *testing.T) {
+	cases := []struct {
+		name      string
+		sanitized string
+		cfg       domain.GitConventionConfig
+		want      string
+	}{
+		{
+			"none leaves name untouched",
+			"feature/STAR-2271-ecoupon-result",
+			domain.GitConventionConfig{},
+			"feature/STAR-2271-ecoupon-result",
+		},
+		{
+			"gitflow leaves the inferred type untouched",
+			"bugfix/STAR-2271-fix-crash",
+			domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow, BranchPrefix: "feature/"},
+			"bugfix/STAR-2271-fix-crash",
+		},
+		{
+			"custom replaces the type but keeps jira key and desc",
+			"feature/STAR-2271-ecoupon-result",
+			domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "feat/"},
+			"feat/STAR-2271-ecoupon-result",
+		},
+		{
+			"custom normalizes a prefix without a trailing slash",
+			"bugfix/ABC-1-x",
+			domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "story"},
+			"story/ABC-1-x",
+		},
+		{
+			"custom supports a nested prefix",
+			"chore/cleanup",
+			domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "team/feat/"},
+			"team/feat/cleanup",
+		},
+		{
+			"custom with no slash in name prepends the prefix whole",
+			"cleanup",
+			domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "feat/"},
+			"feat/cleanup",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := applyConventionPrefix(c.sanitized, c.cfg); got != c.want {
+				t.Fatalf("applyConventionPrefix(%q, %+v) = %q, want %q", c.sanitized, c.cfg, got, c.want)
+			}
+		})
+	}
+}
 
 func TestExtractJiraKey(t *testing.T) {
 	cases := []struct {
