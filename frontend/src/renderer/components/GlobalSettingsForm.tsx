@@ -1,6 +1,7 @@
 import { AutoReclaimSection } from "./AutoReclaimSection";
 import { DashboardSubhead } from "./DashboardSubhead";
 import { MigrationSection } from "./MigrationSection";
+import { NotificationsSection } from "./NotificationsSection";
 import { SpawnConfirmSection } from "./SpawnConfirmSection";
 import { UpdatesSection } from "./UpdatesSection";
 
@@ -16,6 +17,7 @@ export function GlobalSettingsForm() {
 				<div className="mx-auto flex max-w-2xl flex-col gap-4">
 					<SpawnConfirmSection />
 					<AutoReclaimSection />
+					<NotificationsSection />
 					<UpdatesSection />
 					<MigrationSection />
 				</div>
