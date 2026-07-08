@@ -402,15 +402,18 @@ func ciObservation(pipeline restPipeline, jobs []restJob) ports.SCMCIObservation
 	checks := make([]ports.SCMCheckObservation, 0, len(jobs))
 	failed := make([]ports.SCMCheckObservation, 0)
 	for _, job := range jobs {
+		status := normalizeJobStatus(job.Status)
 		check := ports.SCMCheckObservation{
-			Name:       job.Name,
-			Status:     job.Status,
+			Name: job.Name,
+			// Status must be one of AO's normalized domain.PRCheckStatus values;
+			// the raw GitLab status is kept in Conclusion for detail.
+			Status:     string(status),
 			Conclusion: job.Status,
 			URL:        job.WebURL,
 			ProviderID: strconv.Itoa(job.ID),
 		}
 		checks = append(checks, check)
-		if job.Status == "failed" || job.Status == "canceled" {
+		if status == domain.PRCheckFailed || status == domain.PRCheckCancelled {
 			failed = append(failed, check)
 		}
 	}
@@ -419,6 +422,33 @@ func ciObservation(pipeline restPipeline, jobs []restJob) ports.SCMCIObservation
 		HeadSHA:      pipeline.SHA,
 		Checks:       checks,
 		FailedChecks: failed,
+	}
+}
+
+// normalizeJobStatus maps GitLab's CI job `status` enum onto AO's normalized
+// per-check status (domain.PRCheckStatus). The pr_checks.status column
+// CHECK-constrains writes to that vocabulary, so emitting GitLab's raw statuses
+// (success/canceled/running/manual/…) makes the whole PR observation write fail
+// atomically — dropping title, CI, mergeability, and observed_at for the MR.
+// Mirrors the github adapter, whose SCMCheckObservation.Status is likewise a
+// normalized domain value. This is the per-job status; normalizeCIStatus below
+// maps the pipeline-level summary onto the separate CI-summary vocabulary.
+func normalizeJobStatus(status string) domain.PRCheckStatus {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "success":
+		return domain.PRCheckPassed
+	case "failed":
+		return domain.PRCheckFailed
+	case "canceled", "cancelled":
+		return domain.PRCheckCancelled
+	case "skipped":
+		return domain.PRCheckSkipped
+	case "running", "preparing":
+		return domain.PRCheckInProgress
+	case "created", "pending", "scheduled", "waiting_for_resource", "manual":
+		return domain.PRCheckQueued
+	default:
+		return domain.PRCheckUnknown
 	}
 }
 

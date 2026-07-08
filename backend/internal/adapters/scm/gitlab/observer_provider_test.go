@@ -128,6 +128,53 @@ func TestListOpenPRsByRepoCarriesHeadRepo(t *testing.T) {
 	}
 }
 
+// TestCIObservationNormalizesJobStatus locks in that every emitted check status
+// is one of AO's normalized domain.PRCheckStatus values. The pr_checks.status
+// column CHECK-constrains writes to that vocabulary, so emitting GitLab's raw job
+// statuses (success/canceled/running/manual/…) makes the whole PR observation
+// write fail atomically — stranding the MR with no title/CI/mergeability.
+func TestCIObservationNormalizesJobStatus(t *testing.T) {
+	jobs := []restJob{
+		{ID: 1, Name: "build", Status: "success"},
+		{ID: 2, Name: "test", Status: "running"},
+		{ID: 3, Name: "deploy", Status: "canceled"},
+		{ID: 4, Name: "lint", Status: "failed"},
+		{ID: 5, Name: "manual-job", Status: "manual"},
+		{ID: 6, Name: "created-job", Status: "created"},
+		{ID: 7, Name: "skip", Status: "skipped"},
+	}
+	ci := ciObservation(restPipeline{SHA: "s1", Status: "running"}, jobs)
+
+	allowed := map[string]bool{"unknown": true, "queued": true, "in_progress": true, "passed": true, "failed": true, "skipped": true, "cancelled": true}
+	byName := map[string]ports.SCMCheckObservation{}
+	for _, c := range ci.Checks {
+		if !allowed[c.Status] {
+			t.Fatalf("check %q has non-domain status %q (would fail the pr_checks CHECK constraint)", c.Name, c.Status)
+		}
+		byName[c.Name] = c
+	}
+	if got := byName["build"].Status; got != "passed" {
+		t.Fatalf("success -> %q, want passed", got)
+	}
+	if got := byName["test"].Status; got != "in_progress" {
+		t.Fatalf("running -> %q, want in_progress", got)
+	}
+	if got := byName["deploy"].Status; got != "cancelled" {
+		t.Fatalf("canceled -> %q, want cancelled", got)
+	}
+	if got := byName["manual-job"].Status; got != "queued" {
+		t.Fatalf("manual -> %q, want queued", got)
+	}
+	// Raw provider status is preserved in Conclusion for detail.
+	if got := byName["deploy"].Conclusion; got != "canceled" {
+		t.Fatalf("Conclusion = %q, want raw 'canceled'", got)
+	}
+	// failed + canceled are the failing set.
+	if len(ci.FailedChecks) != 2 {
+		t.Fatalf("FailedChecks = %d, want 2 (failed + canceled): %+v", len(ci.FailedChecks), ci.FailedChecks)
+	}
+}
+
 func TestRepoPRListGuard304(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("If-None-Match") == `"list-1"` {
