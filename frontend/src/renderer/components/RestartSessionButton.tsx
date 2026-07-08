@@ -5,6 +5,7 @@ import { useState } from "react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { captureRendererEvent } from "../lib/telemetry";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { returnFocusToTerminal } from "../lib/terminal-focus";
 import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
 
@@ -59,7 +60,12 @@ export function RestartSessionButton({ session }: { session: WorkspaceSession })
 			</Dialog.Trigger>
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
+				<Dialog.Content
+					// Terminal-toolbar dialog: on close (Cancel, Esc, or an outside click)
+					// return the caret to the terminal so the user can keep typing.
+					onCloseAutoFocus={returnFocusToTerminal}
+					className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
+				>
 					<Dialog.Title className="text-sm font-medium text-foreground">Restart this session?</Dialog.Title>
 					<Dialog.Description className="mt-2 text-[13px] text-muted-foreground">
 						The agent restarts and reloads its system prompt, then resumes this conversation where it left off. The

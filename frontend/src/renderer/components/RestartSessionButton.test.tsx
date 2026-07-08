@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
 import { RestartSessionButton } from "./RestartSessionButton";
+import { registerTerminalFocus } from "../lib/terminal-focus";
 
 const { postMock } = vi.hoisted(() => ({
 	postMock: vi.fn(),
@@ -77,6 +78,38 @@ describe("RestartSessionButton", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
 		expect(postMock).not.toHaveBeenCalled();
+	});
+
+	it("returns focus to the terminal (not the restart trigger) when the confirm dialog closes, so the user can keep typing", async () => {
+		const focus = vi.fn();
+		const unregister = registerTerminalFocus(focus);
+		const user = userEvent.setup();
+		renderButton();
+
+		const trigger = screen.getByRole("button", { name: "Restart session" });
+		await user.click(trigger);
+		expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+		await user.keyboard("{Escape}");
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		expect(focus).toHaveBeenCalled();
+		expect(trigger).not.toHaveFocus();
+		unregister();
+	});
+
+	it("falls back to returning focus to the trigger when no terminal is mounted", async () => {
+		const user = userEvent.setup();
+		renderButton();
+
+		const trigger = screen.getByRole("button", { name: "Restart session" });
+		await user.click(trigger);
+		expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+		await user.keyboard("{Escape}");
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		expect(trigger).toHaveFocus();
 	});
 
 	it("surfaces the daemon error when the restart fails", async () => {

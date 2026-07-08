@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { registerTerminalFocus } from "../lib/terminal-focus";
 
 const { getMock, postMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
@@ -227,6 +229,29 @@ describe("NewTaskDialog", () => {
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(spawnBody().harness).toBe("kiro");
+	});
+
+	it("returns focus to the orchestrator terminal when closed without starting a task", async () => {
+		const focus = vi.fn();
+		const unregister = registerTerminalFocus(focus);
+		const user = userEvent.setup();
+
+		function Harness() {
+			const [open, setOpen] = useState(true);
+			return (
+				<QueryClientProvider client={new QueryClient()}>
+					<NewTaskDialog open={open} projectId="proj-1" onCreated={vi.fn()} onOpenChange={setOpen} />
+				</QueryClientProvider>
+			);
+		}
+		render(<Harness />);
+		await waitForAgentCatalog();
+
+		await user.click(screen.getByRole("button", { name: "Close new task dialog" }));
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		expect(focus).toHaveBeenCalled();
+		unregister();
 	});
 
 	it("requires both title and brief", async () => {

@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
+import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { isOrchestratorSession } from "../types/workspace";
 import type { WorkspaceSession } from "../types/workspace";
@@ -32,11 +33,18 @@ export function RestoreUnavailableDialog({ open, session, onOpenChange, onRecrea
 		}
 	};
 
+	// An outside pointer press that closes the dialog must not yank focus back to
+	// its trigger (stray ring); keyboard closes still restore it.
+	const dismissFocus = useOverlayDismissFocus();
+
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
+				<Dialog.Content
+					{...dismissFocus}
+					className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
+				>
 					<Dialog.Title className="text-sm font-medium text-foreground">Session can no longer be restored</Dialog.Title>
 					<Dialog.Description className="mt-2 text-[13px] text-muted-foreground">
 						{orchestrator

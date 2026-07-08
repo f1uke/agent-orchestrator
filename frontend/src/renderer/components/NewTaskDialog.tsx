@@ -8,6 +8,7 @@ import { BranchCombobox } from "./BranchCombobox";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { returnFocusToTerminal } from "../lib/terminal-focus";
 import { captureRendererEvent } from "../lib/telemetry";
 import type { AgentProvider } from "../types/workspace";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
@@ -141,7 +142,15 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-overlay-in" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in">
+				<Dialog.Content
+					// This dialog opens over the orchestrator terminal. On close (Cancel,
+					// ✕, Esc, or an outside click) return the caret to the terminal so the
+					// user can keep typing — instead of parking focus on the "New task"
+					// trigger. Falls back to Radix's default focus return when no terminal
+					// is mounted (e.g. opened from the board).
+					onCloseAutoFocus={returnFocusToTerminal}
+					className="fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in"
+				>
 					<div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
 						<div className="min-w-0">
 							<Dialog.Title className="text-[15px] font-semibold text-foreground">New task</Dialog.Title>

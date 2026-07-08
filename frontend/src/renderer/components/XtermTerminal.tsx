@@ -29,6 +29,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { AttachableTerminal, TerminalUserInputSource } from "../hooks/useTerminalSession";
 import { aoBridge } from "../lib/bridge";
+import { registerTerminalFocus } from "../lib/terminal-focus";
 import { buildTerminalThemes } from "../lib/terminal-themes";
 import type { Theme } from "../stores/ui-store";
 
@@ -37,6 +38,12 @@ export type XtermTerminalProps = {
 	className?: string;
 	fontSize?: number;
 	theme: Theme;
+	/**
+	 * Focus the terminal as soon as it mounts. TerminalPane sets this for an
+	 * attached session terminal so switching to a worker/orchestrator drops the
+	 * caret straight into the terminal — no click needed before typing.
+	 */
+	autoFocus?: boolean;
 	/**
 	 * The pane app scrolls its transcript by keyboard (PageUp/PageDown) rather
 	 * than acting on SGR wheel reports — e.g. opencode, which enables mouse
@@ -396,6 +403,21 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			event.preventDefault();
 			event.stopPropagation();
 		};
+		// A pointer press anywhere in the terminal host focuses the terminal, so a
+		// single click is enough to start typing even when focus was elsewhere — a
+		// top-bar button, or a popover/dropdown/dialog that the same click just
+		// dismissed. xterm focuses its helper textarea when you press on its screen,
+		// but not reliably on host padding or right after an overlay yielded focus;
+		// this makes the whole surface reclaim focus on one click. It never
+		// preventDefaults, so drag-to-select is untouched.
+		const focusTerminal = () => term.focus();
+		host.addEventListener("mousedown", focusTerminal);
+		// Register as the active terminal so anything that dismisses a transient
+		// surface (the New task dialog, a toolbar overlay) can hand the caret back
+		// here; and, when this pane is the one being switched to, grab focus on
+		// mount so the user can type immediately without a first click.
+		const unregisterFocus = registerTerminalFocus(focusTerminal);
+		if (callbacksRef.current.autoFocus) focusTerminal();
 		host.addEventListener("copy", copyInput);
 		window.addEventListener("keydown", copyShortcut, true);
 		const selectionChange = term.onSelectionChange(() => {
@@ -582,6 +604,8 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			observer.disconnect();
 			stabilizer.dispose();
 			window.removeEventListener("resize", fitTerminal);
+			host.removeEventListener("mousedown", focusTerminal);
+			unregisterFocus();
 			host.removeEventListener("copy", copyInput);
 			window.removeEventListener("keydown", copyShortcut, true);
 			selectionChange.dispose();

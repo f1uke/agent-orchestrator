@@ -222,6 +222,7 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 			<div className="relative min-h-0 flex-1">
 				<XtermTerminal
 					ariaLabel="Session terminal"
+					autoFocus={!showEmptyState}
 					fontSize={fontSize}
 					onError={handleInitError}
 					onReady={handleReady}

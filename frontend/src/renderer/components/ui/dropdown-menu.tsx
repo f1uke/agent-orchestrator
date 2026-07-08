@@ -1,7 +1,15 @@
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import { cn } from "../../lib/utils";
+import { useOverlayDismissFocus } from "../../lib/overlay-focus";
 
-export const DropdownMenu = DropdownMenuPrimitive.Root;
+// Non-modal by default: an open dropdown must not lock the rest of the page
+// behind a `pointer-events: none` / focus-trap layer. That layer is what forced
+// a second click on the terminal (the first only dismissed the menu). Callers
+// that genuinely need a modal menu can still pass `modal`. Generalizes PR #33
+// from the notifications bell to every dropdown in the app.
+export function DropdownMenu(props: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+	return <DropdownMenuPrimitive.Root modal={false} {...props} />;
+}
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 export const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
@@ -9,8 +17,14 @@ export const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
 export function DropdownMenuContent({
 	className,
 	sideOffset = 6,
+	onCloseAutoFocus,
+	onPointerDownOutside,
 	...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+	// Skip the close-time focus return when dismissed by an outside pointer press,
+	// so a single click both closes the menu and lands on (and focuses) whatever
+	// was clicked — no stray focus ring left on the trigger. See overlay-focus.ts.
+	const dismissFocus = useOverlayDismissFocus({ onCloseAutoFocus, onPointerDownOutside });
 	return (
 		<DropdownMenuPrimitive.Portal>
 			<DropdownMenuPrimitive.Content
@@ -20,6 +34,7 @@ export function DropdownMenuContent({
 					"data-[state=open]:animate-overlay-in",
 					className,
 				)}
+				{...dismissFocus}
 				{...props}
 			/>
 		</DropdownMenuPrimitive.Portal>
