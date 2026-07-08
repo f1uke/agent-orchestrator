@@ -11,6 +11,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 )
 
 type fakeSettingsSvc struct {
@@ -99,4 +100,83 @@ func TestSettingsController_PutServiceRejectsInvalidSettings(t *testing.T) {
 type reclaimSettingsBody struct {
 	Enabled      bool `json:"enabled"`
 	GraceMinutes int  `json:"graceMinutes"`
+}
+
+type fakeSpawnConfirmSvc struct {
+	cur   spawnconfirm.Settings
+	saved spawnconfirm.Settings
+	err   error
+}
+
+func (f *fakeSpawnConfirmSvc) Get() spawnconfirm.Settings { return f.cur }
+
+func (f *fakeSpawnConfirmSvc) Set(s spawnconfirm.Settings) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = s
+	f.cur = s
+	return nil
+}
+
+func newSpawnConfirmTestServer(t *testing.T, svc *fakeSpawnConfirmSvc) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{SpawnConfirm: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestSpawnConfirmRoutes_DefaultToStubsWithoutService(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/settings/spawn-confirm", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+func TestSpawnConfirmController_GetReturnsCurrent(t *testing.T) {
+	svc := &fakeSpawnConfirmSvc{cur: spawnconfirm.Settings{Enabled: true}}
+	srv := newSpawnConfirmTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/spawn-confirm", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got spawnConfirmSettingsBody
+	mustJSON(t, body, &got)
+	if !got.Enabled {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestSpawnConfirmController_PutSaves(t *testing.T) {
+	svc := &fakeSpawnConfirmSvc{cur: spawnconfirm.Settings{Enabled: true}}
+	srv := newSpawnConfirmTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/spawn-confirm", `{"enabled":false}`)
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got spawnConfirmSettingsBody
+	mustJSON(t, body, &got)
+	if got.Enabled {
+		t.Fatalf("response = %#v", got)
+	}
+	if svc.saved.Enabled {
+		t.Fatalf("saved=%+v, want disabled", svc.saved)
+	}
+}
+
+func TestSpawnConfirmController_PutInvalidJSON(t *testing.T) {
+	srv := newSpawnConfirmTestServer(t, &fakeSpawnConfirmSvc{})
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/spawn-confirm", `{`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_JSON")
+}
+
+type spawnConfirmSettingsBody struct {
+	Enabled bool `json:"enabled"`
 }

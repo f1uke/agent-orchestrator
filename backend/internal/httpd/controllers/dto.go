@@ -593,3 +593,14 @@ type SetReclaimSettingsRequest struct {
 	Enabled      bool `json:"enabled"`
 	GraceMinutes int  `json:"graceMinutes"`
 }
+
+// SpawnConfirmSettingsResponse mirrors spawnconfirm.Settings on the wire. It is
+// the body of GET/PUT /api/v1/settings/spawn-confirm.
+type SpawnConfirmSettingsResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetSpawnConfirmSettingsRequest is the body of PUT /api/v1/settings/spawn-confirm.
+type SetSpawnConfirmSettingsRequest struct {
+	Enabled bool `json:"enabled"`
+}

@@ -209,8 +209,10 @@ var schemaNames = map[string]string{
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
 	// httpd/controllers: settings wire envelopes
-	"ControllersReclaimSettingsResponse":   "ReclaimSettingsResponse",
-	"ControllersSetReclaimSettingsRequest": "SetReclaimSettingsRequest",
+	"ControllersReclaimSettingsResponse":        "ReclaimSettingsResponse",
+	"ControllersSetReclaimSettingsRequest":      "SetReclaimSettingsRequest",
+	"ControllersSpawnConfirmSettingsResponse":   "SpawnConfirmSettingsResponse",
+	"ControllersSetSpawnConfirmSettingsRequest": "SetSpawnConfirmSettingsRequest",
 	// legacyimport report
 	"LegacyimportReport": "ImportReport",
 	// service/project entities + DTOs
@@ -810,6 +812,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetReclaimSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ReclaimSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/spawn-confirm", id: "getSpawnConfirmSettings", tag: "settings",
+			summary: "Fetch the spawn-confirmation gate setting",
+			resps: []respUnit{
+				{http.StatusOK, controllers.SpawnConfirmSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/spawn-confirm", id: "setSpawnConfirmSettings", tag: "settings",
+			summary: "Replace the spawn-confirmation gate setting",
+			reqBody: controllers.SetSpawnConfirmSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SpawnConfirmSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
