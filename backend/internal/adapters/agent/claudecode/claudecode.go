@@ -227,6 +227,22 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 		return nil, false, nil
 	}
 
+	// A resume id is only useful if Claude Code actually holds the conversation
+	// transcript for it under THIS worktree. `claude --resume <id>` is scoped to
+	// the project directory derived from the launch cwd, so a transcript recorded
+	// under a different path is invisible here and --resume exits with "No
+	// conversation found with session ID: <id>", leaving a dead shell that no
+	// further restart can recover. This bites when an AO session number is
+	// recycled (num is MAX+1, so a purged session's number is reused): the derived
+	// session id collides with the purged session's leftover transcript, which
+	// lives under that session's old worktree, not this one. When the transcript
+	// is absent, report ok=false so the caller relaunches fresh instead of
+	// resuming into the error. The check needs the launch cwd, so it only runs
+	// when the workspace path is known (always set on the real restore path).
+	if wp := strings.TrimSpace(cfg.Session.WorkspacePath); wp != "" && !claudeConversationExists(wp, sessionID) {
+		return nil, false, nil
+	}
+
 	binary, err := p.claudeBinary(ctx)
 	if err != nil {
 		return nil, false, err
@@ -377,6 +393,61 @@ func claudeConfigAuthStatus(path string) (ports.AgentAuthStatus, bool, error) {
 // always resolves to the same Claude session.
 func claudeSessionUUID(aoSessionID string) string {
 	return uuid.NewSHA1(claudeSessionNamespace, []byte(aoSessionID)).String()
+}
+
+// claudeConversationExists reports whether Claude Code has a stored transcript
+// for sessionID under the project directory it derives from workspacePath. This
+// is what makes `claude --resume <sessionID>` from that cwd able to find the
+// conversation; when it returns false, a resume would fail with "No conversation
+// found with session ID". The workspace path is symlink-resolved first because
+// Claude derives the project dir from the resolved cwd (e.g. /var -> /private/var
+// on macOS). If the transcript root cannot be located, it returns true so the
+// caller's resume behavior is unchanged — we only suppress resume when we can
+// affirmatively see the conversation is missing.
+func claudeConversationExists(workspacePath, sessionID string) bool {
+	base, err := claudeProjectsDir()
+	if err != nil {
+		return true
+	}
+	resolved := workspacePath
+	if r, err := filepath.EvalSymlinks(workspacePath); err == nil {
+		resolved = r
+	}
+	transcript := filepath.Join(base, claudeProjectDirName(resolved), sessionID+".jsonl")
+	_, statErr := os.Stat(transcript)
+	return statErr == nil
+}
+
+// claudeProjectsDir returns the directory under which Claude Code stores its
+// per-project conversation transcripts (<projectsDir>/<projectDirName>/<id>.jsonl).
+// It honors CLAUDE_CONFIG_DIR the way Claude Code does, defaulting to ~/.claude.
+func claudeProjectsDir() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, "projects"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("claude-code: resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude", "projects"), nil
+}
+
+// claudeProjectDirName maps a working directory onto the directory name Claude
+// Code derives for it under ~/.claude/projects: every byte outside [A-Za-z0-9-]
+// becomes '-', one-for-one and non-collapsing (so "/x/.y_z w" -> "-x--y-z-w").
+// Verified against Claude Code 2.x on macOS; TestClaudeProjectDirName pins it.
+func claudeProjectDirName(cwd string) string {
+	b := make([]byte, 0, len(cwd))
+	for i := 0; i < len(cwd); i++ {
+		c := cwd[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-':
+			b = append(b, c)
+		default:
+			b = append(b, '-')
+		}
+	}
+	return string(b)
 }
 
 // resolveSystemPrompt returns the system prompt text to append, preferring

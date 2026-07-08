@@ -673,9 +673,13 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	}
 	// Resumability is decided inside restoreArgv, not here. A promptless session
 	// can still be fully resumable when the harness pins a deterministic session id
-	// (Claude Code). restoreArgv returns ErrNotResumable only for a promptless,
-	// unresumable non-orchestrator (a worker with no task and no native id to resume).
-	// Orchestrators always relaunch fresh with the system prompt only.
+	// (Claude Code) AND the agent still holds that conversation for this worktree;
+	// the adapter reports not-resumable when the transcript is gone (e.g. a recycled
+	// session number whose id collides with a purged session's transcript), so the
+	// session relaunches fresh instead of resuming into a dead shell. restoreArgv
+	// returns ErrNotResumable only for a promptless, unresumable non-orchestrator (a
+	// worker with no task and no conversation to resume). Orchestrators are promptless
+	// by design and relaunch with the system prompt only when they cannot resume.
 
 	project, err := m.loadProject(ctx, rec.ProjectID)
 	if err != nil {
@@ -1564,11 +1568,12 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 
 // restoreArgv builds the argv to relaunch a torn-down session: the agent's
 // native resume command when it can continue the session, else a fresh launch.
-// The agent signals via ok=false (e.g. no native session id captured yet).
+// The agent signals via ok=false (e.g. no native session id captured yet, or the
+// conversation transcript for this worktree is gone so a resume would fail).
 // Returns ErrNotResumable only for a promptless, unresumable non-orchestrator:
 // a worker with no prompt and no native session id has nothing to restore from.
-// Orchestrators are promptless by design and always relaunch fresh with the
-// system prompt only.
+// Orchestrators are promptless by design, so when they cannot resume they
+// relaunch fresh with the system prompt only rather than erroring.
 func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt string, agentConfig ports.AgentConfig, kind domain.SessionKind) ([]string, error) {
 	ref := ports.SessionRef{
 		ID:            string(id),

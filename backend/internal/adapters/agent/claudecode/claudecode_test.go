@@ -466,6 +466,85 @@ func TestGetRestoreCommandFalseWithoutSessionID(t *testing.T) {
 	}
 }
 
+func TestClaudeProjectDirName(t *testing.T) {
+	// Pins the cwd->project-dir mapping against real Claude Code 2.x output on
+	// macOS: every char outside [A-Za-z0-9-] becomes '-', one-for-one (so "/.ao"
+	// yields the double dash "--ao"). If Claude changes this, resume detection
+	// silently breaks, so lock it down.
+	cases := map[string]string{
+		"/Users/fluke/.ao/data/worktrees/nter-ios-app/chore/MOBILITY-4546-guard-let-self":     "-Users-fluke--ao-data-worktrees-nter-ios-app-chore-MOBILITY-4546-guard-let-self",
+		"/Users/fluke/.ao/data/worktrees/nter-ios-app/orchestrator/nter-ios-app-orchestrator": "-Users-fluke--ao-data-worktrees-nter-ios-app-orchestrator-nter-ios-app-orchestrator",
+		"/tmp/Weird_Dir.Name test": "-tmp-Weird-Dir-Name-test",
+	}
+	for in, want := range cases {
+		if got := claudeProjectDirName(in); got != want {
+			t.Errorf("claudeProjectDirName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// writeClaudeTranscript places an empty transcript file where Claude Code would
+// have stored the conversation for sessionID launched from workspacePath, under
+// the projects root that CLAUDE_CONFIG_DIR points at.
+func writeClaudeTranscript(t *testing.T, cfgDir, workspacePath, sessionID string) {
+	t.Helper()
+	resolved := workspacePath
+	if r, err := filepath.EvalSymlinks(workspacePath); err == nil {
+		resolved = r
+	}
+	dir := filepath.Join(cfgDir, "projects", claudeProjectDirName(resolved))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetRestoreCommandFreshWhenTranscriptMissing(t *testing.T) {
+	// Reproduces the num-reuse collision: the derived id's transcript lives under
+	// a DIFFERENT worktree (a purged worker that recycled this AO session number),
+	// so `claude --resume <id>` from THIS worktree would exit with "No conversation
+	// found with session ID". Expect ok=false so restoreArgv relaunches fresh
+	// instead of dropping the agent into a dead shell.
+	cfgDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+	ws := t.TempDir()
+
+	cmd, ok, err := (&Plugin{resolvedBinary: "claude"}).GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		Permissions: ports.PermissionModeBypassPermissions,
+		Session:     ports.SessionRef{ID: "nter-ios-app-19", WorkspacePath: ws},
+	})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if ok || cmd != nil {
+		t.Fatalf("restore = (%#v, ok=%v), want fresh relaunch (nil, false)", cmd, ok)
+	}
+}
+
+func TestGetRestoreCommandResumesWhenTranscriptPresent(t *testing.T) {
+	// The happy path: the conversation for the derived id exists under this
+	// worktree's project dir, so resume is safe and preserves the conversation.
+	cfgDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+	ws := t.TempDir()
+	uid := claudeSessionUUID("nter-ios-app-19")
+	writeClaudeTranscript(t, cfgDir, ws, uid)
+
+	cmd, ok, err := (&Plugin{resolvedBinary: "claude"}).GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		Permissions: ports.PermissionModeBypassPermissions,
+		Session:     ports.SessionRef{ID: "nter-ios-app-19", WorkspacePath: ws},
+	})
+	if err != nil || !ok {
+		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
+	}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", uid}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
+	}
+}
+
 func TestGetLaunchCommandAppliesAgentConfig(t *testing.T) {
 	p := &Plugin{resolvedBinary: "claude"}
 	cmd, err := p.GetLaunchCommand(context.Background(), ports.LaunchConfig{
