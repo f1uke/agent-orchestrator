@@ -1,6 +1,7 @@
 import { AutoReclaimSection } from "./AutoReclaimSection";
 import { DashboardSubhead } from "./DashboardSubhead";
 import { MigrationSection } from "./MigrationSection";
+import { SpawnConfirmSection } from "./SpawnConfirmSection";
 import { UpdatesSection } from "./UpdatesSection";
 
 // App-wide settings, shown from the sidebar when no project is selected. Each
@@ -13,6 +14,7 @@ export function GlobalSettingsForm() {
 			<DashboardSubhead title="Global settings" subtitle="Settings that apply across all projects" />
 			<div className="min-h-0 flex-1 overflow-y-auto p-[18px]">
 				<div className="mx-auto flex max-w-2xl flex-col gap-4">
+					<SpawnConfirmSection />
 					<AutoReclaimSection />
 					<UpdatesSection />
 					<MigrationSection />
