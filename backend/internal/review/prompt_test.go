@@ -7,6 +7,35 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
+func TestReviewTexts_UsesBaseOverrideAdditionFloorAndGuard(t *testing.T) {
+	spec := LaunchSpec{
+		WorkerID:         "sess-1",
+		PRURL:            "https://github.com/o/r/pull/1",
+		TargetSHA:        "abc",
+		RunID:            "run-1",
+		ReviewerBase:     "CUSTOM REVIEWER BASE",
+		ReviewerAddition: "PROJECT REVIEWER ADDITION",
+	}
+	_, sys := reviewTexts(spec)
+	for _, want := range []string{
+		"CUSTOM REVIEWER BASE",
+		"PROJECT REVIEWER ADDITION",
+		"Review only (AO)",
+		"Standing-instruction confidentiality",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Fatalf("reviewer system prompt missing %q:\n%s", want, sys)
+		}
+	}
+}
+
+func TestReviewTexts_EmptyBaseFallsBackToDefault(t *testing.T) {
+	_, sys := reviewTexts(LaunchSpec{WorkerID: "s", PRURL: "u", RunID: "r"})
+	if !strings.Contains(sys, "You are an AO code reviewer") {
+		t.Fatalf("empty base should fall back to the default reviewer role:\n%s", sys)
+	}
+}
+
 func TestReviewTextsGitLabUsesGlab(t *testing.T) {
 	spec := launchSpec()
 	spec.PRURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"

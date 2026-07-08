@@ -33,6 +33,11 @@ type LaunchSpec struct {
 	TargetSHA     string
 	ReviewQueue   []ports.ReviewTask
 	ReviewIndex   int
+	// ReviewerBase is the effective global reviewer base (override else default),
+	// resolved by the Engine. Empty falls back to prompts.DefaultBase(reviewer).
+	ReviewerBase string
+	// ReviewerAddition is the project's per-project reviewer addition (may be "").
+	ReviewerAddition string
 }
 
 // reviewerRuntime is the runtime surface the launcher needs: create a pane,
