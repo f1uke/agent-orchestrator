@@ -102,6 +102,48 @@ func TestSpawnClaimPRWiring(t *testing.T) {
 	}
 }
 
+func TestSpawnClaimGitLabMRWiring(t *testing.T) {
+	cfg := setConfigEnv(t)
+	const mrURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		appendPrimaryRequest(&requests, r)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"git@gitlab.finnomena.com:group/sub/proj.git","defaultBranch":"main"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-9","status":"idle"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-9/pr/claim":
+			var req claimPRRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.PR != mrURL || req.AllowTakeover {
+				t.Fatalf("claim request = %#v", req)
+			}
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-9","prs":[{"url":`+jsonQuote(mrURL)+`,"number":42,"state":"open","ci":"passing","review":"review_required","mergeability":"mergeable","reviewComments":false,"updatedAt":"2026-06-04T12:00:00Z"}],"branchChanged":false,"takenOverFrom":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	// Pass the URL with a trailing sub-tab; the CLI must normalize it before forwarding.
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "spawn", "--from", "main", "--project", "demo", "--agent", "codex", "--name", "worker", "--claim-pr", mrURL+"/diffs", "--no-takeover")
+	if err != nil {
+		t.Fatalf("spawn claim gitlab MR failed: %v stderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "claimed "+mrURL) {
+		t.Fatalf("output missing claimed label: %s", out)
+	}
+	want := []string{"GET /api/v1/projects/demo", "POST /api/v1/agents/refresh", "POST /api/v1/sessions", "POST /api/v1/sessions/demo-9/pr/claim"}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("requests=%#v want %#v", requests, want)
+	}
+}
+
 func TestSpawnClaimPRFailureRollsBackSession(t *testing.T) {
 	cfg := setConfigEnv(t)
 	var requests []string

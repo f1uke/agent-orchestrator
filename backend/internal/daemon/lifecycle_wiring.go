@@ -11,6 +11,7 @@ import (
 	agentregistry "github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/registry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/reviewer"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/composite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/gitworktree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -114,10 +115,15 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		Logger:       log,
 		IdleCloseTTL: cfg.SessionIdleClose,
 	})
-	scmProvider, err := newGitHubSCMProvider(log)
+	// The PR-claim path shares the observer's provider set so a claimed GitLab
+	// merge request resolves through the same GitLab client + auth as background
+	// observation, not GitHub alone. GitHub is always present; GitLab is added
+	// when AO_GITLAB_HOST is configured (see buildSCMEntries).
+	scmEntries, err := buildSCMEntries(log)
 	if err != nil {
 		logSCMProviderDisabled(log, err)
 	}
+	scmProvider := composite.New(scmEntries...)
 	sessionSvc := sessionsvc.NewWithDeps(sessionsvc.Deps{
 		Manager:   mgr,
 		Store:     store,
