@@ -205,6 +205,7 @@ type fakeCommander struct {
 	restarted       []domain.SessionID
 	retired         []domain.SessionID
 	sent            []domain.SessionID
+	lastMessage     string
 	cleanupProjects []domain.ProjectID
 	purged          []domain.SessionID
 	purgedForce     []bool
@@ -256,11 +257,12 @@ func (f *fakeCommander) RetireForReplacement(_ context.Context, id domain.Sessio
 	f.retired = append(f.retired, id)
 	return nil
 }
-func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, _ string) error {
+func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, message string) error {
 	if f.sendErr != nil {
 		return f.sendErr
 	}
 	f.sent = append(f.sent, id)
+	f.lastMessage = message
 	return nil
 }
 func (f *fakeCommander) Cleanup(_ context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error) {
