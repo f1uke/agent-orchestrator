@@ -1,15 +1,94 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getMock, putMock } = vi.hoisted(() => ({ getMock: vi.fn(), putMock: vi.fn() }));
+const { getMock, putMock, postMock } = vi.hoisted(() => ({
+	getMock: vi.fn(),
+	putMock: vi.fn(),
+	postMock: vi.fn(),
+}));
 vi.mock("../lib/api-client", () => ({
-	apiClient: { GET: getMock, PUT: putMock },
+	apiClient: { GET: getMock, PUT: putMock, POST: postMock },
 	apiErrorMessage: (e: unknown, fb = "Request failed") => (e instanceof Error ? e.message : fb),
 }));
 
 import { CommentsView } from "./CommentsView";
+
+function comment(id: string, author: string, body: string, resolved = false) {
+	return { id, author, body, url: "", resolved, isBot: false, createdAt: "2026-07-09T10:00:00Z" };
+}
+
+// One PR with an unresolved thread (T1) and a resolved thread (T2).
+function commentsPayload() {
+	return {
+		prs: [
+			{
+				prUrl: "https://github.com/o/agent-orchestrator/pull/1",
+				htmlUrl: "https://github.com/o/agent-orchestrator/pull/1",
+				provider: "github",
+				number: 1,
+				headSha: "abc",
+				threads: [
+					{
+						threadId: "T1",
+						path: "backend/a.go",
+						line: 10,
+						resolved: false,
+						isBot: false,
+						comments: [comment("C1", "alice", "please `fix` this")],
+					},
+					{
+						threadId: "T2",
+						path: "backend/b.go",
+						line: 20,
+						resolved: true,
+						isBot: false,
+						comments: [comment("C2", "bob", "done", true)],
+					},
+				],
+			},
+		],
+	};
+}
+
+let commentsData: ReturnType<typeof commentsPayload>;
+
+beforeEach(() => {
+	commentsData = commentsPayload();
+	getMock.mockReset().mockImplementation(async (path: string) => {
+		if (path === "/api/v1/settings/auto-nudge") return { data: { enabled: false }, error: undefined };
+		if (path === "/api/v1/sessions/{sessionId}") {
+			return {
+				data: {
+					session: {
+						id: "s1",
+						autoNudgeComments: null,
+						prs: [
+							{
+								url: "https://github.com/o/agent-orchestrator/pull/1",
+								number: 1,
+								review: "changes_requested",
+								mergeability: "mergeable",
+								ci: "passing",
+								state: "open",
+								reviewComments: true,
+								updatedAt: "",
+							},
+						],
+					},
+				},
+				error: undefined,
+			};
+		}
+		if (path.includes("diff-context")) {
+			return { data: { available: false, mode: "hunk", path: "", lines: [], truncated: false }, error: undefined };
+		}
+		return { data: commentsData, error: undefined };
+	});
+	putMock.mockReset().mockResolvedValue({ data: {}, error: undefined });
+	postMock.mockReset().mockResolvedValue({ data: { ok: true, comment: comment("CR", "me", "") }, error: undefined });
+});
 
 function renderView(sessionId = "s1") {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -20,184 +99,61 @@ function renderView(sessionId = "s1") {
 	);
 }
 
-beforeEach(() => {
-	putMock.mockReset().mockResolvedValue({ data: {}, error: undefined });
-	getMock.mockReset().mockImplementation(async (path: string) => {
-		if (path === "/api/v1/settings/auto-nudge") {
-			return { data: { enabled: false }, error: undefined };
-		}
-		if (path === "/api/v1/sessions/{sessionId}") {
-			return { data: { session: { id: "s1", autoNudgeComments: null } }, error: undefined };
-		}
-		if (path.includes("diff-context")) {
-			return { data: { available: false, mode: "hunk", path: "", lines: [], truncated: false }, error: undefined };
-		}
-		return {
-			data: {
-				sessionId: "s1",
-				prs: [
-					{
-						prUrl: "https://gh/pr/1",
-						htmlUrl: "https://gh/pr/1",
-						provider: "github",
-						number: 1,
-						headSha: "abc",
-						threads: [
-							{
-								threadId: "T1",
-								path: "a.go",
-								line: 10,
-								resolved: false,
-								isBot: false,
-								comments: [
-									{
-										id: "C1",
-										author: "alice",
-										body: "please fix",
-										url: "",
-										resolved: false,
-										isBot: false,
-										createdAt: "2026-07-09T10:00:00Z",
-									},
-								],
-							},
-							{
-								threadId: "T2",
-								path: "x/y/Z.swift",
-								line: 20,
-								resolved: true,
-								isBot: false,
-								comments: [
-									{
-										id: "C2",
-										author: "bob",
-										body: "looks good",
-										url: "",
-										resolved: true,
-										isBot: false,
-										createdAt: "2026-07-09T10:05:00Z",
-									},
-								],
-							},
-						],
-					},
-				],
-			},
-			error: undefined,
-		};
-	});
-});
-
-describe("CommentsView", () => {
-	it("renders a thread's file, author, and comment body", async () => {
+describe("CommentsView (inbox)", () => {
+	it("renders the Unresolved inbox with a comment card and inline code", async () => {
 		renderView();
-		expect(await screen.findByText("a.go")).toBeInTheDocument();
-		expect(await screen.findByText("please fix")).toBeInTheDocument();
-		expect(screen.getByText("alice")).toBeInTheDocument();
+		expect(await screen.findByText("Unresolved")).toBeInTheDocument();
+		expect(await screen.findByText("alice")).toBeInTheDocument();
+		expect(screen.getByText("PR #1")).toBeInTheDocument();
+		expect(screen.getByText("fix").tagName.toLowerCase()).toBe("code");
+		// resolved thread lives in the collapsed Resolved section, not as a card
+		expect(screen.getByText("Resolved")).toBeInTheDocument();
 	});
 
-	it("shows an empty state when there are no threads", async () => {
-		getMock.mockReset().mockResolvedValue({ data: { sessionId: "s1", prs: [] }, error: undefined });
+	it("shows the auto-send switch and toggles it via PUT", async () => {
 		renderView();
-		expect(await screen.findByText(/no review comments/i)).toBeInTheDocument();
+		const sw = await screen.findByRole("switch", { name: /auto-send/i });
+		expect(sw).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(sw);
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		const [path, opts] = putMock.mock.calls[0];
+		expect(path).toBe("/api/v1/sessions/{sessionId}/auto-nudge");
+		expect(opts.body).toEqual({ override: true });
 	});
 
-	it("renders a resolved thread collapsed and an unresolved thread expanded, expanding on click", async () => {
-		const user = userEvent.setup();
+	it("resolve posts comment-resolve for the thread", async () => {
 		renderView();
-
-		// Unresolved thread (T1) is expanded without any interaction.
-		expect(await screen.findByText("please fix")).toBeInTheDocument();
-
-		// Resolved thread (T2) starts collapsed: body hidden, header (badge +
-		// comment count) visible.
-		const resolvedHeader = await screen.findByRole("button", { name: /Z\.swift.*Resolved.*1 comment/is });
-		expect(resolvedHeader).toHaveAttribute("aria-expanded", "false");
-		expect(screen.queryByText("looks good")).not.toBeInTheDocument();
-		expect(within(resolvedHeader).getByText("Resolved")).toBeInTheDocument();
-
-		await user.click(resolvedHeader);
-
-		expect(resolvedHeader).toHaveAttribute("aria-expanded", "true");
-		expect(await screen.findByText("looks good")).toBeInTheDocument();
-	});
-});
-
-describe("CommentsView auto-nudge switch", () => {
-	it("renders the auto-nudge switch even when there are no comments", async () => {
-		getMock.mockReset().mockImplementation(async (path: string) => {
-			if (path === "/api/v1/settings/auto-nudge") {
-				return { data: { enabled: false }, error: undefined };
-			}
-			if (path === "/api/v1/sessions/{sessionId}") {
-				return { data: { session: { id: "s1", autoNudgeComments: null } }, error: undefined };
-			}
-			return { data: { sessionId: "s1", prs: [] }, error: undefined };
-		});
-		renderView();
-		expect(await screen.findByText(/no review comments/i)).toBeInTheDocument();
-		expect(
-			screen.getByRole("switch", { name: /Auto-send unresolved comments to the worker/i }),
-		).toBeInTheDocument();
+		const btn = await screen.findByRole("button", { name: /Resolve/ });
+		await userEvent.click(btn);
+		await waitFor(() =>
+			expect(postMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/comment-resolve")).toBe(true),
+		);
+		const call = postMock.mock.calls.find(([p]) => p === "/api/v1/sessions/{sessionId}/comment-resolve");
+		expect(call![1].body).toMatchObject({ threadId: "T1" });
 	});
 
-	it("toggling the switch PUTs the negated effective value", async () => {
-		const user = userEvent.setup();
+	it("quick send posts comment-dispatch", async () => {
 		renderView();
-
-		const toggle = await screen.findByRole("switch", { name: /Auto-send unresolved comments to the worker/i });
-		await user.click(toggle);
-
-		expect(putMock).toHaveBeenCalledWith(
-			"/api/v1/sessions/{sessionId}/auto-nudge",
-			expect.objectContaining({
-				params: { path: { sessionId: "s1" } },
-				body: { override: true },
-			}),
+		const send = await screen.findByRole("button", { name: /Send to worker/ });
+		await userEvent.click(send);
+		await waitFor(() =>
+			expect(postMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/comment-dispatch")).toBe(true),
 		);
 	});
 
-	it("reflects an explicit override", async () => {
-		getMock.mockReset().mockImplementation(async (path: string) => {
-			if (path === "/api/v1/settings/auto-nudge") {
-				return { data: { enabled: false }, error: undefined };
-			}
-			if (path === "/api/v1/sessions/{sessionId}") {
-				return { data: { session: { id: "s1", autoNudgeComments: true } }, error: undefined };
-			}
-			return { data: { sessionId: "s1", prs: [] }, error: undefined };
-		});
+	it("select mode reveals a checkbox and the batch bar", async () => {
 		renderView();
-
-		// Wait for the session override to load (the reset button only renders
-		// once override !== null) before asserting the switch's resulting state.
-		expect(await screen.findByRole("button", { name: /Reset to default/i })).toBeInTheDocument();
-		const toggle = screen.getByRole("switch", { name: /Auto-send unresolved comments to the worker/i });
-		expect(toggle).toHaveAttribute("data-state", "checked");
+		const selectBtn = await screen.findByRole("button", { name: "Select" });
+		await userEvent.click(selectBtn);
+		const cb = await screen.findByRole("checkbox", { name: /Select comment/ });
+		await userEvent.click(cb);
+		expect(await screen.findByText("1 selected")).toBeInTheDocument();
 	});
 
-	it("reset sends override:null", async () => {
-		const user = userEvent.setup();
-		getMock.mockReset().mockImplementation(async (path: string) => {
-			if (path === "/api/v1/settings/auto-nudge") {
-				return { data: { enabled: false }, error: undefined };
-			}
-			if (path === "/api/v1/sessions/{sessionId}") {
-				return { data: { session: { id: "s1", autoNudgeComments: true } }, error: undefined };
-			}
-			return { data: { sessionId: "s1", prs: [] }, error: undefined };
-		});
+	it("shows Inbox zero when there are no unresolved comments", async () => {
+		const base = commentsPayload().prs[0];
+		commentsData = { prs: [{ ...base, threads: [base.threads[1]] }] };
 		renderView();
-
-		const resetButton = await screen.findByRole("button", { name: /Reset to default/i });
-		await user.click(resetButton);
-
-		expect(putMock).toHaveBeenCalledWith(
-			"/api/v1/sessions/{sessionId}/auto-nudge",
-			expect.objectContaining({
-				params: { path: { sessionId: "s1" } },
-				body: { override: null },
-			}),
-		);
+		expect(await screen.findByText("Inbox zero")).toBeInTheDocument();
 	});
 });

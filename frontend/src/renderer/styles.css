@@ -126,14 +126,6 @@
 	--interactive-active: rgb(255 255 255 / 0.07);
 	--kanban-column-bg: rgb(255 255 255 / 0.018);
 	--kanban-pending-glow: rgb(255 255 255 / 0.02);
-	--hl-keyword: #ff7b72;
-	--hl-string: #a5d6ff;
-	--hl-comment: #8b949e;
-	--hl-number: #79c0ff;
-	--hl-function: #d2a8ff;
-	--hl-type: #ffa657;
-	--hl-attr: #79c0ff;
-	--hl-tag: #7ee787;
 }
 
 :root[data-theme="light"] {
@@ -169,14 +161,6 @@
 	--term-blue: #2563eb;
 	--term-amber: #9a6b00;
 	--shadow: 0 1px 0 rgb(0 0 0 / 0.03), 0 12px 30px rgb(20 30 50 / 0.1);
-	--hl-keyword: #cf222e;
-	--hl-string: #0a3069;
-	--hl-comment: #6e7781;
-	--hl-number: #0550ae;
-	--hl-function: #8250df;
-	--hl-type: #953800;
-	--hl-attr: #0550ae;
-	--hl-tag: #116329;
 }
 
 * {
@@ -814,6 +798,15 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .session-inspector__body--browser .browser-panel {
 	border: 0;
 	border-radius: 0;
+}
+
+/* Comments inbox: fills the rail edge-to-edge and owns its own internal layout
+   (fixed header + auto-send strip, scrolling list, pinned batch bar, toast). */
+.session-inspector__body.session-inspector__body--comments {
+	padding: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
 }
 
 /* Inspector resize handle (shadcn resizable separator, AO visual): a 7px
@@ -1630,72 +1623,3 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	font-size: 12px;
 }
 
-/* Syntax highlighting tokens (highlight.js). No .hljs background/foreground
- * rule — the diff row's own bg/fg and add/del tints are preserved; only
- * token spans get color. */
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-literal,
-.hljs-section,
-.hljs-doctag {
-	color: var(--hl-keyword);
-}
-
-.hljs-string,
-.hljs-meta .hljs-string,
-.hljs-regexp,
-.hljs-addition {
-	color: var(--hl-string);
-}
-
-.hljs-comment,
-.hljs-quote {
-	color: var(--hl-comment);
-	font-style: italic;
-}
-
-.hljs-number,
-.hljs-symbol,
-.hljs-bullet {
-	color: var(--hl-number);
-}
-
-.hljs-title,
-.hljs-title.function_,
-.hljs-built_in {
-	color: var(--hl-function);
-}
-
-.hljs-type,
-.hljs-class .hljs-title,
-.hljs-title.class_ {
-	color: var(--hl-type);
-}
-
-.hljs-attr,
-.hljs-attribute,
-.hljs-variable,
-.hljs-template-variable,
-.hljs-property {
-	color: var(--hl-attr);
-}
-
-.hljs-tag,
-.hljs-name,
-.hljs-selector-id,
-.hljs-selector-class {
-	color: var(--hl-tag);
-}
-
-.hljs-meta,
-.hljs-params {
-	color: var(--hl-comment);
-}
-
-.hljs-emphasis {
-	font-style: italic;
-}
-
-.hljs-strong {
-	font-weight: 600;
-}

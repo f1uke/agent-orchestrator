@@ -152,6 +152,9 @@ export function SessionInspector({
 					// drop the body padding for it (except when popped out, where the
 					// body only holds the "return to panel" empty state).
 					view === "browser" && !browserPoppedOut && "session-inspector__body--browser",
+					// The Comments inbox owns its full-height layout (fixed header,
+					// scrolling list, pinned batch bar), so it also renders flush.
+					view === "comments" && "session-inspector__body--comments",
 				)}
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
