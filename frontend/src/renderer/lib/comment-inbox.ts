@@ -52,6 +52,76 @@ export function accentMix(pct: number, base = "transparent"): string {
 	return `color-mix(in oklab, ${ACCENT} ${pct}%, ${base})`;
 }
 
+/**
+ * Diff-row chrome shared by the inline (rail) diff and the full-file viewer:
+ * added/removed lines get a background tint and a colored sign glyph, while the
+ * code text itself is syntax-highlighted (see `tokenizeCode`). Verbatim from
+ * the design's `styleDiffRow`.
+ */
+export const DIFF_ROW = {
+	addBg: "rgba(63,157,107,.13)",
+	delBg: "rgba(220,90,90,.13)",
+	addSign: "#7fd8a0",
+	delSign: "#e88f8f",
+	contextSign: "#5c5c63",
+} as const;
+
+/** Token colors for the lightweight code highlighter — verbatim from the design's `C`. */
+export const TOKEN_COLORS = {
+	keyword: "#FC5FA3",
+	string: "#FC6A5D",
+	comment: "#6C7986",
+	number: "#D0BF69",
+	type: "#5DD8FF",
+	fn: "#67B7A4",
+	plain: "#E8E8EA",
+} as const;
+
+// Go/Swift/TS keyword set the highlighter recognizes — verbatim from the design.
+const CODE_KEYWORDS = new Set([
+	"func", "return", "if", "else", "switch", "case", "default", "struct", "let", "var", "some", "for",
+	"range", "nil", "true", "false", "bool", "string", "int", "int64", "uint", "byte", "error", "defer",
+	"package", "import", "type", "map", "interface", "chan", "go", "const", "self", "guard", "while", "in",
+	"enum", "protocol", "extension", "class", "static", "private", "public", "override", "throws", "try",
+	"async", "await",
+]);
+
+export type CodeToken = { text: string; color: string };
+
+/**
+ * Split one line of source into colored runs (keywords / strings / comments /
+ * numbers / capitalized types / calls / plain). Language-agnostic and
+ * deliberately simple — ported verbatim from the design's `tokenize`. Lossless:
+ * concatenating the token texts reproduces the input line.
+ */
+export function tokenizeCode(line: string): CodeToken[] {
+	if (!line) return [];
+	const out: CodeToken[] = [];
+	const push = (text: string, color: string) => {
+		if (text) out.push({ text, color });
+	};
+	const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*")|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)/g;
+	let last = 0;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(line)) !== null) {
+		if (m.index > last) push(line.slice(last, m.index), TOKEN_COLORS.plain);
+		if (m[1]) push(m[1], TOKEN_COLORS.comment);
+		else if (m[2]) push(m[2], TOKEN_COLORS.string);
+		else if (m[3]) push(m[3], TOKEN_COLORS.number);
+		else {
+			const w = m[4];
+			const isCall = /^\s*\(/.test(line.slice(re.lastIndex));
+			if (CODE_KEYWORDS.has(w)) push(w, TOKEN_COLORS.keyword);
+			else if (isCall) push(w, TOKEN_COLORS.fn);
+			else if (/^[A-Z]/.test(w)) push(w, TOKEN_COLORS.type);
+			else push(w, TOKEN_COLORS.plain);
+		}
+		last = re.lastIndex;
+	}
+	if (last < line.length) push(line.slice(last), TOKEN_COLORS.plain);
+	return out;
+}
+
 export type BodyRun = { text: string; code: boolean };
 
 /**

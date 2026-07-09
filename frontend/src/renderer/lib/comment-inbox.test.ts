@@ -8,6 +8,8 @@ import {
 	relativeTime,
 	splitBodyRuns,
 	statusFor,
+	TOKEN_COLORS,
+	tokenizeCode,
 } from "./comment-inbox";
 
 describe("splitBodyRuns", () => {
@@ -84,5 +86,36 @@ describe("baseName", () => {
 	it("returns the last path segment", () => {
 		expect(baseName("backend/internal/foo.go")).toBe("foo.go");
 		expect(baseName("foo.go")).toBe("foo.go");
+	});
+});
+
+describe("tokenizeCode", () => {
+	const byText = (line: string, text: string) => tokenizeCode(line).find((t) => t.text === text);
+
+	it("colors keywords, calls, numbers, and line comments", () => {
+		const line = "func Foo() { return 42 } // hi";
+		expect(byText(line, "func")?.color).toBe(TOKEN_COLORS.keyword);
+		expect(byText(line, "Foo")?.color).toBe(TOKEN_COLORS.fn); // capitalized but followed by "("
+		expect(byText(line, "return")?.color).toBe(TOKEN_COLORS.keyword);
+		expect(byText(line, "42")?.color).toBe(TOKEN_COLORS.number);
+		expect(byText(line, "// hi")?.color).toBe(TOKEN_COLORS.comment);
+	});
+
+	it("colors capitalized identifiers as types and quoted text as strings", () => {
+		const line = 'var x Observer = "hello"';
+		expect(byText(line, "var")?.color).toBe(TOKEN_COLORS.keyword);
+		expect(byText(line, "Observer")?.color).toBe(TOKEN_COLORS.type);
+		expect(byText(line, '"hello"')?.color).toBe(TOKEN_COLORS.string);
+		expect(byText(line, "x")?.color).toBe(TOKEN_COLORS.plain);
+	});
+
+	it("returns [] for empty input and losslessly reconstructs the line", () => {
+		expect(tokenizeCode("")).toEqual([]);
+		const line = "  x := y + 1";
+		expect(
+			tokenizeCode(line)
+				.map((t) => t.text)
+				.join(""),
+		).toBe(line);
 	});
 });
