@@ -299,10 +299,32 @@ func (m *Manager) notificationIntentForCurrentSCM(ctx context.Context, id domain
 	if !ok {
 		return nil, nil
 	}
-	return m.notificationIntentForSCM(rec, o), nil
+	// The transient observation only carries review threads on the slower review
+	// cadence; on the frequent PR/CI-only cycles o.Review.Threads is empty, so it
+	// cannot be trusted to prove there is no blocking review feedback. Read the
+	// durable unresolved-comment fact the board status pill uses so ready-to-merge
+	// agrees with the displayed status instead of flapping to "ready" every poll.
+	facts, err := m.store.ListPRFactsForSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	prURL := firstSCMNonEmpty(o.PR.URL, o.PR.HTMLURL)
+	return m.notificationIntentForSCM(rec, o, durableUnresolvedComments(facts, prURL)), nil
 }
 
-func (m *Manager) notificationIntentForSCM(rec domain.SessionRecord, o ports.SCMObservation) *ports.NotificationIntent {
+// durableUnresolvedComments reports whether the persisted PR facts for prURL
+// record an unresolved, non-bot review comment — the same PRFacts.ReviewComments
+// flag the status derivation reads for its changes-requested reason.
+func durableUnresolvedComments(facts []domain.PRFacts, prURL string) bool {
+	for _, f := range facts {
+		if f.URL == prURL {
+			return f.ReviewComments
+		}
+	}
+	return false
+}
+
+func (m *Manager) notificationIntentForSCM(rec domain.SessionRecord, o ports.SCMObservation, unresolvedComments bool) *ports.NotificationIntent {
 	prURL := firstSCMNonEmpty(o.PR.URL, o.PR.HTMLURL)
 	base := ports.NotificationIntent{
 		SessionID:          rec.ID,
@@ -325,14 +347,19 @@ func (m *Manager) notificationIntentForSCM(rec domain.SessionRecord, o ports.SCM
 		base.Type = domain.NotificationPRClosedUnmerged
 		return &base
 	}
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput || !scmObservationIsReadyToMerge(o) {
+	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput || !scmObservationIsReadyToMerge(o, unresolvedComments) {
 		return nil
 	}
 	base.Type = domain.NotificationReadyToMerge
 	return &base
 }
 
-func scmObservationIsReadyToMerge(o ports.SCMObservation) bool {
+// scmObservationIsReadyToMerge reports whether the PR has no known merge
+// blockers. unresolvedComments is the durable "has unresolved review comment"
+// fact from PRFacts; it is authoritative because the transient o.Review.Threads
+// is only populated on the slower review-refresh cadence and is empty on the
+// common PR/CI-only poll cycles.
+func scmObservationIsReadyToMerge(o ports.SCMObservation, unresolvedComments bool) bool {
 	if o.PR.Merged || o.PR.Closed || o.PR.Draft {
 		return false
 	}
@@ -344,7 +371,7 @@ func scmObservationIsReadyToMerge(o ports.SCMObservation) bool {
 	case domain.CIFailing, domain.CIPending, domain.CIUnknown:
 		return false
 	}
-	if domain.ReviewDecision(o.Review.Decision) == domain.ReviewChangesRequest || hasUnresolvedSCMComments(o.Review.Threads) {
+	if domain.ReviewDecision(o.Review.Decision) == domain.ReviewChangesRequest || unresolvedComments || hasUnresolvedSCMComments(o.Review.Threads) {
 		return false
 	}
 	return domain.Mergeability(o.Mergeability.State) == domain.MergeMergeable
