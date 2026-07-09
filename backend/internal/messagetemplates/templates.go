@@ -144,15 +144,20 @@ const mergeConflictDefault = "Your PR has merge conflicts. Rebase onto the base 
 const trackerBotDefault = "A bot left a new comment on your tracker issue. Address it and update the session.{{if .Comments}}\n\n{{.Comments}}{{end}}"
 
 // aoReviewerBatchDefault reproduces the pre-templating loop in
-// ApplyReviewBatch byte-for-byte. The leading intro line ends with "\n"; each
-// review begins with a blank line ("\n" before "Review N").
+// ApplyReviewBatch. The leading intro line ends with "\n"; each review begins
+// with a blank line ("\n" before "Review N"). A GitHub review carries an id to
+// reply on; a GitLab merge request has none ({{.ReviewID}} is empty), so the
+// {{else}} branch still tells the worker to resolve the reviewer's resolvable
+// discussion threads — otherwise the MR stays blocked on unresolved comments.
 const aoReviewerBatchDefault = "[AO reviewer] AO's internal code reviewer submitted {{.Count}} review(s) requesting changes.\n" +
 	"{{range .Reviews}}\nReview {{.Index}}\nPR: {{.PRURL}}\nVerdict: {{.Verdict}}" +
 	"{{if .TargetSHA}}\nHead commit: {{.TargetSHA}}{{end}}" +
-	"{{if .ReviewID}}\nReview: {{.ReviewID}}\nOnce you have addressed it, reply on review {{.ReviewID}} with how you addressed it, then resolve the review comment threads you addressed.{{end}}" +
+	"{{if .ReviewID}}\nReview: {{.ReviewID}}\nOnce you have addressed it, reply on review {{.ReviewID}} with how you addressed it, then resolve the review comment threads you addressed.{{else}}\nOnce you have addressed it, resolve the review comment threads you addressed.{{end}}" +
 	"{{if .Body}}\n\nReview body:\n{{.Body}}\n{{end}}{{end}}"
 
 // aoReviewerSingleDefault reproduces the pre-templating ApplyReviewResult text.
+// As with the batch template, the {{else}} branch covers GitLab merge requests
+// (no review id) so the worker is still told to resolve the threads.
 const aoReviewerSingleDefault = "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: {{.PRURL}}\nVerdict: {{.Verdict}}" +
-	"{{if .ReviewID}}\nReview: {{.ReviewID}}\n\nOnce you have addressed it, reply on review {{.ReviewID}} with how you addressed it, then resolve the review comment threads you addressed.{{end}}" +
+	"{{if .ReviewID}}\nReview: {{.ReviewID}}\n\nOnce you have addressed it, reply on review {{.ReviewID}} with how you addressed it, then resolve the review comment threads you addressed.{{else}}\n\nOnce you have addressed it, resolve the review comment threads you addressed.{{end}}" +
 	"{{if .Body}}\n\nReview body:\n{{.Body}}{{end}}"

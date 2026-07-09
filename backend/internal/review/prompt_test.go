@@ -48,6 +48,9 @@ func TestReviewTextsGitLabUsesGlab(t *testing.T) {
 		"--file",
 		"--line",
 		"--resolvable=false",
+		// REPO must stay host-qualified so glab targets the MR's own GitLab
+		// instance instead of glab's default host.
+		"REPO=`https://<host>/<group>/<project>`",
 		"ao review submit --session mer-1 --reviews -",
 	} {
 		if !strings.Contains(prompt, want) {
