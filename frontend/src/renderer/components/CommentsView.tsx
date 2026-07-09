@@ -1,10 +1,12 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { prTitleLabel } from "../lib/pr-display";
 import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPRComments";
-import { apiErrorMessage } from "../lib/api-client";
+import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
+import { Switch } from "./ui/switch";
 import { DiffHunk } from "./DiffHunk";
 import { FileHeader } from "./FileHeader";
 import { SendToWorkerButton } from "./SendToWorkerButton";
@@ -20,30 +22,134 @@ export type Comment = Thread["comments"][number];
  */
 export function CommentsView({ sessionId }: { sessionId: string }) {
 	const query = useSessionPRComments(sessionId);
+	const queryClient = useQueryClient();
+
+	const settingsQuery = useQuery({
+		queryKey: ["settings", "autoNudge"],
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/auto-nudge", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data;
+		},
+	});
+	const sessionQuery = useQuery({
+		queryKey: ["session", sessionId, "autoNudge"],
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}", {
+				params: { path: { sessionId } },
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data.session;
+		},
+	});
+	const override = sessionQuery.data?.autoNudgeComments ?? null;
+	const globalDefault = settingsQuery.data?.enabled ?? false;
+	const effective = override !== null ? override : globalDefault;
+
+	const setOverride = useMutation({
+		mutationFn: async (next: boolean | null) => {
+			const { error } = await apiClient.PUT("/api/v1/sessions/{sessionId}/auto-nudge", {
+				params: { path: { sessionId } },
+				body: { override: next },
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ["session", sessionId, "autoNudge"] });
+		},
+	});
+
+	let body: React.ReactNode;
 	if (query.isLoading) {
-		return <p className="inspector-empty">Loading comments…</p>;
+		body = <p className="inspector-empty">Loading comments…</p>;
+	} else if (query.error) {
+		body = <p className="inspector-empty">{apiErrorMessage(query.error, "Unable to load comments")}</p>;
+	} else {
+		const groups = (query.data ?? []).filter((group) => group.threads.length > 0);
+		body =
+			groups.length === 0 ? (
+				<p className="inspector-empty">No review comments yet.</p>
+			) : (
+				<>
+					{groups.map((group) => (
+						<section className="inspector-section" key={group.prUrl}>
+							<div className="inspector-section__head">
+								<span>{prTitleLabel(group.provider === "gitlab" ? "gitlab" : "github", group.number)}</span>
+							</div>
+							<div className="flex flex-col gap-2">
+								{group.threads.map((thread) => (
+									<ThreadCard key={thread.threadId} sessionId={sessionId} prUrl={group.prUrl} thread={thread} />
+								))}
+							</div>
+						</section>
+					))}
+				</>
+			);
 	}
-	if (query.error) {
-		return <p className="inspector-empty">{apiErrorMessage(query.error, "Unable to load comments")}</p>;
-	}
-	const groups = (query.data ?? []).filter((group) => group.threads.length > 0);
-	if (groups.length === 0) {
-		return <p className="inspector-empty">No review comments yet.</p>;
-	}
+
 	return (
 		<div role="tabpanel">
-			{groups.map((group) => (
-				<section className="inspector-section" key={group.prUrl}>
-					<div className="inspector-section__head">
-						<span>{prTitleLabel(group.provider === "gitlab" ? "gitlab" : "github", group.number)}</span>
-					</div>
-					<div className="flex flex-col gap-2">
-						{group.threads.map((thread) => (
-							<ThreadCard key={thread.threadId} sessionId={sessionId} prUrl={group.prUrl} thread={thread} />
-						))}
-					</div>
-				</section>
-			))}
+			<AutoNudgeToggle
+				effective={effective}
+				override={override}
+				busy={settingsQuery.isLoading || sessionQuery.isLoading || setOverride.isPending}
+				onToggle={(next) => setOverride.mutate(next)}
+				onReset={() => setOverride.mutate(null)}
+				error={setOverride.isError ? apiErrorMessage(setOverride.error) : null}
+			/>
+			{body}
+		</div>
+	);
+}
+
+function AutoNudgeToggle({
+	effective,
+	override,
+	busy,
+	onToggle,
+	onReset,
+	error,
+}: {
+	effective: boolean;
+	override: boolean | null;
+	busy: boolean;
+	onToggle: (next: boolean) => void;
+	onReset: () => void;
+	error: string | null;
+}) {
+	return (
+		<div className="flex flex-col gap-1 border-b border-border px-3 py-2">
+			<div className="flex items-center justify-between gap-3">
+				<div className="flex flex-col">
+					<span className="text-[12px] font-medium text-foreground">Auto-send unresolved comments to the worker</span>
+					<span className="text-[11px] text-muted-foreground">
+						{override === null ? "Following the global default" : "Overridden for this session"}
+					</span>
+				</div>
+				<div className="flex items-center gap-2">
+					{override !== null && (
+						<button
+							type="button"
+							className="text-[11px] text-accent hover:underline disabled:opacity-50"
+							disabled={busy}
+							onClick={onReset}
+						>
+							Reset to default
+						</button>
+					)}
+					<Switch
+						aria-label="Auto-send unresolved comments to the worker"
+						checked={effective}
+						disabled={busy}
+						onCheckedChange={onToggle}
+					/>
+				</div>
+			</div>
+			{error && (
+				<span className="text-[11px] text-error" role="alert">
+					{error}
+				</span>
+			)}
 		</div>
 	);
 }
