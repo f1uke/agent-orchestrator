@@ -241,15 +241,20 @@ func TestApplyPRObservation_CIFailingUsesTemplateOverride(t *testing.T) {
 	}
 }
 
-func TestPRObservation_ReviewCommentsNudgeAgent(t *testing.T) {
+func TestPRObservation_UnresolvedReviewCommentsDoNotNudgeAgent(t *testing.T) {
+	// The human-review-comment auto-nudge was removed: an unresolved review
+	// comment (or a changes-requested decision) no longer auto-dispatches the
+	// worker. Surfacing and dispatching PR review comments is now manual (the
+	// Comments tab / Send-to-worker). CI-failure, merge-conflict, and
+	// AO-reviewer nudges are unaffected (covered by their own tests).
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
 	o := ports.PRObservation{Fetched: true, URL: "pr1", Review: domain.ReviewChangesRequest, Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}}}
 	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
 		t.Fatal(err)
 	}
-	if len(msg.msgs) != 1 || !strings.Contains(msg.msgs[0], "fix this") {
-		t.Fatalf("want review nudge, got %v", msg.msgs)
+	if len(msg.msgs) != 0 {
+		t.Fatalf("review comments must NOT auto-nudge the worker anymore, got %v", msg.msgs)
 	}
 }
 
@@ -271,25 +276,6 @@ func TestPRObservation_CINudgeSanitizesLogTailControlChars(t *testing.T) {
 	}
 	if !strings.Contains(got, "line1") || !strings.Contains(got, "line2") || !strings.Contains(got, "\ttabbed") {
 		t.Fatalf("nudge dropped visible text or tab: %q", got)
-	}
-}
-
-func TestPRObservation_ReviewNudgeSanitizesCommentControlChars(t *testing.T) {
-	m, st, msg := newManager()
-	st.sessions["mer-1"] = working("mer-1")
-	o := ports.PRObservation{Fetched: true, URL: "pr1", Review: domain.ReviewChangesRequest, Comments: []ports.PRCommentObservation{{ID: "1", Body: "please\x1b]0;pwned\afix this"}}}
-	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
-		t.Fatal(err)
-	}
-	if len(msg.msgs) != 1 {
-		t.Fatalf("want one review nudge, got %v", msg.msgs)
-	}
-	got := msg.msgs[0]
-	if strings.ContainsRune(got, '\x1b') || strings.ContainsRune(got, '\a') {
-		t.Fatalf("review nudge still carries control bytes: %q", got)
-	}
-	if !strings.Contains(got, "please") || !strings.Contains(got, "fix this") {
-		t.Fatalf("review nudge dropped visible text: %q", got)
 	}
 }
 
