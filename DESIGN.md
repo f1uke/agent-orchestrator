@@ -47,6 +47,18 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   strip (user-requested). The AO reference keeps a full-height sidebar with the
   header beside it. On macOS the header always pads past the lights + TitlebarNav
   cluster (`.is-under-titlebar-nav`, 180px).
+- **Approved deviation (2026-07-10):** the board's **4-hue semantic lane colour
+  system** and the **project-sidebar session status glyphs** — a deliberate,
+  user-approved layer on top of the agent-orchestrator clone, recreated from the
+  user's own Claude Design handoff (`Board.dc.html`, from the user's Claude
+  Design project). It gives each board lane its own hue (WORKING amber · NEEDS YOU
+  **coral**, moved off amber so it stops colliding with WORKING · IN REVIEW
+  **blue**, up from undifferentiated gray · READY TO MERGE green) and replaces the
+  sidebar's plain status dot with a lane-coloured, glowing shape glyph. This
+  **intentionally departs** from agent-orchestrator's flatter board palette;
+  QA/review must treat these board + sidebar lane colours as **sanctioned, not
+  drift**, and must **not** flag them as divergence from agent-orchestrator. Full
+  spec in _Color → Board lane colour system_ below.
 
 ## Product Context
 
@@ -175,8 +187,62 @@ Session status is a single ~14px glyph in one fixed slot, never a text pill/badg
 - **Otherwise** → a filled dot: `needs_input` amber (pulsing), idle/done muted gray.
 
 Precedence: **working spinner > PR icon > dot**. Implemented as `StatusGlyph` in
-`components/SideRail.tsx`; used in the orchestrator's Workers list. (Worker rows in the
-left rail stay name-only — no glyph.)
+`components/SideRail.tsx`; used in the orchestrator's Workers list. (This is the
+orchestrator's side-rail Workers list — distinct from the project-sidebar session
+glyphs documented below.)
+
+### Board lane colour system (approved deviation · 2026-07-10)
+
+> Sanctioned exception to the "clone agent-orchestrator verbatim" banner at the top
+> — see the 2026-07-10 _Approved deviation_ bullet there. These board + sidebar lane
+> colours are **intentional**; do not flag them as divergence from agent-orchestrator.
+> Single source of truth = the code (`lib/lane-indicator.ts` + the `--lane-*` /
+> `--kanban-*` tokens in `styles.css`); keep this section in step with it.
+
+The kanban board (`SessionsBoard.tsx`) uses a **4-hue semantic lane system** so lanes
+and statuses are cleanly separable. Each lane owns one **base hue** (chrome) plus a
+**brighter variant** (dots/text/glyphs). `DONE` / terminated is **not** a lane — those
+sessions archive to the Done bar (passive gray, unchanged).
+
+| Lane (attention zone)        | Base hue (token)                 | Bright variant (token)            |
+| ---------------------------- | -------------------------------- | --------------------------------- |
+| **WORKING** (`working`)      | amber `#e0a544` `--lane-working` | `#ebb65c` `--lane-working-bright` |
+| **NEEDS YOU** (`action`)     | coral `#ef6f5c` `--lane-needs`   | `#f58873` `--lane-needs-bright`   |
+| **IN REVIEW** (`pending`)    | blue `#5b8def` `--lane-review`   | `#7ba3f2` `--lane-review-bright`  |
+| **READY TO MERGE** (`merge`) | green `#5fb87a` `--lane-merge`   | `#74c98d` `--lane-merge-bright`   |
+
+Board chrome surfaces (darker than the app hairline family, per the handoff):
+`--kanban-col-border #1a1a1e`, `--kanban-card-bg #121216`, `--kanban-card-border
+#212129`, `--kanban-card-divider #1b1b21`. Light-mode `--lane-*` fall back to darker,
+legible variants (the handoff is dark-only). Tokens live in both `:root` blocks.
+
+**Where each hue lands** (one lane hue, applied consistently so the lane is unmistakable):
+
+- **Base hue** → column top border (`3px`); top-down background tint
+  (`hue @ 11% → transparent` by ~240px so long lanes go dark); count-badge fill
+  (`@16%`) + border (`@34%`); each card's **left accent bar** (`3px`); card footer
+  tint (`@3%`); empty-lane dashed placeholder border (`@28%`).
+- **Bright variant** → header status dot (`9px`, glow `@70%`) + header label text +
+  count-badge text; card status dot (`8px`, glow `@65%`) + card status label text;
+  the sidebar glyph.
+
+Motion: the card status dot pulses (`--animate-status-pulse`) **only in WORKING** —
+per the Motion rule that pulse means a genuinely-live session — not in every lane.
+Card status dot **and label take the lane colour**, not the per-sub-status colour, so
+a `ci_failed` card reads **coral** within NEEDS YOU rather than red (deliberate, to
+keep lanes visually unified).
+
+**Project-sidebar session glyphs** (`Sidebar.tsx`, `SessionGlyph`): each session row
+carries a **distinct lane-shape glyph** (lucide equivalents of the handoff's unicode
+glyphs) tinted by the lane's bright variant with a soft `drop-shadow` glow, so the
+list is scannable by **shape and hue** without opening the board:
+
+- **● Working** — `Circle` (filled) · **◎ Needs you** — `CircleDot` ·
+  **◐ In review** — `Contrast` · **✓ Ready** — `Check`.
+- The session list is **sorted by state** (working → needs → review → merge), the same
+  flow as the lanes, so a session sits at the same rank in the sidebar as in its board
+  lane. This refines the "name-only worker rows" rule: rows are still name + a single
+  status glyph, nothing else (no branch/diff/PR).
 
 ## Spacing
 
@@ -262,13 +328,14 @@ mirrors emdash exactly. Launching from a project row pre-fills the Project field
 
 ## Decisions Log
 
-| Date       | Decision                                                               | Rationale                                                                                          |
-| ---------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 2026-06-09 | Match emdash's visual language exactly                                 | User direction; emdash is the demonstrated reference for this app's UI.                            |
-| 2026-06-09 | System font, not a custom typeface (e.g. Geist)                        | emdash uses the system stack; fidelity + native feel + zero font payload chosen over brand type.   |
-| 2026-06-09 | Refined **blue** accent, not emdash's jade green                       | User's explicit pick; blue for primary/active/focus, terminal stays green.                         |
-| 2026-06-09 | Single global **Orchestrator** anchor, orchestrator-first default view | The one real difference from emdash; orchestrator is the human-facing coordinator you delegate to. |
-| 2026-06-09 | **Name-only** worker rows                                              | User direction; status/branch/diff live in panes + topbar, not the row.                            |
-| 2026-06-09 | Removed **Library** from the rail footer                               | User direction; footer is Search + Settings only.                                                  |
-| 2026-06-09 | Topbar right = PR/CI pill + view toggles + ⋯ menu (worker)             | Surfaces the actionable PR/CI state from the daemon; emdash/PostHog Code precedent.                |
-| 2026-06-09 | Spawn modal mirrors emdash's Create Task                               | Consistency with the reference; mapped to `ao spawn` params.                                       |
+| Date       | Decision                                                                        | Rationale                                                                                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-09 | Match emdash's visual language exactly                                          | User direction; emdash is the demonstrated reference for this app's UI.                                                                                                                                                       |
+| 2026-06-09 | System font, not a custom typeface (e.g. Geist)                                 | emdash uses the system stack; fidelity + native feel + zero font payload chosen over brand type.                                                                                                                              |
+| 2026-06-09 | Refined **blue** accent, not emdash's jade green                                | User's explicit pick; blue for primary/active/focus, terminal stays green.                                                                                                                                                    |
+| 2026-06-09 | Single global **Orchestrator** anchor, orchestrator-first default view          | The one real difference from emdash; orchestrator is the human-facing coordinator you delegate to.                                                                                                                            |
+| 2026-06-09 | **Name-only** worker rows                                                       | User direction; status/branch/diff live in panes + topbar, not the row.                                                                                                                                                       |
+| 2026-06-09 | Removed **Library** from the rail footer                                        | User direction; footer is Search + Settings only.                                                                                                                                                                             |
+| 2026-06-09 | Topbar right = PR/CI pill + view toggles + ⋯ menu (worker)                      | Surfaces the actionable PR/CI state from the daemon; emdash/PostHog Code precedent.                                                                                                                                           |
+| 2026-06-09 | Spawn modal mirrors emdash's Create Task                                        | Consistency with the reference; mapped to `ao spawn` params.                                                                                                                                                                  |
+| 2026-07-10 | **4-hue board lane colour system** + sidebar status glyphs (approved deviation) | User-approved layer on the AO clone (Claude Design handoff `Board.dc.html`); separates lanes (NEEDS YOU → coral, IN REVIEW → blue) so statuses don't collide. Sanctioned — not drift. See _Color → Board lane colour system_. |

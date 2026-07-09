@@ -24,7 +24,8 @@ vi.mock("../lib/api-client", () => ({
 	apiClient: { DELETE: deleteMock, POST: postMock },
 	apiErrorMessage: (error: unknown, fallback = "Request failed") => {
 		if (error instanceof Error) return error.message;
-		if (error && typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message);
+		if (error && typeof error === "object" && "message" in error)
+			return String((error as { message?: unknown }).message);
 		return fallback;
 	},
 }));
@@ -41,6 +42,21 @@ function doneSession(id: string): WorkspaceSession {
 		kind: "worker",
 		branch: `ao/${id}`,
 		status: "terminated",
+		updatedAt: "2026-06-10T00:00:00Z",
+		prs: [],
+	};
+}
+
+function activeSession(id: string, status: WorkspaceSession["status"] = "working"): WorkspaceSession {
+	return {
+		id,
+		workspaceId: "proj-1",
+		workspaceName: "my-app",
+		title: `active ${id}`,
+		provider: "claude-code",
+		kind: "worker",
+		branch: `ao/${id}`,
+		status,
 		updatedAt: "2026-06-10T00:00:00Z",
 		prs: [],
 	};
@@ -157,6 +173,74 @@ describe("SessionsBoard", () => {
 
 		expect(screen.queryByText(/Done \/ Terminated/i)).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Reopen session" })).not.toBeInTheDocument();
+	});
+
+	it("moves an active session to Done via the card menu, arming a confirm before killing", async () => {
+		postMock.mockResolvedValue({ data: { ok: true, sessionId: "sess-9", freed: true }, error: undefined });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-9")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Move to Done/i }));
+		// Arm-confirm: the first click only arms — nothing is terminated yet.
+		expect(postMock).not.toHaveBeenCalled();
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Confirm/i }));
+
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/kill", {
+				params: { path: { sessionId: "sess-9" } },
+			}),
+		);
+	});
+
+	it("keeps you on the board — interacting with the card menu never opens the session", async () => {
+		// The menu content is portaled, but React events still bubble along the React
+		// tree (the menu lives inside the card's open-on-click wrapper). Without a
+		// propagation stop, choosing a menu item would also navigate into the session.
+		postMock.mockResolvedValue({ data: { ok: true, sessionId: "sess-9", freed: true }, error: undefined });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-9")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Move to Done/i }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Confirm/i }));
+
+		expect(navigateMock).not.toHaveBeenCalled();
+	});
+
+	it("surfaces a Move to Done failure inside the menu instead of silently dropping it", async () => {
+		postMock.mockResolvedValue({ error: { code: "INTERNAL_ERROR", message: "runtime destroy failed" } });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-9")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Move to Done/i }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Confirm/i }));
+
+		await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("runtime destroy failed"));
+	});
+
+	it("does not terminate when the Move to Done confirm is cancelled", async () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-9")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Move to Done/i }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Cancel/i }));
+
+		expect(postMock).not.toHaveBeenCalled();
 	});
 
 	it("clears all done sessions", async () => {

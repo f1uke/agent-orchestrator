@@ -2,8 +2,10 @@ import { type KeyboardEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Plus, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, CircleCheck, MoreHorizontal, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { captureRendererEvent } from "../lib/telemetry";
 import { DashboardSubhead } from "./DashboardSubhead";
 import {
 	type AttentionZone,
@@ -25,6 +27,7 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, prKindLabel, prRef, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
+import { LANE_ORDER, LANES, type LaneConfig } from "../lib/lane-indicator";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 
@@ -33,51 +36,10 @@ type SessionsBoardProps = {
 	projectId?: string;
 };
 
-// The four kanban columns, left→right by flow (work → review → merge), ported
-// verbatim from agent-orchestrator (SIMPLE_KANBAN_LEVELS + AttentionZone +
-// mc-board.css). "done" is archived, not a column.
-type Column = {
-	level: AttentionZone;
-	label: string;
-	glow: string;
-	dot: string;
-	dotGlow: boolean;
-	titleClass: string;
-};
-const COLUMNS: Column[] = [
-	{
-		level: "working",
-		label: "Working",
-		glow: "color-mix(in srgb, var(--orange) 7%, transparent)",
-		dot: "var(--orange)",
-		dotGlow: true,
-		titleClass: "text-working",
-	},
-	{
-		level: "action",
-		label: "Needs you",
-		glow: "color-mix(in srgb, var(--amber) 6%, transparent)",
-		dot: "var(--amber)",
-		dotGlow: true,
-		titleClass: "text-warning",
-	},
-	{
-		level: "pending",
-		label: "In review",
-		glow: "var(--kanban-pending-glow)",
-		dot: "var(--fg-muted)",
-		dotGlow: false,
-		titleClass: "text-muted-foreground",
-	},
-	{
-		level: "merge",
-		label: "Ready to merge",
-		glow: "color-mix(in srgb, var(--green) 7%, transparent)",
-		dot: "var(--green)",
-		dotGlow: true,
-		titleClass: "text-success",
-	},
-];
+// The four kanban lanes, left→right by flow (work → review → merge). Each lane
+// owns one hue in the 4-color semantic system (see lib/lane-indicator +
+// design handoff Board.dc.html); "done" is archived in the Done bar, not a lane.
+const COLUMNS: LaneConfig[] = LANE_ORDER.map((key) => LANES[key]);
 
 export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const navigate = useNavigate();
@@ -217,7 +179,7 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				) : (
 					<div className="grid h-full grid-cols-4 gap-2">
 						{COLUMNS.map((col) => (
-							<ZoneColumn key={col.level} col={col} sessions={byZone.get(col.level) ?? []} onOpen={openSession} />
+							<ZoneColumn key={col.key} col={col} sessions={byZone.get(col.key) ?? []} onOpen={openSession} />
 						))}
 					</div>
 				)}
@@ -521,38 +483,196 @@ function ZoneColumn({
 	sessions,
 	onOpen,
 }: {
-	col: Column;
+	col: LaneConfig;
 	sessions: WorkspaceSession[];
 	onOpen: (s: WorkspaceSession) => void;
 }) {
+	const { hueVar, dotVar } = col;
 	return (
 		<section
-			className="flex min-w-0 flex-col overflow-hidden rounded-[13px]"
-			style={{ background: `linear-gradient(180deg, ${col.glow}, transparent 130px), var(--kanban-column-bg)` }}
+			className="flex min-w-0 flex-col overflow-hidden rounded-[12px]"
+			style={{
+				// The lane's hue lands in five places (top border, top-down tint,
+				// header dot+label, count badge, and each card's left accent) so it is
+				// unmistakable. The tint fades out by ~240px so long lanes go dark.
+				border: "1px solid var(--kanban-col-border)",
+				borderTop: `3px solid ${hueVar}`,
+				background: `linear-gradient(180deg, color-mix(in srgb, ${hueVar} 11%, transparent) 0%, transparent 240px), var(--kanban-column-bg)`,
+			}}
 		>
-			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[14px]">
+			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
 				<span
-					className="h-[7px] w-[7px] rounded-full"
-					style={{
-						background: col.dot,
-						boxShadow: col.dotGlow ? `0 0 7px color-mix(in srgb, ${col.dot} 60%, transparent)` : undefined,
-					}}
+					className="h-[9px] w-[9px] shrink-0 rounded-full"
+					style={{ background: dotVar, boxShadow: `0 0 10px color-mix(in srgb, ${dotVar} 70%, transparent)` }}
 				/>
-				<span className={cn("text-[11px] font-semibold uppercase tracking-[0.08em]", col.titleClass)}>{col.label}</span>
-				<span className="ml-auto font-mono text-[11px] leading-none text-passive">{sessions.length}</span>
+				<span className="text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: dotVar }}>
+					{col.label}
+				</span>
+				<span
+					className="ml-auto min-w-[22px] rounded-full px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5]"
+					style={{
+						color: dotVar,
+						background: `color-mix(in srgb, ${hueVar} 16%, transparent)`,
+						border: `1px solid color-mix(in srgb, ${hueVar} 34%, transparent)`,
+					}}
+				>
+					{sessions.length}
+				</span>
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-[11px] pb-3">
-				<div className="flex flex-col gap-2.5">
-					{sessions.map((session) => (
-						<SessionCard key={session.id} session={session} onOpen={() => onOpen(session)} />
-					))}
-				</div>
+				{sessions.length === 0 ? (
+					<EmptyLane col={col} />
+				) : (
+					<div className="flex flex-col gap-2.5">
+						{sessions.map((session) => (
+							<SessionCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} />
+						))}
+					</div>
+				)}
 			</div>
 		</section>
 	);
 }
 
-function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
+// The dashed placeholder shown in a lane with no cards, tinted by the lane hue.
+function EmptyLane({ col }: { col: LaneConfig }) {
+	const { hueVar, dotVar, Icon } = col;
+	return (
+		<div
+			className="mt-2 flex flex-col items-center justify-center gap-2 rounded-[10px] px-4 py-[34px] text-center text-[12px]"
+			style={{
+				border: `1px dashed color-mix(in srgb, ${hueVar} 28%, transparent)`,
+				background: `color-mix(in srgb, ${hueVar} 3%, transparent)`,
+				color: `color-mix(in srgb, ${dotVar} 75%, transparent)`,
+			}}
+		>
+			<Icon
+				className="h-[15px] w-[15px]"
+				style={col.filled ? { fill: "currentColor" } : undefined}
+				aria-hidden="true"
+			/>
+			<span>{col.emptyText}</span>
+		</div>
+	);
+}
+
+// A board card's overflow menu. Its single action, "Move to Done", terminates the
+// session via POST /sessions/{id}/kill — the same terminate + reclaim-worktree path
+// as the topbar Kill (ShellTopbar's TopbarKillButton), reached from the board so a
+// no-PR session (e.g. an investigation) can be finished without opening it. Kill keeps
+// the git branch and preserves an uncommitted worktree, so the session stays restorable
+// via the Done bar's Reopen (the sole reversal affordance — this menu has no reopen).
+// Terminating is destructive, so the item arms a one-step confirm inside the menu
+// before firing.
+function SessionCardMenu({ session }: { session: WorkspaceSession }) {
+	const queryClient = useQueryClient();
+	const [open, setOpen] = useState(false);
+	const [confirming, setConfirming] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const kill = useMutation({
+		mutationFn: async () => {
+			void captureRendererEvent("ao.renderer.session_kill_requested", { project_id: session.workspaceId });
+			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/kill", {
+				params: { path: { sessionId: session.id } },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError));
+		},
+		onSuccess: () => {
+			void captureRendererEvent("ao.renderer.session_kill_succeeded", { project_id: session.workspaceId });
+			// The session flips to terminated on the next refresh, so its card leaves this
+			// column for the Done bar and this menu unmounts with it.
+			setOpen(false);
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
+		onError: (e) => {
+			void captureRendererEvent("ao.renderer.session_kill_failed", { project_id: session.workspaceId });
+			setError(e instanceof Error ? e.message : "Move to Done failed");
+		},
+	});
+
+	return (
+		<DropdownMenu
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
+				// Reset the arm-confirm whenever the menu closes so it never reopens mid-confirm.
+				if (!next) {
+					setConfirming(false);
+					setError(null);
+				}
+			}}
+		>
+			<DropdownMenuTrigger asChild>
+				<button
+					aria-label="Session actions"
+					className={cn(
+						"rounded p-0.5 text-passive opacity-0 transition-opacity hover:text-foreground",
+						"focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+					)}
+					// Stop the click from reaching the card's open-session handler.
+					onClick={(event) => event.stopPropagation()}
+					type="button"
+				>
+					<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+				</button>
+			</DropdownMenuTrigger>
+			{/* The content is portaled, but React events bubble along the React tree — the
+			    menu lives inside the card's open-on-click wrapper — so stop clicks here or
+			    choosing an item would also navigate into the session. */}
+			<DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+				{confirming ? (
+					<>
+						<div className="max-w-[15rem] px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
+							Stops the agent and reclaims its worktree. The branch and any open PR stay. Reopen from the Done bar to
+							undo.
+						</div>
+						<DropdownMenuItem
+							className="text-error focus:text-error [&_svg]:text-error"
+							disabled={kill.isPending}
+							onSelect={(event) => {
+								// Keep the menu open through the mutation so pending/error state is visible.
+								event.preventDefault();
+								kill.mutate();
+							}}
+						>
+							<CircleCheck aria-hidden="true" />
+							{kill.isPending ? "Moving…" : "Confirm — move to Done"}
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							disabled={kill.isPending}
+							onSelect={(event) => {
+								event.preventDefault();
+								setConfirming(false);
+							}}
+						>
+							Cancel
+						</DropdownMenuItem>
+						{error ? (
+							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
+								{error}
+							</div>
+						) : null}
+					</>
+				) : (
+					<DropdownMenuItem
+						className="text-error focus:text-error [&_svg]:text-error"
+						onSelect={(event) => {
+							event.preventDefault();
+							setError(null);
+							setConfirming(true);
+						}}
+					>
+						<CircleCheck aria-hidden="true" />
+						Move to Done
+					</DropdownMenuItem>
+				)}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col: LaneConfig; onOpen: () => void }) {
 	const badge = sessionBadge(session);
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	const branch = session.branch || "";
@@ -565,11 +685,29 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 		onOpen();
 	};
 	return (
-		<div className="w-full rounded-[7px] border border-border bg-surface text-left transition-colors hover:border-border-strong">
+		<div
+			className="group w-full overflow-hidden rounded-[10px] text-left transition-colors"
+			style={{
+				background: "var(--kanban-card-bg)",
+				border: "1px solid var(--kanban-card-border)",
+				// The lane hue repeats on the card's left edge so a card is tied to its
+				// lane even once scrolled away from the column header.
+				borderLeft: `3px solid ${col.hueVar}`,
+			}}
+		>
 			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0}>
 				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
-					<span className={cn("inline-flex items-center gap-1.5 text-[11px] font-medium", badge.className)}>
-						<span className={cn("h-[7px] w-[7px] rounded-full bg-current")} />
+					{/* Status dot + label take the lane's colour so every card in a lane
+					    reads as one status group; the dot pulses only for genuinely-live
+					    WORKING sessions (per DESIGN.md motion). */}
+					<span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: col.dotVar }}>
+						<span
+							className={cn("h-2 w-2 shrink-0 rounded-full", col.key === "working" && "animate-status-pulse")}
+							style={{
+								background: col.dotVar,
+								boxShadow: `0 0 8px color-mix(in srgb, ${col.dotVar} 65%, transparent)`,
+							}}
+						/>
 						{badge.label}
 					</span>
 					{issueId && (
@@ -580,9 +718,12 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 							{issueId}
 						</span>
 					)}
-					<span className="ml-auto shrink-0 font-mono text-[10.5px] tracking-[0.04em] text-passive">
-						{agentLabel(session.provider)}
-					</span>
+					<div className="ml-auto flex shrink-0 items-center gap-1.5">
+						<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
+							{agentLabel(session.provider)}
+						</span>
+						<SessionCardMenu session={session} />
+					</div>
 				</div>
 				<div
 					className={cn(
@@ -596,7 +737,11 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 				{showBranch && <div className="px-[13px] pb-2.5 font-mono text-[10.5px] text-passive">{branch}</div>}
 			</div>
 			<div
-				className="border-t border-border px-[13px] py-2 font-mono text-[10.5px] text-passive"
+				className="px-[13px] py-2 font-mono text-[10.5px] text-passive"
+				style={{
+					borderTop: "1px solid var(--kanban-card-divider)",
+					background: `color-mix(in srgb, ${col.hueVar} 3%, transparent)`,
+				}}
 				onClick={(event) => event.stopPropagation()}
 			>
 				{prSummaries.length === 0 ? (
