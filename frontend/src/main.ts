@@ -174,7 +174,7 @@ function applyRuntimeAppIcon(): void {
 	if (!iconPath) return;
 	const icon = nativeImage.createFromPath(iconPath);
 	if (!icon.isEmpty()) {
-		app.dock.setIcon(icon);
+		app.dock?.setIcon(icon);
 	}
 }
 
