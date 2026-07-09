@@ -483,7 +483,12 @@ func newBotCommentContent(comments []ports.TrackerCommentObservation) ([]string,
 		if c.ID == "" || strings.TrimSpace(c.Body) == "" {
 			continue
 		}
-		bodies = append(bodies, c.Body)
+		// Comment bodies are attacker-influenced (anyone/anything that can
+		// comment on the tracker issue) and get pasted into the agent's live
+		// pane; strip control/escape chars like the review-comment path does.
+		// The dedup signature (sig, below) is built from comment IDs, not
+		// bodies, so sanitizing here does not affect dedup.
+		bodies = append(bodies, domain.SanitizeControlChars(c.Body))
 		ids = append(ids, c.ID)
 	}
 	return bodies, ids
