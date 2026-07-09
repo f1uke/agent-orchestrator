@@ -1,6 +1,9 @@
 package messagetemplates
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExecuteRendersData(t *testing.T) {
 	out, err := Execute("hi {{.Comments}}", ReviewCommentData{Comments: "there"})
@@ -84,12 +87,16 @@ func TestAOReviewerBatchGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Review 1 carries a GitHub review id (reply-on-review branch); Review 2 has
+	// none — the GitLab case — so it takes the {{else}} branch and is still told
+	// to resolve the reviewer's resolvable discussion threads.
 	want := "[AO reviewer] AO's internal code reviewer submitted 2 review(s) requesting changes.\n" +
 		"\nReview 1\nPR: https://x/pr/1\nVerdict: changes_requested" +
 		"\nHead commit: abc" +
 		"\nReview: R1\nOnce you have addressed it, reply on review R1 with how you addressed it, then resolve the review comment threads you addressed." +
 		"\n\nReview body:\nfix it\n" +
-		"\nReview 2\nPR: https://x/pr/2\nVerdict: changes_requested"
+		"\nReview 2\nPR: https://x/pr/2\nVerdict: changes_requested" +
+		"\nOnce you have addressed it, resolve the review comment threads you addressed."
 	if out != want {
 		t.Fatalf("batch golden mismatch:\n got %q\nwant %q", out, want)
 	}
@@ -107,5 +114,26 @@ func TestAOReviewerSingleGolden(t *testing.T) {
 		"\n\nReview body:\nplease fix"
 	if out != want {
 		t.Fatalf("single golden mismatch:\n got %q\nwant %q", out, want)
+	}
+}
+
+// A GitLab merge request carries no review id, so the single template must take
+// the {{else}} branch: still tell the worker to resolve the resolvable
+// discussion threads, without referencing a non-existent "review <id>".
+func TestAOReviewerSingleGitLabResolvesThreadsWithoutReviewID(t *testing.T) {
+	out, err := Execute(Default(NameAOReviewerSingle), AOReviewerSingleData{
+		PRURL: "https://gitlab.finnomena.com/g/p/-/merge_requests/9", Verdict: "changes_requested", ReviewID: "", Body: "please fix",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: https://gitlab.finnomena.com/g/p/-/merge_requests/9\nVerdict: changes_requested" +
+		"\n\nOnce you have addressed it, resolve the review comment threads you addressed." +
+		"\n\nReview body:\nplease fix"
+	if out != want {
+		t.Fatalf("gitlab single mismatch:\n got %q\nwant %q", out, want)
+	}
+	if strings.Contains(out, "reply on review") || strings.Contains(out, "\nReview:") {
+		t.Fatalf("gitlab nudge must not reference a review id: %q", out)
 	}
 }

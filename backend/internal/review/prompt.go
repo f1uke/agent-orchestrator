@@ -117,9 +117,12 @@ const githubReviewStep1 = "1. For each PR below, post a separate review on that 
 
 // gitlabReviewStep1 posts the review to a GitLab merge request with `glab mr
 // note` (glab >= 1.94.0 supports diff/line comments natively). The MR URL
-// carries everything needed: REPO is the path before "/-/" and IID is the
-// number after "/-/merge_requests/".
-const gitlabReviewStep1 = "1. For each merge request below, post your review with `glab mr note` (glab supports diff/line comments natively). From the MR URL `https://<host>/<group>/<project>/-/merge_requests/<iid>`, set REPO=`<group>/<project>` (the path before \"/-/\") and IID=`<iid>` (the number after \"/-/merge_requests/\").\n\n" +
+// carries everything needed: REPO is the host-qualified project URL (the whole
+// MR URL up to "/-/") and IID is the number after "/-/merge_requests/". Passing
+// the host-qualified URL to `glab -R` keeps the note on the MR's own GitLab
+// instance rather than glab's configured default host — self-hosted GitLab (and
+// a multi-host AO_GITLAB_HOST) would otherwise be misrouted to that default.
+const gitlabReviewStep1 = "1. For each merge request below, post your review with `glab mr note` (glab supports diff/line comments natively). From the MR URL `https://<host>/<group>/<project>/-/merge_requests/<iid>`, set REPO=`https://<host>/<group>/<project>` (the whole MR URL up to \"/-/\", host included, so glab targets the MR's own GitLab instance instead of glab's default host) and IID=`<iid>` (the number after \"/-/merge_requests/\").\n\n" +
 	"   - Post the review summary as a non-blocking note, stating clearly whether you are requesting changes or approving:\n\n" +
 	"       glab mr note create <IID> -R <REPO> --resolvable=false -m '<summary markdown>'\n\n" +
 	"   - For each inline finding, add a diff comment anchored to the exact line so the worker can resolve it:\n\n" +
