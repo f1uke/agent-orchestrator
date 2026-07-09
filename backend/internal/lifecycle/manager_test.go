@@ -640,6 +640,60 @@ func TestApplyReviewBatchSendsCombinedAndDedups(t *testing.T) {
 	}
 }
 
+// TestApplyReviewBatch_UsesTemplateOverride proves the batch nudge renders
+// through the injected Renderer: an operator override of the
+// ao-reviewer-batch template changes the text an agent receives.
+func TestApplyReviewBatch_UsesTemplateOverride(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	renderer := messagetemplates.NewRenderer(func() map[string]string {
+		return map[string]string{string(messagetemplates.NameAOReviewerBatch): "OVERRIDE {{.Count}}"}
+	})
+	m := New(st, msg, WithMessageRenderer(renderer))
+	st.sessions["mer-1"] = working("mer-1")
+
+	outcome, err := m.ApplyReviewBatch(ctx, "mer-1", "batch1", []ReviewResult{
+		{RunID: "r1", PRURL: "https://x/pr/1", Verdict: domain.VerdictChangesRequested},
+	})
+	if err != nil {
+		t.Fatalf("ApplyReviewBatch: %v", err)
+	}
+	if outcome != ReviewDeliverySent || len(msg.msgs) != 1 {
+		t.Fatalf("outcome/messages = %q/%v, want sent once", outcome, msg.msgs)
+	}
+	if got := msg.msgs[0]; got != "OVERRIDE 1" {
+		t.Fatalf("batch nudge = %q, want template override applied", got)
+	}
+}
+
+// TestApplyReviewResult_UsesTemplateOverride proves the single-review nudge
+// renders through the injected Renderer: an operator override of the
+// ao-reviewer-single template changes the text an agent receives.
+func TestApplyReviewResult_UsesTemplateOverride(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	renderer := messagetemplates.NewRenderer(func() map[string]string {
+		return map[string]string{string(messagetemplates.NameAOReviewerSingle): "OVERRIDE {{.Verdict}}"}
+	})
+	m := New(st, msg, WithMessageRenderer(renderer))
+	st.sessions["mer-1"] = working("mer-1")
+
+	outcome, err := m.ApplyReviewResult(ctx, "mer-1", ReviewResult{
+		RunID:   "r1",
+		PRURL:   "https://x/pr/1",
+		Verdict: domain.VerdictChangesRequested,
+	})
+	if err != nil {
+		t.Fatalf("ApplyReviewResult: %v", err)
+	}
+	if outcome != ReviewDeliverySent || len(msg.msgs) != 1 {
+		t.Fatalf("outcome/messages = %q/%v, want sent once", outcome, msg.msgs)
+	}
+	if got := msg.msgs[0]; got != "OVERRIDE changes_requested" {
+		t.Fatalf("review nudge = %q, want template override applied", got)
+	}
+}
+
 func TestApplyReviewBatchNoopsWithoutDeliverableResults(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = working("mer-1")

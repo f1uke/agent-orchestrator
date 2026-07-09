@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -68,28 +67,24 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 		}
 		return results[i].RunID < results[j].RunID
 	})
-	var msg strings.Builder
-	fmt.Fprintf(&msg, "[AO reviewer] AO's internal code reviewer submitted %d review(s) requesting changes.\n", len(results))
+	data := messagetemplates.AOReviewerBatchData{Count: len(results)}
 	var sigParts []string
 	for i, r := range results {
-		fmt.Fprintf(&msg, "\nReview %d\nPR: %s\nVerdict: %s", i+1, domain.SanitizeControlChars(r.PRURL), domain.SanitizeControlChars(string(r.Verdict)))
-		if r.TargetSHA != "" {
-			fmt.Fprintf(&msg, "\nHead commit: %s", domain.SanitizeControlChars(r.TargetSHA))
-		}
-		if r.GithubReviewID != "" {
-			safeReviewID := domain.SanitizeControlChars(r.GithubReviewID)
-			fmt.Fprintf(&msg, "\nReview: %s", safeReviewID)
-			fmt.Fprintf(&msg, "\nOnce you have addressed it, reply on review %s with how you addressed it, then resolve the review comment threads you addressed.", safeReviewID)
-		}
-		if r.Body != "" {
-			fmt.Fprintf(&msg, "\n\nReview body:\n%s\n", domain.SanitizeControlChars(r.Body))
-		}
+		data.Reviews = append(data.Reviews, messagetemplates.AOReviewItem{
+			Index:     i + 1,
+			PRURL:     domain.SanitizeControlChars(r.PRURL),
+			Verdict:   domain.SanitizeControlChars(string(r.Verdict)),
+			TargetSHA: domain.SanitizeControlChars(r.TargetSHA),
+			ReviewID:  domain.SanitizeControlChars(r.GithubReviewID),
+			Body:      domain.SanitizeControlChars(r.Body),
+		})
 		sigParts = append(sigParts, strings.Join([]string{r.RunID, r.PRURL, r.TargetSHA, r.GithubReviewID, r.Body}, "\x00"))
 	}
+	msg := m.renderNudge(messagetemplates.NameAOReviewerBatch, data)
 	anchorPR := results[0].PRURL
 	key := "review-batch:" + anchorPR + ":" + batchID
 	sig := strings.Join(sigParts, "\x01")
-	if err := m.sendOnce(ctx, workerID, anchorPR, key, sig, msg.String(), reviewMaxNudge); err != nil {
+	if err := m.sendOnce(ctx, workerID, anchorPR, key, sig, msg, reviewMaxNudge); err != nil {
 		return ReviewDeliveryNoop, err
 	}
 	return ReviewDeliverySent, nil
@@ -206,15 +201,12 @@ func (m *Manager) ApplyReviewResult(ctx context.Context, workerID domain.Session
 	if m.messenger == nil {
 		return ReviewDeliveryNoop, nil
 	}
-	msg := fmt.Sprintf("[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: %s\nVerdict: %s", domain.SanitizeControlChars(r.PRURL), domain.SanitizeControlChars(string(r.Verdict)))
-	if r.GithubReviewID != "" {
-		safeReviewID := domain.SanitizeControlChars(r.GithubReviewID)
-		msg += fmt.Sprintf("\nReview: %s", safeReviewID)
-		msg += fmt.Sprintf("\n\nOnce you have addressed it, reply on review %s with how you addressed it, then resolve the review comment threads you addressed.", safeReviewID)
-	}
-	if r.Body != "" {
-		msg += "\n\nReview body:\n" + domain.SanitizeControlChars(r.Body)
-	}
+	msg := m.renderNudge(messagetemplates.NameAOReviewerSingle, messagetemplates.AOReviewerSingleData{
+		PRURL:    domain.SanitizeControlChars(r.PRURL),
+		Verdict:  domain.SanitizeControlChars(string(r.Verdict)),
+		ReviewID: domain.SanitizeControlChars(r.GithubReviewID),
+		Body:     domain.SanitizeControlChars(r.Body),
+	})
 	key := "review:" + r.PRURL + ":ao:" + r.RunID
 	sig := strings.Join([]string{r.TargetSHA, r.RunID, r.GithubReviewID, r.Body}, "\x00")
 	err = m.sendOnce(ctx, workerID, r.PRURL, key, sig, msg, reviewMaxNudge)
