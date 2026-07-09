@@ -9,8 +9,8 @@ export type Comment = Thread["comments"][number];
 
 /**
  * Read-only Comments tab: lists each PR/MR's review threads GitHub-style
- * (author, body, file:line). No diff hunks (Task 7) and no reply/resolve
- * actions (Phase 3) yet.
+ * (author, body, file:line) with the anchored diff hunk (expandable to the
+ * full file). Reply/resolve actions are deferred to Phase 3.
  */
 export function CommentsView({ sessionId }: { sessionId: string }) {
 	const query = useSessionPRComments(sessionId);

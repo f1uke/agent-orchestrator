@@ -81,7 +81,10 @@ func HunkForLine(diff string, newLine int) ([]Line, bool) {
 			case '\\':
 				// "\ No newline at end of file" — metadata, ignore.
 			default:
-				// Unexpected content; stop consuming this hunk defensively.
+				// Unexpected content: abandon the whole parse defensively
+				// rather than risk returning a corrupt hunk. Real `git diff`
+				// bodies only ever start with ' '/'+'/'-'/'\', so this is
+				// unreachable for well-formed input.
 				i = len(rows)
 			}
 			i++
