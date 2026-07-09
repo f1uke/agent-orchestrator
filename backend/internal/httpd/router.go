@@ -35,7 +35,6 @@ type ControlDeps struct {
 // Middleware order (outermost first):
 //
 //	RequestID      → attach a request id for correlation
-//	RealIP         → normalise client IP (loopback proxy from the dev server)
 //	requestLogger  → slog-backed access log + 5xx telemetry, carries the request id
 //	recoverer      → turn a handler panic into 500 instead of crashing the daemon
 //	cors           → CORS allowlist for the Electron renderer / dev origins
@@ -47,7 +46,9 @@ func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// RealIP intentionally omitted: the daemon binds loopback only, so RemoteAddr
+	// is always 127.0.0.1 and trusting X-Forwarded-For would only add a spoofing
+	// vector (chi deprecated it for this reason: GHSA-3fxj-6jh8-hvhx).
 	r.Use(requestLogger(log, deps.Telemetry))
 	r.Use(recoverTelemetry(log, deps.Telemetry))
 	r.Use(corsMiddleware(cfg.AllowedOrigins))
