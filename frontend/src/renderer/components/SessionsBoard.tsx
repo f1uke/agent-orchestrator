@@ -27,6 +27,7 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, prKindLabel, prRef, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
+import { LANE_ORDER, LANES, type LaneConfig } from "../lib/lane-indicator";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 
@@ -35,51 +36,10 @@ type SessionsBoardProps = {
 	projectId?: string;
 };
 
-// The four kanban columns, left→right by flow (work → review → merge), ported
-// verbatim from agent-orchestrator (SIMPLE_KANBAN_LEVELS + AttentionZone +
-// mc-board.css). "done" is archived, not a column.
-type Column = {
-	level: AttentionZone;
-	label: string;
-	glow: string;
-	dot: string;
-	dotGlow: boolean;
-	titleClass: string;
-};
-const COLUMNS: Column[] = [
-	{
-		level: "working",
-		label: "Working",
-		glow: "color-mix(in srgb, var(--orange) 7%, transparent)",
-		dot: "var(--orange)",
-		dotGlow: true,
-		titleClass: "text-working",
-	},
-	{
-		level: "action",
-		label: "Needs you",
-		glow: "color-mix(in srgb, var(--amber) 6%, transparent)",
-		dot: "var(--amber)",
-		dotGlow: true,
-		titleClass: "text-warning",
-	},
-	{
-		level: "pending",
-		label: "In review",
-		glow: "var(--kanban-pending-glow)",
-		dot: "var(--fg-muted)",
-		dotGlow: false,
-		titleClass: "text-muted-foreground",
-	},
-	{
-		level: "merge",
-		label: "Ready to merge",
-		glow: "color-mix(in srgb, var(--green) 7%, transparent)",
-		dot: "var(--green)",
-		dotGlow: true,
-		titleClass: "text-success",
-	},
-];
+// The four kanban lanes, left→right by flow (work → review → merge). Each lane
+// owns one hue in the 4-color semantic system (see lib/lane-indicator +
+// design handoff Board.dc.html); "done" is archived in the Done bar, not a lane.
+const COLUMNS: LaneConfig[] = LANE_ORDER.map((key) => LANES[key]);
 
 export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const navigate = useNavigate();
@@ -219,7 +179,7 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				) : (
 					<div className="grid h-full grid-cols-4 gap-2">
 						{COLUMNS.map((col) => (
-							<ZoneColumn key={col.level} col={col} sessions={byZone.get(col.level) ?? []} onOpen={openSession} />
+							<ZoneColumn key={col.key} col={col} sessions={byZone.get(col.key) ?? []} onOpen={openSession} />
 						))}
 					</div>
 				)}
@@ -523,34 +483,76 @@ function ZoneColumn({
 	sessions,
 	onOpen,
 }: {
-	col: Column;
+	col: LaneConfig;
 	sessions: WorkspaceSession[];
 	onOpen: (s: WorkspaceSession) => void;
 }) {
+	const { hueVar, dotVar } = col;
 	return (
 		<section
-			className="flex min-w-0 flex-col overflow-hidden rounded-[13px]"
-			style={{ background: `linear-gradient(180deg, ${col.glow}, transparent 130px), var(--kanban-column-bg)` }}
+			className="flex min-w-0 flex-col overflow-hidden rounded-[12px]"
+			style={{
+				// The lane's hue lands in five places (top border, top-down tint,
+				// header dot+label, count badge, and each card's left accent) so it is
+				// unmistakable. The tint fades out by ~240px so long lanes go dark.
+				border: "1px solid var(--kanban-col-border)",
+				borderTop: `3px solid ${hueVar}`,
+				background: `linear-gradient(180deg, color-mix(in srgb, ${hueVar} 11%, transparent) 0%, transparent 240px), var(--kanban-column-bg)`,
+			}}
 		>
-			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[14px]">
+			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
 				<span
-					className="h-[7px] w-[7px] rounded-full"
-					style={{
-						background: col.dot,
-						boxShadow: col.dotGlow ? `0 0 7px color-mix(in srgb, ${col.dot} 60%, transparent)` : undefined,
-					}}
+					className="h-[9px] w-[9px] shrink-0 rounded-full"
+					style={{ background: dotVar, boxShadow: `0 0 10px color-mix(in srgb, ${dotVar} 70%, transparent)` }}
 				/>
-				<span className={cn("text-[11px] font-semibold uppercase tracking-[0.08em]", col.titleClass)}>{col.label}</span>
-				<span className="ml-auto font-mono text-[11px] leading-none text-passive">{sessions.length}</span>
+				<span className="text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: dotVar }}>
+					{col.label}
+				</span>
+				<span
+					className="ml-auto min-w-[22px] rounded-full px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5]"
+					style={{
+						color: dotVar,
+						background: `color-mix(in srgb, ${hueVar} 16%, transparent)`,
+						border: `1px solid color-mix(in srgb, ${hueVar} 34%, transparent)`,
+					}}
+				>
+					{sessions.length}
+				</span>
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-[11px] pb-3">
-				<div className="flex flex-col gap-2.5">
-					{sessions.map((session) => (
-						<SessionCard key={session.id} session={session} onOpen={() => onOpen(session)} />
-					))}
-				</div>
+				{sessions.length === 0 ? (
+					<EmptyLane col={col} />
+				) : (
+					<div className="flex flex-col gap-2.5">
+						{sessions.map((session) => (
+							<SessionCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} />
+						))}
+					</div>
+				)}
 			</div>
 		</section>
+	);
+}
+
+// The dashed placeholder shown in a lane with no cards, tinted by the lane hue.
+function EmptyLane({ col }: { col: LaneConfig }) {
+	const { hueVar, dotVar, Icon } = col;
+	return (
+		<div
+			className="mt-2 flex flex-col items-center justify-center gap-2 rounded-[10px] px-4 py-[34px] text-center text-[12px]"
+			style={{
+				border: `1px dashed color-mix(in srgb, ${hueVar} 28%, transparent)`,
+				background: `color-mix(in srgb, ${hueVar} 3%, transparent)`,
+				color: `color-mix(in srgb, ${dotVar} 75%, transparent)`,
+			}}
+		>
+			<Icon
+				className="h-[15px] w-[15px]"
+				style={col.filled ? { fill: "currentColor" } : undefined}
+				aria-hidden="true"
+			/>
+			<span>{col.emptyText}</span>
+		</div>
 	);
 }
 
@@ -670,7 +672,7 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 	);
 }
 
-function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
+function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col: LaneConfig; onOpen: () => void }) {
 	const badge = sessionBadge(session);
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	const branch = session.branch || "";
@@ -683,11 +685,29 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 		onOpen();
 	};
 	return (
-		<div className="group w-full rounded-[7px] border border-border bg-surface text-left transition-colors hover:border-border-strong">
+		<div
+			className="group w-full overflow-hidden rounded-[10px] text-left transition-colors"
+			style={{
+				background: "var(--kanban-card-bg)",
+				border: "1px solid var(--kanban-card-border)",
+				// The lane hue repeats on the card's left edge so a card is tied to its
+				// lane even once scrolled away from the column header.
+				borderLeft: `3px solid ${col.hueVar}`,
+			}}
+		>
 			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0}>
 				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
-					<span className={cn("inline-flex items-center gap-1.5 text-[11px] font-medium", badge.className)}>
-						<span className={cn("h-[7px] w-[7px] rounded-full bg-current")} />
+					{/* Status dot + label take the lane's colour so every card in a lane
+					    reads as one status group; the dot pulses only for genuinely-live
+					    WORKING sessions (per DESIGN.md motion). */}
+					<span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: col.dotVar }}>
+						<span
+							className={cn("h-2 w-2 shrink-0 rounded-full", col.key === "working" && "animate-status-pulse")}
+							style={{
+								background: col.dotVar,
+								boxShadow: `0 0 8px color-mix(in srgb, ${col.dotVar} 65%, transparent)`,
+							}}
+						/>
 						{badge.label}
 					</span>
 					{issueId && (
@@ -717,7 +737,11 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 				{showBranch && <div className="px-[13px] pb-2.5 font-mono text-[10.5px] text-passive">{branch}</div>}
 			</div>
 			<div
-				className="border-t border-border px-[13px] py-2 font-mono text-[10.5px] text-passive"
+				className="px-[13px] py-2 font-mono text-[10.5px] text-passive"
+				style={{
+					borderTop: "1px solid var(--kanban-card-divider)",
+					background: `color-mix(in srgb, ${col.hueVar} 3%, transparent)`,
+				}}
 				onClick={(event) => event.stopPropagation()}
 			>
 				{prSummaries.length === 0 ? (

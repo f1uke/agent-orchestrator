@@ -142,6 +142,34 @@ afterEach(() => {
 });
 
 describe("Sidebar", () => {
+	it("orders sessions by state: working → needs → review → merge", () => {
+		const mk = (id: string, title: string, status: WorkspaceSession["status"]): WorkspaceSession => ({
+			...session,
+			id,
+			title,
+			status,
+		});
+		renderSidebar({
+			workspaces: [
+				{
+					...workspace,
+					// Provided out of order — the sidebar sorts them into board-lane flow.
+					sessions: [
+						mk("s-merge", "ship-it", "mergeable"),
+						mk("s-review", "in-review", "pr_open"),
+						mk("s-needs", "needs-me", "needs_input"),
+						mk("s-working", "busy", "working"),
+					],
+				},
+			],
+		});
+
+		const order = screen
+			.getAllByRole("button", { name: /^Open (busy|needs-me|in-review|ship-it)$/ })
+			.map((b) => b.getAttribute("aria-label"));
+		expect(order).toEqual(["Open busy", "Open needs-me", "Open in-review", "Open ship-it"]);
+	});
+
 	it("confirms project removal before calling the remove handler", async () => {
 		const user = userEvent.setup();
 		const onRemoveProject = renderSidebar();

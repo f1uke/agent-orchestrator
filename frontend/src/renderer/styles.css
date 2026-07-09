@@ -126,6 +126,24 @@
 	--interactive-active: rgb(255 255 255 / 0.07);
 	--kanban-column-bg: rgb(255 255 255 / 0.018);
 	--kanban-pending-glow: rgb(255 255 255 / 0.02);
+	/* Board kanban — 4-hue semantic lane system (design handoff Board.dc.html).
+	   Each lane owns a base hue (top border, background tint, count badge) plus a
+	   brighter variant (status dot, header label, card accent, sidebar glyph).
+	   NEEDS YOU is coral, not amber, so it no longer collides with WORKING. */
+	--lane-working: #e0a544;
+	--lane-working-bright: #ebb65c;
+	--lane-needs: #ef6f5c;
+	--lane-needs-bright: #f58873;
+	--lane-review: #5b8def;
+	--lane-review-bright: #7ba3f2;
+	--lane-merge: #5fb87a;
+	--lane-merge-bright: #74c98d;
+	/* Board chrome surfaces — deliberately a touch darker than the app hairline
+	   family, per the design handoff. */
+	--kanban-col-border: #1a1a1e;
+	--kanban-card-bg: #121216;
+	--kanban-card-border: #212129;
+	--kanban-card-divider: #1b1b21;
 }
 
 :root[data-theme="light"] {
@@ -154,6 +172,20 @@
 	--interactive-active: rgb(0 0 0 / 0.07);
 	--kanban-column-bg: rgb(0 0 0 / 0.02);
 	--kanban-pending-glow: rgb(0 0 0 / 0.03);
+	/* Light-mode lane hues: darker/saturated so they stay legible on white; the
+	   design handoff is dark-only, these keep the 4-hue system readable in light. */
+	--lane-working: #b06f15;
+	--lane-working-bright: #b06f15;
+	--lane-needs: #d1493a;
+	--lane-needs-bright: #d1493a;
+	--lane-review: #2563eb;
+	--lane-review-bright: #2563eb;
+	--lane-merge: #1a7f37;
+	--lane-merge-bright: #1a7f37;
+	--kanban-col-border: var(--border);
+	--kanban-card-bg: var(--bg-1);
+	--kanban-card-border: var(--border);
+	--kanban-card-divider: var(--border);
 	--term-bg: #fafafa;
 	--term-fg: #24292f;
 	--term-green: #1a7f37;
@@ -1622,4 +1654,3 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--red);
 	font-size: 12px;
 }
-

@@ -24,6 +24,7 @@ import {
 	workerSessions,
 } from "../types/workspace";
 import { aoBridge } from "../lib/bridge";
+import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
@@ -106,23 +107,32 @@ function useSelection() {
 	};
 }
 
-// 6px session dot: mirrors the board's status language so the sidebar can be
-// scanned without opening the project board.
-function SessionDot({ session }: { session: WorkspaceSession }) {
-	const zone = attentionZone(session);
+// Session status glyph: a distinct lane shape (filled dot ● / ring ◎ / half ◐ /
+// check ✓) tinted by the lane hue with a soft glow, so the sidebar list is
+// scannable by shape AND colour without opening the board — the same 4-hue
+// semantic system the board uses (lib/lane-indicator, design handoff Board.dc.html).
+function SessionGlyph({ session }: { session: WorkspaceSession }) {
+	const lane = laneForZone(attentionZone(session));
+	const { Icon } = lane;
 	return (
-		<span
-			aria-hidden="true"
-			className={cn(
-				"mt-px h-1.5 w-1.5 shrink-0 rounded-full",
-				zone === "working" && "animate-status-pulse bg-working",
-				zone === "action" && (session.status === "ci_failed" ? "bg-error" : "bg-warning"),
-				zone === "pending" && "bg-passive",
-				zone === "merge" && "bg-success",
-				zone === "done" && "bg-passive",
-			)}
-		/>
+		<span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center" style={{ color: lane.dotVar }}>
+			<Icon
+				className="h-[13px] w-[13px]"
+				style={{
+					filter: `drop-shadow(0 0 5px color-mix(in srgb, ${lane.dotVar} 70%, transparent))`,
+					...(lane.filled ? { fill: "currentColor" } : {}),
+				}}
+				aria-hidden="true"
+			/>
+		</span>
 	);
+}
+
+// Sidebar session order mirrors the board flow (working → needs → review →
+// merge), so a session sits at the same rank in the list as its board lane.
+function laneRank(session: WorkspaceSession): number {
+	const index = LANE_ORDER.indexOf(laneForZone(attentionZone(session)).key);
+	return index === -1 ? LANE_ORDER.length : index;
 }
 
 // Built on shadcn's sidebar primitives (components/ui/sidebar): the provider in
@@ -436,8 +446,12 @@ function ProjectItem({
 	const restartingProjectIds = useUiStore((state) => state.restartingProjectIds);
 	const isProjectRestarting = restartingProjectIds.has(workspace.id);
 	// Live workers only: merged/terminated sessions leave the sidebar and stay
-	// reachable through the board's Done / Terminated bar (SessionsBoard).
-	const sessions = workerSessions(workspace.sessions).filter(sessionIsActive);
+	// reachable through the board's Done / Terminated bar (SessionsBoard). Sorted
+	// by state (working → needs → review → merge) so the list reads in the same
+	// flow as the board lanes; sort is stable so peers keep their spawn order.
+	const sessions = workerSessions(workspace.sessions)
+		.filter(sessionIsActive)
+		.sort((a, b) => laneRank(a) - laneRank(b));
 	// The project's live orchestrator (if any) backs the hover Orchestrator
 	// button: navigate to it when present, otherwise spawn one first.
 	const orchestrator = newestActiveOrchestrator(workspace.sessions);
@@ -656,7 +670,7 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 		return (
 			<SidebarMenuSubItem>
 				<div className="relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[5px] pl-2.5 pr-1.5">
-					<SessionDot session={session} />
+					<SessionGlyph session={session} />
 					<input
 						aria-label={`Rename ${session.title}`}
 						autoFocus
@@ -696,7 +710,7 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 				onClick={onOpen}
 				type="button"
 			>
-				<SessionDot session={session} />
+				<SessionGlyph session={session} />
 				<span className="min-w-0 flex-1">
 					<span className={cn("block truncate text-[12px]", active ? "text-foreground" : "text-muted-foreground")}>
 						{session.title}
