@@ -62,4 +62,16 @@ describe("SendToWorkerButton", () => {
 		await screen.findByText(/sent/i);
 		expect(screen.queryByLabelText(/extra instructions for the worker/i)).not.toBeInTheDocument();
 	});
+
+	it("surfaces the dispatch error when the primary button is clicked without opening the panel", async () => {
+		postMock.mockReset().mockResolvedValue({ data: undefined, error: { message: "boom" } });
+		const user = userEvent.setup();
+		renderButton();
+
+		await user.click(screen.getByRole("button", { name: "Send to worker" }));
+
+		expect(await screen.findByRole("alert")).toHaveTextContent(/unable to send/i);
+		// the instructions panel was never opened
+		expect(screen.queryByLabelText(/extra instructions for the worker/i)).not.toBeInTheDocument();
+	});
 });

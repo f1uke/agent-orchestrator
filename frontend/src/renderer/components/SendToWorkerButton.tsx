@@ -83,6 +83,11 @@ export function SendToWorkerButton({
 					<ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
 				</Button>
 			</div>
+			{dispatch.isError && (
+				<div className="mt-1.5 text-[11px] text-destructive" role="alert">
+					{apiErrorMessage(dispatch.error, "Unable to send")}
+				</div>
+			)}
 			{panelOpen && (
 				<div className="absolute right-0 top-full z-10 mt-1 w-64 rounded-lg border border-border bg-popover p-2.5 shadow-[var(--shadow)]">
 					<label htmlFor={`extra-prompt-${threadId}`} className="mb-1 block text-[11px] text-muted-foreground">
@@ -95,11 +100,6 @@ export function SendToWorkerButton({
 						value={extraPrompt}
 						onChange={(event) => setExtraPrompt(event.target.value)}
 					/>
-					{dispatch.isError && (
-						<div className="mt-1.5 text-[11px] text-destructive" role="alert">
-							{apiErrorMessage(dispatch.error, "Unable to send")}
-						</div>
-					)}
 					<div className="mt-2 flex justify-end">
 						<Button type="button" size="sm" disabled={busy} onClick={() => dispatch.mutate(extraPrompt)}>
 							Send with instructions
