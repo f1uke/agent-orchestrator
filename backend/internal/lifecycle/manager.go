@@ -23,6 +23,14 @@ type sessionStore interface {
 	// when no open PR remains and at least one merged) and to suppress
 	// merge-conflict nudges on PRs stacked behind an open parent.
 	ListPRsBySession(ctx context.Context, id domain.SessionID) ([]domain.PullRequest, error)
+	// ListPRFactsForSession returns the same durable PR read model the derived
+	// display status is computed from — including the unresolved-comment flag.
+	// The ready-to-merge notification reads it so its "no blocking review
+	// feedback" decision cannot disagree with the board status pill (whose
+	// changes-requested reason also comes from PRFacts.ReviewComments); the
+	// transient SCM observation only carries review threads on the slower review
+	// cadence, so it is not a trustworthy comment signal on its own.
+	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	// GetPRLastNudgeSignature / UpdatePRLastNudgeSignature persist the
 	// reaction-dedup map so nudges survive a daemon restart.
 	GetPRLastNudgeSignature(ctx context.Context, prURL string) (string, error)
