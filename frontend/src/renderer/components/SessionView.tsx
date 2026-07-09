@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
+import type { FileDiffTarget } from "./CommentsView";
+import { FileDiffView } from "./FileDiffView";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable";
 import { useUiStore } from "../stores/ui-store";
@@ -48,6 +50,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const [terminalTarget, setTerminalTarget] = useState<TerminalTarget>({ kind: "worker" });
 	const [browserPoppedOut, setBrowserPoppedOut] = useState(false);
 	const [inspectorView, setInspectorView] = useState<InspectorView>("summary");
+	// A review comment "expanded to full file" takes over the center pane (in
+	// place of the terminal) until dismissed; cleared on session switch below.
+	const [fileView, setFileView] = useState<FileDiffTarget | null>(null);
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
 	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
@@ -73,6 +78,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setTerminalTarget({ kind: "worker" });
 		setBrowserPoppedOut(false);
 		setInspectorView("summary");
+		setFileView(null);
 		revealedPreviewRef.current = null;
 	}, [sessionId]);
 
@@ -186,7 +192,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 				{/* react-resizable-panels v4: bare numbers are PIXELS; percentages must
             be strings. Numeric sizes here once clamped the inspector to 45px. */}
 				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
-					{browserPoppedOut && session ? (
+					{fileView ? (
+						<FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />
+					) : browserPoppedOut && session ? (
 						<BrowserPanelView
 							active
 							browserView={browserView}
@@ -234,6 +242,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									}
 									onToggleBrowserPopOut={setBrowserPoppedOut}
 									onViewChange={setInspectorView}
+									onOpenFile={setFileView}
 									view={inspectorView}
 									browserView={browserView}
 									session={session}

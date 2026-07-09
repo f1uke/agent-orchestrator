@@ -18,7 +18,7 @@ import type { SessionActivityState, WorkspaceSession } from "../types/workspace"
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
-import { CommentsView } from "./CommentsView";
+import { CommentsView, type FileDiffTarget } from "./CommentsView";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -99,6 +99,7 @@ export function SessionInspector({
 	browserView,
 	view: viewProp,
 	onViewChange,
+	onOpenFile,
 }: {
 	session?: WorkspaceSession;
 	onOpenReviewerTerminal?: OpenReviewerTerminal;
@@ -109,6 +110,8 @@ export function SessionInspector({
 	/** Controlled active tab. Omit to let the inspector own its own selection. */
 	view?: InspectorView;
 	onViewChange?: (view: InspectorView) => void;
+	/** Open a review comment's file as a full-file diff in the center pane. */
+	onOpenFile?: (target: FileDiffTarget) => void;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const view = viewProp ?? internalView;
@@ -159,7 +162,7 @@ export function SessionInspector({
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
 				{view === "reviews" ? <ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} session={session} /> : null}
-				{view === "comments" ? <CommentsView sessionId={session.id} /> : null}
+				{view === "comments" ? <CommentsView sessionId={session.id} onOpenFile={onOpenFile} /> : null}
 				{view === "browser" ? (
 					<BrowserView
 						browserPoppedOut={browserPoppedOut}

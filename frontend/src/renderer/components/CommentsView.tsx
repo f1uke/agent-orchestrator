@@ -21,7 +21,7 @@ import {
 	statusFor,
 } from "../lib/comment-inbox";
 import { DiffRows } from "./DiffRows";
-import { MenuItemBody, SendSplit, menuBox, menuItemStyle, outlineBtn, pill, solidBtn } from "./inbox-ui";
+import { CommentActions, MenuItemBody, Toast, menuBox, menuItemStyle, outlineBtn, pill, solidBtn } from "./inbox-ui";
 
 type Group = PRCommentGroup;
 type Thread = Group["threads"][number];
@@ -486,20 +486,8 @@ function ThreadCard({
 	onOpenFile?: () => void;
 }) {
 	const [collapsed, setCollapsed] = useState(false);
-	const [replyOpen, setReplyOpen] = useState(false);
-	const [replyText, setReplyText] = useState("");
-	const [promptOpen, setPromptOpen] = useState(false);
 	const first = thread.comments[0];
 	const author = first?.author ?? "unknown";
-	const [promptText, setPromptText] = useState(() => genPrompt(thread.path, thread.line, first?.body ?? ""));
-	const [resolveAfter, setResolveAfter] = useState(true);
-
-	const submitReply = () => {
-		if (!replyText.trim()) return;
-		onReply(prUrl, thread.threadId, replyText, author);
-		setReplyText("");
-		setReplyOpen(false);
-	};
 
 	return (
 		<div
@@ -645,132 +633,19 @@ function ThreadCard({
 								/>
 							)}
 
-							<div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-								<button
-									type="button"
-									disabled={busy}
-									onClick={() => onResolve(prUrl, thread.threadId)}
-									style={outlineBtn(P.green, "rgba(95,184,122,.35)")}
-								>
-									✓ Resolve
-								</button>
-								<button
-									type="button"
-									disabled={busy}
-									onClick={() => setReplyOpen((o) => !o)}
-									style={solidBtn}
-								>
-									Reply
-								</button>
-								<SendSplit
-									onQuick={() => onSendQuick(prUrl, thread.threadId, thread.path)}
-									onEdit={() => setPromptOpen((o) => !o)}
-								/>
-							</div>
-
-							{replyOpen && (
-								<div style={{ marginTop: 11, border: `1px solid #26262c`, borderRadius: 9, padding: 9, background: P.replyBg }}>
-									<textarea
-										autoFocus
-										value={replyText}
-										onChange={(e) => setReplyText(e.target.value)}
-										onKeyDown={(e) => {
-											if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-												e.preventDefault();
-												submitReply();
-											}
-										}}
-										placeholder={`Reply to ${author}…`}
-										aria-label={`Reply to thread at ${thread.path}:${thread.line}`}
-										style={{
-											width: "100%",
-											minHeight: 64,
-											resize: "vertical",
-											background: "transparent",
-											border: "none",
-											outline: "none",
-											color: P.text,
-											fontSize: 12.5,
-											lineHeight: 1.5,
-											fontFamily: "inherit",
-										}}
-									/>
-									<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
-										<button
-											type="button"
-											onClick={() => {
-												setReplyOpen(false);
-												setReplyText("");
-											}}
-											style={{ fontSize: 12, color: P.secondary, background: "transparent", border: "none", cursor: "pointer", padding: "6px 10px" }}
-										>
-											Cancel
-										</button>
-										<button type="button" disabled={busy || !replyText.trim()} onClick={submitReply} style={solidBtn}>
-											Reply
-										</button>
-									</div>
-								</div>
-							)}
-
-							{promptOpen && (
-								<div
-									style={{
-										marginTop: 11,
-										border: `1px solid ${accentMix(35, "#26262c")}`,
-										borderRadius: 9,
-										padding: 11,
-										background: accentMix(6, P.replyBg),
-									}}
-								>
-									<div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-										<span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: ACCENT }}>⚡ PROMPT TO WORKER</span>
-									</div>
-									<textarea
-										value={promptText}
-										onChange={(e) => setPromptText(e.target.value)}
-										style={{
-											width: "100%",
-											minHeight: 104,
-											resize: "vertical",
-											background: P.promptTextareaBg,
-											border: `1px solid ${P.borderBatch}`,
-											borderRadius: 7,
-											padding: 9,
-											outline: "none",
-											color: "#dcdce0",
-											fontSize: 11.5,
-											lineHeight: 1.6,
-											fontFamily: MONO,
-										}}
-									/>
-									<div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-										<label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: P.secondary2, cursor: "pointer" }}>
-											<input type="checkbox" checked={resolveAfter} onChange={(e) => setResolveAfter(e.target.checked)} style={{ accentColor: ACCENT }} />
-											Resolve after send
-										</label>
-										<div style={{ flex: 1 }} />
-										<button
-											type="button"
-											onClick={() => setPromptOpen(false)}
-											style={{ fontSize: 12, color: P.secondary, background: "transparent", border: "none", cursor: "pointer", padding: "6px 10px" }}
-										>
-											Cancel
-										</button>
-										<button
-											type="button"
-											disabled={busy || !promptText.trim()}
-											onClick={() => {
-												onSendPrompt(prUrl, thread.threadId, promptText, resolveAfter);
-												setPromptOpen(false);
-											}}
-											style={solidBtn}
-										>
-											Send to worker
-										</button>
-									</div>
-								</div>
-							)}
+							<CommentActions
+								prUrl={prUrl}
+								threadId={thread.threadId}
+								path={thread.path}
+								line={thread.line}
+								author={author}
+								seedBody={first?.body ?? ""}
+								busy={busy}
+								onResolve={onResolve}
+								onReply={onReply}
+								onSendQuick={onSendQuick}
+								onSendPrompt={onSendPrompt}
+							/>
 						</div>
 					</div>
 				</div>
@@ -971,36 +846,6 @@ function EmptyState() {
 			<div style={{ fontSize: 34, marginBottom: 14, opacity: 0.6 }}>✓</div>
 			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 4 }}>Inbox zero</div>
 			<div style={{ fontSize: 12.5 }}>No unresolved comments.</div>
-		</div>
-	);
-}
-
-function Toast({ text }: { text: string }) {
-	return (
-		<div
-			role="status"
-			style={{
-				position: "absolute",
-				bottom: 22,
-				left: "50%",
-				transform: "translateX(-50%)",
-				background: P.toastBg,
-				border: `1px solid ${P.borderToast}`,
-				color: P.text,
-				fontSize: 12.5,
-				fontWeight: 500,
-				padding: "10px 16px",
-				borderRadius: 9,
-				boxShadow: "0 10px 34px rgba(0,0,0,.55)",
-				display: "flex",
-				alignItems: "center",
-				gap: 9,
-				zIndex: 40,
-				whiteSpace: "nowrap",
-			}}
-		>
-			<span style={{ color: ACCENT }}>⚡</span>
-			{text}
 		</div>
 	);
 }
