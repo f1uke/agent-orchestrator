@@ -73,7 +73,9 @@ export function DiffHunk({
 					Expand full file
 				</button>
 			)}
-			{ctx.truncated && <div className="px-3 py-1 text-[11px] text-muted-foreground">File truncated…</div>}
+			{mode === "file" && ctx.truncated && (
+				<div className="px-3 py-1 text-[11px] text-muted-foreground">File truncated…</div>
+			)}
 		</div>
 	);
 }

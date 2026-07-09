@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,6 +97,68 @@ func TestDiffContext_HunkMode(t *testing.T) {
 	}
 	if !sawAdd {
 		t.Fatalf("expected the CHANGED add line at new 2: %+v", res.Lines)
+	}
+}
+
+func TestDiffContext_HunkModeWindowsLargeHunk(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("config", "user.email", "t@t")
+	runGit("config", "user.name", "t")
+	// Seed an unrelated file so head's big.go is a pure add (one 40-line hunk).
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "seed.txt")
+	runGit("commit", "-q", "-m", "base")
+	baseSHA := gitRevParse(t, dir, "HEAD")
+	var sb strings.Builder
+	for i := 1; i <= 40; i++ {
+		sb.WriteString("line ")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, "big.go"), []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "big.go")
+	runGit("commit", "-q", "-m", "head")
+	headSHA := gitRevParse(t, dir, "HEAD")
+
+	fake := newFakeStore()
+	fake.putSessionWithWorkspace("s1", dir)
+	stList := &multiPRFakeStore{fakeStore: fake, prs: []domain.PullRequest{{URL: "pr1", BaseSHA: baseSHA, HeadSHA: headSHA}}}
+	svc := newServiceWithStore(t, stList)
+
+	res, err := svc.DiffContext(context.Background(), "s1", DiffContextQuery{PRURL: "pr1", Path: "big.go", Line: 20, Mode: "hunk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Available || res.Mode != "hunk" {
+		t.Fatalf("res = %+v", res)
+	}
+	// A 40-line hunk must be trimmed to a 15-line window centered on line 20.
+	if len(res.Lines) != 15 {
+		t.Fatalf("want a 15-line window, got %d lines", len(res.Lines))
+	}
+	if res.Lines[0].NewLine != 13 || res.Lines[14].NewLine != 27 {
+		t.Fatalf("window not centered on 20: first=%d last=%d", res.Lines[0].NewLine, res.Lines[14].NewLine)
+	}
+	sawAnchor := false
+	for _, l := range res.Lines {
+		if l.NewLine == 20 && l.Text == "line 20" {
+			sawAnchor = true
+		}
+	}
+	if !sawAnchor {
+		t.Fatalf("window must include the anchor line 20: %+v", res.Lines)
 	}
 }
 

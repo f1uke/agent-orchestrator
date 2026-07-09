@@ -15,6 +15,12 @@ import (
 
 const maxFileLines = 2000
 
+// hunkContextWindow bounds how many hunk lines the "hunk" mode returns around a
+// review comment's anchor, so a large hunk doesn't dump the whole file into the
+// comment card. The full file remains reachable via mode=file ("Expand full
+// file"). Odd so the anchor sits centered with equal context above and below.
+const hunkContextWindow = 15
+
 // DiffContextLine is one classified line of returned code context.
 type DiffContextLine struct {
 	Kind    string // "context" | "add" | "del"
@@ -126,11 +132,40 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	if !hit {
 		return DiffContextResult{Available: false, Mode: "hunk", Path: q.Path}, nil
 	}
-	res := DiffContextResult{Available: true, Mode: "hunk", Path: q.Path}
-	for _, l := range lines {
+	windowed, trimmed := windowAroundLine(lines, q.Line)
+	res := DiffContextResult{Available: true, Mode: "hunk", Path: q.Path, Truncated: trimmed}
+	for _, l := range windowed {
 		res.Lines = append(res.Lines, DiffContextLine{Kind: string(l.Kind), OldLine: l.OldLine, NewLine: l.NewLine, Text: l.Text})
 	}
 	return res, nil
+}
+
+// windowAroundLine trims a hunk to at most hunkContextWindow lines centered on
+// the line whose new-side number is target, clamped at the hunk's edges. A large
+// hunk — e.g. a newly added file rendered as one big hunk — would otherwise dump
+// the whole file into the comment; the full file stays available via mode=file.
+// trimmed reports whether any lines were dropped.
+func windowAroundLine(lines []diffhunk.Line, target int) ([]diffhunk.Line, bool) {
+	if len(lines) <= hunkContextWindow {
+		return lines, false
+	}
+	anchor := 0
+	for i, l := range lines {
+		if l.NewLine == target {
+			anchor = i
+			break
+		}
+	}
+	start := anchor - hunkContextWindow/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + hunkContextWindow
+	if end > len(lines) {
+		end = len(lines)
+		start = end - hunkContextWindow
+	}
+	return lines[start:end], true
 }
 
 // fileResult numbers a whole-file `git show` blob as context lines, capping at
