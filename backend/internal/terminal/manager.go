@@ -18,6 +18,14 @@ type EventSource interface {
 	Subscribe(fn func(cdc.Event)) (unsubscribe func())
 }
 
+// InputRecorder is notified each time a client sends input for a terminal id, so
+// the delivery path can tell when a pane was last typed into and avoid injecting
+// a message onto the user's unsent line. *inputgate.Gate satisfies it; the
+// interface lives here so terminal does not depend on the gate package.
+type InputRecorder interface {
+	NoteInput(id string)
+}
+
 // wsConn is the transport seam: a JSON-framed, single-reader/single-writer
 // WebSocket connection. internal/httpd adapts coder/websocket to this; tests
 // supply an in-memory fake. WriteJSON is only ever called from the per-conn
@@ -44,6 +52,7 @@ type Manager struct {
 	events    EventSource
 	log       *slog.Logger
 	heartbeat time.Duration
+	inputRec  InputRecorder // may be nil: input recency is simply not tracked
 
 	// ctx scopes every attachment's PTY lifetime; cancelled by Close.
 	ctx    context.Context
@@ -59,6 +68,10 @@ type Option func(*Manager)
 
 // WithHeartbeat overrides the ping interval.
 func WithHeartbeat(d time.Duration) Option { return func(m *Manager) { m.heartbeat = d } }
+
+// WithInputRecorder wires the recorder notified on every client input frame so
+// the message-delivery path can defer injection while the user is typing.
+func WithInputRecorder(r InputRecorder) Option { return func(m *Manager) { m.inputRec = r } }
 
 // NewManager builds a Manager. src opens attach Streams; events feeds the session
 // channel (may be nil to disable it). A nil logger falls back to slog.Default.
@@ -187,6 +200,12 @@ func (c *connState) handleTerminal(msg clientMsg) {
 		raw, err := base64.StdEncoding.DecodeString(msg.Data)
 		if err != nil {
 			return
+		}
+		// Record that the user just typed into this pane BEFORE writing it through,
+		// so a message-delivery WaitForQuiet racing this frame sees the keystroke.
+		// Guard on non-empty so an empty data frame is not counted as typing.
+		if len(raw) > 0 && c.mgr.inputRec != nil {
+			c.mgr.inputRec.NoteInput(msg.ID)
 		}
 		if a := c.lookup(msg.ID); a != nil {
 			_ = a.write(raw)
