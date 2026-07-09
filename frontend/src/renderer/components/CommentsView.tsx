@@ -2,6 +2,7 @@ import { prTitleLabel } from "../lib/pr-display";
 import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPRComments";
 import { apiErrorMessage } from "../lib/api-client";
 import { Badge } from "./ui/badge";
+import { DiffHunk } from "./DiffHunk";
 
 export type Thread = PRCommentGroup["threads"][number];
 export type Comment = Thread["comments"][number];
@@ -32,7 +33,7 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 					</div>
 					<div className="flex flex-col gap-2">
 						{group.threads.map((thread) => (
-							<ThreadCard key={thread.threadId} thread={thread} />
+							<ThreadCard key={thread.threadId} sessionId={sessionId} prUrl={group.prUrl} thread={thread} />
 						))}
 					</div>
 				</section>
@@ -41,7 +42,7 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 	);
 }
 
-function ThreadCard({ thread }: { thread: Thread }) {
+function ThreadCard({ sessionId, prUrl, thread }: { sessionId: string; prUrl: string; thread: Thread }) {
 	return (
 		<div className="rounded-[7px] border border-border bg-surface">
 			<div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
@@ -53,6 +54,9 @@ function ThreadCard({ thread }: { thread: Thread }) {
 					</Badge>
 				)}
 			</div>
+			{thread.path && thread.line > 0 && (
+				<DiffHunk sessionId={sessionId} prUrl={prUrl} path={thread.path} line={thread.line} />
+			)}
 			<div className="flex flex-col gap-2.5 px-3 py-2.5">
 				{thread.comments.map((comment) => (
 					<CommentRow comment={comment} key={comment.id} />

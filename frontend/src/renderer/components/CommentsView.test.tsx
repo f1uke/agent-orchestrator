@@ -20,40 +20,45 @@ function renderView(sessionId = "s1") {
 }
 
 beforeEach(() => {
-	getMock.mockReset().mockResolvedValue({
-		data: {
-			sessionId: "s1",
-			prs: [
-				{
-					prUrl: "https://gh/pr/1",
-					htmlUrl: "https://gh/pr/1",
-					provider: "github",
-					number: 1,
-					headSha: "abc",
-					threads: [
-						{
-							threadId: "T1",
-							path: "a.go",
-							line: 10,
-							resolved: false,
-							isBot: false,
-							comments: [
-								{
-									id: "C1",
-									author: "alice",
-									body: "please fix",
-									url: "",
-									resolved: false,
-									isBot: false,
-									createdAt: "2026-07-09T10:00:00Z",
-								},
-							],
-						},
-					],
-				},
-			],
-		},
-		error: undefined,
+	getMock.mockReset().mockImplementation(async (path: string) => {
+		if (path.includes("diff-context")) {
+			return { data: { available: false, mode: "hunk", path: "", lines: [], truncated: false }, error: undefined };
+		}
+		return {
+			data: {
+				sessionId: "s1",
+				prs: [
+					{
+						prUrl: "https://gh/pr/1",
+						htmlUrl: "https://gh/pr/1",
+						provider: "github",
+						number: 1,
+						headSha: "abc",
+						threads: [
+							{
+								threadId: "T1",
+								path: "a.go",
+								line: 10,
+								resolved: false,
+								isBot: false,
+								comments: [
+									{
+										id: "C1",
+										author: "alice",
+										body: "please fix",
+										url: "",
+										resolved: false,
+										isBot: false,
+										createdAt: "2026-07-09T10:00:00Z",
+									},
+								],
+							},
+						],
+					},
+				],
+			},
+			error: undefined,
+		};
 	});
 });
 
