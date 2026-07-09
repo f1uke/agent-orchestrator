@@ -151,6 +151,7 @@ var schemaNames = map[string]string{
 	"ControllersSessionResponse":                  "SessionResponse",
 	"ControllersSessionPreviewResponse":           "SessionPreviewResponse",
 	"ControllersSetSessionPreviewRequest":         "SetSessionPreviewRequest",
+	"ControllersSetAutoNudgeRequest":              "SetAutoNudgeRequest",
 	"ControllersRenameSessionRequest":             "RenameSessionRequest",
 	"ControllersRenameSessionResponse":            "RenameSessionResponse",
 	"ControllersRestoreSessionResponse":           "RestoreSessionResponse",
@@ -630,6 +631,19 @@ func sessionOperations() []operation {
 			summary:    "Set (or autodetect) the browser preview URL for a session",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.SetSessionPreviewRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SessionResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/auto-nudge", id: "setSessionAutoNudge", tag: "sessions",
+			summary:    "Set (or clear) the per-session auto-nudge-on-comments override",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetAutoNudgeRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SessionResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},

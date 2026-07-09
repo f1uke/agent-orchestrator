@@ -351,6 +351,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/auto-nudge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set (or clear) the per-session auto-nudge-on-comments override */
+        put: operations["setSessionAutoNudge"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/comment-dispatch": {
         parameters: {
             query?: never;
@@ -841,6 +858,7 @@ export interface components {
         };
         ControllersSessionView: {
             activity: components["schemas"]["DomainActivity"];
+            autoNudgeComments: null | boolean;
             branch?: string;
             /** Format: date-time */
             createdAt: string;
@@ -1299,6 +1317,9 @@ export interface components {
             ok: boolean;
             sessionId: string;
             state: string;
+        };
+        SetAutoNudgeRequest: {
+            override: null | boolean;
         };
         SetAutoNudgeSettingsRequest: {
             enabled: boolean;
@@ -2639,6 +2660,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetActivityResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSessionAutoNudge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetAutoNudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
                 };
             };
             /** @description Bad Request */

@@ -44,6 +44,7 @@ type SessionService interface {
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
+	SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
@@ -80,6 +81,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/preview", c.preview)
 	r.Post("/sessions/{sessionId}/preview", c.setPreview)
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
+	r.Put("/sessions/{sessionId}/auto-nudge", c.setAutoNudge)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
 	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
@@ -277,6 +279,27 @@ func (c *SessionsController) setPreview(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	updated, err := c.Svc.SetPreview(r.Context(), sessionID(r), previewURL)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
+}
+
+// setAutoNudge sets (or clears) the per-session override for auto-nudging the
+// worker on unresolved PR review comments. A null `override` clears it so the
+// session inherits the global default.
+func (c *SessionsController) setAutoNudge(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/auto-nudge")
+		return
+	}
+	var in SetAutoNudgeRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	updated, err := c.Svc.SetAutoNudge(r.Context(), sessionID(r), in.Override)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

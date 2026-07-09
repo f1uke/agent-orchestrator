@@ -103,6 +103,10 @@ func (f *fakeSessionService) SetPreview(context.Context, domain.SessionID, strin
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) SetAutoNudge(context.Context, domain.SessionID, *bool) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) error {
 	return nil
 }

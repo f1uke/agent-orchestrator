@@ -125,6 +125,16 @@ func (f *fakeSessionService) SetPreview(_ context.Context, id domain.SessionID, 
 	return s, nil
 }
 
+func (f *fakeSessionService) SetAutoNudge(_ context.Context, id domain.SessionID, override *bool) (domain.Session, error) {
+	s, ok := f.sessions[id]
+	if !ok {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	s.AutoNudgeComments = override
+	f.sessions[id] = s
+	return s, nil
+}
+
 func (f *fakeSessionService) Restore(_ context.Context, id domain.SessionID) (domain.Session, error) {
 	s := f.sessions[id]
 	s.IsTerminated = false
@@ -767,6 +777,35 @@ func TestSessionsAPI_SetPreviewNotFound(t *testing.T) {
 	srv := newSessionTestServer(t, newFakeSessionService())
 
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/missing-1/preview", `{"url":"http://x"}`)
+	assertErrorCode(t, body, status, http.StatusNotFound, "SESSION_NOT_FOUND")
+}
+
+func TestSessionsAPI_SetAutoNudgeOverridePersists(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/auto-nudge", `{"override":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("set auto-nudge = %d, want 200; body=%s", status, body)
+	}
+	var resp struct {
+		Session struct {
+			AutoNudgeComments *bool `json:"autoNudgeComments"`
+		} `json:"session"`
+	}
+	mustJSON(t, body, &resp)
+	if resp.Session.AutoNudgeComments == nil || *resp.Session.AutoNudgeComments != true {
+		t.Fatalf("response session.autoNudgeComments = %v, want true", resp.Session.AutoNudgeComments)
+	}
+	if got := svc.sessions["ao-1"].AutoNudgeComments; got == nil || *got != true {
+		t.Fatalf("persisted autoNudgeComments = %v, want true", got)
+	}
+}
+
+func TestSessionsAPI_SetAutoNudgeNotFound(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/missing-1/auto-nudge", `{"override":true}`)
 	assertErrorCode(t, body, status, http.StatusNotFound, "SESSION_NOT_FOUND")
 }
 

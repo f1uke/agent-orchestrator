@@ -29,6 +29,7 @@ type Store interface {
 	ListAllSessions(ctx context.Context) ([]domain.SessionRecord, error)
 	RenameSession(ctx context.Context, id domain.SessionID, displayName string, updatedAt time.Time) (bool, error)
 	SetSessionPreviewURL(ctx context.Context, id domain.SessionID, previewURL string, updatedAt time.Time) (bool, error)
+	SetSessionAutoNudge(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
@@ -524,6 +525,20 @@ func (s *Service) SetPreview(ctx context.Context, id domain.SessionID, previewUR
 	updated, err := s.store.SetSessionPreviewURL(ctx, id, previewURL, time.Now().UTC())
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("set preview url %s: %w", id, err)
+	}
+	if !updated {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	return s.Get(ctx, id)
+}
+
+// SetAutoNudge sets (or clears, when override is nil) the per-session override
+// for auto-nudging the worker on unresolved PR review comments, then returns
+// the refreshed read model. A nil override means "inherit the global default".
+func (s *Service) SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error) {
+	updated, err := s.store.SetSessionAutoNudge(ctx, id, override, time.Now().UTC())
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("set auto-nudge %s: %w", id, err)
 	}
 	if !updated {
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")

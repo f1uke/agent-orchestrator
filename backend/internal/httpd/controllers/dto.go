@@ -213,6 +213,13 @@ type SetSessionPreviewRequest struct {
 	URL string `json:"url,omitempty" description:"Preview target URL. When empty, the daemon autodetects a static entry point in the session workspace."`
 }
 
+// SetAutoNudgeRequest is the body of PUT /api/v1/sessions/{sessionId}/auto-nudge.
+// Override is a tri-state: true/false set an explicit per-session override; null
+// clears it so the session inherits the global auto-nudge default.
+type SetAutoNudgeRequest struct {
+	Override *bool `json:"override"`
+}
+
 // RenameSessionResponse is the body of PATCH /api/v1/sessions/{sessionId}.
 type RenameSessionResponse struct {
 	OK          bool             `json:"ok"`

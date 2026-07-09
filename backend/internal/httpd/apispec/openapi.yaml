@@ -1007,6 +1007,57 @@ paths:
       summary: Report an agent activity-state signal for a session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/auto-nudge:
+    put:
+      operationId: setSessionAutoNudge
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAutoNudgeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Set (or clear) the per-session auto-nudge-on-comments override
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/comment-dispatch:
     post:
       operationId: sessionDispatchComment
@@ -3658,6 +3709,15 @@ components:
       - ok
       - sessionId
       - state
+      type: object
+    SetAutoNudgeRequest:
+      properties:
+        override:
+          type:
+          - "null"
+          - boolean
+      required:
+      - override
       type: object
     SetAutoNudgeSettingsRequest:
       properties:
