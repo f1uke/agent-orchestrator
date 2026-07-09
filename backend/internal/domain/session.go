@@ -66,8 +66,8 @@ type SessionRecord struct {
 	// durable fact, not part of the API read model.
 	Reactivated bool            `json:"-"`
 	Metadata    SessionMetadata `json:"-"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	UpdatedAt     time.Time       `json:"updatedAt"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord
