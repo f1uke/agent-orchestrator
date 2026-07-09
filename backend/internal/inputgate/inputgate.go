@@ -24,9 +24,10 @@ import (
 
 const (
 	// DefaultQuietWindow is how long a pane must go without user input before an
-	// injected message is considered safe to deliver. Longer than the gap between
-	// keystrokes in a typing burst, so it fires in the pause after the user stops.
-	DefaultQuietWindow = 800 * time.Millisecond
+	// injected message is considered safe to deliver. Sized to cover not just the
+	// gap between keystrokes in a burst but a natural mid-typing pause (stopping to
+	// think), so a message does not land while the user is composing but paused.
+	DefaultQuietWindow = 2 * time.Second
 	// DefaultMaxDefer caps how long delivery is held while the user keeps typing,
 	// so an important nudge is never starved by a user who never stops. Well under
 	// the 60s REST request timeout that bounds an `ao send` HTTP call.
