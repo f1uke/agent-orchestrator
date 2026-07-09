@@ -574,6 +574,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/message-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the editable nudge message templates (default + override per name) */
+        get: operations["getMessageTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/message-templates/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the override text for a nudge message template */
+        put: operations["setMessageTemplate"];
+        post?: never;
+        /** Reset a nudge message template to its built-in default */
+        delete: operations["clearMessageTemplate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/prompts": {
         parameters: {
             query?: never;
@@ -813,6 +848,15 @@ export interface components {
             method: string;
             ok: boolean;
             prNumber: number;
+        };
+        MessageTemplateItem: {
+            default: string;
+            name: string;
+            override: null | string;
+            placeholders: string[];
+        };
+        MessageTemplatesResponse: {
+            templates: components["schemas"]["MessageTemplateItem"][];
         };
         NotificationEnvelope: {
             notification: components["schemas"]["NotificationResponse"];
@@ -1080,6 +1124,9 @@ export interface components {
             ok: boolean;
             sessionId: string;
             state: string;
+        };
+        SetMessageTemplateRequest: {
+            template: string;
         };
         SetProjectConfigInput: {
             config: components["schemas"]["ProjectConfig"];
@@ -3247,6 +3294,121 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getMessageTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageTemplatesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setMessageTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Editable nudge template name. */
+                name: "review-comment-dispatch" | "ci-failing" | "merge-conflict" | "tracker-bot-comment" | "ao-reviewer-batch" | "ao-reviewer-single";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMessageTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageTemplatesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    clearMessageTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Editable nudge template name. */
+                name: "review-comment-dispatch" | "ci-failing" | "merge-conflict" | "tracker-bot-comment" | "ao-reviewer-batch" | "ao-reviewer-single";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageTemplatesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

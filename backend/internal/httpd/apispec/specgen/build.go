@@ -216,6 +216,9 @@ var schemaNames = map[string]string{
 	"ControllersSystemPromptItem":               "SystemPromptItem",
 	"ControllersSystemPromptsResponse":          "SystemPromptsResponse",
 	"ControllersSetSystemPromptRequest":         "SetSystemPromptRequest",
+	"ControllersMessageTemplateItem":            "MessageTemplateItem",
+	"ControllersMessageTemplatesResponse":       "MessageTemplatesResponse",
+	"ControllersSetMessageTemplateRequest":      "SetMessageTemplateRequest",
 	// legacyimport report
 	"LegacyimportReport": "ImportReport",
 	// service/project entities + DTOs
@@ -862,6 +865,35 @@ func settingsOperations() []operation {
 			pathParams: []any{controllers.PromptKindParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SystemPromptsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/message-templates", id: "getMessageTemplates", tag: "settings",
+			summary: "Fetch the editable nudge message templates (default + override per name)",
+			resps: []respUnit{
+				{http.StatusOK, controllers.MessageTemplatesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/message-templates/{name}", id: "setMessageTemplate", tag: "settings",
+			summary:    "Set the override text for a nudge message template",
+			pathParams: []any{controllers.MessageTemplateNameParam{}},
+			reqBody:    controllers.SetMessageTemplateRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.MessageTemplatesResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/settings/message-templates/{name}", id: "clearMessageTemplate", tag: "settings",
+			summary:    "Reset a nudge message template to its built-in default",
+			pathParams: []any{controllers.MessageTemplateNameParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.MessageTemplatesResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

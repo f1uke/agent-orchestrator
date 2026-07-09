@@ -201,6 +201,7 @@ func Run() error {
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
 		SystemPrompts:      promptOverrides,
+		MessageTemplates:   promptOverrides,
 	})
 	if err != nil {
 		stop()

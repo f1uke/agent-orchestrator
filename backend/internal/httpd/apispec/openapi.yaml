@@ -1641,6 +1641,111 @@ paths:
       summary: Clean up terminated session workspaces
       tags:
       - sessions
+  /api/v1/settings/message-templates:
+    get:
+      operationId: getMessageTemplates
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTemplatesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the editable nudge message templates (default + override per
+        name)
+      tags:
+      - settings
+  /api/v1/settings/message-templates/{name}:
+    delete:
+      operationId: clearMessageTemplate
+      parameters:
+      - description: Editable nudge template name.
+        in: path
+        name: name
+        required: true
+        schema:
+          description: Editable nudge template name.
+          enum:
+          - review-comment-dispatch
+          - ci-failing
+          - merge-conflict
+          - tracker-bot-comment
+          - ao-reviewer-batch
+          - ao-reviewer-single
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTemplatesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Reset a nudge message template to its built-in default
+      tags:
+      - settings
+    put:
+      operationId: setMessageTemplate
+      parameters:
+      - description: Editable nudge template name.
+        in: path
+        name: name
+        required: true
+        schema:
+          description: Editable nudge template name.
+          enum:
+          - review-comment-dispatch
+          - ci-failing
+          - merge-conflict
+          - tracker-bot-comment
+          - ao-reviewer-batch
+          - ao-reviewer-single
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMessageTemplateRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTemplatesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Set the override text for a nudge message template
+      tags:
+      - settings
   /api/v1/settings/prompts:
     get:
       operationId: getSystemPrompts
@@ -2281,6 +2386,35 @@ components:
       - ok
       - prNumber
       - method
+      type: object
+    MessageTemplateItem:
+      properties:
+        default:
+          type: string
+        name:
+          type: string
+        override:
+          type:
+          - "null"
+          - string
+        placeholders:
+          items:
+            type: string
+          type: array
+      required:
+      - name
+      - default
+      - placeholders
+      - override
+      type: object
+    MessageTemplatesResponse:
+      properties:
+        templates:
+          items:
+            $ref: '#/components/schemas/MessageTemplateItem'
+          type: array
+      required:
+      - templates
       type: object
     NotificationEnvelope:
       properties:
@@ -2989,6 +3123,13 @@ components:
       - ok
       - sessionId
       - state
+      type: object
+    SetMessageTemplateRequest:
+      properties:
+        template:
+          type: string
+      required:
+      - template
       type: object
     SetProjectConfigInput:
       properties:

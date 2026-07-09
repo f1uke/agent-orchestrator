@@ -629,3 +629,28 @@ type SetSystemPromptRequest struct {
 type PromptKindParam struct {
 	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, or reviewer." enum:"orchestrator,worker,reviewer"`
 }
+
+// MessageTemplateItem is one editable nudge template on the wire: its built-in
+// default, documented placeholders, and current override (null ⇒ default).
+type MessageTemplateItem struct {
+	Name         string   `json:"name"`
+	Default      string   `json:"default"`
+	Placeholders []string `json:"placeholders"`
+	Override     *string  `json:"override"`
+}
+
+// MessageTemplatesResponse is the body of GET /api/v1/settings/message-templates.
+type MessageTemplatesResponse struct {
+	Templates []MessageTemplateItem `json:"templates"`
+}
+
+// SetMessageTemplateRequest is the body of PUT /api/v1/settings/message-templates/{name}.
+type SetMessageTemplateRequest struct {
+	Template string `json:"template"`
+}
+
+// MessageTemplateNameParam is the {name} path parameter for the
+// /settings/message-templates/{name} routes.
+type MessageTemplateNameParam struct {
+	Name string `path:"name" description:"Editable nudge template name." enum:"review-comment-dispatch,ci-failing,merge-conflict,tracker-bot-comment,ao-reviewer-batch,ao-reviewer-single"`
+}

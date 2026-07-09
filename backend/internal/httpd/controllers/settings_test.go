@@ -263,3 +263,88 @@ func TestSystemPrompts_StubbedWithoutService501(t *testing.T) {
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/prompts", "")
 	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
 }
+
+type fakeMessageTemplates struct {
+	overrides map[string]string
+	setErr    error
+}
+
+func (f *fakeMessageTemplates) Get() promptoverrides.Overrides {
+	cp := map[string]string{}
+	for k, v := range f.overrides {
+		cp[k] = v
+	}
+	return promptoverrides.Overrides{Templates: cp}
+}
+func (f *fakeMessageTemplates) SetTemplate(name, text string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.overrides == nil {
+		f.overrides = map[string]string{}
+	}
+	f.overrides[name] = text
+	return nil
+}
+func (f *fakeMessageTemplates) ClearTemplate(name string) error {
+	delete(f.overrides, name)
+	return nil
+}
+
+func newMessageTemplatesTestServer(t *testing.T, svc *fakeMessageTemplates) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{MessageTemplates: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestMessageTemplatesAPI_GetListsAllWithDefaults(t *testing.T) {
+	svc := &fakeMessageTemplates{overrides: map[string]string{"ci-failing": "custom"}}
+	srv := newMessageTemplatesTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/message-templates", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"name":"review-comment-dispatch"`) {
+		t.Fatalf("missing review-comment-dispatch: %s", body)
+	}
+	if !strings.Contains(string(body), `"override":"custom"`) {
+		t.Fatalf("ci-failing override not surfaced: %s", body)
+	}
+}
+
+func TestMessageTemplatesAPI_SetAndClear(t *testing.T) {
+	fake := &fakeMessageTemplates{}
+	srv := newMessageTemplatesTestServer(t, fake)
+
+	_, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/message-templates/ci-failing", `{"template":"hi"}`)
+	if status != http.StatusOK {
+		t.Fatalf("PUT status %d", status)
+	}
+	if fake.overrides["ci-failing"] != "hi" {
+		t.Fatalf("override not stored: %v", fake.overrides)
+	}
+
+	_, status, _ = doRequest(t, srv, "PUT", "/api/v1/settings/message-templates/bogus", `{"template":"x"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("unknown name should be 400, got %d", status)
+	}
+
+	_, status, _ = doRequest(t, srv, "DELETE", "/api/v1/settings/message-templates/ci-failing", "")
+	if status != http.StatusOK {
+		t.Fatalf("DELETE status %d", status)
+	}
+	if _, ok := fake.overrides["ci-failing"]; ok {
+		t.Fatalf("override not cleared: %v", fake.overrides)
+	}
+}
+
+func TestMessageTemplates_StubbedWithoutService501(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/message-templates", "")
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}

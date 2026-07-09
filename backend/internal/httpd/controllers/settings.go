@@ -8,6 +8,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
@@ -36,13 +37,22 @@ type SystemPromptsService interface {
 	ClearBase(prompts.Kind) error
 }
 
+// MessageTemplatesService is the template-override store surface the controller
+// needs. *promptoverrides.Store satisfies this directly.
+type MessageTemplatesService interface {
+	Get() promptoverrides.Overrides
+	SetTemplate(name, text string) error
+	ClearTemplate(name string) error
+}
+
 // SettingsController serves the global auto-reclaim settings. Nil keeps the
 // routes registered but returns OpenAPI-backed 501s, matching every other
 // controller in this package.
 type SettingsController struct {
-	Svc           SettingsService
-	SpawnConfirm  SpawnConfirmService
-	SystemPrompts SystemPromptsService
+	Svc              SettingsService
+	SpawnConfirm     SpawnConfirmService
+	SystemPrompts    SystemPromptsService
+	MessageTemplates MessageTemplatesService
 }
 
 // Register mounts the settings routes on the supplied router.
@@ -54,6 +64,9 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Get("/settings/prompts", c.getPrompts)
 	r.Put("/settings/prompts/{kind}", c.setPrompt)
 	r.Delete("/settings/prompts/{kind}", c.clearPrompt)
+	r.Get("/settings/message-templates", c.getMessageTemplates)
+	r.Put("/settings/message-templates/{name}", c.setMessageTemplate)
+	r.Delete("/settings/message-templates/{name}", c.clearMessageTemplate)
 }
 
 func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
@@ -165,4 +178,65 @@ func (c *SettingsController) clearPrompt(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	c.getPrompts(w, r)
+}
+
+func (c *SettingsController) getMessageTemplates(w http.ResponseWriter, r *http.Request) {
+	if c.MessageTemplates == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/message-templates")
+		return
+	}
+	ov := c.MessageTemplates.Get()
+	items := make([]MessageTemplateItem, 0, len(messagetemplates.KnownNames()))
+	for _, n := range messagetemplates.KnownNames() {
+		item := MessageTemplateItem{
+			Name:         string(n),
+			Default:      messagetemplates.Default(n),
+			Placeholders: messagetemplates.Placeholders(n),
+		}
+		if v, ok := ov.Templates[string(n)]; ok {
+			v := v
+			item.Override = &v
+		}
+		items = append(items, item)
+	}
+	envelope.WriteJSON(w, http.StatusOK, MessageTemplatesResponse{Templates: items})
+}
+
+func (c *SettingsController) setMessageTemplate(w http.ResponseWriter, r *http.Request) {
+	if c.MessageTemplates == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/message-templates/{name}")
+		return
+	}
+	name := messagetemplates.Name(chi.URLParam(r, "name"))
+	if !name.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", fmt.Sprintf("unknown template name %q", name), nil)
+		return
+	}
+	var in SetMessageTemplateRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if err := c.MessageTemplates.SetTemplate(string(name), in.Template); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	c.getMessageTemplates(w, r)
+}
+
+func (c *SettingsController) clearMessageTemplate(w http.ResponseWriter, r *http.Request) {
+	if c.MessageTemplates == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/settings/message-templates/{name}")
+		return
+	}
+	name := messagetemplates.Name(chi.URLParam(r, "name"))
+	if !name.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", fmt.Sprintf("unknown template name %q", name), nil)
+		return
+	}
+	if err := c.MessageTemplates.ClearTemplate(string(name)); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	c.getMessageTemplates(w, r)
 }
