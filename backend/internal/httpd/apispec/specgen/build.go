@@ -163,6 +163,8 @@ var schemaNames = map[string]string{
 	"ControllersRollbackSessionResponse":          "RollbackSessionResponse",
 	"ControllersSendSessionMessageRequest":        "SendSessionMessageRequest",
 	"ControllersSendSessionMessageResponse":       "SendSessionMessageResponse",
+	"ControllersDispatchCommentRequest":           "DispatchCommentRequest",
+	"ControllersDispatchCommentResponse":          "DispatchCommentResponse",
 	"ControllersClaimPRResponse":                  "ClaimPRResponse",
 	"ControllersClaimPRRequest":                   "ClaimPRRequest",
 	"ControllersSessionPRFacts":                   "SessionPRFacts",
@@ -778,6 +780,19 @@ func sessionOperations() []operation {
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/comment-dispatch", id: "sessionDispatchComment", tag: "sessions",
+			summary:    "Dispatch a review-thread comment (plus an optional extra prompt) to the session's worker",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.DispatchCommentRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.DispatchCommentResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
 		{

@@ -45,6 +45,7 @@ type SessionService interface {
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
+	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ListPRSummaries(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error)
 	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
@@ -88,6 +89,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
+	r.Post("/sessions/{sessionId}/comment-dispatch", c.commentDispatch)
 	r.Post("/sessions/{sessionId}/activity", c.activity)
 	r.Get("/orchestrators", c.listOrchestrators)
 	r.Post("/orchestrators", c.spawnOrchestrator)
@@ -497,6 +499,34 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SendSessionMessageResponse{OK: true, SessionID: sessionID(r), Message: message})
+}
+
+// commentDispatch forwards a review-thread comment (plus an optional extra
+// prompt) to the session's worker, letting a human manually nudge an agent
+// that isn't auto-polling the thread.
+func (c *SessionsController) commentDispatch(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/comment-dispatch")
+		return
+	}
+	var in DispatchCommentRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.PrURL == "" || in.ThreadID == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
+		return
+	}
+	if len(in.ExtraPrompt) > maxMessageLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Extra prompt is too long", nil)
+		return
+	}
+	if err := c.Svc.DispatchCommentToWorker(r.Context(), sessionID(r), in.PrURL, in.ThreadID, in.ExtraPrompt); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, DispatchCommentResponse{OK: true, SessionID: sessionID(r)})
 }
 
 // activity records an agent activity-state signal reported by an agent hook

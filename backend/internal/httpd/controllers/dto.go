@@ -284,6 +284,19 @@ type SendSessionMessageResponse struct {
 	Message   string           `json:"message"`
 }
 
+// DispatchCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-dispatch.
+type DispatchCommentRequest struct {
+	PrURL       string `json:"prUrl"`
+	ThreadID    string `json:"threadId"`
+	ExtraPrompt string `json:"extraPrompt,omitempty"`
+}
+
+// DispatchCommentResponse acknowledges a manual comment dispatch to the worker.
+type DispatchCommentResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+}
+
 // SessionPRFacts is the pull-request read shape returned under session PR routes.
 type SessionPRFacts struct {
 	URL            string                `json:"url"`

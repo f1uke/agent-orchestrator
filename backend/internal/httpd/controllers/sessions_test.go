@@ -23,16 +23,19 @@ import (
 )
 
 type fakeSessionService struct {
-	sessions        map[domain.SessionID]domain.Session
-	sent            string
-	cleanupProjects []domain.ProjectID
-	cleanupResult   []domain.SessionID
-	cleanupSkipped  []sessionsvc.CleanupSkipped
-	spawnErr        error
-	claimErr        error
-	listPRErr       error
-	prCommentGroups []sessionsvc.PRCommentGroup
-	diffContext     sessionsvc.DiffContextResult
+	sessions         map[domain.SessionID]domain.Session
+	sent             string
+	dispatchedPR     string
+	dispatchedThread string
+	dispatchedExtra  string
+	cleanupProjects  []domain.ProjectID
+	cleanupResult    []domain.SessionID
+	cleanupSkipped   []sessionsvc.CleanupSkipped
+	spawnErr         error
+	claimErr         error
+	listPRErr        error
+	prCommentGroups  []sessionsvc.PRCommentGroup
+	diffContext      sessionsvc.DiffContextResult
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -167,6 +170,13 @@ func (f *fakeSessionService) Rename(_ context.Context, id domain.SessionID, disp
 
 func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message string) error {
 	f.sent = message
+	return nil
+}
+
+func (f *fakeSessionService) DispatchCommentToWorker(_ context.Context, _ domain.SessionID, prURL, threadID, extraPrompt string) error {
+	f.dispatchedPR = prURL
+	f.dispatchedThread = threadID
+	f.dispatchedExtra = extraPrompt
 	return nil
 }
 
@@ -859,6 +869,27 @@ func TestSessionsAPI_SendValidation(t *testing.T) {
 
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", `{"message":""}`)
 	assertErrorCode(t, body, status, http.StatusBadRequest, "MESSAGE_REQUIRED")
+}
+
+func TestSessionsAPI_CommentDispatch(t *testing.T) {
+	fake := newFakeSessionService()
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-dispatch",
+		`{"prUrl":"pr1","threadId":"T1","extraPrompt":"add a test"}`)
+	if status != http.StatusOK || !strings.Contains(string(body), `"ok":true`) {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	if fake.dispatchedPR != "pr1" || fake.dispatchedThread != "T1" || fake.dispatchedExtra != "add a test" {
+		t.Fatalf("service not called with the right args: %+v", fake)
+	}
+}
+
+func TestSessionsAPI_CommentDispatchValidation(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-dispatch", `{"prUrl":"","threadId":""}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "THREAD_REQUIRED")
 }
 
 func TestSessionsAPI_CleanupWithProjectFilter(t *testing.T) {

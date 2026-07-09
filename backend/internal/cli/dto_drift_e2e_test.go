@@ -107,6 +107,10 @@ func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) err
 	return nil
 }
 
+func (f *fakeSessionService) DispatchCommentToWorker(context.Context, domain.SessionID, string, string, string) error {
+	return nil
+}
+
 func (f *fakeSessionService) ListPRSummaries(context.Context, domain.SessionID) ([]sessionsvc.PRSummary, error) {
 	return nil, nil
 }
