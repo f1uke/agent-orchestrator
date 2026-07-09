@@ -351,6 +351,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/diff-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return the diff hunk or full file a review comment anchors to */
+        get: operations["sessionDiffContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/kill": {
         parameters: {
             query?: never;
@@ -789,6 +806,19 @@ export interface components {
         DeleteSessionResponse: {
             ok: boolean;
             sessionId: string;
+        };
+        DiffContextLineDTO: {
+            kind: string;
+            newLine: number;
+            oldLine: number;
+            text: string;
+        };
+        DiffContextResponse: {
+            available: boolean;
+            lines: components["schemas"]["DiffContextLineDTO"][];
+            mode: string;
+            path: string;
+            truncated: boolean;
         };
         DomainActivity: {
             /** Format: date-time */
@@ -2516,6 +2546,65 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    sessionDiffContext: {
+        parameters: {
+            query?: {
+                /** @description PR URL the comment belongs to. */
+                prUrl?: string;
+                /** @description Repo-relative file path the comment anchors to. */
+                path?: string;
+                /** @description 1-based new-side line number of the anchor. */
+                line?: number;
+                /** @description hunk (default) or file. */
+                mode?: "hunk" | "file";
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiffContextResponse"];
                 };
             };
             /** @description Not Found */

@@ -48,6 +48,7 @@ type SessionService interface {
 	ListPRSummaries(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error)
 	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
+	DiffContext(ctx context.Context, id domain.SessionID, q sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -79,6 +80,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
 	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
+	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
 	r.Post("/sessions/{sessionId}/restore", c.restore)
@@ -318,6 +320,30 @@ func (c *SessionsController) listPRComments(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ListSessionPRCommentsResponse{SessionID: sessionID(r), PRs: sessionPRCommentGroups(groups)})
+}
+
+func (c *SessionsController) diffContext(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/diff-context")
+		return
+	}
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "hunk"
+	}
+	line, _ := strconv.Atoi(r.URL.Query().Get("line"))
+	q := sessionsvc.DiffContextQuery{
+		PRURL: r.URL.Query().Get("prUrl"),
+		Path:  r.URL.Query().Get("path"),
+		Line:  line,
+		Mode:  mode,
+	}
+	res, err := c.Svc.DiffContext(r.Context(), sessionID(r), q)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, diffContextResponse(res))
 }
 
 func (c *SessionsController) claimPR(w http.ResponseWriter, r *http.Request) {

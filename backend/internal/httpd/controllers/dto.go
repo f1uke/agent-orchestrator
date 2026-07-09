@@ -130,6 +130,15 @@ type DeleteSessionQuery struct {
 	Force bool `query:"force,omitempty" description:"When true, discard uncommitted worktree changes instead of refusing."`
 }
 
+// DiffContextParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/diff-context.
+type DiffContextParams struct {
+	PrURL string `query:"prUrl" description:"PR URL the comment belongs to."`
+	Path  string `query:"path" description:"Repo-relative file path the comment anchors to."`
+	Line  int    `query:"line" description:"1-based new-side line number of the anchor."`
+	Mode  string `query:"mode" description:"hunk (default) or file." enum:"hunk,file"`
+}
+
 // SessionView is the session wire shape: the domain read model plus the
 // display-safe branch name and the session's attributed pull requests in the
 // curated SessionPRFacts shape. One session can own many PRs (e.g. a stack), so
@@ -491,6 +500,32 @@ func sessionPRCommentGroups(groups []sessionsvc.PRCommentGroup) []SessionPRComme
 		})
 	}
 	return out
+}
+
+// DiffContextResponse is the body of GET /sessions/{sessionId}/diff-context.
+type DiffContextResponse struct {
+	Available bool                 `json:"available"`
+	Mode      string               `json:"mode"`
+	Path      string               `json:"path"`
+	Lines     []DiffContextLineDTO `json:"lines"`
+	Truncated bool                 `json:"truncated"`
+}
+
+// DiffContextLineDTO is one classified code-context line.
+type DiffContextLineDTO struct {
+	Kind    string `json:"kind"`
+	OldLine int    `json:"oldLine"`
+	NewLine int    `json:"newLine"`
+	Text    string `json:"text"`
+}
+
+// diffContextResponse maps the service result to the wire DTO.
+func diffContextResponse(res sessionsvc.DiffContextResult) DiffContextResponse {
+	lines := make([]DiffContextLineDTO, 0, len(res.Lines))
+	for _, l := range res.Lines {
+		lines = append(lines, DiffContextLineDTO{Kind: l.Kind, OldLine: l.OldLine, NewLine: l.NewLine, Text: l.Text})
+	}
+	return DiffContextResponse{Available: res.Available, Mode: res.Mode, Path: res.Path, Lines: lines, Truncated: res.Truncated}
 }
 
 // ClaimPRRequest is the body of POST /sessions/{sessionId}/pr/claim.

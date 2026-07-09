@@ -32,6 +32,7 @@ type fakeSessionService struct {
 	claimErr        error
 	listPRErr       error
 	prCommentGroups []sessionsvc.PRCommentGroup
+	diffContext     sessionsvc.DiffContextResult
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -236,6 +237,10 @@ func (f *fakeSessionService) ListPRSummaries(_ context.Context, id domain.Sessio
 
 func (f *fakeSessionService) ListPRCommentThreads(_ context.Context, _ domain.SessionID) ([]sessionsvc.PRCommentGroup, error) {
 	return f.prCommentGroups, nil
+}
+
+func (f *fakeSessionService) DiffContext(_ context.Context, _ domain.SessionID, _ sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error) {
+	return f.diffContext, nil
 }
 
 func (f *fakeSessionService) ClaimPR(_ context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
@@ -1094,6 +1099,23 @@ func TestSessionsAPI_ListPRComments(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"threadId":"T1"`) || !strings.Contains(string(body), `"body":"fix this"`) ||
 		!strings.Contains(string(body), `"headSha":"abc"`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestSessionsAPI_DiffContext(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.diffContext = sessionsvc.DiffContextResult{
+		Available: true, Mode: "hunk", Path: "a.go",
+		Lines: []sessionsvc.DiffContextLine{{Kind: "add", NewLine: 2, Text: "CHANGED"}},
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/diff-context?prUrl=pr1&path=a.go&line=2&mode=hunk", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"available":true`) || !strings.Contains(string(body), `"kind":"add"`) ||
+		!strings.Contains(string(body), `"text":"CHANGED"`) {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }

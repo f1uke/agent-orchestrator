@@ -179,6 +179,9 @@ var schemaNames = map[string]string{
 	"ControllersSessionPRCommentGroup":            "SessionPRCommentGroup",
 	"ControllersSessionPRCommentThread":           "SessionPRCommentThread",
 	"ControllersSessionPRThreadComment":           "SessionPRThreadComment",
+	"ControllersDiffContextParams":                "DiffContextParams",
+	"ControllersDiffContextResponse":              "DiffContextResponse",
+	"ControllersDiffContextLineDTO":               "DiffContextLineDTO",
 	"ControllersSetActivityRequest":               "SetActivityRequest",
 	"ControllersSetActivityResponse":              "SetActivityResponse",
 	"ControllersSpawnOrchestratorRequest":         "SpawnOrchestratorRequest",
@@ -667,6 +670,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ListSessionPRCommentsResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/diff-context", id: "sessionDiffContext", tag: "sessions",
+			summary:    "Return the diff hunk or full file a review comment anchors to",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.DiffContextParams{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.DiffContextResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

@@ -1007,6 +1007,72 @@ paths:
       summary: Report an agent activity-state signal for a session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/diff-context:
+    get:
+      operationId: sessionDiffContext
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: PR URL the comment belongs to.
+        in: query
+        name: prUrl
+        schema:
+          description: PR URL the comment belongs to.
+          type: string
+      - description: Repo-relative file path the comment anchors to.
+        in: query
+        name: path
+        schema:
+          description: Repo-relative file path the comment anchors to.
+          type: string
+      - description: 1-based new-side line number of the anchor.
+        in: query
+        name: line
+        schema:
+          description: 1-based new-side line number of the anchor.
+          type: integer
+      - description: hunk (default) or file.
+        in: query
+        name: mode
+        schema:
+          description: hunk (default) or file.
+          enum:
+          - hunk
+          - file
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffContextResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return the diff hunk or full file a review comment anchors to
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/kill:
     post:
       operationId: killSession
@@ -2234,6 +2300,43 @@ components:
       required:
       - ok
       - sessionId
+      type: object
+    DiffContextLineDTO:
+      properties:
+        kind:
+          type: string
+        newLine:
+          type: integer
+        oldLine:
+          type: integer
+        text:
+          type: string
+      required:
+      - kind
+      - oldLine
+      - newLine
+      - text
+      type: object
+    DiffContextResponse:
+      properties:
+        available:
+          type: boolean
+        lines:
+          items:
+            $ref: '#/components/schemas/DiffContextLineDTO'
+          type: array
+        mode:
+          type: string
+        path:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - available
+      - mode
+      - path
+      - lines
+      - truncated
       type: object
     DomainActivity:
       properties:

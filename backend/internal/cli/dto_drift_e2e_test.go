@@ -119,6 +119,10 @@ func (f *fakeSessionService) ClaimPR(context.Context, domain.SessionID, string, 
 	return sessionsvc.ClaimPRResult{}, nil
 }
 
+func (f *fakeSessionService) DiffContext(context.Context, domain.SessionID, sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error) {
+	return sessionsvc.DiffContextResult{}, nil
+}
+
 type fakeAgentCatalog struct{}
 
 var _ controllers.AgentCatalog = (*fakeAgentCatalog)(nil)
