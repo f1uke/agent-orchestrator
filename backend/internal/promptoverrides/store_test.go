@@ -2,6 +2,7 @@ package promptoverrides
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
@@ -93,5 +94,70 @@ func TestSetBase_DiskWriteFailure_LeavesInMemoryStateUnchanged(t *testing.T) {
 	}
 	if got, ok := st.Get().Base[prompts.KindWorker]; !ok || got != "first value" {
 		t.Fatalf("in-memory state changed despite failed persist: got %q, ok=%v", got, ok)
+	}
+}
+
+func TestTemplateRoundTripPersists(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.GetTemplate("ci-failing"); ok {
+		t.Fatal("expected no template override initially")
+	}
+	if err := s.SetTemplate("ci-failing", "custom CI msg"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.GetTemplate("ci-failing")
+	if !ok || got != "custom CI msg" {
+		t.Fatalf("GetTemplate = %q, %v", got, ok)
+	}
+	// Reload from disk: override survives.
+	s2, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := s2.GetTemplate("ci-failing"); !ok || got != "custom CI msg" {
+		t.Fatalf("after reload GetTemplate = %q, %v", got, ok)
+	}
+	// Get() exposes the templates copy without aliasing internal state.
+	ov := s2.Get()
+	if ov.Templates["ci-failing"] != "custom CI msg" {
+		t.Fatalf("Get().Templates = %v", ov.Templates)
+	}
+	ov.Templates["ci-failing"] = "mutated"
+	if got, _ := s2.GetTemplate("ci-failing"); got != "custom CI msg" {
+		t.Fatal("Get() must return a copy, not internal state")
+	}
+	// Clear restores default (absent key).
+	if err := s2.ClearTemplate("ci-failing"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s2.GetTemplate("ci-failing"); ok {
+		t.Fatal("expected template override cleared")
+	}
+}
+
+func TestGetHandlesLegacyFileWithoutTemplates(t *testing.T) {
+	dir := t.TempDir()
+	// A pre-existing overrides file with only "base" and no "templates" key.
+	if err := os.WriteFile(filepath.Join(dir, "system-prompt-overrides.json"),
+		[]byte(`{"base":{"worker":"x"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.GetTemplate("ci-failing"); ok {
+		t.Fatal("legacy file should yield no template overrides")
+	}
+	// Setting a template must not clobber the existing base override.
+	if err := s.SetTemplate("ci-failing", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Get().Base["worker"] != "x" {
+		t.Fatal("base override lost when setting a template")
 	}
 }
