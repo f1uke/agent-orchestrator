@@ -62,4 +62,44 @@ describe("MessageTemplatesSection", () => {
 			}),
 		);
 	});
+
+	it("preserves an unsaved edit in one template when another is saved and refetched", async () => {
+		let getCallCount = 0;
+		getMock.mockReset().mockImplementation(async () => {
+			getCallCount += 1;
+			const ciOverride = getCallCount === 1 ? "CUSTOM CI" : "NEW CI";
+			return {
+				data: {
+					templates: [
+						{ name: "review-comment-dispatch", default: "DEFAULT RCD", placeholders: ["{{.Comments}}"], override: null },
+						{ name: "ci-failing", default: "DEFAULT CI", placeholders: ["{{.LogTail}}"], override: ciOverride },
+					],
+				},
+				error: undefined,
+			};
+		});
+		putMock.mockReset().mockResolvedValue({ data: { templates: [] }, error: undefined });
+
+		renderSection();
+		const rcd = (await screen.findByLabelText(/review-comment-dispatch/i)) as HTMLTextAreaElement;
+		const ci = (await screen.findByLabelText(/ci-failing/i)) as HTMLTextAreaElement;
+		await waitFor(() => expect(ci.value).toBe("CUSTOM CI"));
+
+		// Edit both templates, but only save ci-failing.
+		await userEvent.clear(rcd);
+		await userEvent.type(rcd, "UNSAVED RCD EDIT");
+		await userEvent.clear(ci);
+		await userEvent.type(ci, "NEW CI");
+
+		await userEvent.click(screen.getAllByRole("button", { name: /save/i })[1]);
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		// Wait for the post-invalidation refetch to complete.
+		await waitFor(() => expect(getCallCount).toBeGreaterThan(1));
+
+		// Saved template syncs to its new server value; the untouched-save
+		// template keeps the user's unsaved edit instead of being wiped by the
+		// refetch.
+		await waitFor(() => expect(ci.value).toBe("NEW CI"));
+		expect(rcd.value).toBe("UNSAVED RCD EDIT");
+	});
 });

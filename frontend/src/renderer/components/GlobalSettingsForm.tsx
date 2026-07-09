@@ -9,9 +9,9 @@ import { UpdatesSection } from "./UpdatesSection";
 
 // App-wide settings, shown from the sidebar when no project is selected. Each
 // section is a self-contained card: System prompts (editable global bases per
-// session kind), Auto-reclaim (daemon-backed teardown grace period), Updates
-// (auto-update channel, #2207), and Migration (re-run the legacy-AO import,
-// #2205).
+// session kind), Message templates (editable runtime nudge messages),
+// Auto-reclaim (daemon-backed teardown grace period), Updates (auto-update
+// channel, #2207), and Migration (re-run the legacy-AO import, #2205).
 export function GlobalSettingsForm() {
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
