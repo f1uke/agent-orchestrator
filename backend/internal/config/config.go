@@ -31,7 +31,8 @@ const (
 	DefaultShutdownTimeout = 10 * time.Second
 	// DefaultSessionIdleClose is the inactivity window after which an idle
 	// session is auto-closed. Zero (via AO_SESSION_IDLE_CLOSE=0) disables it.
-	DefaultSessionIdleClose = 24 * time.Hour
+	// 72h = 3 days (Go durations have no day unit, so express days as hours).
+	DefaultSessionIdleClose = 72 * time.Hour
 	// DefaultAgent is the compatibility value used when AO_AGENT is unset. The
 	// daemon validates it at startup, but worker/orchestrator spawns resolve from
 	// explicit requests or project role config instead of falling back to it.
@@ -118,7 +119,7 @@ func (c Config) Addr() string {
 //	AO_PORT              bind port           (default 3001)
 //	AO_REQUEST_TIMEOUT   per-request timeout (Go duration > 0, default 60s)
 //	AO_SHUTDOWN_TIMEOUT  shutdown deadline   (Go duration > 0, default 10s)
-//	AO_SESSION_IDLE_CLOSE  idle auto-close window (Go duration, 0 disables, default 24h)
+//	AO_SESSION_IDLE_CLOSE  idle auto-close window (Go duration, 0 disables, default 72h/3d)
 //	AO_RUN_FILE          running.json path   (default ~/.ao/running.json)
 //	AO_DATA_DIR          durable state dir   (default ~/.ao/data)
 //	AO_AGENT             compatibility agent id (default claude-code)
