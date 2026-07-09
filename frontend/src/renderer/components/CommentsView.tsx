@@ -4,14 +4,15 @@ import { apiErrorMessage } from "../lib/api-client";
 import { Badge } from "./ui/badge";
 import { DiffHunk } from "./DiffHunk";
 import { SendToWorkerButton } from "./SendToWorkerButton";
+import { ThreadActions } from "./ThreadActions";
 
 export type Thread = PRCommentGroup["threads"][number];
 export type Comment = Thread["comments"][number];
 
 /**
- * Read-only Comments tab: lists each PR/MR's review threads GitHub-style
- * (author, body, file:line) with the anchored diff hunk (expandable to the
- * full file). Reply/resolve actions are deferred to Phase 3.
+ * Comments tab: lists each PR/MR's review threads GitHub-style (author,
+ * body, file:line) with the anchored diff hunk (expandable to the full
+ * file), plus a reply box and resolve button per thread.
  */
 export function CommentsView({ sessionId }: { sessionId: string }) {
 	const query = useSessionPRComments(sessionId);
@@ -63,8 +64,11 @@ function ThreadCard({ sessionId, prUrl, thread }: { sessionId: string; prUrl: st
 					<CommentRow comment={comment} key={comment.id} />
 				))}
 			</div>
-			<div className="flex justify-end border-t border-border px-3 py-2">
-				<SendToWorkerButton sessionId={sessionId} prUrl={prUrl} threadId={thread.threadId} />
+			<div className="flex flex-col gap-2 border-t border-border px-3 py-2">
+				<ThreadActions sessionId={sessionId} prUrl={prUrl} thread={thread} />
+				<div className="flex justify-end">
+					<SendToWorkerButton sessionId={sessionId} prUrl={prUrl} threadId={thread.threadId} />
+				</div>
 			</div>
 		</div>
 	);
