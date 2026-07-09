@@ -1,8 +1,12 @@
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { prTitleLabel } from "../lib/pr-display";
 import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPRComments";
 import { apiErrorMessage } from "../lib/api-client";
+import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { DiffHunk } from "./DiffHunk";
+import { FileHeader } from "./FileHeader";
 import { SendToWorkerButton } from "./SendToWorkerButton";
 import { ThreadActions } from "./ThreadActions";
 
@@ -45,31 +49,55 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 }
 
 function ThreadCard({ sessionId, prUrl, thread }: { sessionId: string; prUrl: string; thread: Thread }) {
+	// Resolved threads start collapsed (they're settled, no action needed);
+	// unresolved threads start expanded so they draw the eye.
+	const [open, setOpen] = useState(!thread.resolved);
 	return (
 		<div className="rounded-[7px] border border-border bg-surface">
-			<div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-				<span className="truncate font-mono text-[11.5px] text-foreground">{thread.path}</span>
-				<span className="shrink-0 text-[11px] text-muted-foreground">:{thread.line}</span>
-				{thread.resolved && (
-					<Badge className="ml-auto" variant="success">
-						Resolved
-					</Badge>
+			<button
+				type="button"
+				aria-expanded={open}
+				onClick={() => setOpen((o) => !o)}
+				className={cn(
+					"flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-interactive-hover",
+					open && "border-b border-border",
 				)}
-			</div>
-			{thread.path && thread.line > 0 && (
-				<DiffHunk sessionId={sessionId} prUrl={prUrl} path={thread.path} line={thread.line} />
+			>
+				{open ? (
+					<ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+				) : (
+					<ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+				)}
+				<FileHeader path={thread.path} line={thread.line} />
+				{thread.resolved && (
+					<>
+						<Badge className="ml-auto" variant="success">
+							Resolved
+						</Badge>
+						<span className="shrink-0 text-[11px] text-muted-foreground">
+							· {thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}
+						</span>
+					</>
+				)}
+			</button>
+			{open && (
+				<>
+					{thread.path && thread.line > 0 && (
+						<DiffHunk sessionId={sessionId} prUrl={prUrl} path={thread.path} line={thread.line} />
+					)}
+					<div className="flex flex-col gap-1.5 px-3 py-2">
+						{thread.comments.map((comment) => (
+							<CommentRow comment={comment} key={comment.id} />
+						))}
+					</div>
+					<div className="flex flex-col gap-2 border-t border-border px-3 py-2">
+						<ThreadActions sessionId={sessionId} prUrl={prUrl} thread={thread} />
+						<div className="flex justify-end">
+							<SendToWorkerButton sessionId={sessionId} prUrl={prUrl} threadId={thread.threadId} />
+						</div>
+					</div>
+				</>
 			)}
-			<div className="flex flex-col gap-2.5 px-3 py-2.5">
-				{thread.comments.map((comment) => (
-					<CommentRow comment={comment} key={comment.id} />
-				))}
-			</div>
-			<div className="flex flex-col gap-2 border-t border-border px-3 py-2">
-				<ThreadActions sessionId={sessionId} prUrl={prUrl} thread={thread} />
-				<div className="flex justify-end">
-					<SendToWorkerButton sessionId={sessionId} prUrl={prUrl} threadId={thread.threadId} />
-				</div>
-			</div>
 		</div>
 	);
 }

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getMock } = vi.hoisted(() => ({ getMock: vi.fn() }));
@@ -53,6 +54,24 @@ beforeEach(() => {
 									},
 								],
 							},
+							{
+								threadId: "T2",
+								path: "x/y/Z.swift",
+								line: 20,
+								resolved: true,
+								isBot: false,
+								comments: [
+									{
+										id: "C2",
+										author: "bob",
+										body: "looks good",
+										url: "",
+										resolved: true,
+										isBot: false,
+										createdAt: "2026-07-09T10:05:00Z",
+									},
+								],
+							},
 						],
 					},
 				],
@@ -74,5 +93,25 @@ describe("CommentsView", () => {
 		getMock.mockReset().mockResolvedValue({ data: { sessionId: "s1", prs: [] }, error: undefined });
 		renderView();
 		expect(await screen.findByText(/no review comments/i)).toBeInTheDocument();
+	});
+
+	it("renders a resolved thread collapsed and an unresolved thread expanded, expanding on click", async () => {
+		const user = userEvent.setup();
+		renderView();
+
+		// Unresolved thread (T1) is expanded without any interaction.
+		expect(await screen.findByText("please fix")).toBeInTheDocument();
+
+		// Resolved thread (T2) starts collapsed: body hidden, header (badge +
+		// comment count) visible.
+		const resolvedHeader = await screen.findByRole("button", { name: /Z\.swift.*Resolved.*1 comment/is });
+		expect(resolvedHeader).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByText("looks good")).not.toBeInTheDocument();
+		expect(within(resolvedHeader).getByText("Resolved")).toBeInTheDocument();
+
+		await user.click(resolvedHeader);
+
+		expect(resolvedHeader).toHaveAttribute("aria-expanded", "true");
+		expect(await screen.findByText("looks good")).toBeInTheDocument();
 	});
 });
