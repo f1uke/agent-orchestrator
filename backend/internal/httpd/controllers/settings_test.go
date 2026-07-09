@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
@@ -184,6 +186,85 @@ type spawnConfirmSettingsBody struct {
 	Enabled bool `json:"enabled"`
 }
 
+type fakeAutoNudgeSvc struct {
+	cur   autonudge.Settings
+	saved autonudge.Settings
+	err   error
+}
+
+func (f *fakeAutoNudgeSvc) Get() autonudge.Settings { return f.cur }
+
+func (f *fakeAutoNudgeSvc) Set(s autonudge.Settings) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = s
+	f.cur = s
+	return nil
+}
+
+func newAutoNudgeTestServer(t *testing.T, svc *fakeAutoNudgeSvc) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{AutoNudge: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestAutoNudgeRoutes_DefaultToStubsWithoutService(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/settings/auto-nudge", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+func TestAutoNudgeController_GetReturnsCurrent(t *testing.T) {
+	svc := &fakeAutoNudgeSvc{cur: autonudge.Settings{Enabled: false}}
+	srv := newAutoNudgeTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/auto-nudge", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got autoNudgeSettingsBody
+	mustJSON(t, body, &got)
+	if got.Enabled {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestAutoNudgeController_PutSaves(t *testing.T) {
+	svc := &fakeAutoNudgeSvc{cur: autonudge.Settings{Enabled: false}}
+	srv := newAutoNudgeTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/auto-nudge", `{"enabled":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got autoNudgeSettingsBody
+	mustJSON(t, body, &got)
+	if !got.Enabled {
+		t.Fatalf("response = %#v", got)
+	}
+	if !svc.saved.Enabled {
+		t.Fatalf("saved=%+v, want enabled", svc.saved)
+	}
+}
+
+func TestAutoNudgeController_PutInvalidJSON(t *testing.T) {
+	srv := newAutoNudgeTestServer(t, &fakeAutoNudgeSvc{})
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/auto-nudge", `{`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_JSON")
+}
+
+type autoNudgeSettingsBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 type fakeSystemPromptsSvc struct {
 	ov      promptoverrides.Overrides
 	setKind prompts.Kind
@@ -261,5 +342,129 @@ func TestSystemPrompts_StubbedWithoutService501(t *testing.T) {
 	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
 	t.Cleanup(srv.Close)
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/prompts", "")
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+type fakeMessageTemplates struct {
+	overrides map[string]string
+	setErr    error
+}
+
+func (f *fakeMessageTemplates) Get() promptoverrides.Overrides {
+	cp := map[string]string{}
+	for k, v := range f.overrides {
+		cp[k] = v
+	}
+	return promptoverrides.Overrides{Templates: cp}
+}
+func (f *fakeMessageTemplates) SetTemplate(name, text string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.overrides == nil {
+		f.overrides = map[string]string{}
+	}
+	f.overrides[name] = text
+	return nil
+}
+func (f *fakeMessageTemplates) ClearTemplate(name string) error {
+	delete(f.overrides, name)
+	return nil
+}
+
+func newMessageTemplatesTestServer(t *testing.T, svc *fakeMessageTemplates) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{MessageTemplates: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestMessageTemplatesAPI_GetListsAllWithDefaults(t *testing.T) {
+	svc := &fakeMessageTemplates{overrides: map[string]string{"ci-failing": "custom"}}
+	srv := newMessageTemplatesTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/message-templates", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"name":"review-comment-dispatch"`) {
+		t.Fatalf("missing review-comment-dispatch: %s", body)
+	}
+	if !strings.Contains(string(body), `"override":"custom"`) {
+		t.Fatalf("ci-failing override not surfaced: %s", body)
+	}
+
+	var got controllers.MessageTemplatesResponse
+	mustJSON(t, body, &got)
+	wantNames := []string{
+		"review-comment-dispatch", "ci-failing", "merge-conflict",
+		"tracker-bot-comment", "ao-reviewer-batch", "ao-reviewer-single",
+	}
+	if len(got.Templates) != len(wantNames) {
+		t.Fatalf("want %d templates, got %d: %+v", len(wantNames), len(got.Templates), got.Templates)
+	}
+	byName := make(map[string]controllers.MessageTemplateItem, len(got.Templates))
+	for _, item := range got.Templates {
+		byName[item.Name] = item
+	}
+	for _, name := range wantNames {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("missing template %q in response: %+v", name, got.Templates)
+		}
+	}
+
+	// merge-conflict has no documented placeholders. It must still serialize
+	// as an empty JSON array, never null: a nil slice here violates the
+	// OpenAPI schema's required non-nullable array and previously crashed the
+	// frontend's Global Settings renderer (t.placeholders.length threw on
+	// null) every time the section opened, since merge-conflict is always in
+	// the response.
+	mc, ok := byName["merge-conflict"]
+	if !ok {
+		t.Fatalf("missing merge-conflict template: %+v", got.Templates)
+	}
+	if mc.Placeholders == nil {
+		t.Fatalf("merge-conflict placeholders must be [] not null")
+	}
+	if len(mc.Placeholders) != 0 {
+		t.Fatalf("merge-conflict placeholders must be empty, got %v", mc.Placeholders)
+	}
+	if !strings.Contains(string(body), `"placeholders":[]`) {
+		t.Fatalf("merge-conflict placeholders must serialize as [] on the wire: %s", body)
+	}
+}
+
+func TestMessageTemplatesAPI_SetAndClear(t *testing.T) {
+	fake := &fakeMessageTemplates{}
+	srv := newMessageTemplatesTestServer(t, fake)
+
+	_, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/message-templates/ci-failing", `{"template":"hi"}`)
+	if status != http.StatusOK {
+		t.Fatalf("PUT status %d", status)
+	}
+	if fake.overrides["ci-failing"] != "hi" {
+		t.Fatalf("override not stored: %v", fake.overrides)
+	}
+
+	_, status, _ = doRequest(t, srv, "PUT", "/api/v1/settings/message-templates/bogus", `{"template":"x"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("unknown name should be 400, got %d", status)
+	}
+
+	_, status, _ = doRequest(t, srv, "DELETE", "/api/v1/settings/message-templates/ci-failing", "")
+	if status != http.StatusOK {
+		t.Fatalf("DELETE status %d", status)
+	}
+	if _, ok := fake.overrides["ci-failing"]; ok {
+		t.Fatalf("override not cleared: %v", fake.overrides)
+	}
+}
+
+func TestMessageTemplates_StubbedWithoutService501(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/message-templates", "")
 	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
 }

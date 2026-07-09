@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -224,15 +225,134 @@ func TestPRObservation_CIFailingNudgesAgentWithLogs(t *testing.T) {
 	}
 }
 
-func TestPRObservation_ReviewCommentsNudgeAgent(t *testing.T) {
+// TestApplyPRObservation_CIFailingUsesTemplateOverride proves the CI nudge
+// renders through the injected Renderer: an operator override of the
+// ci-failing template changes the text an agent receives.
+func TestApplyPRObservation_CIFailingUsesTemplateOverride(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	renderer := messagetemplates.NewRenderer(func() map[string]string {
+		return map[string]string{string(messagetemplates.NameCIFailing): "CUSTOM CI: {{.LogTail}}"}
+	})
+	m := New(st, msg, WithMessageRenderer(renderer))
+	st.sessions["mer-1"] = working("mer-1")
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", CI: domain.CIFailing, Checks: []ports.PRCheckObservation{{Name: "build", Status: domain.PRCheckFailed, LogTail: "boom"}}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 1 || msg.msgs[0] != "CUSTOM CI: boom" {
+		t.Fatalf("CI nudge = %v, want template override applied", msg.msgs)
+	}
+}
+
+func TestPRObservation_UnresolvedReviewCommentsDoNotNudgeWhenDisabled(t *testing.T) {
+	// The human-review-comment auto-nudge is gated behind effective =
+	// perSessionOverride ?? globalDefault. A Manager built without
+	// WithAutoNudgeDefault defaults to "off", and this session carries no
+	// per-session override, so it inherits "off": no nudge fires. Dispatching
+	// review comments in that case is manual (the Comments tab /
+	// Send-to-worker). CI-failure, merge-conflict, and AO-reviewer nudges are
+	// unaffected (covered by their own tests).
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
 	o := ports.PRObservation{Fetched: true, URL: "pr1", Review: domain.ReviewChangesRequest, Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}}}
 	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
 		t.Fatal(err)
 	}
-	if len(msg.msgs) != 1 || !strings.Contains(msg.msgs[0], "fix this") {
-		t.Fatalf("want review nudge, got %v", msg.msgs)
+	if len(msg.msgs) != 0 {
+		t.Fatalf("review comments must NOT auto-nudge when disabled (no override, default off), got %v", msg.msgs)
+	}
+}
+
+func TestPRObservation_AutoNudgeOverrideOnNudgesOnUnresolvedComment(t *testing.T) {
+	m, st, msg := newManager()
+	rec := working("mer-1")
+	on := true
+	rec.AutoNudgeComments = &on
+	st.sessions["mer-1"] = rec
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("want exactly one nudge, got %v", msg.msgs)
+	}
+	if !strings.Contains(msg.msgs[0], "fix this") {
+		t.Fatalf("nudge missing comment body: %q", msg.msgs[0])
+	}
+}
+
+func TestPRObservation_AutoNudgeOverrideOnNudgesOnChangesRequested(t *testing.T) {
+	m, st, msg := newManager()
+	rec := working("mer-1")
+	on := true
+	rec.AutoNudgeComments = &on
+	st.sessions["mer-1"] = rec
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Review: domain.ReviewChangesRequest}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("want exactly one nudge, got %v", msg.msgs)
+	}
+}
+
+func TestPRObservation_AutoNudgeGlobalDefaultOnNudges(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	m := New(st, msg, WithAutoNudgeDefault(func() bool { return true }))
+	st.sessions["mer-1"] = working("mer-1")
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("want exactly one nudge from global default on, got %v", msg.msgs)
+	}
+}
+
+func TestPRObservation_AutoNudgeOverrideOffBeatsGlobalDefaultOn(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	m := New(st, msg, WithAutoNudgeDefault(func() bool { return true }))
+	rec := working("mer-1")
+	off := false
+	rec.AutoNudgeComments = &off
+	st.sessions["mer-1"] = rec
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("per-session override off must beat global default on, got %v", msg.msgs)
+	}
+}
+
+func TestPRObservation_AutoNudgeNudgeSanitizesCommentBody(t *testing.T) {
+	m, st, msg := newManager()
+	rec := working("mer-1")
+	on := true
+	rec.AutoNudgeComments = &on
+	st.sessions["mer-1"] = rec
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "bad\x1b[2Jtext\x00"}}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("want exactly one nudge, got %v", msg.msgs)
+	}
+	got := msg.msgs[0]
+	if strings.ContainsRune(got, '\x1b') || strings.ContainsRune(got, '\x00') {
+		t.Fatalf("nudge still carries control bytes: %q", got)
+	}
+	if !strings.Contains(got, "bad") || !strings.Contains(got, "text") {
+		t.Fatalf("nudge dropped visible text: %q", got)
 	}
 }
 
@@ -254,25 +374,6 @@ func TestPRObservation_CINudgeSanitizesLogTailControlChars(t *testing.T) {
 	}
 	if !strings.Contains(got, "line1") || !strings.Contains(got, "line2") || !strings.Contains(got, "\ttabbed") {
 		t.Fatalf("nudge dropped visible text or tab: %q", got)
-	}
-}
-
-func TestPRObservation_ReviewNudgeSanitizesCommentControlChars(t *testing.T) {
-	m, st, msg := newManager()
-	st.sessions["mer-1"] = working("mer-1")
-	o := ports.PRObservation{Fetched: true, URL: "pr1", Review: domain.ReviewChangesRequest, Comments: []ports.PRCommentObservation{{ID: "1", Body: "please\x1b]0;pwned\afix this"}}}
-	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
-		t.Fatal(err)
-	}
-	if len(msg.msgs) != 1 {
-		t.Fatalf("want one review nudge, got %v", msg.msgs)
-	}
-	got := msg.msgs[0]
-	if strings.ContainsRune(got, '\x1b') || strings.ContainsRune(got, '\a') {
-		t.Fatalf("review nudge still carries control bytes: %q", got)
-	}
-	if !strings.Contains(got, "please") || !strings.Contains(got, "fix this") {
-		t.Fatalf("review nudge dropped visible text: %q", got)
 	}
 }
 
@@ -620,6 +721,60 @@ func TestApplyReviewBatchSendsCombinedAndDedups(t *testing.T) {
 	}
 	if outcome != ReviewDeliverySent || len(msg.msgs) != 1 {
 		t.Fatalf("repeat should suppress duplicate send, outcome=%q msgs=%v", outcome, msg.msgs)
+	}
+}
+
+// TestApplyReviewBatch_UsesTemplateOverride proves the batch nudge renders
+// through the injected Renderer: an operator override of the
+// ao-reviewer-batch template changes the text an agent receives.
+func TestApplyReviewBatch_UsesTemplateOverride(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	renderer := messagetemplates.NewRenderer(func() map[string]string {
+		return map[string]string{string(messagetemplates.NameAOReviewerBatch): "OVERRIDE {{.Count}}"}
+	})
+	m := New(st, msg, WithMessageRenderer(renderer))
+	st.sessions["mer-1"] = working("mer-1")
+
+	outcome, err := m.ApplyReviewBatch(ctx, "mer-1", "batch1", []ReviewResult{
+		{RunID: "r1", PRURL: "https://x/pr/1", Verdict: domain.VerdictChangesRequested},
+	})
+	if err != nil {
+		t.Fatalf("ApplyReviewBatch: %v", err)
+	}
+	if outcome != ReviewDeliverySent || len(msg.msgs) != 1 {
+		t.Fatalf("outcome/messages = %q/%v, want sent once", outcome, msg.msgs)
+	}
+	if got := msg.msgs[0]; got != "OVERRIDE 1" {
+		t.Fatalf("batch nudge = %q, want template override applied", got)
+	}
+}
+
+// TestApplyReviewResult_UsesTemplateOverride proves the single-review nudge
+// renders through the injected Renderer: an operator override of the
+// ao-reviewer-single template changes the text an agent receives.
+func TestApplyReviewResult_UsesTemplateOverride(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	renderer := messagetemplates.NewRenderer(func() map[string]string {
+		return map[string]string{string(messagetemplates.NameAOReviewerSingle): "OVERRIDE {{.Verdict}}"}
+	})
+	m := New(st, msg, WithMessageRenderer(renderer))
+	st.sessions["mer-1"] = working("mer-1")
+
+	outcome, err := m.ApplyReviewResult(ctx, "mer-1", ReviewResult{
+		RunID:   "r1",
+		PRURL:   "https://x/pr/1",
+		Verdict: domain.VerdictChangesRequested,
+	})
+	if err != nil {
+		t.Fatalf("ApplyReviewResult: %v", err)
+	}
+	if outcome != ReviewDeliverySent || len(msg.msgs) != 1 {
+		t.Fatalf("outcome/messages = %q/%v, want sent once", outcome, msg.msgs)
+	}
+	if got := msg.msgs[0]; got != "OVERRIDE changes_requested" {
+		t.Fatalf("review nudge = %q, want template override applied", got)
 	}
 }
 

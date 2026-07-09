@@ -800,6 +800,15 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	border-radius: 0;
 }
 
+/* Comments inbox: fills the rail edge-to-edge and owns its own internal layout
+   (fixed header + auto-send strip, scrolling list, pinned batch bar, toast). */
+.session-inspector__body.session-inspector__body--comments {
+	padding: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
 /* Inspector resize handle (shadcn resizable separator, AO visual): a 7px
  * transparent grab strip whose centered 1px line lights accent on hover, drag
  * (rrp sets data-separator="active"), and keyboard focus. */
@@ -1613,3 +1622,4 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--red);
 	font-size: 12px;
 }
+

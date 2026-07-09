@@ -117,7 +117,7 @@ func (p *Provider) ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([
 	}
 	out := make([]ports.SCMPRObservation, 0, len(mrs))
 	for _, mr := range mrs {
-		out = append(out, mrToObservation(mr))
+		out = append(out, mrToObservation(mr, repo))
 	}
 	return out, nil
 }
@@ -153,13 +153,28 @@ func (p *Provider) CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, he
 // and FetchPullRequests (observer detail fetch) so both map through the
 // same mrToObservation helper.
 type restMR struct {
-	IID          int    `json:"iid"`
-	State        string `json:"state"`
-	Draft        bool   `json:"draft"`
-	Title        string `json:"title"`
-	SourceBranch string `json:"source_branch"`
-	TargetBranch string `json:"target_branch"`
-	SHA          string `json:"sha"`
+	IID   int    `json:"iid"`
+	State string `json:"state"`
+	Draft bool   `json:"draft"`
+	Title string `json:"title"`
+	// SourceProjectID/TargetProjectID identify the projects the MR's source and
+	// target branches live in. They are equal for a same-project MR (the AO
+	// worker model, where a session pushes its branch to the origin project) and
+	// differ for a fork MR. mrToObservation uses their relationship to fill
+	// HeadRepo, which branch-prefix attribution requires.
+	SourceProjectID int    `json:"source_project_id"`
+	TargetProjectID int    `json:"target_project_id"`
+	SourceBranch    string `json:"source_branch"`
+	TargetBranch    string `json:"target_branch"`
+	SHA             string `json:"sha"`
+	// DiffRefs carries the diff base/head/start SHAs. GitLab populates it on the
+	// single-MR detail endpoint (not the list endpoint); base_sha is the diff
+	// base needed to render review-comment code context (`git diff base..head`).
+	DiffRefs struct {
+		BaseSHA  string `json:"base_sha"`
+		HeadSHA  string `json:"head_sha"`
+		StartSHA string `json:"start_sha"`
+	} `json:"diff_refs"`
 	WebURL       string `json:"web_url"`
 	MergeStatus  string `json:"merge_status"`
 	HasConflicts bool   `json:"has_conflicts"`
@@ -176,8 +191,9 @@ type restMR struct {
 }
 
 // mrToObservation normalizes one GitLab merge request payload into the
-// provider-neutral SCM DTO.
-func mrToObservation(mr restMR) ports.SCMPRObservation {
+// provider-neutral SCM DTO. repo is the project the MR was listed/fetched from
+// (its target project); it supplies HeadRepo for same-project MRs.
+func mrToObservation(mr restMR, repo ports.SCMRepo) ports.SCMPRObservation {
 	state, draft, merged, closed := normalizeMRState(mr.State, mr.Draft)
 	changedFiles, _ := strconv.Atoi(mr.ChangesCount)
 	return ports.SCMPRObservation{
@@ -188,8 +204,10 @@ func mrToObservation(mr restMR) ports.SCMPRObservation {
 		Merged:            merged,
 		Closed:            closed,
 		SourceBranch:      mr.SourceBranch,
+		HeadRepo:          headRepoFullName(mr, repo),
 		TargetBranch:      mr.TargetBranch,
 		HeadSHA:           mr.SHA,
+		BaseSHA:           mr.DiffRefs.BaseSHA,
 		Title:             mr.Title,
 		ChangedFiles:      changedFiles,
 		Author:            mr.Author.Username,
@@ -201,6 +219,30 @@ func mrToObservation(mr restMR) ports.SCMPRObservation {
 		MergedAtProvider:  parseGitLabTime(mr.MergedAt),
 		ClosedAtProvider:  parseGitLabTime(mr.ClosedAt),
 	}
+}
+
+// headRepoFullName returns the full path (group/.../project) of the project the
+// MR's source branch lives in. The SCM observer's branch-prefix attribution
+// only claims an open PR whose HeadRepo equals a session's push origin, and
+// drops any PR with an empty HeadRepo (candidatesForHeadRepo in
+// internal/observe/scm/observer.go) — so leaving this blank, as the adapter
+// previously did, silently strands every GitLab MR in the WORKING column.
+//
+// For a same-project MR (SourceProjectID == TargetProjectID) the source branch
+// lives in the listed/target project, so its full path is repo.Repo. This is
+// the AO worker model: a session pushes its branch to the origin project. GitLab
+// always reports both ids, so a fork MR (SourceProjectID != TargetProjectID)
+// takes the other path; its source project path is not carried in the MR list
+// payload and AO workers never push from a fork, so HeadRepo is left empty and
+// the observer leaves the MR unattributed rather than misattributing it to an
+// origin session — mirroring the no-misattribution guard the GitHub path relies
+// on. (Zero-valued ids in a minimal payload compare equal and fall through to
+// the same-project branch, the correct default for AO's usage.)
+func headRepoFullName(mr restMR, repo ports.SCMRepo) string {
+	if mr.SourceProjectID == mr.TargetProjectID {
+		return repo.Repo
+	}
+	return ""
 }
 
 // normalizeMRState maps GitLab's merge_request `state` enum plus the
@@ -309,7 +351,7 @@ func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) 
 		Provider:     "gitlab",
 		Host:         ref.Repo.Host,
 		Repo:         ref.Repo.Repo,
-		PR:           mrToObservation(mr),
+		PR:           mrToObservation(mr, ref.Repo),
 		CI:           ciObservation(pipeline, jobs),
 		Mergeability: mergeability(mr),
 	}, nil
@@ -369,15 +411,18 @@ func ciObservation(pipeline restPipeline, jobs []restJob) ports.SCMCIObservation
 	checks := make([]ports.SCMCheckObservation, 0, len(jobs))
 	failed := make([]ports.SCMCheckObservation, 0)
 	for _, job := range jobs {
+		status := normalizeJobStatus(job.Status)
 		check := ports.SCMCheckObservation{
-			Name:       job.Name,
-			Status:     job.Status,
+			Name: job.Name,
+			// Status must be one of AO's normalized domain.PRCheckStatus values;
+			// the raw GitLab status is kept in Conclusion for detail.
+			Status:     string(status),
 			Conclusion: job.Status,
 			URL:        job.WebURL,
 			ProviderID: strconv.Itoa(job.ID),
 		}
 		checks = append(checks, check)
-		if job.Status == "failed" || job.Status == "canceled" {
+		if status == domain.PRCheckFailed || status == domain.PRCheckCancelled {
 			failed = append(failed, check)
 		}
 	}
@@ -386,6 +431,33 @@ func ciObservation(pipeline restPipeline, jobs []restJob) ports.SCMCIObservation
 		HeadSHA:      pipeline.SHA,
 		Checks:       checks,
 		FailedChecks: failed,
+	}
+}
+
+// normalizeJobStatus maps GitLab's CI job `status` enum onto AO's normalized
+// per-check status (domain.PRCheckStatus). The pr_checks.status column
+// CHECK-constrains writes to that vocabulary, so emitting GitLab's raw statuses
+// (success/canceled/running/manual/…) makes the whole PR observation write fail
+// atomically — dropping title, CI, mergeability, and observed_at for the MR.
+// Mirrors the github adapter, whose SCMCheckObservation.Status is likewise a
+// normalized domain value. This is the per-job status; normalizeCIStatus below
+// maps the pipeline-level summary onto the separate CI-summary vocabulary.
+func normalizeJobStatus(status string) domain.PRCheckStatus {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "success":
+		return domain.PRCheckPassed
+	case "failed":
+		return domain.PRCheckFailed
+	case "canceled", "cancelled":
+		return domain.PRCheckCancelled
+	case "skipped":
+		return domain.PRCheckSkipped
+	case "running", "preparing":
+		return domain.PRCheckInProgress
+	case "created", "pending", "scheduled", "waiting_for_resource", "manual":
+		return domain.PRCheckQueued
+	default:
+		return domain.PRCheckUnknown
 	}
 }
 

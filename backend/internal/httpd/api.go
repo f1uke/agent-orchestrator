@@ -30,7 +30,9 @@ type APIDeps struct {
 	Import             controllers.ImportService
 	Settings           controllers.SettingsService
 	SpawnConfirm       controllers.SpawnConfirmService
+	AutoNudge          controllers.AutoNudgeService
 	SystemPrompts      controllers.SystemPromptsService
+	MessageTemplates   controllers.MessageTemplatesService
 	CDC                cdc.Source
 	Events             cdcSubscriber
 	Telemetry          ports.EventSink
@@ -71,7 +73,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, SystemPrompts: deps.SystemPrompts},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }

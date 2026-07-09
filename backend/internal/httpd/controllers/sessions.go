@@ -44,9 +44,15 @@ type SessionService interface {
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
+	SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
+	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
+	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
+	ResolveThread(ctx context.Context, id domain.SessionID, prURL, threadID string) error
 	ListPRSummaries(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error)
+	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
+	DiffContext(ctx context.Context, id domain.SessionID, q sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -75,8 +81,11 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/preview", c.preview)
 	r.Post("/sessions/{sessionId}/preview", c.setPreview)
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
+	r.Put("/sessions/{sessionId}/auto-nudge", c.setAutoNudge)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
+	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
+	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
 	r.Post("/sessions/{sessionId}/restore", c.restore)
@@ -84,6 +93,9 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
+	r.Post("/sessions/{sessionId}/comment-dispatch", c.commentDispatch)
+	r.Post("/sessions/{sessionId}/comment-reply", c.commentReply)
+	r.Post("/sessions/{sessionId}/comment-resolve", c.commentResolve)
 	r.Post("/sessions/{sessionId}/activity", c.activity)
 	r.Get("/orchestrators", c.listOrchestrators)
 	r.Post("/orchestrators", c.spawnOrchestrator)
@@ -274,6 +286,27 @@ func (c *SessionsController) setPreview(w http.ResponseWriter, r *http.Request) 
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
 }
 
+// setAutoNudge sets (or clears) the per-session override for auto-nudging the
+// worker on unresolved PR review comments. A null `override` clears it so the
+// session inherits the global default.
+func (c *SessionsController) setAutoNudge(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/auto-nudge")
+		return
+	}
+	var in SetAutoNudgeRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	updated, err := c.Svc.SetAutoNudge(r.Context(), sessionID(r), in.Override)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
+}
+
 // clearPreview resets a session's browser preview to empty (`ao preview
 // clear`). Unlike setPreview with an empty url it never autodetects: it persists
 // an empty target so the desktop browser panel returns to its blank state. The
@@ -303,6 +336,43 @@ func (c *SessionsController) listPRs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ListSessionPRsResponse{SessionID: sessionID(r), PRs: sessionPRSummaries(prs)})
+}
+
+func (c *SessionsController) listPRComments(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/pr-comments")
+		return
+	}
+	groups, err := c.Svc.ListPRCommentThreads(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ListSessionPRCommentsResponse{SessionID: sessionID(r), PRs: sessionPRCommentGroups(groups)})
+}
+
+func (c *SessionsController) diffContext(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/diff-context")
+		return
+	}
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "hunk"
+	}
+	line, _ := strconv.Atoi(r.URL.Query().Get("line"))
+	q := sessionsvc.DiffContextQuery{
+		PRURL: r.URL.Query().Get("prUrl"),
+		Path:  r.URL.Query().Get("path"),
+		Line:  line,
+		Mode:  mode,
+	}
+	res, err := c.Svc.DiffContext(r.Context(), sessionID(r), q)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, diffContextResponse(res))
 }
 
 func (c *SessionsController) claimPR(w http.ResponseWriter, r *http.Request) {
@@ -456,6 +526,104 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SendSessionMessageResponse{OK: true, SessionID: sessionID(r), Message: message})
+}
+
+// commentDispatch forwards a review-thread comment (plus an optional extra
+// prompt) to the session's worker, letting a human manually nudge an agent
+// that isn't auto-polling the thread.
+func (c *SessionsController) commentDispatch(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/comment-dispatch")
+		return
+	}
+	var in DispatchCommentRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.PrURL == "" || in.ThreadID == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
+		return
+	}
+	if len(in.ExtraPrompt) > maxMessageLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Extra prompt is too long", nil)
+		return
+	}
+	if err := c.Svc.DispatchCommentToWorker(r.Context(), sessionID(r), in.PrURL, in.ThreadID, in.ExtraPrompt); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, DispatchCommentResponse{OK: true, SessionID: sessionID(r)})
+}
+
+// commentReply posts a reply comment on a PR review thread on behalf of the
+// session's SCM identity.
+func (c *SessionsController) commentReply(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/comment-reply")
+		return
+	}
+	var in ReplyCommentRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.PrURL == "" || in.ThreadID == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
+		return
+	}
+	body := domain.SanitizeControlChars(in.Body)
+	if strings.TrimSpace(body) == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "BODY_REQUIRED", "Reply body is required", nil)
+		return
+	}
+	if len(body) > maxMessageLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Reply body is too long", nil)
+		return
+	}
+	comment, err := c.Svc.ReplyToThread(r.Context(), sessionID(r), in.PrURL, in.ThreadID, body)
+	if err != nil {
+		writeThreadWriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ReplyCommentResponse{OK: true, Comment: newSessionPRThreadComment(comment)})
+}
+
+// commentResolve marks a PR review thread resolved on behalf of the session's
+// SCM identity.
+func (c *SessionsController) commentResolve(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/comment-resolve")
+		return
+	}
+	var in ResolveThreadRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.PrURL == "" || in.ThreadID == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
+		return
+	}
+	if err := c.Svc.ResolveThread(r.Context(), sessionID(r), in.PrURL, in.ThreadID); err != nil {
+		writeThreadWriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ResolveThreadResponse{OK: true, SessionID: sessionID(r), Resolved: true})
+}
+
+// writeThreadWriteError maps thread-write sentinels to explicit statuses,
+// delegating apierr-coded errors (SESSION_NOT_FOUND / PR_NOT_FOUND /
+// THREAD_NOT_FOUND) to envelope.WriteError.
+func writeThreadWriteError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, sessionsvc.ErrSCMWriteForbidden):
+		envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "SCM_WRITE_FORBIDDEN", "The configured token cannot write to this thread (missing write scope)", nil)
+	case errors.Is(err, sessionsvc.ErrSCMUnavailable):
+		envelope.WriteAPIError(w, r, http.StatusServiceUnavailable, "unavailable", "SCM_UNAVAILABLE", "SCM unavailable", nil)
+	default:
+		envelope.WriteError(w, r, err)
+	}
 }
 
 // activity records an agent activity-state signal reported by an agent hook

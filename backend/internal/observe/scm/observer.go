@@ -406,7 +406,12 @@ func (o *Observer) Poll(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		if pending, found := selection.commitETags[key]; found {
+		// Advance the commit-checks ETag only when the CI was actually fetched
+		// this round. A review-only refresh (localOnlyObservations) reuses local
+		// CI state — most importantly when the metadata/CI fetch failed but the
+		// periodic review re-poll still ran — so committing the pending ETag then
+		// would wrongly mark stale CI as current and skip the retry next tick.
+		if pending, found := selection.commitETags[key]; found && !localOnlyObservations[key] {
 			o.cacheSetString(o.Cache.CommitChecksETag, &o.Cache.commitOrder, pending.key, pending.value)
 		}
 		if reviewModes[key] != ports.ReviewWritePreserve {
@@ -923,17 +928,19 @@ func (o *Observer) needsReviewRefresh(key string, local domain.PullRequest, deci
 	if local.ReviewHash == "" {
 		return true
 	}
-	if decision == string(domain.ReviewChangesRequest) {
-		last := o.Cache.LastReviewPollAt[key]
-		return last.IsZero() || now.Sub(last) >= o.reviewInterval
-	}
+	// A metadata refresh whose decision differs from the stored one is fresh
+	// feedback; re-poll immediately rather than waiting out the interval.
 	if hasObs && decision != string(local.Review) {
 		return true
 	}
-	if local.ReviewHash != "" && string(local.Review) == string(domain.ReviewChangesRequest) && decision != string(domain.ReviewChangesRequest) {
-		return true
-	}
-	return false
+	// Otherwise re-poll on the review interval for every open tracked PR. Review
+	// threads — unresolved comments and their resolution — change with no
+	// accompanying metadata/CI change, and providers like GitLab never surface a
+	// changes_requested decision, so gating periodic re-polling on that decision
+	// froze review state after the first fetch (a comment added to an idle MR
+	// never appeared). The interval bounds the extra provider calls.
+	last := o.Cache.LastReviewPollAt[key]
+	return last.IsZero() || now.Sub(last) >= o.reviewInterval
 }
 
 func (o *Observer) prepareForPersistence(obs ports.SCMObservation, local domain.PullRequest, opts persistenceOptions, now time.Time) ports.SCMObservation {

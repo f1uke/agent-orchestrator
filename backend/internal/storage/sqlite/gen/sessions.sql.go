@@ -16,7 +16,7 @@ import (
 const getSession = `-- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
-    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated
+    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments
 FROM sessions WHERE id = ?
 `
 
@@ -45,6 +45,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.PreviewURL,
 		&i.PreviewRevision,
 		&i.Reactivated,
+		&i.AutoNudgeComments,
 	)
 	return i, err
 }
@@ -54,32 +55,33 @@ INSERT INTO sessions (
     id, project_id, num, issue_id, kind, harness, display_name,
     activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
-    preview_url, preview_revision, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    preview_url, preview_revision, auto_nudge_comments, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
-	ID              domain.SessionID
-	ProjectID       domain.ProjectID
-	Num             int64
-	IssueID         domain.IssueID
-	Kind            domain.SessionKind
-	Harness         domain.AgentHarness
-	DisplayName     string
-	ActivityState   domain.ActivityState
-	ActivityLastAt  time.Time
-	FirstSignalAt   sql.NullTime
-	IsTerminated    bool
-	Reactivated     bool
-	Branch          string
-	WorkspacePath   string
-	RuntimeHandleID string
-	AgentSessionID  string
-	Prompt          string
-	PreviewURL      string
-	PreviewRevision int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                domain.SessionID
+	ProjectID         domain.ProjectID
+	Num               int64
+	IssueID           domain.IssueID
+	Kind              domain.SessionKind
+	Harness           domain.AgentHarness
+	DisplayName       string
+	ActivityState     domain.ActivityState
+	ActivityLastAt    time.Time
+	FirstSignalAt     sql.NullTime
+	IsTerminated      bool
+	Reactivated       bool
+	Branch            string
+	WorkspacePath     string
+	RuntimeHandleID   string
+	AgentSessionID    string
+	Prompt            string
+	PreviewURL        string
+	PreviewRevision   int64
+	AutoNudgeComments sql.NullInt64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -103,6 +105,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.Prompt,
 		arg.PreviewURL,
 		arg.PreviewRevision,
+		arg.AutoNudgeComments,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -112,7 +115,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 const listAllSessions = `-- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
-    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated
+    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments
 FROM sessions ORDER BY project_id, num
 `
 
@@ -147,6 +150,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.PreviewURL,
 			&i.PreviewRevision,
 			&i.Reactivated,
+			&i.AutoNudgeComments,
 		); err != nil {
 			return nil, err
 		}
@@ -164,7 +168,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
-    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated
+    runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -199,6 +203,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.PreviewURL,
 			&i.PreviewRevision,
 			&i.Reactivated,
+			&i.AutoNudgeComments,
 		); err != nil {
 			return nil, err
 		}
@@ -266,6 +271,24 @@ func (q *Queries) SessionIsSeed(ctx context.Context, id domain.SessionID) (bool,
 	return is_seed, err
 }
 
+const setSessionAutoNudge = `-- name: SetSessionAutoNudge :execrows
+UPDATE sessions SET auto_nudge_comments = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionAutoNudgeParams struct {
+	AutoNudgeComments sql.NullInt64
+	UpdatedAt         time.Time
+	ID                domain.SessionID
+}
+
+func (q *Queries) SetSessionAutoNudge(ctx context.Context, arg SetSessionAutoNudgeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionAutoNudge, arg.AutoNudgeComments, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setSessionPreviewURL = `-- name: SetSessionPreviewURL :execrows
 UPDATE sessions SET preview_url = ?, preview_revision = preview_revision + 1, updated_at = ? WHERE id = ?
 `
@@ -292,29 +315,30 @@ UPDATE sessions SET
     issue_id = ?, kind = ?, harness = ?, display_name = ?,
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
-    preview_url = ?, preview_revision = ?, updated_at = ?
+    preview_url = ?, preview_revision = ?, auto_nudge_comments = ?, updated_at = ?
 WHERE id = ?
 `
 
 type UpdateSessionParams struct {
-	IssueID         domain.IssueID
-	Kind            domain.SessionKind
-	Harness         domain.AgentHarness
-	DisplayName     string
-	ActivityState   domain.ActivityState
-	ActivityLastAt  time.Time
-	FirstSignalAt   sql.NullTime
-	IsTerminated    bool
-	Reactivated     bool
-	Branch          string
-	WorkspacePath   string
-	RuntimeHandleID string
-	AgentSessionID  string
-	Prompt          string
-	PreviewURL      string
-	PreviewRevision int64
-	UpdatedAt       time.Time
-	ID              domain.SessionID
+	IssueID           domain.IssueID
+	Kind              domain.SessionKind
+	Harness           domain.AgentHarness
+	DisplayName       string
+	ActivityState     domain.ActivityState
+	ActivityLastAt    time.Time
+	FirstSignalAt     sql.NullTime
+	IsTerminated      bool
+	Reactivated       bool
+	Branch            string
+	WorkspacePath     string
+	RuntimeHandleID   string
+	AgentSessionID    string
+	Prompt            string
+	PreviewURL        string
+	PreviewRevision   int64
+	AutoNudgeComments sql.NullInt64
+	UpdatedAt         time.Time
+	ID                domain.SessionID
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) error {
@@ -335,6 +359,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.Prompt,
 		arg.PreviewURL,
 		arg.PreviewRevision,
+		arg.AutoNudgeComments,
 		arg.UpdatedAt,
 		arg.ID,
 	)

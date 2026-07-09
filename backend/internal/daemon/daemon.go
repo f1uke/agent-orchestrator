@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -114,10 +115,39 @@ func Run() error {
 	notifier := notificationsvc.New(notificationsvc.Deps{Store: store})
 	notificationWriter := notify.New(notify.Deps{Store: store, Publisher: notificationHub})
 
+	// The global system-prompt/message-template overrides are read by the
+	// session manager (worker/orchestrator base), the review engine (reviewer
+	// base), and the Lifecycle Manager (CI/review/merge-conflict/tracker
+	// nudges) at (re)launch/observation time, and edited through the settings
+	// API. Built before the Lifecycle Manager so its Templates getter can be
+	// threaded into startLifecycle. A missing/corrupt file degrades to
+	// built-in defaults (no overrides).
+	promptOverrides, err := promptoverrides.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("prompt overrides: %w", err)
+	}
+
+	// The auto-nudge gate is a global setting the Lifecycle Manager will read to
+	// decide whether to nudge the worker on unresolved review comments. Built
+	// before startLifecycle so a later wiring can thread its getter in. A
+	// missing/corrupt file degrades to OFF (no auto-nudge).
+	autoNudge, err := autonudge.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("auto-nudge settings: %w", err)
+	}
+
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
-	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, log)
+	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, log)
 	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
 
 	// The spawn-confirm gate is a global setting the orchestrator prompt reads at
@@ -131,21 +161,6 @@ func Run() error {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
 		}
 		return fmt.Errorf("spawn-confirm settings: %w", err)
-	}
-
-	// The global system-prompt overrides are read by both the session manager
-	// (worker/orchestrator base) and the review engine (reviewer base) at
-	// (re)launch time, and edited through the settings API. Built before the
-	// session manager so its getter can be threaded in. A missing/corrupt file
-	// degrades to built-in defaults (no overrides).
-	promptOverrides, err := promptoverrides.NewStore(cfg.DataDir)
-	if err != nil {
-		stop()
-		lcStack.Stop()
-		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
-			log.Error("cdc pipeline shutdown", "err", cdcErr)
-		}
-		return fmt.Errorf("prompt overrides: %w", err)
 	}
 
 	// Wire the controller-facing session service over the same store + LCM, the
@@ -200,7 +215,9 @@ func Run() error {
 		Telemetry:          telemetrySink,
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
+		AutoNudge:          autoNudge,
 		SystemPrompts:      promptOverrides,
+		MessageTemplates:   promptOverrides,
 	})
 	if err != nil {
 		stop()

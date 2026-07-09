@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -67,28 +67,24 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 		}
 		return results[i].RunID < results[j].RunID
 	})
-	var msg strings.Builder
-	fmt.Fprintf(&msg, "[AO reviewer] AO's internal code reviewer submitted %d review(s) requesting changes.\n", len(results))
+	data := messagetemplates.AOReviewerBatchData{Count: len(results)}
 	var sigParts []string
 	for i, r := range results {
-		fmt.Fprintf(&msg, "\nReview %d\nPR: %s\nVerdict: %s", i+1, domain.SanitizeControlChars(r.PRURL), domain.SanitizeControlChars(string(r.Verdict)))
-		if r.TargetSHA != "" {
-			fmt.Fprintf(&msg, "\nHead commit: %s", domain.SanitizeControlChars(r.TargetSHA))
-		}
-		if r.GithubReviewID != "" {
-			safeReviewID := domain.SanitizeControlChars(r.GithubReviewID)
-			fmt.Fprintf(&msg, "\nReview: %s", safeReviewID)
-			fmt.Fprintf(&msg, "\nOnce you have addressed it, reply on review %s with how you addressed it, then resolve the review comment threads you addressed.", safeReviewID)
-		}
-		if r.Body != "" {
-			fmt.Fprintf(&msg, "\n\nReview body:\n%s\n", domain.SanitizeControlChars(r.Body))
-		}
+		data.Reviews = append(data.Reviews, messagetemplates.AOReviewItem{
+			Index:     i + 1,
+			PRURL:     domain.SanitizeControlChars(r.PRURL),
+			Verdict:   domain.SanitizeControlChars(string(r.Verdict)),
+			TargetSHA: domain.SanitizeControlChars(r.TargetSHA),
+			ReviewID:  domain.SanitizeControlChars(r.GithubReviewID),
+			Body:      domain.SanitizeControlChars(r.Body),
+		})
 		sigParts = append(sigParts, strings.Join([]string{r.RunID, r.PRURL, r.TargetSHA, r.GithubReviewID, r.Body}, "\x00"))
 	}
+	msg := m.renderNudge(messagetemplates.NameAOReviewerBatch, data)
 	anchorPR := results[0].PRURL
 	key := "review-batch:" + anchorPR + ":" + batchID
 	sig := strings.Join(sigParts, "\x01")
-	if err := m.sendOnce(ctx, workerID, anchorPR, key, sig, msg.String(), reviewMaxNudge); err != nil {
+	if err := m.sendOnce(ctx, workerID, anchorPR, key, sig, msg, reviewMaxNudge); err != nil {
 		return ReviewDeliveryNoop, err
 	}
 	return ReviewDeliverySent, nil
@@ -149,23 +145,31 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	if o.CI == domain.CIFailing {
 		for _, ch := range o.Checks {
 			if ch.Status == domain.PRCheckFailed {
-				msg := "CI is failing on your PR. Review the output below and push a fix."
+				logTail := ""
 				if ch.LogTail != "" {
 					// LogTail is raw CI job output; sanitize before it reaches the
 					// agent's live pane so embedded escape sequences can't drive the
 					// terminal (the dedup signature stays on the raw bytes).
-					msg += "\n\nFailing output:\n" + domain.SanitizeControlChars(ch.LogTail)
+					logTail = domain.SanitizeControlChars(ch.LogTail)
 				}
+				msg := m.renderNudge(messagetemplates.NameCIFailing, messagetemplates.CIFailingData{LogTail: logTail})
 				return m.sendOnce(ctx, id, o.URL, "ci:"+o.URL+":"+ch.Name, ch.CommitHash+":"+ch.LogTail, msg, 0)
 			}
 		}
 	}
-	if o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments) {
+	// Auto-nudge the worker when its PR has unresolved human review comments (or
+	// a changes-requested decision) — but only when this session opts in: a
+	// per-session override wins, otherwise the global default. Dispatch is
+	// otherwise manual (Comments tab / Send-to-worker). The observer still
+	// fetches and persists these comments regardless (for that tab and for
+	// merge-readiness gating).
+	effective := m.autoNudgeDefault()
+	if rec.AutoNudgeComments != nil {
+		effective = *rec.AutoNudgeComments
+	}
+	if effective && (o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments)) {
 		comments, sig := reviewContent(o.Comments)
-		msg := "A reviewer left feedback on your PR. Address it and push."
-		if comments != "" {
-			msg += "\n\n" + comments
-		}
+		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{Comments: comments})
 		if sig == "" {
 			sig = string(o.Review)
 		}
@@ -184,7 +188,8 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if blocked {
 			return nil
 		}
-		return m.sendOnce(ctx, id, o.URL, "merge-conflict:"+o.URL, string(o.Mergeability), "Your PR has merge conflicts. Rebase onto the base branch and resolve them.", 0)
+		msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{})
+		return m.sendOnce(ctx, id, o.URL, "merge-conflict:"+o.URL, string(o.Mergeability), msg, 0)
 	}
 	return nil
 }
@@ -206,15 +211,12 @@ func (m *Manager) ApplyReviewResult(ctx context.Context, workerID domain.Session
 	if m.messenger == nil {
 		return ReviewDeliveryNoop, nil
 	}
-	msg := fmt.Sprintf("[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: %s\nVerdict: %s", domain.SanitizeControlChars(r.PRURL), domain.SanitizeControlChars(string(r.Verdict)))
-	if r.GithubReviewID != "" {
-		safeReviewID := domain.SanitizeControlChars(r.GithubReviewID)
-		msg += fmt.Sprintf("\nReview: %s", safeReviewID)
-		msg += fmt.Sprintf("\n\nOnce you have addressed it, reply on review %s with how you addressed it, then resolve the review comment threads you addressed.", safeReviewID)
-	}
-	if r.Body != "" {
-		msg += "\n\nReview body:\n" + domain.SanitizeControlChars(r.Body)
-	}
+	msg := m.renderNudge(messagetemplates.NameAOReviewerSingle, messagetemplates.AOReviewerSingleData{
+		PRURL:    domain.SanitizeControlChars(r.PRURL),
+		Verdict:  domain.SanitizeControlChars(string(r.Verdict)),
+		ReviewID: domain.SanitizeControlChars(r.GithubReviewID),
+		Body:     domain.SanitizeControlChars(r.Body),
+	})
 	key := "review:" + r.PRURL + ":ao:" + r.RunID
 	sig := strings.Join([]string{r.TargetSHA, r.RunID, r.GithubReviewID, r.Body}, "\x00")
 	err = m.sendOnce(ctx, workerID, r.PRURL, key, sig, msg, reviewMaxNudge)
@@ -488,10 +490,7 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 	if o.Changed.Comments {
 		bodies, ids := newBotCommentContent(o.Comments)
 		if len(ids) > 0 {
-			msg := "A bot left a new comment on your tracker issue. Address it and update the session."
-			if joined := strings.Join(bodies, "\n\n"); strings.TrimSpace(joined) != "" {
-				msg += "\n\n" + joined
-			}
+			msg := m.renderNudge(messagetemplates.NameTrackerBotComment, messagetemplates.TrackerBotData{Comments: strings.Join(bodies, "\n\n")})
 			// Empty prURL routes sendOnce through its in-memory-only branch:
 			// the PR-row signature load/persist is skipped, so the dedup
 			// survives only for the lifetime of this Manager. Cross-restart
@@ -521,7 +520,12 @@ func newBotCommentContent(comments []ports.TrackerCommentObservation) ([]string,
 		if c.ID == "" || strings.TrimSpace(c.Body) == "" {
 			continue
 		}
-		bodies = append(bodies, c.Body)
+		// Comment bodies are attacker-influenced (anyone/anything that can
+		// comment on the tracker issue) and get pasted into the agent's live
+		// pane; strip control/escape chars like the review-comment path does.
+		// The dedup signature (sig, below) is built from comment IDs, not
+		// bodies, so sanitizing here does not affect dedup.
+		bodies = append(bodies, domain.SanitizeControlChars(c.Body))
 		ids = append(ids, c.ID)
 	}
 	return bodies, ids
@@ -558,6 +562,16 @@ func reviewContent(comments []ports.PRCommentObservation) (string, string) {
 		ids = append(ids, c.ID)
 	}
 	return strings.Join(bodies, "\n\n"), strings.Join(ids, ",")
+}
+
+// renderNudge renders a nudge template, logging (but tolerating) a failed
+// operator override — the Renderer returns the built-in default on failure.
+func (m *Manager) renderNudge(name messagetemplates.Name, data any) string {
+	msg, err := m.renderer.Render(name, data)
+	if err != nil {
+		slog.Default().Warn("lifecycle: nudge template render fell back to default", "template", name, "err", err)
+	}
+	return msg
 }
 
 func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key, sig, msg string, maxAttempts int) error {

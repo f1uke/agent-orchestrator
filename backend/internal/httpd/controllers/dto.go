@@ -130,6 +130,15 @@ type DeleteSessionQuery struct {
 	Force bool `query:"force,omitempty" description:"When true, discard uncommitted worktree changes instead of refusing."`
 }
 
+// DiffContextParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/diff-context.
+type DiffContextParams struct {
+	PrURL string `query:"prUrl" description:"PR URL the comment belongs to."`
+	Path  string `query:"path" description:"Repo-relative file path the comment anchors to."`
+	Line  int    `query:"line" description:"1-based new-side line number of the anchor."`
+	Mode  string `query:"mode" description:"hunk (default) or file." enum:"hunk,file"`
+}
+
 // SessionView is the session wire shape: the domain read model plus the
 // display-safe branch name and the session's attributed pull requests in the
 // curated SessionPRFacts shape. One session can own many PRs (e.g. a stack), so
@@ -204,6 +213,13 @@ type SetSessionPreviewRequest struct {
 	URL string `json:"url,omitempty" description:"Preview target URL. When empty, the daemon autodetects a static entry point in the session workspace."`
 }
 
+// SetAutoNudgeRequest is the body of PUT /api/v1/sessions/{sessionId}/auto-nudge.
+// Override is a tri-state: true/false set an explicit per-session override; null
+// clears it so the session inherits the global auto-nudge default.
+type SetAutoNudgeRequest struct {
+	Override *bool `json:"override"`
+}
+
 // RenameSessionResponse is the body of PATCH /api/v1/sessions/{sessionId}.
 type RenameSessionResponse struct {
 	OK          bool             `json:"ok"`
@@ -273,6 +289,45 @@ type SendSessionMessageResponse struct {
 	OK        bool             `json:"ok"`
 	SessionID domain.SessionID `json:"sessionId"`
 	Message   string           `json:"message"`
+}
+
+// DispatchCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-dispatch.
+type DispatchCommentRequest struct {
+	PrURL       string `json:"prUrl"`
+	ThreadID    string `json:"threadId"`
+	ExtraPrompt string `json:"extraPrompt,omitempty"`
+}
+
+// DispatchCommentResponse acknowledges a manual comment dispatch to the worker.
+type DispatchCommentResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+}
+
+// ReplyCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-reply.
+type ReplyCommentRequest struct {
+	PrURL    string `json:"prUrl"`
+	ThreadID string `json:"threadId"`
+	Body     string `json:"body"`
+}
+
+// ReplyCommentResponse returns the newly created reply comment.
+type ReplyCommentResponse struct {
+	OK      bool                   `json:"ok"`
+	Comment SessionPRThreadComment `json:"comment"`
+}
+
+// ResolveThreadRequest is the body of POST /api/v1/sessions/{sessionId}/comment-resolve.
+type ResolveThreadRequest struct {
+	PrURL    string `json:"prUrl"`
+	ThreadID string `json:"threadId"`
+}
+
+// ResolveThreadResponse acknowledges a PR review thread resolution.
+type ResolveThreadResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+	Resolved  bool             `json:"resolved"`
 }
 
 // SessionPRFacts is the pull-request read shape returned under session PR routes.
@@ -424,6 +479,105 @@ func newSessionPRMergeabilitySummary(in sessionsvc.PRMergeabilitySummary) Sessio
 		files = append(files, SessionPRConflictFile{Path: file.Path, URL: file.URL})
 	}
 	return SessionPRMergeabilitySummary{State: in.State, Reasons: in.Reasons, PRURL: in.PRURL, ConflictFiles: files}
+}
+
+// ListSessionPRCommentsResponse is the body of GET /sessions/{sessionId}/pr-comments.
+type ListSessionPRCommentsResponse struct {
+	SessionID domain.SessionID        `json:"sessionId"`
+	PRs       []SessionPRCommentGroup `json:"prs"`
+}
+
+// SessionPRCommentGroup is one PR's review threads.
+type SessionPRCommentGroup struct {
+	PrURL    string                   `json:"prUrl"`
+	HtmlURL  string                   `json:"htmlUrl"`
+	Provider string                   `json:"provider"`
+	Number   int                      `json:"number"`
+	HeadSHA  string                   `json:"headSha"`
+	Threads  []SessionPRCommentThread `json:"threads"`
+}
+
+// SessionPRCommentThread is a review thread anchored to a file/line.
+type SessionPRCommentThread struct {
+	ThreadID string                   `json:"threadId"`
+	Path     string                   `json:"path"`
+	Line     int                      `json:"line"`
+	Resolved bool                     `json:"resolved"`
+	IsBot    bool                     `json:"isBot"`
+	Comments []SessionPRThreadComment `json:"comments"`
+}
+
+// SessionPRThreadComment is one review comment.
+type SessionPRThreadComment struct {
+	ID        string `json:"id"`
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	URL       string `json:"url"`
+	Resolved  bool   `json:"resolved"`
+	IsBot     bool   `json:"isBot"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// newSessionPRThreadComment maps a service review comment to its wire DTO,
+// formatting CreatedAt as RFC3339 (empty string when zero).
+func newSessionPRThreadComment(c sessionsvc.PRThreadComment) SessionPRThreadComment {
+	createdAt := ""
+	if !c.CreatedAt.IsZero() {
+		createdAt = c.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	return SessionPRThreadComment{
+		ID: c.ID, Author: c.Author, Body: c.Body, URL: c.URL,
+		Resolved: c.Resolved, IsBot: c.IsBot, CreatedAt: createdAt,
+	}
+}
+
+// sessionPRCommentGroups maps service models to wire DTOs.
+func sessionPRCommentGroups(groups []sessionsvc.PRCommentGroup) []SessionPRCommentGroup {
+	out := make([]SessionPRCommentGroup, 0, len(groups))
+	for _, g := range groups {
+		threads := make([]SessionPRCommentThread, 0, len(g.Threads))
+		for _, t := range g.Threads {
+			comments := make([]SessionPRThreadComment, 0, len(t.Comments))
+			for _, c := range t.Comments {
+				comments = append(comments, newSessionPRThreadComment(c))
+			}
+			threads = append(threads, SessionPRCommentThread{
+				ThreadID: t.ThreadID, Path: t.Path, Line: t.Line,
+				Resolved: t.Resolved, IsBot: t.IsBot, Comments: comments,
+			})
+		}
+		out = append(out, SessionPRCommentGroup{
+			PrURL: g.PRURL, HtmlURL: g.HTMLURL, Provider: g.Provider,
+			Number: g.Number, HeadSHA: g.HeadSHA, Threads: threads,
+		})
+	}
+	return out
+}
+
+// DiffContextResponse is the body of GET /sessions/{sessionId}/diff-context.
+type DiffContextResponse struct {
+	Available bool                 `json:"available"`
+	Mode      string               `json:"mode"`
+	Path      string               `json:"path"`
+	Lines     []DiffContextLineDTO `json:"lines"`
+	Truncated bool                 `json:"truncated"`
+}
+
+// DiffContextLineDTO is one classified code-context line.
+type DiffContextLineDTO struct {
+	Kind    string `json:"kind"`
+	OldLine int    `json:"oldLine"`
+	NewLine int    `json:"newLine"`
+	Text    string `json:"text"`
+}
+
+// diffContextResponse maps the service result to the wire DTO.
+func diffContextResponse(res sessionsvc.DiffContextResult) DiffContextResponse {
+	lines := make([]DiffContextLineDTO, 0, len(res.Lines))
+	for _, l := range res.Lines {
+		lines = append(lines, DiffContextLineDTO{Kind: l.Kind, OldLine: l.OldLine, NewLine: l.NewLine, Text: l.Text})
+	}
+	return DiffContextResponse{Available: res.Available, Mode: res.Mode, Path: res.Path, Lines: lines, Truncated: res.Truncated}
 }
 
 // ClaimPRRequest is the body of POST /sessions/{sessionId}/pr/claim.
@@ -605,6 +759,17 @@ type SetSpawnConfirmSettingsRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// AutoNudgeSettingsResponse mirrors autonudge.Settings on the wire. It is
+// the body of GET/PUT /api/v1/settings/auto-nudge.
+type AutoNudgeSettingsResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetAutoNudgeSettingsRequest is the body of PUT /api/v1/settings/auto-nudge.
+type SetAutoNudgeSettingsRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default
 // (for the editor + Reset) and the current override (null when using the default).
 type SystemPromptItem struct {
@@ -628,4 +793,29 @@ type SetSystemPromptRequest struct {
 // declared here so apispec.Build reflects it as the path parameter.
 type PromptKindParam struct {
 	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, or reviewer." enum:"orchestrator,worker,reviewer"`
+}
+
+// MessageTemplateItem is one editable nudge template on the wire: its built-in
+// default, documented placeholders, and current override (null ⇒ default).
+type MessageTemplateItem struct {
+	Name         string   `json:"name"`
+	Default      string   `json:"default"`
+	Placeholders []string `json:"placeholders"`
+	Override     *string  `json:"override"`
+}
+
+// MessageTemplatesResponse is the body of GET /api/v1/settings/message-templates.
+type MessageTemplatesResponse struct {
+	Templates []MessageTemplateItem `json:"templates"`
+}
+
+// SetMessageTemplateRequest is the body of PUT /api/v1/settings/message-templates/{name}.
+type SetMessageTemplateRequest struct {
+	Template string `json:"template"`
+}
+
+// MessageTemplateNameParam is the {name} path parameter for the
+// /settings/message-templates/{name} routes.
+type MessageTemplateNameParam struct {
+	Name string `path:"name" description:"Editable nudge template name." enum:"review-comment-dispatch,ci-failing,merge-conflict,tracker-bot-comment,ao-reviewer-batch,ao-reviewer-single"`
 }

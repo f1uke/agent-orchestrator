@@ -1,5 +1,7 @@
+import { AutoNudgeSection } from "./AutoNudgeSection";
 import { AutoReclaimSection } from "./AutoReclaimSection";
 import { DashboardSubhead } from "./DashboardSubhead";
+import { MessageTemplatesSection } from "./MessageTemplatesSection";
 import { MigrationSection } from "./MigrationSection";
 import { NotificationsSection } from "./NotificationsSection";
 import { SpawnConfirmSection } from "./SpawnConfirmSection";
@@ -8,9 +10,9 @@ import { UpdatesSection } from "./UpdatesSection";
 
 // App-wide settings, shown from the sidebar when no project is selected. Each
 // section is a self-contained card: System prompts (editable global bases per
-// session kind), Auto-reclaim (daemon-backed teardown grace period), Updates
-// (auto-update channel, #2207), and Migration (re-run the legacy-AO import,
-// #2205).
+// session kind), Message templates (editable runtime nudge messages),
+// Auto-reclaim (daemon-backed teardown grace period), Updates (auto-update
+// channel, #2207), and Migration (re-run the legacy-AO import, #2205).
 export function GlobalSettingsForm() {
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -18,7 +20,9 @@ export function GlobalSettingsForm() {
 			<div className="min-h-0 flex-1 overflow-y-auto p-[18px]">
 				<div className="mx-auto flex max-w-2xl flex-col gap-4">
 					<SystemPromptsSection />
+					<MessageTemplatesSection />
 					<SpawnConfirmSection />
+					<AutoNudgeSection />
 					<AutoReclaimSection />
 					<NotificationsSection />
 					<UpdatesSection />

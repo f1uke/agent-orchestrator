@@ -96,6 +96,17 @@ func (f *fakeStore) SetSessionPreviewURL(_ context.Context, id domain.SessionID,
 	return true, nil
 }
 
+func (f *fakeStore) SetSessionAutoNudge(_ context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error) {
+	r, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	r.AutoNudgeComments = override
+	r.UpdatedAt = updatedAt
+	f.sessions[id] = r
+	return true, nil
+}
+
 func (f *fakeStore) GetDisplayPRFactsForSession(_ context.Context, id domain.SessionID) (domain.PRFacts, bool, error) {
 	pr, ok := f.pr[id]
 	return pr, ok, nil
@@ -188,6 +199,31 @@ func TestSessionSetPreviewUnknownSession(t *testing.T) {
 	}
 }
 
+func TestSessionSetAutoNudgePersistsOverride(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+
+	override := true
+	sess, err := (&Service{store: st, clock: time.Now}).SetAutoNudge(context.Background(), "mer-1", &override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.AutoNudgeComments == nil || *sess.AutoNudgeComments != true {
+		t.Fatalf("returned auto-nudge override = %v, want true", sess.AutoNudgeComments)
+	}
+	if got := st.sessions["mer-1"].AutoNudgeComments; got == nil || *got != true {
+		t.Fatalf("persisted auto-nudge override = %v, want true", got)
+	}
+}
+
+func TestSessionSetAutoNudgeUnknownSession(t *testing.T) {
+	st := newFakeStore()
+	override := true
+	if _, err := (&Service{store: st}).SetAutoNudge(context.Background(), "ghost-1", &override); err == nil {
+		t.Fatal("want error for unknown session")
+	}
+}
+
 func TestSessionRenameMissingSessionReturnsNotFound(t *testing.T) {
 	st := newFakeStore()
 
@@ -205,6 +241,7 @@ type fakeCommander struct {
 	restarted       []domain.SessionID
 	retired         []domain.SessionID
 	sent            []domain.SessionID
+	lastMessage     string
 	cleanupProjects []domain.ProjectID
 	purged          []domain.SessionID
 	purgedForce     []bool
@@ -256,11 +293,12 @@ func (f *fakeCommander) RetireForReplacement(_ context.Context, id domain.Sessio
 	f.retired = append(f.retired, id)
 	return nil
 }
-func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, _ string) error {
+func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, message string) error {
 	if f.sendErr != nil {
 		return f.sendErr
 	}
 	f.sent = append(f.sent, id)
+	f.lastMessage = message
 	return nil
 }
 func (f *fakeCommander) Cleanup(_ context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error) {
@@ -724,10 +762,13 @@ func (f fakePRClaimer) ClaimPR(context.Context, domain.PullRequest, []domain.Pul
 }
 
 type fakeSCM struct {
-	obs       ports.SCMObservation
-	review    ports.SCMReviewObservation
-	fetchErr  error
-	reviewErr error
+	obs          ports.SCMObservation
+	review       ports.SCMReviewObservation
+	fetchErr     error
+	reviewErr    error
+	replyComment ports.SCMReviewCommentObservation
+	replyErr     error
+	resolveErr   error
 }
 
 func (f fakeSCM) ParseRepository(remote string) (ports.SCMRepo, bool) {
@@ -750,6 +791,14 @@ func (f fakeSCM) FetchPullRequests(context.Context, []ports.SCMPRRef) ([]ports.S
 
 func (f fakeSCM) FetchReviewThreads(context.Context, ports.SCMPRRef) (ports.SCMReviewObservation, error) {
 	return f.review, f.reviewErr
+}
+
+func (f fakeSCM) ReplyToThread(_ context.Context, _ ports.SCMPRRef, _, _ string) (ports.SCMReviewCommentObservation, error) {
+	return f.replyComment, f.replyErr
+}
+
+func (f fakeSCM) ResolveThread(_ context.Context, _ ports.SCMPRRef, _ string) error {
+	return f.resolveErr
 }
 
 func TestClaimPRMapsObserverAndStoreErrors(t *testing.T) {

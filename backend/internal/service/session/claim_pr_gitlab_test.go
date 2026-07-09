@@ -39,6 +39,16 @@ func (f *gitlabFakeSCM) FetchReviewThreads(context.Context, ports.SCMPRRef) (por
 	return f.review, nil
 }
 
+// ReplyToThread and ResolveThread satisfy scmProvider; the GitLab claim tests
+// in this file only exercise the read (claim) path, so these are unused stubs.
+func (f *gitlabFakeSCM) ReplyToThread(context.Context, ports.SCMPRRef, string, string) (ports.SCMReviewCommentObservation, error) {
+	return ports.SCMReviewCommentObservation{}, nil
+}
+
+func (f *gitlabFakeSCM) ResolveThread(context.Context, ports.SCMPRRef, string) error {
+	return nil
+}
+
 func TestNormalizePRRefGitLabMergeRequest(t *testing.T) {
 	cases := []struct {
 		name       string

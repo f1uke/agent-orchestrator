@@ -172,8 +172,16 @@ func (s *GlabTokenSource) ttl() time.Duration {
 }
 
 func glabAuthStatus(ctx context.Context, host string) (string, error) {
-	out, err := aoprocess.CommandContext(ctx, "glab", "auth", "status", "--show-token", "--hostname", host).Output()
-	if err != nil {
+	// glab writes `auth status` output — including the "Token:" line that
+	// --show-token unmasks — to STDERR, not stdout. Capturing stdout alone
+	// (the old .Output()) yielded an empty string, so parseGlabToken returned
+	// ErrNoToken and the provider disabled itself with "no token configured"
+	// even for a fully authenticated glab. CombinedOutput captures both streams
+	// so the token is parseable. A non-zero exit (e.g. not logged in) still
+	// carries the status text we scan, so only surface the error when there is
+	// nothing to parse.
+	out, err := aoprocess.CommandContext(ctx, "glab", "auth", "status", "--show-token", "--hostname", host).CombinedOutput()
+	if err != nil && len(out) == 0 {
 		return "", err
 	}
 	return string(out), nil

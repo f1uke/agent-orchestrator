@@ -103,7 +103,23 @@ func (f *fakeSessionService) SetPreview(context.Context, domain.SessionID, strin
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) SetAutoNudge(context.Context, domain.SessionID, *bool) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) error {
+	return nil
+}
+
+func (f *fakeSessionService) DispatchCommentToWorker(context.Context, domain.SessionID, string, string, string) error {
+	return nil
+}
+
+func (f *fakeSessionService) ReplyToThread(context.Context, domain.SessionID, string, string, string) (sessionsvc.PRThreadComment, error) {
+	return sessionsvc.PRThreadComment{}, nil
+}
+
+func (f *fakeSessionService) ResolveThread(context.Context, domain.SessionID, string, string) error {
 	return nil
 }
 
@@ -111,8 +127,16 @@ func (f *fakeSessionService) ListPRSummaries(context.Context, domain.SessionID) 
 	return nil, nil
 }
 
+func (f *fakeSessionService) ListPRCommentThreads(context.Context, domain.SessionID) ([]sessionsvc.PRCommentGroup, error) {
+	return nil, nil
+}
+
 func (f *fakeSessionService) ClaimPR(context.Context, domain.SessionID, string, sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
 	return sessionsvc.ClaimPRResult{}, nil
+}
+
+func (f *fakeSessionService) DiffContext(context.Context, domain.SessionID, sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error) {
+	return sessionsvc.DiffContextResult{}, nil
 }
 
 type fakeAgentCatalog struct{}

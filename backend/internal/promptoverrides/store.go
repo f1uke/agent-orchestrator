@@ -18,10 +18,12 @@ import (
 
 const fileName = "system-prompt-overrides.json"
 
-// Overrides maps a prompt kind to its custom global base. A missing key means
-// the built-in default applies.
+// Overrides maps a prompt kind to its custom global base and each message
+// template name to its custom text. A missing key means the built-in default
+// applies.
 type Overrides struct {
-	Base map[prompts.Kind]string `json:"base,omitempty"`
+	Base      map[prompts.Kind]string `json:"base,omitempty"`
+	Templates map[string]string       `json:"templates,omitempty"`
 }
 
 // Store is a mutex-guarded, file-backed Overrides holder.
@@ -37,11 +39,19 @@ func NewStore(dir string) (*Store, error) {
 	if dir == "" {
 		return nil, errors.New("promptoverrides: data dir is required")
 	}
-	s := &Store{path: filepath.Join(dir, fileName), cur: Overrides{Base: map[prompts.Kind]string{}}}
+	s := &Store{path: filepath.Join(dir, fileName), cur: Overrides{
+		Base:      map[prompts.Kind]string{},
+		Templates: map[string]string{},
+	}}
 	if b, err := os.ReadFile(s.path); err == nil {
 		var loaded Overrides
-		if json.Unmarshal(b, &loaded) == nil && loaded.Base != nil {
-			s.cur = loaded
+		if json.Unmarshal(b, &loaded) == nil {
+			if loaded.Base != nil {
+				s.cur.Base = loaded.Base
+			}
+			if loaded.Templates != nil {
+				s.cur.Templates = loaded.Templates
+			}
 		}
 	}
 	return s, nil
@@ -51,9 +61,15 @@ func NewStore(dir string) (*Store, error) {
 func (s *Store) Get() Overrides {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := Overrides{Base: make(map[prompts.Kind]string, len(s.cur.Base))}
+	out := Overrides{
+		Base:      make(map[prompts.Kind]string, len(s.cur.Base)),
+		Templates: make(map[string]string, len(s.cur.Templates)),
+	}
 	for k, v := range s.cur.Base {
 		out.Base[k] = v
+	}
+	for k, v := range s.cur.Templates {
+		out.Templates[k] = v
 	}
 	return out
 }
@@ -65,12 +81,19 @@ func (s *Store) SetBase(k prompts.Kind, text string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	candidate := s.copyBaseLocked()
-	candidate[k] = text
-	if err := s.persistLocked(candidate); err != nil {
+	prev, existed := s.cur.Base[k]
+	if s.cur.Base == nil {
+		s.cur.Base = map[prompts.Kind]string{}
+	}
+	s.cur.Base[k] = text
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.cur.Base[k] = prev
+		} else {
+			delete(s.cur.Base, k)
+		}
 		return err
 	}
-	s.cur.Base = candidate
 	return nil
 }
 
@@ -81,30 +104,65 @@ func (s *Store) ClearBase(k prompts.Kind) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	candidate := s.copyBaseLocked()
-	delete(candidate, k)
-	if err := s.persistLocked(candidate); err != nil {
+	prev, existed := s.cur.Base[k]
+	delete(s.cur.Base, k)
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.cur.Base[k] = prev
+		}
 		return err
 	}
-	s.cur.Base = candidate
 	return nil
 }
 
-// copyBaseLocked returns a mutable copy of s.cur.Base for building a candidate
-// state. Callers hold s.mu.
-func (s *Store) copyBaseLocked() map[prompts.Kind]string {
-	out := make(map[prompts.Kind]string, len(s.cur.Base))
-	for k, v := range s.cur.Base {
-		out[k] = v
-	}
-	return out
+// GetTemplate returns the custom override for a message template name and
+// whether one exists. Absent ⇒ ("", false) ⇒ caller uses the built-in default.
+func (s *Store) GetTemplate(name string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.cur.Templates[name]
+	return v, ok
 }
 
-// persistLocked writes the given candidate base map to disk atomically
-// (temp+rename), without mutating s.cur. Callers hold s.mu and, on success,
-// are responsible for assigning the candidate to s.cur.
-func (s *Store) persistLocked(base map[prompts.Kind]string) error {
-	b, err := json.Marshal(Overrides{Base: base})
+// SetTemplate stores a custom message-template override.
+func (s *Store) SetTemplate(name, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev, existed := s.cur.Templates[name]
+	if s.cur.Templates == nil {
+		s.cur.Templates = map[string]string{}
+	}
+	s.cur.Templates[name] = text
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.cur.Templates[name] = prev
+		} else {
+			delete(s.cur.Templates, name)
+		}
+		return err
+	}
+	return nil
+}
+
+// ClearTemplate removes a message-template override, restoring the default.
+func (s *Store) ClearTemplate(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev, existed := s.cur.Templates[name]
+	delete(s.cur.Templates, name)
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.cur.Templates[name] = prev
+		}
+		return err
+	}
+	return nil
+}
+
+// persistLocked writes s.cur to disk atomically (temp+rename). Callers hold
+// s.mu.
+func (s *Store) persistLocked() error {
+	b, err := json.Marshal(s.cur)
 	if err != nil {
 		return fmt.Errorf("promptoverrides: marshal: %w", err)
 	}

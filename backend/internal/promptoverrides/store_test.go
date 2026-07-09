@@ -2,6 +2,7 @@ package promptoverrides
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
@@ -93,5 +94,104 @@ func TestSetBase_DiskWriteFailure_LeavesInMemoryStateUnchanged(t *testing.T) {
 	}
 	if got, ok := st.Get().Base[prompts.KindWorker]; !ok || got != "first value" {
 		t.Fatalf("in-memory state changed despite failed persist: got %q, ok=%v", got, ok)
+	}
+}
+
+// TestSetBase_DiskWriteFailure_AbsentKeyStaysAbsent proves the rollback on a
+// failed persist does not plant a spurious present-but-empty override for a
+// key that was never set. Regression test: SetBase used to unconditionally
+// treat s.cur.Base as "had a previous value" (it is always non-nil after
+// NewStore), so on failure it restored the zero-value "" for an absent key
+// instead of deleting it — which downstream callers would then treat as an
+// explicit empty-string override rather than "no override".
+func TestSetBase_DiskWriteFailure_AbsentKeyStaysAbsent(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity check: the key has never been set.
+	if _, ok := st.Get().Base[prompts.KindOrchestrator]; ok {
+		t.Fatal("expected no override for KindOrchestrator before test")
+	}
+
+	// Make the directory unwritable so the temp-file write inside SetBase
+	// fails. Restore permissions in cleanup so t.TempDir() can clean up.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if err := st.SetBase(prompts.KindOrchestrator, "x"); err == nil {
+		t.Fatal("want error when disk write fails")
+	}
+	if _, ok := st.Get().Base[prompts.KindOrchestrator]; ok {
+		t.Fatal("rollback must leave the key absent, not present with an empty string")
+	}
+}
+
+func TestTemplateRoundTripPersists(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.GetTemplate("ci-failing"); ok {
+		t.Fatal("expected no template override initially")
+	}
+	if err := s.SetTemplate("ci-failing", "custom CI msg"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.GetTemplate("ci-failing")
+	if !ok || got != "custom CI msg" {
+		t.Fatalf("GetTemplate = %q, %v", got, ok)
+	}
+	// Reload from disk: override survives.
+	s2, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := s2.GetTemplate("ci-failing"); !ok || got != "custom CI msg" {
+		t.Fatalf("after reload GetTemplate = %q, %v", got, ok)
+	}
+	// Get() exposes the templates copy without aliasing internal state.
+	ov := s2.Get()
+	if ov.Templates["ci-failing"] != "custom CI msg" {
+		t.Fatalf("Get().Templates = %v", ov.Templates)
+	}
+	ov.Templates["ci-failing"] = "mutated"
+	if got, _ := s2.GetTemplate("ci-failing"); got != "custom CI msg" {
+		t.Fatal("Get() must return a copy, not internal state")
+	}
+	// Clear restores default (absent key).
+	if err := s2.ClearTemplate("ci-failing"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s2.GetTemplate("ci-failing"); ok {
+		t.Fatal("expected template override cleared")
+	}
+}
+
+func TestGetHandlesLegacyFileWithoutTemplates(t *testing.T) {
+	dir := t.TempDir()
+	// A pre-existing overrides file with only "base" and no "templates" key.
+	if err := os.WriteFile(filepath.Join(dir, "system-prompt-overrides.json"),
+		[]byte(`{"base":{"worker":"x"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.GetTemplate("ci-failing"); ok {
+		t.Fatal("legacy file should yield no template overrides")
+	}
+	// Setting a template must not clobber the existing base override.
+	if err := s.SetTemplate("ci-failing", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Get().Base["worker"] != "x" {
+		t.Fatal("base override lost when setting a template")
 	}
 }

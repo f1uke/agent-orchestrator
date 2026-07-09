@@ -13,6 +13,10 @@ import (
 // that found no matching resource, such as a branch with no open pull request.
 var ErrSCMNotFound = errors.New("scm: not found")
 
+// ErrSCMForbidden is the provider-neutral sentinel for a write the token is
+// not permitted to make (missing write scope / insufficient permission).
+var ErrSCMForbidden = errors.New("scm: forbidden")
+
 // SCMRepo identifies a repository without assuming a provider-specific URL
 // shape. Repo is conventionally "owner/name" for providers that expose an
 // owner namespace, while Owner/Name are kept split for provider calls.

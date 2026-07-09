@@ -10,10 +10,17 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 )
+
+// messageRenderer renders an editable nudge/dispatch template. *messagetemplates.Renderer
+// satisfies it; kept as an interface so tests can inject a stub.
+type messageRenderer interface {
+	Render(name messagetemplates.Name, data any) (string, error)
+}
 
 // Store is the read-only persistence surface needed to assemble controller-facing session read models.
 type Store interface {
@@ -22,6 +29,7 @@ type Store interface {
 	ListAllSessions(ctx context.Context) ([]domain.SessionRecord, error)
 	RenameSession(ctx context.Context, id domain.SessionID, displayName string, updatedAt time.Time) (bool, error)
 	SetSessionPreviewURL(ctx context.Context, id domain.SessionID, previewURL string, updatedAt time.Time) (bool, error)
+	SetSessionAutoNudge(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
@@ -75,10 +83,17 @@ type CleanupSkipped struct {
 	Reason    string           `json:"reason"`
 }
 
+// ErrSCMWriteForbidden is returned when the SCM provider rejects a review
+// thread write (reply/resolve) because the configured token lacks permission
+// for it.
+var ErrSCMWriteForbidden = errors.New("scm write forbidden")
+
 type scmProvider interface {
 	ParseRepository(remote string) (ports.SCMRepo, bool)
 	FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error)
 	FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error)
+	ReplyToThread(ctx context.Context, ref ports.SCMPRRef, threadID, body string) (ports.SCMReviewCommentObservation, error)
+	ResolveThread(ctx context.Context, ref ports.SCMPRRef, threadID string) error
 }
 
 // Service is the controller-facing session service. It delegates command-side
@@ -98,6 +113,7 @@ type Service struct {
 	// the no_signal downgrade: a hook-less harness staying silent forever is
 	// normal, not a broken pipeline. nil means "unknown": never downgrade.
 	signalCapable func(domain.AgentHarness) bool
+	renderer      messageRenderer
 }
 
 // New wires a controller-facing session service over an internal session Manager.
@@ -119,11 +135,15 @@ type Deps struct {
 	// wiring passes activitydispatch.SupportsHarness. Left nil, no session is
 	// ever downgraded to no_signal.
 	SignalCapable func(domain.AgentHarness) bool
+	// Renderer renders dispatch templates (send-to-worker). nil makes
+	// DispatchCommentToWorker fail safe with an Invalid (400) DISPATCH_UNAVAILABLE
+	// error instead of panicking.
+	Renderer messageRenderer
 }
 
 // NewWithDeps wires a session service with optional PR-claim dependencies.
 func NewWithDeps(d Deps) *Service {
-	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry}
+	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry, renderer: d.Renderer}
 	if s.prClaimer == nil {
 		if w, ok := d.Store.(ports.PRClaimer); ok {
 			s.prClaimer = w
@@ -505,6 +525,20 @@ func (s *Service) SetPreview(ctx context.Context, id domain.SessionID, previewUR
 	updated, err := s.store.SetSessionPreviewURL(ctx, id, previewURL, time.Now().UTC())
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("set preview url %s: %w", id, err)
+	}
+	if !updated {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	return s.Get(ctx, id)
+}
+
+// SetAutoNudge sets (or clears, when override is nil) the per-session override
+// for auto-nudging the worker on unresolved PR review comments, then returns
+// the refreshed read model. A nil override means "inherit the global default".
+func (s *Service) SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error) {
+	updated, err := s.store.SetSessionAutoNudge(ctx, id, override, time.Now().UTC())
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("set auto-nudge %s: %w", id, err)
 	}
 	if !updated {
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")

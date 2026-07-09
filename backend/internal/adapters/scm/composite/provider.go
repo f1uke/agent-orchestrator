@@ -26,6 +26,7 @@ type Provider struct {
 }
 
 var _ scmobserve.Provider = (*Provider)(nil)
+var _ scmobserve.ReviewThreadWriter = (*Provider)(nil)
 
 // New builds a composite Provider from an ordered list of named children.
 // ParseRepository tries entries in the given order; every other method
@@ -158,4 +159,34 @@ func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (
 		return ports.SCMReviewObservation{}, err
 	}
 	return child.FetchReviewThreads(ctx, ref)
+}
+
+// ReplyToThread routes to the child provider named by ref.Repo.Provider. If
+// that child does not implement scmobserve.ReviewThreadWriter, it returns a
+// clear "does not support" error rather than panicking on the type assertion.
+func (p *Provider) ReplyToThread(ctx context.Context, ref ports.SCMPRRef, threadID, body string) (ports.SCMReviewCommentObservation, error) {
+	child, err := p.lookup(ref.Repo.Provider)
+	if err != nil {
+		return ports.SCMReviewCommentObservation{}, err
+	}
+	w, ok := child.(scmobserve.ReviewThreadWriter)
+	if !ok {
+		return ports.SCMReviewCommentObservation{}, fmt.Errorf("composite scm: provider %q does not support thread writes", ref.Repo.Provider)
+	}
+	return w.ReplyToThread(ctx, ref, threadID, body)
+}
+
+// ResolveThread routes to the child provider named by ref.Repo.Provider. If
+// that child does not implement scmobserve.ReviewThreadWriter, it returns a
+// clear "does not support" error rather than panicking on the type assertion.
+func (p *Provider) ResolveThread(ctx context.Context, ref ports.SCMPRRef, threadID string) error {
+	child, err := p.lookup(ref.Repo.Provider)
+	if err != nil {
+		return err
+	}
+	w, ok := child.(scmobserve.ReviewThreadWriter)
+	if !ok {
+		return fmt.Errorf("composite scm: provider %q does not support thread writes", ref.Repo.Provider)
+	}
+	return w.ResolveThread(ctx, ref, threadID)
 }

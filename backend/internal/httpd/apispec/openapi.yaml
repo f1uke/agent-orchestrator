@@ -1007,6 +1007,302 @@ paths:
       summary: Report an agent activity-state signal for a session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/auto-nudge:
+    put:
+      operationId: setSessionAutoNudge
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAutoNudgeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Set (or clear) the per-session auto-nudge-on-comments override
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/comment-dispatch:
+    post:
+      operationId: sessionDispatchComment
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchCommentRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchCommentResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Dispatch a review-thread comment (plus an optional extra prompt) to
+        the session's worker
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/comment-reply:
+    post:
+      operationId: sessionReplyComment
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyCommentRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplyCommentResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Post a reply comment on a PR review thread on behalf of the session's
+        SCM identity
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/comment-resolve:
+    post:
+      operationId: sessionResolveThread
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveThreadRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveThreadResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Mark a PR review thread resolved on behalf of the session's SCM identity
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/diff-context:
+    get:
+      operationId: sessionDiffContext
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: PR URL the comment belongs to.
+        in: query
+        name: prUrl
+        schema:
+          description: PR URL the comment belongs to.
+          type: string
+      - description: Repo-relative file path the comment anchors to.
+        in: query
+        name: path
+        schema:
+          description: Repo-relative file path the comment anchors to.
+          type: string
+      - description: 1-based new-side line number of the anchor.
+        in: query
+        name: line
+        schema:
+          description: 1-based new-side line number of the anchor.
+          type: integer
+      - description: hunk (default) or file.
+        in: query
+        name: mode
+        schema:
+          description: hunk (default) or file.
+          enum:
+          - hunk
+          - file
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffContextResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return the diff hunk or full file a review comment anchors to
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/kill:
     post:
       operationId: killSession
@@ -1083,6 +1379,45 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: List pull requests owned by a session
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/pr-comments:
+    get:
+      operationId: listSessionPRComments
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSessionPRCommentsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List review comment threads across a session's pull requests
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/pr/claim:
@@ -1641,6 +1976,160 @@ paths:
       summary: Clean up terminated session workspaces
       tags:
       - sessions
+  /api/v1/settings/auto-nudge:
+    get:
+      operationId: getAutoNudgeSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoNudgeSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the auto-nudge-on-comments gate setting
+      tags:
+      - settings
+    put:
+      operationId: setAutoNudgeSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAutoNudgeSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoNudgeSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the auto-nudge-on-comments gate setting
+      tags:
+      - settings
+  /api/v1/settings/message-templates:
+    get:
+      operationId: getMessageTemplates
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTemplatesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the editable nudge message templates (default + override per
+        name)
+      tags:
+      - settings
+  /api/v1/settings/message-templates/{name}:
+    delete:
+      operationId: clearMessageTemplate
+      parameters:
+      - description: Editable nudge template name.
+        in: path
+        name: name
+        required: true
+        schema:
+          description: Editable nudge template name.
+          enum:
+          - review-comment-dispatch
+          - ci-failing
+          - merge-conflict
+          - tracker-bot-comment
+          - ao-reviewer-batch
+          - ao-reviewer-single
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTemplatesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Reset a nudge message template to its built-in default
+      tags:
+      - settings
+    put:
+      operationId: setMessageTemplate
+      parameters:
+      - description: Editable nudge template name.
+        in: path
+        name: name
+        required: true
+        schema:
+          description: Editable nudge template name.
+          enum:
+          - review-comment-dispatch
+          - ci-failing
+          - merge-conflict
+          - tracker-bot-comment
+          - ao-reviewer-batch
+          - ao-reviewer-single
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMessageTemplateRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTemplatesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Set the override text for a nudge message template
+      tags:
+      - settings
   /api/v1/settings/prompts:
     get:
       operationId: getSystemPrompts
@@ -1901,6 +2390,13 @@ components:
       - id
       - label
       type: object
+    AutoNudgeSettingsResponse:
+      properties:
+        enabled:
+          type: boolean
+      required:
+      - enabled
+      type: object
     ClaimPRRequest:
       properties:
         allowTakeover:
@@ -1967,6 +2463,10 @@ components:
       properties:
         activity:
           $ref: '#/components/schemas/DomainActivity'
+        autoNudgeComments:
+          type:
+          - "null"
+          - boolean
         branch:
           type: string
         createdAt:
@@ -2057,6 +2557,7 @@ components:
       - kind
       - activity
       - isTerminated
+      - autoNudgeComments
       - createdAt
       - updatedAt
       - status
@@ -2082,6 +2583,65 @@ components:
       - resolveError
       type: object
     DeleteSessionResponse:
+      properties:
+        ok:
+          type: boolean
+        sessionId:
+          type: string
+      required:
+      - ok
+      - sessionId
+      type: object
+    DiffContextLineDTO:
+      properties:
+        kind:
+          type: string
+        newLine:
+          type: integer
+        oldLine:
+          type: integer
+        text:
+          type: string
+      required:
+      - kind
+      - oldLine
+      - newLine
+      - text
+      type: object
+    DiffContextResponse:
+      properties:
+        available:
+          type: boolean
+        lines:
+          items:
+            $ref: '#/components/schemas/DiffContextLineDTO'
+          type: array
+        mode:
+          type: string
+        path:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - available
+      - mode
+      - path
+      - lines
+      - truncated
+      type: object
+    DispatchCommentRequest:
+      properties:
+        extraPrompt:
+          type: string
+        prUrl:
+          type: string
+        threadId:
+          type: string
+      required:
+      - prUrl
+      - threadId
+      type: object
+    DispatchCommentResponse:
       properties:
         ok:
           type: boolean
@@ -2229,6 +2789,18 @@ components:
       - reviewerHandleId
       - reviews
       type: object
+    ListSessionPRCommentsResponse:
+      properties:
+        prs:
+          items:
+            $ref: '#/components/schemas/SessionPRCommentGroup'
+          type: array
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - prs
+      type: object
     ListSessionPRsResponse:
       properties:
         prs:
@@ -2281,6 +2853,35 @@ components:
       - ok
       - prNumber
       - method
+      type: object
+    MessageTemplateItem:
+      properties:
+        default:
+          type: string
+        name:
+          type: string
+        override:
+          type:
+          - "null"
+          - string
+        placeholders:
+          items:
+            type: string
+          type: array
+      required:
+      - name
+      - default
+      - placeholders
+      - override
+      type: object
+    MessageTemplatesResponse:
+      properties:
+        templates:
+          items:
+            $ref: '#/components/schemas/MessageTemplateItem'
+          type: array
+      required:
+      - templates
       type: object
     NotificationEnvelope:
       properties:
@@ -2564,6 +3165,29 @@ components:
       - sessionId
       - displayName
       type: object
+    ReplyCommentRequest:
+      properties:
+        body:
+          type: string
+        prUrl:
+          type: string
+        threadId:
+          type: string
+      required:
+      - prUrl
+      - threadId
+      - body
+      type: object
+    ReplyCommentResponse:
+      properties:
+        comment:
+          $ref: '#/components/schemas/SessionPRThreadComment'
+        ok:
+          type: boolean
+      required:
+      - ok
+      - comment
+      type: object
     ResolveCommentsResponse:
       properties:
         ok:
@@ -2572,6 +3196,29 @@ components:
           type: integer
       required:
       - ok
+      - resolved
+      type: object
+    ResolveThreadRequest:
+      properties:
+        prUrl:
+          type: string
+        threadId:
+          type: string
+      required:
+      - prUrl
+      - threadId
+      type: object
+    ResolveThreadResponse:
+      properties:
+        ok:
+          type: boolean
+        resolved:
+          type: boolean
+        sessionId:
+          type: string
+      required:
+      - ok
+      - sessionId
       - resolved
       type: object
     RestartSessionResponse:
@@ -2720,6 +3367,54 @@ components:
       required:
       - state
       - failingChecks
+      type: object
+    SessionPRCommentGroup:
+      properties:
+        headSha:
+          type: string
+        htmlUrl:
+          type: string
+        number:
+          type: integer
+        prUrl:
+          type: string
+        provider:
+          type: string
+        threads:
+          items:
+            $ref: '#/components/schemas/SessionPRCommentThread'
+          type: array
+      required:
+      - prUrl
+      - htmlUrl
+      - provider
+      - number
+      - headSha
+      - threads
+      type: object
+    SessionPRCommentThread:
+      properties:
+        comments:
+          items:
+            $ref: '#/components/schemas/SessionPRThreadComment'
+          type: array
+        isBot:
+          type: boolean
+        line:
+          type: integer
+        path:
+          type: string
+        resolved:
+          type: boolean
+        threadId:
+          type: string
+      required:
+      - threadId
+      - path
+      - line
+      - resolved
+      - isBot
+      - comments
       type: object
     SessionPRConflictFile:
       properties:
@@ -2927,6 +3622,31 @@ components:
       - mergeability
       - updatedAt
       type: object
+    SessionPRThreadComment:
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+        id:
+          type: string
+        isBot:
+          type: boolean
+        resolved:
+          type: boolean
+        url:
+          type: string
+      required:
+      - id
+      - author
+      - body
+      - url
+      - resolved
+      - isBot
+      - createdAt
+      type: object
     SessionPRUnresolvedReviewer:
       properties:
         count:
@@ -2989,6 +3709,29 @@ components:
       - ok
       - sessionId
       - state
+      type: object
+    SetAutoNudgeRequest:
+      properties:
+        override:
+          type:
+          - "null"
+          - boolean
+      required:
+      - override
+      type: object
+    SetAutoNudgeSettingsRequest:
+      properties:
+        enabled:
+          type: boolean
+      required:
+      - enabled
+      type: object
+    SetMessageTemplateRequest:
+      properties:
+        template:
+          type: string
+      required:
+      - template
       type: object
     SetProjectConfigInput:
       properties:

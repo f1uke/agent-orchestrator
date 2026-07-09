@@ -6,8 +6,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
@@ -28,6 +30,13 @@ type SpawnConfirmService interface {
 	Set(spawnconfirm.Settings) error
 }
 
+// AutoNudgeService is the auto-nudge settings store surface the controller
+// needs. *autonudge.Store satisfies this directly.
+type AutoNudgeService interface {
+	Get() autonudge.Settings
+	Set(autonudge.Settings) error
+}
+
 // SystemPromptsService is the prompt-override store surface the controller needs.
 // *promptoverrides.Store satisfies this directly.
 type SystemPromptsService interface {
@@ -36,13 +45,23 @@ type SystemPromptsService interface {
 	ClearBase(prompts.Kind) error
 }
 
+// MessageTemplatesService is the template-override store surface the controller
+// needs. *promptoverrides.Store satisfies this directly.
+type MessageTemplatesService interface {
+	Get() promptoverrides.Overrides
+	SetTemplate(name, text string) error
+	ClearTemplate(name string) error
+}
+
 // SettingsController serves the global auto-reclaim settings. Nil keeps the
 // routes registered but returns OpenAPI-backed 501s, matching every other
 // controller in this package.
 type SettingsController struct {
-	Svc           SettingsService
-	SpawnConfirm  SpawnConfirmService
-	SystemPrompts SystemPromptsService
+	Svc              SettingsService
+	SpawnConfirm     SpawnConfirmService
+	AutoNudge        AutoNudgeService
+	SystemPrompts    SystemPromptsService
+	MessageTemplates MessageTemplatesService
 }
 
 // Register mounts the settings routes on the supplied router.
@@ -51,9 +70,14 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/reclaim", c.set)
 	r.Get("/settings/spawn-confirm", c.getSpawnConfirm)
 	r.Put("/settings/spawn-confirm", c.setSpawnConfirm)
+	r.Get("/settings/auto-nudge", c.getAutoNudge)
+	r.Put("/settings/auto-nudge", c.setAutoNudge)
 	r.Get("/settings/prompts", c.getPrompts)
 	r.Put("/settings/prompts/{kind}", c.setPrompt)
 	r.Delete("/settings/prompts/{kind}", c.clearPrompt)
+	r.Get("/settings/message-templates", c.getMessageTemplates)
+	r.Put("/settings/message-templates/{name}", c.setMessageTemplate)
+	r.Delete("/settings/message-templates/{name}", c.clearMessageTemplate)
 }
 
 func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +132,33 @@ func (c *SettingsController) setSpawnConfirm(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SpawnConfirmSettingsResponse{Enabled: next.Enabled})
+}
+
+func (c *SettingsController) getAutoNudge(w http.ResponseWriter, r *http.Request) {
+	if c.AutoNudge == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/auto-nudge")
+		return
+	}
+	s := c.AutoNudge.Get()
+	envelope.WriteJSON(w, http.StatusOK, AutoNudgeSettingsResponse{Enabled: s.Enabled})
+}
+
+func (c *SettingsController) setAutoNudge(w http.ResponseWriter, r *http.Request) {
+	if c.AutoNudge == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/auto-nudge")
+		return
+	}
+	var in SetAutoNudgeSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	next := autonudge.Settings{Enabled: in.Enabled}
+	if err := c.AutoNudge.Set(next); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, AutoNudgeSettingsResponse{Enabled: next.Enabled})
 }
 
 func (c *SettingsController) getPrompts(w http.ResponseWriter, r *http.Request) {
@@ -165,4 +216,74 @@ func (c *SettingsController) clearPrompt(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	c.getPrompts(w, r)
+}
+
+func (c *SettingsController) getMessageTemplates(w http.ResponseWriter, r *http.Request) {
+	if c.MessageTemplates == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/message-templates")
+		return
+	}
+	ov := c.MessageTemplates.Get()
+	items := make([]MessageTemplateItem, 0, len(messagetemplates.KnownNames()))
+	for _, n := range messagetemplates.KnownNames() {
+		// Placeholders returns nil for templates with no documented tokens
+		// (e.g. merge-conflict). A nil Go slice marshals to JSON null, which
+		// violates the OpenAPI schema's required non-nullable array and
+		// crashes frontend code that calls .length/.join on it. Coerce to an
+		// empty slice so the wire always honors the schema.
+		ph := messagetemplates.Placeholders(n)
+		if ph == nil {
+			ph = []string{}
+		}
+		item := MessageTemplateItem{
+			Name:         string(n),
+			Default:      messagetemplates.Default(n),
+			Placeholders: ph,
+		}
+		if v, ok := ov.Templates[string(n)]; ok {
+			v := v
+			item.Override = &v
+		}
+		items = append(items, item)
+	}
+	envelope.WriteJSON(w, http.StatusOK, MessageTemplatesResponse{Templates: items})
+}
+
+func (c *SettingsController) setMessageTemplate(w http.ResponseWriter, r *http.Request) {
+	if c.MessageTemplates == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/message-templates/{name}")
+		return
+	}
+	name := messagetemplates.Name(chi.URLParam(r, "name"))
+	if !name.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", fmt.Sprintf("unknown template name %q", name), nil)
+		return
+	}
+	var in SetMessageTemplateRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if err := c.MessageTemplates.SetTemplate(string(name), in.Template); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	c.getMessageTemplates(w, r)
+}
+
+func (c *SettingsController) clearMessageTemplate(w http.ResponseWriter, r *http.Request) {
+	if c.MessageTemplates == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/settings/message-templates/{name}")
+		return
+	}
+	name := messagetemplates.Name(chi.URLParam(r, "name"))
+	if !name.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", fmt.Sprintf("unknown template name %q", name), nil)
+		return
+	}
+	if err := c.MessageTemplates.ClearTemplate(string(name)); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	c.getMessageTemplates(w, r)
 }

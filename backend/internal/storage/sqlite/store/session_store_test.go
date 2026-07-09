@@ -82,3 +82,70 @@ func TestPurgeSession_RemovesTerminalRowAndCascades(t *testing.T) {
 		t.Fatalf("telemetry_event rows not purged: %+v", tevRows)
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }
+
+// TestSetSessionAutoNudgeRoundTrip covers the per-session nullable override
+// for "auto-nudge the worker on unresolved PR comments": a freshly inserted
+// session has no opinion (nil, inherit the global default), SetSessionAutoNudge
+// can force it on or off, and setting nil again clears the override back to
+// inherit. Also covers the not-found path (unknown session id).
+func TestSetSessionAutoNudgeRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+	r, err := s.CreateSession(ctx, sampleRecord("mer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh session: no override, inherits the global default.
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok {
+		t.Fatalf("get: ok=%v err=%v", ok, err)
+	}
+	if got.AutoNudgeComments != nil {
+		t.Fatalf("fresh session auto-nudge override = %v, want nil", got.AutoNudgeComments)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Force on.
+	ok, err = s.SetSessionAutoNudge(ctx, r.ID, boolPtr(true), now)
+	if err != nil || !ok {
+		t.Fatalf("set true: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, r.ID)
+	if got.AutoNudgeComments == nil || *got.AutoNudgeComments != true {
+		t.Fatalf("auto-nudge override = %v, want true", got.AutoNudgeComments)
+	}
+
+	// Force off.
+	ok, err = s.SetSessionAutoNudge(ctx, r.ID, boolPtr(false), now)
+	if err != nil || !ok {
+		t.Fatalf("set false: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, r.ID)
+	if got.AutoNudgeComments == nil || *got.AutoNudgeComments != false {
+		t.Fatalf("auto-nudge override = %v, want false", got.AutoNudgeComments)
+	}
+
+	// Clear back to inherit.
+	ok, err = s.SetSessionAutoNudge(ctx, r.ID, nil, now)
+	if err != nil || !ok {
+		t.Fatalf("set nil: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, r.ID)
+	if got.AutoNudgeComments != nil {
+		t.Fatalf("auto-nudge override = %v, want nil after clearing", got.AutoNudgeComments)
+	}
+
+	// Unknown session id: not found.
+	ok, err = s.SetSessionAutoNudge(ctx, "mer-missing", boolPtr(true), now)
+	if err != nil {
+		t.Fatalf("set on missing session: %v", err)
+	}
+	if ok {
+		t.Fatal("set on missing session ok=true, want false")
+	}
+}

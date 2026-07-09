@@ -3,9 +3,41 @@ package gitlab
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
+
+// TestGlabAuthStatusCapturesStderr reproduces the real-world failure: `glab auth
+// status --show-token` prints its status — including the token line — to STDERR,
+// not stdout. glabAuthStatus must capture stderr, or the token never resolves and
+// the GitLab provider disables itself with "no token configured". A fake glab on
+// PATH that writes only to stderr fails the test if glabAuthStatus reads stdout
+// alone.
+func TestGlabAuthStatusCapturesStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake glab is a /bin/sh script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "glab")
+	// Mirror real glab: everything, including the token, goes to stderr; stdout empty.
+	body := "#!/bin/sh\necho 'gitlab.example.com' >&2\necho '  ✓ Token: glpat-from-stderr' >&2\nexit 0\n"
+	if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	out, err := glabAuthStatus(context.Background(), "gitlab.example.com")
+	if err != nil {
+		t.Fatalf("glabAuthStatus: %v", err)
+	}
+	tok, err := parseGlabToken(out)
+	if err != nil || tok != "glpat-from-stderr" {
+		t.Fatalf("token=%q err=%v, want glpat-from-stderr (stderr not captured?)", tok, err)
+	}
+}
 
 func TestParseGlabToken(t *testing.T) {
 	sample := `gitlab.finnomena.com

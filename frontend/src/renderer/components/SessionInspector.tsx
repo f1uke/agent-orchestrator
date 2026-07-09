@@ -18,6 +18,7 @@ import type { SessionActivityState, WorkspaceSession } from "../types/workspace"
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
+import { CommentsView, type FileDiffTarget } from "./CommentsView";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -29,7 +30,7 @@ type PRReviewState = components["schemas"]["PRReviewState"];
 type ReviewsResponse = components["schemas"]["ListReviewsResponse"];
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "browser";
+export type InspectorView = "summary" | "reviews" | "comments" | "browser";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -52,6 +53,15 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		icon: (
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
 				<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+			</svg>
+		),
+	},
+	{
+		id: "comments",
+		label: "Comments",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
 			</svg>
 		),
 	},
@@ -89,6 +99,7 @@ export function SessionInspector({
 	browserView,
 	view: viewProp,
 	onViewChange,
+	onOpenFile,
 }: {
 	session?: WorkspaceSession;
 	onOpenReviewerTerminal?: OpenReviewerTerminal;
@@ -99,6 +110,8 @@ export function SessionInspector({
 	/** Controlled active tab. Omit to let the inspector own its own selection. */
 	view?: InspectorView;
 	onViewChange?: (view: InspectorView) => void;
+	/** Open a review comment's file as a full-file diff in the center pane. */
+	onOpenFile?: (target: FileDiffTarget) => void;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const view = viewProp ?? internalView;
@@ -142,10 +155,14 @@ export function SessionInspector({
 					// drop the body padding for it (except when popped out, where the
 					// body only holds the "return to panel" empty state).
 					view === "browser" && !browserPoppedOut && "session-inspector__body--browser",
+					// The Comments inbox owns its full-height layout (fixed header,
+					// scrolling list, pinned batch bar), so it also renders flush.
+					view === "comments" && "session-inspector__body--comments",
 				)}
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
 				{view === "reviews" ? <ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} session={session} /> : null}
+				{view === "comments" ? <CommentsView sessionId={session.id} onOpenFile={onOpenFile} /> : null}
 				{view === "browser" ? (
 					<BrowserView
 						browserPoppedOut={browserPoppedOut}
