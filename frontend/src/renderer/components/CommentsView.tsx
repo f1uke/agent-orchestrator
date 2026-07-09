@@ -3,6 +3,7 @@ import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPR
 import { apiErrorMessage } from "../lib/api-client";
 import { Badge } from "./ui/badge";
 import { DiffHunk } from "./DiffHunk";
+import { SendToWorkerButton } from "./SendToWorkerButton";
 
 export type Thread = PRCommentGroup["threads"][number];
 export type Comment = Thread["comments"][number];
@@ -61,6 +62,9 @@ function ThreadCard({ sessionId, prUrl, thread }: { sessionId: string; prUrl: st
 				{thread.comments.map((comment) => (
 					<CommentRow comment={comment} key={comment.id} />
 				))}
+			</div>
+			<div className="flex justify-end border-t border-border px-3 py-2">
+				<SendToWorkerButton sessionId={sessionId} prUrl={prUrl} threadId={thread.threadId} />
 			</div>
 		</div>
 	);
