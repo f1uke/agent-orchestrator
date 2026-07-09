@@ -82,7 +82,19 @@ beforeEach(() => {
 			};
 		}
 		if (path.includes("diff-context")) {
-			return { data: { available: false, mode: "hunk", path: "", lines: [], truncated: false }, error: undefined };
+			return {
+				data: {
+					available: true,
+					mode: "hunk",
+					path: "backend/a.go",
+					truncated: false,
+					lines: [
+						{ kind: "context", oldLine: 9, newLine: 9, text: "func A() {" },
+						{ kind: "add", oldLine: 0, newLine: 10, text: "  return fix" },
+					],
+				},
+				error: undefined,
+			};
 		}
 		return { data: commentsData, error: undefined };
 	});
@@ -90,11 +102,11 @@ beforeEach(() => {
 	postMock.mockReset().mockResolvedValue({ data: { ok: true, comment: comment("CR", "me", "") }, error: undefined });
 });
 
-function renderView(sessionId = "s1") {
+function renderView(sessionId = "s1", onOpenFile?: (t: unknown) => void) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	render(
 		<QueryClientProvider client={qc}>
-			<CommentsView sessionId={sessionId} />
+			<CommentsView sessionId={sessionId} onOpenFile={onOpenFile as never} />
 		</QueryClientProvider>,
 	);
 }
@@ -159,6 +171,28 @@ describe("CommentsView (inbox)", () => {
 		const cb = await screen.findByRole("checkbox", { name: /Select comment/ });
 		await userEvent.click(cb);
 		expect(await screen.findByText("1 selected")).toBeInTheDocument();
+	});
+
+	it("syntax-highlights the inline diff when expanded", async () => {
+		renderView();
+		const show = await screen.findByRole("button", { name: /Show diff/ });
+		await userEvent.click(show);
+		const keyword = await screen.findByText("func");
+		expect(keyword.tagName.toLowerCase()).toBe("span");
+		expect(keyword).toHaveStyle({ color: "#FC5FA3" });
+	});
+
+	it("Expand full file calls onOpenFile with the comment's PR and thread", async () => {
+		const onOpenFile = vi.fn();
+		renderView("s1", onOpenFile);
+		const expand = await screen.findByRole("button", { name: /Expand full file/ });
+		await userEvent.click(expand);
+		expect(onOpenFile).toHaveBeenCalledTimes(1);
+		expect(onOpenFile.mock.calls[0][0]).toMatchObject({
+			prNumber: 1,
+			provider: "github",
+			thread: { threadId: "T1", path: "backend/a.go", line: 10 },
+		});
 	});
 
 	it("shows Inbox zero when there are no unresolved comments", async () => {

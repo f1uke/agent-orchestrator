@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DropdownMenu } from "radix-ui";
 import type { components } from "../../api/schema";
 import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPRComments";
-import { useReplyToThread, useResolveThread } from "../hooks/useThreadActions";
+import { useInboxActions } from "../hooks/useInboxActions";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import {
 	ACCENT,
+	MONO,
 	PALETTE as P,
 	accentMix,
 	avatarBg,
@@ -19,13 +20,25 @@ import {
 	STATUS_COLORS,
 	statusFor,
 } from "../lib/comment-inbox";
+import { DiffRows } from "./DiffRows";
+import { MenuItemBody, SendSplit, menuBox, menuItemStyle, outlineBtn, pill, solidBtn } from "./inbox-ui";
 
 type Group = PRCommentGroup;
 type Thread = Group["threads"][number];
 type PRFacts = NonNullable<components["schemas"]["ControllersSessionView"]["prs"]>[number];
 
-const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
-const TOAST_MS = 2800;
+/**
+ * Everything the full-file diff viewer (center pane) needs to render a comment's
+ * file at its line and act on the thread. Emitted by the inbox's "Expand full
+ * file" affordance and consumed by SessionView → FileDiffView.
+ */
+export type FileDiffTarget = {
+	prUrl: string;
+	htmlUrl: string;
+	prNumber: number;
+	provider: string;
+	thread: Thread;
+};
 
 /**
  * Comments tab — the "Unresolved inbox": a cross-PR list of unresolved review
@@ -35,7 +48,14 @@ const TOAST_MS = 2800;
  * the existing comment-resolve / comment-reply / comment-dispatch / send
  * endpoints; the auto-send strip drives the per-session auto-nudge override.
  */
-export function CommentsView({ sessionId }: { sessionId: string }) {
+export function CommentsView({
+	sessionId,
+	onOpenFile,
+}: {
+	sessionId: string;
+	/** Open a comment's file as a full-file diff in the center pane. */
+	onOpenFile?: (target: FileDiffTarget) => void;
+}) {
 	const query = useSessionPRComments(sessionId);
 	const queryClient = useQueryClient();
 
@@ -79,16 +99,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 		onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["session", sessionId, "autoNudge"] }),
 	});
 
-	// --- toast ---------------------------------------------------------------
-	const [toast, setToast] = useState<string | null>(null);
-	const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const showToast = (msg: string) => {
-		setToast(msg);
-		if (toastTimer.current) clearTimeout(toastTimer.current);
-		toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
-	};
-	useEffect(() => () => void (toastTimer.current && clearTimeout(toastTimer.current)), []);
-
 	// --- select / batch ------------------------------------------------------
 	const [selectMode, setSelectMode] = useState(false);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -103,28 +113,9 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 		setSelected(new Set());
 	};
 
-	// --- mutations -----------------------------------------------------------
-	const reply = useReplyToThread(sessionId);
-	const resolve = useResolveThread(sessionId);
-	const dispatch = useMutation({
-		mutationFn: async (vars: { prUrl: string; threadId: string; extraPrompt?: string }) => {
-			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/comment-dispatch", {
-				params: { path: { sessionId } },
-				body: vars,
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to send"));
-		},
-	});
-	const send = useMutation({
-		mutationFn: async (message: string) => {
-			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/send", {
-				params: { path: { sessionId } },
-				body: { message },
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to send"));
-		},
-	});
-	const busy = resolve.isPending || dispatch.isPending || send.isPending;
+	// --- mutations + toast + per-comment handlers (shared with FileDiffView) --
+	const { resolve, dispatch, send, busy, toast, showToast, doResolve, doReply, doSendQuick, doSendPrompt } =
+		useInboxActions(sessionId);
 
 	// --- derive groups (unresolved) + resolved list --------------------------
 	const groups = query.data ?? [];
@@ -142,24 +133,7 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 	}, [unresolved]);
 	const selectedIds = [...selected].filter((id) => byId.has(id));
 
-	// --- action handlers -----------------------------------------------------
-	const doResolve = (prUrl: string, threadId: string) => {
-		resolve.mutate({ prUrl, threadId });
-		showToast("Comment resolved");
-	};
-	const doReply = (prUrl: string, threadId: string, body: string, author: string) => {
-		reply.mutate({ prUrl, threadId, body });
-		showToast(`Replied to ${author || "author"}`);
-	};
-	const doSendQuick = (prUrl: string, threadId: string, path: string) => {
-		dispatch.mutate({ prUrl, threadId });
-		showToast(`Sent to worker · ${baseName(path)}`);
-	};
-	const doSendPrompt = (prUrl: string, threadId: string, message: string, resolveAfter: boolean) => {
-		send.mutate(message);
-		if (resolveAfter) resolve.mutate({ prUrl, threadId });
-		showToast(resolveAfter ? "Prompt sent to worker · resolving" : "Prompt sent to worker");
-	};
+	// --- batch handlers (operate on the current multi-select) ----------------
 	const batchResolve = () => {
 		selectedIds.forEach((id) => {
 			const it = byId.get(id);
@@ -241,6 +215,7 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 							onReply={doReply}
 							onSendQuick={doSendQuick}
 							onSendPrompt={doSendPrompt}
+							onOpenFile={onOpenFile}
 						/>
 					))}
 
@@ -382,6 +357,7 @@ function PRGroupView({
 	onReply,
 	onSendQuick,
 	onSendPrompt,
+	onOpenFile,
 }: {
 	group: Group;
 	threads: Thread[];
@@ -395,6 +371,7 @@ function PRGroupView({
 	onReply: (prUrl: string, threadId: string, body: string, author: string) => void;
 	onSendQuick: (prUrl: string, threadId: string, path: string) => void;
 	onSendPrompt: (prUrl: string, threadId: string, message: string, resolveAfter: boolean) => void;
+	onOpenFile?: (target: FileDiffTarget) => void;
 }) {
 	const status = statusFor(facts?.review, facts?.mergeability);
 	const sc = STATUS_COLORS[status.kind];
@@ -464,6 +441,17 @@ function PRGroupView({
 					onReply={onReply}
 					onSendQuick={onSendQuick}
 					onSendPrompt={onSendPrompt}
+					onOpenFile={
+						onOpenFile &&
+						(() =>
+							onOpenFile({
+								prUrl: group.prUrl,
+								htmlUrl: group.htmlUrl,
+								prNumber: group.number,
+								provider: group.provider,
+								thread,
+							}))
+					}
 				/>
 			))}
 		</div>
@@ -482,6 +470,7 @@ function ThreadCard({
 	onReply,
 	onSendQuick,
 	onSendPrompt,
+	onOpenFile,
 }: {
 	sessionId: string;
 	prUrl: string;
@@ -494,6 +483,7 @@ function ThreadCard({
 	onReply: (prUrl: string, threadId: string, body: string, author: string) => void;
 	onSendQuick: (prUrl: string, threadId: string, path: string) => void;
 	onSendPrompt: (prUrl: string, threadId: string, message: string, resolveAfter: boolean) => void;
+	onOpenFile?: () => void;
 }) {
 	const [collapsed, setCollapsed] = useState(false);
 	const [replyOpen, setReplyOpen] = useState(false);
@@ -646,7 +636,13 @@ function ThreadCard({
 							))}
 
 							{thread.path && thread.line > 0 && (
-								<InboxDiff sessionId={sessionId} prUrl={prUrl} path={thread.path} line={thread.line} />
+								<InboxDiff
+									sessionId={sessionId}
+									prUrl={prUrl}
+									path={thread.path}
+									line={thread.line}
+									onOpenFile={onOpenFile}
+								/>
 							)}
 
 							<div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
@@ -783,89 +779,23 @@ function ThreadCard({
 	);
 }
 
-const splitSeg: React.CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	gap: 6,
-	fontSize: 12,
-	fontWeight: 600,
-	color: ACCENT,
-	background: accentMix(12),
-	border: `1px solid ${accentMix(40)}`,
-	cursor: "pointer",
-};
-
-// Menu content lives in a portal (Radix DropdownMenu) so it is not clipped by
-// the comment card's `overflow: hidden`; non-modal so it never locks the page.
-function menuBox(width: number): React.CSSProperties {
-	return {
-		width,
-		background: P.menuBg,
-		border: `1px solid ${P.borderMenu}`,
-		borderRadius: 10,
-		padding: 5,
-		zIndex: 50,
-		boxShadow: "0 12px 30px rgba(0,0,0,.5)",
-	};
-}
-
-const menuItemStyle: React.CSSProperties = {
-	display: "flex",
-	flexDirection: "column",
-	gap: 2,
-	padding: "8px 10px",
-	borderRadius: 7,
-	cursor: "pointer",
-	outline: "none",
-};
-
-function MenuItemBody({ title, desc }: { title: string; desc: string }) {
-	return (
-		<>
-			<span style={{ fontSize: 12.5, fontWeight: 600, color: P.text }}>{title}</span>
-			<span style={{ fontSize: 11, color: "#7c7c82" }}>{desc}</span>
-		</>
-	);
-}
-
-function SendSplit({ onQuick, onEdit }: { onQuick: () => void; onEdit: () => void }) {
-	return (
-		<div style={{ display: "inline-flex" }}>
-			<button
-				type="button"
-				onClick={onQuick}
-				style={{ ...splitSeg, borderRight: "none", padding: "7px 12px", borderRadius: "7px 0 0 7px", whiteSpace: "nowrap" }}
-			>
-				⚡ Send to worker
-			</button>
-			<DropdownMenu.Root modal={false}>
-				<DropdownMenu.Trigger asChild>
-					<button
-						type="button"
-						aria-label="Send options"
-						style={{ ...splitSeg, justifyContent: "center", width: 30, borderRadius: "0 7px 7px 0", fontSize: 9 }}
-					>
-						▼
-					</button>
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Portal>
-					<DropdownMenu.Content align="end" sideOffset={6} style={menuBox(220)}>
-						<DropdownMenu.Item onSelect={onQuick} style={menuItemStyle}>
-							<MenuItemBody title="⚡ Quick send" desc="Auto-generated prompt from this comment" />
-						</DropdownMenu.Item>
-						<DropdownMenu.Item onSelect={onEdit} style={menuItemStyle}>
-							<MenuItemBody title="✎ Edit prompt…" desc="Review & tweak before sending" />
-						</DropdownMenu.Item>
-					</DropdownMenu.Content>
-				</DropdownMenu.Portal>
-			</DropdownMenu.Root>
-		</div>
-	);
-}
-
 type DiffCtx = components["schemas"]["DiffContextResponse"];
 
-function InboxDiff({ sessionId, prUrl, path, line }: { sessionId: string; prUrl: string; path: string; line: number }) {
+// Inline diff for one comment: a collapsible, syntax-highlighted hunk plus an
+// "Expand full file" affordance that opens the whole file in the center pane.
+function InboxDiff({
+	sessionId,
+	prUrl,
+	path,
+	line,
+	onOpenFile,
+}: {
+	sessionId: string;
+	prUrl: string;
+	path: string;
+	line: number;
+	onOpenFile?: () => void;
+}) {
 	const [open, setOpen] = useState(false);
 	const q = useQuery({
 		queryKey: ["diff-context", sessionId, prUrl, path, line, "hunk"],
@@ -882,29 +812,27 @@ function InboxDiff({ sessionId, prUrl, path, line }: { sessionId: string; prUrl:
 	const n = ctx.lines.length;
 	return (
 		<div style={{ marginTop: 10 }}>
-			<button
-				type="button"
-				onClick={() => setOpen((o) => !o)}
-				style={{ fontSize: 11.5, color: P.secondary2, background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 5 }}
-			>
-				{open ? "▾ Hide" : "▸ Show"} diff · {n} lines
-			</button>
+			<div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+				<button
+					type="button"
+					onClick={() => setOpen((o) => !o)}
+					style={{ fontSize: 11.5, color: P.secondary2, background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 5 }}
+				>
+					{open ? "▾ Hide" : "▸ Show"} diff · {n} lines
+				</button>
+				{onOpenFile && (
+					<button
+						type="button"
+						onClick={onOpenFile}
+						style={{ fontSize: 11.5, fontWeight: 600, color: ACCENT, background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 5 }}
+					>
+						Expand full file ↗
+					</button>
+				)}
+			</div>
 			{open && (
-				<div style={{ marginTop: 8, border: `1px solid ${P.borderCard}`, borderRadius: 8, overflow: "hidden", fontFamily: MONO, fontSize: 11, lineHeight: 1.7 }}>
-					{ctx.lines.map((l, i) => {
-						const add = l.kind === "add";
-						const del = l.kind === "del";
-						const tc = add ? P.diffAddText : del ? P.diffDelText : P.diffContextText;
-						return (
-							<div key={i} style={{ display: "flex", background: add ? P.diffAddBg : del ? P.diffDelBg : "transparent", padding: "1px 0" }}>
-								<span style={{ flex: "none", width: 34, textAlign: "right", paddingRight: 8, color: P.muted3, userSelect: "none" }}>
-									{l.newLine || l.oldLine || ""}
-								</span>
-								<span style={{ flex: "none", width: 14, textAlign: "center", color: tc }}>{add ? "+" : del ? "-" : " "}</span>
-								<span style={{ flex: 1, whiteSpace: "pre", color: tc, paddingRight: 10 }}>{l.text}</span>
-							</div>
-						);
-					})}
+				<div style={{ marginTop: 8, border: `1px solid ${P.borderCard}`, borderRadius: 8, overflow: "hidden" }}>
+					<DiffRows lines={ctx.lines} size="narrow" />
 				</div>
 			)}
 		</div>
@@ -1076,50 +1004,6 @@ function Toast({ text }: { text: string }) {
 		</div>
 	);
 }
-
-// --- shared style helpers ---------------------------------------------------
-
-function pill(fontSize: number, color: string, padding = "2px 8px"): React.CSSProperties {
-	return {
-		fontSize,
-		fontWeight: 600,
-		color,
-		background: P.pillBg,
-		border: `1px solid ${P.borderPill}`,
-		borderRadius: 999,
-		padding,
-	};
-}
-
-function outlineBtn(color: string, border: string, padding = "6px 12px"): React.CSSProperties {
-	return {
-		display: "inline-flex",
-		alignItems: "center",
-		gap: 5,
-		fontSize: 12,
-		fontWeight: 600,
-		color,
-		background: "transparent",
-		border: `1px solid ${border}`,
-		padding,
-		borderRadius: 7,
-		cursor: "pointer",
-	};
-}
-
-const solidBtn: React.CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	gap: 5,
-	fontSize: 12,
-	fontWeight: 600,
-	color: "#fff",
-	background: ACCENT,
-	border: "none",
-	padding: "7px 13px",
-	borderRadius: 7,
-	cursor: "pointer",
-};
 
 function repoName(prUrl: string): string {
 	// GitHub: .../{owner}/{repo}/pull/N ; GitLab: .../{group}/{repo}/-/merge_requests/N
