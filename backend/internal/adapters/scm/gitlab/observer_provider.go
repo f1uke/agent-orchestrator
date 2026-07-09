@@ -167,9 +167,17 @@ type restMR struct {
 	SourceBranch    string `json:"source_branch"`
 	TargetBranch    string `json:"target_branch"`
 	SHA             string `json:"sha"`
-	WebURL          string `json:"web_url"`
-	MergeStatus     string `json:"merge_status"`
-	HasConflicts    bool   `json:"has_conflicts"`
+	// DiffRefs carries the diff base/head/start SHAs. GitLab populates it on the
+	// single-MR detail endpoint (not the list endpoint); base_sha is the diff
+	// base needed to render review-comment code context (`git diff base..head`).
+	DiffRefs struct {
+		BaseSHA  string `json:"base_sha"`
+		HeadSHA  string `json:"head_sha"`
+		StartSHA string `json:"start_sha"`
+	} `json:"diff_refs"`
+	WebURL       string `json:"web_url"`
+	MergeStatus  string `json:"merge_status"`
+	HasConflicts bool   `json:"has_conflicts"`
 	// ChangesCount is a string in GitLab's API (e.g. "3", or "1000+" when the
 	// diff is very large), not a number.
 	ChangesCount string `json:"changes_count"`
@@ -199,6 +207,7 @@ func mrToObservation(mr restMR, repo ports.SCMRepo) ports.SCMPRObservation {
 		HeadRepo:          headRepoFullName(mr, repo),
 		TargetBranch:      mr.TargetBranch,
 		HeadSHA:           mr.SHA,
+		BaseSHA:           mr.DiffRefs.BaseSHA,
 		Title:             mr.Title,
 		ChangedFiles:      changedFiles,
 		Author:            mr.Author.Username,
