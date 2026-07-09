@@ -10,10 +10,17 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 )
+
+// messageRenderer renders an editable nudge/dispatch template. *messagetemplates.Renderer
+// satisfies it; kept as an interface so tests can inject a stub.
+type messageRenderer interface {
+	Render(name messagetemplates.Name, data any) (string, error)
+}
 
 // Store is the read-only persistence surface needed to assemble controller-facing session read models.
 type Store interface {
@@ -98,6 +105,7 @@ type Service struct {
 	// the no_signal downgrade: a hook-less harness staying silent forever is
 	// normal, not a broken pipeline. nil means "unknown": never downgrade.
 	signalCapable func(domain.AgentHarness) bool
+	renderer      messageRenderer
 }
 
 // New wires a controller-facing session service over an internal session Manager.
@@ -119,11 +127,14 @@ type Deps struct {
 	// wiring passes activitydispatch.SupportsHarness. Left nil, no session is
 	// ever downgraded to no_signal.
 	SignalCapable func(domain.AgentHarness) bool
+	// Renderer renders dispatch templates (send-to-worker). nil disables the
+	// comment-dispatch endpoint (it returns 501-style unavailable).
+	Renderer messageRenderer
 }
 
 // NewWithDeps wires a session service with optional PR-claim dependencies.
 func NewWithDeps(d Deps) *Service {
-	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry}
+	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry, renderer: d.Renderer}
 	if s.prClaimer == nil {
 		if w, ok := d.Store.(ports.PRClaimer); ok {
 			s.prClaimer = w

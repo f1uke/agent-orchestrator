@@ -138,6 +138,10 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		logSCMProviderDisabled(log, err)
 	}
 	scmProvider := composite.New(scmEntries...)
+	// msgRenderer renders editable dispatch templates (send-to-worker); the
+	// closure reads promptOverrides live so an operator edit takes effect on
+	// the next render without a daemon restart.
+	msgRenderer := messagetemplates.NewRenderer(func() map[string]string { return promptOverrides.Get().Templates })
 	sessionSvc := sessionsvc.NewWithDeps(sessionsvc.Deps{
 		Manager:   mgr,
 		Store:     store,
@@ -147,6 +151,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// no_signal only makes sense for harnesses whose adapters install
 		// activity hooks; the deriver registry is the source of truth for that.
 		SignalCapable: activitydispatch.SupportsHarness,
+		Renderer:      msgRenderer,
 	})
 	// Triggering a review spawns a reviewer over the worker's worktree, resolved
 	// from the reviewer registry (distinct from the worker agent set). The
