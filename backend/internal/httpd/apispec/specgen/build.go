@@ -226,6 +226,8 @@ var schemaNames = map[string]string{
 	"ControllersSetReclaimSettingsRequest":      "SetReclaimSettingsRequest",
 	"ControllersSpawnConfirmSettingsResponse":   "SpawnConfirmSettingsResponse",
 	"ControllersSetSpawnConfirmSettingsRequest": "SetSpawnConfirmSettingsRequest",
+	"ControllersAutoNudgeSettingsResponse":      "AutoNudgeSettingsResponse",
+	"ControllersSetAutoNudgeSettingsRequest":    "SetAutoNudgeSettingsRequest",
 	"ControllersSystemPromptItem":               "SystemPromptItem",
 	"ControllersSystemPromptsResponse":          "SystemPromptsResponse",
 	"ControllersSetSystemPromptRequest":         "SetSystemPromptRequest",
@@ -914,6 +916,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetSpawnConfirmSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SpawnConfirmSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/auto-nudge", id: "getAutoNudgeSettings", tag: "settings",
+			summary: "Fetch the auto-nudge-on-comments gate setting",
+			resps: []respUnit{
+				{http.StatusOK, controllers.AutoNudgeSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/auto-nudge", id: "setAutoNudgeSettings", tag: "settings",
+			summary: "Replace the auto-nudge-on-comments gate setting",
+			reqBody: controllers.SetAutoNudgeSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.AutoNudgeSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

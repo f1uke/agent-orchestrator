@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
@@ -27,6 +28,13 @@ type SettingsService interface {
 type SpawnConfirmService interface {
 	Get() spawnconfirm.Settings
 	Set(spawnconfirm.Settings) error
+}
+
+// AutoNudgeService is the auto-nudge settings store surface the controller
+// needs. *autonudge.Store satisfies this directly.
+type AutoNudgeService interface {
+	Get() autonudge.Settings
+	Set(autonudge.Settings) error
 }
 
 // SystemPromptsService is the prompt-override store surface the controller needs.
@@ -51,6 +59,7 @@ type MessageTemplatesService interface {
 type SettingsController struct {
 	Svc              SettingsService
 	SpawnConfirm     SpawnConfirmService
+	AutoNudge        AutoNudgeService
 	SystemPrompts    SystemPromptsService
 	MessageTemplates MessageTemplatesService
 }
@@ -61,6 +70,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/reclaim", c.set)
 	r.Get("/settings/spawn-confirm", c.getSpawnConfirm)
 	r.Put("/settings/spawn-confirm", c.setSpawnConfirm)
+	r.Get("/settings/auto-nudge", c.getAutoNudge)
+	r.Put("/settings/auto-nudge", c.setAutoNudge)
 	r.Get("/settings/prompts", c.getPrompts)
 	r.Put("/settings/prompts/{kind}", c.setPrompt)
 	r.Delete("/settings/prompts/{kind}", c.clearPrompt)
@@ -121,6 +132,33 @@ func (c *SettingsController) setSpawnConfirm(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SpawnConfirmSettingsResponse{Enabled: next.Enabled})
+}
+
+func (c *SettingsController) getAutoNudge(w http.ResponseWriter, r *http.Request) {
+	if c.AutoNudge == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/auto-nudge")
+		return
+	}
+	s := c.AutoNudge.Get()
+	envelope.WriteJSON(w, http.StatusOK, AutoNudgeSettingsResponse{Enabled: s.Enabled})
+}
+
+func (c *SettingsController) setAutoNudge(w http.ResponseWriter, r *http.Request) {
+	if c.AutoNudge == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/auto-nudge")
+		return
+	}
+	var in SetAutoNudgeSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	next := autonudge.Settings{Enabled: in.Enabled}
+	if err := c.AutoNudge.Set(next); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, AutoNudgeSettingsResponse{Enabled: next.Enabled})
 }
 
 func (c *SettingsController) getPrompts(w http.ResponseWriter, r *http.Request) {

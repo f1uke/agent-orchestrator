@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -130,6 +131,19 @@ func Run() error {
 		return fmt.Errorf("prompt overrides: %w", err)
 	}
 
+	// The auto-nudge gate is a global setting the Lifecycle Manager will read to
+	// decide whether to nudge the worker on unresolved review comments. Built
+	// before startLifecycle so a later wiring can thread its getter in. A
+	// missing/corrupt file degrades to OFF (no auto-nudge).
+	autoNudge, err := autonudge.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("auto-nudge settings: %w", err)
+	}
+
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
@@ -201,6 +215,7 @@ func Run() error {
 		Telemetry:          telemetrySink,
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
+		AutoNudge:          autoNudge,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
 	})

@@ -659,6 +659,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/auto-nudge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the auto-nudge-on-comments gate setting */
+        get: operations["getAutoNudgeSettings"];
+        /** Replace the auto-nudge-on-comments gate setting */
+        put: operations["setAutoNudgeSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/message-templates": {
         parameters: {
             query?: never;
@@ -797,6 +815,9 @@ export interface components {
             authStatus?: "authorized" | "unauthorized" | "unknown";
             id: string;
             label: string;
+        };
+        AutoNudgeSettingsResponse: {
+            enabled: boolean;
         };
         ClaimPRRequest: {
             allowTakeover?: null | boolean;
@@ -1278,6 +1299,9 @@ export interface components {
             ok: boolean;
             sessionId: string;
             state: string;
+        };
+        SetAutoNudgeSettingsRequest: {
+            enabled: boolean;
         };
         SetMessageTemplateRequest: {
             template: string;
@@ -3782,6 +3806,77 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getAutoNudgeSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoNudgeSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setAutoNudgeSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetAutoNudgeSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoNudgeSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

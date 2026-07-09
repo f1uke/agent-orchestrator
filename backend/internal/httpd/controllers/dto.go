@@ -752,6 +752,17 @@ type SetSpawnConfirmSettingsRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// AutoNudgeSettingsResponse mirrors autonudge.Settings on the wire. It is
+// the body of GET/PUT /api/v1/settings/auto-nudge.
+type AutoNudgeSettingsResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetAutoNudgeSettingsRequest is the body of PUT /api/v1/settings/auto-nudge.
+type SetAutoNudgeSettingsRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default
 // (for the editor + Reset) and the current override (null when using the default).
 type SystemPromptItem struct {

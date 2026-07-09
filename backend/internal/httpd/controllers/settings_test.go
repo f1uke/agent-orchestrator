@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
@@ -182,6 +183,85 @@ func TestSpawnConfirmController_PutInvalidJSON(t *testing.T) {
 }
 
 type spawnConfirmSettingsBody struct {
+	Enabled bool `json:"enabled"`
+}
+
+type fakeAutoNudgeSvc struct {
+	cur   autonudge.Settings
+	saved autonudge.Settings
+	err   error
+}
+
+func (f *fakeAutoNudgeSvc) Get() autonudge.Settings { return f.cur }
+
+func (f *fakeAutoNudgeSvc) Set(s autonudge.Settings) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = s
+	f.cur = s
+	return nil
+}
+
+func newAutoNudgeTestServer(t *testing.T, svc *fakeAutoNudgeSvc) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{AutoNudge: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestAutoNudgeRoutes_DefaultToStubsWithoutService(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/settings/auto-nudge", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+func TestAutoNudgeController_GetReturnsCurrent(t *testing.T) {
+	svc := &fakeAutoNudgeSvc{cur: autonudge.Settings{Enabled: false}}
+	srv := newAutoNudgeTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/auto-nudge", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got autoNudgeSettingsBody
+	mustJSON(t, body, &got)
+	if got.Enabled {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestAutoNudgeController_PutSaves(t *testing.T) {
+	svc := &fakeAutoNudgeSvc{cur: autonudge.Settings{Enabled: false}}
+	srv := newAutoNudgeTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/auto-nudge", `{"enabled":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got autoNudgeSettingsBody
+	mustJSON(t, body, &got)
+	if !got.Enabled {
+		t.Fatalf("response = %#v", got)
+	}
+	if !svc.saved.Enabled {
+		t.Fatalf("saved=%+v, want enabled", svc.saved)
+	}
+}
+
+func TestAutoNudgeController_PutInvalidJSON(t *testing.T) {
+	srv := newAutoNudgeTestServer(t, &fakeAutoNudgeSvc{})
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/auto-nudge", `{`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_JSON")
+}
+
+type autoNudgeSettingsBody struct {
 	Enabled bool `json:"enabled"`
 }
 
