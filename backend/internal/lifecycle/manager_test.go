@@ -17,6 +17,7 @@ var ctx = context.Background()
 type fakeStore struct {
 	sessions   map[domain.SessionID]domain.SessionRecord
 	prs        map[domain.SessionID][]domain.PullRequest
+	prfacts    map[domain.SessionID][]domain.PRFacts
 	signatures map[string]string
 
 	signatureWriteErr error
@@ -24,7 +25,7 @@ type fakeStore struct {
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{sessions: map[domain.SessionID]domain.SessionRecord{}, prs: map[domain.SessionID][]domain.PullRequest{}, signatures: map[string]string{}}
+	return &fakeStore{sessions: map[domain.SessionID]domain.SessionRecord{}, prs: map[domain.SessionID][]domain.PullRequest{}, prfacts: map[domain.SessionID][]domain.PRFacts{}, signatures: map[string]string{}}
 }
 
 func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
@@ -34,6 +35,10 @@ func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.S
 
 func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]domain.PullRequest, error) {
 	return f.prs[id], nil
+}
+
+func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {
+	return f.prfacts[id], nil
 }
 
 func (f *fakeStore) UpdateSession(_ context.Context, rec domain.SessionRecord) error {
@@ -1225,6 +1230,48 @@ func TestSCMObservation_NotReadyWhenCIOrReviewBlocks(t *testing.T) {
 		if len(sink.intents) != 0 {
 			t.Fatalf("blocked PR emitted %+v", sink.intents)
 		}
+	}
+}
+
+// A CI-passing, mergeable MR that carries an unresolved (non-bot) review comment
+// must NOT be reported ready to merge, even on the frequent PR/CI-only poll cycles
+// where the transient observation carries no review threads. The durable
+// unresolved-comment fact (the same signal the board status pill reads) is
+// authoritative, and it must keep the notification from firing — repeatedly —
+// while the session is really in "changes requested".
+func TestSCMObservation_NotReadyWhenUnresolvedCommentsPersisted(t *testing.T) {
+	st := newFakeStore()
+	sink := &fakeNotificationSink{}
+	m := New(st, nil, WithNotificationSink(sink))
+	st.sessions["mer-1"] = working("mer-1")
+	prURL := "https://gitlab.example.com/o/r/-/merge_requests/3028"
+	// Durable facts: unresolved review comment present (board pill shows
+	// "changes requested"). Mirrors the persisted pr_comment EXISTS(...) flag.
+	st.prfacts["mer-1"] = []domain.PRFacts{{
+		URL:            prURL,
+		Number:         3028,
+		CI:             domain.CIPassing,
+		Review:         domain.ReviewNone,
+		Mergeability:   domain.MergeMergeable,
+		ReviewComments: true,
+	}}
+	// A PR/CI-only poll cycle: CI passing, mergeable, no formal changes-requested
+	// review, and — crucially — no review threads in the transient observation.
+	obs := ports.SCMObservation{
+		Fetched:      true,
+		PR:           ports.SCMPRObservation{URL: prURL, Number: 3028, Title: "STAR-2272 eligible"},
+		CI:           ports.SCMCIObservation{Summary: string(domain.CIPassing)},
+		Review:       ports.SCMReviewObservation{Decision: string(domain.ReviewNone)},
+		Mergeability: ports.SCMMergeabilityObservation{State: string(domain.MergeMergeable)},
+	}
+	// Re-poll a few times: the notification must not fire on any cycle.
+	for i := 0; i < 3; i++ {
+		if err := m.ApplySCMObservation(ctx, "mer-1", obs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sink.intents) != 0 {
+		t.Fatalf("unresolved-comment MR emitted ready-to-merge: %+v", sink.intents)
 	}
 }
 
