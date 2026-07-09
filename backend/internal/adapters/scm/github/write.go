@@ -9,8 +9,15 @@ import (
 	"errors"
 	"fmt"
 
+	scmobserve "github.com/aoagents/agent-orchestrator/backend/internal/observe/scm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
+
+// Provider satisfies the review-thread write capability. The gitlab and
+// composite providers declare the same assertion in production code, so this
+// mirrors the codebase convention (no import cycle: observe/scm defines the
+// interfaces and never imports the concrete adapters).
+var _ scmobserve.ReviewThreadWriter = (*Provider)(nil)
 
 const replyThreadMutation = `mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id body url author{login __typename}}}}`
 const resolveThreadMutation = `mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}`

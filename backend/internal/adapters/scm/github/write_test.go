@@ -8,15 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	scmobserve "github.com/aoagents/agent-orchestrator/backend/internal/observe/scm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
-
-// Compile-time proof that Provider satisfies the shared write-capability
-// contract. Kept in the test file (not write.go) so the github adapter does
-// not gain a production import edge to internal/observe/scm; runtime
-// routing (a later task) type-asserts instead.
-var _ scmobserve.ReviewThreadWriter = (*Provider)(nil)
 
 // decodedGraphQLBody is the shape doGraphQL POSTs: {"query": ..., "variables": {...}}.
 type decodedGraphQLBody struct {
