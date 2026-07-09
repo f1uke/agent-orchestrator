@@ -2,7 +2,7 @@ import { type KeyboardEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, MoreHorizontal, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, CircleCheck, MoreHorizontal, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { captureRendererEvent } from "../lib/telemetry";
@@ -634,7 +634,7 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 								kill.mutate();
 							}}
 						>
-							<Square aria-hidden="true" />
+							<CircleCheck aria-hidden="true" />
 							{kill.isPending ? "Moving…" : "Confirm — move to Done"}
 						</DropdownMenuItem>
 						<DropdownMenuItem
@@ -661,7 +661,7 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 							setConfirming(true);
 						}}
 					>
-						<Square aria-hidden="true" />
+						<CircleCheck aria-hidden="true" />
 						Move to Done
 					</DropdownMenuItem>
 				)}
