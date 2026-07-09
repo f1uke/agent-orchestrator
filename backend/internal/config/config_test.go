@@ -163,6 +163,16 @@ func TestLoadAllowedOrigins(t *testing.T) {
 }
 
 func TestLoadSessionIdleClose(t *testing.T) {
+	t.Run("default is 72h (3 days) when unset", func(t *testing.T) {
+		t.Setenv("AO_SESSION_IDLE_CLOSE", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.SessionIdleClose != 72*time.Hour {
+			t.Errorf("SessionIdleClose = %s, want 72h (3 days)", cfg.SessionIdleClose)
+		}
+	})
 	t.Run("override", func(t *testing.T) {
 		t.Setenv("AO_SESSION_IDLE_CLOSE", "48h")
 		cfg, err := Load()
