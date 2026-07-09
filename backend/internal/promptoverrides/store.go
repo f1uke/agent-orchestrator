@@ -81,17 +81,16 @@ func (s *Store) SetBase(k prompts.Kind, text string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prev := s.cur.Base[k]
-	had := s.cur.Base != nil
+	prev, existed := s.cur.Base[k]
 	if s.cur.Base == nil {
 		s.cur.Base = map[prompts.Kind]string{}
 	}
 	s.cur.Base[k] = text
 	if err := s.persistLocked(); err != nil {
-		if had {
+		if existed {
 			s.cur.Base[k] = prev
 		} else {
-			s.cur.Base = nil
+			delete(s.cur.Base, k)
 		}
 		return err
 	}

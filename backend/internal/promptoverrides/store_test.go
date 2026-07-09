@@ -97,6 +97,40 @@ func TestSetBase_DiskWriteFailure_LeavesInMemoryStateUnchanged(t *testing.T) {
 	}
 }
 
+// TestSetBase_DiskWriteFailure_AbsentKeyStaysAbsent proves the rollback on a
+// failed persist does not plant a spurious present-but-empty override for a
+// key that was never set. Regression test: SetBase used to unconditionally
+// treat s.cur.Base as "had a previous value" (it is always non-nil after
+// NewStore), so on failure it restored the zero-value "" for an absent key
+// instead of deleting it — which downstream callers would then treat as an
+// explicit empty-string override rather than "no override".
+func TestSetBase_DiskWriteFailure_AbsentKeyStaysAbsent(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity check: the key has never been set.
+	if _, ok := st.Get().Base[prompts.KindOrchestrator]; ok {
+		t.Fatal("expected no override for KindOrchestrator before test")
+	}
+
+	// Make the directory unwritable so the temp-file write inside SetBase
+	// fails. Restore permissions in cleanup so t.TempDir() can clean up.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if err := st.SetBase(prompts.KindOrchestrator, "x"); err == nil {
+		t.Fatal("want error when disk write fails")
+	}
+	if _, ok := st.Get().Base[prompts.KindOrchestrator]; ok {
+		t.Fatal("rollback must leave the key absent, not present with an empty string")
+	}
+}
+
 func TestTemplateRoundTripPersists(t *testing.T) {
 	dir := t.TempDir()
 	s, err := NewStore(dir)
