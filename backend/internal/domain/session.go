@@ -64,10 +64,15 @@ type SessionRecord struct {
 	// needs_input (the "Needs you" zone) instead of letting a previously-merged PR
 	// pin it to Done, until it takes on new work or is finished again. Internal
 	// durable fact, not part of the API read model.
-	Reactivated bool            `json:"-"`
-	Metadata    SessionMetadata `json:"-"`
-	CreatedAt   time.Time       `json:"createdAt"`
-	UpdatedAt   time.Time       `json:"updatedAt"`
+	Reactivated bool `json:"-"`
+	// AutoNudgeComments overrides, per session, whether the worker is
+	// auto-nudged when its PR has unresolved review comments. nil = inherit the
+	// global default (autonudge settings); non-nil = explicit on/off. Exposed in
+	// the API read model so the Comments-tab switch can show/set it.
+	AutoNudgeComments *bool           `json:"autoNudgeComments"`
+	Metadata          SessionMetadata `json:"-"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord

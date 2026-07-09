@@ -2412,6 +2412,10 @@ components:
       properties:
         activity:
           $ref: '#/components/schemas/DomainActivity'
+        autoNudgeComments:
+          type:
+          - "null"
+          - boolean
         branch:
           type: string
         createdAt:
@@ -2502,6 +2506,7 @@ components:
       - kind
       - activity
       - isTerminated
+      - autoNudgeComments
       - createdAt
       - updatedAt
       - status

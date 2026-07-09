@@ -74,6 +74,23 @@ func (s *Store) SetSessionPreviewURL(ctx context.Context, id domain.SessionID, p
 	return rows > 0, nil
 }
 
+// SetSessionAutoNudge sets (or clears) the per-session auto-nudge-on-comments
+// override. A nil override means "inherit the global default" and is stored as
+// SQL NULL. Returns ok=false when the session id does not exist.
+func (s *Store) SetSessionAutoNudge(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionAutoNudge(ctx, gen.SetSessionAutoNudgeParams{
+		ID:                id,
+		AutoNudgeComments: boolPtrToNullInt64(override),
+		UpdatedAt:         updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set auto-nudge for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // DeleteSession removes a session row, but only if it is still in seed state
 // (no workspace, no runtime handle, no agent session id, no prompt, and not
 // already terminated). Rows that have observable spawn output are immutable
@@ -232,9 +249,10 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 			State:          row.ActivityState,
 			LastActivityAt: row.ActivityLastAt,
 		},
-		FirstSignalAt: nullTimeToTime(row.FirstSignalAt),
-		IsTerminated:  row.IsTerminated,
-		Reactivated:   row.Reactivated,
+		FirstSignalAt:     nullTimeToTime(row.FirstSignalAt),
+		IsTerminated:      row.IsTerminated,
+		Reactivated:       row.Reactivated,
+		AutoNudgeComments: nullInt64ToBoolPtr(row.AutoNudgeComments),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -252,51 +270,53 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams {
 	activity := normalActivity(rec.Activity, rec.CreatedAt)
 	return gen.InsertSessionParams{
-		ID:              rec.ID,
-		ProjectID:       rec.ProjectID,
-		Num:             num,
-		IssueID:         rec.IssueID,
-		Kind:            rec.Kind,
-		Harness:         rec.Harness,
-		DisplayName:     rec.DisplayName,
-		ActivityState:   activity.State,
-		ActivityLastAt:  activity.LastActivityAt,
-		FirstSignalAt:   timeToNullTime(rec.FirstSignalAt),
-		IsTerminated:    rec.IsTerminated,
-		Reactivated:     rec.Reactivated,
-		Branch:          rec.Metadata.Branch,
-		WorkspacePath:   rec.Metadata.WorkspacePath,
-		RuntimeHandleID: rec.Metadata.RuntimeHandleID,
-		AgentSessionID:  rec.Metadata.AgentSessionID,
-		Prompt:          rec.Metadata.Prompt,
-		PreviewURL:      rec.Metadata.PreviewURL,
-		PreviewRevision: rec.Metadata.PreviewRevision,
-		CreatedAt:       rec.CreatedAt,
-		UpdatedAt:       rec.UpdatedAt,
+		ID:                rec.ID,
+		ProjectID:         rec.ProjectID,
+		Num:               num,
+		IssueID:           rec.IssueID,
+		Kind:              rec.Kind,
+		Harness:           rec.Harness,
+		DisplayName:       rec.DisplayName,
+		ActivityState:     activity.State,
+		ActivityLastAt:    activity.LastActivityAt,
+		FirstSignalAt:     timeToNullTime(rec.FirstSignalAt),
+		IsTerminated:      rec.IsTerminated,
+		Reactivated:       rec.Reactivated,
+		Branch:            rec.Metadata.Branch,
+		WorkspacePath:     rec.Metadata.WorkspacePath,
+		RuntimeHandleID:   rec.Metadata.RuntimeHandleID,
+		AgentSessionID:    rec.Metadata.AgentSessionID,
+		Prompt:            rec.Metadata.Prompt,
+		PreviewURL:        rec.Metadata.PreviewURL,
+		PreviewRevision:   rec.Metadata.PreviewRevision,
+		AutoNudgeComments: boolPtrToNullInt64(rec.AutoNudgeComments),
+		CreatedAt:         rec.CreatedAt,
+		UpdatedAt:         rec.UpdatedAt,
 	}
 }
 
 func recordToUpdate(rec domain.SessionRecord) gen.UpdateSessionParams {
 	activity := normalActivity(rec.Activity, rec.UpdatedAt)
 	return gen.UpdateSessionParams{
-		ID:              rec.ID,
-		IssueID:         rec.IssueID,
-		Kind:            rec.Kind,
-		Harness:         rec.Harness,
-		DisplayName:     rec.DisplayName,
-		ActivityState:   activity.State,
-		ActivityLastAt:  activity.LastActivityAt,
-		FirstSignalAt:   timeToNullTime(rec.FirstSignalAt),
-		IsTerminated:    rec.IsTerminated,
-		Reactivated:     rec.Reactivated,
-		Branch:          rec.Metadata.Branch,
-		WorkspacePath:   rec.Metadata.WorkspacePath,
-		RuntimeHandleID: rec.Metadata.RuntimeHandleID,
-		AgentSessionID:  rec.Metadata.AgentSessionID,
-		Prompt:          rec.Metadata.Prompt,
-		PreviewURL:      rec.Metadata.PreviewURL,
-		PreviewRevision: rec.Metadata.PreviewRevision,
-		UpdatedAt:       rec.UpdatedAt,
+		ID:                rec.ID,
+		IssueID:           rec.IssueID,
+		Kind:              rec.Kind,
+		Harness:           rec.Harness,
+		DisplayName:       rec.DisplayName,
+		ActivityState:     activity.State,
+		ActivityLastAt:    activity.LastActivityAt,
+		FirstSignalAt:     timeToNullTime(rec.FirstSignalAt),
+		IsTerminated:      rec.IsTerminated,
+		Reactivated:       rec.Reactivated,
+		Branch:            rec.Metadata.Branch,
+		WorkspacePath:     rec.Metadata.WorkspacePath,
+		RuntimeHandleID:   rec.Metadata.RuntimeHandleID,
+		AgentSessionID:    rec.Metadata.AgentSessionID,
+		Prompt:            rec.Metadata.Prompt,
+		PreviewURL:        rec.Metadata.PreviewURL,
+		PreviewRevision:   rec.Metadata.PreviewRevision,
+		AutoNudgeComments: boolPtrToNullInt64(rec.AutoNudgeComments),
+		UpdatedAt:         rec.UpdatedAt,
 	}
 }
 
@@ -314,6 +334,27 @@ func timeToNullTime(t time.Time) sql.NullTime {
 		return sql.NullTime{}
 	}
 	return sql.NullTime{Time: t, Valid: true}
+}
+
+// nullInt64ToBoolPtr / boolPtrToNullInt64 bridge the nullable auto_nudge_comments
+// column to the domain's *bool (nil = inherit the global default).
+func nullInt64ToBoolPtr(n sql.NullInt64) *bool {
+	if !n.Valid {
+		return nil
+	}
+	b := n.Int64 != 0
+	return &b
+}
+
+func boolPtrToNullInt64(b *bool) sql.NullInt64 {
+	if b == nil {
+		return sql.NullInt64{}
+	}
+	v := int64(0)
+	if *b {
+		v = 1
+	}
+	return sql.NullInt64{Int64: v, Valid: true}
 }
 
 func normalActivity(a domain.Activity, fallback time.Time) domain.Activity {
