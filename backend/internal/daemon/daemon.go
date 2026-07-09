@@ -147,7 +147,7 @@ func Run() error {
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
-	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, log)
+	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, log)
 	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
 
 	// The spawn-confirm gate is a global setting the orchestrator prompt reads at

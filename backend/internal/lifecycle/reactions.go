@@ -157,11 +157,24 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			}
 		}
 	}
-	// Human PR review comments (and a changes-requested decision) intentionally
-	// do NOT auto-nudge the worker: dispatching them is manual via the Comments
-	// tab / Send-to-worker. The observer still fetches and persists them (for
-	// that tab and for merge-readiness gating). CI-failure, merge-conflict, and
-	// AO-reviewer nudges below remain automatic.
+	// Auto-nudge the worker when its PR has unresolved human review comments (or
+	// a changes-requested decision) — but only when this session opts in: a
+	// per-session override wins, otherwise the global default. Dispatch is
+	// otherwise manual (Comments tab / Send-to-worker). The observer still
+	// fetches and persists these comments regardless (for that tab and for
+	// merge-readiness gating).
+	effective := m.autoNudgeDefault()
+	if rec.AutoNudgeComments != nil {
+		effective = *rec.AutoNudgeComments
+	}
+	if effective && (o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments)) {
+		comments, sig := reviewContent(o.Comments)
+		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{Comments: comments})
+		if sig == "" {
+			sig = string(o.Review)
+		}
+		return m.sendOnce(ctx, id, o.URL, "review:"+o.URL, sig, msg, reviewMaxNudge)
+	}
 	if o.Mergeability == domain.MergeConflicting {
 		// Only the bottom of a stack is eligible for the rebase nudge. A PR
 		// stacked on an open parent is expected to report conflicts against its
@@ -496,6 +509,32 @@ func firstSCMNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+func hasUnresolvedComments(comments []ports.PRCommentObservation) bool {
+	for _, c := range comments {
+		if !c.Resolved {
+			return true
+		}
+	}
+	return false
+}
+
+func reviewContent(comments []ports.PRCommentObservation) (string, string) {
+	bodies := make([]string, 0, len(comments))
+	ids := make([]string, 0, len(comments))
+	for _, c := range comments {
+		if c.Resolved {
+			continue
+		}
+		// Comment bodies are attacker-influenced (anyone who can comment on the
+		// PR) and get pasted into the agent's live pane; strip control/escape
+		// chars. The signature is built from comment IDs, not bodies, so dedup is
+		// unaffected.
+		bodies = append(bodies, domain.SanitizeControlChars(c.Body))
+		ids = append(ids, c.ID)
+	}
+	return strings.Join(bodies, "\n\n"), strings.Join(ids, ",")
 }
 
 // renderNudge renders a nudge template, logging (but tolerating) a failed

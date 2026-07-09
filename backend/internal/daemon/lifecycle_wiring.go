@@ -51,9 +51,9 @@ type lifecycleStack struct {
 // templates is the prompt-overrides store's Templates getter; it lets an
 // operator's edited nudge text take effect on the next observation without a
 // daemon restart.
-func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, logger *slog.Logger) *lifecycleStack {
+func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, autoNudgeDefault func() bool, logger *slog.Logger) *lifecycleStack {
 	renderer := messagetemplates.NewRenderer(templates)
-	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry), lifecycle.WithMessageRenderer(renderer))
+	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry), lifecycle.WithMessageRenderer(renderer), lifecycle.WithAutoNudgeDefault(autoNudgeDefault))
 	rp := reaper.New(lcm, store, runtime, reaper.Config{Logger: logger})
 	return &lifecycleStack{LCM: lcm, reaperDone: rp.Start(ctx)}
 }

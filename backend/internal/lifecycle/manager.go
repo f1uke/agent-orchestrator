@@ -53,6 +53,17 @@ func WithMessageRenderer(r *messagetemplates.Renderer) Option {
 	return func(m *Manager) { m.renderer = r }
 }
 
+// WithAutoNudgeDefault wires the global default for auto-nudging a worker when
+// its PR has unresolved review comments (used when a session has no per-session
+// override). A nil fn leaves the safe "off" default in place.
+func WithAutoNudgeDefault(fn func() bool) Option {
+	return func(m *Manager) {
+		if fn != nil {
+			m.autoNudgeDefault = fn
+		}
+	}
+}
+
 // Manager reduces runtime, activity, spawn, and termination observations into durable session facts.
 // It also owns agent nudges caused by PR observations, including merge-conflict, CI-failure, and review-feedback prompts.
 type Manager struct {
@@ -66,6 +77,10 @@ type Manager struct {
 	react     reactionState
 	telemetry ports.EventSink
 	renderer  *messagetemplates.Renderer
+	// autoNudgeDefault reports the GLOBAL default for auto-nudging a worker on
+	// unresolved PR review comments, read when a session has no per-session
+	// override. Never nil after New (defaults to "off").
+	autoNudgeDefault func() bool
 }
 
 // New builds a Lifecycle Manager over the session store it writes and the messenger it uses for agent nudges.
@@ -80,6 +95,9 @@ func New(store sessionStore, messenger ports.AgentMessenger, opts ...Option) *Ma
 	// (e.g. every pre-existing test) still renders the built-in default nudge
 	// text. WithMessageRenderer, applied below, can override it.
 	m.renderer = messagetemplates.NewRenderer(nil)
+	// Default OFF: a Manager built without WithAutoNudgeDefault (e.g. every
+	// pre-existing test) does not auto-nudge on review comments.
+	m.autoNudgeDefault = func() bool { return false }
 	for _, opt := range opts {
 		opt(m)
 	}
