@@ -175,6 +175,10 @@ var schemaNames = map[string]string{
 	"ControllersSessionPRMergeabilitySummary":     "SessionPRMergeabilitySummary",
 	"ControllersSessionPRConflictFile":            "SessionPRConflictFile",
 	"ControllersListSessionPRsResponse":           "ListSessionPRsResponse",
+	"ControllersListSessionPRCommentsResponse":    "ListSessionPRCommentsResponse",
+	"ControllersSessionPRCommentGroup":            "SessionPRCommentGroup",
+	"ControllersSessionPRCommentThread":           "SessionPRCommentThread",
+	"ControllersSessionPRThreadComment":           "SessionPRThreadComment",
 	"ControllersSetActivityRequest":               "SetActivityRequest",
 	"ControllersSetActivityResponse":              "SetActivityResponse",
 	"ControllersSpawnOrchestratorRequest":         "SpawnOrchestratorRequest",
@@ -652,6 +656,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ListSessionPRsResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/pr-comments", id: "listSessionPRComments", tag: "sessions",
+			summary:    "List review comment threads across a session's pull requests",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSessionPRCommentsResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

@@ -46,6 +46,7 @@ type SessionService interface {
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	ListPRSummaries(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error)
+	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
 }
 
@@ -77,6 +78,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
+	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
 	r.Post("/sessions/{sessionId}/restore", c.restore)
@@ -303,6 +305,19 @@ func (c *SessionsController) listPRs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ListSessionPRsResponse{SessionID: sessionID(r), PRs: sessionPRSummaries(prs)})
+}
+
+func (c *SessionsController) listPRComments(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/pr-comments")
+		return
+	}
+	groups, err := c.Svc.ListPRCommentThreads(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ListSessionPRCommentsResponse{SessionID: sessionID(r), PRs: sessionPRCommentGroups(groups)})
 }
 
 func (c *SessionsController) claimPR(w http.ResponseWriter, r *http.Request) {

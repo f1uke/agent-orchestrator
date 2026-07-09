@@ -31,6 +31,7 @@ type fakeSessionService struct {
 	spawnErr        error
 	claimErr        error
 	listPRErr       error
+	prCommentGroups []sessionsvc.PRCommentGroup
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -231,6 +232,10 @@ func (f *fakeSessionService) ListPRSummaries(_ context.Context, id domain.Sessio
 		},
 		UpdatedAt: time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC),
 	}}, nil
+}
+
+func (f *fakeSessionService) ListPRCommentThreads(_ context.Context, _ domain.SessionID) ([]sessionsvc.PRCommentGroup, error) {
+	return f.prCommentGroups, nil
 }
 
 func (f *fakeSessionService) ClaimPR(_ context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
@@ -1070,5 +1075,25 @@ func TestSessionsAPI_ClaimPRErrors(t *testing.T) {
 			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/pr/claim", tc.body)
 			assertErrorCode(t, body, status, tc.code, tc.want)
 		})
+	}
+}
+
+func TestSessionsAPI_ListPRComments(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.prCommentGroups = []sessionsvc.PRCommentGroup{{
+		PRURL: "https://gh/pr/1", HTMLURL: "https://gh/pr/1", Provider: "github", Number: 1, HeadSHA: "abc",
+		Threads: []sessionsvc.PRCommentThread{{
+			ThreadID: "T1", Path: "a.go", Line: 10, Resolved: false, IsBot: false,
+			Comments: []sessionsvc.PRThreadComment{{ID: "C1", Author: "alice", Body: "fix this"}},
+		}},
+	}}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/pr-comments", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"threadId":"T1"`) || !strings.Contains(string(body), `"body":"fix this"`) ||
+		!strings.Contains(string(body), `"headSha":"abc"`) {
+		t.Fatalf("unexpected body: %s", body)
 	}
 }

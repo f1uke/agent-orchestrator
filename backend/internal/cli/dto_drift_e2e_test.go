@@ -111,6 +111,10 @@ func (f *fakeSessionService) ListPRSummaries(context.Context, domain.SessionID) 
 	return nil, nil
 }
 
+func (f *fakeSessionService) ListPRCommentThreads(context.Context, domain.SessionID) ([]sessionsvc.PRCommentGroup, error) {
+	return nil, nil
+}
+
 func (f *fakeSessionService) ClaimPR(context.Context, domain.SessionID, string, sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
 	return sessionsvc.ClaimPRResult{}, nil
 }

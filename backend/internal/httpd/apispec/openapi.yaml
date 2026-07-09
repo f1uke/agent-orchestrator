@@ -1085,6 +1085,45 @@ paths:
       summary: List pull requests owned by a session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/pr-comments:
+    get:
+      operationId: listSessionPRComments
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSessionPRCommentsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List review comment threads across a session's pull requests
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/pr/claim:
     post:
       operationId: claimSessionPR
@@ -2334,6 +2373,18 @@ components:
       - reviewerHandleId
       - reviews
       type: object
+    ListSessionPRCommentsResponse:
+      properties:
+        prs:
+          items:
+            $ref: '#/components/schemas/SessionPRCommentGroup'
+          type: array
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - prs
+      type: object
     ListSessionPRsResponse:
       properties:
         prs:
@@ -2855,6 +2906,54 @@ components:
       - state
       - failingChecks
       type: object
+    SessionPRCommentGroup:
+      properties:
+        headSha:
+          type: string
+        htmlUrl:
+          type: string
+        number:
+          type: integer
+        prUrl:
+          type: string
+        provider:
+          type: string
+        threads:
+          items:
+            $ref: '#/components/schemas/SessionPRCommentThread'
+          type: array
+      required:
+      - prUrl
+      - htmlUrl
+      - provider
+      - number
+      - headSha
+      - threads
+      type: object
+    SessionPRCommentThread:
+      properties:
+        comments:
+          items:
+            $ref: '#/components/schemas/SessionPRThreadComment'
+          type: array
+        isBot:
+          type: boolean
+        line:
+          type: integer
+        path:
+          type: string
+        resolved:
+          type: boolean
+        threadId:
+          type: string
+      required:
+      - threadId
+      - path
+      - line
+      - resolved
+      - isBot
+      - comments
+      type: object
     SessionPRConflictFile:
       properties:
         path:
@@ -3060,6 +3159,31 @@ components:
       - review
       - mergeability
       - updatedAt
+      type: object
+    SessionPRThreadComment:
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+        id:
+          type: string
+        isBot:
+          type: boolean
+        resolved:
+          type: boolean
+        url:
+          type: string
+      required:
+      - id
+      - author
+      - body
+      - url
+      - resolved
+      - isBot
+      - createdAt
       type: object
     SessionPRUnresolvedReviewer:
       properties:

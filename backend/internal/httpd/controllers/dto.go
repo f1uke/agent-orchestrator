@@ -426,6 +426,73 @@ func newSessionPRMergeabilitySummary(in sessionsvc.PRMergeabilitySummary) Sessio
 	return SessionPRMergeabilitySummary{State: in.State, Reasons: in.Reasons, PRURL: in.PRURL, ConflictFiles: files}
 }
 
+// ListSessionPRCommentsResponse is the body of GET /sessions/{sessionId}/pr-comments.
+type ListSessionPRCommentsResponse struct {
+	SessionID domain.SessionID        `json:"sessionId"`
+	PRs       []SessionPRCommentGroup `json:"prs"`
+}
+
+// SessionPRCommentGroup is one PR's review threads.
+type SessionPRCommentGroup struct {
+	PrURL    string                   `json:"prUrl"`
+	HtmlURL  string                   `json:"htmlUrl"`
+	Provider string                   `json:"provider"`
+	Number   int                      `json:"number"`
+	HeadSHA  string                   `json:"headSha"`
+	Threads  []SessionPRCommentThread `json:"threads"`
+}
+
+// SessionPRCommentThread is a review thread anchored to a file/line.
+type SessionPRCommentThread struct {
+	ThreadID string                   `json:"threadId"`
+	Path     string                   `json:"path"`
+	Line     int                      `json:"line"`
+	Resolved bool                     `json:"resolved"`
+	IsBot    bool                     `json:"isBot"`
+	Comments []SessionPRThreadComment `json:"comments"`
+}
+
+// SessionPRThreadComment is one review comment.
+type SessionPRThreadComment struct {
+	ID        string `json:"id"`
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	URL       string `json:"url"`
+	Resolved  bool   `json:"resolved"`
+	IsBot     bool   `json:"isBot"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// sessionPRCommentGroups maps service models to wire DTOs.
+func sessionPRCommentGroups(groups []sessionsvc.PRCommentGroup) []SessionPRCommentGroup {
+	out := make([]SessionPRCommentGroup, 0, len(groups))
+	for _, g := range groups {
+		threads := make([]SessionPRCommentThread, 0, len(g.Threads))
+		for _, t := range g.Threads {
+			comments := make([]SessionPRThreadComment, 0, len(t.Comments))
+			for _, c := range t.Comments {
+				createdAt := ""
+				if !c.CreatedAt.IsZero() {
+					createdAt = c.CreatedAt.UTC().Format(time.RFC3339)
+				}
+				comments = append(comments, SessionPRThreadComment{
+					ID: c.ID, Author: c.Author, Body: c.Body, URL: c.URL,
+					Resolved: c.Resolved, IsBot: c.IsBot, CreatedAt: createdAt,
+				})
+			}
+			threads = append(threads, SessionPRCommentThread{
+				ThreadID: t.ThreadID, Path: t.Path, Line: t.Line,
+				Resolved: t.Resolved, IsBot: t.IsBot, Comments: comments,
+			})
+		}
+		out = append(out, SessionPRCommentGroup{
+			PrURL: g.PRURL, HtmlURL: g.HTMLURL, Provider: g.Provider,
+			Number: g.Number, HeadSHA: g.HeadSHA, Threads: threads,
+		})
+	}
+	return out
+}
+
 // ClaimPRRequest is the body of POST /sessions/{sessionId}/pr/claim.
 type ClaimPRRequest struct {
 	PR            string `json:"pr" minLength:"1"`

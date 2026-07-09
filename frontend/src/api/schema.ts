@@ -385,6 +385,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/pr-comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List review comment threads across a session's pull requests */
+        get: operations["listSessionPRComments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/pr/claim": {
         parameters: {
             query?: never;
@@ -827,6 +844,10 @@ export interface components {
             reviewerHandleId: string;
             reviews: components["schemas"]["PRReviewState"][];
         };
+        ListSessionPRCommentsResponse: {
+            prs: components["schemas"]["SessionPRCommentGroup"][];
+            sessionId: string;
+        };
         ListSessionPRsResponse: {
             prs: components["schemas"]["SessionPRSummary"][];
             sessionId: string;
@@ -1025,6 +1046,22 @@ export interface components {
             /** @enum {string} */
             state: "unknown" | "pending" | "passing" | "failing";
         };
+        SessionPRCommentGroup: {
+            headSha: string;
+            htmlUrl: string;
+            number: number;
+            prUrl: string;
+            provider: string;
+            threads: components["schemas"]["SessionPRCommentThread"][];
+        };
+        SessionPRCommentThread: {
+            comments: components["schemas"]["SessionPRThreadComment"][];
+            isBot: boolean;
+            line: number;
+            path: string;
+            resolved: boolean;
+            threadId: string;
+        };
         SessionPRConflictFile: {
             path: string;
             url?: string;
@@ -1096,6 +1133,15 @@ export interface components {
             title: string;
             /** Format: date-time */
             updatedAt: string;
+            url: string;
+        };
+        SessionPRThreadComment: {
+            author: string;
+            body: string;
+            createdAt: string;
+            id: string;
+            isBot: boolean;
+            resolved: boolean;
             url: string;
         };
         SessionPRUnresolvedReviewer: {
@@ -2570,6 +2616,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListSessionPRsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listSessionPRComments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSessionPRCommentsResponse"];
                 };
             };
             /** @description Not Found */
