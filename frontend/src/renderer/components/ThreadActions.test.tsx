@@ -48,8 +48,28 @@ beforeEach(() => {
 });
 
 describe("ThreadActions", () => {
-	it("disables the Reply button while the textarea is empty", () => {
+	it("hides the composer initially and shows a Reply trigger", () => {
 		renderActions();
+		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Reply" })).toBeInTheDocument();
+	});
+
+	it("reveals the textarea when the Reply trigger is clicked", async () => {
+		const user = userEvent.setup();
+		renderActions();
+
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+
+		expect(screen.getByRole("textbox")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+	});
+
+	it("disables the Reply button while the textarea is empty", async () => {
+		const user = userEvent.setup();
+		renderActions();
+
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+
 		expect(screen.getByRole("button", { name: "Reply" })).toBeDisabled();
 	});
 
@@ -57,6 +77,7 @@ describe("ThreadActions", () => {
 		const user = userEvent.setup();
 		renderActions();
 
+		await user.click(screen.getByRole("button", { name: "Reply" }));
 		await user.type(screen.getByRole("textbox"), "sounds good, will fix");
 		await user.click(screen.getByRole("button", { name: "Reply" }));
 
@@ -67,7 +88,23 @@ describe("ThreadActions", () => {
 		});
 	});
 
-	it("clears the reply textarea after a successful reply", async () => {
+	it("submits the reply on Cmd/Ctrl+Enter", async () => {
+		const user = userEvent.setup();
+		renderActions();
+
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+		const textbox = screen.getByRole("textbox");
+		await user.type(textbox, "lgtm");
+		await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+		expect(replyMutate).toHaveBeenCalledWith({
+			prUrl: "https://gh/pr/1",
+			threadId: "T1",
+			body: "lgtm",
+		});
+	});
+
+	it("clears the reply textarea and closes the composer after a successful reply", async () => {
 		const user = userEvent.setup();
 		const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
 		// A fresh element per render — passing the same element reference to
@@ -79,15 +116,38 @@ describe("ThreadActions", () => {
 		);
 		const { rerender } = render(view());
 
+		await user.click(screen.getByRole("button", { name: "Reply" }));
 		const textbox = screen.getByRole("textbox");
 		await user.type(textbox, "will fix");
 		expect(textbox).toHaveValue("will fix");
 
-		// The mutation resolves: flipping isSuccess must clear the textarea.
+		// The mutation resolves: flipping isSuccess must clear the body and
+		// close the composer.
 		Object.assign(replyState, { isSuccess: true });
 		rerender(view());
 
-		await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""));
+		await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
+		expect(screen.getByRole("button", { name: "Reply" })).toBeInTheDocument();
+
+		// Reopening proves the body was actually cleared, not just hidden.
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+		expect(screen.getByRole("textbox")).toHaveValue("");
+	});
+
+	it("cancels the composer and clears typed text", async () => {
+		const user = userEvent.setup();
+		renderActions();
+
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+		await user.type(screen.getByRole("textbox"), "draft text");
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Reply" })).toBeInTheDocument();
+
+		// Reopening proves Cancel cleared the body, not just hid the composer.
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+		expect(screen.getByRole("textbox")).toHaveValue("");
 	});
 
 	it("shows the Resolve button when the thread is unresolved and calls resolve.mutate", async () => {
@@ -116,9 +176,15 @@ describe("ThreadActions", () => {
 		expect(screen.getByRole("alert")).toHaveTextContent("resolve failed");
 	});
 
-	it("disables both buttons while a mutation is pending", () => {
+	it("disables both buttons while a mutation is pending", async () => {
+		const user = userEvent.setup();
 		Object.assign(replyState, { isPending: true });
 		renderActions();
+
+		// The trigger is disabled while busy, so this click is a no-op and the
+		// composer stays collapsed — both controls below are still visible.
+		await user.click(screen.getByRole("button", { name: "Reply" }));
+
 		expect(screen.getByRole("button", { name: "Reply" })).toBeDisabled();
 		expect(screen.getByRole("button", { name: "Resolve" })).toBeDisabled();
 	});
