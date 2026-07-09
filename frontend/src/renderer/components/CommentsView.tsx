@@ -53,7 +53,7 @@ function ThreadCard({ sessionId, prUrl, thread }: { sessionId: string; prUrl: st
 	// unresolved threads start expanded so they draw the eye.
 	const [open, setOpen] = useState(!thread.resolved);
 	return (
-		<div className="rounded-[7px] border border-border bg-surface">
+		<div className="overflow-hidden rounded-[7px] border border-border bg-surface">
 			<button
 				type="button"
 				aria-expanded={open}
