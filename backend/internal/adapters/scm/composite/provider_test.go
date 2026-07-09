@@ -36,6 +36,7 @@ func (f *fakeProvider) ListOpenPRsByRepo(context.Context, ports.SCMRepo) ([]port
 func (f *fakeProvider) CommitChecksGuard(context.Context, ports.SCMRepo, string, string) (ports.SCMGuardResult, error) {
 	return ports.SCMGuardResult{}, nil
 }
+
 // FetchPullRequests records every ref it receives (so tests can assert which
 // refs reached this fake) and returns one observation per ref, tagged with
 // this fake's own provider name and the ref's repo/number, so tests can also
