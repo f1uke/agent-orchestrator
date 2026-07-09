@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -216,6 +217,27 @@ func TestPRObservation_CIFailingNudgesAgentWithLogs(t *testing.T) {
 	}
 	if len(msg.msgs) != 1 || !strings.Contains(msg.msgs[0], "boom") {
 		t.Fatalf("want one CI nudge with log tail, got %v", msg.msgs)
+	}
+}
+
+// TestApplyPRObservation_CIFailingUsesTemplateOverride proves the CI nudge
+// renders through the injected Renderer: an operator override of the
+// ci-failing template changes the text an agent receives.
+func TestApplyPRObservation_CIFailingUsesTemplateOverride(t *testing.T) {
+	st := newFakeStore()
+	msg := &fakeMessenger{}
+	renderer := messagetemplates.NewRenderer(func() map[string]string {
+		return map[string]string{string(messagetemplates.NameCIFailing): "CUSTOM CI: {{.LogTail}}"}
+	})
+	m := New(st, msg, WithMessageRenderer(renderer))
+	st.sessions["mer-1"] = working("mer-1")
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", CI: domain.CIFailing, Checks: []ports.PRCheckObservation{{Name: "build", Status: domain.PRCheckFailed, LogTail: "boom"}}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 1 || msg.msgs[0] != "CUSTOM CI: boom" {
+		t.Fatalf("CI nudge = %v, want template override applied", msg.msgs)
 	}
 }
 

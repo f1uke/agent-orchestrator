@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -149,23 +150,21 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	if o.CI == domain.CIFailing {
 		for _, ch := range o.Checks {
 			if ch.Status == domain.PRCheckFailed {
-				msg := "CI is failing on your PR. Review the output below and push a fix."
+				logTail := ""
 				if ch.LogTail != "" {
 					// LogTail is raw CI job output; sanitize before it reaches the
 					// agent's live pane so embedded escape sequences can't drive the
 					// terminal (the dedup signature stays on the raw bytes).
-					msg += "\n\nFailing output:\n" + domain.SanitizeControlChars(ch.LogTail)
+					logTail = domain.SanitizeControlChars(ch.LogTail)
 				}
+				msg := m.renderNudge(messagetemplates.NameCIFailing, messagetemplates.CIFailingData{LogTail: logTail})
 				return m.sendOnce(ctx, id, o.URL, "ci:"+o.URL+":"+ch.Name, ch.CommitHash+":"+ch.LogTail, msg, 0)
 			}
 		}
 	}
 	if o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments) {
 		comments, sig := reviewContent(o.Comments)
-		msg := "A reviewer left feedback on your PR. Address it and push."
-		if comments != "" {
-			msg += "\n\n" + comments
-		}
+		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{Comments: comments})
 		if sig == "" {
 			sig = string(o.Review)
 		}
@@ -184,7 +183,8 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if blocked {
 			return nil
 		}
-		return m.sendOnce(ctx, id, o.URL, "merge-conflict:"+o.URL, string(o.Mergeability), "Your PR has merge conflicts. Rebase onto the base branch and resolve them.", 0)
+		msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{})
+		return m.sendOnce(ctx, id, o.URL, "merge-conflict:"+o.URL, string(o.Mergeability), msg, 0)
 	}
 	return nil
 }
@@ -461,10 +461,7 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 	if o.Changed.Comments {
 		bodies, ids := newBotCommentContent(o.Comments)
 		if len(ids) > 0 {
-			msg := "A bot left a new comment on your tracker issue. Address it and update the session."
-			if joined := strings.Join(bodies, "\n\n"); strings.TrimSpace(joined) != "" {
-				msg += "\n\n" + joined
-			}
+			msg := m.renderNudge(messagetemplates.NameTrackerBotComment, messagetemplates.TrackerBotData{Comments: strings.Join(bodies, "\n\n")})
 			// Empty prURL routes sendOnce through its in-memory-only branch:
 			// the PR-row signature load/persist is skipped, so the dedup
 			// survives only for the lifetime of this Manager. Cross-restart
@@ -531,6 +528,16 @@ func reviewContent(comments []ports.PRCommentObservation) (string, string) {
 		ids = append(ids, c.ID)
 	}
 	return strings.Join(bodies, "\n\n"), strings.Join(ids, ",")
+}
+
+// renderNudge renders a nudge template, logging (but tolerating) a failed
+// operator override — the Renderer returns the built-in default on failure.
+func (m *Manager) renderNudge(name messagetemplates.Name, data any) string {
+	msg, err := m.renderer.Render(name, data)
+	if err != nil {
+		slog.Default().Warn("lifecycle: nudge template render fell back to default", "template", name, "err", err)
+	}
+	return msg
 }
 
 func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key, sig, msg string, maxAttempts int) error {

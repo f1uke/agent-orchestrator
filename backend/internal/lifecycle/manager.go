@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -47,6 +48,11 @@ func WithTelemetry(sink ports.EventSink) Option {
 	return func(m *Manager) { m.telemetry = sink }
 }
 
+// WithMessageRenderer wires lifecycle nudges to render from editable templates.
+func WithMessageRenderer(r *messagetemplates.Renderer) Option {
+	return func(m *Manager) { m.renderer = r }
+}
+
 // Manager reduces runtime, activity, spawn, and termination observations into durable session facts.
 // It also owns agent nudges caused by PR observations, including merge-conflict, CI-failure, and review-feedback prompts.
 type Manager struct {
@@ -59,6 +65,7 @@ type Manager struct {
 	clock     func() time.Time
 	react     reactionState
 	telemetry ports.EventSink
+	renderer  *messagetemplates.Renderer
 }
 
 // New builds a Lifecycle Manager over the session store it writes and the messenger it uses for agent nudges.
@@ -69,6 +76,10 @@ func New(store sessionStore, messenger ports.AgentMessenger, opts ...Option) *Ma
 	// WithClock option may still override this in tests.
 	clock := func() time.Time { return time.Now().UTC() }
 	m := &Manager{store: store, messenger: messenger, window: defaultRecentActivityWindow, clock: clock, react: newReactionState()}
+	// Default the renderer so a Manager built without WithMessageRenderer
+	// (e.g. every pre-existing test) still renders the built-in default nudge
+	// text. WithMessageRenderer, applied below, can override it.
+	m.renderer = messagetemplates.NewRenderer(nil)
 	for _, opt := range opts {
 		opt(m)
 	}
