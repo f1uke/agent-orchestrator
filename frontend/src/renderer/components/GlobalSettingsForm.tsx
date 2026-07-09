@@ -1,3 +1,4 @@
+import { AutoNudgeSection } from "./AutoNudgeSection";
 import { AutoReclaimSection } from "./AutoReclaimSection";
 import { DashboardSubhead } from "./DashboardSubhead";
 import { MessageTemplatesSection } from "./MessageTemplatesSection";
@@ -21,6 +22,7 @@ export function GlobalSettingsForm() {
 					<SystemPromptsSection />
 					<MessageTemplatesSection />
 					<SpawnConfirmSection />
+					<AutoNudgeSection />
 					<AutoReclaimSection />
 					<NotificationsSection />
 					<UpdatesSection />
