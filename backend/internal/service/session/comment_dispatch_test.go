@@ -37,7 +37,10 @@ func TestDispatchCommentToWorker_RendersSanitizesAndSends(t *testing.T) {
 	fc := &fakeCommander{}
 	svc := &Service{store: stList, manager: fc, renderer: stubRenderer{out: "PROMPT:"}}
 
-	err := svc.DispatchCommentToWorker(context.Background(), "s1", "pr1", "T1", "also add a test")
+	// The extra prompt carries a control byte too, so the control-byte assertion
+	// below pins sanitization of BOTH the comment body and the extra prompt (it
+	// fails if either SanitizeControlChars call is dropped).
+	err := svc.DispatchCommentToWorker(context.Background(), "s1", "pr1", "T1", "also add a test\a")
 	if err != nil {
 		t.Fatal(err)
 	}

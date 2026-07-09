@@ -127,8 +127,9 @@ type Deps struct {
 	// wiring passes activitydispatch.SupportsHarness. Left nil, no session is
 	// ever downgraded to no_signal.
 	SignalCapable func(domain.AgentHarness) bool
-	// Renderer renders dispatch templates (send-to-worker). nil disables the
-	// comment-dispatch endpoint (it returns 501-style unavailable).
+	// Renderer renders dispatch templates (send-to-worker). nil makes
+	// DispatchCommentToWorker fail safe with an Invalid (400) DISPATCH_UNAVAILABLE
+	// error instead of panicking.
 	Renderer messageRenderer
 }
 
