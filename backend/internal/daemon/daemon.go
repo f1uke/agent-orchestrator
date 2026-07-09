@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -103,14 +104,21 @@ func Run() error {
 	// is handed to httpd, which mounts it at /mux. Raw PTY bytes never flow
 	// through the CDC change_log -- only session-state events do.
 	runtimeAdapter := runtimeselect.New(log)
-	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log)
+	// The input gate couples message injection with live user typing. The terminal
+	// mux records every client keystroke into it (WithInputRecorder); the gated
+	// runtime consults it before SendMessage so an inbound message never merges
+	// into — or submits — the line the user is mid-typing in the shared pane.
+	inputGate := inputgate.New()
+	gatedRuntime := newGatedRuntime(runtimeAdapter, inputGate)
+	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log, terminal.WithInputRecorder(inputGate))
 	defer termMgr.Close()
 
 	// The agent messenger sends validated user input to the session's live
 	// runtime pane. Keep this path small until durable inbox semantics are needed.
 	// Built before the Lifecycle Manager so the LCM can use it for SCM-driven
-	// agent nudges (CI failure, review feedback, merge conflict).
-	messenger := newSessionMessenger(store, runtimeAdapter, log)
+	// agent nudges (CI failure, review feedback, merge conflict). It injects
+	// through the gated runtime so delivery waits for a typing gap.
+	messenger := newSessionMessenger(store, gatedRuntime, log)
 	notificationHub := notify.NewHub()
 	notifier := notificationsvc.New(notificationsvc.Deps{Store: store})
 	notificationWriter := notify.New(notify.Deps{Store: store, Publisher: notificationHub})
@@ -147,7 +155,7 @@ func Run() error {
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
-	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, log)
+	lcStack := startLifecycle(ctx, store, gatedRuntime, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, log)
 	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
 
 	// The spawn-confirm gate is a global setting the orchestrator prompt reads at
@@ -167,7 +175,7 @@ func Run() error {
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, log)
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
