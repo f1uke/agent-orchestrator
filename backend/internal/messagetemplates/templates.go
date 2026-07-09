@@ -13,6 +13,8 @@ import (
 // Name enumerates the editable nudge templates.
 type Name string
 
+// The editable nudge template names, one per runtime message AO sends into a
+// worker's pane.
 const (
 	NameReviewCommentDispatch Name = "review-comment-dispatch"
 	NameCIFailing             Name = "ci-failing"
