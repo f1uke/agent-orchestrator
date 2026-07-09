@@ -2,8 +2,10 @@ import { type KeyboardEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Plus, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, MoreHorizontal, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { captureRendererEvent } from "../lib/telemetry";
 import { DashboardSubhead } from "./DashboardSubhead";
 import {
 	type AttentionZone,
@@ -552,6 +554,122 @@ function ZoneColumn({
 	);
 }
 
+// A board card's overflow menu. Its single action, "Move to Done", terminates the
+// session via POST /sessions/{id}/kill — the same terminate + reclaim-worktree path
+// as the topbar Kill (ShellTopbar's TopbarKillButton), reached from the board so a
+// no-PR session (e.g. an investigation) can be finished without opening it. Kill keeps
+// the git branch and preserves an uncommitted worktree, so the session stays restorable
+// via the Done bar's Reopen (the sole reversal affordance — this menu has no reopen).
+// Terminating is destructive, so the item arms a one-step confirm inside the menu
+// before firing.
+function SessionCardMenu({ session }: { session: WorkspaceSession }) {
+	const queryClient = useQueryClient();
+	const [open, setOpen] = useState(false);
+	const [confirming, setConfirming] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const kill = useMutation({
+		mutationFn: async () => {
+			void captureRendererEvent("ao.renderer.session_kill_requested", { project_id: session.workspaceId });
+			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/kill", {
+				params: { path: { sessionId: session.id } },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError));
+		},
+		onSuccess: () => {
+			void captureRendererEvent("ao.renderer.session_kill_succeeded", { project_id: session.workspaceId });
+			// The session flips to terminated on the next refresh, so its card leaves this
+			// column for the Done bar and this menu unmounts with it.
+			setOpen(false);
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
+		onError: (e) => {
+			void captureRendererEvent("ao.renderer.session_kill_failed", { project_id: session.workspaceId });
+			setError(e instanceof Error ? e.message : "Move to Done failed");
+		},
+	});
+
+	return (
+		<DropdownMenu
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
+				// Reset the arm-confirm whenever the menu closes so it never reopens mid-confirm.
+				if (!next) {
+					setConfirming(false);
+					setError(null);
+				}
+			}}
+		>
+			<DropdownMenuTrigger asChild>
+				<button
+					aria-label="Session actions"
+					className={cn(
+						"rounded p-0.5 text-passive opacity-0 transition-opacity hover:text-foreground",
+						"focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+					)}
+					// Stop the click from reaching the card's open-session handler.
+					onClick={(event) => event.stopPropagation()}
+					type="button"
+				>
+					<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+				</button>
+			</DropdownMenuTrigger>
+			{/* The content is portaled, but React events bubble along the React tree — the
+			    menu lives inside the card's open-on-click wrapper — so stop clicks here or
+			    choosing an item would also navigate into the session. */}
+			<DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+				{confirming ? (
+					<>
+						<div className="max-w-[15rem] px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
+							Stops the agent and reclaims its worktree. The branch and any open PR stay. Reopen from the Done bar to
+							undo.
+						</div>
+						<DropdownMenuItem
+							className="text-error focus:text-error [&_svg]:text-error"
+							disabled={kill.isPending}
+							onSelect={(event) => {
+								// Keep the menu open through the mutation so pending/error state is visible.
+								event.preventDefault();
+								kill.mutate();
+							}}
+						>
+							<Square aria-hidden="true" />
+							{kill.isPending ? "Moving…" : "Confirm — move to Done"}
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							disabled={kill.isPending}
+							onSelect={(event) => {
+								event.preventDefault();
+								setConfirming(false);
+							}}
+						>
+							Cancel
+						</DropdownMenuItem>
+						{error ? (
+							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
+								{error}
+							</div>
+						) : null}
+					</>
+				) : (
+					<DropdownMenuItem
+						className="text-error focus:text-error [&_svg]:text-error"
+						onSelect={(event) => {
+							event.preventDefault();
+							setError(null);
+							setConfirming(true);
+						}}
+					>
+						<Square aria-hidden="true" />
+						Move to Done
+					</DropdownMenuItem>
+				)}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
 function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
 	const badge = sessionBadge(session);
 	const issueId = canonicalTrackerIssueId(session.issueId);
@@ -565,7 +683,7 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 		onOpen();
 	};
 	return (
-		<div className="w-full rounded-[7px] border border-border bg-surface text-left transition-colors hover:border-border-strong">
+		<div className="group w-full rounded-[7px] border border-border bg-surface text-left transition-colors hover:border-border-strong">
 			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0}>
 				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
 					<span className={cn("inline-flex items-center gap-1.5 text-[11px] font-medium", badge.className)}>
@@ -580,9 +698,12 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 							{issueId}
 						</span>
 					)}
-					<span className="ml-auto shrink-0 font-mono text-[10.5px] tracking-[0.04em] text-passive">
-						{agentLabel(session.provider)}
-					</span>
+					<div className="ml-auto flex shrink-0 items-center gap-1.5">
+						<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
+							{agentLabel(session.provider)}
+						</span>
+						<SessionCardMenu session={session} />
+					</div>
 				</div>
 				<div
 					className={cn(
