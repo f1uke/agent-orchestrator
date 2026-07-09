@@ -726,10 +726,13 @@ func (f fakePRClaimer) ClaimPR(context.Context, domain.PullRequest, []domain.Pul
 }
 
 type fakeSCM struct {
-	obs       ports.SCMObservation
-	review    ports.SCMReviewObservation
-	fetchErr  error
-	reviewErr error
+	obs          ports.SCMObservation
+	review       ports.SCMReviewObservation
+	fetchErr     error
+	reviewErr    error
+	replyComment ports.SCMReviewCommentObservation
+	replyErr     error
+	resolveErr   error
 }
 
 func (f fakeSCM) ParseRepository(remote string) (ports.SCMRepo, bool) {
@@ -752,6 +755,14 @@ func (f fakeSCM) FetchPullRequests(context.Context, []ports.SCMPRRef) ([]ports.S
 
 func (f fakeSCM) FetchReviewThreads(context.Context, ports.SCMPRRef) (ports.SCMReviewObservation, error) {
 	return f.review, f.reviewErr
+}
+
+func (f fakeSCM) ReplyToThread(_ context.Context, _ ports.SCMPRRef, _, _ string) (ports.SCMReviewCommentObservation, error) {
+	return f.replyComment, f.replyErr
+}
+
+func (f fakeSCM) ResolveThread(_ context.Context, _ ports.SCMPRRef, _ string) error {
+	return f.resolveErr
 }
 
 func TestClaimPRMapsObserverAndStoreErrors(t *testing.T) {

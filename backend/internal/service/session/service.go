@@ -82,10 +82,17 @@ type CleanupSkipped struct {
 	Reason    string           `json:"reason"`
 }
 
+// ErrSCMWriteForbidden is returned when the SCM provider rejects a review
+// thread write (reply/resolve) because the configured token lacks permission
+// for it.
+var ErrSCMWriteForbidden = errors.New("scm write forbidden")
+
 type scmProvider interface {
 	ParseRepository(remote string) (ports.SCMRepo, bool)
 	FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error)
 	FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error)
+	ReplyToThread(ctx context.Context, ref ports.SCMPRRef, threadID, body string) (ports.SCMReviewCommentObservation, error)
+	ResolveThread(ctx context.Context, ref ports.SCMPRRef, threadID string) error
 }
 
 // Service is the controller-facing session service. It delegates command-side
