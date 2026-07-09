@@ -32,7 +32,7 @@ export function ThreadActions({
 		<div className="flex w-full flex-col gap-1.5">
 			<div className="flex items-start gap-2">
 				<Textarea
-					aria-label="Reply to thread"
+					aria-label={`Reply to thread at ${thread.path}:${thread.line}`}
 					className="min-h-8 flex-1 text-[12px]"
 					placeholder="Reply…"
 					value={body}

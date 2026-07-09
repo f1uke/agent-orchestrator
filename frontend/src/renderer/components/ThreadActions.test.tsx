@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -65,6 +65,29 @@ describe("ThreadActions", () => {
 			threadId: "T1",
 			body: "sounds good, will fix",
 		});
+	});
+
+	it("clears the reply textarea after a successful reply", async () => {
+		const user = userEvent.setup();
+		const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+		// A fresh element per render — passing the same element reference to
+		// rerender hits React's same-element bailout and skips the re-render.
+		const view = () => (
+			<QueryClientProvider client={qc}>
+				<ThreadActions sessionId="s1" prUrl="https://gh/pr/1" thread={baseThread} />
+			</QueryClientProvider>
+		);
+		const { rerender } = render(view());
+
+		const textbox = screen.getByRole("textbox");
+		await user.type(textbox, "will fix");
+		expect(textbox).toHaveValue("will fix");
+
+		// The mutation resolves: flipping isSuccess must clear the textarea.
+		Object.assign(replyState, { isSuccess: true });
+		rerender(view());
+
+		await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""));
 	});
 
 	it("shows the Resolve button when the thread is unresolved and calls resolve.mutate", async () => {
