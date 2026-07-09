@@ -76,7 +76,7 @@ export function DiffHunk({
 	};
 
 	return (
-		<div className="group relative overflow-x-auto border-b border-border bg-raised font-mono text-[11.5px]">
+		<div className="group relative border-b border-border bg-raised font-mono text-[11.5px]">
 			<button
 				type="button"
 				aria-label={copied ? "Copied" : "Copy code"}
@@ -85,24 +85,30 @@ export function DiffHunk({
 			>
 				{copied ? <Check className="h-3 w-3" aria-hidden="true" /> : <Copy className="h-3 w-3" aria-hidden="true" />}
 			</button>
-			{ctx.lines.map((l, i) => (
-				<div
-					key={`${l.kind}-${l.oldLine}-${l.newLine}-${i}`}
-					className={
-						l.kind === "add"
-							? "bg-success/10 text-success leading-[1.45]"
-							: l.kind === "del"
-								? "bg-error/10 text-error leading-[1.45]"
-								: "text-muted-foreground leading-[1.45]"
-					}
-				>
-					<span className="inline-block w-10 shrink-0 select-none pr-2 text-right opacity-50">
-						{l.newLine || l.oldLine || ""}
-					</span>
-					<span className="select-none opacity-70">{lineSign(l.kind)}</span>
-					<span className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightLine(l.text, lang) }} />
+			<div className="overflow-x-auto">
+				{/* w-max + min-w-full: rows stretch to the widest line so the add/del
+				    tint covers the full scroll width (not just the visible viewport). */}
+				<div className="w-max min-w-full">
+					{ctx.lines.map((l, i) => (
+						<div
+							key={`${l.kind}-${l.oldLine}-${l.newLine}-${i}`}
+							className={
+								l.kind === "add"
+									? "bg-success/10 text-success leading-[1.45]"
+									: l.kind === "del"
+										? "bg-error/10 text-error leading-[1.45]"
+										: "text-muted-foreground leading-[1.45]"
+							}
+						>
+							<span className="inline-block w-10 shrink-0 select-none pr-2 text-right opacity-50">
+								{l.newLine || l.oldLine || ""}
+							</span>
+							<span className="select-none opacity-70">{lineSign(l.kind)}</span>
+							<span className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightLine(l.text, lang) }} />
+						</div>
+					))}
 				</div>
-			))}
+			</div>
 			{mode === "hunk" && (
 				<button
 					type="button"

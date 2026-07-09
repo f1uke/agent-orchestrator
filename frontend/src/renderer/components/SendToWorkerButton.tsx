@@ -59,12 +59,12 @@ export function SendToWorkerButton({
 
 	return (
 		<div className="relative inline-flex">
-			<div className="inline-flex overflow-hidden rounded-md border border-border">
+			<div className="inline-flex overflow-hidden rounded-md border border-accent/30">
 				<Button
 					type="button"
 					variant="outline"
 					size="sm"
-					className="rounded-none border-0"
+					className="rounded-none border-0 text-accent hover:bg-accent/10 hover:text-accent"
 					disabled={busy || sent}
 					onClick={() => dispatch.mutate("")}
 				>
@@ -76,7 +76,7 @@ export function SendToWorkerButton({
 					variant="outline"
 					size="icon-sm"
 					aria-label="Add extra instructions"
-					className="rounded-none border-0 border-l border-border"
+					className="rounded-none border-0 border-l border-accent/30 text-accent hover:bg-accent/10 hover:text-accent"
 					disabled={busy}
 					onClick={() => setPanelOpen((open) => !open)}
 				>

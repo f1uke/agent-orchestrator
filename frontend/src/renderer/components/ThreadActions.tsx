@@ -82,6 +82,7 @@ export function ThreadActions({
 							type="button"
 							variant="outline"
 							size="sm"
+							className="border-success/40 bg-success/10 text-success hover:bg-success/20 hover:text-success"
 							disabled={busy}
 							onClick={() => resolve.mutate({ prUrl, threadId: thread.threadId })}
 						>
@@ -89,13 +90,7 @@ export function ThreadActions({
 							Resolve
 						</Button>
 					)}
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						disabled={busy}
-						onClick={() => setComposing(true)}
-					>
+					<Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => setComposing(true)}>
 						Reply
 					</Button>
 				</div>
