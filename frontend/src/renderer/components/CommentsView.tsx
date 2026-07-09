@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DropdownMenu } from "radix-ui";
 import type { components } from "../../api/schema";
 import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPRComments";
 import { useReplyToThread, useResolveThread } from "../hooks/useThreadActions";
@@ -102,18 +103,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 		setSelected(new Set());
 	};
 
-	// --- single-open caret menu (per-thread or "batch"), outside-click close --
-	const [menuOpen, setMenuOpen] = useState<string | null>(null);
-	useEffect(() => {
-		if (!menuOpen) return;
-		const onDoc = (e: MouseEvent) => {
-			const el = e.target as HTMLElement;
-			if (!el.closest?.("[data-menu]")) setMenuOpen(null);
-		};
-		document.addEventListener("mousedown", onDoc);
-		return () => document.removeEventListener("mousedown", onDoc);
-	}, [menuOpen]);
-
 	// --- mutations -----------------------------------------------------------
 	const reply = useReplyToThread(sessionId);
 	const resolve = useResolveThread(sessionId);
@@ -163,7 +152,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 		showToast(`Replied to ${author || "author"}`);
 	};
 	const doSendQuick = (prUrl: string, threadId: string, path: string) => {
-		setMenuOpen(null);
 		dispatch.mutate({ prUrl, threadId });
 		showToast(`Sent to worker · ${baseName(path)}`);
 	};
@@ -181,7 +169,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 		setSelected(new Set());
 	};
 	const batchSeparate = () => {
-		setMenuOpen(null);
 		selectedIds.forEach((id) => {
 			const it = byId.get(id);
 			if (it) dispatch.mutate({ prUrl: it.prUrl, threadId: it.thread.threadId });
@@ -189,7 +176,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 		showToast(`Fanned out ${selectedIds.length} worker tasks`);
 	};
 	const batchOneTask = () => {
-		setMenuOpen(null);
 		const message = selectedIds
 			.map((id) => {
 				const t = byId.get(id)?.thread;
@@ -250,8 +236,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 							selectMode={selectMode}
 							selected={selected}
 							onToggleSelect={toggleSelect}
-							menuOpen={menuOpen}
-							setMenuOpen={setMenuOpen}
 							busy={busy}
 							onResolve={doResolve}
 							onReply={doReply}
@@ -268,8 +252,6 @@ export function CommentsView({ sessionId }: { sessionId: string }) {
 			{selectMode && selectedIds.length > 0 && (
 				<BatchBar
 					count={selectedIds.length}
-					menuOpen={menuOpen === "batch"}
-					setMenuOpen={(o) => setMenuOpen(o ? "batch" : null)}
 					onResolve={batchResolve}
 					onOneTask={batchOneTask}
 					onSeparate={batchSeparate}
@@ -395,8 +377,6 @@ function PRGroupView({
 	selectMode,
 	selected,
 	onToggleSelect,
-	menuOpen,
-	setMenuOpen,
 	busy,
 	onResolve,
 	onReply,
@@ -410,8 +390,6 @@ function PRGroupView({
 	selectMode: boolean;
 	selected: Set<string>;
 	onToggleSelect: (id: string) => void;
-	menuOpen: string | null;
-	setMenuOpen: (id: string | null) => void;
 	busy: boolean;
 	onResolve: (prUrl: string, threadId: string) => void;
 	onReply: (prUrl: string, threadId: string, body: string, author: string) => void;
@@ -481,8 +459,6 @@ function PRGroupView({
 					selectMode={selectMode}
 					selected={selected.has(thread.threadId)}
 					onToggleSelect={() => onToggleSelect(thread.threadId)}
-					menuOpen={menuOpen === thread.threadId}
-					onToggleMenu={() => setMenuOpen(menuOpen === thread.threadId ? null : thread.threadId)}
 					busy={busy}
 					onResolve={onResolve}
 					onReply={onReply}
@@ -501,8 +477,6 @@ function ThreadCard({
 	selectMode,
 	selected,
 	onToggleSelect,
-	menuOpen,
-	onToggleMenu,
 	busy,
 	onResolve,
 	onReply,
@@ -515,8 +489,6 @@ function ThreadCard({
 	selectMode: boolean;
 	selected: boolean;
 	onToggleSelect: () => void;
-	menuOpen: boolean;
-	onToggleMenu: () => void;
 	busy: boolean;
 	onResolve: (prUrl: string, threadId: string) => void;
 	onReply: (prUrl: string, threadId: string, body: string, author: string) => void;
@@ -695,13 +667,8 @@ function ThreadCard({
 									Reply
 								</button>
 								<SendSplit
-									menuOpen={menuOpen}
-									onToggleMenu={onToggleMenu}
 									onQuick={() => onSendQuick(prUrl, thread.threadId, thread.path)}
-									onEdit={() => {
-										onToggleMenu();
-										setPromptOpen((o) => !o);
-									}}
+									onEdit={() => setPromptOpen((o) => !o)}
 								/>
 							</div>
 
@@ -816,77 +783,82 @@ function ThreadCard({
 	);
 }
 
-function SendSplit({
-	menuOpen,
-	onToggleMenu,
-	onQuick,
-	onEdit,
-}: {
-	menuOpen: boolean;
-	onToggleMenu: () => void;
-	onQuick: () => void;
-	onEdit: () => void;
-}) {
-	const seg: React.CSSProperties = {
-		display: "inline-flex",
-		alignItems: "center",
-		gap: 6,
-		fontSize: 12,
-		fontWeight: 600,
-		color: ACCENT,
-		background: accentMix(12),
-		border: `1px solid ${accentMix(40)}`,
-		cursor: "pointer",
+const splitSeg: React.CSSProperties = {
+	display: "inline-flex",
+	alignItems: "center",
+	gap: 6,
+	fontSize: 12,
+	fontWeight: 600,
+	color: ACCENT,
+	background: accentMix(12),
+	border: `1px solid ${accentMix(40)}`,
+	cursor: "pointer",
+};
+
+// Menu content lives in a portal (Radix DropdownMenu) so it is not clipped by
+// the comment card's `overflow: hidden`; non-modal so it never locks the page.
+function menuBox(width: number): React.CSSProperties {
+	return {
+		width,
+		background: P.menuBg,
+		border: `1px solid ${P.borderMenu}`,
+		borderRadius: 10,
+		padding: 5,
+		zIndex: 50,
+		boxShadow: "0 12px 30px rgba(0,0,0,.5)",
 	};
+}
+
+const menuItemStyle: React.CSSProperties = {
+	display: "flex",
+	flexDirection: "column",
+	gap: 2,
+	padding: "8px 10px",
+	borderRadius: 7,
+	cursor: "pointer",
+	outline: "none",
+};
+
+function MenuItemBody({ title, desc }: { title: string; desc: string }) {
 	return (
-		<div data-menu style={{ position: "relative", display: "inline-flex" }}>
-			<button
-				type="button"
-				onClick={onQuick}
-				style={{ ...seg, borderRight: "none", padding: "7px 12px", borderRadius: "7px 0 0 7px", whiteSpace: "nowrap" }}
-			>
-				⚡ Send to worker
-			</button>
-			<button
-				type="button"
-				aria-label="Send options"
-				onClick={onToggleMenu}
-				style={{ ...seg, justifyContent: "center", width: 30, borderRadius: "0 7px 7px 0", fontSize: 9 }}
-			>
-				▼
-			</button>
-			{menuOpen && (
-				<div
-					data-menu
-					style={{
-						position: "absolute",
-						top: "calc(100% + 6px)",
-						right: 0,
-						width: 220,
-						background: P.menuBg,
-						border: `1px solid ${P.borderMenu}`,
-						borderRadius: 10,
-						padding: 5,
-						zIndex: 20,
-						boxShadow: "0 12px 30px rgba(0,0,0,.5)",
-					}}
-				>
-					<MenuItem title="⚡ Quick send" desc="Auto-generated prompt from this comment" onClick={onQuick} />
-					<MenuItem title="✎ Edit prompt…" desc="Review & tweak before sending" onClick={onEdit} />
-				</div>
-			)}
-		</div>
+		<>
+			<span style={{ fontSize: 12.5, fontWeight: 600, color: P.text }}>{title}</span>
+			<span style={{ fontSize: 11, color: "#7c7c82" }}>{desc}</span>
+		</>
 	);
 }
 
-function MenuItem({ title, desc, onClick }: { title: string; desc: string; onClick: () => void }) {
+function SendSplit({ onQuick, onEdit }: { onQuick: () => void; onEdit: () => void }) {
 	return (
-		<div
-			onClick={onClick}
-			style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 10px", borderRadius: 7, cursor: "pointer" }}
-		>
-			<span style={{ fontSize: 12.5, fontWeight: 600, color: P.text }}>{title}</span>
-			<span style={{ fontSize: 11, color: "#7c7c82" }}>{desc}</span>
+		<div style={{ display: "inline-flex" }}>
+			<button
+				type="button"
+				onClick={onQuick}
+				style={{ ...splitSeg, borderRight: "none", padding: "7px 12px", borderRadius: "7px 0 0 7px", whiteSpace: "nowrap" }}
+			>
+				⚡ Send to worker
+			</button>
+			<DropdownMenu.Root modal={false}>
+				<DropdownMenu.Trigger asChild>
+					<button
+						type="button"
+						aria-label="Send options"
+						style={{ ...splitSeg, justifyContent: "center", width: 30, borderRadius: "0 7px 7px 0", fontSize: 9 }}
+					>
+						▼
+					</button>
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Portal>
+					<DropdownMenu.Content align="end" sideOffset={6} style={menuBox(220)}>
+						<DropdownMenu.Item onSelect={onQuick} style={menuItemStyle}>
+							<MenuItemBody title="⚡ Quick send" desc="Auto-generated prompt from this comment" />
+						</DropdownMenu.Item>
+						<DropdownMenu.Item onSelect={onEdit} style={menuItemStyle}>
+							<MenuItemBody title="✎ Edit prompt…" desc="Review & tweak before sending" />
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Portal>
+			</DropdownMenu.Root>
 		</div>
 	);
 }
@@ -941,15 +913,11 @@ function InboxDiff({ sessionId, prUrl, path, line }: { sessionId: string; prUrl:
 
 function BatchBar({
 	count,
-	menuOpen,
-	setMenuOpen,
 	onResolve,
 	onOneTask,
 	onSeparate,
 }: {
 	count: number;
-	menuOpen: boolean;
-	setMenuOpen: (o: boolean) => void;
 	onResolve: () => void;
 	onOneTask: () => void;
 	onSeparate: () => void;
@@ -971,7 +939,7 @@ function BatchBar({
 			<button type="button" onClick={onResolve} style={outlineBtn(P.green, "rgba(95,184,122,.35)", "6px 11px")}>
 				✓ Resolve
 			</button>
-			<div data-menu style={{ position: "relative", display: "inline-flex" }}>
+			<div style={{ display: "inline-flex" }}>
 				<button
 					type="button"
 					onClick={onOneTask}
@@ -979,34 +947,27 @@ function BatchBar({
 				>
 					⚡ Send batch
 				</button>
-				<button
-					type="button"
-					aria-label="Batch send options"
-					onClick={() => setMenuOpen(!menuOpen)}
-					style={{ ...solidBtn, width: 28, padding: 0, borderRadius: "0 7px 7px 0", borderLeft: "1px solid rgba(255,255,255,.25)", fontSize: 9 }}
-				>
-					▼
-				</button>
-				{menuOpen && (
-					<div
-						data-menu
-						style={{
-							position: "absolute",
-							bottom: "calc(100% + 6px)",
-							right: 0,
-							width: 236,
-							background: P.menuBg,
-							border: `1px solid ${P.borderMenu}`,
-							borderRadius: 10,
-							padding: 5,
-							zIndex: 20,
-							boxShadow: "0 12px 30px rgba(0,0,0,.5)",
-						}}
-					>
-						<MenuItem title="One task, all comments" desc="Bundle selected into a single worker" onClick={onOneTask} />
-						<MenuItem title="Separate task each" desc="Fan out one worker per comment" onClick={onSeparate} />
-					</div>
-				)}
+				<DropdownMenu.Root modal={false}>
+					<DropdownMenu.Trigger asChild>
+						<button
+							type="button"
+							aria-label="Batch send options"
+							style={{ ...solidBtn, width: 28, padding: 0, borderRadius: "0 7px 7px 0", borderLeft: "1px solid rgba(255,255,255,.25)", fontSize: 9 }}
+						>
+							▼
+						</button>
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Portal>
+						<DropdownMenu.Content side="top" align="end" sideOffset={6} style={menuBox(236)}>
+							<DropdownMenu.Item onSelect={onOneTask} style={menuItemStyle}>
+								<MenuItemBody title="One task, all comments" desc="Bundle selected into a single worker" />
+							</DropdownMenu.Item>
+							<DropdownMenu.Item onSelect={onSeparate} style={menuItemStyle}>
+								<MenuItemBody title="Separate task each" desc="Fan out one worker per comment" />
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Portal>
+				</DropdownMenu.Root>
 			</div>
 		</div>
 	);

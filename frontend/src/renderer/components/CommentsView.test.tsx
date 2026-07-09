@@ -141,6 +141,17 @@ describe("CommentsView (inbox)", () => {
 		);
 	});
 
+	it("opens the send-to-worker caret menu (portaled, not clipped)", async () => {
+		renderView();
+		const caret = await screen.findByRole("button", { name: "Send options" });
+		await userEvent.click(caret);
+		expect(await screen.findByText(/Quick send/)).toBeInTheDocument();
+		const edit = screen.getByText(/Edit prompt/);
+		expect(edit).toBeInTheDocument();
+		await userEvent.click(edit);
+		expect(await screen.findByText(/PROMPT TO WORKER/)).toBeInTheDocument();
+	});
+
 	it("select mode reveals a checkbox and the batch bar", async () => {
 		renderView();
 		const selectBtn = await screen.findByRole("button", { name: "Select" });
