@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import type { components } from "../../api/schema";
@@ -61,8 +61,19 @@ export function FileDiffView({
 	const author = first?.author ?? "unknown";
 	const providerHref = htmlUrl || prUrl;
 
+	// Jump straight to the comment once the file's rendered, so opening a
+	// full-file diff lands on the reviewed line instead of the top of the file.
+	const anchorRef = useRef<HTMLDivElement | null>(null);
+	useEffect(() => {
+		if (anchorIndex < 0) return;
+		const el = anchorRef.current;
+		if (!el || typeof el.scrollIntoView !== "function") return;
+		el.scrollIntoView({ block: "center" });
+	}, [anchorIndex, lines.length]);
+
 	const anchoredComment = (
 		<div
+			ref={anchorRef}
 			style={{
 				margin: "8px 14px 10px 20px",
 				border: `1px solid #26262c`,

@@ -77,6 +77,19 @@ describe("FileDiffView", () => {
 		expect(screen.getByText("reviewInterval").tagName.toLowerCase()).toBe("code");
 	});
 
+	it("scrolls the anchored comment into view once the file loads", async () => {
+		const scrollSpy = vi.fn();
+		// jsdom doesn't implement scrollIntoView; provide it so the jump can fire.
+		Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+			configurable: true,
+			writable: true,
+			value: scrollSpy,
+		});
+		renderView();
+		await screen.findByText("f1uke");
+		await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
+	});
+
 	it("Back button invokes onClose", async () => {
 		const { onClose } = renderView();
 		await userEvent.click(await screen.findByRole("button", { name: /agent/ }));
