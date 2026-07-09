@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Check, Copy } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { highlightLine, languageForPath } from "../lib/highlight";
 import type { components } from "../../api/schema";
 
 type DiffContext = components["schemas"]["DiffContextResponse"];
 type Mode = "hunk" | "file";
+
+const COPIED_STATE_MS = 1500;
 
 /**
  * Shows the code a review comment anchors to: the surrounding diff hunk by
@@ -24,6 +28,16 @@ export function DiffHunk({
 	line: number;
 }) {
 	const [mode, setMode] = useState<Mode>("hunk");
+	const [copied, setCopied] = useState(false);
+	const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	useEffect(
+		() => () => {
+			if (copiedTimer.current) clearTimeout(copiedTimer.current);
+		},
+		[],
+	);
+
 	const query = useQuery({
 		queryKey: ["diff-context", sessionId, prUrl, path, line, mode],
 		queryFn: async () => {
@@ -44,24 +58,49 @@ export function DiffHunk({
 		// comments (also keeps preview/demo mode clean when the backend isn't reachable).
 		return null;
 	}
+	const lang = languageForPath(path);
+
+	const copyCode = () => {
+		const code = ctx.lines.map((l) => l.text).join("\n");
+		if (!navigator.clipboard) return;
+		navigator.clipboard
+			.writeText(code)
+			.then(() => {
+				setCopied(true);
+				if (copiedTimer.current) clearTimeout(copiedTimer.current);
+				copiedTimer.current = setTimeout(() => setCopied(false), COPIED_STATE_MS);
+			})
+			.catch(() => {
+				// Clipboard write failed (e.g. permission denied); no-op.
+			});
+	};
+
 	return (
-		<div className="overflow-x-auto border-b border-border bg-raised font-mono text-[11.5px]">
+		<div className="group relative overflow-x-auto border-b border-border bg-raised font-mono text-[11.5px]">
+			<button
+				type="button"
+				aria-label={copied ? "Copied" : "Copy code"}
+				className="absolute right-1.5 top-1.5 z-10 rounded border border-border bg-raised/90 p-1 text-muted-foreground opacity-0 transition hover:text-foreground group-hover:opacity-100"
+				onClick={copyCode}
+			>
+				{copied ? <Check className="h-3 w-3" aria-hidden="true" /> : <Copy className="h-3 w-3" aria-hidden="true" />}
+			</button>
 			{ctx.lines.map((l, i) => (
 				<div
 					key={`${l.kind}-${l.oldLine}-${l.newLine}-${i}`}
 					className={
 						l.kind === "add"
-							? "bg-success/10 text-success"
+							? "bg-success/10 text-success leading-[1.45]"
 							: l.kind === "del"
-								? "bg-error/10 text-error"
-								: "text-muted-foreground"
+								? "bg-error/10 text-error leading-[1.45]"
+								: "text-muted-foreground leading-[1.45]"
 					}
 				>
 					<span className="inline-block w-10 shrink-0 select-none pr-2 text-right opacity-50">
 						{l.newLine || l.oldLine || ""}
 					</span>
 					<span className="select-none opacity-70">{lineSign(l.kind)}</span>
-					<span className="whitespace-pre">{l.text}</span>
+					<span className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightLine(l.text, lang) }} />
 				</div>
 			))}
 			{mode === "hunk" && (

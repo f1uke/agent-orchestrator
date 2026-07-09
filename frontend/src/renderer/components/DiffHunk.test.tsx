@@ -21,6 +21,7 @@ function renderHunk() {
 }
 
 beforeEach(() => {
+	Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 	getMock.mockReset().mockImplementation(async (_path, opts) => {
 		const mode = opts?.params?.query?.mode ?? "hunk";
 		if (mode === "file") {
@@ -62,5 +63,31 @@ describe("DiffHunk", () => {
 		await screen.findByText("CHANGED");
 		await userEvent.click(screen.getByRole("button", { name: /expand/i }));
 		await waitFor(() => expect(screen.getByText("l1")).toBeInTheDocument());
+	});
+
+	it("syntax-highlights a line for a known language path", async () => {
+		getMock.mockReset().mockImplementation(async () => ({
+			data: {
+				available: true,
+				mode: "hunk",
+				path: "a.go",
+				truncated: false,
+				lines: [{ kind: "add", oldLine: 0, newLine: 2, text: "return true" }],
+			},
+			error: undefined,
+		}));
+		const { container } = render(
+			<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+				<DiffHunk sessionId="s1" prUrl="pr1" path="a.go" line={2} />
+			</QueryClientProvider>,
+		);
+		await waitFor(() => expect(container.querySelector(".hljs-keyword")).toBeInTheDocument());
+	});
+
+	it("copies the hunk's joined line text when the copy button is clicked", async () => {
+		renderHunk();
+		await screen.findByText("CHANGED");
+		await userEvent.click(screen.getByRole("button", { name: /copy/i }));
+		expect(navigator.clipboard.writeText).toHaveBeenCalledWith("CHANGED");
 	});
 });
