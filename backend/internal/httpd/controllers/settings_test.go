@@ -11,6 +11,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
@@ -312,6 +313,45 @@ func TestMessageTemplatesAPI_GetListsAllWithDefaults(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"override":"custom"`) {
 		t.Fatalf("ci-failing override not surfaced: %s", body)
+	}
+
+	var got controllers.MessageTemplatesResponse
+	mustJSON(t, body, &got)
+	wantNames := []string{
+		"review-comment-dispatch", "ci-failing", "merge-conflict",
+		"tracker-bot-comment", "ao-reviewer-batch", "ao-reviewer-single",
+	}
+	if len(got.Templates) != len(wantNames) {
+		t.Fatalf("want %d templates, got %d: %+v", len(wantNames), len(got.Templates), got.Templates)
+	}
+	byName := make(map[string]controllers.MessageTemplateItem, len(got.Templates))
+	for _, item := range got.Templates {
+		byName[item.Name] = item
+	}
+	for _, name := range wantNames {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("missing template %q in response: %+v", name, got.Templates)
+		}
+	}
+
+	// merge-conflict has no documented placeholders. It must still serialize
+	// as an empty JSON array, never null: a nil slice here violates the
+	// OpenAPI schema's required non-nullable array and previously crashed the
+	// frontend's Global Settings renderer (t.placeholders.length threw on
+	// null) every time the section opened, since merge-conflict is always in
+	// the response.
+	mc, ok := byName["merge-conflict"]
+	if !ok {
+		t.Fatalf("missing merge-conflict template: %+v", got.Templates)
+	}
+	if mc.Placeholders == nil {
+		t.Fatalf("merge-conflict placeholders must be [] not null")
+	}
+	if len(mc.Placeholders) != 0 {
+		t.Fatalf("merge-conflict placeholders must be empty, got %v", mc.Placeholders)
+	}
+	if !strings.Contains(string(body), `"placeholders":[]`) {
+		t.Fatalf("merge-conflict placeholders must serialize as [] on the wire: %s", body)
 	}
 }
 

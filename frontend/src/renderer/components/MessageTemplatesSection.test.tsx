@@ -26,6 +26,11 @@ beforeEach(() => {
 			templates: [
 				{ name: "review-comment-dispatch", default: "DEFAULT RCD", placeholders: ["{{.Comments}}"], override: null },
 				{ name: "ci-failing", default: "DEFAULT CI", placeholders: ["{{.LogTail}}"], override: "CUSTOM CI" },
+				// Zero-placeholder row (mirrors the real merge-conflict template):
+				// exercises the render path with an empty placeholders array so a
+				// regression back to a null/undefined placeholders field would
+				// crash this render instead of only surfacing in production.
+				{ name: "merge-conflict", default: "DEFAULT MC", placeholders: [], override: null },
 			],
 		},
 		error: undefined,

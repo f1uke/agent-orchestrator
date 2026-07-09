@@ -82,9 +82,9 @@ export function MessageTemplatesSection() {
 						<Label htmlFor={`template-${t.name}`} className="text-[12px] text-muted-foreground">
 							{t.name}
 						</Label>
-						{t.placeholders.length > 0 && (
+						{(t.placeholders ?? []).length > 0 && (
 							<span className="text-[11px] text-muted-foreground">
-								Placeholders: <code>{t.placeholders.join(" ")}</code>
+								Placeholders: <code>{(t.placeholders ?? []).join(" ")}</code>
 							</span>
 						)}
 						<Textarea

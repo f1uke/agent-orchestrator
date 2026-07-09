@@ -188,10 +188,19 @@ func (c *SettingsController) getMessageTemplates(w http.ResponseWriter, r *http.
 	ov := c.MessageTemplates.Get()
 	items := make([]MessageTemplateItem, 0, len(messagetemplates.KnownNames()))
 	for _, n := range messagetemplates.KnownNames() {
+		// Placeholders returns nil for templates with no documented tokens
+		// (e.g. merge-conflict). A nil Go slice marshals to JSON null, which
+		// violates the OpenAPI schema's required non-nullable array and
+		// crashes frontend code that calls .length/.join on it. Coerce to an
+		// empty slice so the wire always honors the schema.
+		ph := messagetemplates.Placeholders(n)
+		if ph == nil {
+			ph = []string{}
+		}
 		item := MessageTemplateItem{
 			Name:         string(n),
 			Default:      messagetemplates.Default(n),
-			Placeholders: messagetemplates.Placeholders(n),
+			Placeholders: ph,
 		}
 		if v, ok := ov.Templates[string(n)]; ok {
 			v := v
