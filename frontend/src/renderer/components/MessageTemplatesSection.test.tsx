@@ -30,7 +30,7 @@ beforeEach(() => {
 				// exercises the render path with an empty placeholders array so a
 				// regression back to a null/undefined placeholders field would
 				// crash this render instead of only surfacing in production.
-				{ name: "merge-conflict", default: "DEFAULT MC", placeholders: [], override: null },
+				{ name: "merge-conflict", default: "DEFAULT MC", placeholders: null as unknown as string[], override: null },
 			],
 		},
 		error: undefined,
