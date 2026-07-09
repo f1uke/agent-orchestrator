@@ -297,6 +297,32 @@ type DispatchCommentResponse struct {
 	SessionID domain.SessionID `json:"sessionId"`
 }
 
+// ReplyCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-reply.
+type ReplyCommentRequest struct {
+	PrURL    string `json:"prUrl"`
+	ThreadID string `json:"threadId"`
+	Body     string `json:"body"`
+}
+
+// ReplyCommentResponse returns the newly created reply comment.
+type ReplyCommentResponse struct {
+	OK      bool                   `json:"ok"`
+	Comment SessionPRThreadComment `json:"comment"`
+}
+
+// ResolveThreadRequest is the body of POST /api/v1/sessions/{sessionId}/comment-resolve.
+type ResolveThreadRequest struct {
+	PrURL    string `json:"prUrl"`
+	ThreadID string `json:"threadId"`
+}
+
+// ResolveThreadResponse acknowledges a PR review thread resolution.
+type ResolveThreadResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+	Resolved  bool             `json:"resolved"`
+}
+
 // SessionPRFacts is the pull-request read shape returned under session PR routes.
 type SessionPRFacts struct {
 	URL            string                `json:"url"`
@@ -485,6 +511,19 @@ type SessionPRThreadComment struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// newSessionPRThreadComment maps a service review comment to its wire DTO,
+// formatting CreatedAt as RFC3339 (empty string when zero).
+func newSessionPRThreadComment(c sessionsvc.PRThreadComment) SessionPRThreadComment {
+	createdAt := ""
+	if !c.CreatedAt.IsZero() {
+		createdAt = c.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	return SessionPRThreadComment{
+		ID: c.ID, Author: c.Author, Body: c.Body, URL: c.URL,
+		Resolved: c.Resolved, IsBot: c.IsBot, CreatedAt: createdAt,
+	}
+}
+
 // sessionPRCommentGroups maps service models to wire DTOs.
 func sessionPRCommentGroups(groups []sessionsvc.PRCommentGroup) []SessionPRCommentGroup {
 	out := make([]SessionPRCommentGroup, 0, len(groups))
@@ -493,14 +532,7 @@ func sessionPRCommentGroups(groups []sessionsvc.PRCommentGroup) []SessionPRComme
 		for _, t := range g.Threads {
 			comments := make([]SessionPRThreadComment, 0, len(t.Comments))
 			for _, c := range t.Comments {
-				createdAt := ""
-				if !c.CreatedAt.IsZero() {
-					createdAt = c.CreatedAt.UTC().Format(time.RFC3339)
-				}
-				comments = append(comments, SessionPRThreadComment{
-					ID: c.ID, Author: c.Author, Body: c.Body, URL: c.URL,
-					Resolved: c.Resolved, IsBot: c.IsBot, CreatedAt: createdAt,
-				})
+				comments = append(comments, newSessionPRThreadComment(c))
 			}
 			threads = append(threads, SessionPRCommentThread{
 				ThreadID: t.ThreadID, Path: t.Path, Line: t.Line,

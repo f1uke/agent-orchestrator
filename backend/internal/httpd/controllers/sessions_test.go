@@ -28,6 +28,14 @@ type fakeSessionService struct {
 	dispatchedPR     string
 	dispatchedThread string
 	dispatchedExtra  string
+	replyPR          string
+	replyThread      string
+	replyBody        string
+	replyErr         error
+	replyComment     sessionsvc.PRThreadComment
+	resolvePR        string
+	resolveThread    string
+	resolveErr       error
 	cleanupProjects  []domain.ProjectID
 	cleanupResult    []domain.SessionID
 	cleanupSkipped   []sessionsvc.CleanupSkipped
@@ -178,6 +186,22 @@ func (f *fakeSessionService) DispatchCommentToWorker(_ context.Context, _ domain
 	f.dispatchedThread = threadID
 	f.dispatchedExtra = extraPrompt
 	return nil
+}
+
+func (f *fakeSessionService) ReplyToThread(_ context.Context, _ domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error) {
+	f.replyPR = prURL
+	f.replyThread = threadID
+	f.replyBody = body
+	if f.replyErr != nil {
+		return sessionsvc.PRThreadComment{}, f.replyErr
+	}
+	return f.replyComment, nil
+}
+
+func (f *fakeSessionService) ResolveThread(_ context.Context, _ domain.SessionID, prURL, threadID string) error {
+	f.resolvePR = prURL
+	f.resolveThread = threadID
+	return f.resolveErr
 }
 
 func (f *fakeSessionService) Delete(_ context.Context, id domain.SessionID, force bool) error {
@@ -890,6 +914,118 @@ func TestSessionsAPI_CommentDispatchValidation(t *testing.T) {
 
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-dispatch", `{"prUrl":"","threadId":""}`)
 	assertErrorCode(t, body, status, http.StatusBadRequest, "THREAD_REQUIRED")
+}
+
+func TestSessionsAPI_CommentReply(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.replyComment = sessionsvc.PRThreadComment{ID: "c1", Author: "ada", Body: "sounds good", URL: "https://example.com/c1"}
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply",
+		`{"prUrl":"pr1","threadId":"T1","body":"sounds good"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	var got struct {
+		OK      bool `json:"ok"`
+		Comment struct {
+			ID     string `json:"id"`
+			Author string `json:"author"`
+			Body   string `json:"body"`
+			URL    string `json:"url"`
+		} `json:"comment"`
+	}
+	mustJSON(t, body, &got)
+	if !got.OK || got.Comment.ID != "c1" || got.Comment.Author != "ada" || got.Comment.Body != "sounds good" || got.Comment.URL != "https://example.com/c1" {
+		t.Fatalf("reply response = %#v", got)
+	}
+	if fake.replyPR != "pr1" || fake.replyThread != "T1" || fake.replyBody != "sounds good" {
+		t.Fatalf("service not called with the right args: %+v", fake)
+	}
+}
+
+func TestSessionsAPI_CommentReplyValidation(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply", `{"prUrl":"","threadId":"","body":"hi"}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "THREAD_REQUIRED")
+
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply", `{"prUrl":"pr1","threadId":"T1","body":"   "}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "BODY_REQUIRED")
+}
+
+func TestSessionsAPI_CommentReplyForbidden(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.replyErr = sessionsvc.ErrSCMWriteForbidden
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply", `{"prUrl":"pr1","threadId":"T1","body":"hi"}`)
+	assertErrorCode(t, body, status, http.StatusForbidden, "SCM_WRITE_FORBIDDEN")
+}
+
+func TestSessionsAPI_CommentReplyUnavailable(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.replyErr = sessionsvc.ErrSCMUnavailable
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply", `{"prUrl":"pr1","threadId":"T1","body":"hi"}`)
+	assertErrorCode(t, body, status, http.StatusServiceUnavailable, "SCM_UNAVAILABLE")
+}
+
+func TestSessionsAPI_CommentReplyThreadNotFound(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.replyErr = apierr.NotFound("THREAD_NOT_FOUND", "Review thread not found")
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply", `{"prUrl":"pr1","threadId":"T1","body":"hi"}`)
+	assertErrorCode(t, body, status, http.StatusNotFound, "THREAD_NOT_FOUND")
+}
+
+func TestSessionsAPI_CommentResolve(t *testing.T) {
+	fake := newFakeSessionService()
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-resolve", `{"prUrl":"pr1","threadId":"T1"}`)
+	if status != http.StatusOK || !strings.Contains(string(body), `"ok":true`) || !strings.Contains(string(body), `"resolved":true`) {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	if fake.resolvePR != "pr1" || fake.resolveThread != "T1" {
+		t.Fatalf("service not called with the right args: %+v", fake)
+	}
+}
+
+func TestSessionsAPI_CommentResolveValidation(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-resolve", `{"prUrl":"","threadId":""}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "THREAD_REQUIRED")
+}
+
+func TestSessionsAPI_CommentResolveForbidden(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.resolveErr = sessionsvc.ErrSCMWriteForbidden
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-resolve", `{"prUrl":"pr1","threadId":"T1"}`)
+	assertErrorCode(t, body, status, http.StatusForbidden, "SCM_WRITE_FORBIDDEN")
+}
+
+func TestSessionsAPI_CommentResolveUnavailable(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.resolveErr = sessionsvc.ErrSCMUnavailable
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-resolve", `{"prUrl":"pr1","threadId":"T1"}`)
+	assertErrorCode(t, body, status, http.StatusServiceUnavailable, "SCM_UNAVAILABLE")
+}
+
+func TestSessionsAPI_CommentResolveThreadNotFound(t *testing.T) {
+	fake := newFakeSessionService()
+	fake.resolveErr = apierr.NotFound("THREAD_NOT_FOUND", "Review thread not found")
+	srv := newSessionTestServer(t, fake)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-resolve", `{"prUrl":"pr1","threadId":"T1"}`)
+	assertErrorCode(t, body, status, http.StatusNotFound, "THREAD_NOT_FOUND")
 }
 
 func TestSessionsAPI_CleanupWithProjectFilter(t *testing.T) {

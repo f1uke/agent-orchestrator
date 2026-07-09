@@ -1059,6 +1059,133 @@ paths:
         the session's worker
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/comment-reply:
+    post:
+      operationId: sessionReplyComment
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyCommentRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplyCommentResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Post a reply comment on a PR review thread on behalf of the session's
+        SCM identity
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/comment-resolve:
+    post:
+      operationId: sessionResolveThread
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveThreadRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveThreadResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Mark a PR review thread resolved on behalf of the session's SCM identity
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/diff-context:
     get:
       operationId: sessionDiffContext
@@ -2926,6 +3053,29 @@ components:
       - sessionId
       - displayName
       type: object
+    ReplyCommentRequest:
+      properties:
+        body:
+          type: string
+        prUrl:
+          type: string
+        threadId:
+          type: string
+      required:
+      - prUrl
+      - threadId
+      - body
+      type: object
+    ReplyCommentResponse:
+      properties:
+        comment:
+          $ref: '#/components/schemas/SessionPRThreadComment'
+        ok:
+          type: boolean
+      required:
+      - ok
+      - comment
+      type: object
     ResolveCommentsResponse:
       properties:
         ok:
@@ -2934,6 +3084,29 @@ components:
           type: integer
       required:
       - ok
+      - resolved
+      type: object
+    ResolveThreadRequest:
+      properties:
+        prUrl:
+          type: string
+        threadId:
+          type: string
+      required:
+      - prUrl
+      - threadId
+      type: object
+    ResolveThreadResponse:
+      properties:
+        ok:
+          type: boolean
+        resolved:
+          type: boolean
+        sessionId:
+          type: string
+      required:
+      - ok
+      - sessionId
       - resolved
       type: object
     RestartSessionResponse:

@@ -111,6 +111,14 @@ func (f *fakeSessionService) DispatchCommentToWorker(context.Context, domain.Ses
 	return nil
 }
 
+func (f *fakeSessionService) ReplyToThread(context.Context, domain.SessionID, string, string, string) (sessionsvc.PRThreadComment, error) {
+	return sessionsvc.PRThreadComment{}, nil
+}
+
+func (f *fakeSessionService) ResolveThread(context.Context, domain.SessionID, string, string) error {
+	return nil
+}
+
 func (f *fakeSessionService) ListPRSummaries(context.Context, domain.SessionID) ([]sessionsvc.PRSummary, error) {
 	return nil, nil
 }

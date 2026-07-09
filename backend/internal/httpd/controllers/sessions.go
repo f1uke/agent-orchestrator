@@ -46,6 +46,8 @@ type SessionService interface {
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
+	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
+	ResolveThread(ctx context.Context, id domain.SessionID, prURL, threadID string) error
 	ListPRSummaries(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error)
 	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
@@ -90,6 +92,8 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
 	r.Post("/sessions/{sessionId}/comment-dispatch", c.commentDispatch)
+	r.Post("/sessions/{sessionId}/comment-reply", c.commentReply)
+	r.Post("/sessions/{sessionId}/comment-resolve", c.commentResolve)
 	r.Post("/sessions/{sessionId}/activity", c.activity)
 	r.Get("/orchestrators", c.listOrchestrators)
 	r.Post("/orchestrators", c.spawnOrchestrator)
@@ -527,6 +531,76 @@ func (c *SessionsController) commentDispatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, DispatchCommentResponse{OK: true, SessionID: sessionID(r)})
+}
+
+// commentReply posts a reply comment on a PR review thread on behalf of the
+// session's SCM identity.
+func (c *SessionsController) commentReply(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/comment-reply")
+		return
+	}
+	var in ReplyCommentRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.PrURL == "" || in.ThreadID == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
+		return
+	}
+	body := domain.SanitizeControlChars(in.Body)
+	if strings.TrimSpace(body) == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "BODY_REQUIRED", "Reply body is required", nil)
+		return
+	}
+	if len(body) > maxMessageLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Reply body is too long", nil)
+		return
+	}
+	comment, err := c.Svc.ReplyToThread(r.Context(), sessionID(r), in.PrURL, in.ThreadID, body)
+	if err != nil {
+		writeThreadWriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ReplyCommentResponse{OK: true, Comment: newSessionPRThreadComment(comment)})
+}
+
+// commentResolve marks a PR review thread resolved on behalf of the session's
+// SCM identity.
+func (c *SessionsController) commentResolve(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/comment-resolve")
+		return
+	}
+	var in ResolveThreadRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.PrURL == "" || in.ThreadID == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
+		return
+	}
+	if err := c.Svc.ResolveThread(r.Context(), sessionID(r), in.PrURL, in.ThreadID); err != nil {
+		writeThreadWriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ResolveThreadResponse{OK: true, SessionID: sessionID(r), Resolved: true})
+}
+
+// writeThreadWriteError maps thread-write sentinels to explicit statuses,
+// delegating apierr-coded errors (SESSION_NOT_FOUND / PR_NOT_FOUND /
+// THREAD_NOT_FOUND) to envelope.WriteError.
+func writeThreadWriteError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, sessionsvc.ErrSCMWriteForbidden):
+		envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "SCM_WRITE_FORBIDDEN", "The configured token cannot write to this thread (missing write scope)", nil)
+	case errors.Is(err, sessionsvc.ErrSCMUnavailable):
+		envelope.WriteAPIError(w, r, http.StatusServiceUnavailable, "unavailable", "SCM_UNAVAILABLE", "SCM unavailable", nil)
+	default:
+		envelope.WriteError(w, r, err)
+	}
 }
 
 // activity records an agent activity-state signal reported by an agent hook
