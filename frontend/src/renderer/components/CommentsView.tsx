@@ -106,17 +106,17 @@ function CommentRow({ comment }: { comment: Comment }) {
 	return (
 		<div className="flex flex-col gap-0.5">
 			<div className="flex items-center gap-2">
-				<span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-raised text-[10px] font-medium text-muted-foreground">
+				<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-raised text-[11px] font-medium text-muted-foreground">
 					{initials(comment.author)}
 				</span>
-				<span className="text-[12px] font-medium text-foreground">{comment.author || "unknown"}</span>
+				<span className="text-[13px] font-medium text-foreground">{comment.author || "unknown"}</span>
 				{comment.isBot && (
 					<Badge variant="neutral" className="h-[16px] px-1.5 text-[9px]">
 						Bot
 					</Badge>
 				)}
 			</div>
-			<p className="whitespace-pre-wrap pl-7 text-[12px] leading-snug text-foreground">{comment.body}</p>
+			<p className="whitespace-pre-wrap pl-9 text-[12px] leading-snug text-foreground">{comment.body}</p>
 		</div>
 	);
 }
