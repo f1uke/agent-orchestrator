@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/diffhunk"
@@ -86,9 +87,19 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	if workspace == "" {
 		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil
 	}
-	if _, ok := previewutil.ConfinedPath(workspace, q.Path); !ok {
+	abs, ok := previewutil.ConfinedPath(workspace, q.Path)
+	if !ok {
 		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil
 	}
+	root, err := filepath.Abs(workspace)
+	if err != nil {
+		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil
+	}
+	safePath := filepath.ToSlash(rel)
 
 	headRef := pr.HeadSHA
 	if strings.TrimSpace(headRef) == "" {
@@ -96,7 +107,7 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	}
 
 	if mode == "file" {
-		out, err := gitOutput(ctx, workspace, "show", headRef+":"+q.Path)
+		out, err := gitOutput(ctx, workspace, "show", headRef+":"+safePath)
 		if err != nil {
 			return DiffContextResult{Available: false, Mode: "file", Path: q.Path}, nil
 		}
@@ -107,7 +118,7 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	if strings.TrimSpace(pr.BaseSHA) == "" {
 		return DiffContextResult{Available: false, Mode: "hunk", Path: q.Path}, nil
 	}
-	out, err := gitOutput(ctx, workspace, "diff", pr.BaseSHA+".."+headRef, "--", q.Path)
+	out, err := gitOutput(ctx, workspace, "diff", pr.BaseSHA+".."+headRef, "--", safePath)
 	if err != nil {
 		return DiffContextResult{Available: false, Mode: "hunk", Path: q.Path}, nil
 	}

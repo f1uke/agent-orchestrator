@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,6 +127,64 @@ func TestDiffContext_PathTraversalRejected(t *testing.T) {
 	res, _ := svc.DiffContext(context.Background(), "s1", DiffContextQuery{PRURL: "pr1", Path: "../../etc/passwd", Mode: "file"})
 	if res.Available {
 		t.Fatal("traversal path must be rejected (Available=false)")
+	}
+}
+
+// TestDiffContext_ConfinesPathBeforeGit asserts the application-level
+// confinement gate directly: it captures the pathspec DiffContext actually
+// hands to git (via the gitOutput seam) and checks it has been confined to
+// the workspace root, independent of git's own refusal to touch out-of-tree
+// pathspecs. A black-box assertion on the returned Available flag can't tell
+// the pre-fix code (raw ".." reaching git, which git then rejects on its
+// own) apart from the fix (the confined path reaching git) — both produce
+// Available:false. This test fails against the pre-fix code because the raw,
+// unconfined "../../etc/passwd" is what gets captured.
+func TestDiffContext_ConfinesPathBeforeGit(t *testing.T) {
+	dir, baseSHA, headSHA := diffContextTestRepo(t)
+
+	fake := newFakeStore()
+	fake.putSessionWithWorkspace("s1", dir)
+	stList := &multiPRFakeStore{fakeStore: fake, prs: []domain.PullRequest{{URL: "pr1", BaseSHA: baseSHA, HeadSHA: headSHA}}}
+	svc := newServiceWithStore(t, stList)
+
+	origGitOutput := gitOutput
+	defer func() { gitOutput = origGitOutput }()
+
+	var capturedArgs []string
+	gitOutput = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+		capturedArgs = append([]string{}, args...)
+		return nil, errors.New("stubbed: capturing args only, not running git")
+	}
+
+	// mode=file: git args are ["show", "<headRef>:<path>"].
+	if _, err := svc.DiffContext(context.Background(), "s1", DiffContextQuery{PRURL: "pr1", Path: "../../etc/passwd", Mode: "file"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(capturedArgs) != 2 || capturedArgs[0] != "show" {
+		t.Fatalf("file mode: unexpected git args: %v", capturedArgs)
+	}
+	pathspec := capturedArgs[1]
+	if strings.Contains(pathspec, "..") {
+		t.Fatalf("file mode: unconfined traversal path reached git: %q", pathspec)
+	}
+	if !strings.HasSuffix(pathspec, ":etc/passwd") {
+		t.Fatalf("file mode: expected confined path suffix %q, got %q", ":etc/passwd", pathspec)
+	}
+
+	// mode=hunk: git args are ["diff", "<base>..<head>", "--", "<path>"].
+	capturedArgs = nil
+	if _, err := svc.DiffContext(context.Background(), "s1", DiffContextQuery{PRURL: "pr1", Path: "../../etc/passwd", Mode: "hunk"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(capturedArgs) != 4 || capturedArgs[0] != "diff" || capturedArgs[2] != "--" {
+		t.Fatalf("hunk mode: unexpected git args: %v", capturedArgs)
+	}
+	pathspec = capturedArgs[3]
+	if strings.Contains(pathspec, "..") {
+		t.Fatalf("hunk mode: unconfined traversal path reached git: %q", pathspec)
+	}
+	if pathspec != "etc/passwd" {
+		t.Fatalf("hunk mode: expected confined path %q, got %q", "etc/passwd", pathspec)
 	}
 }
 
