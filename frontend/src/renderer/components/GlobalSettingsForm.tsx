@@ -1,5 +1,6 @@
 import { AutoReclaimSection } from "./AutoReclaimSection";
 import { DashboardSubhead } from "./DashboardSubhead";
+import { MessageTemplatesSection } from "./MessageTemplatesSection";
 import { MigrationSection } from "./MigrationSection";
 import { NotificationsSection } from "./NotificationsSection";
 import { SpawnConfirmSection } from "./SpawnConfirmSection";
@@ -18,6 +19,7 @@ export function GlobalSettingsForm() {
 			<div className="min-h-0 flex-1 overflow-y-auto p-[18px]">
 				<div className="mx-auto flex max-w-2xl flex-col gap-4">
 					<SystemPromptsSection />
+					<MessageTemplatesSection />
 					<SpawnConfirmSection />
 					<AutoReclaimSection />
 					<NotificationsSection />
