@@ -5,6 +5,9 @@
 /** Accent used across the inbox (primary buttons, links, selection, worker actions). */
 export const ACCENT = "#3b82f6";
 
+/** Monospace stack for paths, line refs, code, and diffs (uses the app's bundled fonts). */
+export const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
+
 /** Exact design palette. Grouped by role; values are verbatim from the design handoff. */
 export const PALETTE = {
 	rail: "#0a0a0c",
@@ -40,11 +43,6 @@ export const PALETTE = {
 	amber: "#e0a544",
 	red: "#ef6a63",
 	code: "#e0a86a",
-	diffAddText: "#84cfa0",
-	diffAddBg: "rgba(63,157,107,.12)",
-	diffDelText: "#e69696",
-	diffDelBg: "rgba(220,90,90,.12)",
-	diffContextText: "#9a9aa0",
 } as const;
 
 /** color-mix tint of the accent (oklab), used for soft fills/borders. */
