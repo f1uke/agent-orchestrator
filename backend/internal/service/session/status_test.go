@@ -374,6 +374,33 @@ func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
 	}
 }
 
+// The default approval floor is 2: with no SCM rule of its own, a PR needs at
+// least 2 approvals before AO treats it as approved. Guards the configured
+// default so it can't silently drift.
+func TestDefaultMinApprovalsFloorIsTwo(t *testing.T) {
+	if domain.DefaultMinApprovals != 2 {
+		t.Fatalf("DefaultMinApprovals = %d, want 2", domain.DefaultMinApprovals)
+	}
+	base := domain.PRFacts{
+		URL:                    "https://gitlab.example.com/g/p/-/merge_requests/1",
+		Number:                 1,
+		CI:                     domain.CIPassing,
+		Mergeability:           domain.MergeUnknown,
+		ApprovalRuleConfigured: false,
+	}
+	// 2 approvals meets the default floor → approved.
+	pr := base
+	pr.ApprovalsCount = 2
+	if got := prPipelineStatus(pr, domain.DefaultMinApprovals); got != domain.StatusApproved {
+		t.Fatalf("count 2 / default floor: got %s, want approved", got)
+	}
+	// 1 approval is under the floor → not yet approved.
+	pr.ApprovalsCount = 1
+	if got := prPipelineStatus(pr, domain.DefaultMinApprovals); got != domain.StatusPROpen {
+		t.Fatalf("count 1 / default floor: got %s, want pr_open", got)
+	}
+}
+
 func TestPRPipelineStatus_MinApprovalsThreshold(t *testing.T) {
 	base := domain.PRFacts{
 		URL:          "https://gitlab.example.com/g/p/-/merge_requests/1",
