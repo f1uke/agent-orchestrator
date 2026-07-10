@@ -90,6 +90,30 @@ const SUPPRESS_NATIVE_PASTE_MS = 100;
 // handshake arrives. The clear only wipes pixels; modes stay up.
 const CLEAR_SEQUENCE = "\x1b[3J\x1b[2J\x1b[H";
 
+// An SGR / SGR-Pixels mouse report: ESC [ < btn ; col ; row (M|m). The "\x1b[<"
+// prefix is unique to SGR mouse reports in the terminal protocol, so matching it
+// lets us forward ONLY mouse reports out of xterm's onData stream and leave every
+// terminal-generated control response (DA/DSR/DECRPM/focus/OSC/window ops) behind
+// — those must never be written back to the PTY (see the onData note below).
+// Exported so a test can assert it matches real xterm's actual output format.
+export const SGR_MOUSE_REPORT = /^\x1b\[<\d+;\d+;\d+[Mm]$/;
+
+// Open a link the terminal surfaced. Auto-detected http(s) links (WebLinksAddon)
+// and http(s) OSC 8 hyperlinks go through window.open, which the Electron main
+// process routes to the OS browser (main.ts setWindowOpenHandler). Non-http OSC 8
+// links — file:// for the .md links Claude Code / Superpowers emit — are denied by
+// that handler, so they go through a dedicated bridge that opens them via the OS
+// after a scheme allowlist check in the main process.
+function openTerminalLink(uri: string): void {
+	if (/^https?:\/\//i.test(uri)) {
+		window.open(uri, "_blank", "noopener");
+		return;
+	}
+	void aoBridge.shell.openExternal(uri).catch((error) => {
+		console.warn("Unable to open terminal link", uri, error);
+	});
+}
+
 function preparePastedText(text: string): string {
 	return text.replace(/\r?\n/g, "\r");
 }
@@ -177,16 +201,6 @@ function terminalHasFocus(host: HTMLElement): boolean {
 	return !!activeElement && host.contains(activeElement);
 }
 
-type XtermInternal = Terminal & {
-	_core?: {
-		element?: HTMLElement;
-		_selectionService?: {
-			enable: () => void;
-			shouldForceSelection: (event: MouseEvent) => boolean;
-		};
-	};
-};
-
 // For mouse-tracking panes we synthesize SGR mouse-wheel reports and write them
 // to the pane; tmux (with `mouse on`, set by the runtime adapter) acts on them
 // and scrolls its scrollback via copy-mode. Left to itself xterm would convert
@@ -208,16 +222,6 @@ const PAGE_DOWN = "\x1b[6~";
 
 function pageKeyReport(lines: number): string {
 	return lines < 0 ? PAGE_UP : PAGE_DOWN;
-}
-
-function forceSelectionMode(term: Terminal): void {
-	const internal = term as XtermInternal;
-	const selectionService = internal._core?._selectionService;
-	const element = internal._core?.element;
-	if (!selectionService || !element) return;
-	selectionService.shouldForceSelection = () => true;
-	selectionService.enable();
-	element.classList.remove("enable-mouse-events");
 }
 
 export function XtermTerminal(props: XtermTerminalProps) {
@@ -284,6 +288,16 @@ export function XtermTerminal(props: XtermTerminalProps) {
 				// CSS so FitAddon's ~14px reservation doesn't shift the grid.
 				scrollback: 5000,
 				theme: props.theme === "dark" ? terminalThemes.dark : terminalThemes.light,
+				// OSC 8 hyperlinks (\x1b]8;;URI\x1b\ text \x1b]8;;\x1b\), as Claude Code /
+				// Superpowers emit for .md file links. WebLinksAddon only covers
+				// auto-detected http(s) in plain text; this handles explicit hyperlinks of
+				// any scheme. allowNonHttpProtocols lets file:// links through (xterm drops
+				// non-http OSC 8 links otherwise), and our own activate replaces xterm's
+				// default handler — whose confirm() dialog would freeze the renderer.
+				linkHandler: {
+					allowNonHttpProtocols: true,
+					activate: (_event, uri) => openTerminalLink(uri),
+				},
 			});
 		} catch (error) {
 			callbacksRef.current.onError?.(error);
@@ -312,8 +326,15 @@ export function XtermTerminal(props: XtermTerminalProps) {
 
 		term.open(host);
 		loadRenderer(term);
+		// Native modifier-based selection (like iTerm2 / Terminal.app / VS Code): when
+		// the agent TUI has mouse tracking on, a plain click/drag is a mouse report the
+		// app acts on (so "Ran shell command" and file links are clickable), and holding
+		// Option (mac) / Shift forces LOCAL text selection for copy. When no app mouse
+		// mode is active (plain shell, scrollback) a plain drag still selects. We do NOT
+		// force selection unconditionally — that made xterm's mousedown handler swallow
+		// every click before it could emit a report (Terminal.bindMouse bails when
+		// shouldForceSelection is true), which is exactly why clickables were dead.
 		term.options.macOptionClickForcesSelection = true;
-		forceSelectionMode(term);
 
 		let lastCopiedSelection = "";
 		const copySelection = (options?: { clipboardData?: DataTransfer | null; dedupe?: boolean }) => {
@@ -510,12 +531,22 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		// misses them. Listen on window directly as a session-long recovery path.
 		window.addEventListener("resize", fitTerminal);
 
-		// Do not replace this with term.onData. xterm's raw data stream can include
-		// terminal-generated control responses during attach/repaint; forwarding
-		// those bytes through the mux writes dirty input into the real Codex PTY and
-		// corrupts the TUI. Keyboard is the only safe generic text path here; paste,
-		// composition, shortcuts, and wheel reports are emitted explicitly below.
+		// Do not forward term.onData wholesale. Its raw stream also carries
+		// terminal-generated control responses during attach/repaint (device
+		// attributes, cursor-position reports, DECRPM, focus, OSC color, window ops);
+		// writing those back through the mux corrupts the real agent PTY. Keyboard is
+		// forwarded via onKey; paste, composition, shortcuts, and wheel reports are
+		// emitted explicitly. The ONE thing onData carries that we DO need is the
+		// agent's mouse reports — without them Claude Code's TUI clickables ("Ran
+		// shell command", file links) never register — so forward only those. SGR /
+		// SGR-Pixels reports match SGR_MOUSE_REPORT (the "\x1b[<" prefix is unique to
+		// them); the DEFAULT encoding is non-UTF-8 and arrives on onBinary, which
+		// xterm uses exclusively for mouse reports, so forward it unconditionally.
 		const keyInput = term.onKey(({ key }) => emitUserInput(key, "keyboard"));
+		const mouseData = term.onData((data) => {
+			if (SGR_MOUSE_REPORT.test(data)) emitUserInput(data, "mouse");
+		});
+		const mouseBinary = term.onBinary((data) => emitUserInput(data, "mouse"));
 
 		// Translate wheel motion into SGR wheel reports for the pane (see
 		// sgrWheelReport), one report per scrolled line. WheelEvent.deltaMode
@@ -623,6 +654,8 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			host.removeEventListener("compositionend", compositionInput, true);
 			clearSuppressNativePaste();
 			keyInput.dispose();
+			mouseData.dispose();
+			mouseBinary.dispose();
 			userInputListeners.clear();
 			try {
 				term.dispose();

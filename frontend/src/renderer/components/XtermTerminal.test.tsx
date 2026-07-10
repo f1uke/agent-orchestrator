@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
 		buffer: { active: { type: string } };
 		scrollLines: ReturnType<typeof vi.fn>;
 		dataListeners: Set<(data: string) => void>;
+		binaryListeners: Set<(data: string) => void>;
 		keyListeners: Set<(event: { key: string }) => void>;
 		selectionListeners: Set<() => void>;
 		_core: {
@@ -40,6 +41,7 @@ vi.mock("@xterm/xterm", () => ({
 		buffer = { active: { type: "normal" } };
 		scrollLines = vi.fn();
 		dataListeners = new Set<(data: string) => void>();
+		binaryListeners = new Set<(data: string) => void>();
 		keyListeners = new Set<(event: { key: string }) => void>();
 		selectionListeners = new Set<() => void>();
 		_core = {
@@ -65,6 +67,10 @@ vi.mock("@xterm/xterm", () => ({
 		onData(listener: (data: string) => void) {
 			this.dataListeners.add(listener);
 			return { dispose: () => this.dataListeners.delete(listener) };
+		}
+		onBinary(listener: (data: string) => void) {
+			this.binaryListeners.add(listener);
+			return { dispose: () => this.binaryListeners.delete(listener) };
 		}
 		onResize() {
 			return { dispose: () => undefined };
@@ -497,12 +503,46 @@ describe("XtermTerminal", () => {
 		expect(onInput).toHaveBeenCalledWith("a", "keyboard");
 	});
 
-	it("does not forward raw xterm data/control bytes as user input", () => {
+	it("forwards SGR mouse reports so Claude Code TUI clickables (Ran shell command, file links) register", () => {
 		const onInput = vi.fn();
 		render(<XtermTerminal theme="dark" onReady={(terminal) => terminal.onUserInput(onInput)} />);
 
-		expect(state.lastTerminal!.dataListeners.size).toBe(0);
-		state.lastTerminal!.dataListeners.forEach((listener) => listener("\x1b[A"));
+		// Press (M) and release (m) at a cell — xterm emits these through onData when
+		// the agent has mouse tracking on; they must reach the pane.
+		state.lastTerminal!.dataListeners.forEach((listener) => listener("\x1b[<0;12;7M"));
+		state.lastTerminal!.dataListeners.forEach((listener) => listener("\x1b[<0;12;7m"));
+
+		expect(onInput).toHaveBeenNthCalledWith(1, "\x1b[<0;12;7M", "mouse");
+		expect(onInput).toHaveBeenNthCalledWith(2, "\x1b[<0;12;7m", "mouse");
+	});
+
+	it("forwards binary DEFAULT-encoding mouse reports (onBinary is mouse-only)", () => {
+		const onInput = vi.fn();
+		render(<XtermTerminal theme="dark" onReady={(terminal) => terminal.onUserInput(onInput)} />);
+
+		// DEFAULT encoding: \x1b[M + 3 bytes (button+32, col+32, row+32).
+		state.lastTerminal!.binaryListeners.forEach((listener) => listener("\x1b[M !!"));
+
+		expect(onInput).toHaveBeenCalledWith("\x1b[M !!", "mouse");
+	});
+
+	it("does not forward xterm control responses (cursor keys, DA/DSR/focus/OSC) as user input", () => {
+		const onInput = vi.fn();
+		render(<XtermTerminal theme="dark" onReady={(terminal) => terminal.onUserInput(onInput)} />);
+
+		// An onData listener now exists (for mouse reports), but terminal-generated
+		// control responses must never be written back to the PTY — that corrupts the TUI.
+		expect(state.lastTerminal!.dataListeners.size).toBeGreaterThan(0);
+		for (const seq of [
+			"\x1b[A", // cursor-up (arrow key echoes / control)
+			"\x1b[?1;2c", // primary device attributes (DA1)
+			"\x1b[>0;276;0c", // secondary device attributes (DA2)
+			"\x1b[10;5R", // cursor position report (DSR)
+			"\x1b[I", // focus in
+			"\x1b]11;rgb:0000/0000/0000\x1b\\", // OSC color report
+		]) {
+			state.lastTerminal!.dataListeners.forEach((listener) => listener(seq));
+		}
 		expect(onInput).not.toHaveBeenCalled();
 	});
 
@@ -599,7 +639,7 @@ describe("XtermTerminal", () => {
 		expect(onInput).toHaveBeenLastCalledWith("\x1b[5~", "wheel");
 	});
 
-	it("opens terminal links via window.open so Electron routes them to the OS browser", () => {
+	it("opens auto-detected http links via window.open so Electron routes them to the OS browser", () => {
 		const open = vi.spyOn(window, "open").mockReturnValue(null);
 		render(<XtermTerminal theme="dark" />);
 
@@ -612,13 +652,47 @@ describe("XtermTerminal", () => {
 		open.mockRestore();
 	});
 
-	it("forces plain drag selection without raw xterm data forwarding", () => {
+	it("opens http OSC 8 hyperlinks via window.open and allows non-http protocols", () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
 		render(<XtermTerminal theme="dark" />);
 
+		const linkHandler = state.lastTerminal!.options.linkHandler as {
+			activate: (event: MouseEvent, uri: string) => void;
+			allowNonHttpProtocols?: boolean;
+		};
+		// allowNonHttpProtocols is required or xterm drops file:// links before activate.
+		expect(linkHandler.allowNonHttpProtocols).toBe(true);
+		linkHandler.activate({} as MouseEvent, "https://example.com/x");
+
+		expect(open).toHaveBeenCalledWith("https://example.com/x", "_blank", "noopener");
+		open.mockRestore();
+	});
+
+	it("opens file:// OSC 8 hyperlinks via the shell bridge (Electron denies window.open for file://)", () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
+		const openExternal = vi.fn().mockResolvedValue(undefined);
+		window.ao!.shell.openExternal = openExternal;
+		render(<XtermTerminal theme="dark" />);
+
+		const linkHandler = state.lastTerminal!.options.linkHandler as {
+			activate: (event: MouseEvent, uri: string) => void;
+		};
+		linkHandler.activate({} as MouseEvent, "file:///Users/me/notes/plan.md");
+
+		expect(openExternal).toHaveBeenCalledWith("file:///Users/me/notes/plan.md");
+		expect(open).not.toHaveBeenCalled();
+		open.mockRestore();
+	});
+
+	it("uses native modifier-based selection so clicks reach a mouse-tracking app", () => {
+		render(<XtermTerminal theme="dark" />);
+
+		// Option (mac) / Shift still force local selection for copy — kept on.
 		expect(state.lastTerminal!.options.macOptionClickForcesSelection).toBe(true);
-		expect(state.lastTerminal!._core._selectionService.enable).toHaveBeenCalled();
-		expect(state.lastTerminal!._core.element.classList.remove).toHaveBeenCalledWith("enable-mouse-events");
-		expect(state.lastTerminal!._core._selectionService.shouldForceSelection({} as MouseEvent)).toBe(true);
+		// The old always-force-selection override is gone: a plain (no-modifier) event
+		// must NOT force selection, or xterm's mousedown handler swallows the click
+		// instead of sending a mouse report to the app.
+		expect(state.lastTerminal!._core._selectionService.shouldForceSelection({} as MouseEvent)).toBe(false);
 	});
 
 	it("focuses the terminal on a pointer press anywhere in the host, so one click is enough to type after using another control", () => {

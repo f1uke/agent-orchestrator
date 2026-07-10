@@ -54,6 +54,7 @@ import { readMigrationState, updateMigration, writeAppStateMarker, type Migratio
 import { createNativeNotifier, type NativeNotificationInput } from "./main/native-notifications";
 import { detectOpenTargets, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
 import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
+import { isAllowedTerminalLink } from "./main/open-terminal-link";
 
 // Globals injected at compile time by @electron-forge/plugin-vite.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -1062,6 +1063,16 @@ ipcMain.handle("clipboard:writeText", (_event, text: string) => {
 	}
 });
 ipcMain.handle("clipboard:readText", () => clipboard.readText());
+
+// Open a link emitted by terminal content (an OSC 8 hyperlink) in the OS default
+// handler. http(s) links already route through the window-open handler, but
+// file:// (Claude Code / Superpowers .md file links) is denied there, so the
+// renderer's terminal linkHandler sends non-http links here. The scheme is
+// allowlisted because terminal output is untrusted agent text.
+ipcMain.handle("shell:openExternal", async (_event, url: string) => {
+	if (!isAllowedTerminalLink(url)) return;
+	await shell.openExternal(url);
+});
 
 // "Open in…" terminal-toolbar menu (macOS only). Detection is best-effort and
 // never throws; launches reject on failure so the renderer can toast without

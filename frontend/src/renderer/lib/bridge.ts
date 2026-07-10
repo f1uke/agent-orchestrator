@@ -24,6 +24,9 @@ export const aoBridge: AoBridge =
 			xcode: async () => undefined,
 			xcodegen: async () => ({ status: "no-specs", root: "" }),
 		},
+		shell: {
+			openExternal: async () => undefined,
+		},
 		daemon: {
 			getStatus: async () => ({
 				state: "stopped",
