@@ -69,9 +69,33 @@ function normalizeTerm(term: string | undefined): string {
 	return trimmed;
 }
 
+// AO_* env vars that scope to a single WORKER SESSION and must never define the
+// daemon's own behaviour. When the desktop app is (re)launched from inside a
+// worker's shell (its tmux pane), Electron's process.env carries these — and left
+// unscrubbed they leak into the daemon: a stale AO_SESSION_IDLE_CLOSE silently
+// overrides the user's ~/.zshrc so the idle sweep closes finished workers early,
+// and AO_SESSION_ID gives the daemon a worker's identity. The daemon then
+// re-propagates them to every worker it spawns, so the stale value perpetuates
+// across app restarts. AO_SESSION_ID being present is the tell that the launch
+// context is a worker shell (a daemon has no session of its own).
+export const WORKER_SCOPED_AO_KEYS = ["AO_SESSION_ID", "AO_ISSUE_ID", "AO_OWNER", "AO_SESSION_IDLE_CLOSE"] as const;
+
+// Drop worker-session-scoped AO_* keys from a launch env when it is a worker
+// shell's env (marked by AO_SESSION_ID), so the daemon derives config from the
+// clean login-shell profile + explicit overrides rather than from whatever worker
+// pane happened to spawn the app. A non-worker env is returned unchanged.
+export function stripWorkerScopedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	if (!env.AO_SESSION_ID) return env;
+	const clean: NodeJS.ProcessEnv = { ...env };
+	for (const key of WORKER_SCOPED_AO_KEYS) delete clean[key];
+	return clean;
+}
+
 // Base = shell env, overlaid by processEnv so Electron/AO runtime vars win, then
 // PATH forced to the shell's PATH (with floor), TERM forced to a tmux-usable
-// value, then explicit overrides.
+// value, then explicit overrides. The process.env base is first scrubbed of
+// worker-session-scoped AO_* keys (see stripWorkerScopedEnv) so a launch from
+// inside a worker shell cannot corrupt daemon-global config.
 //
 // TERM defaults to xterm-256color (what the renderer's xterm.js emulates): a
 // Finder/Dock launch starts under launchd with no controlling tty, so TERM is
@@ -83,8 +107,9 @@ export function buildDaemonEnv(
 	shellEnv: Record<string, string> | null,
 	overrides: Record<string, string>,
 ): NodeJS.ProcessEnv {
-	const merged: NodeJS.ProcessEnv = { TERM: "xterm-256color", ...(shellEnv ?? {}), ...processEnv };
-	merged.PATH = withFallbackPath(shellEnv?.PATH ?? processEnv.PATH);
+	const base = stripWorkerScopedEnv(processEnv);
+	const merged: NodeJS.ProcessEnv = { TERM: "xterm-256color", ...(shellEnv ?? {}), ...base };
+	merged.PATH = withFallbackPath(shellEnv?.PATH ?? base.PATH);
 	merged.TERM = normalizeTerm(merged.TERM);
 	return { ...merged, ...overrides };
 }

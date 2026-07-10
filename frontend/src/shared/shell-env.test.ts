@@ -7,7 +7,9 @@ import {
 	resolveShellPath,
 	SHELL_ENV_SENTINEL,
 	type ShellRunner,
+	stripWorkerScopedEnv,
 	withFallbackPath,
+	WORKER_SCOPED_AO_KEYS,
 } from "./shell-env";
 
 describe("parseEnvBlock", () => {
@@ -96,6 +98,69 @@ describe("buildDaemonEnv", () => {
 	it("replaces TERM=dumb with a tmux-usable default", () => {
 		const env = buildDaemonEnv({ ...minimalProcessEnv, TERM: "dumb" }, null, {});
 		expect(env.TERM).toBe("xterm-256color");
+	});
+
+	it("lets the profile's idle-close win when launched from a worker shell (leak scrubbed)", () => {
+		// Regression: the app relaunched from inside a worker pane carried a stale
+		// AO_SESSION_IDLE_CLOSE=3h in process.env, which used to override the user's
+		// ~/.zshrc 48h and idle-close finished workers early.
+		const env = buildDaemonEnv(
+			{ ...minimalProcessEnv, AO_SESSION_ID: "agent-orchestrator-48", AO_SESSION_IDLE_CLOSE: "3h" },
+			{ PATH: "/opt/homebrew/bin", AO_SESSION_IDLE_CLOSE: "48h" },
+			{},
+		);
+		expect(env.AO_SESSION_IDLE_CLOSE).toBe("48h");
+		expect(env.AO_SESSION_ID).toBeUndefined();
+	});
+
+	it("still honors a process-env idle-close when NOT launched from a worker shell", () => {
+		const env = buildDaemonEnv(
+			{ ...minimalProcessEnv, AO_SESSION_IDLE_CLOSE: "24h" },
+			{ PATH: "/opt/homebrew/bin" },
+			{},
+		);
+		expect(env.AO_SESSION_IDLE_CLOSE).toBe("24h");
+	});
+
+	it("keeps non-worker-scoped AO vars (data dir) when scrubbing a worker-shell launch", () => {
+		const env = buildDaemonEnv(
+			{ ...minimalProcessEnv, AO_SESSION_ID: "agent-orchestrator-48", AO_DATA_DIR: "/Users/me/.ao/data" },
+			null,
+			{},
+		);
+		expect(env.AO_DATA_DIR).toBe("/Users/me/.ao/data");
+		expect(env.AO_SESSION_ID).toBeUndefined();
+	});
+
+	it("lets AO_OWNER override win even when a worker-shell AO_OWNER is scrubbed", () => {
+		const env = buildDaemonEnv(
+			{ ...minimalProcessEnv, AO_SESSION_ID: "agent-orchestrator-48", AO_OWNER: "leaked" },
+			null,
+			{ AO_OWNER: "app" },
+		);
+		expect(env.AO_OWNER).toBe("app");
+	});
+});
+
+describe("stripWorkerScopedEnv", () => {
+	it("returns the env unchanged when AO_SESSION_ID is absent", () => {
+		const env = { PATH: "/usr/bin", AO_SESSION_IDLE_CLOSE: "3h" };
+		expect(stripWorkerScopedEnv(env)).toBe(env);
+	});
+
+	it("drops every worker-scoped AO_* key when AO_SESSION_ID is present", () => {
+		const env = {
+			PATH: "/usr/bin",
+			AO_SESSION_ID: "agent-orchestrator-48",
+			AO_ISSUE_ID: "",
+			AO_OWNER: "app",
+			AO_SESSION_IDLE_CLOSE: "3h",
+			AO_DATA_DIR: "/Users/me/.ao/data",
+		};
+		const out = stripWorkerScopedEnv(env);
+		for (const key of WORKER_SCOPED_AO_KEYS) expect(out[key]).toBeUndefined();
+		expect(out.AO_DATA_DIR).toBe("/Users/me/.ao/data");
+		expect(out.PATH).toBe("/usr/bin");
 	});
 });
 

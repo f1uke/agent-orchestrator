@@ -174,6 +174,7 @@ func TestLoadSessionIdleClose(t *testing.T) {
 		}
 	})
 	t.Run("override", func(t *testing.T) {
+		t.Setenv("AO_SESSION_ID", "") // clean shell: honor the override
 		t.Setenv("AO_SESSION_IDLE_CLOSE", "48h")
 		cfg, err := Load()
 		if err != nil {
@@ -184,6 +185,7 @@ func TestLoadSessionIdleClose(t *testing.T) {
 		}
 	})
 	t.Run("zero disables", func(t *testing.T) {
+		t.Setenv("AO_SESSION_ID", "")
 		t.Setenv("AO_SESSION_IDLE_CLOSE", "0")
 		cfg, err := Load()
 		if err != nil {
@@ -194,9 +196,36 @@ func TestLoadSessionIdleClose(t *testing.T) {
 		}
 	})
 	t.Run("malformed errors", func(t *testing.T) {
+		t.Setenv("AO_SESSION_ID", "")
 		t.Setenv("AO_SESSION_IDLE_CLOSE", "banana")
 		if _, err := Load(); err == nil {
 			t.Fatal("Load() = nil error for malformed AO_SESSION_IDLE_CLOSE, want error")
+		}
+	})
+	t.Run("ignored when launched from a worker shell (AO_SESSION_ID set)", func(t *testing.T) {
+		// Regression: a daemon started from inside a worker's shell inherits that
+		// worker's stale AO_SESSION_IDLE_CLOSE; honoring it idle-closed finished
+		// workers early. AO_SESSION_ID marks the leak, so the inherited value is
+		// ignored and the default stands.
+		t.Setenv("AO_SESSION_ID", "agent-orchestrator-48")
+		t.Setenv("AO_SESSION_IDLE_CLOSE", "3h")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.SessionIdleClose != DefaultSessionIdleClose {
+			t.Errorf("SessionIdleClose = %s, want default %s (leaked value ignored)", cfg.SessionIdleClose, DefaultSessionIdleClose)
+		}
+	})
+	t.Run("a leaked malformed value is ignored, not an error", func(t *testing.T) {
+		t.Setenv("AO_SESSION_ID", "agent-orchestrator-48")
+		t.Setenv("AO_SESSION_IDLE_CLOSE", "banana")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.SessionIdleClose != DefaultSessionIdleClose {
+			t.Errorf("SessionIdleClose = %s, want default %s", cfg.SessionIdleClose, DefaultSessionIdleClose)
 		}
 	})
 }
