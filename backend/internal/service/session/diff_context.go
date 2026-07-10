@@ -99,11 +99,11 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	}
 	root, err := filepath.Abs(workspace)
 	if err != nil {
-		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil
+		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil //nolint:nilerr // intentional: an unresolvable path degrades to Available:false, not an error
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil {
-		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil
+		return DiffContextResult{Available: false, Mode: mode, Path: q.Path}, nil //nolint:nilerr // intentional: an unresolvable path degrades to Available:false, not an error
 	}
 	safePath := filepath.ToSlash(rel)
 
@@ -115,7 +115,7 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	if mode == "file" {
 		out, err := gitOutput(ctx, workspace, "show", headRef+":"+safePath)
 		if err != nil {
-			return DiffContextResult{Available: false, Mode: "file", Path: q.Path}, nil
+			return DiffContextResult{Available: false, Mode: "file", Path: q.Path}, nil //nolint:nilerr // intentional: an unreadable file degrades to Available:false, not an error
 		}
 		return fileResult(q.Path, string(out)), nil
 	}
@@ -126,7 +126,7 @@ func (s *Service) DiffContext(ctx context.Context, id domain.SessionID, q DiffCo
 	}
 	out, err := gitOutput(ctx, workspace, "diff", pr.BaseSHA+".."+headRef, "--", safePath)
 	if err != nil {
-		return DiffContextResult{Available: false, Mode: "hunk", Path: q.Path}, nil
+		return DiffContextResult{Available: false, Mode: "hunk", Path: q.Path}, nil //nolint:nilerr // intentional: an unreadable diff degrades to Available:false, not an error
 	}
 	lines, hit := diffhunk.HunkForLine(string(out), q.Line)
 	if !hit {

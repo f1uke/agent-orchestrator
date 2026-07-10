@@ -618,6 +618,18 @@ func gitRepo(t *testing.T, name string) string {
 
 	}
 
+	// Configure a local identity so `git commit` works on hosts (e.g. CI
+	// runners) with no global user.name/user.email set.
+	for _, kv := range [][2]string{{"user.email", "ao-test@example.com"}, {"user.name", "AO Test"}} {
+
+		if out, err := exec.Command("git", "-C", dir, "config", kv[0], kv[1]).CombinedOutput(); err != nil {
+
+			t.Fatalf("git config %s fixture: %v\n%s", kv[0], err, out)
+
+		}
+
+	}
+
 	return dir
 
 }

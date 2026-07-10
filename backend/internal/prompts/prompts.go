@@ -12,6 +12,7 @@ import "strings"
 // kind) but is edited through the same surface.
 type Kind string
 
+// Kind values are the stable string keys for each editable prompt kind.
 const (
 	KindOrchestrator Kind = "orchestrator"
 	KindWorker       Kind = "worker"

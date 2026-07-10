@@ -152,11 +152,11 @@ func (m *Service) Get(ctx context.Context, id domain.ProjectID) (GetResult, erro
 // Task dialog's branch dropdown can render regardless.
 func (m *Service) ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error) {
 	if err := validateProjectID(id); err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: an invalid/missing project degrades to an empty branch list so the New Task dialog still renders (see doc comment)
 	}
 	row, ok, err := m.store.GetProject(ctx, string(id))
 	if err != nil || !ok || !row.ArchivedAt.IsZero() {
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: unreadable/archived project degrades to an empty branch list (see doc comment)
 	}
 	// Emit both the full ref name and its short form: git's shortening quirk
 	// collapses refs/remotes/origin/HEAD to the bare "origin" (not
@@ -164,7 +164,7 @@ func (m *Service) ListBranches(ctx context.Context, id domain.ProjectID) ([]stri
 	// rather than by matching the short-form text.
 	out, err := gitOutput(ctx, row.Path, "for-each-ref", "--format=%(refname)\t%(refname:short)", "refs/heads", "refs/remotes/origin")
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: an unreadable repo degrades to an empty branch list (see doc comment)
 	}
 	seen := make(map[string]bool)
 	var branches []string

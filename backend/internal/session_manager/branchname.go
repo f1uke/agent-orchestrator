@@ -17,7 +17,7 @@ var (
 	jiraKeyRe         = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
 	allowedTypes      = map[string]bool{"feature": true, "bugfix": true, "hotfix": true, "chore": true}
 	nonBranchChars    = regexp.MustCompile(`[^a-z0-9/-]+`)
-	repeatedSlashDash = regexp.MustCompile(`[-]{2,}`)
+	repeatedSlashDash = regexp.MustCompile(`-{2,}`)
 	// leadingJiraKeyRe matches a lowercased Jira key at the START of the branch's
 	// segment after the type slash (e.g. the "star-2271" in "star-2271-ecoupon"),
 	// so only the card key is re-uppercased and later "-2" de-dup suffixes or
@@ -174,7 +174,7 @@ func (m *Manager) generateBranchName(ctx context.Context, agent ports.Agent, cfg
 	if err != nil {
 		return "", false
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cmd := aoprocess.CommandContext(cctx, argv[0], argv[1:]...)
 	cmd.Dir = tmpDir
