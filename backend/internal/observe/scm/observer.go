@@ -885,6 +885,18 @@ func (o *Observer) selectRefreshCandidates(ctx context.Context, subjects map[str
 				}
 			}
 		}
+		// CI-stuck-pending fix (board: "ci checks stuck pending"): the check-runs
+		// ETag guard above gates the REST /check-runs list, but the CI verdict is
+		// decided by the GraphQL statusCheckRollup — an independent subsystem. A
+		// PENDING->terminal rollup transition can occur with NO change to the
+		// check-runs list, so the guard keeps returning 304 and the observation
+		// freezes at ci=pending forever. While local CI is still non-terminal we
+		// must keep re-reading the rollup regardless of that 304. This is
+		// self-limiting: it only forces a refetch while CI is transient (pending),
+		// then quiesces to the ETag fast-path once CI reaches a terminal state.
+		if s.known.CI == domain.CIPending {
+			candidate = true
+		}
 		if candidate {
 			selection.refs = append(selection.refs, ports.SCMPRRef{Repo: s.repo, Number: s.known.Number, URL: s.known.URL})
 			selection.candidateKeys[key] = true
