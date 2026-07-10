@@ -38,6 +38,7 @@ function seedGroups(): PRCommentGroup[] {
 							url: "https://gh/pr/1#c1",
 							resolved: false,
 							isBot: false,
+							system: false,
 							createdAt: "2026-07-08T00:00:00Z",
 						},
 					],

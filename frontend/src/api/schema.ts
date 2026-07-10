@@ -1313,6 +1313,7 @@ export interface components {
             id: string;
             isBot: boolean;
             resolved: boolean;
+            system: boolean;
             url: string;
         };
         SessionPRUnresolvedReviewer: {

@@ -133,6 +133,56 @@ export function splitBodyRuns(body: string): BodyRun[] {
 		.filter((r) => r.text !== "");
 }
 
+export type NoteRun = { text: string; href?: string };
+
+// Matches a single markdown link: [label](target). Kept deliberately simple —
+// GitLab system notes embed exactly one such link and no nested brackets.
+const MD_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+/**
+ * Split a GitLab system-note body (e.g. "changed this line in
+ * [version 6 of the diff](/g/p/-/merge_requests/7/diffs?diff_id=1)") into plain
+ * and link runs, so the UI can render the markdown link as a real hyperlink
+ * instead of dumping the raw URL. `origin` (the PR/MR host) resolves GitLab's
+ * host-relative link targets to absolute URLs. Runs with an `href` are links;
+ * concatenating every run's `text` reproduces the visible label text.
+ */
+export function splitNoteRuns(body: string, origin = ""): NoteRun[] {
+	const s = body ?? "";
+	const out: NoteRun[] = [];
+	let last = 0;
+	let m: RegExpExecArray | null;
+	MD_LINK.lastIndex = 0;
+	while ((m = MD_LINK.exec(s)) !== null) {
+		if (m.index > last) out.push({ text: s.slice(last, m.index) });
+		out.push({ text: m[1], href: resolveNoteHref(m[2], origin) });
+		last = MD_LINK.lastIndex;
+	}
+	if (last < s.length) out.push({ text: s.slice(last) });
+	return out.filter((r) => r.text !== "");
+}
+
+/**
+ * Resolve a note link target against the PR's origin. Absolute http(s) URLs pass
+ * through; GitLab's host-relative targets ("/group/repo/-/…") are prefixed with
+ * `origin` so Electron's window-open handler (http(s)-only) opens them.
+ */
+export function resolveNoteHref(href: string, origin: string): string {
+	const h = (href ?? "").trim();
+	if (/^https?:\/\//i.test(h)) return h;
+	if (h.startsWith("/") && origin) return origin.replace(/\/+$/, "") + h;
+	return h;
+}
+
+/** scheme://host of a PR/MR URL, used to resolve host-relative note links. */
+export function originOf(url: string): string {
+	try {
+		return new URL(url).origin;
+	} catch {
+		return "";
+	}
+}
+
 /**
  * The auto-generated worker prompt for a review comment — verbatim from the
  * design's `genPrompt`. Seeded (editable) into the "Edit prompt…" drawer and

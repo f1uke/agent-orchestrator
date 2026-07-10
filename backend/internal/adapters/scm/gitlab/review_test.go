@@ -87,6 +87,51 @@ func TestFetchReviewThreads_DropsNonResolvableDiscussions(t *testing.T) {
 	}
 }
 
+// TestFetchReviewThreads_MarksSystemNotes verifies that GitLab auto-generated
+// system notes (system:true — e.g. "changed this line in version 6 of the diff"
+// appended when a thread goes outdated) are flagged System on the observation so
+// downstream rendering can de-emphasize them instead of treating them as a second
+// user comment. The note stays in the thread (nothing dropped) and does not change
+// the thread's resolved/inclusion outcome, which is driven by the resolvable note.
+func TestFetchReviewThreads_MarksSystemNotes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Fproj/merge_requests/7/discussions", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"disc1","notes":[
+			{"id":101,"body":"please fix","resolvable":true,"resolved":false,"system":false,"author":{"username":"rev"},"position":{"new_path":"main.go","new_line":42}},
+			{"id":102,"body":"changed this line in [version 6 of the diff](/g/p/-/merge_requests/7/diffs?diff_id=1)","resolvable":false,"resolved":false,"system":true,"author":{"username":"rev"}}
+		]}]`))
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Fproj/merge_requests/7/approvals", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"approvals_left":0,"approved_by":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := newTestProvider(t, srv.URL)
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj"}, Number: 7}
+	rev, err := p.FetchReviewThreads(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("FetchReviewThreads: %v", err)
+	}
+	if len(rev.Threads) != 1 {
+		t.Fatalf("Threads = %+v, want exactly 1", rev.Threads)
+	}
+	cs := rev.Threads[0].Comments
+	if len(cs) != 2 {
+		t.Fatalf("Comments = %+v, want 2 (system note retained, not dropped)", cs)
+	}
+	if cs[0].System {
+		t.Errorf("comments[0].System = true, want false (real user note)")
+	}
+	if !cs[1].System {
+		t.Errorf("comments[1].System = false, want true (GitLab system note)")
+	}
+	// The system note is non-resolvable, so it must not flip the thread's
+	// resolved state — resolution is driven solely by the resolvable user note.
+	if rev.Threads[0].Resolved {
+		t.Errorf("threads[0].Resolved = true, want false (driven by the unresolved user note)")
+	}
+}
+
 // TestIsBotUsername guards against the raw strings.Contains(login, "bot")
 // false-positive magnet that was deliberately removed from the GitHub
 // adapter (see scm/github/provider.go's isBotAuthor doc: logins like

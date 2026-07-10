@@ -414,7 +414,10 @@ func TestWriteSCMObservationPersistsMetadataChecksReviewsAndComments(t *testing.
 	checks := []domain.PullRequestCheck{{Name: "build", CommitHash: "h1", Status: domain.PRCheckFailed, Conclusion: "failure", URL: "ci", Details: "99", LogTail: "boom", CreatedAt: now}}
 	reviews := []domain.PullRequestReview{{ID: "review-1", Author: "reviewer", State: domain.ReviewChangesRequest, URL: "https://github.com/o/r/pull/1#pullrequestreview-1", SubmittedAt: now}}
 	threads := []domain.PullRequestReviewThread{{ThreadID: "t1", Path: "main.go", Line: 7, SemanticHash: "th", UpdatedAt: now}}
-	comments := []domain.PullRequestComment{{ThreadID: "t1", ID: "c1", Author: "reviewer", File: "main.go", Line: 7, Body: "fix", URL: "comment", CreatedAt: now}}
+	comments := []domain.PullRequestComment{
+		{ThreadID: "t1", ID: "c1", Author: "reviewer", File: "main.go", Line: 7, Body: "fix", URL: "comment", CreatedAt: now},
+		{ThreadID: "t1", ID: "c2", Author: "reviewer", File: "main.go", Line: 7, Body: "changed this line in [version 6 of the diff](/o/r/-/mr/1)", System: true, CreatedAt: now.Add(time.Second)},
+	}
 
 	if err := s.WriteSCMObservation(ctx, pr, checks, reviews, threads, comments, ports.ReviewWriteReplace); err != nil {
 		t.Fatal(err)
@@ -439,8 +442,19 @@ func TestWriteSCMObservationPersistsMetadataChecksReviewsAndComments(t *testing.
 		t.Fatalf("reviews not persisted: %+v", gotReviews)
 	}
 	gotComments, _ := s.ListPRComments(ctx, pr.URL)
-	if len(gotComments) != 1 || gotComments[0].ThreadID != "t1" || gotComments[0].URL != "comment" {
+	if len(gotComments) != 2 || gotComments[0].ThreadID != "t1" || gotComments[0].URL != "comment" {
 		t.Fatalf("comments not persisted: %+v", gotComments)
+	}
+	// The system flag must round-trip so the UI can de-emphasize system notes.
+	byID := map[string]domain.PullRequestComment{}
+	for _, c := range gotComments {
+		byID[c.ID] = c
+	}
+	if byID["c1"].System {
+		t.Errorf("c1.System = true, want false (real user comment)")
+	}
+	if !byID["c2"].System {
+		t.Errorf("c2.System = false, want true (GitLab system note)")
 	}
 }
 

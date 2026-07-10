@@ -14,9 +14,11 @@ import {
 	baseName,
 	genPrompt,
 	initialsFor,
+	originOf,
 	providerBadge,
 	relativeTime,
 	splitBodyRuns,
+	splitNoteRuns,
 	STATUS_COLORS,
 	statusFor,
 } from "../lib/comment-inbox";
@@ -592,36 +594,40 @@ function ThreadCard({
 						</div>
 
 						<div style={{ flex: 1, minWidth: 0 }}>
-							{thread.comments.map((c, i) => (
-								<div key={c.id} style={{ marginTop: i === 0 ? 0 : 10 }}>
-									<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-										<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>{c.author || "unknown"}</span>
-										<span style={{ fontSize: 11, color: P.muted2 }}>{relativeTime(c.createdAt, Date.now())}</span>
+							{thread.comments.map((c, i) =>
+								c.system ? (
+									<SystemNoteLine key={c.id} body={c.body} prUrl={prUrl} first={i === 0} />
+								) : (
+									<div key={c.id} style={{ marginTop: i === 0 ? 0 : 10 }}>
+										<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+											<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>{c.author || "unknown"}</span>
+											<span style={{ fontSize: 11, color: P.muted2 }}>{relativeTime(c.createdAt, Date.now())}</span>
+										</div>
+										<div style={{ fontSize: 13, lineHeight: 1.55, color: P.body, wordBreak: "break-word" }}>
+											{splitBodyRuns(c.body).map((run, j) =>
+												run.code ? (
+													<code
+														key={j}
+														style={{
+															fontFamily: MONO,
+															fontSize: 11.5,
+															color: P.code,
+															background: P.pillBg,
+															border: `1px solid ${P.borderPill}`,
+															borderRadius: 4,
+															padding: "0 4px",
+														}}
+													>
+														{run.text}
+													</code>
+												) : (
+													<span key={j}>{run.text}</span>
+												),
+											)}
+										</div>
 									</div>
-									<div style={{ fontSize: 13, lineHeight: 1.55, color: P.body, wordBreak: "break-word" }}>
-										{splitBodyRuns(c.body).map((run, j) =>
-											run.code ? (
-												<code
-													key={j}
-													style={{
-														fontFamily: MONO,
-														fontSize: 11.5,
-														color: P.code,
-														background: P.pillBg,
-														border: `1px solid ${P.borderPill}`,
-														borderRadius: 4,
-														padding: "0 4px",
-													}}
-												>
-													{run.text}
-												</code>
-											) : (
-												<span key={j}>{run.text}</span>
-											),
-										)}
-									</div>
-								</div>
-							))}
+								),
+							)}
 
 							{thread.path && thread.line > 0 && (
 								<InboxDiff
@@ -649,6 +655,44 @@ function ThreadCard({
 						</div>
 					</div>
 				</div>
+			)}
+		</div>
+	);
+}
+
+/**
+ * A GitLab (or other provider) system note — e.g. "changed this line in version 6
+ * of the diff" that GitLab appends when a thread goes outdated. Rendered as a
+ * small, de-emphasized activity line (no avatar/author block, unlike a real
+ * comment), with its embedded markdown link shown as a clean hyperlink rather
+ * than the raw URL. Purely presentational: it never affects thread counts.
+ */
+function SystemNoteLine({ body, prUrl, first }: { body: string; prUrl: string; first: boolean }) {
+	const runs = splitNoteRuns(body, originOf(prUrl));
+	return (
+		<div
+			style={{
+				marginTop: first ? 0 : 8,
+				fontSize: 11.5,
+				lineHeight: 1.5,
+				color: P.muted,
+				wordBreak: "break-word",
+			}}
+		>
+			{runs.map((run, j) =>
+				run.href ? (
+					<a
+						key={j}
+						href={run.href}
+						target="_blank"
+						rel="noopener noreferrer"
+						style={{ color: P.secondary, textDecoration: "underline", textUnderlineOffset: 2 }}
+					>
+						{run.text}
+					</a>
+				) : (
+					<span key={j}>{run.text}</span>
+				),
 			)}
 		</div>
 	);

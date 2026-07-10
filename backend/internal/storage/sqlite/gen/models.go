@@ -101,6 +101,7 @@ type PRComment struct {
 	ThreadID  string
 	URL       string
 	IsBot     int64
+	System    int64
 }
 
 type PRReview struct {
