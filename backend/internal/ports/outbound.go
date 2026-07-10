@@ -83,6 +83,20 @@ type Runtime interface {
 	IsAlive(ctx context.Context, handle RuntimeHandle) (bool, error)
 }
 
+// AgentLivenessProber reports whether the AGENT PROCESS running in a session's
+// pane is still alive, as distinct from Runtime.IsAlive which only reports that
+// the runtime session/pane still exists. The tmux runtime keeps a session alive
+// with a keep-alive shell after its agent exits (so an operator can still inspect
+// the pane), which makes IsAlive stay true even though the agent is gone;
+// AgentAlive sees through that by checking for a live agent process under the
+// pane. A missing session is a definitive (false, nil); an ambiguous probe
+// failure is (false, err) so callers never treat a failed probe as death.
+//
+// Optional capability: not every Runtime implements it. Callers type-assert.
+type AgentLivenessProber interface {
+	AgentAlive(ctx context.Context, handle RuntimeHandle) (bool, error)
+}
+
 // RuntimeConfig is the spec for launching a session's process in a Runtime.
 // Argv is the agent's launch command as discrete arguments; each Runtime
 // shell-quotes it for its own shell, so the command survives args with spaces

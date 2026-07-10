@@ -112,6 +112,26 @@ func (s *Store) SupersedeStaleRunningReviewRuns(ctx context.Context, sessionID d
 	})
 }
 
+// FailRunningReviewRunsBySession marks every still-running pass for a worker
+// failed. Used to reconcile orphaned runs whose reviewer pane has died (so the
+// board unsticks and a fresh run can be triggered) and to back `ao review reset`.
+// Returns the number of rows failed.
+func (s *Store) FailRunningReviewRunsBySession(ctx context.Context, sessionID domain.SessionID, body string) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.qw.FailRunningReviewRunsBySession(ctx, gen.FailRunningReviewRunsBySessionParams{
+		Body:      body,
+		SessionID: sessionID,
+	})
+}
+
+// ListSessionIDsWithRunningReviewRuns returns the distinct worker sessions that
+// currently have at least one running review run. Used by the boot reconcile to
+// find reviews to check for orphaned (dead-pane) runs.
+func (s *Store) ListSessionIDsWithRunningReviewRuns(ctx context.Context) ([]domain.SessionID, error) {
+	return s.qw.ListSessionIDsWithRunningReviewRuns(ctx)
+}
+
 // MarkReviewRunDelivered records that lifecycle delivered the worker nudge for
 // a completed AO-internal review pass.
 func (s *Store) MarkReviewRunDelivered(ctx context.Context, id string, deliveredAt time.Time) (bool, error) {

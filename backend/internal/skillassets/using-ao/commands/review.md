@@ -32,6 +32,27 @@ ao review submit [worker-session-id] [flags]
 | `--session string` | Worker session id (or pass it as the positional argument) | - |
 | `--verdict string` | Review verdict: `approved` or `changes_requested` | Required |
 
+---
+
+### ao review reset
+
+Clear a worker's stuck "Reviewing…" state by failing its orphaned running reviews.
+Use this when a review is stuck because its reviewer terminal was closed (or the
+reviewer died) before it finished: it fails every still-running review run for the
+worker so the review can be triggered again. Completed and changes-requested
+reviews are left untouched.
+
+**Syntax:**
+```
+ao review reset [worker-session-id] [flags]
+```
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Worker session id (or pass it as the positional argument) | - |
+
 ## Examples
 
 ```bash
@@ -42,4 +63,9 @@ ao review submit mer-3 --run review-run-1 --verdict approved
 ```bash
 # Submit a changes-requested review with a body from stdin
 echo "Please fix the null check on line 42." | ao review submit --session mer-3 --run review-run-1 --verdict changes_requested --body -
+```
+
+```bash
+# Unstick a worker whose reviewer terminal was closed mid-review
+ao review reset mer-3
 ```

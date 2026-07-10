@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -61,10 +62,14 @@ type Runtime struct {
 	enterDelay time.Duration
 	runner     runner
 	sleep      func(time.Duration) // seam for tests; defaults to time.Sleep
+	// hasLiveChild reports whether pid has at least one live child process. It is
+	// the seam AgentAlive uses to see past the keep-alive shell; tests fake it.
+	hasLiveChild func(ctx context.Context, pid int) (bool, error)
 }
 
 var _ ports.Runtime = (*Runtime)(nil)
 var _ ports.Attacher = (*Runtime)(nil)
+var _ ports.AgentLivenessProber = (*Runtime)(nil)
 
 type runner interface {
 	Run(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
@@ -114,14 +119,15 @@ func New(opts Options) *Runtime {
 		enterDelay = defaultEnterDelay
 	}
 	return &Runtime{
-		binary:     binary,
-		shell:      shellPath,
-		timeout:    timeout,
-		chunkSize:  chunkSize,
-		chunkDelay: chunkDelay,
-		enterDelay: enterDelay,
-		runner:     execRunner{},
-		sleep:      time.Sleep,
+		binary:       binary,
+		shell:        shellPath,
+		timeout:      timeout,
+		chunkSize:    chunkSize,
+		chunkDelay:   chunkDelay,
+		enterDelay:   enterDelay,
+		runner:       execRunner{},
+		sleep:        time.Sleep,
+		hasLiveChild: defaultHasLiveChild,
 	}
 }
 
@@ -144,8 +150,26 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 
 	launchCmd := buildLaunchCommand(cfg)
 	args := newSessionArgs(id, cfg.WorkspacePath, r.shell, launchCmd)
-	if _, err := r.run(ctx, args...); err != nil {
-		return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s: %w", id, err)
+	if out, err := r.run(ctx, args...); err != nil {
+		// A pre-existing session with this deterministic name blocks new-session
+		// with "duplicate session". If it is a STALE orphan (its agent has exited —
+		// e.g. left by a terminated/restarted session, the re-import→open case),
+		// reap it and retry. If a LIVE agent occupies it, refuse rather than clobber
+		// a session the user may be using.
+		if !duplicateSessionOutput(string(out)) {
+			return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s: %w", id, err)
+		}
+		stale := ports.RuntimeHandle{ID: id}
+		alive, aErr := r.AgentAlive(ctx, stale)
+		if aErr != nil || alive {
+			return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s: a live agent already occupies that name: %w", id, err)
+		}
+		if dErr := r.Destroy(ctx, stale); dErr != nil {
+			return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s: reap stale: %w", id, dErr)
+		}
+		if _, err := r.run(ctx, args...); err != nil {
+			return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s (after reaping stale): %w", id, err)
+		}
 	}
 
 	// Hide the status bar in the embedded terminal: it clutters the view and
@@ -213,6 +237,70 @@ func (r *Runtime) IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool
 		return false, fmt.Errorf("tmux runtime: probe session %s: %w", id, err)
 	}
 	return true, nil
+}
+
+// AgentAlive reports whether the agent process is still running in the session's
+// pane, seeing past the keep-alive shell that IsAlive cannot. The pane is
+// launched as `<shell> -c '<exports>; <agent argv>; exec <shell> -i'`: while the
+// agent runs it is a child of the pane's leader process; once it exits the leader
+// execs into a bare interactive shell with no children. So "the pane leader has a
+// live child" is a runtime-agnostic proxy for "the agent is alive" — a leaked
+// dev server the agent double-forked reparents to init and is NOT a child, so it
+// does not count. A definitively-missing session is (false, nil); any other
+// non-zero tmux exit is a probe error so a reaper never reaps on a failed probe.
+func (r *Runtime) AgentAlive(ctx context.Context, handle ports.RuntimeHandle) (bool, error) {
+	id, err := handleID(handle)
+	if err != nil {
+		return false, err
+	}
+	out, err := r.run(ctx, listPanePIDArgs(id)...)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && sessionMissingOutput(string(out)) {
+			return false, nil
+		}
+		return false, fmt.Errorf("tmux runtime: agent-alive probe %s: %w", id, err)
+	}
+	pid, err := parseFirstPID(string(out))
+	if err != nil {
+		return false, fmt.Errorf("tmux runtime: agent-alive probe %s: %w", id, err)
+	}
+	if pid <= 0 {
+		return false, nil
+	}
+	return r.hasLiveChild(ctx, pid)
+}
+
+// parseFirstPID reads the first positive integer from `tmux list-panes` pane_pid
+// output. Empty output (no panes) yields 0, nil so AgentAlive reports not-alive.
+func parseFirstPID(out string) (int, error) {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			return 0, fmt.Errorf("unexpected pane_pid output %q", line)
+		}
+		return pid, nil
+	}
+	return 0, nil
+}
+
+// defaultHasLiveChild reports whether pid has at least one direct child process,
+// via `pgrep -P`. pgrep exits 1 with no output when nothing matches, which is a
+// clean "no child" (false, nil), not an error.
+func defaultHasLiveChild(ctx context.Context, pid int) (bool, error) {
+	out, err := exec.CommandContext(ctx, "pgrep", "-P", strconv.Itoa(pid)).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("tmux runtime: pgrep -P %d: %w", pid, err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
 // SendMessage sends literal text to the session (chunked via send-keys -l),
@@ -425,6 +513,12 @@ func sessionMissingOutput(out string) bool {
 // failed because the session was already gone.
 func killSessionMissingOutput(out string) bool {
 	return sessionMissingOutput(out)
+}
+
+// duplicateSessionOutput reports whether a non-zero `tmux new-session` exit
+// failed because a session with that name already exists.
+func duplicateSessionOutput(out string) bool {
+	return strings.Contains(strings.ToLower(out), "duplicate session")
 }
 
 // -- text helpers --

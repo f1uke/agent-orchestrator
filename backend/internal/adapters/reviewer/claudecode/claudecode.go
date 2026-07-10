@@ -69,8 +69,16 @@ var reviewerDisallowedTools = []string{
 // ReviewCommand builds a claude-code invocation that reviews the worker's
 // checkout for the PR, with the review prompt baked in.
 func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, error) {
+	// Pin the native `claude --session-id` to the per-launch AgentSessionID (not
+	// the stable pane handle), so a relaunched reviewer never reuses the prior
+	// pass's id and collides with its on-disk transcript. Empty falls back to the
+	// handle id for older callers that don't set it.
+	sessionID := inv.AgentSessionID
+	if sessionID == "" {
+		sessionID = inv.ReviewerID
+	}
 	argv, err := r.agent.GetLaunchCommand(ctx, ports.LaunchConfig{
-		SessionID:     inv.ReviewerID,
+		SessionID:     sessionID,
 		WorkspacePath: inv.WorkspacePath,
 		Prompt:        inv.Prompt,
 		SystemPrompt:  inv.SystemPrompt,

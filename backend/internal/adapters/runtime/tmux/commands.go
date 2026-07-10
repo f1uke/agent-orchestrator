@@ -64,6 +64,14 @@ func sendEnterArgs(id string) []string {
 	return []string{"send-keys", "-t", id, "Enter"}
 }
 
+// listPanePIDArgs builds args for `tmux list-panes -t <id> -F '#{pane_pid}'`,
+// which prints the pid of each pane's leader process. AgentAlive reads the first
+// line to find the pane leader whose children reveal whether the agent is live.
+// Pane-targeting, so a plain session name (no `=` prefix; see exactSessionTarget).
+func listPanePIDArgs(id string) []string {
+	return []string{"list-panes", "-t", id, "-F", "#{pane_pid}"}
+}
+
 // capturePaneArgs builds args for `tmux capture-pane -t <id> -p -S -<lines>`.
 // -p prints to stdout; -S -<n> starts n lines back in history.
 func capturePaneArgs(id string, lines int) []string {

@@ -171,6 +171,10 @@ type fakeRuntime struct {
 	aliveByHandle map[string]bool
 	aliveErr      error
 	destroyedIDs  []string
+	// agentAliveByHandle maps a RuntimeHandle.ID to agent-process liveness
+	// (distinct from session existence); missing = false.
+	agentAliveByHandle map[string]bool
+	agentAliveErr      error
 }
 
 func (r *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
@@ -191,6 +195,12 @@ func (r *fakeRuntime) IsAlive(_ context.Context, handle ports.RuntimeHandle) (bo
 		return false, r.aliveErr
 	}
 	return r.aliveByHandle[handle.ID], nil
+}
+func (r *fakeRuntime) AgentAlive(_ context.Context, handle ports.RuntimeHandle) (bool, error) {
+	if r.agentAliveErr != nil {
+		return false, r.agentAliveErr
+	}
+	return r.agentAliveByHandle[handle.ID], nil
 }
 
 type fakeAgent struct{}
@@ -883,6 +893,33 @@ func TestCleanup_ReclaimsTerminalWorkspaces(t *testing.T) {
 	}
 	if ws.destroyed != 1 {
 		t.Fatal("live workspace must not be destroyed")
+	}
+}
+
+// Reap-safety: a session the DB marks terminated but whose pane still has a LIVE
+// agent (e.g. a late/stale SessionEnd, or the user resumed into it) must NOT be
+// reaped by cleanup — that is the orchestrator "closes repeatedly" bug. It is
+// skipped and reported, its runtime and worktree left intact.
+func TestCleanup_SkipsTerminatedSessionWithLiveAgent(t *testing.T) {
+	m, st, rt, ws := newManager()
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", RuntimeHandleID: "h1"})
+	rt.agentAliveByHandle = map[string]bool{"h1": true}
+
+	res, err := m.Cleanup(ctx, "mer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Cleaned) != 0 {
+		t.Fatalf("must not clean a live-agent session, cleaned=%v", res.Cleaned)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("must not destroy a live agent's runtime, destroyed=%d", rt.destroyed)
+	}
+	if ws.destroyed != 0 {
+		t.Fatalf("must not destroy a live agent's worktree, destroyed=%d", ws.destroyed)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].SessionID != "mer-1" {
+		t.Fatalf("expected mer-1 reported skipped, got %v", res.Skipped)
 	}
 }
 

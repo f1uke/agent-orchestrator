@@ -38,9 +38,11 @@ type Store interface {
 	UpdateReviewRunResult(ctx stdctx.Context, id string, status domain.ReviewRunStatus, verdict domain.ReviewVerdict, body, githubReviewID string) (bool, error)
 	SupersedeReviewRun(ctx stdctx.Context, id, body string) (bool, error)
 	SupersedeStaleRunningReviewRuns(ctx stdctx.Context, sessionID domain.SessionID, prURL, targetSHA, body string) (int64, error)
+	FailRunningReviewRunsBySession(ctx stdctx.Context, sessionID domain.SessionID, body string) (int64, error)
 	GetReviewRun(ctx stdctx.Context, id string) (domain.ReviewRun, bool, error)
 	GetReviewRunBySessionPRAndSHA(ctx stdctx.Context, id domain.SessionID, prURL, targetSHA string) (domain.ReviewRun, bool, error)
 	ListReviewRunsBySession(ctx stdctx.Context, id domain.SessionID) ([]domain.ReviewRun, error)
+	ListSessionIDsWithRunningReviewRuns(ctx stdctx.Context) ([]domain.SessionID, error)
 }
 
 // Sessions resolves the worker session under review.
@@ -203,6 +205,30 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 		return TriggerResult{}, err
 	}
 
+	// Probe the reviewer pane's agent liveness once, up front. If the pane is
+	// gone (its claude-code exited out of band), any run still 'running' is
+	// orphaned — no live reviewer will ever complete it — so fail those runs and
+	// re-plan. That unsticks the board and lets this trigger create fresh runs
+	// instead of skipping the stuck PRs. The result is reused for the reuse-vs-
+	// spawn decision below, so the pane is probed only once.
+	reviewerAlive := false
+	if hasReview && reviewRow.ReviewerHandleID != "" {
+		reviewerAlive, err = e.launcher.Alive(ctx, reviewRow.ReviewerHandleID)
+		if err != nil {
+			return TriggerResult{}, err
+		}
+		if !reviewerAlive {
+			if _, err := e.store.FailRunningReviewRunsBySession(ctx, workerID, "reviewer pane exited before the review completed"); err != nil {
+				return TriggerResult{}, err
+			}
+			runs, err = e.store.ListReviewRunsBySession(ctx, workerID)
+			if err != nil {
+				return TriggerResult{}, err
+			}
+			reviews = Plan(prs, runs)
+		}
+	}
+
 	projCfg, err := e.projectConfig(ctx, worker)
 	if err != nil {
 		return TriggerResult{}, err
@@ -288,14 +314,15 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 	spec := reviewLaunchSpec(worker, harness, created[0], queue, 0)
 	spec.ReviewerBase = e.reviewerBase()
 	spec.ReviewerAddition = projCfg.SystemPromptAdditions.Reviewer
-	if hasReview && reviewRow.ReviewerHandleID != "" {
-		alive, err := e.launcher.Alive(ctx, reviewRow.ReviewerHandleID)
-		if err != nil {
-			return TriggerResult{}, failRuns(0, err)
-		}
-		if alive {
-			handleID = reviewRow.ReviewerHandleID
-		}
+	// A fresh per-launch native session id keyed on this batch's first run, so a
+	// relaunched reviewer never reuses a prior pass's `claude --session-id` and
+	// collides with its transcript. Only consumed on the Spawn (relaunch) path;
+	// the live-pane Notify path keeps the running claude's original id.
+	spec.AgentSessionID = reviewerAgentSessionID(workerID, created[0].ID)
+	// Reuse the up-front liveness probe: an agent-alive pane is re-notified;
+	// otherwise a fresh reviewer is spawned (which destroys any stale pane first).
+	if reviewerAlive && reviewRow.ReviewerHandleID != "" {
+		handleID = reviewRow.ReviewerHandleID
 	}
 	if handleID == "" {
 		h, err := e.launcher.Spawn(ctx, spec)
@@ -366,6 +393,53 @@ func firstReusableRun(reviews []PRReviewState) domain.ReviewRun {
 		}
 	}
 	return domain.ReviewRun{}
+}
+
+// ReconcileOrphanedRuns fails running review runs whose reviewer pane is no
+// longer alive. Called on daemon boot so a review left "running" when a reviewer
+// died (or the daemon restarted without it) unsticks the board automatically,
+// instead of waiting for the next manual trigger. A run whose pane genuinely
+// survived is left alone so an in-flight reviewer can still submit. Best-effort:
+// a per-session probe error is skipped (never fails a run on an ambiguous probe).
+// Returns the number of runs failed.
+func (e *Engine) ReconcileOrphanedRuns(ctx stdctx.Context) (int, error) {
+	ids, err := e.store.ListSessionIDsWithRunningReviewRuns(ctx)
+	if err != nil {
+		return 0, err
+	}
+	failed := 0
+	for _, id := range ids {
+		alive := false
+		if reviewRow, ok, err := e.store.GetReviewBySession(ctx, id); err != nil {
+			return failed, err
+		} else if ok && reviewRow.ReviewerHandleID != "" {
+			alive, err = e.launcher.Alive(ctx, reviewRow.ReviewerHandleID)
+			if err != nil {
+				// Ambiguous probe: do not fail the run on uncertainty.
+				continue
+			}
+		}
+		if alive {
+			continue
+		}
+		n, err := e.store.FailRunningReviewRunsBySession(ctx, id, "reviewer pane not alive at daemon start")
+		if err != nil {
+			return failed, err
+		}
+		failed += int(n)
+	}
+	return failed, nil
+}
+
+// Reset fails every still-running review run for a worker, clearing a board stuck
+// on "Reviewing…" when a reviewer died out of band and left an orphaned run. A
+// failed run drops out of the per-commit idempotency index, so the next trigger
+// can start a fresh review. Returns the number of runs failed.
+func (e *Engine) Reset(ctx stdctx.Context, workerID domain.SessionID) (int64, error) {
+	if workerID == "" {
+		return 0, fmt.Errorf("%w: worker session id is required", ErrInvalid)
+	}
+	return e.store.FailRunningReviewRunsBySession(ctx, workerID, "review reset by operator")
 }
 
 // List returns a worker's review state: the live reviewer handle and its passes.

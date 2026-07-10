@@ -64,6 +64,26 @@ func (c *ReviewsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/reviews", c.list)
 	r.Post("/sessions/{sessionId}/reviews/trigger", c.trigger)
 	r.Post("/sessions/{sessionId}/reviews/submit", c.submit)
+	r.Post("/sessions/{sessionId}/reviews/reset", c.reset)
+}
+
+// ResetReviewResponse is the body of reset (200): how many stuck running runs
+// were failed so the worker's review can be re-triggered.
+type ResetReviewResponse struct {
+	Failed int64 `json:"failed" description:"Number of stuck running review runs that were failed."`
+}
+
+func (c *ReviewsController) reset(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/reviews/reset")
+		return
+	}
+	failed, err := c.Svc.Reset(r.Context(), sessionID(r))
+	if err != nil {
+		writeReviewError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ResetReviewResponse{Failed: failed})
 }
 
 func (c *ReviewsController) list(w http.ResponseWriter, r *http.Request) {

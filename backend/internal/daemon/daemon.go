@@ -246,6 +246,17 @@ func Run() error {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
 	}
 
+	// Fail review runs left "running" by a reviewer that died out of band (or did
+	// not survive this restart), so a board stuck on "Reviewing…" unsticks without
+	// a manual trigger. Best-effort; never blocks boot.
+	if reviewSvc != nil {
+		if failed, reconcileErr := reviewSvc.ReconcileOrphanedRuns(ctx); reconcileErr != nil {
+			log.Error("reconcile orphaned review runs on boot failed", "err", reconcileErr)
+		} else if failed > 0 {
+			log.Info("reconciled orphaned review runs on boot", "failed", failed)
+		}
+	}
+
 	// ponytail: 5s tolerates a brief frontend restart; tune if dev hot-reload trips it.
 	const supervisorGrace = 5 * time.Second
 
