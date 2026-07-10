@@ -11,8 +11,9 @@ func TestRendererUsesDefaultWhenNoOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != Default(NameMergeConflict) {
-		t.Fatalf("got %q", out)
+	want, _ := Execute(Default(NameMergeConflict), MergeConflictData{})
+	if out != want {
+		t.Fatalf("got %q, want %q", out, want)
 	}
 }
 
@@ -51,7 +52,8 @@ func TestRendererBlankOverrideUsesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != Default(NameMergeConflict) {
+	want, _ := Execute(Default(NameMergeConflict), MergeConflictData{})
+	if out != want {
 		t.Fatalf("blank override should use default, got %q", out)
 	}
 }

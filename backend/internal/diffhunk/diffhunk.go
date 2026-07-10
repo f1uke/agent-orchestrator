@@ -121,7 +121,7 @@ func parseHunkHeader(h string) (oldStart, newStart int, ok bool) {
 
 // parseStart reads a "<sign><start>[,<count>]" token, returning start.
 func parseStart(tok string, sign byte) (int, bool) {
-	if len(tok) == 0 || tok[0] != sign {
+	if tok == "" || tok[0] != sign {
 		return 0, false
 	}
 	tok = tok[1:]

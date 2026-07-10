@@ -32,6 +32,8 @@ const (
 // from one the agent actually asked for (ReasonWaitingInput).
 type StatusReason string
 
+// StatusReason values name each rule in the status derivation; the trailing
+// comment on each states the condition that selects it.
 const (
 	ReasonWorking      StatusReason = "working"       // active, heartbeat fresh
 	ReasonWaitingInput StatusReason = "waiting_input" // agent reported a prompt (Notification hook)

@@ -48,6 +48,8 @@ type statusResult struct {
 // deriveStatus computes the display status. It delegates to deriveStatusDetail
 // and drops the reason/countdown, preserving the original signature for callers
 // and tests that only need the status.
+//
+//nolint:unparam // minApprovals is kept to preserve deriveStatusDetail's signature for callers/tests, even though current callers pass the default
 func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) domain.SessionStatus {
 	return deriveStatusDetail(rec, prs, now, signalCapable, minApprovals).Status
 }

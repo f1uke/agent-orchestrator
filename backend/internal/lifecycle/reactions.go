@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -112,6 +113,17 @@ type reactionPayload struct {
 	Attempts map[string]int    `json:"attempts,omitempty"`
 }
 
+// pendingNudge is one actionable PR nudge queued by ApplyPRObservation. Queuing
+// each condition's nudge (instead of sending inline and returning) keeps the
+// conditions independent — none can suppress another — and centralizes the
+// send + dedup in a single loop.
+type pendingNudge struct {
+	key         string
+	sig         string
+	msg         string
+	maxAttempts int
+}
+
 // ApplyPRObservation reacts to a fetched PR observation after the PR service has
 // persisted it. It does not write PR rows; it owns PR-driven lifecycle effects
 // and sends actionable agent nudges such as rebase, fix-CI, and
@@ -142,19 +154,27 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput {
 		return nil
 	}
+	// A single PR can trip several actionable conditions at once (failing CI,
+	// unresolved review comments, a merge conflict). Queue every applicable nudge
+	// and send them together, so each surfaces independently instead of one
+	// returning early and hiding the rest — the bug this reducer had, where a CI
+	// failure suppressed review feedback on the same PR. Each nudge self-dedups
+	// via sendOnce; a send error short-circuits, and nudges already sent have
+	// persisted their own dedup signature so the next poll retries only the rest.
+	ident := prIdentity(o)
+	var nudges []pendingNudge
+
 	if o.CI == domain.CIFailing {
-		for _, ch := range o.Checks {
-			if ch.Status == domain.PRCheckFailed {
-				logTail := ""
-				if ch.LogTail != "" {
-					// LogTail is raw CI job output; sanitize before it reaches the
-					// agent's live pane so embedded escape sequences can't drive the
-					// terminal (the dedup signature stays on the raw bytes).
-					logTail = domain.SanitizeControlChars(ch.LogTail)
-				}
-				msg := m.renderNudge(messagetemplates.NameCIFailing, messagetemplates.CIFailingData{LogTail: logTail})
-				return m.sendOnce(ctx, id, o.URL, "ci:"+o.URL+":"+ch.Name, ch.CommitHash+":"+ch.LogTail, msg, 0)
+		if ch, ok := firstFailedCheck(o.Checks); ok {
+			logTail := ""
+			if ch.LogTail != "" {
+				// LogTail is raw CI job output; sanitize before it reaches the
+				// agent's live pane so embedded escape sequences can't drive the
+				// terminal (the dedup signature stays on the raw bytes).
+				logTail = domain.SanitizeControlChars(ch.LogTail)
 			}
+			msg := m.renderNudge(messagetemplates.NameCIFailing, messagetemplates.CIFailingData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL), LogTail: logTail})
+			nudges = append(nudges, pendingNudge{key: "ci:" + o.URL + ":" + ch.Name, sig: ch.CommitHash + ":" + ch.LogTail, msg: msg, maxAttempts: 0})
 		}
 	}
 	// Auto-nudge the worker when its PR has unresolved human review comments (or
@@ -169,11 +189,11 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	}
 	if effective && (o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments)) {
 		comments, sig := reviewContent(o.Comments)
-		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{Comments: comments})
+		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL), Comments: comments})
 		if sig == "" {
 			sig = string(o.Review)
 		}
-		return m.sendOnce(ctx, id, o.URL, "review:"+o.URL, sig, msg, reviewMaxNudge)
+		nudges = append(nudges, pendingNudge{key: "review:" + o.URL, sig: sig, msg: msg, maxAttempts: reviewMaxNudge})
 	}
 	if o.Mergeability == domain.MergeConflicting {
 		// Only the bottom of a stack is eligible for the rebase nudge. A PR
@@ -185,11 +205,16 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if err != nil {
 			return err
 		}
-		if blocked {
-			return nil
+		if !blocked {
+			msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL)})
+			nudges = append(nudges, pendingNudge{key: "merge-conflict:" + o.URL, sig: string(o.Mergeability), msg: msg, maxAttempts: 0})
 		}
-		msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{})
-		return m.sendOnce(ctx, id, o.URL, "merge-conflict:"+o.URL, string(o.Mergeability), msg, 0)
+	}
+
+	for _, n := range nudges {
+		if err := m.sendOnce(ctx, id, o.URL, n.key, n.sig, n.msg, n.maxAttempts); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -398,6 +423,9 @@ func scmToPRObservation(o ports.SCMObservation) ports.PRObservation {
 		Fetched:      o.Fetched,
 		URL:          firstSCMNonEmpty(o.PR.URL, o.PR.HTMLURL),
 		Number:       o.PR.Number,
+		Title:        o.PR.Title,
+		SourceBranch: o.PR.SourceBranch,
+		TargetBranch: o.PR.TargetBranch,
 		Draft:        o.PR.Draft,
 		Merged:       o.PR.Merged,
 		Closed:       o.PR.Closed,
@@ -536,6 +564,39 @@ func firstSCMNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// prIdentity renders a short, sanitized PR identity ("PR #123 \"Title\"
+// (feat/x → main)") for nudge messages so an agent in a multi-PR session can
+// tell which PR — and where in a stack — a nudge refers to. Title and branch
+// names are provider-controlled and reach the agent's live pane, so both are
+// control-char sanitized. Falls back to "your PR" when the number is unknown.
+func prIdentity(o ports.PRObservation) string {
+	if o.Number <= 0 {
+		return "your PR"
+	}
+	id := fmt.Sprintf("PR #%d", o.Number)
+	if o.Title != "" {
+		id += fmt.Sprintf(" %q", domain.SanitizeControlChars(o.Title))
+	}
+	if o.SourceBranch != "" && o.TargetBranch != "" {
+		id += fmt.Sprintf(" (%s → %s)", domain.SanitizeControlChars(o.SourceBranch), domain.SanitizeControlChars(o.TargetBranch))
+	}
+	return id
+}
+
+// firstFailedCheck returns the first check in a failed state, preserving the
+// original CI-nudge behavior of surfacing a single failing check. Extracting it
+// lets the CI branch queue its nudge and fall through instead of returning from
+// inside the loop, so review/merge-conflict feedback for the same PR is no
+// longer skipped.
+func firstFailedCheck(checks []ports.PRCheckObservation) (ports.PRCheckObservation, bool) {
+	for _, ch := range checks {
+		if ch.Status == domain.PRCheckFailed {
+			return ch, true
+		}
+	}
+	return ports.PRCheckObservation{}, false
 }
 
 func hasUnresolvedComments(comments []ports.PRCommentObservation) bool {

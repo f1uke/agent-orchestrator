@@ -21,7 +21,6 @@ import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { CommentsView, type FileDiffTarget } from "./CommentsView";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
@@ -793,17 +792,12 @@ function BrowserView({
 	onTogglePopOut?: (next: boolean) => void;
 	browserView?: BrowserViewModel;
 }) {
+	// While maximized, the browser is a full-window overlay that covers the rail,
+	// so the inspector's Browser tab has nothing to show (and must not mount a
+	// second BrowserPanelView — it would fight the overlay over the shared native
+	// view slot). Exit is via the overlay's own minimize button.
 	if (browserPoppedOut) {
-		return (
-			<div role="tabpanel">
-				<div className="inspector-empty inspector-empty--browser">
-					<p>Browser preview is in the center pane.</p>
-					<Button onClick={() => onTogglePopOut?.(false)} size="sm" type="button" variant="outline">
-						Return to panel
-					</Button>
-				</div>
-			</div>
-		);
+		return null;
 	}
 
 	if (!browserView) {

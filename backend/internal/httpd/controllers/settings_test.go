@@ -414,24 +414,21 @@ func TestMessageTemplatesAPI_GetListsAllWithDefaults(t *testing.T) {
 		}
 	}
 
-	// merge-conflict has no documented placeholders. It must still serialize
-	// as an empty JSON array, never null: a nil slice here violates the
-	// OpenAPI schema's required non-nullable array and previously crashed the
-	// frontend's Global Settings renderer (t.placeholders.length threw on
-	// null) every time the section opened, since merge-conflict is always in
-	// the response.
+	// merge-conflict now documents the PR-context placeholders (#2492 enrichment:
+	// {{.PRIdentity}} / {{.PRURL}}).
 	mc, ok := byName["merge-conflict"]
 	if !ok {
 		t.Fatalf("missing merge-conflict template: %+v", got.Templates)
 	}
-	if mc.Placeholders == nil {
-		t.Fatalf("merge-conflict placeholders must be [] not null")
+	if len(mc.Placeholders) != 2 {
+		t.Fatalf("merge-conflict should document the PR-context placeholders, got %v", mc.Placeholders)
 	}
-	if len(mc.Placeholders) != 0 {
-		t.Fatalf("merge-conflict placeholders must be empty, got %v", mc.Placeholders)
-	}
-	if !strings.Contains(string(body), `"placeholders":[]`) {
-		t.Fatalf("merge-conflict placeholders must serialize as [] on the wire: %s", body)
+	// Placeholders must always serialize as a JSON array, never null: a nil slice
+	// violates the OpenAPI schema's required non-nullable array and previously
+	// crashed the frontend's Global Settings renderer (t.placeholders.length threw
+	// on null) every time the section opened.
+	if strings.Contains(string(body), `"placeholders":null`) {
+		t.Fatalf("placeholders must never serialize as null: %s", body)
 	}
 }
 
