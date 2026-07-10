@@ -90,8 +90,10 @@ type RoleOverride struct {
 // DefaultBranchName is the base branch used when a project configures none.
 const DefaultBranchName = "main"
 
-// DefaultMinApprovals is the fallback approval floor when a project sets none.
-const DefaultMinApprovals = 3
+// DefaultMinApprovals is the fallback approval floor when a project sets none:
+// a PR with no SCM approval rule of its own is treated as approved once it has
+// at least this many approvals.
+const DefaultMinApprovals = 2
 
 // ResolveMinApprovals returns the effective approval floor, defaulting unset or
 // non-positive values to DefaultMinApprovals.

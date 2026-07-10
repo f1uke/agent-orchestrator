@@ -126,8 +126,8 @@ func TestResolveMinApprovals(t *testing.T) {
 		in   int
 		want int
 	}{
-		{"unset defaults to 3", 0, 3},
-		{"negative defaults to 3", -2, 3},
+		{"unset defaults to 2", 0, 2},
+		{"negative defaults to 2", -2, 2},
 		{"explicit 1", 1, 1},
 		{"explicit 5", 5, 5},
 	}

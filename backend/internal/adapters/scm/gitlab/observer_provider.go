@@ -175,9 +175,15 @@ type restMR struct {
 		HeadSHA  string `json:"head_sha"`
 		StartSHA string `json:"start_sha"`
 	} `json:"diff_refs"`
-	WebURL       string `json:"web_url"`
-	MergeStatus  string `json:"merge_status"`
-	HasConflicts bool   `json:"has_conflicts"`
+	WebURL      string `json:"web_url"`
+	MergeStatus string `json:"merge_status"`
+	// DetailedMergeStatus is GitLab's richer, authoritative merge verdict
+	// (GitLab >= 15.6). Unlike the coarse MergeStatus — which returns
+	// can_be_merged whenever conflicts/pipeline are clear, even with an unmet
+	// approval rule — it names the specific blocker (e.g. not_approved,
+	// discussions_not_resolved, ci_must_pass). Empty on older GitLab.
+	DetailedMergeStatus string `json:"detailed_merge_status"`
+	HasConflicts        bool   `json:"has_conflicts"`
 	// ChangesCount is a string in GitLab's API (e.g. "3", or "1000+" when the
 	// diff is very large), not a number.
 	ChangesCount string `json:"changes_count"`
@@ -476,32 +482,61 @@ func normalizeCIStatus(pipelineStatus string) string {
 	}
 }
 
-// mergeability normalizes a merge request's merge_status/has_conflicts into
-// AO's mergeability verdict. GitLab reports has_conflicts independently of
-// merge_status, so conflicts are surfaced as an explicit blocker even when
-// merge_status doesn't otherwise call it out.
+// mergeability normalizes a merge request's merge status into AO's mergeability
+// verdict. GitLab reports has_conflicts independently of merge_status, so
+// conflicts are surfaced as an explicit blocker even when merge_status doesn't
+// otherwise call it out. The Mergeable flag and conflict blocker are derived
+// from the normalized State so that whichever signal decided it (the rich
+// detailed_merge_status, the coarse merge_status, or has_conflicts) stays
+// consistent with the emitted verdict.
 func mergeability(mr restMR) ports.SCMMergeabilityObservation {
+	state := normalizeMergeStatus(mr.MergeStatus, mr.DetailedMergeStatus, mr.HasConflicts)
 	out := ports.SCMMergeabilityObservation{
-		State:     normalizeMergeStatus(mr.MergeStatus, mr.HasConflicts),
-		Mergeable: mr.MergeStatus == "can_be_merged" && !mr.HasConflicts,
+		State:     state,
+		Mergeable: state == string(domain.MergeMergeable),
 	}
-	if mr.HasConflicts {
+	if state == string(domain.MergeConflicting) {
 		out.Conflict = true
 		out.Blockers = append(out.Blockers, "merge conflict")
 	}
 	return out
 }
 
-// normalizeMergeStatus maps GitLab's raw merge_status vocabulary (plus the
-// independently-reported has_conflicts flag) onto AO's domain.Mergeability
-// enum. This mirrors the github adapter, which also emits domain enum values:
-// the observer casts State straight into domain.Mergeability, and the status
-// pipeline only reaches "Ready to merge" when it equals domain.MergeMergeable.
-// Emitting GitLab's raw "can_be_merged" would never match, stranding mergeable
-// MRs in the "In review" column.
-func normalizeMergeStatus(mergeStatus string, hasConflicts bool) string {
+// normalizeMergeStatus maps GitLab's merge-status vocabulary onto AO's
+// domain.Mergeability enum. This mirrors the github adapter, which folds the
+// review/CI/blocked gates into its verdict: the observer casts State straight
+// into domain.Mergeability, and the status pipeline only reaches "Ready to
+// merge" when it equals domain.MergeMergeable.
+//
+// detailed_merge_status (GitLab >= 15.6) is preferred because it is the only
+// signal that reflects approval rules. The coarse merge_status returns
+// can_be_merged even when an approval rule (e.g. requires >= 3 approvals) is
+// unmet, which is exactly how an under-approved MR was wrongly promoted to
+// "Ready to merge". Only detailed_merge_status == "mergeable" means the MR can
+// actually merge right now; every other terminal value is a blocker, and the
+// transient checking/unchecked states are unknown. When detailed_merge_status
+// is absent (older GitLab / minimal payloads) fall back to the legacy
+// merge_status mapping. has_conflicts always wins, since GitLab reports it
+// independently.
+func normalizeMergeStatus(mergeStatus, detailedMergeStatus string, hasConflicts bool) string {
 	if hasConflicts {
 		return string(domain.MergeConflicting)
+	}
+	if d := strings.ToLower(strings.TrimSpace(detailedMergeStatus)); d != "" {
+		switch d {
+		case "mergeable":
+			return string(domain.MergeMergeable)
+		case "conflict", "broken_status":
+			return string(domain.MergeConflicting)
+		case "checking", "unchecked", "preparing":
+			return string(domain.MergeUnknown)
+		default:
+			// not_approved, blocked_status, draft_status, discussions_not_resolved,
+			// requested_changes, ci_must_pass, ci_still_running, need_rebase,
+			// external_status_checks, not_open, jira_association_missing, ... —
+			// all mean "cannot merge right now".
+			return string(domain.MergeBlocked)
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(mergeStatus)) {
 	case "can_be_merged":
