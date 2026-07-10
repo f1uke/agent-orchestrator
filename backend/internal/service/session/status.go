@@ -248,7 +248,7 @@ func prPipelineStatus(pr domain.PRFacts, minApprovals int) domain.SessionStatus 
 		return domain.StatusDraft
 	case pr.Review == domain.ReviewChangesRequest || pr.ReviewComments:
 		return domain.StatusChangesRequested
-	case pr.Mergeability == domain.MergeMergeable:
+	case pr.Mergeability == domain.MergeMergeable && !approvalRuleUnsatisfied(pr):
 		return domain.StatusMergeable
 	case pr.Review == domain.ReviewApproved:
 		return domain.StatusApproved
@@ -260,4 +260,21 @@ func prPipelineStatus(pr domain.PRFacts, minApprovals int) domain.SessionStatus 
 	default:
 		return domain.StatusPROpen
 	}
+}
+
+// approvalRuleUnsatisfied reports whether the SCM enforces an approval rule for
+// this PR that is not yet satisfied. It guards the mergeable → "Ready to merge"
+// transition so an under-approved PR can never be promoted on a mergeability
+// reading alone.
+//
+// This is the GitLab safety net: GitLab's coarse merge_status returns
+// can_be_merged even when an approval rule is unmet, and while the adapter now
+// prefers detailed_merge_status (which downgrades such an MR to blocked), older
+// GitLab omits that field. Keying on ApprovalRuleConfigured keeps GitHub
+// untouched — the GitHub adapter never sets it, folding its required-review gate
+// into mergeability (mergeStateStatus=BLOCKED) instead. When a rule is
+// configured, GitLab reports approved (ReviewApproved) only once approvals_left
+// hits zero, so any other decision means the rule is still outstanding.
+func approvalRuleUnsatisfied(pr domain.PRFacts) bool {
+	return pr.ApprovalRuleConfigured && pr.Review != domain.ReviewApproved
 }

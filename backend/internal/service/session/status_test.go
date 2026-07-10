@@ -129,6 +129,63 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 	}
 }
 
+// A configured-but-unmet SCM approval rule must NOT surface as "Ready to merge",
+// even when mergeability reads mergeable. GitLab's coarse merge_status returns
+// can_be_merged while an approval rule (e.g. requires >= 3 approvals) is still
+// unsatisfied; if the adapter's richer signal lags, prPipelineStatus must still
+// hold the card back from StatusMergeable until the rule is met. GitHub is
+// unaffected: it never sets ApprovalRuleConfigured (its required-review gate is
+// already folded into mergeStateStatus=BLOCKED, i.e. Mergeability=blocked).
+func TestApprovalRuleGatesReadyToMerge(t *testing.T) {
+	rec := statusRec(domain.ActivityIdle, false)
+	tests := []struct {
+		name string
+		pr   domain.PRFacts
+		want domain.SessionStatus
+	}{
+		{
+			// The nter-ios-app !3028 bug: rule configured, not enough approvals,
+			// yet mergeability says mergeable. Must not be Ready to merge.
+			"gitlab-rule-unmet-mergeable-not-ready",
+			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: true, Review: domain.ReviewNone},
+			domain.StatusPROpen,
+		},
+		{
+			// Rule met (approvalDecision -> approved) with no conflicts: ready.
+			"gitlab-rule-met-mergeable-ready",
+			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: true, Review: domain.ReviewApproved},
+			domain.StatusMergeable,
+		},
+		{
+			// Primary fix path: adapter already downgraded mergeability via
+			// detailed_merge_status=not_approved. Still not ready.
+			"gitlab-rule-unmet-blocked-not-ready",
+			domain.PRFacts{Mergeability: domain.MergeBlocked, ApprovalRuleConfigured: true, Review: domain.ReviewNone},
+			domain.StatusPROpen,
+		},
+		{
+			// Conflicts are never Ready to merge.
+			"conflicts-not-ready",
+			domain.PRFacts{Mergeability: domain.MergeConflicting, ApprovalRuleConfigured: true, Review: domain.ReviewNone},
+			domain.StatusPROpen,
+		},
+		{
+			// GitHub-shaped PR: no AO-visible rule, mergeability already folds in
+			// the review gate. A mergeable one stays Ready to merge (unchanged).
+			"github-no-rule-mergeable-ready",
+			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: false, Review: domain.ReviewNone},
+			domain.StatusMergeable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deriveStatus(rec, statusPR(tt.pr), statusNow, true, domain.DefaultMinApprovals); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A session brought back from a terminal state via Reopen (restore) is marked
 // reactivated. It must return to the board — surfaced as needs_input (the "Needs
 // you" zone) — instead of staying pinned to Done by a previously-merged PR, until
