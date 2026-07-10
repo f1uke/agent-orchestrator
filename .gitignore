@@ -51,6 +51,12 @@ session-events.jsonl.*
 .codegraph/
 .cursor/
 
+# Claude Code local scaffolding (never shared): the native worktrees dir and
+# per-user local settings. A shared .claude/settings.json (or commands/skills)
+# stays trackable — only the local-only junk is ignored here.
+.claude/worktrees/
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

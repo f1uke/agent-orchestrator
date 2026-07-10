@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/knowledgestore"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
@@ -255,6 +256,28 @@ func (m *Manager) reapReviewer(ctx context.Context, id domain.SessionID) {
 	}
 	if err := m.reviewerReaper(ctx, id); err != nil {
 		m.logger.Warn("reviewer pane teardown failed", "sessionID", id, "error", err)
+	}
+}
+
+// preserveWorkerKnowledge is the belt-and-suspenders safety net behind the
+// worker prompt (which asks agents to write plans/proposals to the knowledge
+// store directly): on worker teardown, BEFORE the worktree is removed, it copies
+// any stray planning docs left in the worktree into the project's private
+// knowledge store so they survive the teardown. It is best-effort and must never
+// fail teardown — every error is logged and swallowed. Only workers are scanned
+// (orchestrators keep no per-branch worktree artifacts); a session with no data
+// dir or workspace path is a no-op.
+func (m *Manager) preserveWorkerKnowledge(rec domain.SessionRecord) {
+	if rec.Kind != domain.KindWorker || m.dataDir == "" || rec.Metadata.WorkspacePath == "" {
+		return
+	}
+	dest := knowledgestore.PlansDir(m.dataDir, string(rec.ProjectID))
+	written, err := knowledgestore.PreserveStrayDocs(rec.Metadata.WorkspacePath, rec.Metadata.Branch, dest)
+	if err != nil {
+		m.logger.Warn("preserve worker knowledge: partial failure", "sessionID", rec.ID, "error", err)
+	}
+	if len(written) > 0 {
+		m.logger.Info("preserved worker planning docs to knowledge store", "sessionID", rec.ID, "count", len(written), "dest", dest)
 	}
 }
 
@@ -636,6 +659,10 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 			return false, fmt.Errorf("kill %s: runtime: %w", id, err)
 		}
 	}
+	// Rescue any stray planning docs left in the worktree into the private
+	// knowledge store before the (possibly refused) workspace teardown, so plans
+	// and proposals survive even if the agent did not save them there directly.
+	m.preserveWorkerKnowledge(rec)
 	// The worker is terminating: close its reviewer pane too. Done before the
 	// (possibly refused) workspace teardown so a preserved dirty worktree still
 	// reaps the reviewer.
@@ -971,6 +998,10 @@ func (m *Manager) SaveAndTeardownAll(ctx context.Context) error {
 // ForceDestroy; if either capture or the DB write fails, ForceDestroy is
 // not called.
 func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionRecord, destroyRuntime bool) error {
+	// Rescue stray planning docs into the private knowledge store before anything
+	// stashes or removes the worktree, so a worker's plans/proposals survive the
+	// shutdown/crash teardown path too (best-effort; never fails teardown).
+	m.preserveWorkerKnowledge(rec)
 	if rows, ok, err := m.workspaceProjectRows(ctx, rec); err != nil {
 		return fmt.Errorf("save %s: workspace rows: %w", rec.ID, err)
 	} else if ok {
