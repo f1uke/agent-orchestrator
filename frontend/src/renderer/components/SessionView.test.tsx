@@ -331,10 +331,7 @@ describe("SessionView", () => {
 			// The rail stays collapsed on its default (Summary) tab — no auto-switch.
 			// (Closed inspector is aria-hidden/inert, so include hidden in the query.)
 			expect(useUiStore.getState().isInspectorOpen).toBe(false);
-			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute(
-				"data-view",
-				"summary",
-			);
+			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute("data-view", "summary");
 		} finally {
 			delete worker.previewUrl;
 			delete worker.previewRevision;
@@ -352,10 +349,7 @@ describe("SessionView", () => {
 			// Baseline: the freshly opened session has no live preview yet.
 			// (Closed inspector is aria-hidden/inert, so include hidden in the query.)
 			expect(useUiStore.getState().isInspectorOpen).toBe(false);
-			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute(
-				"data-view",
-				"summary",
-			);
+			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute("data-view", "summary");
 
 			// `ao preview <url>` streams in: previewUrl set + revision bumped.
 			worker.previewUrl = "http://localhost:5173/";
