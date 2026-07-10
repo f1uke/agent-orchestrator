@@ -79,6 +79,23 @@ func TestOrchestratorDefault_ReconcilesGitflow(t *testing.T) {
 	}
 }
 
+// TestOrchestratorDefault_RefersToWorkByBoardName: the orchestrator base must
+// tell the dispatcher to name worker sessions and their PRs by the human-readable
+// board label when talking to the human, keeping the internal session id / PR
+// number for parenthetical disambiguation only.
+func TestOrchestratorDefault_RefersToWorkByBoardName(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"human-readable board name",                        // the rule
+		"rather than the internal session id or PR number", // what to avoid
+		"put it in parentheses after the name",             // the disambiguation escape hatch
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing board-name guidance %q:\n%s", want, base)
+		}
+	}
+}
+
 func TestRenderBase_SubstitutesProjectID(t *testing.T) {
 	got := RenderBase("coordinator for "+ProjectIDPlaceholder+" now", "proj-1")
 	if got != "coordinator for proj-1 now" {
