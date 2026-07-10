@@ -79,7 +79,26 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 
 	open := openPRs(prs)
 	if len(open) > 0 {
-		return statusResult{Status: aggregatePRStatus(open, minApprovals), Reason: domain.ReasonPRPipeline}
+		prStatus := aggregatePRStatus(open, minApprovals)
+		// While the agent is actively working (auto mode), an open PR sitting in
+		// a PROBLEM pipeline state — failing CI, requested changes, pending
+		// review — is being fixed autonomously; the human doesn't need to act
+		// yet, so surface it as working and defer the problem state until the
+		// agent goes stale/idle (mirrors the Reactivated active branch below).
+		// POSITIVE states (mergeable/approved) and neutral ones (draft/pr_open)
+		// are never overridden: a ready-to-merge PR stays ready even while active.
+		if isDeferrableProblemStatus(prStatus) &&
+			rec.Activity.State == domain.ActivityActive &&
+			now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
+			at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
+			return statusResult{
+				Status:           domain.StatusWorking,
+				Reason:           domain.ReasonWorking,
+				NextTransitionAt: &at,
+				NextTransitionTo: prStatus,
+			}
+		}
+		return statusResult{Status: prStatus, Reason: domain.ReasonPRPipeline}
 	}
 	// A reactivated session (brought back via Reopen/restore) is waiting for you to
 	// direct it: surface it as needs_input so it returns to the board in the "Needs
@@ -202,6 +221,21 @@ func aggregatePRStatus(open []domain.PRFacts, minApprovals int) domain.SessionSt
 		}
 	}
 	return worst
+}
+
+// isDeferrableProblemStatus reports whether an open-PR pipeline status is a
+// problem an actively-working agent may be resolving on its own — failing CI,
+// requested changes, or a pending review — and so should read as working rather
+// than pulling the human in while the agent is active. Positive states
+// (mergeable/approved) and neutral ones (draft/pr_open) are not deferred: they
+// keep their pipeline status even while the agent runs.
+func isDeferrableProblemStatus(s domain.SessionStatus) bool {
+	switch s {
+	case domain.StatusCIFailed, domain.StatusChangesRequested, domain.StatusReviewPending:
+		return true
+	default:
+		return false
+	}
 }
 
 // isActionableChildSignal reports whether a blocked stacked child's pipeline

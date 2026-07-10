@@ -102,6 +102,26 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 		{"idle-past-grace-review-pending-pr-stays-review", idleAgedRec(2 * waitingInputGrace), statusPR(domain.PRFacts{Review: domain.ReviewRequired}), false, domain.StatusReviewPending},
 		{"idle-past-grace-ci-failing-pr-stays-ci-failed", idleAgedRec(2 * waitingInputGrace), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusCIFailed},
 
+		// An agent actively working an open PR that is in a PROBLEM pipeline
+		// state (failing CI, requested changes, pending review) is autonomously
+		// fixing it (auto mode): show working, not a "needs you" problem state,
+		// until the agent goes stale/idle. Once it goes stale, the underlying
+		// problem status surfaces again.
+		{"active-ci-failing-pr-shows-working", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusWorking},
+		{"stale-active-ci-failing-pr-stays-ci-failed", activeAgedRec(2 * activeStaleGrace), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusCIFailed},
+		{"active-changes-requested-pr-shows-working", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Review: domain.ReviewChangesRequest}), false, domain.StatusWorking},
+		{"stale-active-changes-requested-stays-changes-requested", activeAgedRec(2 * activeStaleGrace), statusPR(domain.PRFacts{Review: domain.ReviewChangesRequest}), false, domain.StatusChangesRequested},
+		{"active-review-pending-pr-shows-working", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Review: domain.ReviewRequired}), false, domain.StatusWorking},
+		// POSITIVE pipeline states are never overridden by active-working: a
+		// ready-to-merge or approved PR still shows its readiness even while the
+		// agent runs. Neutral states (draft/pr_open) are likewise not deferred.
+		{"active-mergeable-pr-stays-mergeable", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable},
+		{"active-approved-pr-stays-approved", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Review: domain.ReviewApproved}), false, domain.StatusApproved},
+		{"active-open-pr-stays-pr-open", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{}), false, domain.StatusPROpen},
+		// WaitingInput (a real prompt) is resolved before the open-PR branch, so
+		// a genuine block still surfaces as needs_input even over a problem PR.
+		{"waiting-input-ci-failing-pr-needs-input", statusRec(domain.ActivityWaitingInput, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusNeedsInput},
+
 		// A live session whose hook-capable agent never signaled is no_signal
 		// once the grace passes — never a confident idle.
 		{"no-signal-after-grace", silentRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal},
@@ -272,6 +292,13 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 		{"no-signal", silentRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal, domain.ReasonNoSignal, ""},
 		{"hookless-idle", silentRec(2 * noSignalGrace), nil, true, domain.StatusIdle, domain.ReasonIdle, ""},
 		{"pr-open", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{}), false, domain.StatusPROpen, domain.ReasonPRPipeline, ""},
+		// Active over a problem PR reads working, with the pending transition set
+		// to the underlying problem status it flips to once the agent goes stale.
+		{"active-ci-failing-pr-working", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusWorking, domain.ReasonWorking, domain.StatusCIFailed},
+		{"active-changes-requested-pr-working", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Review: domain.ReviewChangesRequest}), false, domain.StatusWorking, domain.ReasonWorking, domain.StatusChangesRequested},
+		{"active-review-pending-pr-working", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Review: domain.ReviewRequired}), false, domain.StatusWorking, domain.ReasonWorking, domain.StatusReviewPending},
+		// A positive PR state is not deferred: reason stays pr_pipeline, no timed transition.
+		{"active-mergeable-pr-pipeline", statusRec(domain.ActivityActive, false), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable, domain.ReasonPRPipeline, ""},
 		{"terminated", statusRec(domain.ActivityExited, true), nil, false, domain.StatusTerminated, domain.ReasonTerminated, ""},
 		{"merged", statusRec(domain.ActivityIdle, true), statusPR(domain.PRFacts{Merged: true}), false, domain.StatusMerged, domain.ReasonMerged, ""},
 	}
@@ -314,6 +341,16 @@ func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
 	wantAt = idle.Activity.LastActivityAt.Add(waitingInputGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("idle nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
+	}
+	// active over a PROBLEM PR flips to that problem status at last + activeStaleGrace.
+	activePR := statusRec(domain.ActivityActive, false)
+	got = deriveStatusDetail(activePR, statusPR(domain.PRFacts{CI: domain.CIFailing}), statusNow, true, domain.DefaultMinApprovals)
+	wantAt = activePR.Activity.LastActivityAt.Add(activeStaleGrace)
+	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
+		t.Fatalf("active problem-PR nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
+	}
+	if got.NextTransitionTo != domain.StatusCIFailed {
+		t.Fatalf("active problem-PR nextTransitionTo: got %q want %q", got.NextTransitionTo, domain.StatusCIFailed)
 	}
 }
 
