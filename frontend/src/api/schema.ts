@@ -850,6 +850,10 @@ export interface components {
             id: string;
             label: string;
         };
+        ApprovalRule: {
+            enabled?: boolean;
+            threshold?: number;
+        };
         AutoNudgeSettingsResponse: {
             enabled: boolean;
         };
@@ -1091,12 +1095,12 @@ export interface components {
         };
         ProjectConfig: {
             agentConfig?: components["schemas"]["AgentConfig"];
+            approvalRule?: components["schemas"]["ApprovalRule"];
             defaultBranch?: string;
             env?: {
                 [key: string]: string;
             };
             gitConvention?: components["schemas"]["GitConventionConfig"];
-            minApprovals?: number;
             orchestrator?: components["schemas"]["RoleOverride"];
             postCreate?: string[];
             reviewers?: components["schemas"]["DomainReviewerConfig"][];

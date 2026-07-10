@@ -142,7 +142,7 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveStatus(tt.rec, tt.pr, statusNow, !tt.hookless, domain.DefaultMinApprovals); got != tt.want {
+			if got := deriveStatus(tt.rec, tt.pr, statusNow, !tt.hookless, domain.ApprovalRule{}); got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
@@ -199,7 +199,7 @@ func TestApprovalRuleGatesReadyToMerge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveStatus(rec, statusPR(tt.pr), statusNow, true, domain.DefaultMinApprovals); got != tt.want {
+			if got := deriveStatus(rec, statusPR(tt.pr), statusNow, true, domain.ApprovalRule{}); got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
@@ -231,7 +231,7 @@ func TestReactivatedSessionSurfacesAsNeedsYou(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveStatus(tt.rec, tt.prs, statusNow, true, domain.DefaultMinApprovals); got != tt.want {
+			if got := deriveStatus(tt.rec, tt.prs, statusNow, true, domain.ApprovalRule{}); got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
@@ -254,7 +254,7 @@ func TestRecapNotificationDoesNotDemoteReadyPR(t *testing.T) {
 	if state, ok := claudecode.DeriveActivityState("notification", []byte(`{"notification_type":"idle_prompt"}`)); ok {
 		recap.Activity.State = state
 	}
-	if got := deriveStatus(recap, prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusMergeable {
+	if got := deriveStatus(recap, prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusMergeable {
 		t.Fatalf("recap over an open mergeable PR: status = %q, want %q (a recap must not flip a ready PR to needs_input)", got, domain.StatusMergeable)
 	}
 
@@ -265,7 +265,7 @@ func TestRecapNotificationDoesNotDemoteReadyPR(t *testing.T) {
 		t.Fatalf("permission_prompt must derive waiting_input; got (%q, %v)", state, ok)
 	}
 	blocked := statusRec(state, false)
-	if got := deriveStatus(blocked, prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusNeedsInput {
+	if got := deriveStatus(blocked, prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusNeedsInput {
 		t.Fatalf("genuine permission prompt over a PR: status = %q, want %q", got, domain.StatusNeedsInput)
 	}
 }
@@ -307,7 +307,7 @@ func TestAggregateStackedChildSignals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deriveStatus(statusRec(domain.ActivityIdle, false), tt.prs, statusNow, true, domain.DefaultMinApprovals); got != tt.want {
+			if got := deriveStatus(statusRec(domain.ActivityIdle, false), tt.prs, statusNow, true, domain.ApprovalRule{}); got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
@@ -361,7 +361,7 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := deriveStatusDetail(tt.rec, tt.pr, statusNow, !tt.hookless, domain.DefaultMinApprovals)
+			got := deriveStatusDetail(tt.rec, tt.pr, statusNow, !tt.hookless, domain.ApprovalRule{})
 			if got.Status != tt.wantStatus {
 				t.Fatalf("status: got %q want %q", got.Status, tt.wantStatus)
 			}
@@ -387,21 +387,21 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
 	// active within grace flips to needs_input at last + activeStaleGrace.
 	active := activeAgedRec(activeStaleGrace / 2)
-	got := deriveStatusDetail(active, nil, statusNow, true, domain.DefaultMinApprovals)
+	got := deriveStatusDetail(active, nil, statusNow, true, domain.ApprovalRule{})
 	wantAt := active.Activity.LastActivityAt.Add(activeStaleGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("active nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
 	}
 	// idle-fresh (signalled) flips to needs_input at last + waitingInputGrace.
 	idle := idleAgedRec(waitingInputGrace / 2)
-	got = deriveStatusDetail(idle, nil, statusNow, true, domain.DefaultMinApprovals)
+	got = deriveStatusDetail(idle, nil, statusNow, true, domain.ApprovalRule{})
 	wantAt = idle.Activity.LastActivityAt.Add(waitingInputGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("idle nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
 	}
 	// active over a PROBLEM PR flips to that problem status at last + activeStaleGrace.
 	activePR := statusRec(domain.ActivityActive, false)
-	got = deriveStatusDetail(activePR, statusPR(domain.PRFacts{CI: domain.CIFailing}), statusNow, true, domain.DefaultMinApprovals)
+	got = deriveStatusDetail(activePR, statusPR(domain.PRFacts{CI: domain.CIFailing}), statusNow, true, domain.ApprovalRule{})
 	wantAt = activePR.Activity.LastActivityAt.Add(activeStaleGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("active problem-PR nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
@@ -411,67 +411,84 @@ func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
 	}
 }
 
-// The default approval floor is 2: with no SCM rule of its own, a PR needs at
-// least 2 approvals before AO treats it as approved. Guards the configured
-// default so it can't silently drift.
-func TestDefaultMinApprovalsFloorIsTwo(t *testing.T) {
-	if domain.DefaultMinApprovals != 2 {
-		t.Fatalf("DefaultMinApprovals = %d, want 2", domain.DefaultMinApprovals)
-	}
-	base := domain.PRFacts{
-		URL:                    "https://gitlab.example.com/g/p/-/merge_requests/1",
-		Number:                 1,
-		CI:                     domain.CIPassing,
-		Mergeability:           domain.MergeUnknown,
-		ApprovalRuleConfigured: false,
-	}
-	// 2 approvals meets the default floor → approved.
-	pr := base
-	pr.ApprovalsCount = 2
-	if got := prPipelineStatus(pr, domain.DefaultMinApprovals); got != domain.StatusApproved {
-		t.Fatalf("count 2 / default floor: got %s, want approved", got)
-	}
-	// 1 approval is under the floor → not yet approved.
-	pr.ApprovalsCount = 1
-	if got := prPipelineStatus(pr, domain.DefaultMinApprovals); got != domain.StatusPROpen {
-		t.Fatalf("count 1 / default floor: got %s, want pr_open", got)
-	}
-}
-
-func TestPRPipelineStatus_MinApprovalsThreshold(t *testing.T) {
+// A disabled approval rule (the default) imposes no approval-count gate: a
+// mergeable PR is Ready to merge regardless of its approval count, and an
+// under-approved PR is never promoted to Approved on count alone. This is the
+// exact behavior a project that never opts in keeps.
+func TestPRPipelineStatus_ApprovalRuleDisabled(t *testing.T) {
 	base := domain.PRFacts{
 		URL:          "https://gitlab.example.com/g/p/-/merge_requests/1",
 		Number:       1,
 		CI:           domain.CIPassing,
-		Mergeability: domain.MergeUnknown,
+		Mergeability: domain.MergeMergeable,
 	}
+	off := domain.ApprovalRule{}
 
-	// No rule, count >= threshold → approved.
+	// Mergeable with 0 approvals is still Ready to merge when the rule is off.
 	pr := base
-	pr.ApprovalRuleConfigured = false
-	pr.ApprovalsCount = 3
-	if got := prPipelineStatus(pr, 3); got != domain.StatusApproved {
-		t.Fatalf("count 3 / min 3: got %s, want approved", got)
+	pr.ApprovalsCount = 0
+	if got := prPipelineStatus(pr, off); got != domain.StatusMergeable {
+		t.Fatalf("rule off, mergeable/0 approvals: got %s, want mergeable", got)
 	}
 
-	// No rule, count < threshold → stays pr_open (In review).
-	pr.ApprovalsCount = 2
-	if got := prPipelineStatus(pr, 3); got != domain.StatusPROpen {
-		t.Fatalf("count 2 / min 3: got %s, want pr_open", got)
+	// Non-mergeable with plenty of approvals is NOT promoted to approved on count
+	// alone when the rule is off (that promotion is opt-in now).
+	pr = base
+	pr.Mergeability = domain.MergeUnknown
+	pr.ApprovalsCount = 5
+	if got := prPipelineStatus(pr, off); got != domain.StatusPROpen {
+		t.Fatalf("rule off, 5 approvals, not mergeable: got %s, want pr_open", got)
 	}
+}
 
-	// Rule configured → threshold ignored; GitLab's decision (here none) wins → pr_open.
-	pr.ApprovalRuleConfigured = true
+// An enabled approval rule gates the mergeable → Ready-to-merge transition on
+// the approval count and (when no SCM rule exists) promotes a sufficiently
+// approved PR to Approved.
+func TestPRPipelineStatus_ApprovalRuleEnabled(t *testing.T) {
+	base := domain.PRFacts{
+		URL:          "https://gitlab.example.com/g/p/-/merge_requests/1",
+		Number:       1,
+		CI:           domain.CIPassing,
+		Mergeability: domain.MergeMergeable,
+	}
+	rule := domain.ApprovalRule{Enabled: true, Threshold: 2}
+
+	// Mergeable but under threshold → gated out of Ready to merge.
+	pr := base
 	pr.ApprovalsCount = 1
-	if got := prPipelineStatus(pr, 3); got != domain.StatusPROpen {
-		t.Fatalf("rule configured: got %s, want pr_open", got)
+	if got := prPipelineStatus(pr, rule); got != domain.StatusPROpen {
+		t.Fatalf("enabled, mergeable/1 approval < 2: got %s, want pr_open", got)
+	}
+
+	// Mergeable and threshold met → Ready to merge.
+	pr.ApprovalsCount = 2
+	if got := prPipelineStatus(pr, rule); got != domain.StatusMergeable {
+		t.Fatalf("enabled, mergeable/2 approvals: got %s, want mergeable", got)
+	}
+
+	// Not mergeable, threshold met, no SCM rule → promoted to Approved.
+	pr = base
+	pr.Mergeability = domain.MergeUnknown
+	pr.ApprovalsCount = 3
+	if got := prPipelineStatus(pr, rule); got != domain.StatusApproved {
+		t.Fatalf("enabled, 3 approvals, not mergeable: got %s, want approved", got)
+	}
+
+	// SCM enforces its own rule → the count gate does not manufacture readiness;
+	// GitLab's decision (here none) wins → pr_open even with approvals.
+	pr = base
+	pr.Mergeability = domain.MergeUnknown
+	pr.ApprovalRuleConfigured = true
+	pr.ApprovalsCount = 5
+	if got := prPipelineStatus(pr, rule); got != domain.StatusPROpen {
+		t.Fatalf("enabled, SCM rule configured: got %s, want pr_open", got)
 	}
 
 	// Threshold met but an unresolved thread still wins (worst-wins).
-	pr.ApprovalRuleConfigured = false
+	pr = base
 	pr.ApprovalsCount = 3
 	pr.ReviewComments = true
-	if got := prPipelineStatus(pr, 3); got != domain.StatusChangesRequested {
+	if got := prPipelineStatus(pr, rule); got != domain.StatusChangesRequested {
 		t.Fatalf("unresolved thread: got %s, want changes_requested", got)
 	}
 }

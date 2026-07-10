@@ -31,8 +31,8 @@ func newTestProvider(t *testing.T, apiBase string) *Provider {
 
 // TestApprovalDecision locks in the new no-rule-defers-to-AO semantics:
 // approvalDecision only ever says "approved" when GitLab itself enforces an
-// approval rule; otherwise it returns "" and leaves the call to AO's
-// per-project MinApprovals threshold (via ApprovalsCount).
+// approval rule; otherwise it returns "" and leaves the call to the project's
+// ApprovalRule (via ApprovalsCount).
 func TestApprovalDecision(t *testing.T) {
 	approver := func(n int) []struct {
 		User struct {

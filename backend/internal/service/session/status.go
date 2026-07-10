@@ -49,9 +49,9 @@ type statusResult struct {
 // and drops the reason/countdown, preserving the original signature for callers
 // and tests that only need the status.
 //
-//nolint:unparam // minApprovals is kept to preserve deriveStatusDetail's signature for callers/tests, even though current callers pass the default
-func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) domain.SessionStatus {
-	return deriveStatusDetail(rec, prs, now, signalCapable, minApprovals).Status
+//nolint:unparam // rule is kept to preserve deriveStatusDetail's signature for callers/tests, even though current callers pass the zero (disabled) rule
+func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, rule domain.ApprovalRule) domain.SessionStatus {
+	return deriveStatusDetail(rec, prs, now, signalCapable, rule).Status
 }
 
 // deriveStatusDetail computes the display status AND the reason that produced it,
@@ -65,7 +65,7 @@ func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time,
 // status is the worst-wins aggregate across its open PRs; stacked children whose
 // parent is still open are exempt from the aggregation since they cannot merge
 // until the parent does. Merged/closed PRs only matter once no open PR remains.
-func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) statusResult {
+func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, rule domain.ApprovalRule) statusResult {
 	if rec.IsTerminated {
 		if anyMerged(prs) {
 			return statusResult{Status: domain.StatusMerged, Reason: domain.ReasonMerged}
@@ -79,7 +79,7 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 
 	open := openPRs(prs)
 	if len(open) > 0 {
-		prStatus := aggregatePRStatus(open, minApprovals)
+		prStatus := aggregatePRStatus(open, rule)
 		// While the agent is actively working (auto mode), an open PR sitting in
 		// a PROBLEM pipeline state — failing CI, requested changes, pending
 		// review — is being fixed autonomously; the human doesn't need to act
@@ -199,11 +199,11 @@ func anyMerged(prs []domain.PRFacts) bool {
 // so a broken child is not hidden behind the stack. If no PR contributes any
 // signal (a degenerate stack with no visible root), it falls back to aggregating
 // the raw status across all open PRs so the session never goes dark.
-func aggregatePRStatus(open []domain.PRFacts, minApprovals int) domain.SessionStatus {
+func aggregatePRStatus(open []domain.PRFacts, rule domain.ApprovalRule) domain.SessionStatus {
 	stacks := buildStacks(open)
 	candidates := make([]domain.SessionStatus, 0, len(open))
 	for _, p := range open {
-		s := prPipelineStatus(p, minApprovals)
+		s := prPipelineStatus(p, rule)
 		if stacks[p.URL].Blocked && !isActionableChildSignal(s) {
 			continue
 		}
@@ -211,7 +211,7 @@ func aggregatePRStatus(open []domain.PRFacts, minApprovals int) domain.SessionSt
 	}
 	if len(candidates) == 0 {
 		for _, p := range open {
-			candidates = append(candidates, prPipelineStatus(p, minApprovals))
+			candidates = append(candidates, prPipelineStatus(p, rule))
 		}
 	}
 	worst := candidates[0]
@@ -274,7 +274,7 @@ func statusSeverity(s domain.SessionStatus) int {
 	}
 }
 
-func prPipelineStatus(pr domain.PRFacts, minApprovals int) domain.SessionStatus {
+func prPipelineStatus(pr domain.PRFacts, rule domain.ApprovalRule) domain.SessionStatus {
 	switch {
 	case pr.CI == domain.CIFailing:
 		return domain.StatusCIFailed
@@ -282,14 +282,17 @@ func prPipelineStatus(pr domain.PRFacts, minApprovals int) domain.SessionStatus 
 		return domain.StatusDraft
 	case pr.Review == domain.ReviewChangesRequest || pr.ReviewComments:
 		return domain.StatusChangesRequested
-	case pr.Mergeability == domain.MergeMergeable && !approvalRuleUnsatisfied(pr):
+	case pr.Mergeability == domain.MergeMergeable && !approvalRuleUnsatisfied(pr) && rule.Satisfied(pr):
+		// Ready to merge only when the project's approval rule is also satisfied:
+		// a disabled rule imposes nothing, an enabled one requires enough approvals.
 		return domain.StatusMergeable
 	case pr.Review == domain.ReviewApproved:
 		return domain.StatusApproved
 	case pr.Review == domain.ReviewRequired:
 		return domain.StatusReviewPending
-	case !pr.ApprovalRuleConfigured && pr.ApprovalsCount >= minApprovals:
-		// No SCM rule of its own: AO's per-project floor decides readiness.
+	case rule.Enabled && !pr.ApprovalRuleConfigured && pr.ApprovalsCount >= rule.ResolveThreshold():
+		// No SCM rule of its own: an enabled project rule surfaces enough
+		// approvals as "Approved" even when the PR is not yet mergeable.
 		return domain.StatusApproved
 	default:
 		return domain.StatusPROpen

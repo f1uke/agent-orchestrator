@@ -42,7 +42,8 @@ type PullRequest struct {
 	// ApprovalsCount is the number of distinct approvers the SCM reports.
 	ApprovalsCount int
 	// ApprovalRuleConfigured is true when the SCM enforces an approval rule of
-	// its own. When false, AO's per-project MinApprovals floor decides readiness.
+	// its own. When false, the project's ApprovalRule (if enabled) decides
+	// readiness from ApprovalsCount.
 	ApprovalRuleConfigured bool
 
 	Provider string

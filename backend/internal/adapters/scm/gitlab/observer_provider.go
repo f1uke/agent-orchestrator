@@ -690,7 +690,7 @@ func discussionToThread(d restDiscussion) (thread ports.SCMReviewThreadObservati
 // decision. When GitLab enforces an approval rule, "approved" means no approvals
 // remain outstanding and at least one is recorded. When there is NO rule
 // (approvals_left is trivially 0), GitLab cannot express a floor, so we return no
-// decision and let AO's per-project MinApprovals threshold decide from
+// decision and let the project's ApprovalRule (if enabled) decide from
 // ApprovalsCount at status-derivation time.
 func approvalDecision(a restApprovals) string {
 	if !approvalRuleConfigured(a) {
