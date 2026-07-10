@@ -61,7 +61,11 @@ func PreserveStrayDocs(worktreePath, branch, destPlansDir string) (written []str
 			return nil
 		}
 		rel, relErr := filepath.Rel(worktreePath, p)
-		if relErr != nil || !isStrayDoc(rel) {
+		if relErr != nil {
+			//nolint:nilerr // best-effort: skip an unrelatable path, keep scanning
+			return nil
+		}
+		if !isStrayDoc(rel) {
 			return nil
 		}
 		dst, copyErr := copyPreserve(p, rel, branch, destPlansDir)
@@ -139,7 +143,7 @@ func copyPreserve(src, rel, branch, destPlansDir string) (string, error) {
 		existing, readErr := os.ReadFile(dst)
 		switch {
 		case os.IsNotExist(readErr):
-			if err := os.WriteFile(dst, data, 0o640); err != nil {
+			if err := os.WriteFile(dst, data, 0o600); err != nil {
 				return "", err
 			}
 			return dst, nil
