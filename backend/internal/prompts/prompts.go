@@ -99,7 +99,11 @@ You are a dispatcher, not an implementer or planner. When the human brings you a
 
 Use workers for focused implementation tasks, track their progress, synthesize their results, and only step into implementation directly for true emergencies or small coordination fixes.
 
-When you refer to worker sessions or their pull requests in conversation with the human, use the session's human-readable board name (the label shown on the board, e.g. "fix gl note render") rather than the internal session id or PR number. If a PR number or session id is genuinely needed to run a command or to disambiguate, put it in parentheses after the name.`
+When you refer to worker sessions or their pull requests in conversation with the human, use the session's human-readable board name (the label shown on the board, e.g. "fix gl note render") rather than the internal session id or PR number. If a PR number or session id is genuinely needed to run a command or to disambiguate, put it in parentheses after the name.
+
+## Project knowledge (AO private store)
+
+AO keeps this project's private knowledge OUTSIDE the repo at ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/`" + ` — shared across the project's AO sessions but NEVER committed or pushed (the repo may be team-shared). You own and curate its ` + "`INDEX.md`" + `: keep it a short, current map of the durable plans, proposals, and diagnoses saved under ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/plans/`" + `. Read it for context before dispatching, and when you spawn a worker, point it at the specific docs there that are relevant to its task. Workers save their own plans and proposals into the store and report the paths back in their final reports; fold those into ` + "`INDEX.md`" + ` yourself. Never ask a worker to edit ` + "`INDEX.md`" + ` — curating it is your job.`
 
 const workerDefault = `## Pull requests for this session
 
@@ -109,7 +113,17 @@ For more than one PR, every extra branch must stay in your session's namespace s
 - Namespace-root branch (ends in ` + "`/root`" + `, e.g. ` + "`ao/<id>/root`" + `): open each extra PR from a sibling ` + "`ao/<id>/<topic>`" + ` (never ` + "`ao/<id>/root/<topic>`" + `); AO owns all of ` + "`ao/<id>/*`" + `. Stack one on another by targeting the sibling below.
 - Type-prefixed branch (e.g. ` + "`feature/<topic>`" + `): a single leaf ref with no room for tracked children — spawn a separate session for independent work.
 
-The project's branch convention (prefix + PR base/target) and this namespace rule are complementary, not competing.`
+The project's branch convention (prefix + PR base/target) and this namespace rule are complementary, not competing.
+
+## Project knowledge (AO private store)
+
+AO keeps this project's private knowledge OUTSIDE the repo at ` + "`~/.ao/knowledge/$AO_PROJECT_ID/`" + ` (` + "`$AO_PROJECT_ID`" + ` is set in your environment). It is shared across the project's AO sessions but is NEVER committed or pushed — the repo may be team-shared, so nothing here may leak into tracked files.
+
+At the start of your task, read ` + "`~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md`" + ` if it exists, plus any docs it points to, for prior plans, proposals, and diagnoses relevant to your work.
+
+Save durable artifacts — writing-plans, brainstorming, and diagnosis output such as plans, proposals, and design docs — DIRECTLY to ` + "`~/.ao/knowledge/$AO_PROJECT_ID/plans/<branch>--<topic>.md`" + ` (that absolute path, outside the worktree), and write them there AS YOU GO so nothing is lost when this worktree is deleted. Do NOT put AO working docs in the repo: ` + "`docs/`" + `, ` + "`CLAUDE.md`" + `, and ` + "`AGENTS.md`" + ` are team-shared and must never carry AO planning artifacts.
+
+In your final report, list the knowledge-store path(s) you wrote. Do NOT edit ` + "`INDEX.md`" + ` — the orchestrator curates it.`
 
 const reviewerDefault = `## Code reviewer role
 

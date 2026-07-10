@@ -96,6 +96,57 @@ func TestOrchestratorDefault_RefersToWorkByBoardName(t *testing.T) {
 	}
 }
 
+// TestWorkerDefault_KnowledgeStore: the worker base must point workers at the
+// private, out-of-repo knowledge store, tell them to read INDEX.md at task
+// start, save durable plans/proposals to the store (never the team-shared repo)
+// as they go, report the paths, and leave INDEX.md to the orchestrator. It must
+// address the store via the $AO_PROJECT_ID env var, NOT the render placeholder
+// (a worker base carries no placeholder — see the placeholder test above).
+func TestWorkerDefault_KnowledgeStore(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	for _, want := range []string{
+		"~/.ao/knowledge/$AO_PROJECT_ID/",                        // out-of-repo store, env-var addressed
+		"~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md",                // read the index at task start
+		"~/.ao/knowledge/$AO_PROJECT_ID/plans/<branch>--<topic>", // where to save artifacts
+		"NEVER committed or pushed",                              // must not leak into the shared repo
+		"team-shared and must never carry AO planning artifacts", // docs/CLAUDE.md/AGENTS.md are off-limits
+		"AS YOU GO", // write incrementally so nothing is lost
+		"list the knowledge-store path(s) you wrote", // report what was written
+		"Do NOT edit `INDEX.md`",                     // orchestrator curates the index
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("worker default missing knowledge-store wording %q:\n%s", want, base)
+		}
+	}
+	if strings.Contains(base, ProjectIDPlaceholder) {
+		t.Fatalf("worker default must address the store via $AO_PROJECT_ID, not the %q placeholder", ProjectIDPlaceholder)
+	}
+}
+
+// TestOrchestratorDefault_KnowledgeStore: the orchestrator base must say it owns
+// and curates the store's INDEX.md, reads it for context before dispatching,
+// points workers at relevant docs, and keeps the store private/out-of-repo. It
+// addresses the store via the render placeholder (the orchestrator base carries
+// it and RenderBase substitutes the project id).
+func TestOrchestratorDefault_KnowledgeStore(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"~/.ao/knowledge/" + ProjectIDPlaceholder + "/", // out-of-repo store, placeholder-addressed
+		"You own and curate its `INDEX.md`",             // orchestrator curates the index
+		"NEVER committed or pushed",                     // private store
+		"point it at the specific docs",                 // steer new workers to relevant docs
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing knowledge-store wording %q:\n%s", want, base)
+		}
+	}
+	// The placeholder must resolve to a concrete per-project path at render time.
+	rendered := RenderBase(base, "nter-ios-app")
+	if !strings.Contains(rendered, "~/.ao/knowledge/nter-ios-app/") {
+		t.Fatalf("rendered orchestrator base must carry the concrete project path:\n%s", rendered)
+	}
+}
+
 func TestRenderBase_SubstitutesProjectID(t *testing.T) {
 	got := RenderBase("coordinator for "+ProjectIDPlaceholder+" now", "proj-1")
 	if got != "coordinator for proj-1 now" {
