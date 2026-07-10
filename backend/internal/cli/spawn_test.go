@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func authorizedAgentsJSON(agent string) string {
@@ -825,6 +827,19 @@ func TestSpawnPromptAndPromptFileMutuallyExclusive(t *testing.T) {
 		"--prompt", "inline", "--prompt-file", path)
 	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("err=%v exit=%d, want a mutually-exclusive usage error", err, ExitCode(err))
+	}
+}
+
+// TestSpawnChecksFromBeforeReadingStdinPrompt asserts the cheap synchronous
+// flag validations (here --from) run before `--prompt-file -` reads stdin, so a
+// missing --from exits 2 immediately instead of an interactive invocation
+// hanging on stdin. The stdin reader errors if read: if prompt resolution ran
+// first, the error would mention "read prompt file", not "--from".
+func TestSpawnChecksFromBeforeReadingStdinPrompt(t *testing.T) {
+	deps := Deps{In: iotest.ErrReader(errors.New("stdin-sentinel-read"))}
+	_, _, err := executeCLI(t, deps, "spawn", "--project", "demo", "--agent", "codex", "--name", "worker", "--prompt-file", "-")
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "--from") {
+		t.Fatalf("err=%v exit=%d, want a --from usage error before stdin is read", err, ExitCode(err))
 	}
 }
 

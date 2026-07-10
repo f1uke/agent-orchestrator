@@ -86,13 +86,6 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if explicitName := strings.TrimSpace(opts.name); utf8.RuneCountInString(explicitName) > maxDisplayNameLen {
 				return usageError{fmt.Errorf("--name must be %d characters or fewer", maxDisplayNameLen)}
 			}
-			// Resolve the initial prompt from --prompt / --prompt-file before any
-			// daemon round-trip so misuse (both set, empty/unreadable file) exits 2.
-			prompt, err := resolvePrompt(opts.prompt, opts.promptFile, cmd.InOrStdin())
-			if err != nil {
-				return err
-			}
-			opts.prompt = prompt
 			// --from is required and names the branch the worktree is created from
 			// (the UI "Start from" field). Reject a missing base fast, before any
 			// daemon round-trip, so misuse exits 2 rather than spawning off an
@@ -101,6 +94,16 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if baseBranch == "" {
 				return usageError{fmt.Errorf("--from is required: name the branch the worktree starts from, e.g. --from main")}
 			}
+			// Resolve the initial prompt from --prompt / --prompt-file. This runs
+			// after the cheap synchronous flag checks above so a missing --from (or
+			// an overlong --name) fails fast rather than blocking on `--prompt-file
+			// -` stdin; it still precedes any daemon round-trip so a bad prompt-file
+			// exits 2 without a network call.
+			prompt, err := resolvePrompt(opts.prompt, opts.promptFile, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			opts.prompt = prompt
 
 			project, err := ctx.resolveSpawnProject(cmd.Context(), opts.project)
 			if err != nil {
