@@ -145,12 +145,8 @@ describe("NewTaskDialog", () => {
 		const newBranchName = screen.getByLabelText("New branch name");
 		const agentField = screen.getByRole("combobox", { name: "Agent" });
 
-		expect(
-			startFrom.compareDocumentPosition(newBranchName) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
-		expect(
-			newBranchName.compareDocumentPosition(agentField) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
+		expect(startFrom.compareDocumentPosition(newBranchName) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(newBranchName.compareDocumentPosition(agentField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
 	it("initializes Start from to the project default branch and includes baseBranch in the payload", async () => {

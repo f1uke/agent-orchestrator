@@ -555,7 +555,13 @@ function ZoneColumn({
 					<div className="flex flex-col gap-2.5">
 						{sessions.map((session) =>
 							isTodo ? (
-								<TodoCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} onStarted={onStarted} />
+								<TodoCard
+									key={session.id}
+									session={session}
+									col={col}
+									onOpen={() => onOpen(session)}
+									onStarted={onStarted}
+								/>
 							) : (
 								<SessionCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} />
 							),
@@ -772,10 +778,7 @@ function TodoCard({
 				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
 					<span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: col.dotVar }}>
 						{/* Ring (not filled) dot: queued, not live. */}
-						<span
-							className="size-2 shrink-0 rounded-full border-[1.5px]"
-							style={{ borderColor: col.dotVar }}
-						/>
+						<span className="size-2 shrink-0 rounded-full border-[1.5px]" style={{ borderColor: col.dotVar }} />
 						Queued
 					</span>
 					<span className="ml-auto font-mono text-[10.5px] tracking-[0.04em] text-passive">
