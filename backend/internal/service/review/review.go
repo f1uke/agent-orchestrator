@@ -29,6 +29,10 @@ type Manager interface {
 	Submit(ctx context.Context, workerID domain.SessionID, runID string, verdict domain.ReviewVerdict, body, githubReviewID string) (domain.ReviewRun, error)
 	SubmitMany(ctx context.Context, workerID domain.SessionID, reviews []SubmittedReview) ([]domain.ReviewRun, error)
 	List(ctx context.Context, workerID domain.SessionID) (reviewcore.SessionReviews, error)
+	Reset(ctx context.Context, workerID domain.SessionID) (int64, error)
+	ReconcileOrphanedRuns(ctx context.Context) (int, error)
+	TeardownReviewer(ctx context.Context, workerID domain.SessionID) error
+	ReapOrphanedReviewers(ctx context.Context) (int, error)
 }
 
 // Service is the API-facing review service. It delegates to the core engine.
@@ -85,6 +89,30 @@ func New(engine *reviewcore.Engine, store Store, opts ...Option) *Service {
 // Trigger starts (or reuses) a review pass for a worker's PR.
 func (s *Service) Trigger(ctx context.Context, workerID domain.SessionID) (reviewcore.TriggerResult, error) {
 	return s.engine.Trigger(ctx, workerID)
+}
+
+// Reset fails a worker's orphaned running review runs so a board stuck on
+// "Reviewing…" can be re-triggered. Delegates to the engine.
+func (s *Service) Reset(ctx context.Context, workerID domain.SessionID) (int64, error) {
+	return s.engine.Reset(ctx, workerID)
+}
+
+// ReconcileOrphanedRuns fails running review runs whose reviewer pane is dead,
+// on daemon boot. Delegates to the engine.
+func (s *Service) ReconcileOrphanedRuns(ctx context.Context) (int, error) {
+	return s.engine.ReconcileOrphanedRuns(ctx)
+}
+
+// TeardownReviewer closes a worker's reviewer pane when the worker is torn down,
+// so it does not linger as a keep-alive shell. Delegates to the engine.
+func (s *Service) TeardownReviewer(ctx context.Context, workerID domain.SessionID) error {
+	return s.engine.TeardownReviewer(ctx, workerID)
+}
+
+// ReapOrphanedReviewers closes reviewer panes whose worker session is gone or
+// terminal, on daemon boot. Delegates to the engine.
+func (s *Service) ReapOrphanedReviewers(ctx context.Context) (int, error) {
+	return s.engine.ReapOrphanedReviewers(ctx)
 }
 
 // SubmittedReview is one review result supplied by the reviewer CLI.

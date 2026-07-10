@@ -11,6 +11,10 @@ ON CONFLICT (session_id) DO UPDATE SET
 SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
 FROM review WHERE session_id = ?;
 
+-- name: ListReviews :many
+SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
+FROM review ORDER BY created_at;
+
 -- name: InsertReviewRun :exec
 INSERT INTO review_run (id, review_id, session_id, batch_id, harness, pr_url, target_sha, status, verdict, body, github_review_id, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -23,6 +27,12 @@ UPDATE review_run SET status = 'failed', body = ? WHERE id = ? AND verdict = '' 
 
 -- name: SupersedeStaleRunningReviewRuns :execrows
 UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND pr_url = ? AND target_sha != ? AND status = 'running' AND verdict = '';
+
+-- name: FailRunningReviewRunsBySession :execrows
+UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND status = 'running';
+
+-- name: ListSessionIDsWithRunningReviewRuns :many
+SELECT DISTINCT session_id FROM review_run WHERE status = 'running';
 
 -- name: MarkReviewRunDelivered :execrows
 UPDATE review_run SET status = 'delivered', delivered_at = ? WHERE id = ? AND status = 'complete' AND delivered_at IS NULL;

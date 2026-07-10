@@ -44,18 +44,30 @@ func (f fakeReviewerResolver) Reviewer(domain.ReviewerHarness) (ports.Reviewer, 
 }
 
 type fakeRuntime struct {
-	createCfg ports.RuntimeConfig
-	sentMsg   string
-	sentTo    string
-	alive     bool
+	createCfg   ports.RuntimeConfig
+	sentMsg     string
+	sentTo      string
+	alive       bool
+	agentAlive  bool
+	destroyed   []string
+	createOrder []string // "destroy"/"create" sequence to assert ordering
 }
 
 func (f *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
 	f.createCfg = cfg
+	f.createOrder = append(f.createOrder, "create")
 	return ports.RuntimeHandle{ID: string(cfg.SessionID)}, nil
+}
+func (f *fakeRuntime) Destroy(_ context.Context, handle ports.RuntimeHandle) error {
+	f.destroyed = append(f.destroyed, handle.ID)
+	f.createOrder = append(f.createOrder, "destroy")
+	return nil
 }
 func (f *fakeRuntime) IsAlive(_ context.Context, _ ports.RuntimeHandle) (bool, error) {
 	return f.alive, nil
+}
+func (f *fakeRuntime) AgentAlive(_ context.Context, _ ports.RuntimeHandle) (bool, error) {
+	return f.agentAlive, nil
 }
 func (f *fakeRuntime) SendMessage(_ context.Context, handle ports.RuntimeHandle, msg string) error {
 	f.sentTo = handle.ID
@@ -127,12 +139,75 @@ func TestLauncherNotifySendsMessageToHandle(t *testing.T) {
 }
 
 func TestLauncherAlive(t *testing.T) {
-	l := NewLauncher(fakeReviewerResolver{ok: true}, &fakeRuntime{alive: true})
+	l := NewLauncher(fakeReviewerResolver{ok: true}, &fakeRuntime{agentAlive: true})
 	if ok, _ := l.Alive(context.Background(), "review-mer-1"); !ok {
 		t.Fatal("want alive true")
 	}
 	if ok, _ := l.Alive(context.Background(), ""); ok {
 		t.Fatal("empty handle should not be alive")
+	}
+}
+
+// Alive must reflect AGENT liveness, not tmux session existence: a keep-alive
+// shell (IsAlive=true) whose agent has exited (AgentAlive=false) is NOT alive, so
+// the engine recreates instead of typing the prompt into a bare shell.
+func TestLauncherAliveUsesAgentLiveness(t *testing.T) {
+	rt := &fakeRuntime{alive: true, agentAlive: false}
+	l := NewLauncher(fakeReviewerResolver{ok: true}, rt)
+	if ok, _ := l.Alive(context.Background(), "review-mer-1"); ok {
+		t.Fatal("Alive = true, want false when the agent has exited (bare keep-alive shell)")
+	}
+}
+
+// A relaunch must destroy any stale pane before creating a fresh one, so a
+// lingering tmux session (same deterministic name) does not fail new-session with
+// "duplicate session".
+func TestLauncherSpawnDestroysStalePaneBeforeCreate(t *testing.T) {
+	rt := &fakeRuntime{}
+	l := NewLauncher(fakeReviewerResolver{reviewer: &fakeReviewer{}, ok: true}, rt)
+	if _, err := l.Spawn(context.Background(), launchSpec()); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if len(rt.destroyed) == 0 || rt.destroyed[0] != "review-mer-1" {
+		t.Fatalf("expected the stale pane review-mer-1 to be destroyed, got %v", rt.destroyed)
+	}
+	if len(rt.createOrder) < 2 || rt.createOrder[0] != "destroy" || rt.createOrder[1] != "create" {
+		t.Fatalf("expected destroy-before-create, got %v", rt.createOrder)
+	}
+}
+
+// Each spawn must pass a fresh per-launch agent session id (distinct from the
+// stable tmux handle), so `claude --session-id` never collides with the prior
+// reviewer's transcript ("Session ID already in use").
+func TestLauncherSpawnUsesFreshAgentSessionID(t *testing.T) {
+	reviewer := &fakeReviewer{}
+	rt := &fakeRuntime{}
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt)
+	spec := launchSpec()
+	spec.AgentSessionID = "review-mer-1-run-1"
+	if _, err := l.Spawn(context.Background(), spec); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if reviewer.gotInv.AgentSessionID != "review-mer-1-run-1" {
+		t.Fatalf("AgentSessionID = %q, want review-mer-1-run-1", reviewer.gotInv.AgentSessionID)
+	}
+	// The tmux handle stays stable for live-pane reuse.
+	if reviewer.gotInv.ReviewerID != "review-mer-1" {
+		t.Fatalf("ReviewerID = %q, want review-mer-1", reviewer.gotInv.ReviewerID)
+	}
+}
+
+// Teardown destroys the worker's reviewer pane by its stable deterministic
+// handle, so a completed/orphaned reviewer's tmux session is closed instead of
+// lingering as a keep-alive shell. It needs no reviewer adapter (pure runtime op).
+func TestLauncherTeardownDestroysReviewerPane(t *testing.T) {
+	rt := &fakeRuntime{}
+	l := NewLauncher(fakeReviewerResolver{ok: false}, rt)
+	if err := l.Teardown(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "review-mer-1" {
+		t.Fatalf("destroyed = %v, want [review-mer-1]", rt.destroyed)
 	}
 }
 

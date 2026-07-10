@@ -1761,6 +1761,45 @@ paths:
       summary: List a worker's code-review runs
       tags:
       - reviews
+  /api/v1/sessions/{sessionId}/reviews/reset:
+    post:
+      operationId: resetReview
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersResetReviewResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Clear a worker's stuck review by failing its orphaned running runs
+      tags:
+      - reviews
   /api/v1/sessions/{sessionId}/reviews/submit:
     post:
       operationId: submitReview
@@ -2458,6 +2497,15 @@ components:
       required:
       - sessionId
       - reason
+      type: object
+    ControllersResetReviewResponse:
+      properties:
+        failed:
+          description: Number of stuck running review runs that were failed.
+          format: int64
+          type: integer
+      required:
+      - failed
       type: object
     ControllersSessionView:
       properties:

@@ -17,7 +17,10 @@ import (
 
 type fakeStore struct {
 	review *domain.Review
-	runs   []domain.ReviewRun
+	// reviews, when set, is returned by ListReviews (the boot reap-orphans pass).
+	// Falls back to the single review when nil.
+	reviews []domain.Review
+	runs    []domain.ReviewRun
 	// insertErr, when set, makes the next InsertReviewRun model a concurrent
 	// writer that already recorded a run for this commit: it records that
 	// winner (so a follow-up GetReviewRunBySessionAndSHA finds it) and returns
@@ -95,6 +98,28 @@ func (f *fakeStore) SupersedeStaleRunningReviewRuns(_ context.Context, sessionID
 	}
 	return n, nil
 }
+func (f *fakeStore) FailRunningReviewRunsBySession(_ context.Context, sessionID domain.SessionID, body string) (int64, error) {
+	var n int64
+	for i := range f.runs {
+		if f.runs[i].SessionID == sessionID && f.runs[i].Status == domain.ReviewRunRunning {
+			f.runs[i].Status = domain.ReviewRunFailed
+			f.runs[i].Body = body
+			n++
+		}
+	}
+	return n, nil
+}
+func (f *fakeStore) ListSessionIDsWithRunningReviewRuns(_ context.Context) ([]domain.SessionID, error) {
+	seen := map[domain.SessionID]bool{}
+	var ids []domain.SessionID
+	for _, r := range f.runs {
+		if r.Status == domain.ReviewRunRunning && !seen[r.SessionID] {
+			seen[r.SessionID] = true
+			ids = append(ids, r.SessionID)
+		}
+	}
+	return ids, nil
+}
 func (f *fakeStore) GetReviewRun(_ context.Context, id string) (domain.ReviewRun, bool, error) {
 	for _, r := range f.runs {
 		if r.ID == id {
@@ -113,6 +138,15 @@ func (f *fakeStore) GetReviewRunBySessionPRAndSHA(_ context.Context, sessionID d
 }
 func (f *fakeStore) ListReviewRunsBySession(_ context.Context, _ domain.SessionID) ([]domain.ReviewRun, error) {
 	return f.runs, nil
+}
+func (f *fakeStore) ListReviews(_ context.Context) ([]domain.Review, error) {
+	if f.reviews != nil {
+		return f.reviews, nil
+	}
+	if f.review != nil {
+		return []domain.Review{*f.review}, nil
+	}
+	return nil, nil
 }
 
 type fakeSessions struct {
@@ -148,6 +182,7 @@ type fakeLauncher struct {
 	gotHandle  string
 	specs      []LaunchSpec
 	handles    []string
+	teardowns  []domain.SessionID
 }
 
 func (f *fakeLauncher) Spawn(_ context.Context, spec LaunchSpec) (string, error) {
@@ -170,6 +205,21 @@ func (f *fakeLauncher) Notify(_ context.Context, handleID string, spec LaunchSpe
 }
 func (f *fakeLauncher) Alive(_ context.Context, _ string) (bool, error) {
 	return f.alive || f.spawned, nil
+}
+func (f *fakeLauncher) Teardown(_ context.Context, workerID domain.SessionID) error {
+	f.teardowns = append(f.teardowns, workerID)
+	return nil
+}
+
+// fakeSessionsByID answers GetSession per id, so the reap-orphans pass can see
+// distinct live/terminal/absent workers.
+type fakeSessionsByID struct {
+	m map[domain.SessionID]domain.SessionRecord
+}
+
+func (f fakeSessionsByID) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	rec, ok := f.m[id]
+	return rec, ok, nil
 }
 
 func liveWorker() domain.SessionRecord {
@@ -222,6 +272,31 @@ func TestTriggerSpawnsNewReviewerAndRecordsRunAfterLaunch(t *testing.T) {
 	}
 }
 
+// A spawn must carry a fresh, unique native agent session id (not the stable
+// reviewer handle), so `claude --session-id` never reuses a prior pass's id and
+// collides with its on-disk transcript. It is tied to the created run so two
+// triggers produce two distinct ids.
+func TestTriggerSpawnSetsFreshAgentSessionID(t *testing.T) {
+	store := &fakeStore{}
+	launcher := &fakeLauncher{handle: "review-mer-1"}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	res, err := eng.Trigger(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if launcher.gotSpec.AgentSessionID == "" {
+		t.Fatal("spawn spec AgentSessionID is empty; want a fresh per-launch id")
+	}
+	if launcher.gotSpec.AgentSessionID == "review-mer-1" {
+		t.Fatal("AgentSessionID must differ from the stable reviewer handle")
+	}
+	// Ties to the run so relaunches produce distinct ids.
+	if !strings.Contains(launcher.gotSpec.AgentSessionID, res.Run.ID) {
+		t.Fatalf("AgentSessionID %q should incorporate the run id %q", launcher.gotSpec.AgentSessionID, res.Run.ID)
+	}
+}
+
 func TestTriggerConcurrentSameWorkerSpawnsOnce(t *testing.T) {
 	store := &fakeStore{}
 	launcher := &fakeLauncher{handle: "review-mer-1"}
@@ -257,6 +332,60 @@ func TestTriggerConcurrentSameWorkerSpawnsOnce(t *testing.T) {
 	}
 	if len(store.runs) != 1 {
 		t.Errorf("recorded review runs = %d, want 1", len(store.runs))
+	}
+}
+
+// TeardownReviewer closes a worker's reviewer pane (used when the worker is
+// killed/reclaimed): the reviewer belongs to the worker, so it dies with it.
+func TestTeardownReviewerDestroysPane(t *testing.T) {
+	launcher := &fakeLauncher{}
+	eng := newEngineForTest(&fakeStore{}, fakeSessions{}, fakePRs{}, fakeProjects{}, launcher)
+	if err := eng.TeardownReviewer(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("TeardownReviewer: %v", err)
+	}
+	if len(launcher.teardowns) != 1 || launcher.teardowns[0] != "mer-1" {
+		t.Fatalf("teardowns = %v, want [mer-1]", launcher.teardowns)
+	}
+}
+
+// ReapOrphanedReviewers (boot safety net) closes reviewer panes whose worker is
+// terminal or gone — the review-agent-orchestrator-34 leak — while leaving a live
+// worker's reviewer (which may be mid-review) and handle-less rows untouched.
+func TestReapOrphanedReviewersReapsTerminalAndAbsentWorkers(t *testing.T) {
+	store := &fakeStore{reviews: []domain.Review{
+		{SessionID: "live-1", ReviewerHandleID: "review-live-1"},
+		{SessionID: "dead-1", ReviewerHandleID: "review-dead-1"},
+		{SessionID: "gone-1", ReviewerHandleID: "review-gone-1"},
+		{SessionID: "nohandle", ReviewerHandleID: ""},
+	}}
+	sessions := fakeSessionsByID{m: map[domain.SessionID]domain.SessionRecord{
+		"live-1": {ID: "live-1"},                     // live worker
+		"dead-1": {ID: "dead-1", IsTerminated: true}, // terminal worker
+		// "gone-1" is absent (purged) → GetSession ok=false
+		"nohandle": {ID: "nohandle"},
+	}}
+	launcher := &fakeLauncher{}
+	eng := newEngineForTest(store, sessions, fakePRs{}, fakeProjects{}, launcher)
+
+	n, err := eng.ReapOrphanedReviewers(context.Background())
+	if err != nil {
+		t.Fatalf("ReapOrphanedReviewers: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("reaped = %d, want 2 (dead-1 + gone-1)", n)
+	}
+	got := map[domain.SessionID]bool{}
+	for _, id := range launcher.teardowns {
+		got[id] = true
+	}
+	if !got["dead-1"] || !got["gone-1"] {
+		t.Fatalf("teardowns = %v, want dead-1 and gone-1 reaped", launcher.teardowns)
+	}
+	if got["live-1"] {
+		t.Fatal("must not reap a live worker's reviewer pane")
+	}
+	if got["nohandle"] {
+		t.Fatal("must not reap a review row with no reviewer handle")
 	}
 }
 
@@ -308,12 +437,15 @@ func TestTriggerIsIdempotentForSameCommit(t *testing.T) {
 	}
 }
 
+// A same-commit running row under a LIVE reviewer pane is reused as-is: no new
+// run, no relaunch. (A DEAD pane instead orphans the run — see
+// TestTriggerFailsOrphanedRunningRunWhenPaneDead.)
 func TestTriggerReusesRunningRowWithNoVerdict(t *testing.T) {
 	store := &fakeStore{
 		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
 		runs:   []domain.ReviewRun{{ID: "run-1", SessionID: "mer-1", PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1", Status: domain.ReviewRunRunning}},
 	}
-	launcher := &fakeLauncher{alive: false, handle: "review-mer-2"}
+	launcher := &fakeLauncher{alive: true, handle: "review-mer-1"}
 	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
 
 	res, err := eng.Trigger(context.Background(), "mer-1")
@@ -328,6 +460,120 @@ func TestTriggerReusesRunningRowWithNoVerdict(t *testing.T) {
 	}
 	if got := store.runs[0]; got.Status != domain.ReviewRunRunning {
 		t.Fatalf("running row should remain running, got %+v", got)
+	}
+}
+
+func TestResetFailsRunningRunsOnly(t *testing.T) {
+	store := &fakeStore{runs: []domain.ReviewRun{
+		{ID: "r1", SessionID: "mer-1", Status: domain.ReviewRunRunning},
+		{ID: "r2", SessionID: "mer-1", Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved},
+	}}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, fakePRs{}, fakeProjects{}, &fakeLauncher{})
+
+	n, err := eng.Reset(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("failed count = %d, want 1", n)
+	}
+	if store.runs[0].Status != domain.ReviewRunFailed {
+		t.Fatalf("running run should be failed, got %+v", store.runs[0])
+	}
+	if store.runs[1].Status != domain.ReviewRunComplete {
+		t.Fatalf("completed run must be untouched, got %+v", store.runs[1])
+	}
+}
+
+// On daemon boot, a running run whose reviewer pane is not alive is orphaned and
+// must be failed so the board unsticks automatically.
+func TestReconcileOrphanedRunsFailsDeadPaneRuns(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs:   []domain.ReviewRun{{ID: "run-1", SessionID: "mer-1", Status: domain.ReviewRunRunning}},
+	}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, fakePRs{}, fakeProjects{}, &fakeLauncher{alive: false, handle: "review-mer-1"})
+
+	failed, err := eng.ReconcileOrphanedRuns(context.Background())
+	if err != nil {
+		t.Fatalf("ReconcileOrphanedRuns: %v", err)
+	}
+	if failed != 1 {
+		t.Fatalf("failed = %d, want 1", failed)
+	}
+	if store.runs[0].Status != domain.ReviewRunFailed {
+		t.Fatalf("orphaned run should be failed, got %+v", store.runs[0])
+	}
+}
+
+// A running run whose reviewer pane survived the restart is left alone.
+func TestReconcileOrphanedRunsKeepsLivePaneRuns(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs:   []domain.ReviewRun{{ID: "run-1", SessionID: "mer-1", Status: domain.ReviewRunRunning}},
+	}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, fakePRs{}, fakeProjects{}, &fakeLauncher{alive: true, handle: "review-mer-1"})
+
+	failed, err := eng.ReconcileOrphanedRuns(context.Background())
+	if err != nil {
+		t.Fatalf("ReconcileOrphanedRuns: %v", err)
+	}
+	if failed != 0 || store.runs[0].Status != domain.ReviewRunRunning {
+		t.Fatalf("live-pane run must be kept, failed=%d run=%+v", failed, store.runs[0])
+	}
+}
+
+func TestResetRejectsEmptyWorker(t *testing.T) {
+	eng := newEngineForTest(&fakeStore{}, fakeSessions{ok: true}, fakePRs{}, fakeProjects{}, &fakeLauncher{})
+	if _, err := eng.Reset(context.Background(), ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
+	}
+}
+
+// A run stuck 'running' because its reviewer pane died out of band must be failed
+// on the next trigger (the dead pane will never complete it), so the board
+// unsticks and a fresh review starts — instead of the PR being skipped forever.
+func TestTriggerFailsOrphanedRunningRunWhenPaneDead(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs:   []domain.ReviewRun{{ID: "run-stuck", SessionID: "mer-1", PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1", Status: domain.ReviewRunRunning}},
+	}
+	launcher := &fakeLauncher{alive: false, handle: "review-mer-1"}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	res, err := eng.Trigger(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if stuck := store.runs[0]; stuck.ID != "run-stuck" || stuck.Status != domain.ReviewRunFailed {
+		t.Fatalf("expected orphaned run-stuck failed, got %+v", stuck)
+	}
+	if !res.Created || !launcher.spawned || launcher.notified {
+		t.Fatalf("expected a fresh spawn after failing the orphan: res=%+v launcher=%+v", res, launcher)
+	}
+	if len(store.runs) != 2 || store.runs[1].Status != domain.ReviewRunRunning || store.runs[1].TargetSHA != "sha1" {
+		t.Fatalf("expected a fresh running run for sha1, got %+v", store.runs)
+	}
+}
+
+// A LIVE reviewer with a same-sha running run is left alone (reused), never
+// failed — only a dead pane orphans its runs.
+func TestTriggerKeepsRunningRunWhenPaneAlive(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs:   []domain.ReviewRun{{ID: "run-live", SessionID: "mer-1", PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1", Status: domain.ReviewRunRunning}},
+	}
+	launcher := &fakeLauncher{alive: true, handle: "review-mer-1"}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	if _, err := eng.Trigger(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if live := store.runs[0]; live.Status != domain.ReviewRunRunning {
+		t.Fatalf("a live reviewer's running run must not be failed, got %+v", live)
+	}
+	if len(store.runs) != 1 {
+		t.Fatalf("expected no new run while the same-sha run is still running under a live pane, got %+v", store.runs)
 	}
 }
 

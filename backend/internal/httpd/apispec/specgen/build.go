@@ -478,6 +478,17 @@ func reviewOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/reviews/reset", id: "resetReview", tag: "reviews",
+			summary:    "Clear a worker's stuck review by failing its orphaned running runs",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ResetReviewResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 

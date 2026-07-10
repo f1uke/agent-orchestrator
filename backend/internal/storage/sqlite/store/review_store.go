@@ -40,6 +40,21 @@ func (s *Store) GetReviewBySession(ctx context.Context, id domain.SessionID) (do
 	return reviewFromRow(row), true, nil
 }
 
+// ListReviews returns every per-worker review row. The boot reap-orphans pass
+// uses it to find reviewer panes whose worker has ended, since reviewers have no
+// session row of their own.
+func (s *Store) ListReviews(ctx context.Context) ([]domain.Review, error) {
+	rows, err := s.qr.ListReviews(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list reviews: %w", err)
+	}
+	reviews := make([]domain.Review, 0, len(rows))
+	for _, row := range rows {
+		reviews = append(reviews, reviewFromRow(row))
+	}
+	return reviews, nil
+}
+
 // InsertReviewRun records a new review pass. A unique-constraint hit on the
 // (session_id, pr_url, target_sha) index (migration 0020) is surfaced as the sentinel
 // domain.ErrDuplicateReviewRun so the engine can fall back to the existing run.
@@ -110,6 +125,26 @@ func (s *Store) SupersedeStaleRunningReviewRuns(ctx context.Context, sessionID d
 		PRURL:     prURL,
 		TargetSha: targetSHA,
 	})
+}
+
+// FailRunningReviewRunsBySession marks every still-running pass for a worker
+// failed. Used to reconcile orphaned runs whose reviewer pane has died (so the
+// board unsticks and a fresh run can be triggered) and to back `ao review reset`.
+// Returns the number of rows failed.
+func (s *Store) FailRunningReviewRunsBySession(ctx context.Context, sessionID domain.SessionID, body string) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.qw.FailRunningReviewRunsBySession(ctx, gen.FailRunningReviewRunsBySessionParams{
+		Body:      body,
+		SessionID: sessionID,
+	})
+}
+
+// ListSessionIDsWithRunningReviewRuns returns the distinct worker sessions that
+// currently have at least one running review run. Used by the boot reconcile to
+// find reviews to check for orphaned (dead-pane) runs.
+func (s *Store) ListSessionIDsWithRunningReviewRuns(ctx context.Context) ([]domain.SessionID, error) {
+	return s.qw.ListSessionIDsWithRunningReviewRuns(ctx)
 }
 
 // MarkReviewRunDelivered records that lifecycle delivered the worker nudge for

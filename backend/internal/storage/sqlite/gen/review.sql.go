@@ -13,6 +13,23 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+const failRunningReviewRunsBySession = `-- name: FailRunningReviewRunsBySession :execrows
+UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND status = 'running'
+`
+
+type FailRunningReviewRunsBySessionParams struct {
+	Body      string
+	SessionID domain.SessionID
+}
+
+func (q *Queries) FailRunningReviewRunsBySession(ctx context.Context, arg FailRunningReviewRunsBySessionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, failRunningReviewRunsBySession, arg.Body, arg.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getReviewBySession = `-- name: GetReviewBySession :one
 SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
 FROM review WHERE session_id = ?
@@ -209,6 +226,70 @@ func (q *Queries) ListReviewRunsBySession(ctx context.Context, sessionID domain.
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReviews = `-- name: ListReviews :many
+SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
+FROM review ORDER BY created_at
+`
+
+func (q *Queries) ListReviews(ctx context.Context) ([]Review, error) {
+	rows, err := q.db.QueryContext(ctx, listReviews)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Review{}
+	for rows.Next() {
+		var i Review
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.Harness,
+			&i.PRURL,
+			&i.ReviewerHandleID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionIDsWithRunningReviewRuns = `-- name: ListSessionIDsWithRunningReviewRuns :many
+SELECT DISTINCT session_id FROM review_run WHERE status = 'running'
+`
+
+func (q *Queries) ListSessionIDsWithRunningReviewRuns(ctx context.Context) ([]domain.SessionID, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionIDsWithRunningReviewRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.SessionID{}
+	for rows.Next() {
+		var session_id domain.SessionID
+		if err := rows.Scan(&session_id); err != nil {
+			return nil, err
+		}
+		items = append(items, session_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

@@ -21,6 +21,10 @@ type Launcher interface {
 	Notify(ctx context.Context, handleID string, spec LaunchSpec) error
 	// Alive reports whether a reviewer pane is still running.
 	Alive(ctx context.Context, handleID string) (bool, error)
+	// Teardown closes a worker's reviewer pane (by its stable deterministic
+	// handle), so a completed or orphaned reviewer's tmux session does not linger
+	// as a keep-alive shell. Idempotent: a missing pane is a no-op.
+	Teardown(ctx context.Context, workerID domain.SessionID) error
 }
 
 // LaunchSpec is the engine's request to (re)launch a reviewer for one pass.
@@ -38,13 +42,19 @@ type LaunchSpec struct {
 	ReviewerBase string
 	// ReviewerAddition is the project's per-project reviewer addition (may be "").
 	ReviewerAddition string
+	// AgentSessionID is the unique-per-launch native agent session id (see
+	// ports.ReviewInvocation.AgentSessionID). Empty falls back to the handle id.
+	AgentSessionID string
 }
 
 // reviewerRuntime is the runtime surface the launcher needs: create a pane,
-// inject a message into a running pane, and probe liveness. The tmux runtime
-// satisfies it.
+// destroy a stale one, inject a message into a running pane, and probe liveness.
+// The tmux runtime satisfies it. AgentAlive (agent-process liveness, distinct
+// from IsAlive session-existence) is an optional capability probed via
+// ports.AgentLivenessProber, so it is not part of this interface.
 type reviewerRuntime interface {
 	Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error)
+	Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool, error)
 	SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error
 }
@@ -72,10 +82,23 @@ func reviewerHandleID(workerID domain.SessionID) string {
 	return "review-" + string(workerID)
 }
 
+// reviewerAgentSessionID is the UNIQUE-per-launch native agent session id for a
+// reviewer, keyed on the batch's first run so each relaunch gets a distinct
+// `claude --session-id` (never colliding with a prior pass's transcript). It is
+// distinct from reviewerHandleID, which stays stable for live-pane reuse.
+func reviewerAgentSessionID(workerID domain.SessionID, runID string) string {
+	return "review-" + string(workerID) + "-" + runID
+}
+
 func (l *agentLauncher) invocation(spec LaunchSpec) ports.ReviewInvocation {
 	prompt, systemPrompt := reviewTexts(spec)
+	agentSessionID := spec.AgentSessionID
+	if agentSessionID == "" {
+		agentSessionID = reviewerHandleID(spec.WorkerID)
+	}
 	return ports.ReviewInvocation{
 		ReviewerID:      reviewerHandleID(spec.WorkerID),
+		AgentSessionID:  agentSessionID,
 		RunID:           spec.RunID,
 		WorkerSessionID: spec.WorkerID,
 		PRURL:           spec.PRURL,
@@ -103,6 +126,14 @@ func (l *agentLauncher) Spawn(ctx context.Context, spec LaunchSpec) (string, err
 	cmd, err := reviewer.ReviewCommand(ctx, inv)
 	if err != nil {
 		return "", fmt.Errorf("reviewer command: %w", err)
+	}
+	// Destroy any stale pane under this deterministic handle before creating a
+	// fresh one. Spawn is only reached when the prior pane is not agent-alive, but
+	// its tmux session may still linger (a keep-alive shell), which would fail
+	// new-session with "duplicate session". Destroy is idempotent (a missing
+	// session is a no-op), so this is safe on a first-ever spawn too.
+	if err := l.runtime.Destroy(ctx, ports.RuntimeHandle{ID: handleID}); err != nil {
+		return "", fmt.Errorf("reviewer destroy stale pane: %w", err)
 	}
 	handle, err := l.runtime.Create(ctx, ports.RuntimeConfig{
 		SessionID:     domain.SessionID(handleID),
@@ -149,9 +180,24 @@ func (l *agentLauncher) Notify(ctx context.Context, handleID string, spec Launch
 	return nil
 }
 
+// Teardown destroys the worker's reviewer pane. Uses the same deterministic
+// handle Spawn/Notify key on, and relies on Destroy being idempotent so tearing
+// down a worker that never had a reviewer (or whose pane is already gone) is a
+// harmless no-op.
+func (l *agentLauncher) Teardown(ctx context.Context, workerID domain.SessionID) error {
+	return l.runtime.Destroy(ctx, ports.RuntimeHandle{ID: reviewerHandleID(workerID)})
+}
+
 func (l *agentLauncher) Alive(ctx context.Context, handleID string) (bool, error) {
 	if handleID == "" {
 		return false, nil
+	}
+	// Prefer agent-process liveness: a reviewer whose claude-code exited leaves a
+	// keep-alive shell that IsAlive (session-existence) still reports as alive,
+	// which would make the engine type the review prompt into that shell. Fall
+	// back to IsAlive only for a runtime without the AgentAlive capability.
+	if prober, ok := l.runtime.(ports.AgentLivenessProber); ok {
+		return prober.AgentAlive(ctx, ports.RuntimeHandle{ID: handleID})
 	}
 	return l.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID})
 }

@@ -25,9 +25,16 @@ type Reviewer interface {
 // the reviewer needs are passed explicitly here (and embedded in the prompt /
 // message), never through environment variables.
 type ReviewInvocation struct {
-	// ReviewerID is a stable id for the reviewer's runtime instance (pane,
-	// native session id), derived from the worker session.
+	// ReviewerID is a STABLE id for the reviewer's runtime instance (the tmux
+	// pane / handle), derived from the worker session and reused across passes so
+	// a live reviewer pane can be re-notified.
 	ReviewerID string
+	// AgentSessionID is the id for the agent's NATIVE session (e.g. the value AO
+	// pins onto `claude --session-id`). Unlike ReviewerID it is unique per launch,
+	// so relaunching a reviewer whose pane died never reuses the prior pass's
+	// native session id — which would collide with its on-disk transcript
+	// ("Session ID already in use"). Empty falls back to ReviewerID.
+	AgentSessionID string
 	// RunID is the review_run this pass completes; the reviewer passes it to
 	// `ao review submit`.
 	RunID string

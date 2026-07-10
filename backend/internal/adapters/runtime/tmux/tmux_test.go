@@ -19,6 +19,10 @@ type fakeRunner struct {
 	calls   []runnerCall
 	outputs [][]byte
 	err     error
+	// errQueue, when non-empty, supplies a per-call error (consumed in order),
+	// taking precedence over err. A nil entry means that call succeeds. Lets a
+	// test model e.g. new-session failing then kill-session succeeding.
+	errQueue []error
 }
 
 type runnerCall struct {
@@ -33,6 +37,11 @@ func (f *fakeRunner) Run(_ context.Context, env []string, name string, args ...s
 	if len(f.outputs) > 0 {
 		out = f.outputs[0]
 		f.outputs = f.outputs[1:]
+	}
+	if len(f.errQueue) > 0 {
+		err := f.errQueue[0]
+		f.errQueue = f.errQueue[1:]
+		return out, err
 	}
 	if f.err != nil {
 		return out, f.err

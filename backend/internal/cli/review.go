@@ -69,7 +69,47 @@ func newReviewCommand(ctx *commandContext) *cobra.Command {
 		Short: "Manage AO code reviews of a worker's PR",
 	}
 	cmd.AddCommand(newReviewSubmitCommand(ctx))
+	cmd.AddCommand(newReviewResetCommand(ctx))
 	return cmd
+}
+
+// resetReviewResponse mirrors controllers.ResetReviewResponse.
+type resetReviewResponse struct {
+	Failed int64 `json:"failed"`
+}
+
+func newReviewResetCommand(ctx *commandContext) *cobra.Command {
+	var session string
+	cmd := &cobra.Command{
+		Use:   "reset [worker-session-id]",
+		Short: "Clear a worker's stuck 'Reviewing…' state by failing its orphaned running reviews",
+		Long: "Fails every still-running review run for the worker so a review stuck because " +
+			"its reviewer terminal was closed can be triggered again. Completed and " +
+			"changes-requested reviews are left untouched.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return ctx.resetReview(cmd, args, session)
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", "Worker session id (or pass it as the positional argument)")
+	return cmd
+}
+
+func (c *commandContext) resetReview(cmd *cobra.Command, args []string, session string) error {
+	session = strings.TrimSpace(session)
+	if len(args) == 1 {
+		session = strings.TrimSpace(args[0])
+	}
+	if session == "" {
+		return usageError{errors.New("usage: worker session id is required (positional or --session)")}
+	}
+	path := "sessions/" + url.PathEscape(session) + "/reviews/reset"
+	var res resetReviewResponse
+	if err := c.postJSON(cmd.Context(), path, struct{}{}, &res); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "reset %d running review(s) for %s\n", res.Failed, session)
+	return err
 }
 
 func newReviewSubmitCommand(ctx *commandContext) *cobra.Command {

@@ -36,6 +36,31 @@ func reviewServer(t *testing.T, status int, respBody string) (*httptest.Server, 
 
 func aliveDeps() Deps { return Deps{ProcessAlive: func(int) bool { return true }} }
 
+func TestReviewResetPostsToResetEndpoint(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := reviewServer(t, http.StatusOK, `{"failed":2}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "review", "reset", "mer-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if capture.method != http.MethodPost || capture.path != "/api/v1/sessions/mer-1/reviews/reset" {
+		t.Fatalf("request = %s %s", capture.method, capture.path)
+	}
+	if !strings.Contains(out, "reset 2 running review(s) for mer-1") {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestReviewResetRequiresSession(t *testing.T) {
+	setConfigEnv(t)
+	_, _, err := executeCLI(t, aliveDeps(), "review", "reset")
+	if err == nil || !strings.Contains(err.Error(), "worker session id is required") {
+		t.Fatalf("err = %v, want session-required usage error", err)
+	}
+}
+
 func TestReviewSubmitReadsBodyFile(t *testing.T) {
 	cfg := setConfigEnv(t)
 	srv, capture := reviewServer(t, http.StatusOK, `{"review":{"verdict":"changes_requested"}}`)
