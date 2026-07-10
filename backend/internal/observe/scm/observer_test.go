@@ -918,6 +918,114 @@ func TestPoll_CIETagChangeRefreshesWhenRepoUnchanged(t *testing.T) {
 	}
 }
 
+// pendingObs models GitHub's GraphQL statusCheckRollup while a commit's checks
+// have NOT yet been aggregated: rollup state=PENDING, zero context nodes. This
+// is the shape that produced the observed DB row (ci=pending, checks=0,
+// mergeability=unstable) for the stuck PR.
+func pendingObs(num int) ports.SCMObservation {
+	o := testObs(num)
+	o.CI = ports.SCMCIObservation{Summary: string(domain.CIPending), HeadSHA: "sha" + fmt.Sprint(num)}
+	o.Mergeability = ports.SCMMergeabilityObservation{State: string(domain.MergeUnstable)}
+	return o
+}
+
+// knownPendingPR is the local baseline persisted from a first observation that
+// landed before the rollup populated (pending / zero checks).
+func knownPendingPR(num int) domain.PullRequest {
+	pr, _, _, _, _ := domainFromObservation("p-1", pendingObs(num), domain.PullRequest{}, persistenceOptions{}, time.Unix(1, 0).UTC())
+	return pr
+}
+
+func lastWriteForPR(store *fakeStore, num int) *domain.PullRequest {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var out *domain.PullRequest
+	for i := range store.writes {
+		if store.writes[i].pr.Number == num {
+			cp := store.writes[i].pr
+			out = &cp
+		}
+	}
+	return out
+}
+
+// TestPoll_CIStuckPendingWhenRollupLagsBehindCheckRunsETag reproduces the
+// "CI stuck at pending forever" bug (board: "ci checks stuck pending").
+//
+// Root cause: the observer gates its GraphQL statusCheckRollup re-fetch on the
+// REST /commits/{sha}/check-runs ETag (CommitChecksGuard). Those are two
+// independent GitHub subsystems. When the REST check-runs list reaches its
+// terminal state (all runs completed) the ETag stabilizes, but GitHub's GraphQL
+// rollup can still report PENDING / zero contexts for a short window afterward.
+// If a tick observes the stabilized check-runs ETag while the rollup still lags,
+// the observer commits the terminal ETag (skip-write path, nothing changed) and
+// from then on the guard returns 304 forever — so the rollup's later
+// PENDING->SUCCESS transition (which does NOT alter the check-runs list, hence
+// no ETag change) is never re-read. CI freezes at pending.
+//
+// This test asserts the CORRECT behavior (observer should eventually persist the
+// passing CI). It currently FAILS (red), demonstrating the frozen state.
+func TestPoll_CIStuckPendingWhenRollupLagsBehindCheckRunsETag(t *testing.T) {
+	key := prKey(testRepo, 1)
+	ck := commitKey(testRepo, "sha1")
+
+	store := testStoreWithSession()
+	store.prs["p-1"] = []domain.PullRequest{knownPendingPR(1)}
+
+	provider := &fakeProvider{
+		// Quiet repo: no open-PR-list change, so the repo guard never forces a refetch.
+		repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo", NotModified: true}},
+		// Tick 1: REST check-runs has advanced to its terminal ETag (differs from cache).
+		checkGuards: map[string]ports.SCMGuardResult{ck: {ETag: "ci-final", NotModified: false}},
+		// ...but the GraphQL rollup still lags: pending / zero checks (== local baseline).
+		observations: map[string]ports.SCMObservation{key: pendingObs(1)},
+	}
+
+	obs := newTestObserver(store, provider, &fakeLifecycle{}, time.Unix(2, 0).UTC())
+	obs.Cache.RepoPRListETag[prKey(testRepo, 0)] = "repo"
+	obs.Cache.CommitChecksETag[ck] = "ci-pending"           // cached from the first (pending) observation
+	obs.Cache.LastReviewPollAt[key] = time.Unix(2, 0).UTC() // isolate: suppress review re-poll noise
+
+	// Tick 1: check-runs ETag changed -> PR is a candidate -> GraphQL fetched ->
+	// rollup still pending (== local) -> write skipped -> "ci-final" ETag committed.
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.fetchBatches) != 1 {
+		t.Fatalf("tick 1: expected the changed check-runs ETag to trigger one GraphQL fetch, got %d", len(provider.fetchBatches))
+	}
+
+	// The rollup now catches up to the true state: passing, with real checks.
+	// The REST check-runs list is UNCHANGED (all runs already completed), so its
+	// ETag stays "ci-final" and the guard returns 304.
+	provider.mu.Lock()
+	provider.observations[key] = testObs(1) // passing + 1 check
+	provider.checkGuards[ck] = ports.SCMGuardResult{ETag: "ci-final", NotModified: true}
+	provider.mu.Unlock()
+
+	fetchesBeforeTick2 := len(provider.fetchBatches)
+
+	// Tick 2: SCM truly reports passing now. A correct observer must re-read and
+	// persist it. The bug: nothing re-triggers the fetch, so CI stays pending.
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(provider.fetchBatches) == fetchesBeforeTick2 {
+		t.Fatalf("BUG (ci-checks-stuck-pending): observer never re-fetched PR #1 after its checks completed; "+
+			"CI is frozen at pending because the check-runs ETag stabilized before the GraphQL rollup did "+
+			"(fetch batches stayed at %d)", fetchesBeforeTick2)
+	}
+
+	last := lastWriteForPR(store, 1)
+	if last == nil {
+		t.Fatalf("BUG (ci-checks-stuck-pending): no write persisted PR #1's completed CI; it is stuck at pending")
+	}
+	if last.CI != domain.CIPassing {
+		t.Fatalf("BUG (ci-checks-stuck-pending): CI stuck at %q; SCM reports passing but the observer never re-read the rollup", last.CI)
+	}
+}
+
 func TestPoll_GraphQLBatchChunksAt25(t *testing.T) {
 	store := &fakeStore{projects: map[string]domain.ProjectRecord{"p": {ID: "p", RepoOriginURL: "https://github.com/o/r.git"}}, prs: map[domain.SessionID][]domain.PullRequest{}, checks: map[string][]domain.PullRequestCheck{}}
 	provider := &fakeProvider{repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo"}}, observations: map[string]ports.SCMObservation{}}
