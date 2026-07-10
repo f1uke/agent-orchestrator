@@ -65,7 +65,11 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const hasInspector = !isOrchestrator;
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
-	const revealedPreviewRef = useRef<number | null>(null);
+	const sessionLoaded = Boolean(session);
+	// Baseline of the last preview state observed for the *currently loaded*
+	// session, keyed by sessionId. Only a change against this baseline counts as a
+	// live `ao preview` (see the reveal effect below).
+	const previewRevealRef = useRef<{ sessionId: string; revision: number; url: string } | null>(null);
 	const browserView = useBrowserView({
 		sessionId,
 		active: Boolean(session && hasInspector && (browserPoppedOut || isInspectorOpen)),
@@ -80,21 +84,31 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setBrowserPoppedOut(false);
 		setInspectorView("summary");
 		setFileView(null);
-		revealedPreviewRef.current = null;
 	}, [sessionId]);
 
-	// `ao preview` sets session.previewUrl (streamed over CDC); surface the result
-	// in the inspector rail's Browser tab (opening the rail if collapsed), not the
-	// center pane. Tracked per preview revision so re-revealing fires on every
-	// `ao preview` (even a re-run of the same target) while a manual tab switch
-	// sticks for a given revision. `ao preview clear` (empty url) does not reveal.
+	// `ao preview` sets session.previewUrl and bumps previewRevision (streamed over
+	// CDC); surface a *live* preview in the inspector rail's Browser tab (opening
+	// the rail if collapsed), not the center pane. Only a change observed while
+	// THIS session's data is already loaded counts: selecting or spawning a
+	// session — or a late async load of one that ran `ao preview` earlier — just
+	// records the baseline and must NEVER steal the Browser tab. The baseline is
+	// keyed by sessionId, so switching sessions can't look like a fresh preview,
+	// and a re-run of the same target still reveals (revision advances) while a
+	// manual tab switch sticks until the next `ao preview`. `ao preview clear`
+	// (empty url) advances the baseline but does not reveal. Older daemons omit
+	// previewRevision, so a URL change is also treated as a fresh preview.
 	useEffect(() => {
+		if (!sessionLoaded) return;
 		const revision = previewRevision ?? 0;
-		if (!previewUrl || revealedPreviewRef.current === revision) return;
-		revealedPreviewRef.current = revision;
+		const url = previewUrl ?? "";
+		const prev = previewRevealRef.current;
+		previewRevealRef.current = { sessionId, revision, url };
+		if (!prev || prev.sessionId !== sessionId) return;
+		if (prev.revision === revision && prev.url === url) return;
+		if (!url) return;
 		setInspectorView("browser");
 		if (!useUiStore.getState().isInspectorOpen) toggleInspector();
-	}, [previewRevision, previewUrl, toggleInspector]);
+	}, [sessionLoaded, sessionId, previewRevision, previewUrl, toggleInspector]);
 
 	// Computed when the inspector panel mounts and frozen while it stays
 	// mounted: rrp re-registers the panel (a layout effect keyed on defaultSize,

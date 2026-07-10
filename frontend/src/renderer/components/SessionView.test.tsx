@@ -317,12 +317,50 @@ describe("SessionView", () => {
 		expect(browserDestroy).not.toHaveBeenCalled();
 	});
 
-	it("reveals an `ao preview` URL in the inspector Browser tab, not the center pane", () => {
+	// Regression: selecting/opening a session that already carries a preview URL
+	// (a past `ao preview`, streamed on load) must NOT jump the rail to the
+	// Browser tab. Only a live `ao preview` while the session is open may.
+	it("does not auto-open the Browser tab when selecting a session that already has a preview URL", () => {
 		const worker = workspaces[0].sessions[0];
 		worker.previewUrl = "http://localhost:5173/";
+		worker.previewRevision = 2;
 		try {
 			useUiStore.setState({ isInspectorOpen: false });
 			render(<SessionView sessionId="sess-1" />);
+
+			// The rail stays collapsed on its default (Summary) tab — no auto-switch.
+			// (Closed inspector is aria-hidden/inert, so include hidden in the query.)
+			expect(useUiStore.getState().isInspectorOpen).toBe(false);
+			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute(
+				"data-view",
+				"summary",
+			);
+		} finally {
+			delete worker.previewUrl;
+			delete worker.previewRevision;
+		}
+	});
+
+	it("reveals the Browser tab when `ao preview` fires live on the open session, not the center pane", () => {
+		const worker = workspaces[0].sessions[0];
+		worker.previewUrl = undefined;
+		worker.previewRevision = 1;
+		try {
+			useUiStore.setState({ isInspectorOpen: false });
+			const { rerender } = render(<SessionView sessionId="sess-1" />);
+
+			// Baseline: the freshly opened session has no live preview yet.
+			// (Closed inspector is aria-hidden/inert, so include hidden in the query.)
+			expect(useUiStore.getState().isInspectorOpen).toBe(false);
+			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute(
+				"data-view",
+				"summary",
+			);
+
+			// `ao preview <url>` streams in: previewUrl set + revision bumped.
+			worker.previewUrl = "http://localhost:5173/";
+			worker.previewRevision = 2;
+			rerender(<SessionView sessionId="sess-1" />);
 
 			// Center pane keeps the terminal — the preview must not pop out over it.
 			expect(screen.getByText("terminal center")).toBeInTheDocument();
@@ -332,6 +370,7 @@ describe("SessionView", () => {
 			expect(screen.getByRole("button", { name: "pop browser" })).toHaveAttribute("data-view", "browser");
 		} finally {
 			delete worker.previewUrl;
+			delete worker.previewRevision;
 		}
 	});
 });
