@@ -212,7 +212,11 @@ describe("ProjectSettingsForm", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0][1].body.config;
-		expect(body.systemPromptAdditions).toEqual({ orchestrator: undefined, worker: "new worker note", reviewer: undefined });
+		expect(body.systemPromptAdditions).toEqual({
+			orchestrator: undefined,
+			worker: "new worker note",
+			reviewer: undefined,
+		});
 		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
 	});
 

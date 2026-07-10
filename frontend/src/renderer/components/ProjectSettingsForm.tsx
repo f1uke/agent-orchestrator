@@ -382,9 +382,8 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							Require approvals before Ready to merge
 						</label>
 						<p className="text-[11px] text-muted-foreground">
-							When enabled, a merge request is only marked Ready to merge once it has at least the required
-							number of approvals. Off by default; applies only when the GitLab repo has no approval rule of its
-							own.
+							When enabled, a merge request is only marked Ready to merge once it has at least the required number of
+							approvals. Off by default; applies only when the GitLab repo has no approval rule of its own.
 						</p>
 						{form.approvalRuleEnabled && (
 							<Field label="Required approvals" htmlFor="approvalThreshold">
