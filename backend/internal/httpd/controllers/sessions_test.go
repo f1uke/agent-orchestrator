@@ -2,6 +2,7 @@ package controllers_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -858,6 +859,43 @@ func TestSessionsAPI_SpawnRejectsOverlongDisplayName(t *testing.T) {
 	overlong := strings.Repeat("x", 21)
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","harness":"codex","displayName":"`+overlong+`"}`)
 	assertErrorCode(t, body, status, http.StatusBadRequest, "DISPLAY_NAME_TOO_LONG")
+}
+
+// TestSessionsAPI_SpawnAcceptsLargePrompt asserts the spawn endpoint accepts a
+// prompt well beyond the old 4 KB cap (the PROMPT_TOO_LONG limit was an
+// over-conservative validation constant, not an agent/model or ARG_MAX limit)
+// and forwards it to the session service verbatim.
+func TestSessionsAPI_SpawnAcceptsLargePrompt(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	prompt := strings.Repeat("x", 8*1024) // 8 KiB — rejected under the old 4 KiB cap
+	reqBody, err := json.Marshal(map[string]string{"projectId": "ao", "harness": "codex", "prompt": prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", string(reqBody))
+	if status != http.StatusCreated {
+		t.Fatalf("POST session = %d, want 201; body=%s", status, body)
+	}
+	if svc.lastSpawnCfg.Prompt != prompt {
+		t.Fatalf("SpawnConfig.Prompt len = %d, want %d (prompt forwarded verbatim)", len(svc.lastSpawnCfg.Prompt), len(prompt))
+	}
+}
+
+// TestSessionsAPI_SpawnRejectsOverlongPrompt asserts the raised cap still
+// rejects a pathologically large body so a single request can't blow past
+// ARG_MAX or bloat storage.
+func TestSessionsAPI_SpawnRejectsOverlongPrompt(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	prompt := strings.Repeat("x", 200*1024) // 200 KiB — above the 128 KiB cap
+	reqBody, err := json.Marshal(map[string]string{"projectId": "ao", "harness": "codex", "prompt": prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", string(reqBody))
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PROMPT_TOO_LONG")
 }
 
 func TestSessionsAPI_RenameNotFound(t *testing.T) {

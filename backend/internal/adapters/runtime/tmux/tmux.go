@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -168,7 +169,7 @@ func New(opts Options) *Runtime {
 
 // Create starts a new tmux session in the workspace, running the agent's
 // launch command with a keep-alive shell, and returns a handle to it.
-func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
+func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (_ ports.RuntimeHandle, err error) {
 	id, err := SessionNameFor(string(cfg.ProjectID), cfg.Branch, string(cfg.SessionID))
 	if err != nil {
 		return ports.RuntimeHandle{}, err
@@ -184,7 +185,19 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 	}
 
 	launchCmd := buildLaunchCommand(cfg)
-	args := newSessionArgs(id, cfg.WorkspacePath, r.shell, launchCmd)
+	args, scriptPath, err := r.launchInvocation(id, cfg.WorkspacePath, launchCmd, cfg.Env)
+	if err != nil {
+		return ports.RuntimeHandle{}, err
+	}
+	// A launch command too long for tmux's inline limit is delivered via a
+	// self-deleting script file (see launchInvocation). On success the shell
+	// removes it; if new-session ultimately fails, the shell never runs it, so
+	// remove it here rather than leak it. Inline launches leave scriptPath "".
+	defer func() {
+		if err != nil && scriptPath != "" {
+			_ = os.Remove(scriptPath)
+		}
+	}()
 	if out, err := r.run(ctx, args...); err != nil {
 		// A pre-existing session with this deterministic name blocks new-session
 		// with "duplicate session". If it is a STALE orphan (its agent has exited —
@@ -651,6 +664,68 @@ func sortedKeys(m map[string]string) []string {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// maxInlineLaunchLen is the largest launch command tmux accepts inline via
+// `new-session … <shell> -c <cmd>`. tmux caps a command argument near 16 KiB and
+// fails with "command too long" beyond it, so a bigger command (a large prompt
+// and/or system prompt) is delivered via a script FILE instead — the prompt then
+// reaches the agent as a normal argv element, bounded only by ARG_MAX (~1 MiB).
+// The margin below 16384 leaves room for the other new-session args.
+const maxInlineLaunchLen = 15000
+
+// launchInvocation returns the `tmux new-session` args for cfg's launch command.
+// A command within tmux's inline limit uses `<shell> -c <cmd>` (unchanged
+// behavior). An oversized command is written to a self-deleting script under the
+// session data dir and launched as `<shell> <script>`. The returned scriptPath is
+// non-empty only in that case, so Create can remove it if new-session fails (on
+// success the script removes itself — see writeLaunchScript).
+func (r *Runtime) launchInvocation(id, cwd, launchCmd string, env map[string]string) (args []string, scriptPath string, err error) {
+	if len(launchCmd) <= maxInlineLaunchLen {
+		return newSessionArgs(id, cwd, r.shell, launchCmd), "", nil
+	}
+	scriptPath, err = writeLaunchScript(id, launchCmd, env)
+	if err != nil {
+		return nil, "", err
+	}
+	return newSessionScriptArgs(id, cwd, r.shell, scriptPath), scriptPath, nil
+}
+
+// writeLaunchScript writes launchCmd to a self-deleting shell script so an
+// oversized launch command bypasses tmux's inline command-length limit. The
+// script removes itself as its first action; the shell keeps the file open by
+// fd, so the unlink is safe and nothing is left behind after launch. It lives
+// under AO_DATA_DIR (all app state stays under ~/.ao) — never the worktree, where
+// it could be committed onto the branch.
+func writeLaunchScript(id, launchCmd string, env map[string]string) (string, error) {
+	dir := filepath.Join(launchScriptBaseDir(env), "runtime", "launch")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("tmux runtime: prepare launch dir: %w", err)
+	}
+	f, err := os.CreateTemp(dir, "launch-"+id+"-*.sh")
+	if err != nil {
+		return "", fmt.Errorf("tmux runtime: create launch script: %w", err)
+	}
+	// `$0` is the script path under `sh <script>`, so `rm -f -- "$0"` deletes it.
+	if _, err := f.WriteString("rm -f -- \"$0\"\n" + launchCmd + "\n"); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("tmux runtime: write launch script: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("tmux runtime: write launch script: %w", err)
+	}
+	return f.Name(), nil
+}
+
+// launchScriptBaseDir returns the base dir for launch scripts: the session's
+// AO_DATA_DIR when set (keeping app state under ~/.ao), else a temp dir.
+func launchScriptBaseDir(env map[string]string) string {
+	if d := strings.TrimSpace(env["AO_DATA_DIR"]); d != "" {
+		return d
+	}
+	return os.TempDir()
 }
 
 // buildLaunchCommand builds the shell command string passed to `sh -c`. It
