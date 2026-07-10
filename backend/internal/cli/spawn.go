@@ -34,6 +34,7 @@ type spawnOptions struct {
 	claimPR        string
 	noTakeover     bool
 	skipAgentCheck bool
+	todo           bool
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -51,6 +52,12 @@ type spawnRequest struct {
 	AutoNameBranch bool   `json:"autoNameBranch,omitempty"`
 	Prompt         string `json:"prompt,omitempty"`
 	DisplayName    string `json:"displayName,omitempty"`
+	// StartImmediately is nil for a normal spawn (start now, unchanged) and set
+	// to false by `--todo` to stage the worker as a prepared TODO on the board.
+	StartImmediately *bool `json:"startImmediately,omitempty"`
+	// CreatedBy records the orchestrator session queuing a `--todo`, for the
+	// report-back once the worker finishes.
+	CreatedBy string `json:"createdBy,omitempty"`
 }
 
 type spawnResult struct {
@@ -81,6 +88,10 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if opts.noTakeover && opts.claimPR == "" {
 				return usageError{fmt.Errorf("--no-takeover requires --claim-pr")}
 			}
+			// A TODO is not started, so there is no session to claim a PR into.
+			if opts.todo && opts.claimPR != "" {
+				return usageError{fmt.Errorf("--todo cannot be combined with --claim-pr (a queued task has no live session to claim into)")}
+			}
 			if explicitName := strings.TrimSpace(opts.name); utf8.RuneCountInString(explicitName) > maxDisplayNameLen {
 				return usageError{fmt.Errorf("--name must be %d characters or fewer", maxDisplayNameLen)}
 			}
@@ -106,7 +117,9 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			opts.harness = harness
 
 			name := resolveSpawnDisplayName(opts.name, opts.prompt)
-			if !opts.skipAgentCheck {
+			// A TODO is not launched now, so skip the agent install/auth preflight:
+			// the check runs when it is later started.
+			if !opts.skipAgentCheck && !opts.todo {
 				if err := ctx.preflightSpawnAgentAuth(cmd.Context(), cmd, opts.harness); err != nil {
 					return err
 				}
@@ -131,8 +144,20 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				Prompt:         opts.prompt,
 				DisplayName:    name,
 			}
+			if opts.todo {
+				// --todo stages a prepared TODO (no branch/worktree/tmux until
+				// Start). createdBy links it back to the queuing orchestrator.
+				deferred := false
+				req.StartImmediately = &deferred
+				req.CreatedBy = strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+			}
 			var res spawnResult
 			if err := ctx.postJSON(cmd.Context(), "sessions", req, &res); err != nil {
+				return err
+			}
+			// A queued TODO has nothing to attach to; report it and stop here.
+			if opts.todo {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "queued TODO session %s — start it with `ao session start %s`\n", res.Session.ID, res.Session.ID)
 				return err
 			}
 			claimed := ""
@@ -156,22 +181,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if _, err := fmt.Fprintf(out, "spawned session %s (%s)%s\n", res.Session.ID, res.Session.Status, claimLabel); err != nil {
 				return err
 			}
-			// Print a copy-pasteable attach hint for the selected runtime.
-			// On Darwin/Linux: tmux attach-session using the sanitised session name.
-			// On Windows: ConPTY has no user-facing attach CLI; use the AO dashboard.
-			var attach string
-			if runtime.GOOS != "windows" {
-				// Reuse the runtime's own naming so the hint matches the actual
-				// tmux session (branch-mirroring name; falls back to the id).
-				name, nameErr := tmux.SessionNameFor(res.Session.ProjectID, res.Session.Branch, res.Session.ID)
-				if nameErr != nil {
-					name = res.Session.ID
-				}
-				attach = fmt.Sprintf("tmux attach -t %s", name)
-			} else {
-				attach = "Attach from the AO dashboard (ConPTY sessions have no CLI attach command)"
-			}
-			_, err = fmt.Fprintf(out, "attach with: %s\n", attach)
+			_, err = fmt.Fprintf(out, "attach with: %s\n", spawnAttachHint(res.Session.ProjectID, res.Session.Branch, res.Session.ID))
 			return err
 		},
 	}
@@ -194,7 +204,23 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.claimPR, "claim-pr", "", "Immediately claim an existing PR for the spawned session: a github.com PR URL/number, or a full GitLab merge-request URL")
 	f.BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the claimed PR (requires --claim-pr)")
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
+	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
 	return cmd
+}
+
+// spawnAttachHint returns a copy-pasteable attach hint for the selected runtime.
+// On Darwin/Linux it is a tmux attach-session using the sanitised session name
+// (branch-mirroring, falling back to the id); on Windows ConPTY has no
+// user-facing attach CLI, so it points at the AO dashboard.
+func spawnAttachHint(projectID, branch, id string) string {
+	if runtime.GOOS == "windows" {
+		return "Attach from the AO dashboard (ConPTY sessions have no CLI attach command)"
+	}
+	name, err := tmux.SessionNameFor(projectID, branch, id)
+	if err != nil {
+		name = id
+	}
+	return fmt.Sprintf("tmux attach -t %s", name)
 }
 
 func (c *commandContext) fetchAgentInventory(ctx context.Context, refresh bool) (agentInventory, error) {

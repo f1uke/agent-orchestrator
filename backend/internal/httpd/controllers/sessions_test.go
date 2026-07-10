@@ -52,6 +52,14 @@ type fakeSessionService struct {
 	deleteID     domain.SessionID
 	deleteForce  bool
 	deleteErr    error
+	// TODO-lane fakes.
+	preparedCfg  ports.SpawnConfig
+	prepared     bool
+	startedID    domain.SessionID
+	startErr     error
+	updatedID    domain.SessionID
+	updatedPatch ports.TodoSpecPatch
+	updateErr    error
 }
 
 func newFakeSessionService() *fakeSessionService {
@@ -85,6 +93,44 @@ func (f *fakeSessionService) Spawn(_ context.Context, cfg ports.SpawnConfig) (do
 	now := time.Now().UTC()
 	s := domain.Session{SessionRecord: domain.SessionRecord{ID: domain.SessionID(string(cfg.ProjectID) + "-2"), ProjectID: cfg.ProjectID, IssueID: cfg.IssueID, Kind: cfg.Kind, Harness: cfg.Harness, DisplayName: cfg.DisplayName, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, CreatedAt: now, UpdatedAt: now}, Status: domain.StatusIdle}
 	f.sessions[s.ID] = s
+	return s, nil
+}
+func (f *fakeSessionService) PrepareTodo(_ context.Context, cfg ports.SpawnConfig) (domain.Session, error) {
+	f.preparedCfg = cfg
+	f.prepared = true
+	if f.spawnErr != nil {
+		return domain.Session{}, f.spawnErr
+	}
+	now := time.Now().UTC()
+	s := domain.Session{SessionRecord: domain.SessionRecord{ID: domain.SessionID(string(cfg.ProjectID) + "-todo"), ProjectID: cfg.ProjectID, Kind: cfg.Kind, Harness: cfg.Harness, DisplayName: cfg.DisplayName, IsTodo: true, BaseBranch: cfg.BaseBranch, PRTarget: cfg.PRTarget, CreatedBy: cfg.CreatedBy, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, Metadata: domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt}, CreatedAt: now, UpdatedAt: now}, Status: domain.StatusTodo}
+	f.sessions[s.ID] = s
+	return s, nil
+}
+func (f *fakeSessionService) StartTodo(_ context.Context, id domain.SessionID) (domain.Session, error) {
+	f.startedID = id
+	if f.startErr != nil {
+		return domain.Session{}, f.startErr
+	}
+	now := time.Now().UTC()
+	s := domain.Session{SessionRecord: domain.SessionRecord{ID: id, ProjectID: "mer", Kind: domain.KindWorker, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, CreatedAt: now, UpdatedAt: now}, Status: domain.StatusIdle}
+	f.sessions[id] = s
+	return s, nil
+}
+func (f *fakeSessionService) UpdateTodoSpec(_ context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.Session, error) {
+	f.updatedID = id
+	f.updatedPatch = patch
+	if f.updateErr != nil {
+		return domain.Session{}, f.updateErr
+	}
+	now := time.Now().UTC()
+	s := domain.Session{SessionRecord: domain.SessionRecord{ID: id, ProjectID: "mer", Kind: domain.KindWorker, IsTodo: true, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, CreatedAt: now, UpdatedAt: now}, Status: domain.StatusTodo}
+	if patch.DisplayName != nil {
+		s.DisplayName = *patch.DisplayName
+	}
+	if patch.Prompt != nil {
+		s.Metadata.Prompt = *patch.Prompt
+	}
+	f.sessions[id] = s
 	return s, nil
 }
 

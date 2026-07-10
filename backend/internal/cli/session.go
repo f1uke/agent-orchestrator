@@ -143,6 +143,7 @@ func newSessionCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.AddCommand(newSessionListCommand(ctx))
 	cmd.AddCommand(newSessionGetCommand(ctx))
+	cmd.AddCommand(newSessionStartCommand(ctx))
 	cmd.AddCommand(newSessionKillCommand(ctx))
 	cmd.AddCommand(newSessionRestoreCommand(ctx))
 	cmd.AddCommand(newSessionRenameCommand(ctx))
@@ -205,6 +206,45 @@ func newSessionKillCommand(ctx *commandContext) *cobra.Command {
 	}
 	addSessionProjectFlag(cmd.Flags(), &opts.project, "Project id to scope the lookup")
 	return cmd
+}
+
+func newSessionStartCommand(ctx *commandContext) *cobra.Command {
+	var opts sessionOptions
+	cmd := &cobra.Command{
+		Use:   "start <id>",
+		Short: "Start (materialize) a prepared TODO session",
+		Long: "Start a queued TODO session: the daemon materializes its branch, worktree\n" +
+			"and agent runtime from the stored spec and hands it to the normal session\n" +
+			"lifecycle. Stage a TODO with `ao spawn --todo`.",
+		Args: oneSessionIDArg,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := normalizeSessionID(args[0])
+			if err != nil {
+				return err
+			}
+			return ctx.startSession(cmd.Context(), cmd, id, opts)
+		},
+	}
+	addSessionProjectFlag(cmd.Flags(), &opts.project, "Project id to scope the lookup")
+	return cmd
+}
+
+func (c *commandContext) startSession(ctx context.Context, cmd *cobra.Command, id string, opts sessionOptions) error {
+	if opts.project != "" {
+		if _, err := c.fetchScopedSession(ctx, id, opts.project); err != nil {
+			return err
+		}
+	}
+	var res spawnResult
+	if err := c.postJSON(ctx, "sessions/"+url.PathEscape(id)+"/start", struct{}{}, &res); err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "started session %s (%s)\n", res.Session.ID, res.Session.Status); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "attach with: %s\n", spawnAttachHint(res.Session.ProjectID, res.Session.Branch, res.Session.ID))
+	return err
 }
 
 func newSessionRestoreCommand(ctx *commandContext) *cobra.Command {

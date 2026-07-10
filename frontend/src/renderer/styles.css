@@ -129,7 +129,10 @@
 	/* Board kanban — 4-hue semantic lane system (design handoff Board.dc.html).
 	   Each lane owns a base hue (top border, background tint, count badge) plus a
 	   brighter variant (status dot, header label, card accent, sidebar glyph).
-	   NEEDS YOU is coral, not amber, so it no longer collides with WORKING. */
+	   NEEDS YOU is coral, not amber, so it no longer collides with WORKING.
+	   TODO is a cool desaturated grey-violet — visibly "queued, not live". */
+	--lane-todo: #8a8aa0;
+	--lane-todo-bright: #a6a6be;
 	--lane-working: #e0a544;
 	--lane-working-bright: #ebb65c;
 	--lane-needs: #ef6f5c;
@@ -174,6 +177,8 @@
 	--kanban-pending-glow: rgb(0 0 0 / 0.03);
 	/* Light-mode lane hues: darker/saturated so they stay legible on white; the
 	   design handoff is dark-only, these keep the 4-hue system readable in light. */
+	--lane-todo: #6b6b85;
+	--lane-todo-bright: #6b6b85;
 	--lane-working: #b06f15;
 	--lane-working-bright: #b06f15;
 	--lane-needs: #d1493a;

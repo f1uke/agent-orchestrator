@@ -34,6 +34,11 @@ var errPreviewFileNotFound = errors.New("preview file not found")
 type SessionService interface {
 	List(ctx context.Context, filter sessionsvc.ListFilter) ([]domain.Session, error)
 	Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Session, error)
+	// PrepareTodo stages a deferred/TODO session; StartTodo materializes it;
+	// UpdateTodoSpec edits its spec while still queued.
+	PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domain.Session, error)
+	StartTodo(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.Session, error)
 	SpawnOrchestrator(ctx context.Context, projectID domain.ProjectID, clean bool) (domain.Session, error)
 	Get(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.Session, error)
@@ -88,6 +93,8 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
+	r.Patch("/sessions/{sessionId}/spec", c.updateSpec)
+	r.Post("/sessions/{sessionId}/start", c.start)
 	r.Post("/sessions/{sessionId}/restore", c.restore)
 	r.Post("/sessions/{sessionId}/restart", c.restart)
 	r.Post("/sessions/{sessionId}/kill", c.kill)
@@ -150,12 +157,63 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 	if in.Kind == "" {
 		in.Kind = domain.KindWorker
 	}
-	sess, err := c.Svc.Spawn(r.Context(), ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName})
+	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy}
+	// startImmediately absent/null/true keeps the current spawn-now behavior;
+	// false stages the worker as a prepared TODO on the board.
+	deferred := in.StartImmediately != nil && !*in.StartImmediately
+	spawn := c.Svc.Spawn
+	if deferred {
+		spawn = c.Svc.PrepareTodo
+	}
+	sess, err := spawn(r.Context(), cfg)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusCreated, SessionResponse{Session: sessionView(sess)})
+}
+
+// start materializes a prepared TODO in place and hands it to the normal
+// session lifecycle, returning the now-live session.
+func (c *SessionsController) start(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/start")
+		return
+	}
+	sess, err := c.Svc.StartTodo(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(sess)})
+}
+
+// updateSpec persists edits to a prepared TODO's spec before it is started.
+func (c *SessionsController) updateSpec(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/sessions/{sessionId}/spec")
+		return
+	}
+	var in UpdateTodoSpecRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.DisplayName != nil && utf8.RuneCountInString(strings.TrimSpace(*in.DisplayName)) > maxDisplayNameLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "DISPLAY_NAME_TOO_LONG", "displayName must be 20 characters or fewer", nil)
+		return
+	}
+	if in.Prompt != nil && len(*in.Prompt) > maxPromptLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PROMPT_TOO_LONG", "prompt is too long", nil)
+		return
+	}
+	patch := ports.TodoSpecPatch{DisplayName: in.DisplayName, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, PRTarget: in.PRTarget, Prompt: in.Prompt, AutoNameBranch: in.AutoNameBranch}
+	sess, err := c.Svc.UpdateTodoSpec(r.Context(), sessionID(r), patch)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(sess)})
 }
 
 func (c *SessionsController) get(w http.ResponseWriter, r *http.Request) {
@@ -892,7 +950,13 @@ func previewFileURL(r *http.Request, id domain.SessionID, entry string) string {
 }
 
 func sessionView(s domain.Session) SessionView {
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, PRs: sessionPRFacts(s.PRs)}
+	// The prompt is surfaced only for a prepared TODO (the board detail modal
+	// edits it); a live session keeps its prompt off the read model.
+	prompt := ""
+	if s.IsTodo {
+		prompt = s.Metadata.Prompt
+	}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs)}
 }
 
 func sessionViews(sessions []domain.Session) []SessionView {

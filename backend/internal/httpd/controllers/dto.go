@@ -160,8 +160,12 @@ type SessionView struct {
 	// unchanged) so the desktop browser panel can re-navigate / refresh on a
 	// repeated preview of the same target. Pulled from the json:"-" domain
 	// Metadata.
-	PreviewRevision int64            `json:"previewRevision,omitempty"`
-	PRs             []SessionPRFacts `json:"prs"`
+	PreviewRevision int64 `json:"previewRevision,omitempty"`
+	// Prompt is the deferred task's prompt. Surfaced (curated from the json:"-"
+	// domain Metadata) only for a prepared TODO so the board detail modal can
+	// show/edit it; omitted for live sessions to keep the sessions list lean.
+	Prompt string           `json:"prompt,omitempty"`
+	PRs    []SessionPRFacts `json:"prs"`
 }
 
 // ListSessionsResponse is the body of GET /api/v1/sessions.
@@ -187,6 +191,30 @@ type SpawnSessionRequest struct {
 	// `ao spawn --name` always sets it; other clients (e.g. the desktop new-task
 	// dialog) may omit it and fall back to the session id in the read model.
 	DisplayName string `json:"displayName,omitempty" maxLength:"20"`
+	// StartImmediately controls deferral. Absent/null (the default) or true
+	// spawns the session now — the unchanged behavior. false stages it as a
+	// prepared TODO on the board (no branch/worktree/tmux until Start).
+	StartImmediately *bool `json:"startImmediately,omitempty"`
+	// PRTarget is the intended PR merge target, stored on a deferred TODO so the
+	// board detail modal can show/edit it. Ignored for an immediate spawn.
+	PRTarget string `json:"prTarget,omitempty"`
+	// CreatedBy is the orchestrator session id queuing a deferred TODO, kept for
+	// the report-back. `ao spawn --todo` sets it from AO_SESSION_ID.
+	CreatedBy domain.SessionID `json:"createdBy,omitempty"`
+}
+
+// UpdateTodoSpecRequest is the body of PATCH /api/v1/sessions/{sessionId}/spec:
+// edits to a prepared TODO's spec before it is started. Every field is optional
+// — an absent field is left unchanged; a present field is set (including to
+// empty). Rejected once the task has started.
+type UpdateTodoSpecRequest struct {
+	DisplayName    *string              `json:"displayName,omitempty" maxLength:"20"`
+	Harness        *domain.AgentHarness `json:"harness,omitempty" enum:"claude-code,codex,aider,opencode,grok,droid,amp,agy,crush,cursor,qwen,copilot,goose,auggie,continue,devin,cline,kimi,kiro,kilocode,vibe,pi,autohand"`
+	Branch         *string              `json:"branch,omitempty"`
+	BaseBranch     *string              `json:"baseBranch,omitempty"`
+	PRTarget       *string              `json:"prTarget,omitempty"`
+	Prompt         *string              `json:"prompt,omitempty" maxLength:"4096"`
+	AutoNameBranch *bool                `json:"autoNameBranch,omitempty"`
 }
 
 // SessionResponse is the { session } body shared by session create/get.

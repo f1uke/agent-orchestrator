@@ -186,6 +186,11 @@ type Session struct {
 	PreviewRevision   int64
 	Reactivated       bool
 	AutoNudgeComments sql.NullInt64
+	IsTodo            bool
+	BaseBranch        string
+	AutoNameBranch    bool
+	PRTarget          string
+	CreatedBy         string
 }
 
 type SessionWorktree struct {

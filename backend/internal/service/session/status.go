@@ -66,6 +66,13 @@ func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time,
 // parent is still open are exempt from the aggregation since they cannot merge
 // until the parent does. Merged/closed PRs only matter once no open PR remains.
 func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, rule domain.ApprovalRule) statusResult {
+	// A prepared-but-not-started TODO has no runtime to observe: it reads todo
+	// until Start materializes it (MarkSpawned clears IsTodo, at which point the
+	// normal derivation below takes over).
+	if rec.IsTodo {
+		return statusResult{Status: domain.StatusTodo, Reason: domain.ReasonTodo}
+	}
+
 	if rec.IsTerminated {
 		if anyMerged(prs) {
 			return statusResult{Status: domain.StatusMerged, Reason: domain.ReasonMerged}

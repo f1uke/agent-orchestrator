@@ -256,6 +256,9 @@ type fakeCommander struct {
 	restartRecord   domain.SessionRecord
 	spawned         bool
 	killsAtSpawn    int
+	preparedTodo    bool
+	startedTodo     []domain.SessionID
+	updatedTodo     []domain.SessionID
 }
 
 func (f *fakeCommander) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error) {
@@ -268,6 +271,28 @@ func (f *fakeCommander) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.
 		return f.spawnRecord, nil
 	}
 	return domain.SessionRecord{ID: "mer-9", ProjectID: cfg.ProjectID, Kind: cfg.Kind, Harness: cfg.Harness}, nil
+}
+func (f *fakeCommander) PrepareTodo(_ context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error) {
+	if f.spawnErr != nil {
+		return domain.SessionRecord{}, f.spawnErr
+	}
+	f.preparedTodo = true
+	return domain.SessionRecord{ID: "mer-todo", ProjectID: cfg.ProjectID, Kind: cfg.Kind, Harness: cfg.Harness, IsTodo: true, BaseBranch: cfg.BaseBranch, PRTarget: cfg.PRTarget, CreatedBy: cfg.CreatedBy, Metadata: domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt}}, nil
+}
+func (f *fakeCommander) StartTodo(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	if f.spawnErr != nil {
+		return domain.SessionRecord{}, f.spawnErr
+	}
+	f.startedTodo = append(f.startedTodo, id)
+	return domain.SessionRecord{ID: id, ProjectID: "mer", Kind: domain.KindWorker}, nil
+}
+func (f *fakeCommander) UpdateTodoSpec(_ context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.SessionRecord, error) {
+	f.updatedTodo = append(f.updatedTodo, id)
+	rec := domain.SessionRecord{ID: id, ProjectID: "mer", IsTodo: true}
+	if patch.DisplayName != nil {
+		rec.DisplayName = *patch.DisplayName
+	}
+	return rec, nil
 }
 func (f *fakeCommander) Restore(context.Context, domain.SessionID) (domain.SessionRecord, error) {
 	return domain.SessionRecord{}, nil

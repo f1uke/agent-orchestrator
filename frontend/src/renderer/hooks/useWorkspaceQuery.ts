@@ -70,6 +70,12 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				previewUrl: session.previewUrl,
 				previewRevision: session.previewRevision,
 				prs: (session.prs ?? []).map(toPullRequestFacts),
+				isTodo: session.isTodo,
+				baseBranch: session.baseBranch,
+				prTarget: session.prTarget,
+				autoNameBranch: session.autoNameBranch,
+				createdBy: session.createdBy,
+				prompt: session.prompt,
 			})),
 	}));
 }

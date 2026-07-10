@@ -6,6 +6,10 @@ type SessionStatus string
 
 // The display statuses the dashboard renders.
 const (
+	// StatusTodo marks a session PREPARED BUT NOT STARTED (the board's TODO
+	// lane): no branch/worktree/tmux exists yet, only the persisted spec. Start
+	// materializes it and it takes on the normal derived statuses below.
+	StatusTodo             SessionStatus = "todo"
 	StatusWorking          SessionStatus = "working"
 	StatusPROpen           SessionStatus = "pr_open"
 	StatusDraft            SessionStatus = "draft"
@@ -35,6 +39,7 @@ type StatusReason string
 // StatusReason values name each rule in the status derivation; the trailing
 // comment on each states the condition that selects it.
 const (
+	ReasonTodo         StatusReason = "todo"          // prepared but not started (TODO lane)
 	ReasonWorking      StatusReason = "working"       // active, heartbeat fresh
 	ReasonWaitingInput StatusReason = "waiting_input" // agent reported a prompt (Notification hook)
 	ReasonActiveStale  StatusReason = "active_stale"  // active aged past grace -> needs_input (timeout guess)

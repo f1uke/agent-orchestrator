@@ -154,6 +154,8 @@ func (l *fakeLCM) MarkSpawned(_ context.Context, id domain.SessionID, metadata d
 	l.completed++
 	rec := l.store.sessions[id]
 	rec.IsTerminated = false
+	// Mirror the real lifecycle manager: a spawned session is no longer a TODO.
+	rec.IsTodo = false
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()}
 	rec.Metadata = metadata
 	l.store.sessions[id] = rec

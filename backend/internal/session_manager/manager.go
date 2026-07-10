@@ -40,6 +40,9 @@ var (
 	// ErrMissingHarness means neither the spawn request nor the project's role
 	// config selected an agent. Worker/orchestrator spawns must be explicit.
 	ErrMissingHarness = errors.New("session: agent harness required")
+	// ErrNotTodo means a start/spec-edit targeted a session that is not a
+	// prepared TODO (already started, or never was one). The API maps it to 409.
+	ErrNotTodo = errors.New("session: not a prepared TODO")
 	// ErrNotResumable means a terminated session cannot be relaunched: its adapter
 	// cannot natively resume it AND it has no prompt to fresh-launch from, and it is
 	// not an orchestrator (orchestrators are promptless by design and relaunch fresh
@@ -92,6 +95,9 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
 	ListWorkspaceRepos(ctx context.Context, projectID string) ([]domain.WorkspaceRepoRecord, error)
 	CreateSession(ctx context.Context, rec domain.SessionRecord) (domain.SessionRecord, error)
+	// UpdateSession rewrites a session row's mutable state. Used to persist edits
+	// to a prepared TODO's spec before it is started.
+	UpdateSession(ctx context.Context, rec domain.SessionRecord) error
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 	ListSessions(ctx context.Context, project domain.ProjectID) ([]domain.SessionRecord, error)
 	ListAllSessions(ctx context.Context) ([]domain.SessionRecord, error)
@@ -317,7 +323,24 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: create: %w", err)
 	}
-	id := rec.ID
+	// Materialize the freshly-seeded row: a hard failure deletes the seed
+	// outright (keepTodo=false) so it never lingers as a terminated orphan.
+	return m.materialize(ctx, project, cfg, rec.ID, prompt, systemPrompt, false)
+}
+
+// materialize runs the branch → worktree → provision → agent-prep → runtime →
+// MarkSpawned half of a spawn against an already-persisted seed row `id`. On any
+// failure it tears down whatever partial workspace/runtime it created; the seed
+// row is then either deleted (keepTodo=false, a fresh spawn) or left intact as a
+// TODO for the user to retry (keepTodo=true, a TODO Start).
+func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord, cfg ports.SpawnConfig, id domain.SessionID, prompt, systemPrompt string, keepTodo bool) (domain.SessionRecord, error) {
+	disposeSeed := func() {
+		if keepTodo {
+			m.logger.Warn("start todo: materialize failed, keeping task in TODO for retry", "sessionID", id)
+			return
+		}
+		m.rollbackSpawnSeedRow(ctx, id)
+	}
 
 	branch := cfg.Branch
 	autoNamed := false
@@ -359,8 +382,9 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if err != nil {
 		// Nothing observable exists yet — no worktree, no runtime — so the seed
 		// row is deleted outright instead of accumulating as a terminated orphan
-		// in session lists (e.g. when gitworktree refuses the branch).
-		m.rollbackSpawnSeedRow(ctx, id)
+		// in session lists (e.g. when gitworktree refuses the branch). A TODO
+		// Start keeps the row so the task can be retried.
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: workspace: %w", id, err)
 	}
 
@@ -368,20 +392,20 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// post-create commands (e.g. `pnpm install`) before the agent launches.
 	if err := m.provisionWorkspace(ctx, project, ws.Path); err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.rollbackSpawnSeedRow(ctx, id)
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: provision: %w", id, err)
 	}
 
 	agent, ok := m.agents.Agent(cfg.Harness)
 	if !ok {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.rollbackSpawnSeedRow(ctx, id)
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: no agent adapter for harness %q", id, cfg.Harness)
 	}
 	agentConfig := effectiveAgentConfig(cfg.Kind, project.Config)
 	if err := m.prepareWorkspace(ctx, agent, id, ws.Path, systemPrompt, agentConfig); err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.rollbackSpawnSeedRow(ctx, id)
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
 	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
@@ -396,7 +420,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.rollbackSpawnSeedRow(ctx, id)
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: launch command: %w", id, err)
 	}
 	// Pre-flight: confirm argv[0] actually exists on PATH (or as an absolute
@@ -405,7 +429,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// unresolved binary would leak through as a "live" session that never ran.
 	if err := m.validateAgentBinary(argv); err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.rollbackSpawnSeedRow(ctx, id)
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
@@ -418,7 +442,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.rollbackSpawnSeedRow(ctx, id)
+		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: runtime: %w", id, err)
 	}
 
@@ -426,8 +450,134 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if err := m.lcm.MarkSpawned(ctx, id, metadata); err != nil {
 		_ = m.runtime.Destroy(ctx, handle)
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		m.markSpawnFailedTerminated(ctx, id)
+		// Runtime came up but the completing DB write failed. A fresh spawn
+		// terminates the row; a TODO Start leaves it queued (still is_todo) for
+		// a retry rather than stranding it as terminated.
+		if keepTodo {
+			m.logger.Warn("start todo: mark spawned failed, keeping task in TODO for retry", "sessionID", id)
+		} else {
+			m.markSpawnFailedTerminated(ctx, id)
+		}
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: completed: %w", id, err)
+	}
+	return m.getRecord(ctx, id)
+}
+
+// PrepareTodo persists a session in the TODO/prepared state: the spec is saved
+// (project, harness, base/new branch, prTarget, prompt, createdBy) but NO
+// branch, worktree, runtime or agent process is created. StartTodo materializes
+// it later. Unlike Spawn, an empty harness is allowed (it resolves to the
+// project default at Start); a non-empty but unknown harness is still rejected
+// so bad data never persists.
+func (m *Manager) PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error) {
+	if _, err := m.loadProject(ctx, cfg.ProjectID); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w", err)
+	}
+	if cfg.Harness != "" {
+		if _, ok := m.agents.Agent(cfg.Harness); !ok {
+			return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w: %q", ErrUnknownHarness, cfg.Harness)
+		}
+	}
+	rec, err := m.store.CreateSession(ctx, todoSeedRecord(cfg, m.clock()))
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("prepare todo: create: %w", err)
+	}
+	return m.getRecord(ctx, rec.ID)
+}
+
+// StartTodo materializes a prepared TODO in place: it replays the stored spec
+// through the normal spawn materialization on the SAME row, so the id carries
+// through into the live session. A materialize failure keeps the row queued in
+// TODO for a retry rather than deleting or terminating it.
+func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	row, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
+	}
+	if !ok {
+		return domain.SessionRecord{}, ErrNotFound
+	}
+	if !row.IsTodo {
+		return domain.SessionRecord{}, ErrNotTodo
+	}
+	project, err := m.loadProject(ctx, row.ProjectID)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
+	}
+	cfg := ports.SpawnConfig{
+		ProjectID:      row.ProjectID,
+		IssueID:        row.IssueID,
+		Kind:           row.Kind,
+		Harness:        row.Harness,
+		Branch:         row.Metadata.Branch,
+		AutoNameBranch: row.AutoNameBranch,
+		BaseBranch:     row.BaseBranch,
+		Prompt:         row.Metadata.Prompt,
+		DisplayName:    row.DisplayName,
+		PRTarget:       row.PRTarget,
+		CreatedBy:      row.CreatedBy,
+	}
+	cfg.Harness = effectiveHarness(cfg.Harness, cfg.Kind, project.Config)
+	if cfg.Harness == "" {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w: configure project %s.agent or set the task's agent", id, ErrMissingHarness, roleConfigName(cfg.Kind))
+	}
+	if _, ok := m.agents.Agent(cfg.Harness); !ok {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w: %q", id, ErrUnknownHarness, cfg.Harness)
+	}
+	if err := m.validateRuntimePrerequisites(); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
+	}
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: prompt: %w", id, err)
+	}
+	return m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true)
+}
+
+// UpdateTodoSpec persists edits to a prepared TODO's spec (name, agent, base/new
+// branch, PR target, prompt). It is rejected once the task has started
+// (ErrNotTodo). An unknown non-empty harness is rejected; harness resolution to
+// the project default is deferred to Start.
+func (m *Manager) UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.SessionRecord, error) {
+	row, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("update todo %s: %w", id, err)
+	}
+	if !ok {
+		return domain.SessionRecord{}, ErrNotFound
+	}
+	if !row.IsTodo {
+		return domain.SessionRecord{}, ErrNotTodo
+	}
+	if patch.DisplayName != nil {
+		row.DisplayName = *patch.DisplayName
+	}
+	if patch.Harness != nil {
+		if *patch.Harness != "" {
+			if _, ok := m.agents.Agent(*patch.Harness); !ok {
+				return domain.SessionRecord{}, fmt.Errorf("update todo %s: %w: %q", id, ErrUnknownHarness, *patch.Harness)
+			}
+		}
+		row.Harness = *patch.Harness
+	}
+	if patch.Branch != nil {
+		row.Metadata.Branch = *patch.Branch
+	}
+	if patch.BaseBranch != nil {
+		row.BaseBranch = *patch.BaseBranch
+	}
+	if patch.PRTarget != nil {
+		row.PRTarget = *patch.PRTarget
+	}
+	if patch.Prompt != nil {
+		row.Metadata.Prompt = *patch.Prompt
+	}
+	if patch.AutoNameBranch != nil {
+		row.AutoNameBranch = *patch.AutoNameBranch
+	}
+	row.UpdatedAt = m.clock()
+	if err := m.store.UpdateSession(ctx, row); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("update todo %s: %w", id, err)
 	}
 	return m.getRecord(ctx, id)
 }
@@ -1793,6 +1943,30 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		Harness:     cfg.Harness,
 		DisplayName: cfg.DisplayName,
 		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+	}
+}
+
+// todoSeedRecord builds the durable row for a prepared TODO. Unlike seedRecord
+// (a transient row whose spec is only written at MarkSpawned), this persists the
+// full spec — prompt, desired new branch, base branch, PR target, createdBy —
+// so StartTodo can replay it verbatim, and marks the row is_todo so status
+// derivation reads it as StatusTodo and it never counts as a live session.
+func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
+	return domain.SessionRecord{
+		ProjectID:      cfg.ProjectID,
+		IssueID:        cfg.IssueID,
+		Kind:           cfg.Kind,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Harness:        cfg.Harness,
+		DisplayName:    cfg.DisplayName,
+		Activity:       domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		IsTodo:         true,
+		BaseBranch:     cfg.BaseBranch,
+		AutoNameBranch: cfg.AutoNameBranch,
+		PRTarget:       cfg.PRTarget,
+		CreatedBy:      cfg.CreatedBy,
+		Metadata:       domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }
 

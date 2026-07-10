@@ -291,6 +291,11 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 	// spawn reads is_terminated=false here, so it stays reactivated=false.
 	rec.Reactivated = rec.IsTerminated
 	rec.IsTerminated = false
+	// A session that has been spawned is, by definition, no longer a prepared
+	// TODO. Clearing the flag here (a no-op for a normal spawn where it is
+	// already false) is what materializes a queued TODO in place on Start, and
+	// the recreated sessions_cdc_update trigger fans the transition out.
+	rec.IsTodo = false
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}
 	// Each spawn/restore must re-prove its hook pipeline: clear the receipt so
 	// a relaunch with broken hooks degrades to no_signal instead of inheriting
