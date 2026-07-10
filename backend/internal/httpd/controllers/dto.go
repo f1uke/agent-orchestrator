@@ -509,12 +509,16 @@ type SessionPRCommentThread struct {
 
 // SessionPRThreadComment is one review comment.
 type SessionPRThreadComment struct {
-	ID        string `json:"id"`
-	Author    string `json:"author"`
-	Body      string `json:"body"`
-	URL       string `json:"url"`
-	Resolved  bool   `json:"resolved"`
-	IsBot     bool   `json:"isBot"`
+	ID       string `json:"id"`
+	Author   string `json:"author"`
+	Body     string `json:"body"`
+	URL      string `json:"url"`
+	Resolved bool   `json:"resolved"`
+	IsBot    bool   `json:"isBot"`
+	// System is true for provider-generated system notes (e.g. GitLab's
+	// "changed this line in version N of the diff"); the UI renders these as a
+	// de-emphasized activity line rather than a user comment.
+	System    bool   `json:"system"`
 	CreatedAt string `json:"createdAt"`
 }
 
@@ -527,7 +531,7 @@ func newSessionPRThreadComment(c sessionsvc.PRThreadComment) SessionPRThreadComm
 	}
 	return SessionPRThreadComment{
 		ID: c.ID, Author: c.Author, Body: c.Body, URL: c.URL,
-		Resolved: c.Resolved, IsBot: c.IsBot, CreatedAt: createdAt,
+		Resolved: c.Resolved, IsBot: c.IsBot, System: c.System, CreatedAt: createdAt,
 	}
 }
 

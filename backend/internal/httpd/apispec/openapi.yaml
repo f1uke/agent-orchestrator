@@ -3684,6 +3684,8 @@ components:
           type: boolean
         resolved:
           type: boolean
+        system:
+          type: boolean
         url:
           type: string
       required:
@@ -3693,6 +3695,7 @@ components:
       - url
       - resolved
       - isBot
+      - system
       - createdAt
       type: object
     SessionPRUnresolvedReviewer:

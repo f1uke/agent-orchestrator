@@ -93,15 +93,18 @@ type PullRequestCheck struct {
 
 // PullRequestComment is one normalized review comment for a pull request.
 type PullRequestComment struct {
-	ThreadID  string
-	ID        string
-	Author    string
-	File      string
-	Line      int
-	Body      string
-	URL       string
-	Resolved  bool
-	IsBot     bool
+	ThreadID string
+	ID       string
+	Author   string
+	File     string
+	Line     int
+	Body     string
+	URL      string
+	Resolved bool
+	IsBot    bool
+	// System is true for provider-generated system notes (e.g. GitLab's
+	// "changed this line in version N of the diff") rather than human comments.
+	System    bool
 	CreatedAt time.Time
 }
 

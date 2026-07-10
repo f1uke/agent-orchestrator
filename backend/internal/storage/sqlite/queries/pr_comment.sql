@@ -1,10 +1,10 @@
 -- name: InsertPRComment :exec
-INSERT INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot, system)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: InsertLegacyPRComment :exec
-INSERT OR IGNORE INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR IGNORE INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot, system)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: DeletePRComments :exec
 DELETE FROM pr_comment WHERE pr_url = ?;
@@ -16,5 +16,5 @@ DELETE FROM pr_comment WHERE pr_url = ? AND thread_id = '';
 DELETE FROM pr_comment WHERE pr_url = ? AND thread_id = ?;
 
 -- name: ListPRComments :many
-SELECT pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot
+SELECT pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot, system
 FROM pr_comment WHERE pr_url = ? ORDER BY created_at, comment_id;

@@ -43,8 +43,8 @@ func (q *Queries) DeletePRCommentsByThread(ctx context.Context, arg DeletePRComm
 }
 
 const insertLegacyPRComment = `-- name: InsertLegacyPRComment :exec
-INSERT OR IGNORE INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT OR IGNORE INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot, system)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertLegacyPRCommentParams struct {
@@ -59,6 +59,7 @@ type InsertLegacyPRCommentParams struct {
 	ThreadID  string
 	URL       string
 	IsBot     int64
+	System    int64
 }
 
 func (q *Queries) InsertLegacyPRComment(ctx context.Context, arg InsertLegacyPRCommentParams) error {
@@ -74,13 +75,14 @@ func (q *Queries) InsertLegacyPRComment(ctx context.Context, arg InsertLegacyPRC
 		arg.ThreadID,
 		arg.URL,
 		arg.IsBot,
+		arg.System,
 	)
 	return err
 }
 
 const insertPRComment = `-- name: InsertPRComment :exec
-INSERT INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO pr_comment (pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot, system)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertPRCommentParams struct {
@@ -95,6 +97,7 @@ type InsertPRCommentParams struct {
 	ThreadID  string
 	URL       string
 	IsBot     int64
+	System    int64
 }
 
 func (q *Queries) InsertPRComment(ctx context.Context, arg InsertPRCommentParams) error {
@@ -110,12 +113,13 @@ func (q *Queries) InsertPRComment(ctx context.Context, arg InsertPRCommentParams
 		arg.ThreadID,
 		arg.URL,
 		arg.IsBot,
+		arg.System,
 	)
 	return err
 }
 
 const listPRComments = `-- name: ListPRComments :many
-SELECT pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot
+SELECT pr_url, comment_id, author, file, line, body, resolved, created_at, thread_id, url, is_bot, system
 FROM pr_comment WHERE pr_url = ? ORDER BY created_at, comment_id
 `
 
@@ -140,6 +144,7 @@ func (q *Queries) ListPRComments(ctx context.Context, prUrl string) ([]PRComment
 			&i.ThreadID,
 			&i.URL,
 			&i.IsBot,
+			&i.System,
 		); err != nil {
 			return nil, err
 		}

@@ -4,9 +4,12 @@ import {
 	genPrompt,
 	hueFor,
 	initialsFor,
+	originOf,
 	providerBadge,
 	relativeTime,
+	resolveNoteHref,
 	splitBodyRuns,
+	splitNoteRuns,
 	statusFor,
 	TOKEN_COLORS,
 	tokenizeCode,
@@ -24,6 +27,39 @@ describe("splitBodyRuns", () => {
 		expect(splitBodyRuns("plain text")).toEqual([{ text: "plain text", code: false }]);
 		expect(splitBodyRuns("`code`")).toEqual([{ text: "code", code: true }]);
 		expect(splitBodyRuns("")).toEqual([]);
+	});
+});
+
+describe("splitNoteRuns", () => {
+	it("renders a GitLab system note's markdown link as a link run with an absolute href", () => {
+		const origin = "https://gitlab.com";
+		const rel = "/finnomena/mobility/nter-ios-app/-/merge_requests/3028/diffs?diff_id=177522";
+		const runs = splitNoteRuns(`changed this line in [version 6 of the diff](${rel})`, origin);
+		expect(runs).toEqual([
+			{ text: "changed this line in " },
+			{ text: "version 6 of the diff", href: `${origin}${rel}` },
+		]);
+	});
+	it("passes absolute link targets through unchanged and needs no origin for text", () => {
+		expect(splitNoteRuns("see [here](https://x.test/y)")).toEqual([
+			{ text: "see " },
+			{ text: "here", href: "https://x.test/y" },
+		]);
+		expect(splitNoteRuns("no link here")).toEqual([{ text: "no link here" }]);
+		expect(splitNoteRuns("")).toEqual([]);
+	});
+});
+
+describe("resolveNoteHref / originOf", () => {
+	it("prefixes host-relative targets with the origin, passes absolute through", () => {
+		expect(resolveNoteHref("/a/b", "https://h.test")).toBe("https://h.test/a/b");
+		expect(resolveNoteHref("https://h.test/a", "https://other.test")).toBe("https://h.test/a");
+		// no origin → cannot resolve, leave as-is (won't open, but never a broken prefix)
+		expect(resolveNoteHref("/a/b", "")).toBe("/a/b");
+	});
+	it("extracts the origin from a PR/MR url", () => {
+		expect(originOf("https://gitlab.com/g/r/-/merge_requests/7")).toBe("https://gitlab.com");
+		expect(originOf("not a url")).toBe("");
 	});
 });
 

@@ -15,8 +15,8 @@ vi.mock("../lib/api-client", () => ({
 
 import { CommentsView } from "./CommentsView";
 
-function comment(id: string, author: string, body: string, resolved = false) {
-	return { id, author, body, url: "", resolved, isBot: false, createdAt: "2026-07-09T10:00:00Z" };
+function comment(id: string, author: string, body: string, resolved = false, system = false) {
+	return { id, author, body, url: "", resolved, isBot: false, system, createdAt: "2026-07-09T10:00:00Z" };
 }
 
 // One PR with an unresolved thread (T1) and a resolved thread (T2).
@@ -193,6 +193,44 @@ describe("CommentsView (inbox)", () => {
 			provider: "github",
 			thread: { threadId: "T1", path: "backend/a.go", line: 10 },
 		});
+	});
+
+	it("renders a GitLab system note as a de-emphasized line with a clean hyperlink, not a raw URL", async () => {
+		// A thread whose outdated diff appended a system note (system:true) after
+		// the real user comment. The note embeds a host-relative markdown link.
+		const rawUrl = "/finnomena/mobility/nter-ios-app/-/merge_requests/3028/diffs?diff_id=177522";
+		const base = commentsPayload().prs[0];
+		commentsData = {
+			prs: [
+				{
+					...base,
+					threads: [
+						{
+							threadId: "T1",
+							path: "backend/a.go",
+							line: 10,
+							resolved: false,
+							isBot: false,
+							comments: [
+								comment("C1", "fluke.s", "ฝั่ง api เพิ่ม payment_display_text มาให้แล้ว"),
+								comment("C2", "fluke.s", `changed this line in [version 6 of the diff](${rawUrl})`, false, true),
+							],
+						},
+					],
+				},
+			],
+		};
+		renderView();
+		// The markdown label renders as a real anchor…
+		const link = await screen.findByRole("link", { name: "version 6 of the diff" });
+		expect(link.tagName.toLowerCase()).toBe("a");
+		// …resolved against the PR origin into an absolute, openable URL…
+		expect(link).toHaveAttribute("href", `https://github.com${rawUrl}`);
+		// …and the raw URL string is never shown as plain text.
+		expect(screen.queryByText(new RegExp(rawUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeNull();
+		// The real user comment still renders; the system note does not add a
+		// second "fluke.s" author block (only the one real comment header).
+		expect(screen.getAllByText("fluke.s")).toHaveLength(1);
 	});
 
 	it("shows Inbox zero when there are no unresolved comments", async () => {

@@ -246,6 +246,10 @@ type SCMReviewCommentObservation struct {
 	URL string
 	// IsBot is true when the provider identifies the author as a bot.
 	IsBot bool
+	// System is true when the provider marks the note as auto-generated system
+	// activity (e.g. GitLab's "changed this line in version N of the diff")
+	// rather than a human-authored comment. Consumers render these de-emphasized.
+	System bool
 }
 
 // SCMMergeabilityObservation is the normalized mergeability verdict.

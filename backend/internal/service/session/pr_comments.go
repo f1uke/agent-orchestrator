@@ -11,12 +11,15 @@ import (
 
 // PRThreadComment is one review comment on a PR thread.
 type PRThreadComment struct {
-	ID        string
-	Author    string
-	Body      string
-	URL       string
-	Resolved  bool
-	IsBot     bool
+	ID       string
+	Author   string
+	Body     string
+	URL      string
+	Resolved bool
+	IsBot    bool
+	// System is true for provider-generated system notes (e.g. GitLab's
+	// "changed this line in version N of the diff") rather than human comments.
+	System    bool
 	CreatedAt time.Time
 }
 
@@ -102,6 +105,7 @@ func buildPRCommentThreads(threads []domain.PullRequestReviewThread, comments []
 			URL:       c.URL,
 			Resolved:  c.Resolved,
 			IsBot:     c.IsBot,
+			System:    c.System,
 			CreatedAt: c.CreatedAt,
 		})
 	}

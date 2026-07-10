@@ -531,6 +531,7 @@ type restNote struct {
 	Body       string `json:"body"`
 	Resolvable bool   `json:"resolvable"`
 	Resolved   bool   `json:"resolved"`
+	System     bool   `json:"system"`
 	Author     struct {
 		Username string `json:"username"`
 	} `json:"author"`
@@ -626,6 +627,7 @@ func discussionToThread(d restDiscussion) (thread ports.SCMReviewThreadObservati
 			Author: n.Author.Username,
 			Body:   n.Body,
 			IsBot:  isBot,
+			System: n.System,
 		})
 	}
 	if !hasResolvable {
