@@ -28,6 +28,7 @@ type Project = components["schemas"]["Project"];
 type ProjectConfig = components["schemas"]["ProjectConfig"];
 type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 type GitConventionConfig = components["schemas"]["GitConventionConfig"];
+type ApprovalRule = components["schemas"]["ApprovalRule"];
 
 const PERMISSION_MODE_OPTIONS = [
 	{ value: "default", label: "Default" },
@@ -52,6 +53,16 @@ function buildGitConvention(workflow: string, branchPrefix: string): GitConventi
 	if (workflow !== "gitflow" && workflow !== "custom") return undefined;
 	const prefix = branchPrefix.trim();
 	return prefix ? { workflow, branchPrefix: prefix } : { workflow };
+}
+
+// buildApprovalRule turns the enable toggle + threshold field into the typed rule,
+// or undefined when the rule is off so the config field is omitted entirely (an
+// unset rule is disabled — the default). A blank threshold falls back to the
+// backend default (2), so it is left off the payload.
+function buildApprovalRule(enabled: boolean, threshold: string): ApprovalRule | undefined {
+	if (!enabled) return undefined;
+	const trimmed = threshold.trim();
+	return trimmed === "" ? { enabled: true } : { enabled: true, threshold: Number(trimmed) };
 }
 
 const projectQueryKey = (id: string) => ["project", id] as const;
@@ -113,6 +124,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
 	const intake: TrackerIntakeConfig = config.trackerIntake ?? {};
 	const gitConvention: GitConventionConfig = config.gitConvention ?? {};
+	const approvalRule: ApprovalRule = config.approvalRule ?? {};
 	const [form, setForm] = useState({
 		defaultBranch: config.defaultBranch ?? project.defaultBranch ?? "",
 		sessionPrefix: config.sessionPrefix ?? "",
@@ -128,7 +140,8 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 		intakeEnabled: intake.enabled ?? false,
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
-		minApprovals: config.minApprovals != null ? String(config.minApprovals) : "",
+		approvalRuleEnabled: approvalRule.enabled ?? false,
+		approvalThreshold: approvalRule.threshold != null ? String(approvalRule.threshold) : "",
 		orchestratorPrompt: config.systemPromptAdditions?.orchestrator ?? "",
 		workerPrompt: config.systemPromptAdditions?.worker ?? "",
 		reviewerPrompt: config.systemPromptAdditions?.reviewer ?? "",
@@ -192,7 +205,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 				reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,
 				trackerIntake: buildIntake(intakeForm),
 				gitConvention: buildGitConvention(form.gitWorkflow, form.branchPrefix),
-				minApprovals: form.minApprovals.trim() === "" ? undefined : Number(form.minApprovals),
+				approvalRule: buildApprovalRule(form.approvalRuleEnabled, form.approvalThreshold),
 				systemPromptAdditions: blankToUndefined({
 					orchestrator: form.orchestratorPrompt || undefined,
 					worker: form.workerPrompt || undefined,
@@ -315,22 +328,6 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							placeholder="ao"
 						/>
 					</Field>
-					{isGitLabProject && (
-						<Field label="Minimum approvals" htmlFor="minApprovals">
-							<input
-								id="minApprovals"
-								type="number"
-								min={1}
-								className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
-								value={form.minApprovals}
-								onChange={(e) => setForm((f) => ({ ...f, minApprovals: e.target.value }))}
-								placeholder="3"
-							/>
-							<p className="text-[11px] text-muted-foreground">
-								Applies only when the GitLab repo has no approval rule of its own. Default 3.
-							</p>
-						</Field>
-					)}
 				</CardContent>
 			</Card>
 
@@ -368,6 +365,44 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 					)}
 				</CardContent>
 			</Card>
+
+			{isGitLabProject && (
+				<Card>
+					<CardHeader>
+						<CardTitle className="text-[13px]">Approval rule</CardTitle>
+					</CardHeader>
+					<CardContent className="flex flex-col gap-4">
+						<label className="flex items-center gap-2.5 text-[13px] text-foreground">
+							<input
+								type="checkbox"
+								className="h-4 w-4 accent-accent"
+								checked={form.approvalRuleEnabled}
+								onChange={(e) => setForm((f) => ({ ...f, approvalRuleEnabled: e.target.checked }))}
+							/>
+							Require approvals before Ready to merge
+						</label>
+						<p className="text-[11px] text-muted-foreground">
+							When enabled, a merge request is only marked Ready to merge once it has at least the required
+							number of approvals. Off by default; applies only when the GitLab repo has no approval rule of its
+							own.
+						</p>
+						{form.approvalRuleEnabled && (
+							<Field label="Required approvals" htmlFor="approvalThreshold">
+								<input
+									id="approvalThreshold"
+									type="number"
+									min={1}
+									className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
+									value={form.approvalThreshold}
+									onChange={(e) => setForm((f) => ({ ...f, approvalThreshold: e.target.value }))}
+									placeholder="2"
+								/>
+								<p className="text-[11px] text-muted-foreground">Default 2.</p>
+							</Field>
+						)}
+					</CardContent>
+				</Card>
+			)}
 
 			<Card>
 				<CardHeader>

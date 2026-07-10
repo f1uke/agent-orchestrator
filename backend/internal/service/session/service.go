@@ -691,11 +691,11 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("pr facts %s: %w", rec.ID, err)
 	}
-	minApprovals := domain.DefaultMinApprovals
+	var approvalRule domain.ApprovalRule
 	if project, ok, perr := s.store.GetProject(ctx, string(rec.ProjectID)); perr == nil && ok {
-		minApprovals = project.Config.ResolveMinApprovals()
+		approvalRule = project.Config.ApprovalRule
 	}
-	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), minApprovals)
+	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule)
 	return domain.Session{
 		SessionRecord:    rec,
 		Status:           detail.Status,

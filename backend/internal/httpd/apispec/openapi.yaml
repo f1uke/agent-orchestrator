@@ -2429,6 +2429,13 @@ components:
       - id
       - label
       type: object
+    ApprovalRule:
+      properties:
+        enabled:
+          type: boolean
+        threshold:
+          type: integer
+      type: object
     AutoNudgeSettingsResponse:
       properties:
         enabled:
@@ -3091,6 +3098,8 @@ components:
       properties:
         agentConfig:
           $ref: '#/components/schemas/AgentConfig'
+        approvalRule:
+          $ref: '#/components/schemas/ApprovalRule'
         defaultBranch:
           type: string
         env:
@@ -3099,8 +3108,6 @@ components:
           type: object
         gitConvention:
           $ref: '#/components/schemas/GitConventionConfig'
-        minApprovals:
-          type: integer
         orchestrator:
           $ref: '#/components/schemas/RoleOverride'
         postCreate:

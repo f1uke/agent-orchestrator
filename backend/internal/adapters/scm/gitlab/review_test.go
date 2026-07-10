@@ -27,8 +27,8 @@ func TestFetchReviewThreads(t *testing.T) {
 	}
 	// This fixture carries no approval-rule fields (approvals_required=0,
 	// has_approval_rules=false), so per the new no-rule-defers-to-AO
-	// semantics, Decision is "" and AO's per-project MinApprovals threshold
-	// is expected to decide from ApprovalsCount instead.
+	// semantics, Decision is "" and the project's ApprovalRule is expected to
+	// decide from ApprovalsCount instead.
 	if rev.Decision != "" {
 		t.Fatalf("decision=%q want \"\" (no approval rule configured)", rev.Decision)
 	}

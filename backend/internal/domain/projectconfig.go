@@ -55,10 +55,11 @@ type ProjectConfig struct {
 	// for this project's sessions. Empty fields append nothing.
 	SystemPromptAdditions SystemPromptAdditions `json:"systemPromptAdditions,omitempty"`
 
-	// MinApprovals is the minimum number of approvals AO treats as "ready" when
-	// the SCM has no approval rule of its own (see PullRequest.ApprovalRuleConfigured).
-	// 0 = unset → DefaultMinApprovals. GitLab only in this version.
-	MinApprovals int `json:"minApprovals,omitempty"`
+	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
+	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
+	// condition onto the existing ready-to-merge conditions. Approvals are only
+	// counted for GitLab in this version.
+	ApprovalRule ApprovalRule `json:"approvalRule,omitempty"`
 }
 
 // ReviewerConfig names one reviewer agent by harness. The harness is drawn from
@@ -89,20 +90,6 @@ type RoleOverride struct {
 
 // DefaultBranchName is the base branch used when a project configures none.
 const DefaultBranchName = "main"
-
-// DefaultMinApprovals is the fallback approval floor when a project sets none:
-// a PR with no SCM approval rule of its own is treated as approved once it has
-// at least this many approvals.
-const DefaultMinApprovals = 2
-
-// ResolveMinApprovals returns the effective approval floor, defaulting unset or
-// non-positive values to DefaultMinApprovals.
-func (c ProjectConfig) ResolveMinApprovals() int {
-	if c.MinApprovals <= 0 {
-		return DefaultMinApprovals
-	}
-	return c.MinApprovals
-}
 
 // DefaultProjectConfig returns the config a project has when it sets nothing:
 // branch "main". Every other field defaults to its zero value (no

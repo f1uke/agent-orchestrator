@@ -216,7 +216,7 @@ describe("ProjectSettingsForm", () => {
 		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
 	});
 
-	it("shows a minimum-approvals field for GitLab projects only, and saves a typed value", async () => {
+	it("shows the approval-rule toggle for GitLab projects only, and saves the enabled rule with a threshold", async () => {
 		mockProject({
 			id: "proj-1",
 			name: "Project One",
@@ -232,21 +232,49 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
-		const minApprovals = await screen.findByLabelText("Minimum approvals");
-		expect(minApprovals).toHaveValue(null);
-		expect(
-			screen.getByText("Applies only when the GitLab repo has no approval rule of its own. Default 3."),
-		).toBeInTheDocument();
+		// Off by default: the toggle is present and unchecked, the threshold hidden.
+		const toggle = await screen.findByLabelText("Require approvals before Ready to merge");
+		expect(toggle).not.toBeChecked();
+		expect(screen.queryByLabelText("Required approvals")).not.toBeInTheDocument();
 
-		await userEvent.type(minApprovals, "4");
+		// Enabling reveals the threshold input.
+		await userEvent.click(toggle);
+		const threshold = await screen.findByLabelText("Required approvals");
+		expect(threshold).toHaveValue(null);
+
+		await userEvent.type(threshold, "4");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0]?.[1]?.body;
-		expect(body.config.minApprovals).toBe(4);
+		expect(body.config.approvalRule).toEqual({ enabled: true, threshold: 4 });
 	});
 
-	it("hides the minimum-approvals field for a GitHub project", async () => {
+	it("omits the approval rule when the toggle is left off", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@gitlab.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		await screen.findByLabelText("Require approvals before Ready to merge");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.approvalRule).toBeUndefined();
+	});
+
+	it("hides the approval-rule card for a GitHub project", async () => {
 		mockProject({
 			id: "proj-1",
 			name: "Project One",
@@ -263,7 +291,7 @@ describe("ProjectSettingsForm", () => {
 		renderSettings();
 
 		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
-		expect(screen.queryByLabelText("Minimum approvals")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Require approvals before Ready to merge")).not.toBeInTheDocument();
 	});
 
 	it("shows the daemon validation message when save fails", async () => {

@@ -49,7 +49,7 @@ func TestDeriveStatusWorstWinsAcrossIndependentPRs(t *testing.T) {
 		{URL: "a", SourceBranch: "ao/a", TargetBranch: "main", Mergeability: domain.MergeMergeable},
 		{URL: "b", SourceBranch: "ao/b", TargetBranch: "main", CI: domain.CIFailing},
 	}
-	if got := deriveStatus(live(), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusCIFailed {
+	if got := deriveStatus(live(), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusCIFailed {
 		t.Fatalf("got %q want ci_failed", got)
 	}
 }
@@ -59,7 +59,7 @@ func TestDeriveStatusAllMergeableReportsMergeable(t *testing.T) {
 		{URL: "a", SourceBranch: "ao/a", TargetBranch: "main", Mergeability: domain.MergeMergeable},
 		{URL: "b", SourceBranch: "ao/b", TargetBranch: "main", Mergeability: domain.MergeMergeable},
 	}
-	if got := deriveStatus(live(), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusMergeable {
+	if got := deriveStatus(live(), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusMergeable {
 		t.Fatalf("got %q want mergeable", got)
 	}
 }
@@ -71,7 +71,7 @@ func TestDeriveStatusStackedChildExemptFromAggregation(t *testing.T) {
 		{URL: "root", SourceBranch: "ao/abc", TargetBranch: "main", Mergeability: domain.MergeMergeable},
 		{URL: "child", SourceBranch: "ao/abc/x", TargetBranch: "ao/abc"},
 	}
-	if got := deriveStatus(live(), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusMergeable {
+	if got := deriveStatus(live(), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusMergeable {
 		t.Fatalf("got %q want mergeable (child exempt)", got)
 	}
 }
@@ -83,7 +83,7 @@ func TestDeriveStatusMergedParentOpenChildStaysOnChild(t *testing.T) {
 		{URL: "root", SourceBranch: "ao/abc", TargetBranch: "main", Merged: true},
 		{URL: "child", SourceBranch: "ao/abc/x", TargetBranch: "main", Review: domain.ReviewRequired},
 	}
-	if got := deriveStatus(live(), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusReviewPending {
+	if got := deriveStatus(live(), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusReviewPending {
 		t.Fatalf("got %q want review_pending", got)
 	}
 }
@@ -93,7 +93,7 @@ func TestDeriveStatusAllMergedReportsMerged(t *testing.T) {
 		{URL: "a", Merged: true},
 		{URL: "b", Merged: true},
 	}
-	if got := deriveStatus(live(), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusMerged {
+	if got := deriveStatus(live(), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusMerged {
 		t.Fatalf("got %q want merged", got)
 	}
 }
@@ -103,13 +103,13 @@ func TestDeriveStatusAllClosedNoneMergedFallsToActivity(t *testing.T) {
 		{URL: "a", Closed: true},
 		{URL: "b", Closed: true},
 	}
-	if got := deriveStatus(statusRec(domain.ActivityActive, false), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusWorking {
+	if got := deriveStatus(statusRec(domain.ActivityActive, false), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusWorking {
 		t.Fatalf("got %q want working", got)
 	}
 }
 
 func TestDeriveStatusEmptyPRsUsesActivity(t *testing.T) {
-	if got := deriveStatus(statusRec(domain.ActivityActive, false), nil, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusWorking {
+	if got := deriveStatus(statusRec(domain.ActivityActive, false), nil, statusNow, true, domain.ApprovalRule{}); got != domain.StatusWorking {
 		t.Fatalf("got %q want working", got)
 	}
 }
@@ -121,7 +121,7 @@ func TestDeriveStatusDegenerateAllBlockedStillAggregates(t *testing.T) {
 		{URL: "a", SourceBranch: "x", TargetBranch: "y", CI: domain.CIFailing},
 		{URL: "b", SourceBranch: "y", TargetBranch: "x", Mergeability: domain.MergeMergeable},
 	}
-	if got := deriveStatus(live(), prs, statusNow, true, domain.DefaultMinApprovals); got != domain.StatusCIFailed {
+	if got := deriveStatus(live(), prs, statusNow, true, domain.ApprovalRule{}); got != domain.StatusCIFailed {
 		t.Fatalf("got %q want ci_failed (degenerate fallback)", got)
 	}
 }
