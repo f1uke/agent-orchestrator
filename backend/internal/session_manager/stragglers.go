@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // strayReaper best-effort terminates processes an agent left running in its
@@ -39,7 +38,7 @@ func newStrayReaper(log *slog.Logger) *strayReaper {
 	}
 	return &strayReaper{
 		listCwdPIDs: lsofCwdPIDs,
-		kill:        func(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) },
+		kill:        killStray,
 		self:        os.Getpid(),
 		log:         log,
 	}
