@@ -197,6 +197,20 @@ func TestLauncherSpawnUsesFreshAgentSessionID(t *testing.T) {
 	}
 }
 
+// Teardown destroys the worker's reviewer pane by its stable deterministic
+// handle, so a completed/orphaned reviewer's tmux session is closed instead of
+// lingering as a keep-alive shell. It needs no reviewer adapter (pure runtime op).
+func TestLauncherTeardownDestroysReviewerPane(t *testing.T) {
+	rt := &fakeRuntime{}
+	l := NewLauncher(fakeReviewerResolver{ok: false}, rt)
+	if err := l.Teardown(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "review-mer-1" {
+		t.Fatalf("destroyed = %v, want [review-mer-1]", rt.destroyed)
+	}
+}
+
 func TestLauncherSpawnNoAdapter(t *testing.T) {
 	l := NewLauncher(fakeReviewerResolver{ok: false}, &fakeRuntime{})
 	if _, err := l.Spawn(context.Background(), launchSpec()); err == nil || !strings.Contains(err.Error(), "no reviewer adapter") {

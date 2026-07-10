@@ -34,6 +34,7 @@ var (
 type Store interface {
 	UpsertReview(ctx stdctx.Context, r domain.Review) error
 	GetReviewBySession(ctx stdctx.Context, id domain.SessionID) (domain.Review, bool, error)
+	ListReviews(ctx stdctx.Context) ([]domain.Review, error)
 	InsertReviewRun(ctx stdctx.Context, r domain.ReviewRun) error
 	UpdateReviewRunResult(ctx stdctx.Context, id string, status domain.ReviewRunStatus, verdict domain.ReviewVerdict, body, githubReviewID string) (bool, error)
 	SupersedeReviewRun(ctx stdctx.Context, id, body string) (bool, error)
@@ -429,6 +430,50 @@ func (e *Engine) ReconcileOrphanedRuns(ctx stdctx.Context) (int, error) {
 		failed += int(n)
 	}
 	return failed, nil
+}
+
+// TeardownReviewer closes a worker's reviewer pane. The reviewer is a child of
+// the worker — one live reviewer per worker, reused across passes — so when the
+// worker is torn down (killed, reclaimed, deleted) its reviewer must die with it
+// instead of lingering as a keep-alive shell. Best-effort and idempotent: a
+// worker that never had a reviewer, or whose pane is already gone, is a no-op.
+func (e *Engine) TeardownReviewer(ctx stdctx.Context, workerID domain.SessionID) error {
+	if workerID == "" {
+		return nil
+	}
+	return e.launcher.Teardown(ctx, workerID)
+}
+
+// ReapOrphanedReviewers closes reviewer panes whose worker session is gone or
+// terminal, on daemon boot. Reviewers have no session row, so no boot pass
+// (Reconcile/CloseIdleSessions/Cleanup) ever touches them; a reviewer whose
+// worker ended out of band — or was killed while the daemon was down — otherwise
+// lingers forever (the review-<worker> keep-alive shell leak). A live worker's
+// reviewer is left alone: it may be mid-review or idle-waiting for the next pass.
+// Returns the number of panes reaped. Best-effort per the daemon's boot contract.
+func (e *Engine) ReapOrphanedReviewers(ctx stdctx.Context) (int, error) {
+	reviews, err := e.store.ListReviews(ctx)
+	if err != nil {
+		return 0, err
+	}
+	reaped := 0
+	for _, review := range reviews {
+		if review.ReviewerHandleID == "" {
+			continue
+		}
+		worker, ok, err := e.sessions.GetSession(ctx, review.SessionID)
+		if err != nil {
+			return reaped, err
+		}
+		if ok && !worker.IsTerminated {
+			continue // live worker: its reviewer may still be needed.
+		}
+		if err := e.launcher.Teardown(ctx, review.SessionID); err != nil {
+			return reaped, err
+		}
+		reaped++
+	}
+	return reaped, nil
 }
 
 // Reset fails every still-running review run for a worker, clearing a board stuck

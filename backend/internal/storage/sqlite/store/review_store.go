@@ -40,6 +40,21 @@ func (s *Store) GetReviewBySession(ctx context.Context, id domain.SessionID) (do
 	return reviewFromRow(row), true, nil
 }
 
+// ListReviews returns every per-worker review row. The boot reap-orphans pass
+// uses it to find reviewer panes whose worker has ended, since reviewers have no
+// session row of their own.
+func (s *Store) ListReviews(ctx context.Context) ([]domain.Review, error) {
+	rows, err := s.qr.ListReviews(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list reviews: %w", err)
+	}
+	reviews := make([]domain.Review, 0, len(rows))
+	for _, row := range rows {
+		reviews = append(reviews, reviewFromRow(row))
+	}
+	return reviews, nil
+}
+
 // InsertReviewRun records a new review pass. A unique-constraint hit on the
 // (session_id, pr_url, target_sha) index (migration 0020) is surfaced as the sentinel
 // domain.ErrDuplicateReviewRun so the engine can fall back to the existing run.

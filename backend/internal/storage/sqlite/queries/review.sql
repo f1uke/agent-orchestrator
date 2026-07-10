@@ -11,6 +11,10 @@ ON CONFLICT (session_id) DO UPDATE SET
 SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
 FROM review WHERE session_id = ?;
 
+-- name: ListReviews :many
+SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
+FROM review ORDER BY created_at;
+
 -- name: InsertReviewRun :exec
 INSERT INTO review_run (id, review_id, session_id, batch_id, harness, pr_url, target_sha, status, verdict, body, github_review_id, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

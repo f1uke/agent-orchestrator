@@ -152,6 +152,12 @@ type Manager struct {
 	// means "no overrides" (built-in defaults) — the safe default for a bare
 	// Manager in tests or wiring that omits the store.
 	promptOverrides func() promptoverrides.Overrides
+	// reviewerReaper closes a worker's reviewer pane when the worker is torn
+	// down, so the reviewer (a child of the worker, keyed on the worker id) does
+	// not linger. Injected by the daemon after the review service is built to
+	// avoid an import cycle; nil in tests/wiring that omit it, in which case
+	// teardown simply skips reviewer reaping.
+	reviewerReaper func(context.Context, domain.SessionID) error
 }
 
 // Deps are the collaborators a Session Manager needs; New wires them together.
@@ -229,6 +235,26 @@ func New(d Deps) *Manager {
 		m.logger = slog.Default()
 	}
 	return m
+}
+
+// SetReviewerReaper wires the hook that closes a worker's reviewer pane on
+// teardown. The daemon calls this after the review service is constructed (the
+// session manager is built first, so it cannot receive the hook via Deps without
+// an import cycle). A manager with no reaper set simply skips reviewer reaping.
+func (m *Manager) SetReviewerReaper(fn func(context.Context, domain.SessionID) error) {
+	m.reviewerReaper = fn
+}
+
+// reapReviewer best-effort closes the worker's reviewer pane. Teardown of the
+// worker must never fail because its reviewer could not be reaped, so any error
+// is logged and swallowed. A nil reaper (unwired) is a no-op.
+func (m *Manager) reapReviewer(ctx context.Context, id domain.SessionID) {
+	if m.reviewerReaper == nil {
+		return
+	}
+	if err := m.reviewerReaper(ctx, id); err != nil {
+		m.logger.Warn("reviewer pane teardown failed", "sessionID", id, "error", err)
+	}
 }
 
 // Spawn creates the session row (which assigns the "{project}-{n}" id), then the
@@ -547,6 +573,10 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 			return false, fmt.Errorf("kill %s: runtime: %w", id, err)
 		}
 	}
+	// The worker is terminating: close its reviewer pane too. Done before the
+	// (possibly refused) workspace teardown so a preserved dirty worktree still
+	// reaps the reviewer.
+	m.reapReviewer(ctx, id)
 	freed := false
 	if ws.Path != "" {
 		if err := m.workspace.Destroy(ctx, ws); err != nil {
@@ -600,6 +630,9 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 			}
 		}
 	}
+	// Close the worker's reviewer pane before the row (and its cascading review
+	// rows) are hard-deleted, so a delete never orphans the reviewer's tmux.
+	m.reapReviewer(ctx, id)
 	return m.store.PurgeSession(ctx, id)
 }
 
@@ -1263,6 +1296,10 @@ func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (Cleanu
 		// (e.g. a detached dev server holding a port) that tmux teardown missed.
 		// Best-effort and tightly guarded to AO worktree paths.
 		newStrayReaper(m.logger).reap(ctx, ws.Path)
+		// A terminal worker reclaimed here may never have gone through Kill (e.g.
+		// merged, or crash-terminated by reconcile), so this is the choke point that
+		// closes its reviewer pane.
+		m.reapReviewer(ctx, rec.ID)
 		result.Cleaned = append(result.Cleaned, rec.ID)
 	}
 	return result, nil

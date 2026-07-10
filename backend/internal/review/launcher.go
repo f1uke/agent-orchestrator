@@ -21,6 +21,10 @@ type Launcher interface {
 	Notify(ctx context.Context, handleID string, spec LaunchSpec) error
 	// Alive reports whether a reviewer pane is still running.
 	Alive(ctx context.Context, handleID string) (bool, error)
+	// Teardown closes a worker's reviewer pane (by its stable deterministic
+	// handle), so a completed or orphaned reviewer's tmux session does not linger
+	// as a keep-alive shell. Idempotent: a missing pane is a no-op.
+	Teardown(ctx context.Context, workerID domain.SessionID) error
 }
 
 // LaunchSpec is the engine's request to (re)launch a reviewer for one pass.
@@ -174,6 +178,14 @@ func (l *agentLauncher) Notify(ctx context.Context, handleID string, spec Launch
 		return fmt.Errorf("notify reviewer: %w", err)
 	}
 	return nil
+}
+
+// Teardown destroys the worker's reviewer pane. Uses the same deterministic
+// handle Spawn/Notify key on, and relies on Destroy being idempotent so tearing
+// down a worker that never had a reviewer (or whose pane is already gone) is a
+// harmless no-op.
+func (l *agentLauncher) Teardown(ctx context.Context, workerID domain.SessionID) error {
+	return l.runtime.Destroy(ctx, ports.RuntimeHandle{ID: reviewerHandleID(workerID)})
 }
 
 func (l *agentLauncher) Alive(ctx context.Context, handleID string) (bool, error) {

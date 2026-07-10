@@ -236,6 +236,43 @@ func (q *Queries) ListReviewRunsBySession(ctx context.Context, sessionID domain.
 	return items, nil
 }
 
+const listReviews = `-- name: ListReviews :many
+SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, created_at, updated_at
+FROM review ORDER BY created_at
+`
+
+func (q *Queries) ListReviews(ctx context.Context) ([]Review, error) {
+	rows, err := q.db.QueryContext(ctx, listReviews)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Review{}
+	for rows.Next() {
+		var i Review
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.Harness,
+			&i.PRURL,
+			&i.ReviewerHandleID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionIDsWithRunningReviewRuns = `-- name: ListSessionIDsWithRunningReviewRuns :many
 SELECT DISTINCT session_id FROM review_run WHERE status = 'running'
 `

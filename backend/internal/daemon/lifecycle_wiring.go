@@ -172,6 +172,11 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },
 	})
 	reviewSvc := reviewsvc.New(reviewEngine, store, reviewsvc.WithLifecycleReducer(lcm))
+	// Tie the reviewer pane's lifetime to its worker: when the session manager
+	// tears a worker down (kill/reclaim/delete), it closes the worker's reviewer
+	// pane too, instead of leaving a keep-alive shell behind. Wired here — after
+	// the review service exists — because the manager is built first.
+	mgr.SetReviewerReaper(reviewSvc.TeardownReviewer)
 	return sessionSvc, reviewSvc, mgr, nil
 }
 

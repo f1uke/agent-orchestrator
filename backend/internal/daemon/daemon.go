@@ -246,10 +246,21 @@ func Run() error {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
 	}
 
-	// Fail review runs left "running" by a reviewer that died out of band (or did
-	// not survive this restart), so a board stuck on "Reviewing…" unsticks without
-	// a manual trigger. Best-effort; never blocks boot.
 	if reviewSvc != nil {
+		// Close reviewer panes whose worker has ended or was killed while the daemon
+		// was down: reviewers have no session row, so no session-reconcile pass ever
+		// reaps them and they otherwise linger forever as keep-alive shells. Run
+		// before ReconcileOrphanedRuns so a terminal worker's pane is destroyed
+		// first and its now-orphaned run is failed in the same boot. Best-effort.
+		if reaped, reapErr := reviewSvc.ReapOrphanedReviewers(ctx); reapErr != nil {
+			log.Error("reap orphaned reviewer panes on boot failed", "err", reapErr)
+		} else if reaped > 0 {
+			log.Info("reaped orphaned reviewer panes on boot", "reaped", reaped)
+		}
+
+		// Fail review runs left "running" by a reviewer that died out of band (or did
+		// not survive this restart), so a board stuck on "Reviewing…" unsticks without
+		// a manual trigger. Best-effort; never blocks boot.
 		if failed, reconcileErr := reviewSvc.ReconcileOrphanedRuns(ctx); reconcileErr != nil {
 			log.Error("reconcile orphaned review runs on boot failed", "err", reconcileErr)
 		} else if failed > 0 {

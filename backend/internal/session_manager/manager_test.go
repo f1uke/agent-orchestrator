@@ -663,6 +663,75 @@ func TestKill_DeletesStaleRestoreMarker(t *testing.T) {
 	}
 }
 
+// Killing a worker must also close its reviewer pane: the reviewer is a child of
+// the worker (one live reviewer per worker, reused across passes), so it must die
+// with the worker instead of lingering as a keep-alive shell.
+func TestKill_ReapsReviewerPane(t *testing.T) {
+	m, st, _, _ := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	var reaped []domain.SessionID
+	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+		reaped = append(reaped, id)
+		return nil
+	})
+	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if len(reaped) != 1 || reaped[0] != "mer-1" {
+		t.Fatalf("reaped = %v, want [mer-1]", reaped)
+	}
+}
+
+// A worker with a dirty (preserved) worktree still terminates, so its reviewer
+// pane must be reaped even though the worktree is kept.
+func TestKill_ReapsReviewerPaneEvenWhenWorkspacePreserved(t *testing.T) {
+	m, st, _, ws := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	ws.destroyErr = fmt.Errorf("gitworktree: refusing to remove: %w", ports.ErrWorkspaceDirty)
+	var reaped []domain.SessionID
+	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+		reaped = append(reaped, id)
+		return nil
+	})
+	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if len(reaped) != 1 || reaped[0] != "mer-1" {
+		t.Fatalf("reaped = %v, want [mer-1] even with a preserved worktree", reaped)
+	}
+}
+
+// A reaper failure must never fail the kill: it is best-effort teardown.
+func TestKill_ReviewerReaperErrorDoesNotFailKill(t *testing.T) {
+	m, st, _, _ := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	m.SetReviewerReaper(func(_ context.Context, _ domain.SessionID) error {
+		return errors.New("tmux is unhappy")
+	})
+	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+		t.Fatalf("Kill must succeed despite a reviewer-reap error: %v", err)
+	}
+}
+
+// Reclaiming a terminal worker's workspace must also close its reviewer pane:
+// a worker that ended out of band (merge, crash-terminate) never went through
+// Kill, so Cleanup is the choke point that reaps its reviewer.
+func TestCleanup_ReapsReviewerPane(t *testing.T) {
+	m, st, _, _ := newManager()
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", RuntimeHandleID: "h1"})
+	var reaped []domain.SessionID
+	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+		reaped = append(reaped, id)
+		return nil
+	})
+	if _, err := m.Cleanup(ctx, "mer"); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if len(reaped) != 1 || reaped[0] != "mer-1" {
+		t.Fatalf("reaped = %v, want [mer-1]", reaped)
+	}
+}
+
 // TestKill_OtherWorkspaceErrorStillFails: only the typed dirty refusal is a
 // success-with-preserved-workspace; any other teardown failure keeps erroring.
 func TestKill_OtherWorkspaceErrorStillFails(t *testing.T) {

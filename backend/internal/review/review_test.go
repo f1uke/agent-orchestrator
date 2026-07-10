@@ -17,7 +17,10 @@ import (
 
 type fakeStore struct {
 	review *domain.Review
-	runs   []domain.ReviewRun
+	// reviews, when set, is returned by ListReviews (the boot reap-orphans pass).
+	// Falls back to the single review when nil.
+	reviews []domain.Review
+	runs    []domain.ReviewRun
 	// insertErr, when set, makes the next InsertReviewRun model a concurrent
 	// writer that already recorded a run for this commit: it records that
 	// winner (so a follow-up GetReviewRunBySessionAndSHA finds it) and returns
@@ -136,6 +139,15 @@ func (f *fakeStore) GetReviewRunBySessionPRAndSHA(_ context.Context, sessionID d
 func (f *fakeStore) ListReviewRunsBySession(_ context.Context, _ domain.SessionID) ([]domain.ReviewRun, error) {
 	return f.runs, nil
 }
+func (f *fakeStore) ListReviews(_ context.Context) ([]domain.Review, error) {
+	if f.reviews != nil {
+		return f.reviews, nil
+	}
+	if f.review != nil {
+		return []domain.Review{*f.review}, nil
+	}
+	return nil, nil
+}
 
 type fakeSessions struct {
 	rec domain.SessionRecord
@@ -170,6 +182,7 @@ type fakeLauncher struct {
 	gotHandle  string
 	specs      []LaunchSpec
 	handles    []string
+	teardowns  []domain.SessionID
 }
 
 func (f *fakeLauncher) Spawn(_ context.Context, spec LaunchSpec) (string, error) {
@@ -192,6 +205,21 @@ func (f *fakeLauncher) Notify(_ context.Context, handleID string, spec LaunchSpe
 }
 func (f *fakeLauncher) Alive(_ context.Context, _ string) (bool, error) {
 	return f.alive || f.spawned, nil
+}
+func (f *fakeLauncher) Teardown(_ context.Context, workerID domain.SessionID) error {
+	f.teardowns = append(f.teardowns, workerID)
+	return nil
+}
+
+// fakeSessionsByID answers GetSession per id, so the reap-orphans pass can see
+// distinct live/terminal/absent workers.
+type fakeSessionsByID struct {
+	m map[domain.SessionID]domain.SessionRecord
+}
+
+func (f fakeSessionsByID) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	rec, ok := f.m[id]
+	return rec, ok, nil
 }
 
 func liveWorker() domain.SessionRecord {
@@ -304,6 +332,60 @@ func TestTriggerConcurrentSameWorkerSpawnsOnce(t *testing.T) {
 	}
 	if len(store.runs) != 1 {
 		t.Errorf("recorded review runs = %d, want 1", len(store.runs))
+	}
+}
+
+// TeardownReviewer closes a worker's reviewer pane (used when the worker is
+// killed/reclaimed): the reviewer belongs to the worker, so it dies with it.
+func TestTeardownReviewerDestroysPane(t *testing.T) {
+	launcher := &fakeLauncher{}
+	eng := newEngineForTest(&fakeStore{}, fakeSessions{}, fakePRs{}, fakeProjects{}, launcher)
+	if err := eng.TeardownReviewer(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("TeardownReviewer: %v", err)
+	}
+	if len(launcher.teardowns) != 1 || launcher.teardowns[0] != "mer-1" {
+		t.Fatalf("teardowns = %v, want [mer-1]", launcher.teardowns)
+	}
+}
+
+// ReapOrphanedReviewers (boot safety net) closes reviewer panes whose worker is
+// terminal or gone — the review-agent-orchestrator-34 leak — while leaving a live
+// worker's reviewer (which may be mid-review) and handle-less rows untouched.
+func TestReapOrphanedReviewersReapsTerminalAndAbsentWorkers(t *testing.T) {
+	store := &fakeStore{reviews: []domain.Review{
+		{SessionID: "live-1", ReviewerHandleID: "review-live-1"},
+		{SessionID: "dead-1", ReviewerHandleID: "review-dead-1"},
+		{SessionID: "gone-1", ReviewerHandleID: "review-gone-1"},
+		{SessionID: "nohandle", ReviewerHandleID: ""},
+	}}
+	sessions := fakeSessionsByID{m: map[domain.SessionID]domain.SessionRecord{
+		"live-1": {ID: "live-1"},                     // live worker
+		"dead-1": {ID: "dead-1", IsTerminated: true}, // terminal worker
+		// "gone-1" is absent (purged) → GetSession ok=false
+		"nohandle": {ID: "nohandle"},
+	}}
+	launcher := &fakeLauncher{}
+	eng := newEngineForTest(store, sessions, fakePRs{}, fakeProjects{}, launcher)
+
+	n, err := eng.ReapOrphanedReviewers(context.Background())
+	if err != nil {
+		t.Fatalf("ReapOrphanedReviewers: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("reaped = %d, want 2 (dead-1 + gone-1)", n)
+	}
+	got := map[domain.SessionID]bool{}
+	for _, id := range launcher.teardowns {
+		got[id] = true
+	}
+	if !got["dead-1"] || !got["gone-1"] {
+		t.Fatalf("teardowns = %v, want dead-1 and gone-1 reaped", launcher.teardowns)
+	}
+	if got["live-1"] {
+		t.Fatal("must not reap a live worker's reviewer pane")
+	}
+	if got["nohandle"] {
+		t.Fatal("must not reap a review row with no reviewer handle")
 	}
 }
 

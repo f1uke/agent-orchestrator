@@ -31,6 +31,8 @@ type Manager interface {
 	List(ctx context.Context, workerID domain.SessionID) (reviewcore.SessionReviews, error)
 	Reset(ctx context.Context, workerID domain.SessionID) (int64, error)
 	ReconcileOrphanedRuns(ctx context.Context) (int, error)
+	TeardownReviewer(ctx context.Context, workerID domain.SessionID) error
+	ReapOrphanedReviewers(ctx context.Context) (int, error)
 }
 
 // Service is the API-facing review service. It delegates to the core engine.
@@ -99,6 +101,18 @@ func (s *Service) Reset(ctx context.Context, workerID domain.SessionID) (int64, 
 // on daemon boot. Delegates to the engine.
 func (s *Service) ReconcileOrphanedRuns(ctx context.Context) (int, error) {
 	return s.engine.ReconcileOrphanedRuns(ctx)
+}
+
+// TeardownReviewer closes a worker's reviewer pane when the worker is torn down,
+// so it does not linger as a keep-alive shell. Delegates to the engine.
+func (s *Service) TeardownReviewer(ctx context.Context, workerID domain.SessionID) error {
+	return s.engine.TeardownReviewer(ctx, workerID)
+}
+
+// ReapOrphanedReviewers closes reviewer panes whose worker session is gone or
+// terminal, on daemon boot. Delegates to the engine.
+func (s *Service) ReapOrphanedReviewers(ctx context.Context) (int, error) {
+	return s.engine.ReapOrphanedReviewers(ctx)
 }
 
 // SubmittedReview is one review result supplied by the reviewer CLI.

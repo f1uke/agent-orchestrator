@@ -35,6 +35,14 @@ func (f *fakeReviewService) ReconcileOrphanedRuns(context.Context) (int, error) 
 	return 0, nil
 }
 
+func (f *fakeReviewService) TeardownReviewer(context.Context, domain.SessionID) error {
+	return nil
+}
+
+func (f *fakeReviewService) ReapOrphanedReviewers(context.Context) (int, error) {
+	return 0, nil
+}
+
 func (f *fakeReviewService) Trigger(context.Context, domain.SessionID) (reviewcore.TriggerResult, error) {
 	if f.triggerErr != nil {
 		return reviewcore.TriggerResult{}, f.triggerErr
