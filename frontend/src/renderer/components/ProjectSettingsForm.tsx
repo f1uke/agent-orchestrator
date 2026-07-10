@@ -260,10 +260,37 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 				</CardHeader>
 				<CardContent className="flex flex-col gap-2 font-mono text-[12px] text-muted-foreground">
 					<ReadonlyRow label="id" value={project.id} />
+					<ReadonlyRow label="kind" value={project.kind === "workspace" ? "workspace" : "single repo"} />
 					<ReadonlyRow label="path" value={project.path} />
 					<ReadonlyRow label="repo" value={project.repo || "—"} />
 				</CardContent>
 			</Card>
+
+			{project.kind === "workspace" && (
+				<Card>
+					<CardHeader>
+						<CardTitle className="text-[13px]">Workspace repos</CardTitle>
+					</CardHeader>
+					<CardContent className="flex flex-col gap-2">
+						{project.workspaceRepos?.length ? (
+							project.workspaceRepos.map((repo) => (
+								<div
+									key={repo.name}
+									className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 rounded-md border border-border px-3 py-2 font-mono text-[12px]"
+								>
+									<span className="truncate text-foreground">{repo.name}</span>
+									<span className="min-w-0 truncate text-muted-foreground">
+										{repo.relativePath}
+										{repo.repo ? ` · ${repo.repo}` : ""}
+									</span>
+								</div>
+							))
+						) : (
+							<p className="text-[12px] text-muted-foreground">No child repositories are registered.</p>
+						)}
+					</CardContent>
+				</Card>
+			)}
 
 			<Card>
 				<CardHeader>
@@ -319,8 +346,8 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							onChange={(v) => setForm((f) => ({ ...f, gitWorkflow: v }))}
 						/>
 						<p className="text-[11px] text-muted-foreground">
-							Prefixes auto-named worker branches and tells the orchestrator how to name them. None keeps the
-							current behavior.
+							Prefixes auto-named worker branches and tells the orchestrator how to name them. None keeps the current
+							behavior.
 						</p>
 					</Field>
 					{(form.gitWorkflow === "gitflow" || form.gitWorkflow === "custom") && (
@@ -518,15 +545,7 @@ function PermissionModeSelect({
 	);
 }
 
-function GitWorkflowSelect({
-	id,
-	value,
-	onChange,
-}: {
-	id: string;
-	value: string;
-	onChange: (value: string) => void;
-}) {
+function GitWorkflowSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
 	// Empty (unset) maps to the "none" option; selecting "none" clears the value.
 	return (
 		<Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
