@@ -346,8 +346,8 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							onChange={(v) => setForm((f) => ({ ...f, gitWorkflow: v }))}
 						/>
 						<p className="text-[11px] text-muted-foreground">
-							Prefixes auto-named worker branches and tells the orchestrator how to name them. None keeps the
-							current behavior.
+							Prefixes auto-named worker branches and tells the orchestrator how to name them. None keeps the current
+							behavior.
 						</p>
 					</Field>
 					{(form.gitWorkflow === "gitflow" || form.gitWorkflow === "custom") && (
@@ -545,15 +545,7 @@ function PermissionModeSelect({
 	);
 }
 
-function GitWorkflowSelect({
-	id,
-	value,
-	onChange,
-}: {
-	id: string;
-	value: string;
-	onChange: (value: string) => void;
-}) {
+function GitWorkflowSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
 	// Empty (unset) maps to the "none" option; selecting "none" clears the value.
 	return (
 		<Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>

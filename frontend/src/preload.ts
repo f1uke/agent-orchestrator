@@ -94,8 +94,7 @@ const api = {
 		show: (notification: NativeNotificationInput) =>
 			ipcRenderer.invoke("notifications:show", notification) as Promise<void>,
 		onClick: (listener: (payload: NativeNotificationClickPayload) => void) => {
-			const wrapped = (_event: Electron.IpcRendererEvent, payload: NativeNotificationClickPayload) =>
-				listener(payload);
+			const wrapped = (_event: Electron.IpcRendererEvent, payload: NativeNotificationClickPayload) => listener(payload);
 			ipcRenderer.on("notifications:click", wrapped);
 			return () => {
 				ipcRenderer.off("notifications:click", wrapped);
