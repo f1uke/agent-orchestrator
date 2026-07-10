@@ -173,7 +173,15 @@ func Load() (Config, error) {
 		cfg.ShutdownTimeout = d
 	}
 
-	if raw := os.Getenv("AO_SESSION_IDLE_CLOSE"); raw != "" {
+	// A daemon launched from inside a worker's shell inherits that worker's env,
+	// including AO_SESSION_IDLE_CLOSE. That value is a stale per-worker leftover
+	// (the daemon re-propagates its own env to every worker it spawns), not real
+	// daemon config, and honoring it has silently idle-closed finished workers
+	// early. AO_SESSION_ID being set is the tell that we were launched from a worker
+	// shell — a daemon has no session of its own — so ignore the inherited
+	// idle-close and keep the default. A daemon started from a clean shell (no
+	// AO_SESSION_ID) still honors the override.
+	if raw := os.Getenv("AO_SESSION_IDLE_CLOSE"); raw != "" && os.Getenv("AO_SESSION_ID") == "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil {
 			return Config{}, fmt.Errorf("invalid AO_SESSION_IDLE_CLOSE %q: %w", raw, err)

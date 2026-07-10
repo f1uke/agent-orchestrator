@@ -77,9 +77,44 @@ type runner interface {
 
 type execRunner struct{}
 
+// daemonOnlyEnvKeys are AO_* vars that configure the DAEMON and must not leak into
+// the worker panes tmux spawns from the daemon's environment. A worker inheriting
+// the daemon's AO_SESSION_IDLE_CLOSE re-seeds that value back into the next
+// app-from-worker-shell launch (a self-perpetuating stale-config loop); AO_OWNER
+// only means "app-spawned daemon" and is meaningless on a worker. Per-session env
+// the daemon sets intentionally (AO_SESSION_ID, AO_DATA_DIR, …) is exported by
+// buildLaunchCommand, not inherited here, so stripping these is safe.
+var daemonOnlyEnvKeys = []string{"AO_SESSION_IDLE_CLOSE", "AO_OWNER"}
+
+// stripEnvKeys returns env (a KEY=VALUE slice) without any entry whose key is in
+// keys. The input slice is not mutated.
+func stripEnvKeys(env, keys []string) []string {
+	if len(keys) == 0 {
+		return env
+	}
+	drop := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		drop[k] = true
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if drop[name] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 func (execRunner) Run(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(append([]string(nil), os.Environ()...), env...)
+	// stripEnvKeys returns a fresh slice, so appending env into it is safe (no
+	// aliasing of the caller's os.Environ()).
+	cmd.Env = append(stripEnvKeys(os.Environ(), daemonOnlyEnvKeys), env...)
 	return cmd.CombinedOutput()
 }
 
