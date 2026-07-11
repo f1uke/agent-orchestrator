@@ -55,8 +55,8 @@ export function AutoNudgeSection() {
 			<CardContent className="flex flex-col gap-4">
 				<p className="text-[12px] text-muted-foreground">
 					When on, a session whose pull request gets an unresolved review comment (or a changes-requested review)
-					automatically nudges its worker. This is the default for new sessions — each session can override it from
-					its Comments tab.
+					automatically nudges its worker. This is the default for new sessions — each session can override it from its
+					Reviews tab.
 				</p>
 				<div className="flex items-center gap-3">
 					<Switch
