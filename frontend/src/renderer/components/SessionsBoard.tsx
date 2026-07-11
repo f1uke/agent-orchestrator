@@ -573,18 +573,15 @@ function ZoneColumn({
 	);
 }
 
-// The dashed placeholder shown in a lane with no cards, tinted by the lane hue.
+// The quiet placeholder shown in a lane with no cards. It deliberately carries
+// NO lane hue and no filled surface — a faint neutral dashed hairline plus
+// passive, low-contrast text, faded further with opacity — so an empty lane
+// reads as "nothing here" filler and recedes, letting a single real card (solid
+// surface, bright lane-coloured dot, full-strength title) clearly dominate.
 function EmptyLane({ col }: { col: LaneConfig }) {
-	const { hueVar, dotVar, Icon } = col;
+	const { Icon } = col;
 	return (
-		<div
-			className="mt-2 flex flex-col items-center justify-center gap-2 rounded-[10px] px-4 py-[34px] text-center text-[12px]"
-			style={{
-				border: `1px dashed color-mix(in srgb, ${hueVar} 28%, transparent)`,
-				background: `color-mix(in srgb, ${hueVar} 3%, transparent)`,
-				color: `color-mix(in srgb, ${dotVar} 75%, transparent)`,
-			}}
-		>
+		<div className="mt-2 flex flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed border-border px-4 py-[34px] text-center text-[12px] text-passive opacity-60">
 			<Icon
 				className="h-[15px] w-[15px]"
 				style={col.filled ? { fill: "currentColor" } : undefined}
