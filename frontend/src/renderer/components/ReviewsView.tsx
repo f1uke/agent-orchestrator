@@ -747,57 +747,61 @@ function PRBlock({
 
 	return (
 		<div style={{ marginBottom: 18 }}>
-			{/* PR/MR identity + review status + CI (sticky within the scroll) */}
+			{/* PR/MR identity + title, with review status + CI on their own line below (sticky within the scroll) */}
 			<div
 				style={{
 					display: "flex",
-					alignItems: "center",
+					flexDirection: "column",
 					gap: 8,
 					padding: "8px 4px 10px",
 					position: "sticky",
 					top: 0,
 					background: P.rail,
 					zIndex: 2,
-					flexWrap: "wrap",
 				}}
 			>
-				<span
-					style={{
-						fontFamily: MONO,
-						fontSize: 9,
-						fontWeight: 600,
-						color: "#c7c7cc",
-						background: P.pillBg,
-						border: `1px solid ${P.borderMenu}`,
-						padding: "2px 5px",
-						borderRadius: 4,
-					}}
-				>
-					{providerBadge(block.provider)}
-				</span>
-				<span style={{ fontSize: 13.5, fontWeight: 700, color: P.textStrong }}>
-					{`${kind} ${prRef(block.provider, block.number)}`}
-				</span>
-				{block.title && (
+				<div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
 					<span
-						title={block.title}
 						style={{
-							fontSize: 12,
-							color: P.secondary2,
-							overflow: "hidden",
-							textOverflow: "ellipsis",
-							whiteSpace: "nowrap",
-							maxWidth: 200,
+							flex: "none",
+							fontFamily: MONO,
+							fontSize: 9,
+							fontWeight: 600,
+							color: "#c7c7cc",
+							background: P.pillBg,
+							border: `1px solid ${P.borderMenu}`,
+							padding: "2px 5px",
+							borderRadius: 4,
 						}}
 					>
-						{block.title}
+						{providerBadge(block.provider)}
 					</span>
+					<span style={{ flex: "none", fontSize: 13.5, fontWeight: 700, color: P.textStrong, whiteSpace: "nowrap" }}>
+						{`${kind} ${prRef(block.provider, block.number)}`}
+					</span>
+					{block.title && (
+						<span
+							style={{
+								flex: "1 1 auto",
+								minWidth: 0,
+								fontSize: 12,
+								color: P.secondary2,
+								lineHeight: 1.42,
+								wordBreak: "break-word",
+							}}
+						>
+							{block.title}
+						</span>
+					)}
+				</div>
+				{(ci || rv || conflict || threads.length > 0) && (
+					<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+						{ci && <StatusPill color={ci.color} label={ci.label} dot />}
+						{rv && <StatusPill color={TONE_COLOR[rv.tone]} label={rv.label} />}
+						{conflict && <StatusPill color={P.red} label="Conflict" />}
+						{threads.length > 0 && <span style={pill(11, P.secondary, "1px 7px")}>{threads.length}</span>}
+					</div>
 				)}
-				<div style={{ flex: 1, minWidth: 12 }} />
-				{ci && <StatusPill color={ci.color} label={ci.label} dot />}
-				{rv && <StatusPill color={TONE_COLOR[rv.tone]} label={rv.label} />}
-				{conflict && <StatusPill color={P.red} label="Conflict" />}
-				{threads.length > 0 && <span style={pill(11, P.secondary, "1px 7px")}>{threads.length}</span>}
 			</div>
 
 			{threads.length === 0 ? (
