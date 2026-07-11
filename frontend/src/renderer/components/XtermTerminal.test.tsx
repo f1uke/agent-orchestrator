@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { XtermTerminal } from "./XtermTerminal";
 import { focusTerminal } from "../lib/terminal-focus";
 import { findSessionLinks } from "../lib/session-ref";
+import { findExternalRefLinks } from "../lib/terminal-scm-links";
 
 type FakeLink = {
 	text: string;
@@ -23,6 +24,7 @@ const state = vi.hoisted(() => ({
 		lines: string[];
 		buffer: { active: { type: string; getLine: (i: number) => { translateToString: () => string } | undefined } };
 		linkProvider?: FakeLinkProvider;
+		linkProviders: FakeLinkProvider[];
 		scrollLines: ReturnType<typeof vi.fn>;
 		dataListeners: Set<(data: string) => void>;
 		binaryListeners: Set<(data: string) => void>;
@@ -59,6 +61,7 @@ vi.mock("@xterm/xterm", () => ({
 			},
 		};
 		linkProvider?: FakeLinkProvider;
+		linkProviders: FakeLinkProvider[] = [];
 		scrollLines = vi.fn();
 		dataListeners = new Set<(data: string) => void>();
 		binaryListeners = new Set<(data: string) => void>();
@@ -103,10 +106,16 @@ vi.mock("@xterm/xterm", () => ({
 			return { dispose: () => this.keyListeners.delete(listener) };
 		}
 		registerLinkProvider(provider: FakeLinkProvider) {
-			this.linkProvider = provider;
+			// The component registers two providers: the session-ref provider first,
+			// then the SCM `#`/`!` provider. Keep `linkProvider` pointing at the first
+			// (session) for the existing tests, and expose every provider via
+			// `linkProviders` so the SCM tests can reach the second.
+			this.linkProviders.push(provider);
+			if (!this.linkProvider) this.linkProvider = provider;
 			return {
 				dispose: () => {
-					this.linkProvider = undefined;
+					this.linkProviders = this.linkProviders.filter((p) => p !== provider);
+					this.linkProvider = this.linkProviders[0];
 				},
 			};
 		}
@@ -810,6 +819,63 @@ describe("XtermTerminal", () => {
 				received = links;
 			});
 			expect(received).toBeUndefined();
+		});
+	});
+
+	describe("SCM ref (#/!) link provider", () => {
+		const GH = "https://github.com/acme-inc/ao-demo";
+		const GL = "https://gitlab.example.com/team/webapp";
+		const resolver = (line: string) => findExternalRefLinks(line, { githubRepoBase: GH, gitlabProjectBase: GL });
+
+		// The SCM provider is registered second, so it is the last of linkProviders.
+		function provideScmLinksFor(line: string, bufferLineNumber = 1): FakeLink[] | undefined {
+			const term = state.lastTerminal!;
+			term.lines = [line];
+			const provider = term.linkProviders[term.linkProviders.length - 1]!;
+			let received: FakeLink[] | undefined;
+			provider.provideLinks(bufferLineNumber, (links) => {
+				received = links;
+			});
+			return received;
+		}
+
+		it("linkifies a #<num> GitHub ref with the correct 1-based buffer range", () => {
+			render(<XtermTerminal theme="dark" externalRefResolver={resolver} />);
+			const links = provideScmLinksFor("opened #63 ok");
+			expect(links).toHaveLength(1);
+			expect(links![0].text).toBe("#63");
+			// "opened " is 7 chars → token at 0-based index 7 → 1-based start.x 8; the
+			// token "#63" is 3 chars → inclusive end.x 10.
+			expect(links![0].range).toEqual({ start: { x: 8, y: 1 }, end: { x: 10, y: 1 } });
+		});
+
+		it("opens the GitHub PR URL in the OS browser when a #<num> ref is activated", () => {
+			const open = vi.spyOn(window, "open").mockReturnValue(null);
+			render(<XtermTerminal theme="dark" externalRefResolver={resolver} />);
+			const links = provideScmLinksFor("see #63 now");
+			links![0].activate(new MouseEvent("click"), links![0].text);
+			expect(open).toHaveBeenCalledWith(`${GH}/pull/63`, "_blank", "noopener");
+			open.mockRestore();
+		});
+
+		it("opens the GitLab MR URL in the OS browser when a !<num> ref is activated", () => {
+			const open = vi.spyOn(window, "open").mockReturnValue(null);
+			render(<XtermTerminal theme="dark" externalRefResolver={resolver} />);
+			const links = provideScmLinksFor("landed !2961");
+			expect(links![0].text).toBe("!2961");
+			links![0].activate(new MouseEvent("click"), links![0].text);
+			expect(open).toHaveBeenCalledWith(`${GL}/-/merge_requests/2961`, "_blank", "noopener");
+			open.mockRestore();
+		});
+
+		it("does not linkify a hex color or #! (no false matches)", () => {
+			render(<XtermTerminal theme="dark" externalRefResolver={resolver} />);
+			expect(provideScmLinksFor("color: #3b82f6; #!/bin/sh")).toBeUndefined();
+		});
+
+		it("returns undefined when no external resolver is supplied", () => {
+			render(<XtermTerminal theme="dark" />);
+			expect(provideScmLinksFor("opened #63 ok")).toBeUndefined();
 		});
 	});
 });

@@ -8,6 +8,7 @@ import { useTerminalSession, type AttachableTerminal, type TerminalSessionState 
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { findSessionLinks } from "../lib/session-ref";
+import { findExternalRefLinks, resolveScmRemotes } from "../lib/terminal-scm-links";
 import { XtermTerminal } from "./XtermTerminal";
 import { RestoreUnavailableDialog } from "./RestoreUnavailableDialog";
 
@@ -180,6 +181,21 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 		},
 		[navigate, projectBySessionId],
 	);
+
+	// SCM reference linkification: `#<num>` → the project's GitHub PR/issue,
+	// `!<num>` → its GitLab MR, opened in the OS browser. The GitHub repo base and
+	// GitLab project base are derived from PR/MR URLs observed anywhere in this
+	// session's project (every session shares the project's remote(s), so a
+	// worker linkifies `#`/`!` even before it opens its own PR). Provider gating
+	// falls out: a base — and thus its sigil — exists only when that remote has
+	// been observed. Same provider split the Reviews/Comments UI uses.
+	const scmRemotes = useMemo(() => {
+		const project = currentProjectId ? (workspaces ?? []).find((w) => w.id === currentProjectId) : undefined;
+		const urls = (project?.sessions ?? []).flatMap((s) => s.prs.map((pr) => pr.url));
+		if (session) urls.push(...session.prs.map((pr) => pr.url));
+		return resolveScmRemotes(urls);
+	}, [workspaces, currentProjectId, session]);
+	const externalRefResolver = useCallback((line: string) => findExternalRefLinks(line, scmRemotes), [scmRemotes]);
 	const hadAttachmentRef = useRef(false);
 	const canRestoreSession = terminalTarget?.kind !== "reviewer" && session?.status === "terminated";
 
@@ -265,6 +281,7 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 					ariaLabel="Session terminal"
 					autoFocus={!showEmptyState}
 					fontSize={fontSize}
+					externalRefResolver={externalRefResolver}
 					onError={handleInitError}
 					onReady={handleReady}
 					onSessionLinkActivate={onSessionLinkActivate}
