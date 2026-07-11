@@ -23,6 +23,7 @@ import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
+	isOrchestratorSession,
 	newestActiveOrchestrator,
 	sessionIsActive,
 	type ProjectKind,
@@ -86,10 +87,10 @@ const HOVER_ACTION_CLASS =
 // The labeled Dashboard / Orchestrator buttons that sit inside a project's
 // section box (per the redesign prototype): a full-width split of two 36px
 // segments. Plain clickable — hover lifts the surface, press flashes
-// refined-blue — with NO persistent active/current-page highlight (both segments
-// always look identical regardless of which view is open). font-size/weight take
-// `!` because styles.css resets `button { font: inherit }` (unlayered → beats
-// Tailwind's layered utilities); `!important` is the codebase's override idiom.
+// refined-blue. The resting (inactive) look; the ACTIVE view's segment layers
+// SEG_ACTIVE_CLASS on top (see below). font-size/weight take `!` because
+// styles.css resets `button { font: inherit }` (unlayered → beats Tailwind's
+// layered utilities); `!important` is the codebase's override idiom.
 const SEG_CLASS =
 	"flex flex-1 items-center justify-center gap-[7px] h-9 rounded-[9px] border text-[12.5px]! font-semibold! " +
 	"bg-raised border-border-strong text-muted-foreground transition-colors " +
@@ -97,6 +98,19 @@ const SEG_CLASS =
 	"active:border-accent-dim active:bg-accent-weak active:text-accent " +
 	"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 " +
 	"disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[15px] [&_svg]:shrink-0";
+
+// The ACTIVE/current-view glow, layered over SEG_CLASS via cn() (tailwind-merge
+// keeps these later conflicting utilities, so they win over the resting bg /
+// border / text and the neutral hover wash). A refined-blue selected state:
+// accent-tinted fill + accent border/label, plus a soft box-shadow "glow" — a
+// crisp 1px accent ring and a diffuse blue halo. Exactly one segment across the
+// whole sidebar carries this at a time (the active project's active view). The
+// halo uses color-mix so it reads on both the dark and light accent (#4d8dff /
+// #2563eb). NOTE (decision 2026-07-11): this REVERSES PR #59's "no persistent
+// current-page highlight" — the user now wants an at-a-glance active indicator.
+const SEG_ACTIVE_CLASS =
+	"border-accent bg-accent-weak text-accent hover:bg-accent-weak hover:text-accent " +
+	"shadow-[0_0_0_1px_var(--accent),0_0_12px_-1px_color-mix(in_srgb,var(--accent)_55%,transparent)]";
 
 // Mirrors the daemon's display-name cap (maxDisplayNameLen) and the spawn
 // `--name` flag, so inline edits never round-trip a value the API would reject.
@@ -474,6 +488,20 @@ function ProjectItem({
 	// button: navigate to it when present, otherwise spawn one first.
 	const orchestrator = newestActiveOrchestrator(workspace.sessions);
 
+	// Active-view glow: mark which of Dashboard / Orchestrator is the view
+	// currently open, read from the REAL route state (useSelection → URL params).
+	// This project must be the active one, then the Dashboard route (project, no
+	// session) lights Dashboard, and an open orchestrator session lights
+	// Orchestrator — mutually exclusive, and only the active project can match, so
+	// exactly one segment across the whole sidebar glows (a worker session lights
+	// neither; its own child row highlights instead). Decomposes projectRowActive.
+	const isActiveProject = selection.activeProjectId === workspace.id;
+	const dashboardActive = isActiveProject && !selection.activeSessionId;
+	const orchestratorActive =
+		isActiveProject &&
+		!!selection.activeSessionId &&
+		workspace.sessions.some((s) => s.id === selection.activeSessionId && isOrchestratorSession(s));
+
 	// Mirrors ShellTopbar's launcher: attach to the running orchestrator, or
 	// spawn one via the daemon and follow it once the workspace refetches.
 	const openOrchestrator = async () => {
@@ -613,13 +641,15 @@ function ProjectItem({
 					</DropdownMenu>
 				</div>
 				{/* Dashboard + Orchestrator: labeled, full-width split, ~36px tall.
-				Plain clickable (no persistent current-page highlight); they navigate
-				to today's Dashboard / Orchestrator views. Shown only when expanded. */}
+				They navigate to the project's Dashboard / Orchestrator views; the
+				segment whose view is currently open glows (SEG_ACTIVE_CLASS, marked
+				aria-current="page"). Shown only when expanded. */}
 				{expanded && (
 					<div className="flex gap-[7px] px-1 pt-0.5 pb-1 group-data-[collapsible=icon]:hidden">
 						<button
+							aria-current={dashboardActive ? "page" : undefined}
 							aria-label={`Open ${workspace.name} dashboard`}
-							className={SEG_CLASS}
+							className={cn(SEG_CLASS, dashboardActive && SEG_ACTIVE_CLASS)}
 							onClick={() => selection.goProject(workspace.id)}
 							type="button"
 						>
@@ -627,8 +657,9 @@ function ProjectItem({
 							Dashboard
 						</button>
 						<button
+							aria-current={orchestratorActive ? "page" : undefined}
 							aria-label={orchestrator ? `Open ${workspace.name} orchestrator` : `Spawn ${workspace.name} orchestrator`}
-							className={SEG_CLASS}
+							className={cn(SEG_CLASS, orchestratorActive && SEG_ACTIVE_CLASS)}
 							disabled={isSpawning || isProjectRestarting}
 							onClick={() => void openOrchestrator()}
 							type="button"

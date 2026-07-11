@@ -11,7 +11,12 @@ import { useUiStore } from "../stores/ui-store";
 const { getMock, navigateMock, mockParams, renameSessionMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	navigateMock: vi.fn(),
-	mockParams: { projectId: undefined as string | undefined },
+	// Drives useSelection: which project/session the URL points at. Reset per test;
+	// the active-glow tests set these to simulate the Dashboard vs Orchestrator route.
+	mockParams: {
+		projectId: undefined as string | undefined,
+		sessionId: undefined as string | undefined,
+	},
 	renameSessionMock: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -22,9 +27,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 	return {
 		...actual,
 		useNavigate: () => navigateMock,
-		useParams: () => ({}),
+		useParams: () => ({ projectId: mockParams.projectId, sessionId: mockParams.sessionId }),
 		useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => unknown }) =>
-			select({ location: { pathname: "/" } }),
+			select({ location: { pathname: mockParams.projectId ? `/projects/${mockParams.projectId}` : "/" } }),
 	};
 });
 
@@ -54,6 +59,21 @@ const session: WorkspaceSession = {
 	provider: "claude-code",
 	kind: "worker",
 	branch: "session/proj-1-1",
+	status: "working",
+	updatedAt: "2026-06-30T00:00:00Z",
+	prs: [],
+};
+
+// A live orchestrator session; backs the Orchestrator button's active glow when
+// its route is open (isOrchestratorSession + sessionIsActive).
+const orchestratorSession: WorkspaceSession = {
+	id: "proj-1-orchestrator",
+	workspaceId: "proj-1",
+	workspaceName: "Project One",
+	title: "orchestrator",
+	provider: "claude-code",
+	kind: "orchestrator",
+	branch: "orchestrator/proj-1",
 	status: "working",
 	updatedAt: "2026-06-30T00:00:00Z",
 	prs: [],
@@ -141,6 +161,7 @@ beforeEach(() => {
 	navigateMock.mockReset();
 	renameSessionMock.mockReset().mockResolvedValue(undefined);
 	mockParams.projectId = undefined;
+	mockParams.sessionId = undefined;
 	localStorage.clear();
 	useUiStore.setState({ collapsedProjectIds: new Set() });
 	vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -227,6 +248,68 @@ describe("Sidebar", () => {
 		await user.click(screen.getByLabelText("Open Project One dashboard"));
 
 		expect(navigateMock).toHaveBeenCalledWith({ to: "/projects/$projectId", params: { projectId: "proj-1" } });
+	});
+
+	// Active-view glow (decision 2026-07-11): exactly one segment across the whole
+	// sidebar shows the refined-blue glow — the active project's open view — wired
+	// to the real route (useSelection). SEG_ACTIVE_CLASS is marked aria-current.
+	describe("active-view glow", () => {
+		const glow = "shadow-[0_0_0_1px_var(--accent)";
+
+		function dashboardBtn(name = "Project One") {
+			return screen.getByLabelText(`Open ${name} dashboard`);
+		}
+		function orchestratorBtn(name = "Project One") {
+			return screen.getByLabelText(new RegExp(`(Open|Spawn) ${name} orchestrator`));
+		}
+
+		it("glows the Dashboard button on the project dashboard route (no session open)", () => {
+			mockParams.projectId = "proj-1";
+			mockParams.sessionId = undefined;
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orchestratorSession] }] });
+
+			expect(dashboardBtn()).toHaveAttribute("aria-current", "page");
+			expect(dashboardBtn().className).toContain(glow);
+			expect(dashboardBtn().className).toContain("bg-accent-weak");
+			expect(orchestratorBtn()).not.toHaveAttribute("aria-current");
+			expect(orchestratorBtn().className).not.toContain(glow);
+		});
+
+		it("moves the glow to Orchestrator when its session route is open", () => {
+			mockParams.projectId = "proj-1";
+			mockParams.sessionId = "proj-1-orchestrator";
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orchestratorSession] }] });
+
+			expect(orchestratorBtn()).toHaveAttribute("aria-current", "page");
+			expect(orchestratorBtn().className).toContain(glow);
+			expect(dashboardBtn()).not.toHaveAttribute("aria-current");
+			expect(dashboardBtn().className).not.toContain(glow);
+		});
+
+		it("glows neither button while a worker session route is open", () => {
+			mockParams.projectId = "proj-1";
+			mockParams.sessionId = "proj-1-1";
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session, orchestratorSession] }] });
+
+			expect(dashboardBtn()).not.toHaveAttribute("aria-current");
+			expect(orchestratorBtn()).not.toHaveAttribute("aria-current");
+			expect(dashboardBtn().className).not.toContain(glow);
+			expect(orchestratorBtn().className).not.toContain(glow);
+		});
+
+		it("glows only the active project's button across multiple projects", () => {
+			const workspace2: WorkspaceSummary = { ...workspace, id: "proj-2", name: "Project Two", sessions: [] };
+			mockParams.projectId = "proj-2";
+			mockParams.sessionId = undefined;
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orchestratorSession] }, workspace2] });
+
+			expect(dashboardBtn("Project Two")).toHaveAttribute("aria-current", "page");
+			expect(dashboardBtn("Project Two").className).toContain(glow);
+			// The other project's dashboard — same view kind, different project — stays dark.
+			expect(dashboardBtn("Project One")).not.toHaveAttribute("aria-current");
+			expect(dashboardBtn("Project One").className).not.toContain(glow);
+			expect(orchestratorBtn("Project One")).not.toHaveAttribute("aria-current");
+		});
 	});
 
 	it("requires explicit worker and orchestrator agents when creating a project", async () => {
