@@ -353,7 +353,7 @@ function CaseCard({
 						{hasEvidence ? "▣ evidence attached" : "□ no evidence yet"}
 					</div>
 				</div>
-				<span aria-hidden="true" style={{ flex: "none", fontSize: 10, color: P.muted, width: 10 }}>
+				<span aria-hidden="true" style={{ flex: "none", fontSize: 14, color: P.secondary, width: 14 }}>
 					{open ? "▾" : "▸"}
 				</span>
 			</div>
