@@ -340,10 +340,10 @@ describe("SessionInspector Activity section", () => {
 });
 
 describe("SessionInspector tabs", () => {
-	it("exposes Summary, Reviews, Comments, and Browser as the four inspector tabs", () => {
+	it("exposes Summary, Reviews, Comments, Tests, and Browser as the inspector tabs", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
 		const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
-		expect(tabs).toEqual(["Summary", "Reviews", "Comments", "Browser"]);
+		expect(tabs).toEqual(["Summary", "Reviews", "Comments", "Tests", "Browser"]);
 	});
 
 	it("shows the intake issue id in the summary overview when present", () => {

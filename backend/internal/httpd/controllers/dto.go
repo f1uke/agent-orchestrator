@@ -111,6 +111,21 @@ type SessionIDParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
 }
 
+// SmokeCheckParam is the {sessionId}/{checkId} path parameters for the
+// per-case smoke routes.
+type SmokeCheckParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
+}
+
+// SmokeEvidenceParam is the {sessionId}/{checkId}/{evidenceId} path parameters
+// for serving a stored evidence blob.
+type SmokeEvidenceParam struct {
+	SessionID  string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	CheckID    string `path:"checkId" description:"Smoke-check case identifier."`
+	EvidenceID string `path:"evidenceId" description:"Evidence blob identifier."`
+}
+
 // ListSessionsQuery is the query string accepted by GET /api/v1/sessions.
 type ListSessionsQuery struct {
 	Project          string `query:"project,omitempty" description:"Project id filter."`

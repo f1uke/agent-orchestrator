@@ -175,7 +175,7 @@ func Run() error {
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, log)
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -214,6 +214,7 @@ func Run() error {
 		Agents:             agentSvc,
 		Sessions:           sessionSvc,
 		Reviews:            reviewSvc,
+		Smoke:              smokeSvc,
 		Notifications:      notifier,
 		NotificationStream: notificationHub,
 		Import:             importsvc.New(importsvc.Deps{Store: store}),

@@ -15,6 +15,7 @@ import (
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
+	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
 )
 
 // APIDeps bundles every service the API layer's controllers depend on.
@@ -25,6 +26,7 @@ type APIDeps struct {
 	Activity           controllers.ActivityRecorder
 	PRs                prsvc.ActionManager
 	Reviews            reviewsvc.Manager
+	Smoke              smokesvc.Manager
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	Import             controllers.ImportService
@@ -47,6 +49,7 @@ type API struct {
 	sessions      *controllers.SessionsController
 	prs           *controllers.PRsController
 	reviews       *controllers.ReviewsController
+	smoke         *controllers.SmokeController
 	notifications *controllers.NotificationsController
 	imports       *controllers.ImportController
 	settings      *controllers.SettingsController
@@ -71,6 +74,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		},
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
+		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
 		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
@@ -97,6 +101,7 @@ func (a *API) Register(root chi.Router) {
 			a.sessions.Register(r)
 			a.prs.Register(r)
 			a.reviews.Register(r)
+			a.smoke.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)

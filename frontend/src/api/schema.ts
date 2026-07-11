@@ -676,6 +676,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/smoke-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a session's smoke-test checklist */
+        get: operations["listSmokeChecks"];
+        /** Author/replace a session's smoke-test checklist (results preserved by case id) */
+        put: operations["authorSmokeChecks"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Attach a screenshot/short clip to a smoke-test case (multipart/form-data 'file' or raw body) */
+        post: operations["uploadSmokeEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a stored smoke-test evidence blob */
+        get: operations["serveSmokeEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear a smoke-test case's verdict/note/evidence */
+        post: operations["resetSmokeCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record the user's verdict + note for a smoke-test case */
+        post: operations["setSmokeVerdict"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a session's smoke-test results back to the worker */
+        post: operations["reportSmokeChecks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/spec": {
         parameters: {
             query?: never;
@@ -888,6 +991,10 @@ export interface components {
             enabled?: boolean;
             threshold?: number;
         };
+        AuthorSmokeChecksInput: {
+            /** @description The full 3–6 case checklist. */
+            cases: components["schemas"]["SmokeAuthoredCaseInput"][];
+        };
         AutoNudgeSettingsResponse: {
             enabled: boolean;
         };
@@ -1052,6 +1159,16 @@ export interface components {
         ListSessionsResponse: {
             sessions: components["schemas"]["ControllersSessionView"][];
         };
+        ListSmokeChecksResponse: {
+            checks: components["schemas"]["SmokeCheck"][];
+            /**
+             * Format: date-time
+             * @description When this session's results were last reported back.
+             */
+            reportedAt?: null | string;
+            /** @description Worker label for the tab subtitle. */
+            worker: string;
+        };
         MarkAllNotificationsReadResponse: {
             notifications: components["schemas"]["NotificationResponse"][];
         };
@@ -1192,6 +1309,14 @@ export interface components {
         ReplyCommentResponse: {
             comment: components["schemas"]["SessionPRThreadComment"];
             ok: boolean;
+        };
+        ReportSmokeResponse: {
+            /** @description Whether the summary was delivered to a live session. */
+            delivered: boolean;
+            /** @description The composed results summary. */
+            summary: string;
+            /** @description worker | orchestrator | persisted. */
+            target: string;
         };
         ResolveCommentsResponse: {
             ok: boolean;
@@ -1407,11 +1532,76 @@ export interface components {
             /** @description Preview target URL. When empty, the daemon autodetects a static entry point in the session workspace. */
             url?: string;
         };
+        SetSmokeVerdictInput: {
+            /** @description Optional note about what the user saw. */
+            note?: string;
+            /** @description pass | fail | skip. */
+            verdict: string;
+        };
         SetSpawnConfirmSettingsRequest: {
             enabled: boolean;
         };
         SetSystemPromptRequest: {
             base: string;
+        };
+        SmokeAuthoredCaseInput: {
+            /** @description Expected result. */
+            expected?: string;
+            /** @description file:line the change touched. */
+            fileRef?: string;
+            /** @description Stable case id. Optional — derived from the name (slugified) when omitted. Supplying it keeps the user's verdict/note/evidence across a re-author. */
+            id?: string;
+            /** @description One-line 'what to verify'. */
+            name: string;
+            /** @description PR/MR number the change belongs to (0 if none). */
+            prNum?: number;
+            /** @description Ordered play steps. */
+            steps?: string[];
+            /** @description Derived display tag (CHECK N); accepted but not persisted. */
+            tag?: string;
+            /** @description Why it matters / what it confirms. */
+            why?: string;
+        };
+        SmokeCheck: {
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            decidedAt?: null | string;
+            evidence: components["schemas"]["SmokeEvidence"][];
+            expected: string;
+            fileRef: string;
+            id: string;
+            name: string;
+            note: string;
+            prNum: number;
+            projectId: string;
+            /** Format: date-time */
+            reportedAt?: null | string;
+            seq: number;
+            sessionId: string;
+            steps: string[];
+            /** Format: date-time */
+            updatedAt: string;
+            verdict: string;
+            why: string;
+        };
+        SmokeCheckResponse: {
+            check: components["schemas"]["SmokeCheck"];
+        };
+        SmokeEvidence: {
+            checkId: string;
+            /** Format: date-time */
+            createdAt: string;
+            filename: string;
+            id: string;
+            kind: string;
+            mime: string;
+            sessionId: string;
+            /** Format: int64 */
+            sizeBytes: number;
+        };
+        SmokeEvidenceResponse: {
+            evidence: components["schemas"]["SmokeEvidence"];
         };
         SpawnConfirmSettingsResponse: {
             enabled: boolean;
@@ -3981,6 +4171,374 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listSmokeChecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    authorSmokeChecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorSmokeChecksInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    uploadSmokeEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmokeEvidenceResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    serveSmokeEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+                /** @description Evidence blob identifier. */
+                evidenceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    resetSmokeCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmokeCheckResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSmokeVerdict: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSmokeVerdictInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmokeCheckResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    reportSmokeChecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportSmokeResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
