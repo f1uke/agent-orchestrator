@@ -621,3 +621,13 @@ export const mockSessionJiraContexts: Record<string, components["schemas"]["Jira
 		},
 	},
 };
+
+// Available status transitions per session, read live in production; here they
+// let the Move-status dialog demo in browser-preview mode. Synthetic data only.
+export const mockSessionJiraTransitions: Record<string, components["schemas"]["JiraTransition"][]> = {
+	"demo-working": [
+		{ id: "11", name: "Start Testing", to: "In Progress", toCategory: "indeterminate" },
+		{ id: "21", name: "Abandoned", to: "Abandoned", toCategory: "done" },
+		{ id: "31", name: "Cancel", to: "Cancelled", toCategory: "done" },
+	],
+};
