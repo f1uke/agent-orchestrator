@@ -158,6 +158,7 @@ var schemaNames = map[string]string{
 	"ControllersRenameSessionResponse":            "RenameSessionResponse",
 	"ControllersRestoreSessionResponse":           "RestoreSessionResponse",
 	"ControllersRestartSessionResponse":           "RestartSessionResponse",
+	"ControllersWakeSessionResponse":              "WakeSessionResponse",
 	"ControllersDeleteSessionQuery":               "DeleteSessionQuery",
 	"ControllersDeleteSessionResponse":            "DeleteSessionResponse",
 	"ControllersCleanupSessionsResponse":          "CleanupSessionsResponse",
@@ -900,6 +901,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.RestartSessionResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/wake", id: "wakeSession", tag: "sessions",
+			summary:    "Wake a session on user-open: resume it if the idle sweep suspended it, else reset its idle-close countdown",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WakeSessionResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},

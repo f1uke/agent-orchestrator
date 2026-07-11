@@ -78,6 +78,7 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/sessions/{sessionId}/preview/files/*",
 	"/api/v1/sessions/{sessionId}/restart",
 	"/api/v1/sessions/{sessionId}/restore",
+	"/api/v1/sessions/{sessionId}/wake",
 	"/api/v1/sessions/{sessionId}/reviews",
 	"/api/v1/sessions/{sessionId}/reviews/submit",
 	"/api/v1/sessions/{sessionId}/reviews/trigger",

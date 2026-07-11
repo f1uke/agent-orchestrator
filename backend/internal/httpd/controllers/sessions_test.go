@@ -198,6 +198,13 @@ func (f *fakeSessionService) Restart(_ context.Context, id domain.SessionID) (do
 	return s, nil
 }
 
+func (f *fakeSessionService) Wake(_ context.Context, id domain.SessionID) (domain.Session, error) {
+	s := f.sessions[id]
+	s.IsSuspended = false
+	f.sessions[id] = s
+	return s, nil
+}
+
 func (f *fakeSessionService) Kill(_ context.Context, id domain.SessionID) (bool, error) {
 	s := f.sessions[id]
 	s.IsTerminated = true
@@ -806,6 +813,37 @@ func TestSessionsAPI_RestartRelaunchesSession(t *testing.T) {
 	mustJSON(t, body, &restarted)
 	if !restarted.OK || restarted.SessionID != "ao-1" || restarted.Session.ID != "ao-1" {
 		t.Fatalf("restart response = %#v", restarted)
+	}
+}
+
+// TestSessionsAPI_WakeReturnsSession: POST /sessions/{id}/wake returns 200 with
+// the woken session view (suspended cleared), so the UI reflects the reset
+// without a CDC round-trip.
+func TestSessionsAPI_WakeReturnsSession(t *testing.T) {
+	svc := newFakeSessionService()
+	s := svc.sessions["ao-1"]
+	s.IsSuspended = true
+	svc.sessions["ao-1"] = s
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/wake", "")
+	if status != http.StatusOK {
+		t.Fatalf("wake = %d, want 200; body=%s", status, body)
+	}
+	var woken struct {
+		OK        bool   `json:"ok"`
+		SessionID string `json:"sessionId"`
+		Session   struct {
+			ID          string `json:"id"`
+			IsSuspended bool   `json:"isSuspended"`
+		} `json:"session"`
+	}
+	mustJSON(t, body, &woken)
+	if !woken.OK || woken.SessionID != "ao-1" || woken.Session.ID != "ao-1" {
+		t.Fatalf("wake response = %#v", woken)
+	}
+	if woken.Session.IsSuspended {
+		t.Fatal("wake must clear isSuspended in the returned session view")
 	}
 }
 

@@ -813,6 +813,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wake a session on user-open: resume it if the idle sweep suspended it, else reset its idle-close countdown */
+        post: operations["wakeSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/cleanup": {
         parameters: {
             query?: never;
@@ -1037,6 +1054,9 @@ export interface components {
             displayName?: string;
             harness?: string;
             id: string;
+            /** Format: date-time */
+            idleCloseAt?: null | string;
+            isSuspended?: boolean;
             isTerminated: boolean;
             isTodo?: boolean;
             issueId?: string;
@@ -1679,6 +1699,11 @@ export interface components {
             harness?: "claude-code" | "codex" | "aider" | "opencode" | "grok" | "droid" | "amp" | "agy" | "crush" | "cursor" | "qwen" | "copilot" | "goose" | "auggie" | "continue" | "devin" | "cline" | "kimi" | "kiro" | "kilocode" | "vibe" | "pi" | "autohand" | null;
             prTarget?: null | string;
             prompt?: null | string;
+        };
+        WakeSessionResponse: {
+            ok: boolean;
+            session: components["schemas"]["ControllersSessionView"];
+            sessionId: string;
         };
         WorkspaceRepo: {
             name: string;
@@ -4670,6 +4695,56 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    wakeSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeSessionResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

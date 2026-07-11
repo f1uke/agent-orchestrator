@@ -60,6 +60,9 @@ type commander interface {
 	UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.SessionRecord, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// Wake is the user-open hook: resume a suspended session in place, or reset a
+	// live session's idle-close countdown; terminated sessions are left untouched.
+	Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string) error
@@ -120,6 +123,10 @@ type Service struct {
 	// normal, not a broken pipeline. nil means "unknown": never downgrade.
 	signalCapable func(domain.AgentHarness) bool
 	renderer      messageRenderer
+	// idleCloseTTL is the inactivity window after which the idle sweep suspends a
+	// live session. The read model exposes IdleCloseAt = idleReference + this so
+	// the board can count down to suspension. 0 (disabled) omits IdleCloseAt.
+	idleCloseTTL time.Duration
 }
 
 // New wires a controller-facing session service over an internal session Manager.
@@ -145,11 +152,14 @@ type Deps struct {
 	// DispatchCommentToWorker fail safe with an Invalid (400) DISPATCH_UNAVAILABLE
 	// error instead of panicking.
 	Renderer messageRenderer
+	// IdleCloseTTL is the idle-suspend window (config.SessionIdleClose), used to
+	// derive the read model's IdleCloseAt countdown. 0 disables it (no countdown).
+	IdleCloseTTL time.Duration
 }
 
 // NewWithDeps wires a session service with optional PR-claim dependencies.
 func NewWithDeps(d Deps) *Service {
-	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry, renderer: d.Renderer}
+	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry, renderer: d.Renderer, idleCloseTTL: d.IdleCloseTTL}
 	if s.prClaimer == nil {
 		if w, ok := d.Store.(ports.PRClaimer); ok {
 			s.prClaimer = w
@@ -442,6 +452,18 @@ func (s *Service) lockOrchestratorProject(projectID domain.ProjectID) func() {
 // Restore relaunches a terminated session and returns the API-facing read model.
 func (s *Service) Restore(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	rec, err := s.manager.Restore(ctx, id)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// Wake is the user-open hook: opening/selecting a session in the UI resumes it
+// in place if the idle sweep suspended it, or resets its idle-close countdown if
+// it is live (a genuine open counts as activity). A terminated session is
+// returned unchanged — reviving one is Restore's job, not an idle-timer reset.
+func (s *Service) Wake(ctx context.Context, id domain.SessionID) (domain.Session, error) {
+	rec, err := s.manager.Wake(ctx, id)
 	if err != nil {
 		return domain.Session{}, toAPIError(err)
 	}
@@ -744,9 +766,23 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		StatusReason:     detail.Reason,
 		NextTransitionAt: detail.NextTransitionAt,
 		NextTransitionTo: detail.NextTransitionTo,
+		IdleCloseAt:      s.idleCloseAt(rec),
 		TerminalHandleID: rec.Metadata.RuntimeHandleID,
 		PRs:              prs,
 	}, nil
+}
+
+// idleCloseAt is when the idle sweep would suspend this session if no further
+// activity arrives — idleReference + the configured TTL — for the board/sidebar
+// countdown. It is nil when the sweep is disabled (TTL 0) or the session is not
+// a live suspend candidate: a terminated session (already gone), a prepared TODO
+// (no runtime yet), or an already-suspended one (no countdown while paused).
+func (s *Service) idleCloseAt(rec domain.SessionRecord) *time.Time {
+	if s.idleCloseTTL <= 0 || rec.IsTerminated || rec.IsTodo || rec.IsSuspended {
+		return nil
+	}
+	at := sessionmanager.IdleReference(rec).Add(s.idleCloseTTL)
+	return &at
 }
 
 // now tolerates a zero-value Service (tests construct the struct literally

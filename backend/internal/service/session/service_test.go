@@ -254,6 +254,8 @@ type fakeCommander struct {
 	purgeErr        error
 	spawnRecord     domain.SessionRecord
 	restartRecord   domain.SessionRecord
+	woken           []domain.SessionID
+	wakeRecord      domain.SessionRecord
 	spawned         bool
 	killsAtSpawn    int
 	preparedTodo    bool
@@ -296,6 +298,10 @@ func (f *fakeCommander) UpdateTodoSpec(_ context.Context, id domain.SessionID, p
 }
 func (f *fakeCommander) Restore(context.Context, domain.SessionID) (domain.SessionRecord, error) {
 	return domain.SessionRecord{}, nil
+}
+func (f *fakeCommander) Wake(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	f.woken = append(f.woken, id)
+	return f.wakeRecord, nil
 }
 func (f *fakeCommander) Kill(_ context.Context, id domain.SessionID) (bool, error) {
 	if f.killErr != nil {

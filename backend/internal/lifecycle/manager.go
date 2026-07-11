@@ -136,7 +136,11 @@ func (m *Manager) mutate(ctx context.Context, id domain.SessionID, fn func(domai
 // failed probe or liveness disagreement is ignored; no transient lifecycle state is stored.
 func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.SessionID, f ports.RuntimeFacts) error {
 	return m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
-		if cur.IsTerminated || !runtimeClearlyDead(f, cur.Activity, now, m.window) {
+		// A suspended session INTENTIONALLY has no runtime: the idle sweep tore its
+		// tmux down while keeping it on the board. A dead-runtime probe is expected,
+		// not proof of death — never let it flip a suspended session to terminated
+		// (the reaper already skips these; this is the belt-and-suspenders guard).
+		if cur.IsTerminated || cur.IsSuspended || !runtimeClearlyDead(f, cur.Activity, now, m.window) {
 			return cur, false
 		}
 		next := cur
@@ -164,6 +168,16 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 	}
 	now := m.clock()
 	if rec.IsTerminated {
+		m.mu.Unlock()
+		return nil
+	}
+	// A suspended session's agent process is being (or has been) torn down by the
+	// idle sweep: ignore its late hooks. This is load-bearing — reaping the tmux
+	// makes the agent fire its SessionEnd hook, whose "exited" signal would
+	// otherwise set is_terminated and archive the card to Done, defeating suspend.
+	// The session resumes (clearing is_suspended) only via an explicit open, after
+	// which fresh hooks flow normally.
+	if rec.IsSuspended {
 		m.mu.Unlock()
 		return nil
 	}
@@ -291,6 +305,11 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 	// spawn reads is_terminated=false here, so it stays reactivated=false.
 	rec.Reactivated = rec.IsTerminated
 	rec.IsTerminated = false
+	// A (re)launch always brings a live runtime back, so it clears the idle-sweep
+	// suspend flag: resuming a suspended session, or restoring a terminated one,
+	// un-pauses the card. A suspended session is non-terminated here, so the
+	// Reactivated read above stays false (resume must not land it in "Needs you").
+	rec.IsSuspended = false
 	// A session that has been spawned is, by definition, no longer a prepared
 	// TODO. Clearing the flag here (a no-op for a normal spawn where it is
 	// already false) is what materializes a queued TODO in place on Start, and
@@ -314,6 +333,39 @@ func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID) error
 		}
 		cur.IsTerminated = true
 		cur.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: now}
+		return cur, true
+	})
+}
+
+// MarkSuspended flags a session as runtime-suspended by the idle sweep. The
+// runtime (tmux) is torn down separately by the session manager; this records
+// the durable fact. It deliberately leaves activity_state and is_terminated
+// untouched so status derivation keeps the card in its real board lane — the
+// flag only drives a "paused — click to resume" affordance. A terminated
+// session is never suspended (nothing to pause). Idempotent.
+func (m *Manager) MarkSuspended(ctx context.Context, id domain.SessionID) error {
+	return m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
+		if cur.IsTerminated || cur.IsSuspended {
+			return cur, false
+		}
+		cur.IsSuspended = true
+		return cur, true
+	})
+}
+
+// TouchActivity resets a session's idle reference to now WITHOUT changing its
+// activity state, so opening/selecting the session in the UI restarts its
+// idle-close countdown while leaving its board lane unchanged. A terminated
+// session is left alone (touch must never resurrect one — Restore owns
+// revival). The activity_state is preserved, so the sessions_cdc_update trigger
+// stays quiet on this write alone; the wake endpoint returns the fresh read
+// model and the UI invalidates its workspace query to reflect the reset.
+func (m *Manager) TouchActivity(ctx context.Context, id domain.SessionID) error {
+	return m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
+		if cur.IsTerminated {
+			return cur, false
+		}
+		cur.Activity.LastActivityAt = now
 		return cur, true
 	})
 }

@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SessionView } from "./SessionView";
 import { useUiStore } from "../stores/ui-store";
@@ -92,6 +92,16 @@ vi.mock("../lib/shell-context", () => ({
 }));
 vi.mock("../hooks/useWorkspaceQuery", () => ({
 	useWorkspaceQuery: () => ({ data: workspaces, isLoading: false }),
+	workspaceQueryKey: ["workspaces"],
+}));
+
+// The wake-on-open effect touches the daemon (POST /wake) and invalidates the
+// workspace query; both are stubbed so the effect is observable without a real
+// QueryClientProvider or daemon.
+const { wakeMock, invalidateMock } = vi.hoisted(() => ({ wakeMock: vi.fn(), invalidateMock: vi.fn() }));
+vi.mock("../lib/api-client", () => ({ apiClient: { POST: wakeMock } }));
+vi.mock("@tanstack/react-query", () => ({
+	useQueryClient: () => ({ invalidateQueries: invalidateMock }),
 }));
 
 // jsdom has no layout engine, so the real react-resizable-panels would never
@@ -170,6 +180,8 @@ describe("SessionView", () => {
 		useUiStore.setState({ isInspectorOpen: true });
 		panels.clear();
 		browserDestroy.mockReset();
+		wakeMock.mockReset().mockResolvedValue({ error: undefined });
+		invalidateMock.mockReset();
 	});
 
 	// Regression: react-resizable-panels v4 treats bare numeric sizes as PIXELS
@@ -366,5 +378,38 @@ describe("SessionView", () => {
 			delete worker.previewUrl;
 			delete worker.previewRevision;
 		}
+	});
+
+	it("wakes the session on open, then refetches the workspace so the reset/resume shows", async () => {
+		await act(async () => {
+			render(<SessionView sessionId="sess-1" />);
+		});
+		expect(wakeMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/wake", {
+			params: { path: { sessionId: "sess-1" } },
+		});
+		await waitFor(() => expect(invalidateMock).toHaveBeenCalledWith({ queryKey: ["workspaces"] }));
+	});
+
+	it("re-wakes when the user selects a different session", async () => {
+		let rerender!: (ui: React.ReactElement) => void;
+		await act(async () => {
+			({ rerender } = render(<SessionView sessionId="sess-1" />));
+		});
+		wakeMock.mockClear();
+		await act(async () => {
+			rerender(<SessionView sessionId="sess-orch" />);
+		});
+		expect(wakeMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/wake", {
+			params: { path: { sessionId: "sess-orch" } },
+		});
+	});
+
+	it("skips the refetch when the wake call fails (benign no-op)", async () => {
+		wakeMock.mockResolvedValue({ error: { code: "SESSION_NOT_FOUND", message: "gone" } });
+		await act(async () => {
+			render(<SessionView sessionId="sess-1" />);
+		});
+		expect(wakeMock).toHaveBeenCalled();
+		expect(invalidateMock).not.toHaveBeenCalled();
 	});
 });

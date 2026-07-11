@@ -148,14 +148,20 @@ type fakeLCM struct {
 	completed int
 	// terminated counts MarkTerminated calls per session id.
 	terminated map[domain.SessionID]int
+	// suspended counts MarkSuspended calls per session id.
+	suspended map[domain.SessionID]int
+	// touched counts TouchActivity calls per session id.
+	touched map[domain.SessionID]int
 }
 
 func (l *fakeLCM) MarkSpawned(_ context.Context, id domain.SessionID, metadata domain.SessionMetadata) error {
 	l.completed++
 	rec := l.store.sessions[id]
 	rec.IsTerminated = false
-	// Mirror the real lifecycle manager: a spawned session is no longer a TODO.
+	// Mirror the real lifecycle manager: a spawned session is no longer a TODO
+	// and no longer suspended (a (re)launch brings its runtime back).
 	rec.IsTodo = false
+	rec.IsSuspended = false
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()}
 	rec.Metadata = metadata
 	l.store.sessions[id] = rec
@@ -169,6 +175,32 @@ func (l *fakeLCM) MarkTerminated(_ context.Context, id domain.SessionID) error {
 	rec := l.store.sessions[id]
 	rec.IsTerminated = true
 	rec.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: time.Now()}
+	l.store.sessions[id] = rec
+	return nil
+}
+func (l *fakeLCM) MarkSuspended(_ context.Context, id domain.SessionID) error {
+	if l.suspended == nil {
+		l.suspended = map[domain.SessionID]int{}
+	}
+	rec := l.store.sessions[id]
+	if rec.IsTerminated || rec.IsSuspended {
+		return nil
+	}
+	l.suspended[id]++
+	rec.IsSuspended = true
+	l.store.sessions[id] = rec
+	return nil
+}
+func (l *fakeLCM) TouchActivity(_ context.Context, id domain.SessionID) error {
+	if l.touched == nil {
+		l.touched = map[domain.SessionID]int{}
+	}
+	rec := l.store.sessions[id]
+	if rec.IsTerminated {
+		return nil
+	}
+	l.touched[id]++
+	rec.Activity.LastActivityAt = time.Now()
 	l.store.sessions[id] = rec
 	return nil
 }
@@ -3477,13 +3509,13 @@ func TestReconcile_AdoptAcrossDaemonRestart(t *testing.T) {
 	}
 }
 
-// TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched locks in the fix for
-// the final-review finding: a session whose runtime died with the daemon AND
-// is idle past the auto-close TTL must be closed like CloseIdleSessions would
-// (terminated, worktree kept in place) instead of being captured into a
-// preserve ref and relaunched by RestoreAll on this same boot. Relaunching an
-// idle-past-TTL session on reboot would contradict the auto-close contract.
-func TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched(t *testing.T) {
+// TestReconcile_IdlePastTTLDeadRuntimeSuspendedNotRelaunched: a session whose
+// runtime died with the daemon AND is idle past the auto-close TTL must be
+// SUSPENDED like CloseIdleSessions would (kept on the board in its lane, worktree
+// kept in place, NOT terminated) instead of being captured into a preserve ref
+// and relaunched by RestoreAll on this same boot. Relaunching an idle-past-TTL
+// session on reboot would contradict the suspend contract.
+func TestReconcile_IdlePastTTLDeadRuntimeSuspendedNotRelaunched(t *testing.T) {
 	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 	m, st, rt, ws, _ := newIdleManager(time.Hour, now)
 	// Handle "hX" is intentionally absent from rt.aliveByHandle so IsAlive
@@ -3498,8 +3530,11 @@ func TestReconcile_IdlePastTTLDeadRuntimeClosedNotRelaunched(t *testing.T) {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	if !st.sessions["s1"].IsTerminated {
-		t.Fatal("idle-past-TTL dead-runtime session must end up terminated")
+	if st.sessions["s1"].IsTerminated {
+		t.Fatal("idle-past-TTL dead-runtime session must be suspended, not terminated")
+	}
+	if !st.sessions["s1"].IsSuspended {
+		t.Fatal("idle-past-TTL dead-runtime session must end up suspended (kept on board)")
 	}
 	if ws.stashCalls != 0 {
 		t.Fatalf("stashCalls = %d, want 0 (idle session must not be captured)", ws.stashCalls)
@@ -3532,9 +3567,13 @@ func newIdleManager(ttl time.Duration, now time.Time) (*Manager, *fakeStore, *fa
 	return m, st, rt, ws, lcm
 }
 
-func TestCloseIdleSessions_IdleAlive_DestroysTmuxTerminatesKeepsWorktree(t *testing.T) {
+// TestCloseIdleSessions_IdleAlive_SuspendsKeepsOnBoardKeepsWorktree is the core
+// suspend contract: an idle-past-TTL LIVE session has its tmux torn down, is
+// marked SUSPENDED (NOT terminated, so it stays on the board in its lane), and
+// keeps its worktree on disk (and its restore marker untouched).
+func TestCloseIdleSessions_IdleAlive_SuspendsKeepsOnBoardKeepsWorktree(t *testing.T) {
 	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
-	m, st, rt, ws, _ := newIdleManager(time.Hour, now)
+	m, st, rt, ws, lcm := newIdleManager(time.Hour, now)
 	rt.aliveByHandle["h1"] = true
 	st.sessions["s1"] = domain.SessionRecord{
 		ID: "s1", ProjectID: "mer",
@@ -3546,13 +3585,223 @@ func TestCloseIdleSessions_IdleAlive_DestroysTmuxTerminatesKeepsWorktree(t *test
 		t.Fatalf("CloseIdleSessions: %v", err)
 	}
 	if len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != "h1" {
-		t.Fatalf("destroyedIDs = %v, want [h1]", rt.destroyedIDs)
+		t.Fatalf("destroyedIDs = %v, want [h1] (tmux freed)", rt.destroyedIDs)
 	}
-	if !st.sessions["s1"].IsTerminated {
-		t.Fatal("idle session must be marked terminated")
+	if st.sessions["s1"].IsTerminated {
+		t.Fatal("idle session must NOT be terminated (it stays on the board)")
+	}
+	if !st.sessions["s1"].IsSuspended {
+		t.Fatal("idle session must be marked suspended")
+	}
+	if lcm.terminated["s1"] != 0 {
+		t.Fatalf("MarkTerminated calls = %d, want 0 (suspend, not terminate)", lcm.terminated["s1"])
+	}
+	if lcm.suspended["s1"] != 1 {
+		t.Fatalf("MarkSuspended calls = %d, want 1", lcm.suspended["s1"])
+	}
+	if st.sessions["s1"].Activity.State != domain.ActivityIdle {
+		t.Fatalf("activity state = %s, want idle preserved (lane unchanged)", st.sessions["s1"].Activity.State)
 	}
 	if ws.destroyed != 0 {
 		t.Fatalf("worktree must be kept; workspace Destroy called %d times", ws.destroyed)
+	}
+	if rows := st.worktrees["s1"]; len(rows) != 0 {
+		t.Fatalf("suspend must not touch restore markers, got %+v", rows)
+	}
+}
+
+// TestCloseIdleSessions_AlreadySuspended_Skipped: a suspended session (tmux
+// already gone) is left alone by the sweep — no re-processing, no terminate.
+func TestCloseIdleSessions_AlreadySuspended_Skipped(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, lcm := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", IsSuspended: true,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h1", WorkspacePath: "/ws/s1"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-90 * time.Hour)},
+		CreatedAt: now.Add(-100 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("already-suspended session must not be re-reaped; Destroy calls = %d", rt.destroyed)
+	}
+	if st.sessions["s1"].IsTerminated || lcm.terminated["s1"] != 0 {
+		t.Fatal("already-suspended session must never be terminated by the sweep")
+	}
+}
+
+// TestReconcileLive_SuspendedSkipped: on boot, a suspended session stays
+// suspended — not relaunched, not terminated, worktree untouched.
+func TestReconcileLive_SuspendedSkipped(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, ws, lcm := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", IsSuspended: true,
+		Metadata:  domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-2 * time.Hour)},
+		CreatedAt: now.Add(-3 * time.Hour),
+	}
+	if err := m.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	got := st.sessions["s1"]
+	if got.IsTerminated || lcm.terminated["s1"] != 0 {
+		t.Fatal("suspended session must not be terminated on boot")
+	}
+	if !got.IsSuspended {
+		t.Fatal("suspended session must stay suspended across a boot")
+	}
+	if rt.created != 0 {
+		t.Fatalf("suspended session must not be relaunched; rt.created = %d", rt.created)
+	}
+	if ws.stashCalls != 0 {
+		t.Fatalf("suspended session must not be captured; stashCalls = %d", ws.stashCalls)
+	}
+}
+
+// TestSaveAndTeardownAll_SuspendedSkipped: daemon shutdown leaves a suspended
+// session untouched (worktree kept, not terminated, no restore marker), so it
+// stays suspended across the restart instead of being relaunched by RestoreAll.
+func TestSaveAndTeardownAll_SuspendedSkipped(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, _, ws, lcm := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", IsSuspended: true,
+		Metadata:  domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-80 * time.Hour)},
+		CreatedAt: now.Add(-90 * time.Hour),
+	}
+	if err := m.SaveAndTeardownAll(ctx); err != nil {
+		t.Fatalf("SaveAndTeardownAll: %v", err)
+	}
+	if ws.stashCalls != 0 || ws.destroyed != 0 {
+		t.Fatalf("suspended session must not be stashed/destroyed on shutdown: stash=%d destroy=%d", ws.stashCalls, ws.destroyed)
+	}
+	if lcm.terminated["s1"] != 0 || st.sessions["s1"].IsTerminated {
+		t.Fatal("suspended session must not be terminated on shutdown")
+	}
+	if rows := st.worktrees["s1"]; len(rows) != 0 {
+		t.Fatalf("no restore marker expected for a suspended session, got %+v", rows)
+	}
+}
+
+// TestResume_RecreatesRuntimeClearsSuspended: opening a suspended session
+// recreates its tmux from the kept worktree and clears the suspend flag, in
+// place (no terminate semantics, not reactivated).
+func TestResume_RecreatesRuntimeClearsSuspended(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		IsSuspended: true,
+		Metadata:    domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX", Prompt: "do the thing"},
+		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-80 * time.Hour)},
+		CreatedAt:   now.Add(-90 * time.Hour),
+	}
+	rec, err := m.Resume(ctx, "s1")
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if rec.IsSuspended || st.sessions["s1"].IsSuspended {
+		t.Fatal("Resume must clear the suspended flag")
+	}
+	if rec.IsTerminated {
+		t.Fatal("Resume must not terminate")
+	}
+	if st.sessions["s1"].Reactivated {
+		t.Fatal("Resume of a non-terminated session must not set reactivated")
+	}
+	if rt.created != 1 {
+		t.Fatalf("Resume must recreate the runtime once; rt.created = %d", rt.created)
+	}
+}
+
+// TestResume_NotSuspendedIsNoOp: resuming a live session is idempotent.
+func TestResume_NotSuspendedIsNoOp(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer",
+		Metadata:  domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "h1"},
+		Activity:  domain.Activity{State: domain.ActivityActive, LastActivityAt: now},
+		CreatedAt: now,
+	}
+	if _, err := m.Resume(ctx, "s1"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if rt.created != 0 {
+		t.Fatalf("resuming a non-suspended session must be a no-op; rt.created = %d", rt.created)
+	}
+}
+
+// TestWake_SuspendedResumes / _LiveTouches / _TerminatedNoOp cover the user-open
+// hook's three branches.
+func TestWake_SuspendedResumes(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		IsSuspended: true,
+		Metadata:    domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX", Prompt: "task"},
+		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-80 * time.Hour)},
+		CreatedAt:   now.Add(-90 * time.Hour),
+	}
+	if _, err := m.Wake(ctx, "s1"); err != nil {
+		t.Fatalf("Wake: %v", err)
+	}
+	if st.sessions["s1"].IsSuspended {
+		t.Fatal("Wake on a suspended session must resume it")
+	}
+	if rt.created != 1 {
+		t.Fatalf("Wake resume must recreate runtime; rt.created = %d", rt.created)
+	}
+}
+
+func TestWake_LiveTouchesResetsIdleReference(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, lcm := newIdleManager(time.Hour, now)
+	old := now.Add(-50 * time.Minute)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer",
+		Metadata:  domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "h1"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: old},
+		CreatedAt: now.Add(-2 * time.Hour),
+	}
+	if _, err := m.Wake(ctx, "s1"); err != nil {
+		t.Fatalf("Wake: %v", err)
+	}
+	if lcm.touched["s1"] != 1 {
+		t.Fatalf("Wake on a live session must touch it once; touched = %d", lcm.touched["s1"])
+	}
+	if rt.created != 0 || rt.destroyed != 0 {
+		t.Fatal("Wake on a live session must not recreate/destroy the runtime")
+	}
+	if !st.sessions["s1"].Activity.LastActivityAt.After(old) {
+		t.Fatal("Wake must reset the idle reference (LastActivityAt) on a live session")
+	}
+	if st.sessions["s1"].Activity.State != domain.ActivityIdle {
+		t.Fatal("Wake touch must not change the activity state (lane preserved)")
+	}
+}
+
+func TestWake_TerminatedNoOp(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, lcm := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", IsTerminated: true,
+		Metadata: domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX"},
+		Activity: domain.Activity{State: domain.ActivityExited, LastActivityAt: now.Add(-2 * time.Hour)},
+	}
+	if _, err := m.Wake(ctx, "s1"); err != nil {
+		t.Fatalf("Wake: %v", err)
+	}
+	if rt.created != 0 || lcm.touched["s1"] != 0 {
+		t.Fatal("Wake must never resurrect a terminated session (Restore owns revival)")
+	}
+	if !st.sessions["s1"].IsTerminated {
+		t.Fatal("terminated session must stay terminated after Wake")
 	}
 }
 
@@ -3589,6 +3838,44 @@ func TestCloseIdleSessions_TerminatedSibling_KeepsSharedTmuxAlive(t *testing.T) 
 	}
 	if st.sessions["live"].IsTerminated {
 		t.Fatal("live session sharing the handle must stay running after the sweep")
+	}
+}
+
+// TestCloseIdleSessions_IdleOrchestratorSuspends_SharedHandleSafe preserves the
+// shared-handle safety through the new suspend path: a project's orchestrators
+// share ONE runtime handle. When the LIVE orchestrator is itself idle past the
+// TTL it must suspend (reap its own tmux, kept on board), while its terminated
+// sibling (same handle) must NOT also reap that tmux — liveHandles, computed
+// upfront, still guards it.
+func TestCloseIdleSessions_IdleOrchestratorSuspends_SharedHandleSafe(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, lcm := newIdleManager(time.Hour, now)
+	const shared = "proj-ao-proj-orchestrator"
+	rt.aliveByHandle[shared] = true
+	st.sessions["old"] = domain.SessionRecord{
+		ID: "old", ProjectID: "mer", IsTerminated: true, Kind: domain.KindOrchestrator,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: shared},
+		Activity: domain.Activity{State: domain.ActivityExited, LastActivityAt: now.Add(-8 * time.Hour)},
+	}
+	st.sessions["live"] = domain.SessionRecord{
+		ID: "live", ProjectID: "mer", IsTerminated: false, Kind: domain.KindOrchestrator,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: shared, WorkspacePath: "/ws/live", Branch: "ao/live/root"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-2 * time.Hour)},
+		CreatedAt: now.Add(-3 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	// The shared tmux is reaped exactly once — by suspending the live orchestrator
+	// itself, never a second time by the terminated sibling.
+	if rt.destroyed != 1 || len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != shared {
+		t.Fatalf("shared tmux Destroy = %d ids=%v, want exactly one (the live orchestrator's own suspend)", rt.destroyed, rt.destroyedIDs)
+	}
+	if !st.sessions["live"].IsSuspended || st.sessions["live"].IsTerminated {
+		t.Fatal("idle live orchestrator must be suspended (on board), not terminated")
+	}
+	if lcm.suspended["old"] != 0 {
+		t.Fatal("terminated sibling must never be suspended")
 	}
 }
 

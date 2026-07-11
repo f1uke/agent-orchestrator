@@ -415,6 +415,56 @@ func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
 // mergeable PR is Ready to merge regardless of its approval count, and an
 // under-approved PR is never promoted to Approved on count alone. This is the
 // exact behavior a project that never opts in keeps.
+func TestIdleCloseAt(t *testing.T) {
+	ttl := 72 * time.Hour
+	last := statusNow.Add(-time.Hour)
+	live := domain.SessionRecord{Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: last}}
+
+	t.Run("live session -> idleReference + TTL", func(t *testing.T) {
+		s := &Service{idleCloseTTL: ttl}
+		at := s.idleCloseAt(live)
+		if at == nil {
+			t.Fatal("live session must expose an idle-close deadline")
+		}
+		if want := last.Add(ttl); !at.Equal(want) {
+			t.Fatalf("idleCloseAt = %v, want %v", at, want)
+		}
+	})
+
+	t.Run("no signal yet -> CreatedAt + TTL", func(t *testing.T) {
+		s := &Service{idleCloseTTL: ttl}
+		created := statusNow.Add(-10 * time.Minute)
+		rec := domain.SessionRecord{CreatedAt: created}
+		at := s.idleCloseAt(rec)
+		if at == nil || !at.Equal(created.Add(ttl)) {
+			t.Fatalf("idleCloseAt = %v, want %v (falls back to CreatedAt)", at, created.Add(ttl))
+		}
+	})
+
+	t.Run("TTL disabled -> nil", func(t *testing.T) {
+		s := &Service{idleCloseTTL: 0}
+		if at := s.idleCloseAt(live); at != nil {
+			t.Fatalf("idleCloseAt = %v, want nil when the sweep is disabled", at)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		rec  domain.SessionRecord
+	}{
+		{"terminated", domain.SessionRecord{IsTerminated: true, Activity: live.Activity}},
+		{"todo", domain.SessionRecord{IsTodo: true, Activity: live.Activity}},
+		{"suspended", domain.SessionRecord{IsSuspended: true, Activity: live.Activity}},
+	} {
+		t.Run(tc.name+" -> nil (not a live suspend candidate)", func(t *testing.T) {
+			s := &Service{idleCloseTTL: ttl}
+			if at := s.idleCloseAt(tc.rec); at != nil {
+				t.Fatalf("idleCloseAt = %v, want nil for a %s session", at, tc.name)
+			}
+		})
+	}
+}
+
 func TestPRPipelineStatus_ApprovalRuleDisabled(t *testing.T) {
 	base := domain.PRFacts{
 		URL:          "https://gitlab.example.com/g/p/-/merge_requests/1",

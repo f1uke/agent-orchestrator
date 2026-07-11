@@ -257,4 +257,42 @@ describe("SessionsBoard", () => {
 
 		await waitFor(() => expect(deleteMock).toHaveBeenCalledTimes(2));
 	});
+
+	it("renders a suspended session in its real lane (not the Done bar) with a paused affordance", () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [{ ...activeSession("sess-9", "needs_input"), isSuspended: true }] }],
+			isError: false,
+		});
+		renderBoard();
+
+		// The card renders directly in its lane; the Done bar is collapsed, so a
+		// visible card title (no expansion click) proves it did NOT archive.
+		expect(screen.getByText("active sess-9")).toBeInTheDocument();
+		expect(screen.getByText("Paused")).toBeInTheDocument();
+		// A non-terminated suspended session produces no done sessions at all, so the
+		// Done/Terminated bar is absent — the card cannot be hiding there.
+		expect(screen.queryByRole("button", { name: /Done \/ Terminated/i })).not.toBeInTheDocument();
+	});
+
+	it("shows an escalating idle countdown when a live session nears suspension", () => {
+		const soon = new Date(Date.now() + 40 * 60_000).toISOString(); // 40m out
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [{ ...activeSession("sess-9", "needs_input"), idleCloseAt: soon }] }],
+			isError: false,
+		});
+		renderBoard();
+
+		expect(screen.getByLabelText(/^Auto-suspends in/)).toBeInTheDocument();
+	});
+
+	it("hides the countdown for a session far from suspension", () => {
+		const far = new Date(Date.now() + 60 * 60 * 60_000).toISOString(); // 60h out
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [{ ...activeSession("sess-9", "needs_input"), idleCloseAt: far }] }],
+			isError: false,
+		});
+		renderBoard();
+
+		expect(screen.queryByLabelText(/^Auto-suspends in/)).not.toBeInTheDocument();
+	});
 });

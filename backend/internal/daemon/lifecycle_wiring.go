@@ -153,6 +153,9 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// activity hooks; the deriver registry is the source of truth for that.
 		SignalCapable: activitydispatch.SupportsHarness,
 		Renderer:      msgRenderer,
+		// Same window the idle sweep uses, so the read model's IdleCloseAt
+		// countdown lines up with when a session would actually be suspended.
+		IdleCloseTTL: cfg.SessionIdleClose,
 	})
 	// Triggering a review spawns a reviewer over the worker's worktree, resolved
 	// from the reviewer registry (distinct from the worker agent set). The

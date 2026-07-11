@@ -89,6 +89,21 @@ func TestTick_SkipsTerminatedSession(t *testing.T) {
 	}
 }
 
+func TestTick_SkipsSuspendedSession(t *testing.T) {
+	lcm := &fakeLCM{}
+	paused := probableSession("mer-1")
+	paused.IsSuspended = true
+	sessions := fakeSessions{rows: []domain.SessionRecord{paused}}
+	// A suspended session's tmux is intentionally gone; probing it would report a
+	// dead runtime and re-terminate it. It must be skipped like a terminated one.
+	if err := newReaper(lcm, sessions, fakeRuntime{alive: false}).Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, probed := lcm.observed["mer-1"]; probed {
+		t.Fatal("suspended sessions must not be probed")
+	}
+}
+
 func TestTick_SkipsSessionWithoutHandle(t *testing.T) {
 	lcm := &fakeLCM{}
 	noHandle := domain.SessionRecord{ID: "mer-1"} // no runtime metadata

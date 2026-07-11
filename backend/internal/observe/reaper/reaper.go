@@ -125,7 +125,11 @@ func (r *Reaper) Tick(ctx context.Context) error {
 	}
 
 	for _, sess := range sessions {
-		if sess.IsTerminated {
+		// A suspended session intentionally has no runtime (the idle sweep tore its
+		// tmux down while keeping it on the board). Probing it would report a dead
+		// runtime and, via ApplyRuntimeObservation, flip it to terminated — undoing
+		// the suspend. Skip it exactly like a terminated one until it is resumed.
+		if sess.IsTerminated || sess.IsSuspended {
 			continue
 		}
 		r.probeOne(ctx, sess, now)
