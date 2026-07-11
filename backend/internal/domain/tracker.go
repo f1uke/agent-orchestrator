@@ -8,10 +8,13 @@ import (
 // TrackerProvider identifies an issue-tracker provider implementation.
 type TrackerProvider string
 
-// TrackerProviderGitHub and TrackerProviderGitLab are the supported issue-tracker providers.
+// TrackerProviderGitHub, TrackerProviderGitLab and TrackerProviderJira are the
+// supported issue-tracker providers. Jira is display-only (a session binds to a
+// Jira key via issue_id "jira:<KEY>"); it has no intake/List path.
 const (
 	TrackerProviderGitHub TrackerProvider = "github"
 	TrackerProviderGitLab TrackerProvider = "gitlab"
+	TrackerProviderJira   TrackerProvider = "jira"
 )
 
 // TrackerID identifies one issue. Native is the provider's own canonical form

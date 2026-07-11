@@ -9,6 +9,7 @@ import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { SmokeTestView } from "./SmokeTestView";
+import { JiraIssueSection } from "./JiraIssueSection";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/utils";
@@ -200,9 +201,12 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 			: `${singularNoun[0].toUpperCase()}${singularNoun.slice(1)}`;
 	const branchLabel = session.branch || `session/${session.id}`;
 	const issueId = canonicalTrackerIssueId(session.issueId);
+	const jiraLinked = issueId?.startsWith("jira:") ?? false;
 
 	return (
 		<div role="tabpanel">
+			<JiraIssueSection sessionId={session.id} linked={jiraLinked} />
+
 			<Section title={prSectionTitle}>
 				{prSummaries.length === 0 ? (
 					<p className="inspector-empty">No pull request opened yet.</p>

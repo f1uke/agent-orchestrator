@@ -320,4 +320,64 @@ describe("NewTaskDialog", () => {
 
 		expect(await screen.findByText(`${message} (${code})`)).toBeInTheDocument();
 	});
+
+	it("binds the session to jira:<KEY> and keeps the title as displayName when a Jira key is linked", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText(/Jira issue/i), "demo-101");
+		await user.type(screen.getByLabelText("Title"), "Order Eligible UI");
+		await user.type(screen.getByLabelText("Brief"), "Build the participating-funds UI.");
+		await user.click(screen.getByRole("button", { name: "Start now" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		const body = spawnBody();
+		expect(body.issueId).toBe("jira:DEMO-101");
+		expect(body.displayName).toBe("Order Eligible UI");
+		expect(body.prompt).toBe("Build the participating-funds UI.");
+	});
+
+	it("caps displayName at 20 characters for a Jira-linked task", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText(/Jira issue/i), "DEMO-101");
+		await user.type(screen.getByLabelText("Title"), "A very long human title beyond twenty");
+		await user.type(screen.getByLabelText("Brief"), "B");
+		await user.click(screen.getByRole("button", { name: "Start now" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect((spawnBody().displayName as string).length).toBe(20);
+	});
+
+	it("keeps the title in issueId (no displayName) when no Jira key is linked", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText("Title"), "Plain task");
+		await user.type(screen.getByLabelText("Brief"), "No Jira here.");
+		await user.click(screen.getByRole("button", { name: "Start now" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		const body = spawnBody();
+		expect(body.issueId).toBe("Plain task");
+		expect(body.displayName).toBeUndefined();
+	});
+
+	it("rejects an invalid Jira key without submitting", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText(/Jira issue/i), "not-a-key");
+		await user.type(screen.getByLabelText("Title"), "T");
+		await user.type(screen.getByLabelText("Brief"), "B");
+		await user.click(screen.getByRole("button", { name: "Start now" }));
+
+		expect(await screen.findByText(/valid Jira issue key/i)).toBeInTheDocument();
+		expect(postMock).not.toHaveBeenCalled();
+	});
 });

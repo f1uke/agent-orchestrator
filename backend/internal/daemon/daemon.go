@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -28,6 +29,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
+	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
@@ -213,6 +215,7 @@ func Run() error {
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
 		Sessions:           sessionSvc,
+		Jira:               jirasvc.New(sessionSvc, jiraadapter.NewClient()),
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		Notifications:      notifier,

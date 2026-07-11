@@ -436,6 +436,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/jira": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return the display-only Jira issue context for a session bound to a Jira key */
+        get: operations["getSessionJira"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/kill": {
         parameters: {
             query?: never;
@@ -991,6 +1008,28 @@ export interface components {
             path: string;
             projectId?: null | string;
         };
+        AdfAttrs: {
+            color?: string;
+            filename?: string;
+            language?: string;
+            layout?: string;
+            level?: number;
+            panelType?: string;
+            state?: string;
+            text?: string;
+            url?: string;
+        };
+        AdfMark: {
+            href?: string;
+            type: string;
+        };
+        AdfNode: {
+            attrs?: components["schemas"]["AdfAttrs"];
+            content?: components["schemas"]["AdfNode"][];
+            marks?: components["schemas"]["AdfMark"][];
+            text?: string;
+            type: string;
+        };
         AgentConfig: {
             model?: string;
             permissions?: string;
@@ -1144,6 +1183,41 @@ export interface components {
         ImportStatusResponse: {
             available: boolean;
             legacyRoot: string;
+        };
+        JiraContextResponse: {
+            fetchError?: string;
+            issue?: components["schemas"]["JiraIssue"];
+            linked: boolean;
+            sessionId: string;
+        };
+        JiraIssue: {
+            assignee?: string;
+            description?: components["schemas"]["AdfNode"][];
+            key: string;
+            priority?: string;
+            reporter?: string;
+            sprint?: components["schemas"]["JiraSprint"];
+            status?: string;
+            statusCategory?: string;
+            statusColor?: string;
+            subtasks?: components["schemas"]["JiraSubtask"][];
+            title?: string;
+            type?: string;
+            url?: string;
+        };
+        JiraSprint: {
+            endDate?: string;
+            name: string;
+            startDate?: string;
+            state?: string;
+        };
+        JiraSubtask: {
+            key: string;
+            status?: string;
+            statusCategory?: string;
+            statusColor?: string;
+            title?: string;
+            type?: string;
         };
         KillSessionResponse: {
             freed?: boolean;
@@ -3326,6 +3400,47 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSessionJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraContextResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

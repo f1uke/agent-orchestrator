@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleDashed, Loader2, Play, X } from "lucide-react";
+import { CircleDashed, Loader2, Play, Search, X } from "lucide-react";
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -31,15 +31,22 @@ type NewTaskDialogProps = {
 	onOpenChange: (open: boolean) => void;
 };
 
+// A Jira issue key: PROJECT-123. Used to bind a session to a Jira issue so its
+// context shows in the Summary tab. (A searchable cross-project picker replaces
+// this plain input in a later slice.)
+const JIRA_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
+
 export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChange }: NewTaskDialogProps) {
 	const queryClient = useQueryClient();
 	const titleId = useId();
 	const promptId = useId();
+	const jiraId = useId();
 	const branchId = useId();
 	const baseId = useId();
 	const prTargetId = useId();
 	const agentId = useId();
 	const [title, setTitle] = useState("");
+	const [jiraKey, setJiraKey] = useState("");
 	const [prompt, setPrompt] = useState("");
 	const [branch, setBranch] = useState("");
 	const [base, setBase] = useState("");
@@ -84,6 +91,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 	useEffect(() => {
 		if (!open) {
 			setTitle("");
+			setJiraKey("");
 			setPrompt("");
 			setBranch("");
 			setBase("");
@@ -132,6 +140,14 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 			setError("Title and brief are required.");
 			return;
 		}
+		// Optional Jira link: blank = a plain manual task; a valid key binds the
+		// session to "jira:<KEY>" so its context shows in Summary.
+		const cleanKey = jiraKey.trim().toUpperCase();
+		const jiraLinked = cleanKey !== "" && JIRA_KEY_RE.test(cleanKey);
+		if (cleanKey !== "" && !jiraLinked) {
+			setError("Enter a valid Jira issue key (e.g. PROJ-123), or leave it blank.");
+			return;
+		}
 
 		setIsSubmitting(true);
 		setError(undefined);
@@ -142,7 +158,12 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 					projectId,
 					kind: "worker",
 					harness: agentTouched && agent ? (agent as AgentProvider) : undefined,
-					issueId: cleanTitle,
+					// A Jira-linked task binds issueId to the key and keeps the human
+					// title as the sidebar label (displayName, capped at 20 by the API);
+					// an unlinked task keeps the existing behavior of storing the title
+					// in issueId.
+					issueId: jiraLinked ? `jira:${cleanKey}` : cleanTitle,
+					displayName: jiraLinked ? cleanTitle.slice(0, 20) : undefined,
 					prompt: cleanPrompt,
 					branch: cleanBranch || undefined,
 					baseBranch: cleanBase || undefined,
@@ -207,6 +228,33 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 
 					<form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
 						<div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+							<div className="space-y-1.5">
+								<label className="text-[12px] font-medium text-muted-foreground" htmlFor={jiraId}>
+									Jira issue{" "}
+									<span className="font-normal text-passive">
+										— optional, link one to bind & show its context in Summary
+									</span>
+								</label>
+								<div className="relative">
+									<Search
+										className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-passive"
+										aria-hidden="true"
+									/>
+									<Input
+										id={jiraId}
+										className="pl-8"
+										placeholder="e.g. PROJ-123 — or leave blank"
+										value={jiraKey}
+										autoCapitalize="characters"
+										spellCheck={false}
+										onChange={(event) => setJiraKey(event.target.value)}
+									/>
+								</div>
+								<p className="text-[11px] leading-relaxed text-passive">
+									Leave blank for a plain manual task. Linking an issue binds the session to its key.
+								</p>
+							</div>
+
 							<div className="space-y-1.5">
 								<label className="text-[12px] font-medium text-muted-foreground" htmlFor={titleId}>
 									Title

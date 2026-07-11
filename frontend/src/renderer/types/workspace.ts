@@ -316,11 +316,11 @@ export type WorkspaceSession = {
 	prompt?: string;
 };
 
-// Tracker providers whose ids the intake daemon stamps sessions with, in
-// "<provider>:<native>" form. Adding a provider (Linear, Jira, ...) later is
-// just another prefix in this list — no caller of canonicalTrackerIssueId
-// needs to change.
-const TRACKER_PROVIDER_PREFIXES = ["github:", "gitlab:"] as const;
+// Tracker providers whose ids sessions are stamped with, in "<provider>:<native>"
+// form: intake stamps github:/gitlab:, and a manually linked Jira issue stamps
+// jira:<KEY>. Adding a provider (Linear, …) later is just another prefix here —
+// no caller of canonicalTrackerIssueId needs to change.
+const TRACKER_PROVIDER_PREFIXES = ["github:", "gitlab:", "jira:"] as const;
 
 /**
  * The provider-prefixed issue id if `issueId` came from tracker intake, or
@@ -342,7 +342,13 @@ export type WorkspaceRepoSummary = {
 
 /** Glanceable worker status. Maps 1:1 to the accent colors in DESIGN.md. */
 export type WorkerDisplayStatus =
-	"working" | "needs_you" | "mergeable" | "ci_failed" | "no_signal" | "done" | "unknown";
+	| "working"
+	| "needs_you"
+	| "mergeable"
+	| "ci_failed"
+	| "no_signal"
+	| "done"
+	| "unknown";
 
 export function workerDisplayStatus(session: WorkspaceSession): WorkerDisplayStatus {
 	if (session.displayStatus) return session.displayStatus;

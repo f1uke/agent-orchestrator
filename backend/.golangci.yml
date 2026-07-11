@@ -87,6 +87,7 @@ linters:
         - G304 # file inclusion via variable — paths are config/run-file/worktree-derived, not user input
         - G703 # path traversal via taint analysis — same as G304: binary-resolution and worktree-derived paths, not user input
         - G704 # SSRF via taint analysis — the daemon client's host is hardcoded loopback; only the request path varies, so it cannot be steered to an external host
+        - G702 # command injection via taint analysis — same as G204: the daemon shells out to fixed binaries with literal/derived args (e.g. the jira-cli issue-view, whose only variable arg is a strictly regex-validated issue key), not free-form user input
 
   exclusions:
     generated: lax # skip sqlc/codegen ("Code generated ... DO NOT EDIT")
