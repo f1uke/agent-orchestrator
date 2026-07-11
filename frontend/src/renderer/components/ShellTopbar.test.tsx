@@ -5,10 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionActivityState, WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import { ShellTopbar, TopbarKillButton } from "./ShellTopbar";
 
-const { navigateMock, onKilledMock, paramsMock, postMock, useWorkspaceQueryMock } = vi.hoisted(() => ({
+const { navigateMock, onKilledMock, paramsMock, pathnameMock, postMock, useWorkspaceQueryMock } = vi.hoisted(() => ({
 	navigateMock: vi.fn(),
 	onKilledMock: vi.fn(),
 	paramsMock: { projectId: undefined as string | undefined, sessionId: undefined as string | undefined },
+	pathnameMock: { value: "/" },
 	postMock: vi.fn(),
 	useWorkspaceQueryMock: vi.fn(),
 }));
@@ -19,6 +20,8 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 		...actual,
 		useNavigate: () => navigateMock,
 		useParams: () => paramsMock,
+		useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => unknown }) =>
+			select({ location: { pathname: pathnameMock.value } }),
 	};
 });
 
@@ -95,6 +98,25 @@ function renderTopbar(session: WorkspaceSession) {
 	useWorkspaceQueryMock.mockReturnValue({ data, isError: false, isLoading: false });
 	paramsMock.projectId = session.workspaceId;
 	paramsMock.sessionId = session.id;
+	pathnameMock.value = `/projects/${session.workspaceId}/sessions/${session.id}`;
+	return render(
+		<QueryClientProvider client={new QueryClient()}>
+			<ShellTopbar />
+		</QueryClientProvider>,
+	);
+}
+
+// Renders the topbar as it appears on a project surface (board or Browse Jira):
+// a project in scope, no session selected.
+function renderProjectSurface(pathname: string) {
+	useWorkspaceQueryMock.mockReturnValue({
+		data: [{ id: "proj-1", name: "my-app", path: "/repo/my-app", sessions: [] }] as WorkspaceSummary[],
+		isError: false,
+		isLoading: false,
+	});
+	paramsMock.projectId = "proj-1";
+	paramsMock.sessionId = undefined;
+	pathnameMock.value = pathname;
 	return render(
 		<QueryClientProvider client={new QueryClient()}>
 			<ShellTopbar />
@@ -122,6 +144,7 @@ beforeEach(() => {
 	onKilledMock.mockReset();
 	paramsMock.projectId = undefined;
 	paramsMock.sessionId = undefined;
+	pathnameMock.value = "/";
 	postMock.mockReset();
 	postMock.mockResolvedValue({ data: { ok: true, sessionId: "sess-1" }, error: undefined });
 	useWorkspaceQueryMock.mockReset();
@@ -168,6 +191,25 @@ describe("ShellTopbar status pill", () => {
 		first.unmount();
 		renderTopbar(sessionWith({ activity: { state: "unknown", lastActivityAt: "" } }));
 		expect(screen.getByText("Unknown")).toBeInTheDocument();
+	});
+});
+
+describe("ShellTopbar Browse Jira entry", () => {
+	it("shows the Browse Jira button on a project board and navigates to the surface", async () => {
+		renderProjectSurface("/projects/proj-1");
+
+		const button = screen.getByRole("button", { name: "Browse Jira" });
+		expect(button).toBeInTheDocument();
+		expect(button).not.toHaveClass("is-active");
+
+		await userEvent.click(button);
+		expect(navigateMock).toHaveBeenCalledWith({ to: "/projects/$projectId/jira", params: { projectId: "proj-1" } });
+	});
+
+	it("marks the Browse Jira button active on the Browse Jira surface", () => {
+		renderProjectSurface("/projects/proj-1/jira");
+
+		expect(screen.getByRole("button", { name: "Browse Jira" })).toHaveClass("is-active");
 	});
 });
 

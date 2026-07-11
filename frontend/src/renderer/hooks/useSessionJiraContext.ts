@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { workspaceQueryKey } from "./useWorkspaceQuery";
-import { mockJiraSearch, mockSessionJiraContexts, mockSessionJiraTransitions } from "../lib/mock-data";
+import {
+	mockJiraProjects,
+	mockJiraSearch,
+	mockSessionJiraContexts,
+	mockSessionJiraTransitions,
+} from "../lib/mock-data";
 
 export type JiraContext = components["schemas"]["JiraContextResponse"];
 export type JiraIssue = components["schemas"]["JiraIssue"];
@@ -10,6 +15,7 @@ export type JiraSubtask = components["schemas"]["JiraSubtask"];
 export type JiraTransition = components["schemas"]["JiraTransition"];
 export type JiraMoveResponse = components["schemas"]["JiraMoveResponse"];
 export type JiraIssueSummary = components["schemas"]["JiraIssueSummary"];
+export type JiraProject = components["schemas"]["JiraProject"];
 export type JiraLinkResponse = components["schemas"]["JiraLinkResponse"];
 export type AdfNode = components["schemas"]["AdfNode"];
 
@@ -20,6 +26,8 @@ export const sessionJiraTransitionsQueryKey = (sessionId?: string) =>
 	sessionId ? (["session-jira-transitions", sessionId] as const) : (["session-jira-transitions"] as const);
 
 export const jiraSearchQueryKey = (project: string, query: string) => ["jira-search", project, query] as const;
+
+export const jiraProjectsQueryKey = (query: string) => ["jira-projects", query] as const;
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -114,18 +122,44 @@ async function fetchJiraSearch(project: string, query: string): Promise<JiraIssu
 }
 
 /**
- * Cross-project issue search for the New-task + link-existing pickers, read LIVE
- * via REST (jira-cli list is unusable here). Enable only when there is at least a
- * two-character query so an empty box never fans out a search. A failure throws so
- * the picker can surface it (e.g. a missing JIRA_API_TOKEN).
+ * Cross-project issue search for the New-task + link-existing pickers AND the
+ * project-scoped Browse Jira list, read LIVE via REST (jira-cli list is unusable
+ * here). Fires once there is a 2+ char query OR a project is scoped — so Browse
+ * lists a project's recent issues with no text typed, while the pickers (which
+ * pass project="") still wait for two characters. A failure throws so the caller
+ * can surface it (e.g. a missing JIRA_API_TOKEN).
  */
 export function useJiraSearch(query: string, project: string, enabled: boolean) {
 	const q = query.trim();
+	const scoped = project.trim().length > 0;
 	return useQuery({
 		queryKey: jiraSearchQueryKey(project, q),
-		enabled: enabled && q.length >= 2,
+		enabled: enabled && (q.length >= 2 || scoped),
 		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraSearch(project, q)) : fetchJiraSearch(project, q)),
 		staleTime: 15_000,
+	});
+}
+
+async function fetchJiraProjects(query: string): Promise<JiraProject[]> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/projects", {
+		params: { query: { q: query || undefined } },
+	});
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't load Jira projects"));
+	return data?.projects ?? [];
+}
+
+/**
+ * Lists the user's Jira projects for the Browse-Jira project picker, read LIVE via
+ * REST (`/rest/api/3/project/search`). Optional `query` filters server-side. A
+ * failure throws so the picker can surface it (e.g. a missing JIRA_API_TOKEN).
+ */
+export function useJiraProjects(query: string, enabled: boolean) {
+	const q = query.trim();
+	return useQuery({
+		queryKey: jiraProjectsQueryKey(q),
+		enabled,
+		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraProjects(q)) : fetchJiraProjects(q)),
+		staleTime: 60_000,
 	});
 }
 

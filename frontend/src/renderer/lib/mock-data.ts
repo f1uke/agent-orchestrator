@@ -684,3 +684,19 @@ export function mockJiraSearch(project: string, query: string): components["sche
 		return key.toLowerCase().includes(q) || (it.title ?? "").toLowerCase().includes(q);
 	});
 }
+
+const mockJiraProjectPool: components["schemas"]["JiraProject"][] = [
+	{ key: "DEMO", name: "Demo Project" },
+	{ key: "ACME", name: "Acme Platform" },
+	{ key: "PLAT", name: "Platform Services" },
+	{ key: "WEB", name: "Web App" },
+];
+
+/** Preview-mode project list: filters the synthetic pool by key/name. */
+export function mockJiraProjects(query: string): components["schemas"]["JiraProject"][] {
+	const q = query.trim().toLowerCase();
+	if (!q) return mockJiraProjectPool;
+	return mockJiraProjectPool.filter(
+		(p) => (p.key ?? "").toLowerCase().includes(q) || (p.name ?? "").toLowerCase().includes(q),
+	);
+}

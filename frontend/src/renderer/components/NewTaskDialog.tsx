@@ -26,6 +26,12 @@ type StartMode = "now" | "todo";
 type NewTaskDialogProps = {
 	open: boolean;
 	projectId?: string;
+	/**
+	 * Pre-selected Jira issue to bind — the Browse-Jira "Create session" handoff
+	 * (mockup 03). When set, the dialog opens with the issue already linked and its
+	 * title pre-filled. Absent for the plain New-task flow.
+	 */
+	initialIssue?: JiraIssueSummary | null;
 	/** Called after a Start-now create with the new live session id (board navigates to it). */
 	onCreated: (sessionId: string) => void;
 	/** Called after an Add-to-TODO create; the board just refreshes to show the card. */
@@ -38,7 +44,14 @@ type NewTaskDialogProps = {
 // the box and bind it without picking from the dropdown.
 const JIRA_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
 
-export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChange }: NewTaskDialogProps) {
+export function NewTaskDialog({
+	open,
+	projectId,
+	initialIssue,
+	onCreated,
+	onQueued,
+	onOpenChange,
+}: NewTaskDialogProps) {
 	const queryClient = useQueryClient();
 	const titleId = useId();
 	const promptId = useId();
@@ -109,6 +122,18 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 			setIsSubmitting(false);
 		}
 	}, [open]);
+
+	// Browse-Jira handoff: when the dialog opens carrying a pre-selected issue,
+	// bind it and pre-fill the title (only if the user hasn't typed one), matching
+	// the plain picker's onPick behavior. Runs after the reset effect above so it
+	// seeds a freshly-cleared form.
+	useEffect(() => {
+		if (open && initialIssue?.key) {
+			setLinkedIssue(initialIssue);
+			setJiraQuery("");
+			setTitle((current) => (current.trim() ? current : (initialIssue.title ?? "")));
+		}
+	}, [open, initialIssue]);
 
 	useEffect(() => {
 		if (open && !agentTouched) {
