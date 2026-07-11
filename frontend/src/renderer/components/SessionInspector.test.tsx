@@ -340,10 +340,10 @@ describe("SessionInspector Activity section", () => {
 });
 
 describe("SessionInspector tabs", () => {
-	it("exposes Summary, Reviews, Comments, Tests, and Browser as the inspector tabs", () => {
+	it("exposes Summary, Reviews, Tests, and Browser as the inspector tabs (Comments merged into Reviews)", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
 		const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
-		expect(tabs).toEqual(["Summary", "Reviews", "Comments", "Tests", "Browser"]);
+		expect(tabs).toEqual(["Summary", "Reviews", "Tests", "Browser"]);
 	});
 
 	it("shows the intake issue id in the summary overview when present", () => {
@@ -424,9 +424,9 @@ describe("SessionInspector reviews tab", () => {
 		await openReviewsTab();
 
 		expect(await screen.findByText("Reviewable change 3")).toBeInTheDocument();
-		expect(screen.getByText("#3")).toBeInTheDocument();
+		expect(screen.getByText("PR #3")).toBeInTheDocument();
 		expect(screen.getByText("Reviewable change 4")).toBeInTheDocument();
-		expect(screen.getByText("#4")).toBeInTheDocument();
+		expect(screen.getByText("PR #4")).toBeInTheDocument();
 		expect(screen.getAllByText("Not run")).not.toHaveLength(0);
 		expect(screen.getAllByText("Approved")).not.toHaveLength(0);
 		expect(screen.getByRole("button", { name: "Re-run review" })).toBeInTheDocument();

@@ -4,10 +4,19 @@ import { ChevronLeft } from "lucide-react";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { useInboxActions } from "../hooks/useInboxActions";
-import { ACCENT, MONO, PALETTE as P, accentMix, avatarBg, initialsFor, relativeTime, splitBodyRuns } from "../lib/comment-inbox";
+import {
+	ACCENT,
+	MONO,
+	PALETTE as P,
+	accentMix,
+	avatarBg,
+	initialsFor,
+	relativeTime,
+	splitBodyRuns,
+} from "../lib/comment-inbox";
 import { DiffRows } from "./DiffRows";
 import { CommentActions, Toast } from "./inbox-ui";
-import type { FileDiffTarget } from "./CommentsView";
+import type { FileDiffTarget } from "./ReviewsView";
 
 type DiffCtx = components["schemas"]["DiffContextResponse"];
 
@@ -151,9 +160,29 @@ export function FileDiffView({
 	);
 
 	return (
-		<div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#060607", color: P.text }}>
+		<div
+			style={{
+				position: "relative",
+				display: "flex",
+				flexDirection: "column",
+				height: "100%",
+				minHeight: 0,
+				background: "#060607",
+				color: P.text,
+			}}
+		>
 			{/* header */}
-			<div style={{ height: 52, flex: "none", display: "flex", alignItems: "center", gap: 12, padding: "0 20px", borderBottom: `1px solid ${P.borderRail}` }}>
+			<div
+				style={{
+					height: 52,
+					flex: "none",
+					display: "flex",
+					alignItems: "center",
+					gap: 12,
+					padding: "0 20px",
+					borderBottom: `1px solid ${P.borderRail}`,
+				}}
+			>
 				<button
 					type="button"
 					onClick={onClose}
@@ -190,7 +219,15 @@ export function FileDiffView({
 				</span>
 				<span
 					title={thread.path}
-					style={{ fontFamily: MONO, fontSize: 12.5, color: "#c7c7cc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}
+					style={{
+						fontFamily: MONO,
+						fontSize: 12.5,
+						color: "#c7c7cc",
+						overflow: "hidden",
+						textOverflow: "ellipsis",
+						whiteSpace: "nowrap",
+						minWidth: 0,
+					}}
 				>
 					{thread.path}
 				</span>
@@ -217,16 +254,36 @@ export function FileDiffView({
 					<p style={{ fontSize: 12.5, color: P.muted2 }}>No file diff available for this comment.</p>
 				)}
 				{ctx && ctx.available && lines.length > 0 && (
-					<div style={{ maxWidth: 1040, border: `1px solid ${P.borderCard}`, borderRadius: 10, overflow: "hidden", background: "#0b0b0e" }}>
+					<div
+						style={{
+							maxWidth: 1040,
+							border: `1px solid ${P.borderCard}`,
+							borderRadius: 10,
+							overflow: "hidden",
+							background: "#0b0b0e",
+						}}
+					>
 						<div
 							className="mono"
-							style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", background: P.fileHeader, borderBottom: `1px solid ${P.borderCard}`, fontFamily: MONO, fontSize: 11.5, color: "#b7b7bc" }}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: 8,
+								padding: "9px 14px",
+								background: P.fileHeader,
+								borderBottom: `1px solid ${P.borderCard}`,
+								fontFamily: MONO,
+								fontSize: 11.5,
+								color: "#b7b7bc",
+							}}
 						>
 							{thread.path}
 						</div>
 						<DiffRows lines={lines} size="wide" anchorIndex={anchorIndex} anchorNode={anchoredComment} />
 						{ctx.truncated && (
-							<div style={{ padding: "8px 14px", borderTop: `1px solid ${P.borderCard}`, fontSize: 11, color: P.muted2 }}>
+							<div
+								style={{ padding: "8px 14px", borderTop: `1px solid ${P.borderCard}`, fontSize: 11, color: P.muted2 }}
+							>
 								Diff truncated — open the {provider?.toLowerCase() === "gitlab" ? "MR" : "PR"} to see the full file.
 							</div>
 						)}

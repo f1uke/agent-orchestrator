@@ -1,36 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowUpRight, GitPullRequest, Play, Shield, Terminal } from "lucide-react";
-import type { components } from "../../api/schema";
-import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { ArrowUpRight, GitPullRequest } from "lucide-react";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
-import {
-	prBrowserUrl,
-	prNoun,
-	prRef,
-	prTitleLabel,
-	providerFromPRURL,
-	sessionPRDisplaySummaries,
-} from "../lib/pr-display";
+import { prBrowserUrl, prNoun, prTitleLabel, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
 import type { SessionActivityState, WorkspaceSession } from "../types/workspace";
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
-import { CommentsView, type FileDiffTarget } from "./CommentsView";
+import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { SmokeTestView } from "./SmokeTestView";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/utils";
 import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
-type ProjectConfig = components["schemas"]["ProjectConfig"];
-type PRReviewState = components["schemas"]["PRReviewState"];
-type ReviewsResponse = components["schemas"]["ListReviewsResponse"];
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "comments" | "tests" | "browser";
+export type InspectorView = "summary" | "reviews" | "tests" | "browser";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -57,15 +43,6 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		),
 	},
 	{
-		id: "comments",
-		label: "Comments",
-		icon: (
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-				<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-			</svg>
-		),
-	},
-	{
 		id: "tests",
 		label: "Tests",
 		icon: (
@@ -86,8 +63,6 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		),
 	},
 ];
-
-const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
 const prStateTone: Record<SessionPRSummary["state"], string> = {
 	open: "border-success/40 bg-success/10 text-success",
@@ -164,16 +139,18 @@ export function SessionInspector({
 					// drop the body padding for it (except when popped out, where the
 					// body only holds the "return to panel" empty state).
 					view === "browser" && !browserPoppedOut && "session-inspector__body--browser",
-					// The Comments inbox owns its full-height layout (fixed header,
-					// scrolling list, pinned batch bar), so it also renders flush.
-					view === "comments" && "session-inspector__body--comments",
+					// The merged Reviews tab owns its full-height layout (fixed header +
+					// reviewer strip + auto-send, scrolling per-PR list, pinned batch
+					// bar), so it renders flush.
+					view === "reviews" && "session-inspector__body--reviews",
 					// The Tests tab (smoke checklist) owns the same full-height layout.
 					view === "tests" && "session-inspector__body--tests",
 				)}
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
-				{view === "reviews" ? <ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} session={session} /> : null}
-				{view === "comments" ? <CommentsView sessionId={session.id} onOpenFile={onOpenFile} /> : null}
+				{view === "reviews" ? (
+					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
+				) : null}
 				{view === "tests" ? <SmokeTestView sessionId={session.id} worker={session.title} /> : null}
 				{view === "browser" ? (
 					<BrowserView
@@ -460,336 +437,6 @@ function scmTimelineStates(session: WorkspaceSession): ScmTimelineState[] {
 	}
 
 	return states;
-}
-
-function ReviewsView({
-	session,
-	onOpenReviewerTerminal,
-}: {
-	session: WorkspaceSession;
-	onOpenReviewerTerminal?: OpenReviewerTerminal;
-}) {
-	const hasPr = sortedPRs(session).length > 0;
-	const queryClient = useQueryClient();
-	const [reviewNotice, setReviewNotice] = useState<string | null>(null);
-	const reviewsQuery = useQuery({
-		queryKey: ["session-reviews", session.id],
-		enabled: hasPr,
-		refetchInterval: (query) => {
-			const data = query.state.data as ReviewsResponse | undefined;
-			const reviews = data?.reviews ?? [];
-			return reviews.some((review) => review.status === "running") ? 2500 : false;
-		},
-		queryFn: async () => {
-			if (usePreviewData) return mockReviewsResponse(session);
-			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/reviews", {
-				params: { path: { sessionId: session.id } },
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to load reviews"));
-			return data ?? ({ reviewerHandleId: "", reviews: [] } satisfies ReviewsResponse);
-		},
-	});
-	const projectConfigQuery = useQuery({
-		queryKey: ["project-config", session.workspaceId],
-		enabled: hasPr,
-		queryFn: async () => {
-			if (usePreviewData) return mockProjectConfig();
-			const { data, error } = await apiClient.GET("/api/v1/projects/{id}", {
-				params: { path: { id: session.workspaceId } },
-			});
-			if (error) return undefined;
-			return projectConfig(data?.project);
-		},
-	});
-	const triggerReview = useMutation({
-		mutationFn: async () => {
-			const { data, error, response } = await apiClient.POST("/api/v1/sessions/{sessionId}/reviews/trigger", {
-				params: { path: { sessionId: session.id } },
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to start review"));
-			return { data, reused: response?.status === 200 };
-		},
-		onMutate: () => {
-			setReviewNotice(null);
-		},
-		onSuccess: ({ data, reused }) => {
-			void queryClient.invalidateQueries({ queryKey: ["session-reviews", session.id] });
-			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
-			const started = data?.reviews?.find((review) => review.status === "running" && review.latestRun);
-			if (reused || !started?.latestRun) {
-				setReviewNotice("No needed reviews were started.");
-				return;
-			}
-			if (data?.reviewerHandleId) {
-				const harness = started.latestRun.harness || "reviewer";
-				onOpenReviewerTerminal?.({ handleId: data.reviewerHandleId, harness });
-			}
-		},
-	});
-	const reviewStates = reviewsQuery.data?.reviews ?? [];
-
-	return (
-		<div role="tabpanel">
-			<Section title="Reviews">
-				<ReviewPanel
-					config={projectConfigQuery.data}
-					error={reviewsQuery.error ?? triggerReview.error}
-					isLoading={reviewsQuery.isLoading}
-					isTriggering={triggerReview.isPending}
-					onOpenTerminal={onOpenReviewerTerminal}
-					onTrigger={() => triggerReview.mutate()}
-					reviewerHandleId={reviewsQuery.data?.reviewerHandleId ?? ""}
-					reviewStates={reviewStates}
-					notice={reviewNotice}
-					session={session}
-				/>
-			</Section>
-		</div>
-	);
-}
-
-function projectConfig(project: components["schemas"]["ProjectOrDegraded"] | undefined): ProjectConfig | undefined {
-	if (!project || !("config" in project)) return undefined;
-	return project.config;
-}
-
-function mockProjectConfig(): ProjectConfig {
-	return {
-		worker: { agent: "codex" },
-		orchestrator: { agent: "codex" },
-		reviewers: [{ harness: "codex" }],
-	};
-}
-
-function mockReviewsResponse(session: WorkspaceSession): ReviewsResponse {
-	return {
-		reviewerHandleId: `${session.id}-reviewer`,
-		reviews: sortedPRs(session).map((pr, index) => {
-			const targetSha = `demo${pr.number}${index}`;
-			const reviewedAt = new Date(Date.now() - (index + 1) * 11 * 60 * 1000).toISOString();
-			const latestRun =
-				pr.review === "approved" || pr.review === "changes_requested"
-					? {
-							batchId: `demo-batch-${session.id}`,
-							body:
-								pr.review === "approved"
-									? "Demo review approved. The implementation is ready for the README screenshot flow."
-									: "Demo review found polish feedback for the terminal presentation.",
-							createdAt: reviewedAt,
-							githubReviewId: `${pr.number}01`,
-							harness: "codex",
-							id: `demo-review-run-${pr.number}`,
-							prUrl: pr.url,
-							reviewId: `demo-review-${pr.number}`,
-							sessionId: session.id,
-							status: "delivered",
-							targetSha,
-							verdict: pr.review === "approved" ? "approved" : "changes_requested",
-						}
-					: undefined;
-			return {
-				latestRun,
-				prNumber: pr.number,
-				prUrl: pr.url,
-				status:
-					pr.review === "approved"
-						? "up_to_date"
-						: pr.review === "changes_requested"
-							? "changes_requested"
-							: pr.state === "draft"
-								? "ineligible"
-								: "needs_review",
-				targetSha,
-				title: mockReviewTitle(pr.number),
-			};
-		}),
-	};
-}
-
-function mockReviewTitle(prNumber: number): string {
-	switch (prNumber) {
-		case 319:
-			return "Browser preview rail renders inside AO";
-		case 320:
-			return "Review tab keeps stacked PR rows visible";
-		case 321:
-			return "Draft child PR waits for parent review";
-		case 318:
-			return "Terminal polish feedback";
-		case 323:
-			return "README screenshot assets ready";
-		default:
-			return `Demo pull request ${prNumber}`;
-	}
-}
-
-function ReviewPanel({
-	session,
-	config,
-	reviewStates,
-	reviewerHandleId,
-	isLoading,
-	isTriggering,
-	error,
-	notice,
-	onTrigger,
-	onOpenTerminal,
-}: {
-	session: WorkspaceSession;
-	config?: ProjectConfig;
-	reviewStates: PRReviewState[];
-	reviewerHandleId: string;
-	isLoading: boolean;
-	isTriggering: boolean;
-	error: unknown;
-	notice: string | null;
-	onTrigger: () => void;
-	onOpenTerminal?: OpenReviewerTerminal;
-}) {
-	if (sortedPRs(session).length === 0) {
-		return <p className="inspector-empty">No pull request opened yet.</p>;
-	}
-	if (isLoading) {
-		return <p className="inspector-empty">Loading reviews...</p>;
-	}
-
-	const latest = reviewStates.find((review) => review.latestRun)?.latestRun;
-	const harness = latest?.harness || config?.reviewers?.[0]?.harness || "claude-code";
-	const terminalEnabled = Boolean(reviewerHandleId && onOpenTerminal);
-	const aggregateVerdict = sessionReviewVerdict(reviewStates);
-	const runAction = reviewSessionRunAction(reviewStates, isTriggering);
-	const runDisabled =
-		isTriggering ||
-		reviewStates.length === 0 ||
-		reviewStates.some((reviewState) => reviewState.status === "running") ||
-		reviewStates.every((reviewState) => reviewState.status === "ineligible");
-
-	return (
-		<div className="reviewer-list">
-			{error ? <p className="reviewer-error">{apiErrorMessage(error, "Review request failed")}</p> : null}
-			{notice ? <p className="reviewer-notice">{notice}</p> : null}
-			<div className="reviewer-kicker">
-				<Shield aria-hidden="true" />
-				<span>{harness}</span>
-				<span>reviewer</span>
-			</div>
-			<div className="reviewer-card">
-				<div className="reviewer-card__top">
-					<span className="reviewer-card__label">Pull requests</span>
-					<span className={cn("reviewer-status", `reviewer-status--${aggregateVerdict.tone}`)}>
-						{aggregateVerdict.label}
-					</span>
-				</div>
-				<div className="reviewer-summary-list">
-					{reviewStates.length === 0 ? <p className="inspector-empty">No review state loaded yet.</p> : null}
-					{reviewStates.map((reviewState) => (
-						<ReviewStateRow key={`${reviewState.prUrl}:${reviewState.targetSha}`} reviewState={reviewState} />
-					))}
-				</div>
-				<div className="reviewer-card__actions">
-					<button
-						className="reviewer-card__action reviewer-card__action--primary"
-						disabled={runDisabled}
-						onClick={onTrigger}
-						type="button"
-					>
-						<Play aria-hidden="true" />
-						{runAction}
-					</button>
-					<button
-						className="reviewer-card__action"
-						disabled={!terminalEnabled}
-						onClick={() => {
-							if (!terminalEnabled) return;
-							onOpenTerminal?.({ handleId: reviewerHandleId, harness });
-						}}
-						type="button"
-					>
-						<Terminal aria-hidden="true" />
-						Open terminal
-					</button>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function ReviewStateRow({ reviewState }: { reviewState: PRReviewState }) {
-	const verdict = reviewVerdict(reviewState);
-	const provider = providerFromPRURL(reviewState.prUrl);
-	const title = reviewState.title?.trim() || prTitleLabel(provider, reviewState.prNumber);
-	return (
-		<div
-			className={cn(
-				"reviewer-row",
-				`reviewer-row--${verdict.tone}`,
-				reviewState.status === "ineligible" && "opacity-70",
-			)}
-		>
-			<div className="reviewer-row__main">
-				<span className={cn("reviewer-row__dot", `reviewer-row__dot--${verdict.tone}`)} />
-				<div className="reviewer-row__copy">
-					<GitPullRequest aria-hidden="true" />
-					<a href={reviewState.prUrl} target="_blank" rel="noopener noreferrer">
-						{title}
-					</a>
-					<span className="reviewer-row__number">{prRef(provider, reviewState.prNumber)}</span>
-				</div>
-			</div>
-			<span className={cn("reviewer-row__verdict", `reviewer-row__verdict--${verdict.tone}`)}>{verdict.label}</span>
-		</div>
-	);
-}
-
-function sessionReviewVerdict(reviewStates: PRReviewState[]): {
-	label: string;
-	tone: "neutral" | "running" | "success" | "danger";
-} {
-	if (reviewStates.some((reviewState) => reviewState.status === "running")) {
-		return { label: "Reviewing...", tone: "running" };
-	}
-	if (reviewStates.some((reviewState) => reviewState.latestRun?.status === "failed")) {
-		return { label: "Failed", tone: "danger" };
-	}
-	if (reviewStates.some((reviewState) => reviewState.status === "changes_requested")) {
-		return { label: "Changes requested", tone: "danger" };
-	}
-	const eligibleReviews = reviewStates.filter((reviewState) => reviewState.status !== "ineligible");
-	if (eligibleReviews.length > 0 && eligibleReviews.every((reviewState) => reviewState.status === "up_to_date")) {
-		return { label: "Approved", tone: "success" };
-	}
-	return { label: "Not run", tone: "neutral" };
-}
-
-function reviewVerdict(reviewState: PRReviewState): {
-	label: string;
-	tone: "neutral" | "running" | "success" | "danger";
-} {
-	if (reviewState.latestRun?.status === "failed") {
-		return { label: "Failed", tone: "danger" };
-	}
-	switch (reviewState.status) {
-		case "running":
-			return { label: "Reviewing...", tone: "running" };
-		case "up_to_date":
-			return { label: "Approved", tone: "success" };
-		case "changes_requested":
-			return { label: "Changes requested", tone: "danger" };
-		case "needs_review":
-		case "ineligible":
-			return { label: "Not run", tone: "neutral" };
-	}
-	return { label: "Not run", tone: "neutral" };
-}
-
-function reviewSessionRunAction(reviewStates: PRReviewState[], isTriggering: boolean): string {
-	if (isTriggering || reviewStates.some((reviewState) => reviewState.status === "running")) {
-		return "Reviewing...";
-	}
-	if (reviewStates.some((reviewState) => reviewState.status === "changes_requested" || reviewState.latestRun)) {
-		return "Re-run review";
-	}
-	return "Run review";
 }
 
 function BrowserView({

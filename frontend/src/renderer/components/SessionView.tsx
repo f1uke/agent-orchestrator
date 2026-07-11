@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
-import type { FileDiffTarget } from "./CommentsView";
+import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable";
