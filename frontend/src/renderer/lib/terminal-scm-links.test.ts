@@ -3,13 +3,16 @@ import {
 	findExternalRefLinks,
 	githubRepoBaseFromUrl,
 	gitlabProjectBaseFromUrl,
+	jiraBrowseBaseFromUrl,
 	resolveScmRemotes,
 	type ScmRemotes,
 } from "./terminal-scm-links";
 
 const GH = "https://github.com/acme-inc/ao-demo";
 const GL = "https://gitlab.example.com/team/group/webapp";
+const JIRA = "https://acme.atlassian.net";
 const BOTH: ScmRemotes = { githubRepoBase: GH, gitlabProjectBase: GL };
+const ALL: ScmRemotes = { ...BOTH, jiraBrowseBase: JIRA };
 
 describe("githubRepoBaseFromUrl", () => {
 	it("derives the repo base from a /pull/ URL", () => {
@@ -48,6 +51,21 @@ describe("gitlabProjectBaseFromUrl", () => {
 	it("returns undefined for a GitHub URL or garbage", () => {
 		expect(gitlabProjectBaseFromUrl(`${GH}/pull/63`)).toBeUndefined();
 		expect(gitlabProjectBaseFromUrl("::::")).toBeUndefined();
+	});
+});
+
+describe("jiraBrowseBaseFromUrl", () => {
+	it("derives the browse base from a cloud issue URL", () => {
+		expect(jiraBrowseBaseFromUrl(`${JIRA}/browse/DEMO-101`)).toBe(JIRA);
+	});
+
+	it("keeps a self-hosted host + path prefix (never hardcoded)", () => {
+		expect(jiraBrowseBaseFromUrl("https://jira.corp.net/jira/browse/AB-1")).toBe("https://jira.corp.net/jira");
+	});
+
+	it("returns undefined for a non-browse URL or garbage", () => {
+		expect(jiraBrowseBaseFromUrl(`${JIRA}/issues/?jql=x`)).toBeUndefined();
+		expect(jiraBrowseBaseFromUrl("not a url")).toBeUndefined();
 	});
 });
 
@@ -139,5 +157,41 @@ describe("findExternalRefLinks — no false positives", () => {
 		expect(findExternalRefLinks("#12abc", BOTH)).toHaveLength(0);
 		expect(findExternalRefLinks("#12-foo", BOTH)).toHaveLength(0);
 		expect(findExternalRefLinks("!12x", BOTH)).toHaveLength(0);
+	});
+});
+
+describe("findExternalRefLinks — Jira keys", () => {
+	it("links a bare Jira key to its browse URL", () => {
+		const line = "moved STAR-2272 to QA";
+		const matches = findExternalRefLinks(line, ALL);
+		expect(matches).toHaveLength(1);
+		expect(matches[0].url).toBe(`${JIRA}/browse/STAR-2272`);
+		expect(line.slice(matches[0].startIndex, matches[0].endIndex)).toBe("STAR-2272");
+	});
+
+	it("links a key at start of line and one in parentheses", () => {
+		expect(findExternalRefLinks("DEMO-1 is ready", ALL)[0].url).toBe(`${JIRA}/browse/DEMO-1`);
+		expect(findExternalRefLinks("(AB1-42)", ALL)[0].url).toBe(`${JIRA}/browse/AB1-42`);
+	});
+
+	it("links multiple keys and orders them with #/! by position", () => {
+		const matches = findExternalRefLinks("STAR-1 fixed in #7 and !8", ALL);
+		expect(matches.map((m) => m.url)).toEqual([`${JIRA}/browse/STAR-1`, `${GH}/pull/7`, `${GL}/-/merge_requests/8`]);
+	});
+
+	it("does not link a Jira key when no browse base is known (gating)", () => {
+		expect(findExternalRefLinks("moved STAR-2272 to QA", BOTH)).toHaveLength(0);
+	});
+
+	it("does not link a key embedded in a branch name (path/hyphen bounded)", () => {
+		expect(findExternalRefLinks("on feature/STAR-2272-order-eligible-ui now", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("STAR-2272-order glued", ALL)).toHaveLength(0);
+	});
+
+	it("ignores lowercase, word-glued, and non-key hyphen-number tokens", () => {
+		expect(findExternalRefLinks("star-2272 lower", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("xSTAR-1 glued", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("STAR-1x glued", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("build 123-45 numbers", ALL)).toHaveLength(0);
 	});
 });

@@ -24,6 +24,7 @@ import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
 	isOrchestratorSession,
+	jiraKeyFromIssueId,
 	newestActiveOrchestrator,
 	sessionIsActive,
 	type ProjectKind,
@@ -71,6 +72,7 @@ import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { JiraKeyBadge } from "./JiraKeyBadge";
 import { Button } from "./ui/button";
 
 // The macOS hiddenInset traffic lights and the fixed TitlebarNav overlay live
@@ -706,6 +708,7 @@ function ProjectItem({
 function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; active: boolean; onOpen: () => void }) {
 	const queryClient = useQueryClient();
 	const sessionRef = sessionRefLabel(session.id);
+	const jiraKey = jiraKeyFromIssueId(session.issueId);
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState(session.title);
 	// Escape must not be swallowed by the blur-to-save path: the keydown handler
@@ -799,6 +802,13 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
 						{sessionRef}
 					</span>
+					{/* Display-only Jira chip (KEY · status) for a Jira-linked session,
+					decoupled from the board lane. Shows nothing for unlinked sessions. */}
+					{jiraKey && (
+						<span className="block">
+							<JiraKeyBadge sessionId={session.id} issueKey={jiraKey} variant="row" />
+						</span>
+					)}
 				</span>
 				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
 				(most rows show nothing). Sits left of the pr-7 rename zone so the
