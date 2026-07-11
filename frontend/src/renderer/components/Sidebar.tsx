@@ -36,6 +36,7 @@ import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
+import { sessionRefLabel } from "../lib/session-ref";
 import { useEventsConnection } from "../hooks/useEventsConnection";
 import { useResizable } from "../hooks/useResizable";
 import {
@@ -647,6 +648,7 @@ function ProjectItem({
 // persists through the daemon rename endpoint, so the new name survives reload.
 function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; active: boolean; onOpen: () => void }) {
 	const queryClient = useQueryClient();
+	const sessionRef = sessionRefLabel(session.id);
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState(session.title);
 	// Escape must not be swallowed by the blur-to-save path: the keydown handler
@@ -723,6 +725,11 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 				<span className="min-w-0 flex-1">
 					<span className={cn("block truncate text-[12px]", active ? "text-foreground" : "text-muted-foreground")}>
 						{session.title}
+					</span>
+					{/* Canonical session reference (@<project>-<num>): muted mono, ellipsized
+					when tight; full id on hover via the native title. */}
+					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
+						{sessionRef}
 					</span>
 				</span>
 			</button>

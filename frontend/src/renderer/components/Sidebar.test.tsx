@@ -177,6 +177,14 @@ describe("Sidebar", () => {
 		expect(order).toEqual(["Open busy", "Open needs-me", "Open in-review", "Open ship-it"]);
 	});
 
+	it("shows the canonical session reference (@<project>-<num>) on each worker row", () => {
+		renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+		const ref = screen.getByText("@proj-1-1");
+		expect(ref).toBeInTheDocument();
+		// Full id on hover via the native title.
+		expect(ref).toHaveAttribute("title", "@proj-1-1");
+	});
+
 	it("confirms project removal before calling the remove handler", async () => {
 		const user = userEvent.setup();
 		const onRemoveProject = renderSidebar();

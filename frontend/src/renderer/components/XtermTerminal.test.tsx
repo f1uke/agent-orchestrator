@@ -2,6 +2,14 @@ import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { XtermTerminal } from "./XtermTerminal";
 import { focusTerminal } from "../lib/terminal-focus";
+import { findSessionLinks } from "../lib/session-ref";
+
+type FakeLink = {
+	text: string;
+	range: { start: { x: number; y: number }; end: { x: number; y: number } };
+	activate: (event: MouseEvent, text: string) => void;
+};
+type FakeLinkProvider = { provideLinks: (line: number, callback: (links: FakeLink[] | undefined) => void) => void };
 
 const state = vi.hoisted(() => ({
 	linkHandler: null as null | ((event: MouseEvent, uri: string) => void),
@@ -12,7 +20,9 @@ const state = vi.hoisted(() => ({
 		selection: string;
 		options: Record<string, unknown>;
 		modes: { bracketedPasteMode: boolean; mouseTrackingMode: string };
-		buffer: { active: { type: string } };
+		lines: string[];
+		buffer: { active: { type: string; getLine: (i: number) => { translateToString: () => string } | undefined } };
+		linkProvider?: FakeLinkProvider;
 		scrollLines: ReturnType<typeof vi.fn>;
 		dataListeners: Set<(data: string) => void>;
 		binaryListeners: Set<(data: string) => void>;
@@ -38,7 +48,17 @@ vi.mock("@xterm/xterm", () => ({
 		wheelHandler?: (event: WheelEvent) => boolean;
 		focus = vi.fn();
 		modes = { bracketedPasteMode: false, mouseTrackingMode: "vt200" };
-		buffer = { active: { type: "normal" } };
+		lines: string[] = [];
+		buffer = {
+			active: {
+				type: "normal",
+				getLine: (i: number) => {
+					const text = this.lines[i];
+					return text === undefined ? undefined : { translateToString: () => text };
+				},
+			},
+		};
+		linkProvider?: FakeLinkProvider;
 		scrollLines = vi.fn();
 		dataListeners = new Set<(data: string) => void>();
 		binaryListeners = new Set<(data: string) => void>();
@@ -81,6 +101,14 @@ vi.mock("@xterm/xterm", () => ({
 		onKey(listener: (event: { key: string }) => void) {
 			this.keyListeners.add(listener);
 			return { dispose: () => this.keyListeners.delete(listener) };
+		}
+		registerLinkProvider(provider: FakeLinkProvider) {
+			this.linkProvider = provider;
+			return {
+				dispose: () => {
+					this.linkProvider = undefined;
+				},
+			};
 		}
 		onSelectionChange(listener: () => void) {
 			this.selectionListeners.add(listener);
@@ -723,5 +751,65 @@ describe("XtermTerminal", () => {
 
 		unmount();
 		expect(focusTerminal()).toBe(false);
+	});
+
+	describe("session-id link provider", () => {
+		const known = new Set(["agent-orchestrator-54"]);
+		const resolver = (line: string) =>
+			findSessionLinks(line, { knownIds: known, currentProjectId: "agent-orchestrator" });
+
+		function provideLinksFor(line: string, bufferLineNumber = 1): FakeLink[] | undefined {
+			const term = state.lastTerminal!;
+			term.lines = [line];
+			let received: FakeLink[] | undefined;
+			term.linkProvider!.provideLinks(bufferLineNumber, (links) => {
+				received = links;
+			});
+			return received;
+		}
+
+		it("linkifies a resolved session reference with the correct 1-based buffer range", () => {
+			const activate = vi.fn();
+			render(<XtermTerminal theme="dark" sessionLinkResolver={resolver} onSessionLinkActivate={activate} />);
+
+			const links = provideLinksFor("see agent-orchestrator-54 ok");
+			expect(links).toHaveLength(1);
+			expect(links![0].text).toBe("agent-orchestrator-54");
+			// "see " is 4 chars → token at 0-based index 4 → 1-based start.x 5; the
+			// token is 21 chars → inclusive end.x 25. y mirrors bufferLineNumber.
+			expect(links![0].range).toEqual({ start: { x: 5, y: 1 }, end: { x: 25, y: 1 } });
+		});
+
+		it("navigates internally (not the OS browser) when a session link is activated", () => {
+			const activate = vi.fn();
+			render(<XtermTerminal theme="dark" sessionLinkResolver={resolver} onSessionLinkActivate={activate} />);
+
+			const links = provideLinksFor("[from @agent-orchestrator-54] done");
+			expect(links).toHaveLength(1);
+			links![0].activate(new MouseEvent("click"), links![0].text);
+			expect(activate).toHaveBeenCalledWith("agent-orchestrator-54");
+		});
+
+		it("returns undefined for a line with no known session reference", () => {
+			render(<XtermTerminal theme="dark" sessionLinkResolver={resolver} onSessionLinkActivate={vi.fn()} />);
+			// Unknown hyphen-number token (Jira key) must not linkify.
+			expect(provideLinksFor("blocked by STAR-2272")).toBeUndefined();
+		});
+
+		it("returns undefined when no resolver is supplied", () => {
+			render(<XtermTerminal theme="dark" />);
+			expect(provideLinksFor("agent-orchestrator-54")).toBeUndefined();
+		});
+
+		it("returns undefined for a line index past the buffer", () => {
+			render(<XtermTerminal theme="dark" sessionLinkResolver={resolver} onSessionLinkActivate={vi.fn()} />);
+			const term = state.lastTerminal!;
+			term.lines = ["agent-orchestrator-54"];
+			let received: FakeLink[] | undefined = [];
+			term.linkProvider!.provideLinks(5, (links) => {
+				received = links;
+			});
+			expect(received).toBeUndefined();
+		});
 	});
 });

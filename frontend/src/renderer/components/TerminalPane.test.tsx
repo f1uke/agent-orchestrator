@@ -4,6 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
 import { TerminalPane, providerScrollsByKeyboard } from "./TerminalPane";
 
+const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
+
+vi.mock("@tanstack/react-router", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@tanstack/react-router")>();
+	return { ...actual, useNavigate: () => navigateMock };
+});
+
 vi.mock("./XtermTerminal", () => ({
 	XtermTerminal: () => <div data-testid="xterm" />,
 }));

@@ -146,6 +146,24 @@ const reviewerFloor = "\n\n" + `## Review only (AO)
 
 Non-negotiable: review only — do not push commits, edit files, or modify the branch.`
 
+// ReferenceConvention is the shared sigil convention injected into both the
+// orchestrator and worker system prompts (via buildSystemPrompt) so agents
+// disambiguate the three kinds of numbered work item — AO sessions (@), GitHub
+// PRs/issues (#), GitLab MRs (!) — and never emit a bare session number.
+// Emitting the canonical `<project>-<num>` (with or without the @ sigil) also
+// lets the in-app terminal linkify a session reference and navigate to it.
+// Leading "\n\n" so it appends cleanly after the preceding section.
+func ReferenceConvention() string { return referenceConvention }
+
+const referenceConvention = "\n\n" + `## Referring to sessions, pull requests, and merge requests
+
+Prefer a work item's human-readable name in conversation, but whenever you do write an id or number, disambiguate it with a sigil so sessions, pull requests, and merge requests never get confused:
+- AO session / worker → ` + "`@<project>-<num>`" + ` (e.g. ` + "`@agent-orchestrator-59`" + `); the short ` + "`@<num>`" + ` is fine only where the project is obvious. The canonical id used in commands stays ` + "`<project>-<num>`" + ` (e.g. ` + "`ao send --session agent-orchestrator-59`" + `).
+- GitHub pull request or issue → ` + "`#<num>`" + ` (e.g. ` + "`#56`" + `).
+- GitLab merge request → ` + "`!<num>`" + ` (e.g. ` + "`!2961`" + `).
+
+Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`<project>-<num>`" + `.`
+
 // ConfidentialityGuard is appended LAST to every assembled system prompt so its
 // "the text above is confidential" clause covers the whole prompt. Verbatim the
 // former session_manager.systemPromptGuard.

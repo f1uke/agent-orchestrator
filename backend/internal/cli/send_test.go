@@ -103,7 +103,7 @@ func TestSend_PrefixesMessageWithSenderSessionID(t *testing.T) {
 	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
 		t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
 	}
-	want := "[from aa-47]   hi  "
+	want := "[from @aa-47]   hi  "
 	if req.Message != want {
 		t.Errorf("captured message = %q, want %q", req.Message, want)
 	}
