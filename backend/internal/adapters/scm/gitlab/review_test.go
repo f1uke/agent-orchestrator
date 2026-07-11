@@ -2,8 +2,10 @@ package gitlab
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -52,6 +54,70 @@ func TestFetchReviewThreads(t *testing.T) {
 	}
 	if rev.Threads[0].Comments[0].IsBot {
 		t.Fatalf("comments[0].IsBot = true, want false")
+	}
+}
+
+// TestFetchReviewThreads_PaginatesDiscussions proves the adapter pages through
+// GitLab's /discussions endpoint instead of reading only the first page. GitLab
+// paginates discussions (default 20, max 100 per page) and system notes count
+// toward the total, so on an active MR the newest review threads land on page 2+.
+// Fetching only page 1 silently drops them, freezing AO's resolved/unresolved
+// view (see fix/reviews-gitlab-resolved-refresh: MR !3028's newest unresolved
+// thread lived on page 2 and never reached AO). A resolvable thread on page 2
+// must still be returned, and the request must ask for the max page size.
+func TestFetchReviewThreads_PaginatesDiscussions(t *testing.T) {
+	var page1PerPage string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Fproj/merge_requests/7/discussions", func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if page == "1" || page == "" {
+			page1PerPage = r.URL.Query().Get("per_page")
+		}
+		if page == "2" {
+			// The newest resolvable thread — only reachable if the adapter
+			// requests page 2.
+			_, _ = w.Write([]byte(`[{"id":"disc-p2","notes":[{"id":902,"body":"newest thread","resolvable":true,"resolved":false,"author":{"username":"rev"},"position":{"new_path":"b.go","new_line":7}}]}]`))
+			return
+		}
+		// Page 1 (or an unpaginated request): a full page of 100 discussions —
+		// one resolvable thread plus 99 non-resolvable system notes — so the
+		// pagination loop must go on to page 2 to find disc-p2.
+		var b strings.Builder
+		b.WriteByte('[')
+		b.WriteString(`{"id":"disc-p1","notes":[{"id":901,"body":"first thread","resolvable":true,"resolved":true,"author":{"username":"rev"},"position":{"new_path":"a.go","new_line":3}}]}`)
+		for i := 0; i < 99; i++ {
+			fmt.Fprintf(&b, `,{"id":"sys-%d","notes":[{"id":%d,"body":"system","resolvable":false,"system":true,"author":{"username":"rev"}}]}`, i, 1000+i)
+		}
+		b.WriteByte(']')
+		_, _ = w.Write([]byte(b.String()))
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Fproj/merge_requests/7/approvals", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"approvals_left":0,"approved_by":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := newTestProvider(t, srv.URL)
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj"}, Number: 7}
+	rev, err := p.FetchReviewThreads(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("FetchReviewThreads: %v", err)
+	}
+	byID := map[string]ports.SCMReviewThreadObservation{}
+	for _, th := range rev.Threads {
+		byID[th.ID] = th
+	}
+	if _, ok := byID["disc-p1"]; !ok {
+		t.Errorf("missing page-1 thread disc-p1; got %+v", rev.Threads)
+	}
+	p2, ok := byID["disc-p2"]
+	if !ok {
+		t.Fatalf("missing page-2 thread disc-p2 (pagination not applied); got %d threads: %+v", len(rev.Threads), rev.Threads)
+	}
+	if p2.Resolved {
+		t.Errorf("disc-p2.Resolved = true, want false (fixture note has resolved:false)")
+	}
+	if page1PerPage != "100" {
+		t.Errorf("discussions request per_page=%q, want 100 (max page size)", page1PerPage)
 	}
 }
 

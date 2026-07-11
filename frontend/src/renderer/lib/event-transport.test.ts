@@ -131,6 +131,11 @@ describe("createEventTransport", () => {
 			vi.advanceTimersByTime(200);
 			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["workspaces"] });
 			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["session-scm-summary"] });
+			// The Reviews tab's comment/thread data (and the derived Resolved
+			// section) reads from ["session-pr-comments", sessionId], which has no
+			// refetch interval; a CDC thread event must invalidate it too so an
+			// externally-resolved GitLab MR thread live-updates without a remount.
+			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["session-pr-comments"] });
 		} finally {
 			vi.useRealTimers();
 		}
