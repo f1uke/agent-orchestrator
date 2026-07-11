@@ -29,6 +29,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { AttachableTerminal, TerminalUserInputSource } from "../hooks/useTerminalSession";
 import { aoBridge } from "../lib/bridge";
+import type { SessionLinkMatch } from "../lib/session-ref";
 import { registerTerminalFocus } from "../lib/terminal-focus";
 import { buildTerminalThemes } from "../lib/terminal-themes";
 import type { Theme } from "../stores/ui-store";
@@ -51,6 +52,19 @@ export type XtermTerminalProps = {
 	 * on every platform (see the wheel handler), fixing it under a mux too.
 	 */
 	paneScrollsByKeyboard?: boolean;
+	/**
+	 * Resolve AO session-id references on a line of terminal text to link ranges.
+	 * TerminalPane supplies this from live workspace data; when a matched token
+	 * names a known session, the token is linkified and clicking it fires
+	 * {@link onSessionLinkActivate}. Absent → no session linkification.
+	 */
+	sessionLinkResolver?: (line: string) => SessionLinkMatch[];
+	/**
+	 * Navigate the app to a session when its terminal reference is clicked. This
+	 * is internal navigation (select the session on the board), NOT the OS
+	 * browser — unlike http/OSC-8 links which go through openTerminalLink.
+	 */
+	onSessionLinkActivate?: (sessionId: string) => void;
 	/** Terminal construction failed; the owner decides how to surface it. */
 	onError?: (error: unknown) => void;
 	/**
@@ -548,6 +562,47 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		});
 		const mouseBinary = term.onBinary((data) => emitUserInput(data, "mouse"));
 
+		// Linkify AO session-id references (`@<project>-<num>`, the bare canonical
+		// `<project>-<num>` as it appears in logs / `[from …]` wrappers, and the
+		// short `@<num>`) so a click navigates the app to that session. Unlike the
+		// http/OSC-8 links above — which openExternal to the OS browser — session
+		// links resolve INTERNALLY via onSessionLinkActivate. The resolver only
+		// yields tokens that name a currently-known session, so unrelated
+		// hyphen-number tokens (a Jira key like STAR-2272) are never linkified.
+		// Session ids are ASCII and short, so a token's string offset on a line maps
+		// 1:1 to its cell column (no wide-char remap) and we do not stitch wrapped
+		// rows.
+		const sessionLinks = term.registerLinkProvider({
+			provideLinks(bufferLineNumber, callback) {
+				const resolver = callbacksRef.current.sessionLinkResolver;
+				if (!resolver) {
+					callback(undefined);
+					return;
+				}
+				const line = term.buffer.active.getLine(bufferLineNumber - 1);
+				if (!line) {
+					callback(undefined);
+					return;
+				}
+				const text = line.translateToString(true);
+				const matches = resolver(text);
+				if (matches.length === 0) {
+					callback(undefined);
+					return;
+				}
+				callback(
+					matches.map((match) => ({
+						text: text.slice(match.startIndex, match.endIndex),
+						range: {
+							start: { x: match.startIndex + 1, y: bufferLineNumber },
+							end: { x: match.endIndex, y: bufferLineNumber },
+						},
+						activate: () => callbacksRef.current.onSessionLinkActivate?.(match.sessionId),
+					})),
+				);
+			},
+		});
+
 		// Translate wheel motion into SGR wheel reports for the pane (see
 		// sgrWheelReport), one report per scrolled line. WheelEvent.deltaMode
 		// varies by platform/device: trackpads and normalized wheels report
@@ -656,6 +711,7 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			keyInput.dispose();
 			mouseData.dispose();
 			mouseBinary.dispose();
+			sessionLinks.dispose();
 			userInputListeners.clear();
 			try {
 				term.dispose();

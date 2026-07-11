@@ -42,8 +42,12 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions) erro
 		return usageError{errors.New("usage: --message is required")}
 	}
 	message := opts.message
+	// Tag the message with the sender's canonical session id under the `@`
+	// reference sigil (`[from @<project>-<num>]`), so the recipient's in-app
+	// terminal linkifies it and can navigate back to the sender. AO_SESSION_ID is
+	// the canonical `<project>-<num>`; the `@` is the human/agent-facing sigil.
 	if sender := strings.TrimSpace(os.Getenv("AO_SESSION_ID")); sender != "" {
-		message = "[from " + sender + "] " + message
+		message = "[from @" + sender + "] " + message
 	}
 	session := strings.TrimSpace(opts.session)
 	if session == "" {

@@ -1,11 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TerminalTarget } from "../types/terminal";
 import type { WorkspaceSession } from "../types/workspace";
 import type { Theme } from "../stores/ui-store";
 import { useTerminalSession, type AttachableTerminal, type TerminalSessionState } from "../hooks/useTerminalSession";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { findSessionLinks } from "../lib/session-ref";
 import { XtermTerminal } from "./XtermTerminal";
 import { RestoreUnavailableDialog } from "./RestoreUnavailableDialog";
 
@@ -149,9 +151,35 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 	const [restoreError, setRestoreError] = useState<string | undefined>();
 	const [restoreUnavailable, setRestoreUnavailable] = useState(false);
 	const queryClient = useQueryClient();
+	const navigate = useNavigate();
+	const { data: workspaces } = useWorkspaceQuery();
 	const { attach, state, error } = useTerminalSession(attachSession, { daemonReady });
 	const handleId = attachSession?.terminalHandleId;
 	const provider = terminalTarget?.kind === "reviewer" ? terminalTarget.harness : session?.provider;
+
+	// Session-id linkification: resolve terminal tokens against the set of known
+	// session ids (so only real sessions linkify), and map a clicked id back to
+	// its project to navigate the board. The `@<num>` short form resolves within
+	// this terminal's own project.
+	const knownIds = useMemo(() => new Set((workspaces ?? []).flatMap((w) => w.sessions.map((s) => s.id))), [workspaces]);
+	const projectBySessionId = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const w of workspaces ?? []) for (const s of w.sessions) map.set(s.id, w.id);
+		return map;
+	}, [workspaces]);
+	const currentProjectId = session?.workspaceId;
+	const sessionLinkResolver = useCallback(
+		(line: string) => findSessionLinks(line, { knownIds, currentProjectId }),
+		[knownIds, currentProjectId],
+	);
+	const onSessionLinkActivate = useCallback(
+		(sessionId: string) => {
+			const projectId = projectBySessionId.get(sessionId);
+			if (!projectId) return;
+			void navigate({ to: "/projects/$projectId/sessions/$sessionId", params: { projectId, sessionId } });
+		},
+		[navigate, projectBySessionId],
+	);
 	const hadAttachmentRef = useRef(false);
 	const canRestoreSession = terminalTarget?.kind !== "reviewer" && session?.status === "terminated";
 
@@ -239,7 +267,9 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 					fontSize={fontSize}
 					onError={handleInitError}
 					onReady={handleReady}
+					onSessionLinkActivate={onSessionLinkActivate}
 					paneScrollsByKeyboard={providerScrollsByKeyboard(provider)}
+					sessionLinkResolver={sessionLinkResolver}
 					theme={theme}
 				/>
 				{showEmptyState && (

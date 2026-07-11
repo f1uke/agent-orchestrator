@@ -1747,6 +1747,11 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 			if !strings.Contains(sp, "skills/using-ao/SKILL.md") {
 				t.Fatalf("%s: system prompt missing using-ao skill pointer:\n%s", tc.name, sp)
 			}
+			// The @session / #PR / !MR reference convention is injected into every
+			// assembled prompt (orchestrator and both worker variants).
+			if !strings.Contains(sp, "## Referring to sessions, pull requests, and merge requests") {
+				t.Fatalf("%s: system prompt missing the reference-sigil convention:\n%s", tc.name, sp)
+			}
 		})
 	}
 }

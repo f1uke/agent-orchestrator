@@ -188,6 +188,27 @@ func TestSection_OmitsEmpty(t *testing.T) {
 	}
 }
 
+// TestReferenceConvention: the shared sigil section names all three work-item
+// forms (@session / #PR / !MR), leads with a blank-line separator so it appends
+// cleanly, and forbids a bare session number.
+func TestReferenceConvention(t *testing.T) {
+	got := ReferenceConvention()
+	if !strings.HasPrefix(got, "\n\n") {
+		t.Fatalf("reference convention must start with a blank-line separator: %q", got)
+	}
+	for _, want := range []string{
+		"## Referring to sessions, pull requests, and merge requests",
+		"`@<project>-<num>`",
+		"`#<num>`",
+		"`!<num>`",
+		"Never write a bare session number",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("reference convention missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestKnownKindsAndValid(t *testing.T) {
 	if len(KnownKinds()) != 3 {
 		t.Fatalf("want 3 kinds, got %d", len(KnownKinds()))

@@ -2053,6 +2053,10 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	if base == "" {
 		return "", nil
 	}
+	// The @session / #PR / !MR reference convention applies to both orchestrator
+	// and worker prompts, so it is injected here rather than baked into either
+	// editable base — it stays present even when a base is overridden or cleared.
+	base += prompts.ReferenceConvention()
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {
 		return "", err
