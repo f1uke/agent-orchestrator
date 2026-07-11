@@ -221,7 +221,10 @@ legible variants (the handoff is dark-only). Tokens live in both `:root` blocks.
 - **Base hue** → column top border (`3px`); top-down background tint
   (`hue @ 11% → transparent` by ~240px so long lanes go dark); count-badge fill
   (`@16%`) + border (`@34%`); each card's **left accent bar** (`3px`); card footer
-  tint (`@3%`); empty-lane dashed placeholder border (`@28%`).
+  tint (`@3%`). The **empty-lane placeholder carries NO lane hue** — a neutral
+  dashed `--border` hairline + passive text at `opacity-60`, so an empty lane
+  recedes and a single real card dominates (was lane-tinted; de-emphasised
+  2026-07-11 so placeholders stop reading as cards).
 - **Bright variant** → header status dot (`9px`, glow `@70%`) + header label text +
   count-badge text; card status dot (`8px`, glow `@65%`) + card status label text;
   the sidebar glyph.
