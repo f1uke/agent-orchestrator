@@ -8,6 +8,7 @@ import {
 	nativeImage,
 	Notification as ElectronNotification,
 	protocol,
+	screen,
 	shell,
 	WebContentsView,
 	type OpenDialogOptions,
@@ -55,6 +56,13 @@ import { createNativeNotifier, type NativeNotificationInput } from "./main/nativ
 import { detectOpenTargets, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
 import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
 import { isAllowedTerminalLink } from "./main/open-terminal-link";
+import {
+	clampWindowState,
+	readWindowStateSync,
+	writeWindowState,
+	writeWindowStateSync,
+	type WindowState,
+} from "./main/window-state";
 
 // Globals injected at compile time by @electron-forge/plugin-vite.
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -226,14 +234,102 @@ function setDaemonStatus(nextStatus: DaemonStatus): void {
 	mainWindow?.webContents.send("daemon:status", daemonStatus);
 }
 
+// First-run window size. Deliberately larger than the old fixed 1320×860 (users
+// found that too small); resolveInitialWindowState clamps it to the screen on
+// small displays. After first run the saved bounds win. WINDOW_MIN_* mirror the
+// BrowserWindow minimums so a restored size is never validated below what the
+// window can actually shrink to.
+const DEFAULT_WINDOW_WIDTH = 1440;
+const DEFAULT_WINDOW_HEIGHT = 900;
+const WINDOW_MIN_WIDTH = 960;
+const WINDOW_MIN_HEIGHT = 640;
+// Coalesce the burst of resize/move events during a drag into one disk write.
+const WINDOW_SAVE_DEBOUNCE_MS = 400;
+
+// Debounce handle for resize/move saves. Only one window exists at a time.
+let windowSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+// The ~/.ao dir the window-state file lives in (dirname of running.json), the
+// same dir as app-state.json / update-settings.json. null only when the home
+// dir is unresolvable, in which case persistence is skipped.
+function windowStateDir(): string | null {
+	const runFile = runFilePath();
+	return runFile ? path.dirname(runFile) : null;
+}
+
+// The bounds to open the window at: the saved state clamped/validated against
+// the current displays, or the screen-clamped default on first run. `screen` may
+// only be read after app 'ready', which always holds here — createWindow runs
+// from whenReady and from the macOS 'activate'/reopen handler.
+function resolveInitialWindowState(): WindowState {
+	const dir = windowStateDir();
+	const saved = dir ? readWindowStateSync(dir) : null;
+	const workAreas = screen.getAllDisplays().map((display) => display.workArea);
+	return clampWindowState(saved, workAreas, {
+		defaultWidth: DEFAULT_WINDOW_WIDTH,
+		defaultHeight: DEFAULT_WINDOW_HEIGHT,
+		minWidth: WINDOW_MIN_WIDTH,
+		minHeight: WINDOW_MIN_HEIGHT,
+	});
+}
+
+// Snapshot the window's *restore* bounds — getNormalBounds() reports the
+// pre-maximize/pre-fullscreen frame — plus the special-mode flags, so a later
+// un-maximize lands at the last normal size.
+function captureWindowState(win: BrowserWindow): WindowState {
+	const bounds = win.getNormalBounds();
+	return {
+		width: bounds.width,
+		height: bounds.height,
+		x: bounds.x,
+		y: bounds.y,
+		maximized: win.isMaximized(),
+		fullScreen: win.isFullScreen(),
+	};
+}
+
+// Debounced, non-blocking save for the resize/move/mode-toggle stream.
+function scheduleWindowStateSave(win: BrowserWindow): void {
+	if (windowSaveTimer) clearTimeout(windowSaveTimer);
+	windowSaveTimer = setTimeout(() => {
+		windowSaveTimer = null;
+		const dir = windowStateDir();
+		if (!dir || win.isDestroyed()) return;
+		void writeWindowState(dir, captureWindowState(win)).catch((err) => {
+			console.error("AO: failed to persist window bounds:", err);
+		});
+	}, WINDOW_SAVE_DEBOUNCE_MS);
+}
+
+// Final durable save on window close / app quit. Synchronous so the write
+// completes even if the process exits right after (an async write could be cut
+// off before it flushes).
+function saveWindowStateNow(win: BrowserWindow): void {
+	if (windowSaveTimer) {
+		clearTimeout(windowSaveTimer);
+		windowSaveTimer = null;
+	}
+	const dir = windowStateDir();
+	if (!dir || win.isDestroyed()) return;
+	try {
+		writeWindowStateSync(dir, captureWindowState(win));
+	} catch (err) {
+		console.error("AO: failed to persist window bounds on close:", err);
+	}
+}
+
 function createWindow(): void {
 	browserViewHost?.dispose();
 	browserViewHost = null;
+	const initial = resolveInitialWindowState();
 	mainWindow = new BrowserWindow({
-		width: 1320,
-		height: 860,
-		minWidth: 960,
-		minHeight: 640,
+		width: initial.width,
+		height: initial.height,
+		// Restore the saved position when it survived validation; otherwise omit
+		// x/y so the OS centers the window (first run / off-screen fallback).
+		...(initial.x !== undefined && initial.y !== undefined ? { x: initial.x, y: initial.y } : {}),
+		minWidth: WINDOW_MIN_WIDTH,
+		minHeight: WINDOW_MIN_HEIGHT,
 		title: "Agent Orchestrator",
 		icon: windowIconPath(),
 		backgroundColor: "#0f1014",
@@ -250,6 +346,24 @@ function createWindow(): void {
 			sandbox: true,
 		},
 	});
+
+	// Restore the special display modes the constructor can't express as bounds.
+	// Done before wiring the save listeners so the restore itself doesn't write.
+	if (initial.maximized) mainWindow.maximize();
+	if (initial.fullScreen) mainWindow.setFullScreen(true);
+
+	// Persist size/position across resize/move (debounced) and the mode toggles,
+	// so a close-without-quit → reopen (and a full relaunch) restores the last
+	// geometry. 'close' fires while bounds are still readable, before 'closed'.
+	const win = mainWindow;
+	const onGeometryChange = () => scheduleWindowStateSave(win);
+	win.on("resize", onGeometryChange);
+	win.on("move", onGeometryChange);
+	win.on("maximize", onGeometryChange);
+	win.on("unmaximize", onGeometryChange);
+	win.on("enter-full-screen", onGeometryChange);
+	win.on("leave-full-screen", onGeometryChange);
+	win.on("close", () => saveWindowStateNow(win));
 
 	// Harden navigation: never let renderer/terminal content open in-app windows or
 	// navigate the privileged window away from the app origin. External links go to
