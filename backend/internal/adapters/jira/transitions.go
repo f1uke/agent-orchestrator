@@ -154,13 +154,21 @@ func (c *Client) Move(ctx context.Context, key, transitionID string) error {
 // endpoint. The key is already keyPattern-validated, so it is a safe path segment.
 func transitionRequest(ctx context.Context, cfg restConfig, method, key string, body []byte) (*http.Request, error) {
 	url := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", cfg.baseURL, key)
+	return newJiraRequest(ctx, cfg, method, url, body)
+}
+
+// newJiraRequest builds an authenticated Jira Cloud REST request (Accept JSON +
+// basic auth from the resolved config). Shared by the transition and search
+// endpoints so the auth handling lives in one place. rawURL is fully built by
+// the caller (query already encoded).
+func newJiraRequest(ctx context.Context, cfg restConfig, method, rawURL string, body []byte) (*http.Request, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, rdr)
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request %s: %w", ErrUnavailable, key, err)
+		return nil, fmt.Errorf("%w: build request: %w", ErrUnavailable, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {

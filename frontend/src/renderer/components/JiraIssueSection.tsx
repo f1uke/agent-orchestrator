@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { ArrowUpRight, ChevronDown } from "lucide-react";
-import { useSessionJiraContext, type JiraIssue, type JiraSubtask } from "../hooks/useSessionJiraContext";
+import { ArrowUpRight, ChevronDown, Plus } from "lucide-react";
+import { useSessionJiraContext, useUnlinkJira, type JiraIssue, type JiraSubtask } from "../hooks/useSessionJiraContext";
 import { JiraAdf } from "./JiraAdf";
+import { JiraLinkDialog } from "./JiraLinkDialog";
 import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
 
 /**
@@ -12,7 +13,9 @@ import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
  */
 export function JiraIssueSection({ sessionId, linked }: { sessionId: string; linked: boolean }) {
 	const query = useSessionJiraContext(sessionId, linked);
-	if (!linked) return null;
+	// An unlinked session still gets an entry point to attach a Jira issue after
+	// the fact (e.g. a session created before the Jira integration existed).
+	if (!linked) return <JiraLinkPrompt sessionId={sessionId} />;
 
 	const data = query.data;
 	// While the first fetch is in flight, show a quiet placeholder so the section
@@ -71,10 +74,31 @@ function JiraEyebrow() {
 	);
 }
 
+// JiraLinkPrompt is shown on the Summary tab of a session that is NOT yet bound to
+// a Jira issue — a quiet entry point to attach one after the fact (opens the same
+// live search picker as the New-task modal).
+function JiraLinkPrompt({ sessionId }: { sessionId: string }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<section className="jira-section">
+			<JiraEyebrow />
+			<div className="jira-card jira-link-prompt">
+				<p className="jira-link-prompt__text">No Jira issue linked to this session.</p>
+				<button type="button" className="jira-link-prompt__btn" onClick={() => setOpen(true)}>
+					<Plus className="size-3.5" aria-hidden="true" />
+					Link a Jira issue
+				</button>
+			</div>
+			<JiraLinkDialog sessionId={sessionId} open={open} onOpenChange={setOpen} />
+		</section>
+	);
+}
+
 function IssueLead({ sessionId, issue }: { sessionId: string; issue: JiraIssue }) {
 	// The status pill doubles as the entry point to the ONE sanctioned Jira write
 	// (Move status). Placed in Slice 1, wired here.
 	const [moveOpen, setMoveOpen] = useState(false);
+	const unlink = useUnlinkJira(sessionId);
 	return (
 		<div className="jira-card jira-card--lead">
 			<div className="jira-head">
@@ -98,7 +122,21 @@ function IssueLead({ sessionId, issue }: { sessionId: string; issue: JiraIssue }
 						<ChevronDown className="jira-status__caret" aria-hidden="true" />
 					</button>
 				) : null}
+				<button
+					type="button"
+					className="jira-unlink"
+					onClick={() => unlink.mutate()}
+					disabled={unlink.isPending}
+					title="Unlink this Jira issue from the session"
+				>
+					{unlink.isPending ? "Unlinking…" : "Unlink"}
+				</button>
 			</div>
+			{unlink.isError ? (
+				<p className="jira-fetch-error" role="alert">
+					{unlink.error instanceof Error ? unlink.error.message : "Couldn't unlink the Jira issue."}
+				</p>
+			) : null}
 			<JiraMoveStatusDialog sessionId={sessionId} issue={issue} open={moveOpen} onOpenChange={setMoveOpen} />
 			{issue.title ? <div className="jira-title">{issue.title}</div> : null}
 			{issue.url ? (

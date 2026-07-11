@@ -107,6 +107,18 @@ func (f *fakeStore) SetSessionAutoNudge(_ context.Context, id domain.SessionID, 
 	return true, nil
 }
 
+func (f *fakeStore) SetSessionIssueBinding(_ context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error) {
+	r, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	r.IssueID = domain.IssueID(issueID)
+	r.DisplayName = displayName
+	r.UpdatedAt = updatedAt
+	f.sessions[id] = r
+	return true, nil
+}
+
 func (f *fakeStore) GetDisplayPRFactsForSession(_ context.Context, id domain.SessionID) (domain.PRFacts, bool, error) {
 	pr, ok := f.pr[id]
 	return pr, ok, nil
@@ -173,6 +185,29 @@ func TestSessionRenameUpdatesDisplayName(t *testing.T) {
 	}
 	if got := st.sessions["mer-1"].DisplayName; got != "Fix issue #90" {
 		t.Fatalf("display name = %q, want trimmed rename", got)
+	}
+}
+
+func TestSessionSetIssueBindingUpdatesIssueAndDisplayName(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", IssueID: "old title"}
+
+	sess, err := (&Service{store: st}).SetIssueBinding(context.Background(), "mer-1", "jira:DEMO-2272", "Example issue summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.IssueID != "jira:DEMO-2272" || sess.DisplayName != "Example issue summary" {
+		t.Fatalf("returned session = %+v, want the new binding", sess)
+	}
+	if got := st.sessions["mer-1"]; got.IssueID != "jira:DEMO-2272" || got.DisplayName != "Example issue summary" {
+		t.Fatalf("persisted = %+v, want the new binding", got)
+	}
+}
+
+func TestSessionSetIssueBindingUnknownSessionIs404(t *testing.T) {
+	st := newFakeStore()
+	if _, err := (&Service{store: st}).SetIssueBinding(context.Background(), "ghost-1", "jira:DEMO-1", "x"); err == nil {
+		t.Fatal("expected an error for an unknown session")
 	}
 }
 

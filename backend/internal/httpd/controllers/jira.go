@@ -18,11 +18,16 @@ import (
 
 // JiraService is the controller-facing Jira contract, satisfied by
 // *service/jira.Service. Context is the display read; Transitions + Move are the
-// status-move write path (the one sanctioned Jira write).
+// status-move write path; Search/Projects power the pre-session pickers;
+// SetBinding/Unlink link an existing session to an issue after the fact.
 type JiraService interface {
 	Context(ctx context.Context, id domain.SessionID) (jirasvc.Result, error)
 	Transitions(ctx context.Context, id domain.SessionID) ([]jiraadapter.Transition, error)
 	Move(ctx context.Context, id domain.SessionID, transitionID string) (jirasvc.MoveResult, error)
+	Search(ctx context.Context, project, text string) ([]jiraadapter.IssueSummary, error)
+	Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
+	SetBinding(ctx context.Context, id domain.SessionID, key string) (jiraadapter.IssueSummary, error)
+	Unlink(ctx context.Context, id domain.SessionID) (domain.Session, error)
 }
 
 // JiraController serves the session-scoped, display-only Jira context route.
@@ -30,12 +35,96 @@ type JiraController struct {
 	Svc JiraService
 }
 
-// Register mounts the Jira routes: the display read, plus the status-move write
-// path (list transitions + apply).
+// Register mounts the Jira routes: the pre-session pickers (search + projects,
+// no session context yet), the session display read + status-move write path,
+// and the after-the-fact link (PUT) / unlink (DELETE) on the same session path.
 func (c *JiraController) Register(r chi.Router) {
+	r.Get("/jira/search", c.search)
+	r.Get("/jira/projects", c.projects)
 	r.Get("/sessions/{sessionId}/jira", c.get)
+	r.Put("/sessions/{sessionId}/jira", c.link)
+	r.Delete("/sessions/{sessionId}/jira", c.unlink)
 	r.Get("/sessions/{sessionId}/jira/transitions", c.transitions)
 	r.Post("/sessions/{sessionId}/jira/move", c.move)
+}
+
+// search resolves the pre-session issue picker query (New task + link-existing).
+// A free-text query or an exact key; optionally scoped to a project.
+func (c *JiraController) search(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/search")
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	issues, err := c.Svc.Search(r.Context(), project, q)
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	out := JiraSearchResponse{Issues: make([]JiraIssueSummary, 0, len(issues))}
+	for _, it := range issues {
+		out.Issues = append(out.Issues, jiraIssueSummaryDTO(it))
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// projects lists the user's Jira projects for the project picker.
+func (c *JiraController) projects(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/projects")
+		return
+	}
+	ps, err := c.Svc.Projects(r.Context(), strings.TrimSpace(r.URL.Query().Get("q")))
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	out := JiraProjectsResponse{Projects: make([]JiraProject, 0, len(ps))}
+	for _, p := range ps {
+		out.Projects = append(out.Projects, JiraProject{Key: p.Key, Name: p.Name})
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// link binds an existing session to a Jira issue (issue_id = "jira:<KEY>"). The
+// key is resolved/validated first, so an unknown key never binds.
+func (c *JiraController) link(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/jira")
+		return
+	}
+	id := sessionID(r)
+	var req JiraLinkRequest
+	if err := decodeJSON(r, &req); err != nil {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_LINK_BODY_INVALID", "Malformed request body.", nil))
+		return
+	}
+	if strings.TrimSpace(req.IssueKey) == "" {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_KEY_REQUIRED", "An issue key is required.", nil))
+		return
+	}
+	iss, err := c.Svc.SetBinding(r.Context(), id, req.IssueKey)
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	summary := jiraIssueSummaryDTO(iss)
+	envelope.WriteJSON(w, http.StatusOK, JiraLinkResponse{SessionID: id, Linked: true, Issue: &summary})
+}
+
+// unlink removes a session's Jira binding.
+func (c *JiraController) unlink(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/jira")
+		return
+	}
+	id := sessionID(r)
+	if _, err := c.Svc.Unlink(r.Context(), id); err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, JiraLinkResponse{SessionID: id, Linked: false})
 }
 
 func (c *JiraController) get(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +213,8 @@ func writeJiraError(w http.ResponseWriter, r *http.Request, err error) {
 		envelope.WriteError(w, r, apierr.NotFound("JIRA_ISSUE_NOT_FOUND", "Jira issue not found or not visible to your account."))
 	case errors.Is(err, jiraadapter.ErrBadKey):
 		envelope.WriteError(w, r, apierr.Invalid("JIRA_BAD_KEY", "The linked Jira key is invalid.", nil))
+	case errors.Is(err, jiraadapter.ErrBadQuery):
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_BAD_QUERY", jiraErrMessage(err, "The Jira search query is invalid."), nil))
 	case errors.Is(err, jiraadapter.ErrBadTransition):
 		envelope.WriteError(w, r, apierr.Invalid("JIRA_TRANSITION_REJECTED", jiraErrMessage(err, "Jira rejected the transition (a workflow validator or permission)."), nil))
 	case errors.Is(err, jiraadapter.ErrAuthFailed):
@@ -151,6 +242,20 @@ func jiraContextResponse(id domain.SessionID, res jirasvc.Result) JiraContextRes
 		out.Issue = jiraIssueDTO(*res.Issue)
 	}
 	return out
+}
+
+// jiraIssueSummaryDTO maps a search/resolve row to its wire shape.
+func jiraIssueSummaryDTO(it jiraadapter.IssueSummary) JiraIssueSummary {
+	return JiraIssueSummary{
+		Key:            it.Key,
+		Type:           it.Type,
+		Title:          it.Title,
+		Status:         it.Status,
+		StatusCategory: it.StatusCategory,
+		StatusColor:    it.StatusColor,
+		Assignee:       it.Assignee,
+		URL:            it.URL,
+	}
 }
 
 func jiraIssueDTO(iss jiraadapter.Issue) *JiraIssue {

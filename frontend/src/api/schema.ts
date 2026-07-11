@@ -90,6 +90,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jira/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the user's Jira projects for the project picker */
+        get: operations["listJiraProjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jira/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Jira issues cross-project (free-text or exact key), read live via REST */
+        get: operations["searchJira"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -445,9 +479,11 @@ export interface paths {
         };
         /** Return the display-only Jira issue context for a session bound to a Jira key */
         get: operations["getSessionJira"];
-        put?: never;
+        /** Bind an existing session to a Jira issue (validated) after the fact */
+        put: operations["linkSessionJira"];
         post?: never;
-        delete?: never;
+        /** Remove a session's Jira binding */
+        delete: operations["unlinkSessionJira"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1239,6 +1275,25 @@ export interface components {
             type?: string;
             url?: string;
         };
+        JiraIssueSummary: {
+            assignee?: string;
+            key: string;
+            status?: string;
+            statusCategory?: string;
+            statusColor?: string;
+            title?: string;
+            type?: string;
+            url?: string;
+        };
+        JiraLinkRequest: {
+            /** @description Jira issue key to bind (e.g. PROJ-123). */
+            issueKey: string;
+        };
+        JiraLinkResponse: {
+            issue?: components["schemas"]["JiraIssueSummary"];
+            linked: boolean;
+            sessionId: string;
+        };
         JiraMoveRequest: {
             transitionId: string;
         };
@@ -1248,6 +1303,16 @@ export interface components {
             status?: string;
             statusCategory?: string;
             statusColor?: string;
+        };
+        JiraProject: {
+            key: string;
+            name?: string;
+        };
+        JiraProjectsResponse: {
+            projects: components["schemas"]["JiraProject"][];
+        };
+        JiraSearchResponse: {
+            issues: components["schemas"]["JiraIssueSummary"][];
         };
         JiraSprint: {
             endDate?: string;
@@ -2078,6 +2143,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportRunResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listJiraProjects: {
+        parameters: {
+            query?: {
+                /** @description Optional filter matched against project key/name. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraProjectsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    searchJira: {
+        parameters: {
+            query?: {
+                /** @description Free-text query, or an exact issue key (e.g. PROJ-123). */
+                q?: string;
+                /** @description Optional project key to scope the search to. */
+                project?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraSearchResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Internal Server Error */
@@ -3492,6 +3650,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JiraContextResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    linkSessionJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JiraLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraLinkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unlinkSessionJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraLinkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */

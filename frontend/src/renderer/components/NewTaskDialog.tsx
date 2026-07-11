@@ -1,12 +1,14 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleDashed, Loader2, Play, Search, X } from "lucide-react";
+import { CircleDashed, Loader2, Play, X } from "lucide-react";
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { BranchCombobox } from "./BranchCombobox";
+import { JiraIssuePicker } from "./JiraIssuePicker";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import type { components } from "../../api/schema";
+import type { JiraIssueSummary } from "../hooks/useSessionJiraContext";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { returnFocusToTerminal } from "../lib/terminal-focus";
 import { captureRendererEvent } from "../lib/telemetry";
@@ -31,9 +33,9 @@ type NewTaskDialogProps = {
 	onOpenChange: (open: boolean) => void;
 };
 
-// A Jira issue key: PROJECT-123. Used to bind a session to a Jira issue so its
-// context shows in the Summary tab. (A searchable cross-project picker replaces
-// this plain input in a later slice.)
+// A Jira issue key: PROJECT-123. The field is a live search picker (JiraIssuePicker);
+// this regex is the fallback that still lets a user type a full key straight into
+// the box and bind it without picking from the dropdown.
 const JIRA_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
 
 export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChange }: NewTaskDialogProps) {
@@ -46,7 +48,8 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 	const prTargetId = useId();
 	const agentId = useId();
 	const [title, setTitle] = useState("");
-	const [jiraKey, setJiraKey] = useState("");
+	const [jiraQuery, setJiraQuery] = useState("");
+	const [linkedIssue, setLinkedIssue] = useState<JiraIssueSummary | null>(null);
 	const [prompt, setPrompt] = useState("");
 	const [branch, setBranch] = useState("");
 	const [base, setBase] = useState("");
@@ -91,7 +94,8 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 	useEffect(() => {
 		if (!open) {
 			setTitle("");
-			setJiraKey("");
+			setJiraQuery("");
+			setLinkedIssue(null);
 			setPrompt("");
 			setBranch("");
 			setBase("");
@@ -140,14 +144,23 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 			setError("Title and brief are required.");
 			return;
 		}
-		// Optional Jira link: blank = a plain manual task; a valid key binds the
-		// session to "jira:<KEY>" so its context shows in Summary.
-		const cleanKey = jiraKey.trim().toUpperCase();
-		const jiraLinked = cleanKey !== "" && JIRA_KEY_RE.test(cleanKey);
-		if (cleanKey !== "" && !jiraLinked) {
-			setError("Enter a valid Jira issue key (e.g. PROJ-123), or leave it blank.");
-			return;
+		// Optional Jira link: blank = a plain manual task. A picked issue (or a
+		// full key typed and left in the search box) binds the session to
+		// "jira:<KEY>" so its context shows in Summary.
+		let boundKey = "";
+		if (linkedIssue?.key) {
+			boundKey = linkedIssue.key;
+		} else {
+			const typedKey = jiraQuery.trim().toUpperCase();
+			if (typedKey !== "") {
+				if (!JIRA_KEY_RE.test(typedKey)) {
+					setError("Pick a Jira issue from the list, or clear the search field.");
+					return;
+				}
+				boundKey = typedKey;
+			}
 		}
+		const jiraLinked = boundKey !== "";
 
 		setIsSubmitting(true);
 		setError(undefined);
@@ -162,7 +175,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 					// title as the sidebar label (displayName, capped at 20 by the API);
 					// an unlinked task keeps the existing behavior of storing the title
 					// in issueId.
-					issueId: jiraLinked ? `jira:${cleanKey}` : cleanTitle,
+					issueId: jiraLinked ? `jira:${boundKey}` : cleanTitle,
 					displayName: jiraLinked ? cleanTitle.slice(0, 20) : undefined,
 					prompt: cleanPrompt,
 					branch: cleanBranch || undefined,
@@ -235,21 +248,34 @@ export function NewTaskDialog({ open, projectId, onCreated, onQueued, onOpenChan
 										— optional, link one to bind & show its context in Summary
 									</span>
 								</label>
-								<div className="relative">
-									<Search
-										className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-passive"
-										aria-hidden="true"
+								{linkedIssue ? (
+									<div className="jira-linked-chip">
+										<span className="jira-linked-chip__key">{linkedIssue.key}</span>
+										<span className="jira-linked-chip__title">{linkedIssue.title}</span>
+										{linkedIssue.status ? <span className="jira-linked-chip__status">{linkedIssue.status}</span> : null}
+										<button
+											type="button"
+											className="jira-linked-chip__clear"
+											aria-label="Unlink Jira issue"
+											onClick={() => setLinkedIssue(null)}
+										>
+											<X className="size-3.5" aria-hidden="true" />
+										</button>
+									</div>
+								) : (
+									<JiraIssuePicker
+										inputId={jiraId}
+										query={jiraQuery}
+										onQueryChange={setJiraQuery}
+										enabled={open}
+										placeholder="Search Jira to link an issue (e.g. DEMO-2272) — or leave blank"
+										onPick={(issue) => {
+											setLinkedIssue(issue);
+											setJiraQuery("");
+											if (!title.trim() && issue.title) setTitle(issue.title);
+										}}
 									/>
-									<Input
-										id={jiraId}
-										className="pl-8"
-										placeholder="e.g. PROJ-123 — or leave blank"
-										value={jiraKey}
-										autoCapitalize="characters"
-										spellCheck={false}
-										onChange={(event) => setJiraKey(event.target.value)}
-									/>
-								</div>
+								)}
 								<p className="text-[11px] leading-relaxed text-passive">
 									Leave blank for a plain manual task. Linking an issue binds the session to its key.
 								</p>

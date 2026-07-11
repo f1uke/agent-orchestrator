@@ -211,14 +211,16 @@ func Run() error {
 		}
 	}()
 
-	// One jira client backs both the display read (jira-cli) and the status
-	// transitions (REST) — it satisfies IssueReader and TransitionMover.
+	// One jira client backs the display read (jira-cli), the status transitions,
+	// and cross-project search (both REST) — it satisfies IssueReader,
+	// TransitionMover, and IssueSearcher. sessionSvc is the SessionGateway (read +
+	// set the after-the-fact Jira binding).
 	jiraClient := jiraadapter.NewClient()
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
 		Sessions:           sessionSvc,
-		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient),
+		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		Notifications:      notifier,

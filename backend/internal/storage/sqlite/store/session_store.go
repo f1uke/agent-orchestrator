@@ -91,6 +91,26 @@ func (s *Store) SetSessionAutoNudge(ctx context.Context, id domain.SessionID, ov
 	return rows > 0, nil
 }
 
+// SetSessionIssueBinding sets a session's issue_id and display_name together —
+// the after-the-fact Jira link/unlink path. issue_id becomes "jira:<KEY>" (with
+// display_name = the issue title) on link, or a plain title on unlink. Returns
+// ok=false when the session id does not exist. Bumping updated_at trips the
+// sessions_cdc_update trigger so the board/sidebar/Summary refresh live.
+func (s *Store) SetSessionIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionIssueBinding(ctx, gen.SetSessionIssueBindingParams{
+		ID:          id,
+		IssueID:     domain.IssueID(issueID),
+		DisplayName: displayName,
+		UpdatedAt:   updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set issue binding for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // DeleteSession removes a session row, but only if it is still in seed state
 // (no workspace, no runtime handle, no agent session id, no prompt, and not
 // already terminated). Rows that have observable spawn output are immutable

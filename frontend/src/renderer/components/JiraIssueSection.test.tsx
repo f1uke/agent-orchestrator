@@ -1,13 +1,17 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useJiraMock } = vi.hoisted(() => ({ useJiraMock: vi.fn() }));
+const { useJiraMock, unlinkMutate } = vi.hoisted(() => ({ useJiraMock: vi.fn(), unlinkMutate: vi.fn() }));
 vi.mock("../hooks/useSessionJiraContext", () => ({
 	useSessionJiraContext: useJiraMock,
-	// The lead now mounts the (closed) Move-status dialog, whose hooks run on
-	// render; stub them so the section tests stay focused on the display.
+	// The lead now mounts the (closed) Move-status dialog + link/unlink affordances,
+	// whose hooks run on render; stub them so the section tests stay focused on the
+	// display.
 	useJiraTransitions: () => ({ data: [], isLoading: false, isError: false, error: null }),
 	useMoveJiraStatus: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false, error: null }),
+	useUnlinkJira: () => ({ mutate: unlinkMutate, isPending: false, isError: false, error: null }),
+	useSetJiraBinding: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false, error: null }),
+	useJiraSearch: () => ({ data: [], isFetching: false, isError: false, error: null }),
 }));
 
 import { JiraIssueSection } from "./JiraIssueSection";
@@ -24,7 +28,7 @@ const fullIssue: JiraContext = {
 		key: "DEMO-101",
 		url: "https://example.atlassian.net/browse/DEMO-101",
 		type: "Story",
-		title: "Order Eligible UI",
+		title: "Example issue summary",
 		status: "Ready for QA",
 		statusCategory: "new",
 		priority: "Medium",
@@ -44,21 +48,33 @@ const fullIssue: JiraContext = {
 };
 
 describe("JiraIssueSection", () => {
-	beforeEach(() => useJiraMock.mockReset());
+	beforeEach(() => {
+		useJiraMock.mockReset();
+		unlinkMutate.mockReset();
+	});
 
-	it("renders nothing when the session is not Jira-linked (and never queries)", () => {
+	it("offers a link prompt when the session is not Jira-linked (and never queries)", () => {
 		mockQuery(undefined);
-		const { container } = render(<JiraIssueSection sessionId="s1" linked={false} />);
-		expect(container.firstChild).toBeNull();
-		// enabled=false is passed through so the hook does not fetch.
+		render(<JiraIssueSection sessionId="s1" linked={false} />);
+		// An unlinked session gets an after-the-fact link entry point, not nothing.
+		expect(screen.getByText(/No Jira issue linked/i)).toBeTruthy();
+		expect(screen.getByRole("button", { name: /Link a Jira issue/i })).toBeTruthy();
+		// enabled=false is passed through so the display hook does not fetch.
 		expect(useJiraMock).toHaveBeenCalledWith("s1", false);
+	});
+
+	it("unlinks a linked session from the issue section", () => {
+		mockQuery(fullIssue);
+		render(<JiraIssueSection sessionId="s1" linked={true} />);
+		fireEvent.click(screen.getByRole("button", { name: /^Unlink/i }));
+		expect(unlinkMutate).toHaveBeenCalled();
 	});
 
 	it("renders the issue lead, description, and subtasks when linked", () => {
 		mockQuery(fullIssue);
 		render(<JiraIssueSection sessionId="s1" linked={true} />);
 		expect(screen.getByText("DEMO-101")).toBeTruthy();
-		expect(screen.getByText("Order Eligible UI")).toBeTruthy();
+		expect(screen.getByText("Example issue summary")).toBeTruthy();
 		expect(screen.getByText("Ready for QA")).toBeTruthy();
 		expect(screen.getByText("Alex")).toBeTruthy();
 		expect(screen.getByText("Some requirement text.")).toBeTruthy();
