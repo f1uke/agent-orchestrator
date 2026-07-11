@@ -209,6 +209,76 @@ describe("Sidebar", () => {
 		expect(ref).toHaveAttribute("title", "@proj-1-1");
 	});
 
+	// Session-row visual hierarchy (decision 2026-07-11): the work name is the
+	// prominent headline; the @<project>-<num> id recedes to a muted, non-link
+	// subordinate line (reverts the #58 refined-blue in the sidebar only — the
+	// whole row is already the click target, so the id must not read as a link).
+	describe("session row hierarchy", () => {
+		it("renders the work name as the prominent primary line (larger + medium weight)", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+			const name = screen.getByText("fix login");
+			expect(name.className).toContain("font-medium");
+			// Larger than the 10.5px id below it, so it reads as the headline.
+			expect(name.className).toContain("text-[12.5px]");
+			// A real foreground token, not the muted/passive id colour.
+			expect(name.className).toMatch(/text-(foreground|muted-foreground)/);
+		});
+
+		it("renders the @<project>-<num> id as a muted, non-link subordinate line", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+			const id = screen.getByText("@proj-1-1");
+			// Quiet secondary text — never the bright refined-blue link look (#58).
+			expect(id.className).toContain("text-passive");
+			expect(id.className).not.toContain("text-accent");
+			// Not styled as a link: no underline, no hover colour/underline change.
+			expect(id.className).not.toMatch(/underline/);
+			expect(id.className).not.toMatch(/hover:/);
+			// Monospace still reads well for an id; keep it.
+			expect(id.className).toContain("font-mono");
+			// Smaller than the name, and it is plain text, not an anchor.
+			expect(id.className).toContain("text-[10.5px]");
+			expect(id.tagName).toBe("SPAN");
+		});
+	});
+
+	// Breathing status dot (decision 2026-07-11): the lane glyph gently pulses
+	// ONLY while the session is working; every other state is static; and the
+	// pulse is disabled under prefers-reduced-motion.
+	describe("working status dot breathing", () => {
+		function glyphOf(title: string): SVGElement | null {
+			return screen.getByLabelText(`Open ${title}`).querySelector("svg");
+		}
+
+		it("breathes the status glyph while the session is working", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+			expect(glyphOf("fix login")?.getAttribute("class") ?? "").toContain("animate-status-pulse");
+		});
+
+		it("keeps the status glyph static for non-working sessions", () => {
+			const merge = { ...session, id: "proj-1-2", title: "ship it", status: "mergeable" as const };
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [merge] }] });
+			expect(glyphOf("ship it")?.getAttribute("class") ?? "").not.toContain("animate-status-pulse");
+		});
+
+		it("keeps the working glyph static under prefers-reduced-motion", () => {
+			vi.spyOn(window, "matchMedia").mockImplementation(
+				(query: string) =>
+					({
+						matches: query.includes("prefers-reduced-motion"),
+						media: query,
+						onchange: null,
+						addEventListener: () => undefined,
+						removeEventListener: () => undefined,
+						addListener: () => undefined,
+						removeListener: () => undefined,
+						dispatchEvent: () => false,
+					}) as unknown as MediaQueryList,
+			);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+			expect(glyphOf("fix login")?.getAttribute("class") ?? "").not.toContain("animate-status-pulse");
+		});
+	});
+
 	it("confirms project removal before calling the remove handler", async () => {
 		const user = userEvent.setup();
 		const onRemoveProject = renderSidebar();

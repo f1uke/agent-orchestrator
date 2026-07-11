@@ -38,6 +38,7 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
 import { sessionRefLabel } from "../lib/session-ref";
 import { useEventsConnection } from "../hooks/useEventsConnection";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { useResizable } from "../hooks/useResizable";
 import {
 	DropdownMenu,
@@ -152,10 +153,15 @@ function useSelection() {
 function SessionGlyph({ session }: { session: WorkspaceSession }) {
 	const lane = laneForZone(attentionZone(session));
 	const { Icon } = lane;
+	// The glyph gently breathes (opacity pulse, the shared 1.8s status-pulse) ONLY
+	// while the session is actively working, so a live worker is glanceable in the
+	// list; every other lane keeps a static glyph. Disabled under reduced-motion.
+	const prefersReducedMotion = usePrefersReducedMotion();
+	const breathe = lane.key === "working" && !prefersReducedMotion;
 	return (
 		<span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center" style={{ color: lane.dotVar }}>
 			<Icon
-				className="h-[13px] w-[13px]"
+				className={cn("h-[13px] w-[13px]", breathe && "animate-status-pulse")}
 				style={{
 					filter: `drop-shadow(0 0 5px color-mix(in srgb, ${lane.dotVar} 70%, transparent))`,
 					...(lane.filled ? { fill: "currentColor" } : {}),
@@ -773,13 +779,23 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 			>
 				<SessionGlyph session={session} />
 				<span className="min-w-0 flex-1">
-					<span className={cn("block truncate text-[12px]", active ? "text-foreground" : "text-muted-foreground")}>
+					{/* The work name is the row's headline: slightly larger + medium weight
+					and a real foreground colour, so it dominates the id line below. */}
+					<span
+						className={cn(
+							"block truncate text-[12.5px] font-medium",
+							active ? "text-foreground" : "text-muted-foreground",
+						)}
+					>
 						{session.title}
 					</span>
-					{/* Canonical session reference (@<project>-<num>): refined-blue mono
-					(matches the redesign prototype), ellipsized when tight; full id on
-					hover via the native title. */}
-					<span className="block truncate font-mono text-[10.5px] leading-tight text-accent" title={sessionRef}>
+					{/* Canonical session reference (@<project>-<num>): a de-emphasised,
+					muted PLAIN subordinate line — NOT a link. The whole row is already
+					the click target, so the id drops the #58 refined-blue/link look
+					(no accent colour, no underline, no hover change) and is just quiet
+					mono secondary text (decision 2026-07-11). Ellipsized when tight;
+					full id on hover via the native title. */}
+					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
 						{sessionRef}
 					</span>
 				</span>
