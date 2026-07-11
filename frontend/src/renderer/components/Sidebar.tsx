@@ -527,7 +527,7 @@ function ProjectItem({
 	};
 
 	return (
-		<SidebarMenuItem className="mb-px group-data-[collapsible=icon]:mb-0">
+		<SidebarMenuItem className="mb-2 group-data-[collapsible=icon]:mb-0">
 			{/* Project SECTION: heading + labeled buttons share one box. Expanded →
 			the box is highlighted (subtle surface + hairline); collapsed → it is
 			de-emphasised (transparent) and only the heading shows. The icon rail
