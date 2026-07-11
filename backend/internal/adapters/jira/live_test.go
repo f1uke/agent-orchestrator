@@ -7,15 +7,18 @@ import (
 	"time"
 )
 
-// TestLive_RealCLI exercises the real jira-cli shell-out end to end (binary on
-// PATH + keychain auth + REST v3 parse). Gated behind AO_JIRA_LIVE=1 so it never
-// runs in CI (no jira binary / no auth there). Supply a key from your own Jira —
-// nothing is hardcoded. Run locally with:
+// TestLive_RealREST exercises the real Jira Cloud REST v3 issue endpoint end to
+// end (base URL + login + API token → GET /rest/api/3/issue/{key} → v3 parse).
+// Gated behind AO_JIRA_LIVE=1 so it never runs in CI (no credential there).
+// Requires the same auth as the app: AO_JIRA_URL/JIRA_SERVER, AO_JIRA_EMAIL/
+// JIRA_LOGIN, and AO_JIRA_TOKEN/JIRA_API_TOKEN (or a jira-cli config file for the
+// non-secret base URL + login). Supply a key from your own Jira — nothing is
+// hardcoded. Run locally with:
 //
-//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_KEY=<YOUR-KEY> go test -run TestLive_RealCLI ./internal/adapters/jira/ -v
-func TestLive_RealCLI(t *testing.T) {
+//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_KEY=<YOUR-KEY> go test -run TestLive_RealREST ./internal/adapters/jira/ -v
+func TestLive_RealREST(t *testing.T) {
 	if os.Getenv("AO_JIRA_LIVE") != "1" {
-		t.Skip("set AO_JIRA_LIVE=1 to run the live jira-cli integration test")
+		t.Skip("set AO_JIRA_LIVE=1 to run the live Jira REST integration test")
 	}
 	key := os.Getenv("AO_JIRA_LIVE_KEY")
 	if key == "" {

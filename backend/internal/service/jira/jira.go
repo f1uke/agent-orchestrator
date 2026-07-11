@@ -1,6 +1,6 @@
 // Package jira is the read-only service that resolves a session's bound Jira key
 // and returns the issue's display context for the Summary tab. It is the seam
-// between the HTTP controller and the jira-cli adapter.
+// between the HTTP controller and the Jira Cloud REST v3 adapter.
 package jira
 
 import (
@@ -71,7 +71,7 @@ type MoveResult struct {
 //     the UI renders nothing.
 //   - Issue is set when the bound key resolved.
 //   - FetchError is a user-facing message when the session IS Jira-linked but
-//     the live fetch failed (missing issue, auth, or jira-cli unavailable). It
+//     the live fetch failed (missing issue, auth, or Jira unavailable). It
 //     is returned as a normal 200 so a Jira hiccup never breaks the Summary tab.
 type Result struct {
 	Linked     bool
@@ -356,11 +356,11 @@ func fetchMessage(err error) string {
 	case errors.Is(err, jiraadapter.ErrNotFound):
 		return "Jira issue not found or not visible to your account."
 	case errors.Is(err, jiraadapter.ErrAuthFailed):
-		return "Jira authentication failed — check your jira-cli login."
+		return "Jira authentication failed — check your Jira API token (JIRA_API_TOKEN)."
 	case errors.Is(err, jiraadapter.ErrBadKey):
 		return "The linked Jira key is invalid."
 	case errors.Is(err, jiraadapter.ErrUnavailable):
-		return "Couldn't reach Jira (jira-cli unavailable)."
+		return "Couldn't reach Jira."
 	default:
 		return "Couldn't load the Jira issue."
 	}
