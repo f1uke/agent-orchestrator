@@ -1,4 +1,5 @@
 export type SessionStatus =
+	| "todo"
 	| "working"
 	| "pr_open"
 	| "draft"
@@ -15,6 +16,7 @@ export type SessionStatus =
 	| "unknown";
 
 const sessionStatuses = new Set<SessionStatus>([
+	"todo",
 	"working",
 	"pr_open",
 	"draft",
@@ -246,6 +248,16 @@ export type WorkspaceSession = {
 	 * absent it is derived from {@link SessionStatus} via {@link workerDisplayStatus}.
 	 */
 	displayStatus?: WorkerDisplayStatus;
+	/** True for a prepared-but-not-started TODO (status === "todo"). */
+	isTodo?: boolean;
+	/** TODO spec (present only while `isTodo`): the branch the worktree will start
+	 * from, the intended PR merge target, whether to auto-name the new branch, the
+	 * queuing orchestrator, and the task prompt — all editable before Start. */
+	baseBranch?: string;
+	prTarget?: string;
+	autoNameBranch?: boolean;
+	createdBy?: string;
+	prompt?: string;
 };
 
 // Tracker providers whose ids the intake daemon stamps sessions with, in
@@ -424,12 +436,13 @@ export function workerStatusPulses(status: WorkerDisplayStatus): boolean {
  * {@link SessionStatus}. The board groups sessions into these columns so the
  * highest-ROrI work (a one-click merge) sits leftmost.
  */
-export type AttentionZone = "merge" | "action" | "pending" | "working" | "done";
+export type AttentionZone = "todo" | "merge" | "action" | "pending" | "working" | "done";
 
 /** Columns left→right, most-urgent first. "done" is the archive column. */
-export const attentionZoneOrder: AttentionZone[] = ["merge", "action", "pending", "working", "done"];
+export const attentionZoneOrder: AttentionZone[] = ["todo", "merge", "action", "pending", "working", "done"];
 
 export const attentionZoneLabel: Record<AttentionZone, string> = {
+	todo: "Todo",
 	merge: "Ready to merge",
 	action: "Needs you",
 	pending: "Pending",
@@ -439,6 +452,10 @@ export const attentionZoneLabel: Record<AttentionZone, string> = {
 
 export function attentionZone(session: WorkspaceSession): AttentionZone {
 	switch (session.status) {
+		// Prepared but not started — the board's far-left TODO lane. No
+		// branch/worktree/tmux exists until it is started.
+		case "todo":
+			return "todo";
 		// Terminal — archive.
 		case "merged":
 		case "terminated":

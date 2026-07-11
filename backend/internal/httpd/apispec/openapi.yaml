@@ -1981,6 +1981,108 @@ paths:
       summary: Send a message to a running session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/spec:
+    patch:
+      operationId: updateTodoSpec
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTodoSpecRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Edit a prepared TODO's spec before it is started
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/start:
+    post:
+      operationId: startTodoSession
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start (materialize) a prepared TODO session
+      tags:
+      - sessions
   /api/v1/sessions/cleanup:
     post:
       operationId: cleanupSessions
@@ -2518,14 +2620,20 @@ components:
       properties:
         activity:
           $ref: '#/components/schemas/DomainActivity'
+        autoNameBranch:
+          type: boolean
         autoNudgeComments:
           type:
           - "null"
           - boolean
+        baseBranch:
+          type: string
         branch:
           type: string
         createdAt:
           format: date-time
+          type: string
+        createdBy:
           type: string
         displayName:
           type: string
@@ -2534,6 +2642,8 @@ components:
         id:
           type: string
         isTerminated:
+          type: boolean
+        isTodo:
           type: boolean
         issueId:
           type: string
@@ -2546,6 +2656,7 @@ components:
           - string
         nextTransitionTo:
           enum:
+          - todo
           - working
           - pr_open
           - draft
@@ -2560,6 +2671,8 @@ components:
           - terminated
           - no_signal
           type: string
+        prTarget:
+          type: string
         previewRevision:
           format: int64
           type: integer
@@ -2567,12 +2680,15 @@ components:
           type: string
         projectId:
           type: string
+        prompt:
+          type: string
         prs:
           items:
             $ref: '#/components/schemas/SessionPRFacts'
           type: array
         status:
           enum:
+          - todo
           - working
           - pr_open
           - draft
@@ -3860,6 +3976,8 @@ components:
           type: string
         branch:
           type: string
+        createdBy:
+          type: string
         displayName:
           maxLength: 20
           type: string
@@ -3896,11 +4014,17 @@ components:
           - worker
           - orchestrator
           type: string
+        prTarget:
+          type: string
         projectId:
           type: string
         prompt:
           maxLength: 131072
           type: string
+        startImmediately:
+          type:
+          - "null"
+          - boolean
       required:
       - projectId
       type: object
@@ -3991,6 +4115,63 @@ components:
       required:
       - reviewerHandleId
       - reviews
+      type: object
+    UpdateTodoSpecRequest:
+      properties:
+        autoNameBranch:
+          type:
+          - "null"
+          - boolean
+        baseBranch:
+          type:
+          - "null"
+          - string
+        branch:
+          type:
+          - "null"
+          - string
+        displayName:
+          maxLength: 20
+          type:
+          - "null"
+          - string
+        harness:
+          enum:
+          - claude-code
+          - codex
+          - aider
+          - opencode
+          - grok
+          - droid
+          - amp
+          - agy
+          - crush
+          - cursor
+          - qwen
+          - copilot
+          - goose
+          - auggie
+          - continue
+          - devin
+          - cline
+          - kimi
+          - kiro
+          - kilocode
+          - vibe
+          - pi
+          - autohand
+          type:
+          - "null"
+          - string
+        prTarget:
+          type:
+          - "null"
+          - string
+        prompt:
+          maxLength: 4096
+          type:
+          - "null"
+          - string
       type: object
     WorkspaceRepo:
       properties:

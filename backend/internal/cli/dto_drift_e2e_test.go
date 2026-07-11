@@ -63,6 +63,22 @@ func (f *fakeSessionService) Spawn(_ context.Context, cfg ports.SpawnConfig) (do
 	}, nil
 }
 
+func (f *fakeSessionService) PrepareTodo(_ context.Context, cfg ports.SpawnConfig) (domain.Session, error) {
+	f.spawned = cfg
+	return domain.Session{
+		SessionRecord: domain.SessionRecord{ID: domain.SessionID(string(cfg.ProjectID) + "-1"), IsTodo: true},
+		Status:        domain.StatusTodo,
+	}, nil
+}
+
+func (f *fakeSessionService) StartTodo(_ context.Context, id domain.SessionID) (domain.Session, error) {
+	return domain.Session{SessionRecord: domain.SessionRecord{ID: id}, Status: domain.StatusIdle}, nil
+}
+
+func (f *fakeSessionService) UpdateTodoSpec(_ context.Context, id domain.SessionID, _ ports.TodoSpecPatch) (domain.Session, error) {
+	return domain.Session{SessionRecord: domain.SessionRecord{ID: id, IsTodo: true}, Status: domain.StatusTodo}, nil
+}
+
 func (f *fakeSessionService) SpawnOrchestrator(ctx context.Context, projectID domain.ProjectID, _ bool) (domain.Session, error) {
 	return f.Spawn(ctx, ports.SpawnConfig{ProjectID: projectID, Kind: domain.KindOrchestrator})
 }

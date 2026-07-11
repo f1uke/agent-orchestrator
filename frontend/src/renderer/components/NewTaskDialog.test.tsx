@@ -90,7 +90,7 @@ describe("NewTaskDialog", () => {
 
 		await user.type(screen.getByLabelText("Title"), "Fix fallback renderer");
 		await user.type(screen.getByLabelText("Brief"), "Restore the fallback renderer after WebGL init fails.");
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions", {
@@ -115,7 +115,7 @@ describe("NewTaskDialog", () => {
 
 		await user.type(screen.getByLabelText("Title"), "T");
 		await user.type(screen.getByLabelText("Brief"), "B");
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(spawnBody().branch).toBeUndefined();
@@ -130,7 +130,7 @@ describe("NewTaskDialog", () => {
 		await user.type(screen.getByLabelText("Title"), "T");
 		await user.type(screen.getByLabelText("Brief"), "B");
 		await user.type(screen.getByLabelText("New branch name"), "feature/foo");
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(spawnBody().branch).toBe("feature/foo");
@@ -145,12 +145,8 @@ describe("NewTaskDialog", () => {
 		const newBranchName = screen.getByLabelText("New branch name");
 		const agentField = screen.getByRole("combobox", { name: "Agent" });
 
-		expect(
-			startFrom.compareDocumentPosition(newBranchName) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
-		expect(
-			newBranchName.compareDocumentPosition(agentField) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
+		expect(startFrom.compareDocumentPosition(newBranchName) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(newBranchName.compareDocumentPosition(agentField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
 	it("initializes Start from to the project default branch and includes baseBranch in the payload", async () => {
@@ -189,7 +185,7 @@ describe("NewTaskDialog", () => {
 
 		await user.type(screen.getByLabelText("Title"), "T");
 		await user.type(screen.getByLabelText("Brief"), "B");
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(spawnBody().baseBranch).toBe("develop");
@@ -206,7 +202,7 @@ describe("NewTaskDialog", () => {
 		await user.click(screen.getByRole("combobox", { name: "Agent" }));
 		await user.click(await screen.findByRole("option", { name: "Cursor" }));
 
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(spawnBody().harness).toBe("cursor");
@@ -225,7 +221,7 @@ describe("NewTaskDialog", () => {
 
 		await user.type(screen.getByLabelText("Title"), "T");
 		await user.type(screen.getByLabelText("Brief"), "B");
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(spawnBody().harness).toBe("kiro");
@@ -254,14 +250,46 @@ describe("NewTaskDialog", () => {
 		unregister();
 	});
 
-	it("requires both title and brief", async () => {
+	it("omits startImmediately in the default Start-now mode", async () => {
 		renderDialog();
 		const user = userEvent.setup();
+		await waitForAgentCatalog();
 
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.type(screen.getByLabelText("Title"), "Now task");
+		await user.type(screen.getByLabelText("Brief"), "Start it now.");
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
-		expect(await screen.findByText("Title and brief are required.")).toBeInTheDocument();
-		expect(postMock).not.toHaveBeenCalled();
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(spawnBody().startImmediately).toBeUndefined();
+	});
+
+	it("queues a deferred TODO with startImmediately=false when Add to TODO is selected", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText("Title"), "Deferred task");
+		await user.type(screen.getByLabelText("Brief"), "Do it later.");
+		await user.click(screen.getByRole("button", { name: "Mode: queue in TODO" }));
+		await user.click(screen.getByRole("button", { name: "Add to TODO" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(spawnBody().startImmediately).toBe(false);
+	});
+
+	it("disables the primary action until both title and brief are filled", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		const submit = screen.getByRole("button", { name: "Start now" });
+		expect(submit).toBeDisabled();
+
+		await user.type(screen.getByLabelText("Title"), "T");
+		expect(submit).toBeDisabled();
+
+		await user.type(screen.getByLabelText("Brief"), "B");
+		expect(submit).toBeEnabled();
 	});
 
 	it.each([
@@ -288,7 +316,7 @@ describe("NewTaskDialog", () => {
 
 		await user.type(screen.getByLabelText("Title"), "Fix fallback renderer");
 		await user.type(screen.getByLabelText("Brief"), "Restore fallback renderer.");
-		await user.click(screen.getByRole("button", { name: "Start task" }));
+		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		expect(await screen.findByText(`${message} (${code})`)).toBeInTheDocument();
 	});

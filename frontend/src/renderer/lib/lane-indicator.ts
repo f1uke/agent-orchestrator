@@ -1,4 +1,4 @@
-import { Check, Circle, CircleDot, Contrast, type LucideIcon } from "lucide-react";
+import { Check, Circle, CircleDot, CircleDashed, Contrast, type LucideIcon } from "lucide-react";
 import type { AttentionZone } from "../types/workspace";
 
 // The four board lanes, each owning one hue in a 4-color semantic system
@@ -9,7 +9,7 @@ import type { AttentionZone } from "../types/workspace";
 // WORKING. The glyph shapes (filled dot ● / ring ◎ / half ◐ / check ✓) make the
 // sidebar scannable by shape as well as hue, using lucide equivalents of the
 // design's unicode glyphs.
-export type LaneKey = "working" | "action" | "pending" | "merge";
+export type LaneKey = "todo" | "working" | "action" | "pending" | "merge";
 
 export type LaneConfig = {
 	key: LaneKey;
@@ -28,6 +28,15 @@ export type LaneConfig = {
 };
 
 export const LANES: Record<LaneKey, LaneConfig> = {
+	todo: {
+		key: "todo",
+		label: "Todo",
+		hueVar: "var(--lane-todo)",
+		dotVar: "var(--lane-todo-bright)",
+		Icon: CircleDashed,
+		filled: false,
+		emptyText: "Nothing queued",
+	},
 	working: {
 		key: "working",
 		label: "Working",
@@ -68,7 +77,7 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 
 // Left→right board order and, identically, the sidebar's sort order (the design
 // sorts sidebar sessions by state in the same flow as the lanes).
-export const LANE_ORDER: LaneKey[] = ["working", "action", "pending", "merge"];
+export const LANE_ORDER: LaneKey[] = ["todo", "working", "action", "pending", "merge"];
 
 // Maps a derived attention zone to its lane. "done" is not a lane (terminated /
 // merged sessions live in the board's Done bar and leave the sidebar), so it

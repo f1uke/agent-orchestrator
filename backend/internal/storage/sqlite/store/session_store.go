@@ -253,6 +253,11 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		IsTerminated:      row.IsTerminated,
 		Reactivated:       row.Reactivated,
 		AutoNudgeComments: nullInt64ToBoolPtr(row.AutoNudgeComments),
+		IsTodo:            row.IsTodo,
+		BaseBranch:        row.BaseBranch,
+		AutoNameBranch:    row.AutoNameBranch,
+		PRTarget:          row.PRTarget,
+		CreatedBy:         domain.SessionID(row.CreatedBy),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -290,6 +295,11 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		PreviewURL:        rec.Metadata.PreviewURL,
 		PreviewRevision:   rec.Metadata.PreviewRevision,
 		AutoNudgeComments: boolPtrToNullInt64(rec.AutoNudgeComments),
+		IsTodo:            rec.IsTodo,
+		BaseBranch:        rec.BaseBranch,
+		AutoNameBranch:    rec.AutoNameBranch,
+		PRTarget:          rec.PRTarget,
+		CreatedBy:         string(rec.CreatedBy),
 		CreatedAt:         rec.CreatedAt,
 		UpdatedAt:         rec.UpdatedAt,
 	}
@@ -316,6 +326,11 @@ func recordToUpdate(rec domain.SessionRecord) gen.UpdateSessionParams {
 		PreviewURL:        rec.Metadata.PreviewURL,
 		PreviewRevision:   rec.Metadata.PreviewRevision,
 		AutoNudgeComments: boolPtrToNullInt64(rec.AutoNudgeComments),
+		IsTodo:            rec.IsTodo,
+		BaseBranch:        rec.BaseBranch,
+		AutoNameBranch:    rec.AutoNameBranch,
+		PRTarget:          rec.PRTarget,
+		CreatedBy:         string(rec.CreatedBy),
 		UpdatedAt:         rec.UpdatedAt,
 	}
 }

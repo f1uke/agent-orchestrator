@@ -52,6 +52,12 @@ type ListFilter struct {
 // *sessionmanager.Manager in production, a fake in tests.
 type commander interface {
 	Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error)
+	// PrepareTodo persists a deferred/TODO session (spec only, nothing
+	// materialized); StartTodo materializes it in place; UpdateTodoSpec edits
+	// the spec while still queued.
+	PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error)
+	StartTodo(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.SessionRecord, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
@@ -174,6 +180,38 @@ func (s *Service) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	s.emitSpawned(rec, s.now().Sub(start).Milliseconds())
 	if firstSession {
 		s.emitFirstSessionSpawned(rec, project)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// PrepareTodo persists a deferred/TODO session (the board's TODO lane): the spec
+// is saved but no branch/worktree/tmux is created. StartTodo materializes it.
+func (s *Service) PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domain.Session, error) {
+	if _, err := s.requireProject(ctx, cfg.ProjectID); err != nil {
+		return domain.Session{}, err
+	}
+	rec, err := s.manager.PrepareTodo(ctx, cfg)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// StartTodo materializes a prepared TODO in place and hands it to the normal
+// session lifecycle. The returned read model is the now-live session.
+func (s *Service) StartTodo(ctx context.Context, id domain.SessionID) (domain.Session, error) {
+	rec, err := s.manager.StartTodo(ctx, id)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// UpdateTodoSpec persists edits to a prepared TODO's spec before it is started.
+func (s *Service) UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.Session, error) {
+	rec, err := s.manager.UpdateTodoSpec(ctx, id, patch)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
 	}
 	return s.toSession(ctx, rec)
 }
@@ -488,7 +526,9 @@ func (s *Service) Delete(ctx context.Context, id domain.SessionID, force bool) e
 	if err != nil {
 		return err
 	}
-	if sess.Status != domain.StatusMerged && sess.Status != domain.StatusTerminated {
+	// A prepared TODO can always be deleted (nothing was materialized); a live
+	// session must be finished (merged or terminated) first.
+	if sess.Status != domain.StatusTodo && sess.Status != domain.StatusMerged && sess.Status != domain.StatusTerminated {
 		return toAPIError(sessionmanager.ErrNotTerminal)
 	}
 	return toAPIError(s.manager.PurgeSession(ctx, id, force))
@@ -677,6 +717,8 @@ func toAPIError(err error) error {
 		return apierr.Invalid("AGENT_BINARY_NOT_FOUND", err.Error(), nil)
 	case errors.Is(err, ports.ErrRuntimePrerequisite):
 		return apierr.Invalid("RUNTIME_PREREQUISITE_MISSING", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrNotTodo):
+		return apierr.Conflict("SESSION_NOT_TODO", "Session is not a prepared TODO (already started or never was one)", nil)
 	case errors.Is(err, sessionmanager.ErrNotTerminal):
 		return apierr.Conflict("SESSION_NOT_TERMINAL", "Session is not finished (merged or terminated)", nil)
 	case errors.Is(err, ports.ErrWorkspaceDirty):

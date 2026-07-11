@@ -69,17 +69,33 @@ type SessionRecord struct {
 	// auto-nudged when its PR has unresolved review comments. nil = inherit the
 	// global default (autonudge settings); non-nil = explicit on/off. Exposed in
 	// the API read model so the Comments-tab switch can show/set it.
-	AutoNudgeComments *bool           `json:"autoNudgeComments"`
-	Metadata          SessionMetadata `json:"-"`
-	CreatedAt         time.Time       `json:"createdAt"`
-	UpdatedAt         time.Time       `json:"updatedAt"`
+	AutoNudgeComments *bool `json:"autoNudgeComments"`
+	// IsTodo marks a session PREPARED BUT NOT STARTED: the board's TODO lane.
+	// No branch/worktree/tmux exists yet — only the spec below is persisted.
+	// Start materializes the row in place (clearing this flag in MarkSpawned),
+	// so the id carries through into the live session. Durable fact; drives the
+	// StatusTodo display status.
+	IsTodo bool `json:"isTodo,omitempty"`
+	// BaseBranch, AutoNameBranch, PRTarget and CreatedBy are the deferred spec
+	// captured at TODO create-time and replayed verbatim on Start. BaseBranch is
+	// the branch the worktree is created from; AutoNameBranch asks for an AI
+	// branch name when Branch is empty; PRTarget is the intended PR merge target
+	// (informational, convention-derived); CreatedBy is the orchestrator session
+	// that queued the task (for report-back). Empty for normal spawns.
+	BaseBranch     string          `json:"baseBranch,omitempty"`
+	AutoNameBranch bool            `json:"autoNameBranch,omitempty"`
+	PRTarget       string          `json:"prTarget,omitempty"`
+	CreatedBy      SessionID       `json:"createdBy,omitempty"`
+	Metadata       SessionMetadata `json:"-"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord
 // plus the derived display Status.
 type Session struct {
 	SessionRecord
-	Status SessionStatus `json:"status" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
+	Status SessionStatus `json:"status" enum:"todo,working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
 	// StatusReason names the derivation rule that produced Status, so the UI can
 	// explain WHY (e.g. a needs_input from a lost-hook timeout vs a real agent
 	// prompt). Derived on read, never stored.
@@ -88,7 +104,7 @@ type Session struct {
 	// new signal arrives; nil when the status is sticky/terminal. NextTransitionTo
 	// is what it becomes. Both derived on read.
 	NextTransitionAt *time.Time    `json:"nextTransitionAt,omitempty"`
-	NextTransitionTo SessionStatus `json:"nextTransitionTo,omitempty" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
+	NextTransitionTo SessionStatus `json:"nextTransitionTo,omitempty" enum:"todo,working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
 	TerminalHandleID string        `json:"terminalHandleId,omitempty"`
 	// PRs are the session's attributed pull requests (one session can own many).
 	// They feed status derivation and are surfaced on the API read model. Not

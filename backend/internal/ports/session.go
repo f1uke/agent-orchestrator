@@ -29,4 +29,24 @@ type SpawnConfig struct {
 	// DisplayName is the user-facing sidebar label. Empty falls back to the
 	// session id in the read model (e.g. orchestrator sessions).
 	DisplayName string
+	// PRTarget is the intended PR merge target for a deferred/TODO task,
+	// informational and convention-derived. Persisted on the TODO row so the
+	// board detail modal can show/edit it; not consumed by materialization.
+	PRTarget string
+	// CreatedBy is the orchestrator session id that queued a deferred/TODO task,
+	// so it can be pinged with the report-back when the worker finishes. Empty
+	// for a normal interactive spawn.
+	CreatedBy domain.SessionID
+}
+
+// TodoSpecPatch carries the editable fields of a prepared TODO. A nil pointer
+// leaves that field unchanged; a non-nil pointer sets it (including to empty).
+type TodoSpecPatch struct {
+	DisplayName    *string
+	Harness        *domain.AgentHarness
+	Branch         *string
+	BaseBranch     *string
+	PRTarget       *string
+	Prompt         *string
+	AutoNameBranch *bool
 }

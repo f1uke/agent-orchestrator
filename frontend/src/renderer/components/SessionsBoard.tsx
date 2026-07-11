@@ -2,7 +2,7 @@ import { type KeyboardEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, CircleCheck, MoreHorizontal, Plus, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, CircleCheck, MoreHorizontal, Play, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { captureRendererEvent } from "../lib/telemetry";
@@ -22,6 +22,8 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { OrchestratorIcon } from "./icons";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { TodoDetailDialog } from "./TodoDetailDialog";
+import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
@@ -51,6 +53,7 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const sessions = workspaces.flatMap((w) => workerSessions(w.sessions));
 	const orchestrator = projectId ? newestActiveOrchestrator(workspaces[0]?.sessions ?? []) : undefined;
 	const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
+	const [todoDetail, setTodoDetail] = useState<WorkspaceSession | null>(null);
 	const [isSpawning, setIsSpawning] = useState(false);
 	const restartingProjectIds = useUiStore((state) => state.restartingProjectIds);
 	const setProjectRestarting = useUiStore((state) => state.setProjectRestarting);
@@ -74,6 +77,18 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 			to: "/projects/$projectId/sessions/$sessionId",
 			params: { projectId: session.workspaceId, sessionId: session.id },
 		});
+
+	// A TODO card opens the detail/edit modal instead of navigating — it has no
+	// live terminal yet.
+	const openTodo = (session: WorkspaceSession) => setTodoDetail(session);
+	const handleTodoStarted = (sessionId: string) => {
+		const workspaceId = projectId ?? todoDetail?.workspaceId;
+		if (!workspaceId) return;
+		void navigate({
+			to: "/projects/$projectId/sessions/$sessionId",
+			params: { projectId: workspaceId, sessionId },
+		});
+	};
 
 	const openOrchestrator = async () => {
 		if (!projectId || isProjectRestarting) return;
@@ -177,9 +192,15 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				{workspaceQuery.isError ? (
 					<p className="py-10 text-center text-[12px] text-passive">Could not load sessions.</p>
 				) : (
-					<div className="grid h-full grid-cols-4 gap-2">
+					<div className="grid h-full grid-cols-5 gap-2">
 						{COLUMNS.map((col) => (
-							<ZoneColumn key={col.key} col={col} sessions={byZone.get(col.key) ?? []} onOpen={openSession} />
+							<ZoneColumn
+								key={col.key}
+								col={col}
+								sessions={byZone.get(col.key) ?? []}
+								onOpen={col.key === "todo" ? openTodo : openSession}
+								onStarted={handleTodoStarted}
+							/>
 						))}
 					</div>
 				)}
@@ -230,6 +251,11 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				projectId={projectId}
 				onCreated={(sessionId) => void handleTaskCreated(sessionId)}
 				onOpenChange={setIsNewTaskOpen}
+			/>
+			<TodoDetailDialog
+				session={todoDetail}
+				onOpenChange={(open) => !open && setTodoDetail(null)}
+				onStarted={handleTodoStarted}
 			/>
 		</div>
 	);
@@ -482,11 +508,14 @@ function ZoneColumn({
 	col,
 	sessions,
 	onOpen,
+	onStarted,
 }: {
 	col: LaneConfig;
 	sessions: WorkspaceSession[];
 	onOpen: (s: WorkspaceSession) => void;
+	onStarted: (sessionId: string) => void;
 }) {
+	const isTodo = col.key === "todo";
 	const { hueVar, dotVar } = col;
 	return (
 		<section
@@ -524,9 +553,19 @@ function ZoneColumn({
 					<EmptyLane col={col} />
 				) : (
 					<div className="flex flex-col gap-2.5">
-						{sessions.map((session) => (
-							<SessionCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} />
-						))}
+						{sessions.map((session) =>
+							isTodo ? (
+								<TodoCard
+									key={session.id}
+									session={session}
+									col={col}
+									onOpen={() => onOpen(session)}
+									onStarted={onStarted}
+								/>
+							) : (
+								<SessionCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} />
+							),
+						)}
 					</div>
 				)}
 			</div>
@@ -669,6 +708,135 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 				)}
 			</DropdownMenuContent>
 		</DropdownMenu>
+	);
+}
+
+// A TODO-lane card: a prepared, not-yet-started worker. Unlike SessionCard it
+// has no PR footer and no navigate-on-click (clicking opens the detail/edit
+// modal); its footer is a split "▶ Start ▾" button whose caret picks the agent
+// to start with. Start materializes the session in place (POST /start).
+function TodoCard({
+	session,
+	col,
+	onOpen,
+	onStarted,
+}: {
+	session: WorkspaceSession;
+	col: LaneConfig;
+	onOpen: () => void;
+	onStarted: (sessionId: string) => void;
+}) {
+	const queryClient = useQueryClient();
+	const [menuOpen, setMenuOpen] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const agentsQuery = useAgentsQuery();
+	const branch = session.branch || "";
+	const showBranch = session.autoNameBranch || branch === "" ? true : !sameLabel(branch, session.title);
+	const branchLabel = branch && !session.autoNameBranch ? branch : "auto-named on start";
+
+	const start = useMutation({
+		mutationFn: async (harness?: string) => {
+			if (harness && harness !== session.provider) {
+				const { error: patchErr } = await apiClient.PATCH("/api/v1/sessions/{sessionId}/spec", {
+					params: { path: { sessionId: session.id } },
+					body: { harness: harness as never },
+				});
+				if (patchErr) throw new Error(apiErrorMessage(patchErr, "Could not set agent"));
+			}
+			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/start", {
+				params: { path: { sessionId: session.id } },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError, "Could not start task"));
+		},
+		onSuccess: async () => {
+			setMenuOpen(false);
+			await queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+			onStarted(session.id);
+		},
+		onError: (e) => setError(e instanceof Error ? e.message : "Could not start task"),
+	});
+
+	const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (event.currentTarget !== event.target) return;
+		if (event.key !== "Enter" && event.key !== " ") return;
+		event.preventDefault();
+		onOpen();
+	};
+
+	const agentOptions = agentsQuery.data?.supported ?? [];
+
+	return (
+		<div
+			className="group w-full overflow-visible rounded-[10px] text-left transition-colors"
+			style={{
+				background: "var(--kanban-card-bg)",
+				border: "1px solid var(--kanban-card-border)",
+				borderLeft: `3px solid ${col.hueVar}`,
+			}}
+		>
+			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0} className="cursor-pointer">
+				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
+					<span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: col.dotVar }}>
+						{/* Ring (not filled) dot: queued, not live. */}
+						<span className="size-2 shrink-0 rounded-full border-[1.5px]" style={{ borderColor: col.dotVar }} />
+						Queued
+					</span>
+					<span className="ml-auto font-mono text-[10.5px] tracking-[0.04em] text-passive">
+						{agentLabel(session.provider)}
+					</span>
+				</div>
+				<div className="line-clamp-2 overflow-hidden px-[13px] pb-2 text-[13px] font-medium leading-[1.42] tracking-[-0.01em] text-foreground">
+					{session.title}
+				</div>
+				{showBranch && <div className="px-[13px] pb-2.5 font-mono text-[10.5px] text-passive">{branchLabel}</div>}
+			</div>
+			<div
+				className="flex items-center justify-end px-[13px] py-2"
+				style={{ borderTop: "1px solid var(--kanban-card-divider)" }}
+				onClick={(event) => event.stopPropagation()}
+			>
+				<div className="inline-flex">
+					<button
+						type="button"
+						disabled={start.isPending}
+						onClick={() => start.mutate(undefined)}
+						className="inline-flex items-center gap-1.5 rounded-l-[7px] px-3 py-1 text-[11.5px] font-semibold text-[#12121a] disabled:opacity-60"
+						style={{ background: col.dotVar }}
+					>
+						{start.isPending ? (
+							<span className="size-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+						) : (
+							<Play className="size-3" aria-hidden="true" />
+						)}
+						Start
+					</button>
+					<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+						<DropdownMenuTrigger asChild>
+							<button
+								type="button"
+								aria-label="Start with a specific agent"
+								disabled={start.isPending}
+								className="inline-flex w-6 items-center justify-center rounded-r-[7px] text-[#12121a] disabled:opacity-60"
+								style={{ background: col.dotVar, borderLeft: "1px solid rgba(0,0,0,0.22)" }}
+							>
+								<ChevronDown className="size-3" aria-hidden="true" />
+							</button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-48">
+							<div className="px-2 py-1 font-mono text-[9.5px] font-semibold uppercase tracking-[0.07em] text-passive">
+								Start with
+							</div>
+							{agentOptions.map((a) => (
+								<DropdownMenuItem key={a.id} onSelect={() => start.mutate(a.id)}>
+									<span className="truncate">{a.label}</span>
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
+				</div>
+			</div>
+			{error && <div className="px-[13px] pb-2 text-[11px] text-destructive">{error}</div>}
+		</div>
 	);
 }
 
