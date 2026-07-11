@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,6 +30,7 @@ type spawnOptions struct {
 	from           string
 	branch         string
 	prompt         string
+	promptFile     string
 	issue          string
 	name           string
 	claimPR        string
@@ -92,6 +94,16 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if baseBranch == "" {
 				return usageError{fmt.Errorf("--from is required: name the branch the worktree starts from, e.g. --from main")}
 			}
+			// Resolve the initial prompt from --prompt / --prompt-file. This runs
+			// after the cheap synchronous flag checks above so a missing --from (or
+			// an overlong --name) fails fast rather than blocking on `--prompt-file
+			// -` stdin; it still precedes any daemon round-trip so a bad prompt-file
+			// exits 2 without a network call.
+			prompt, err := resolvePrompt(opts.prompt, opts.promptFile, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			opts.prompt = prompt
 
 			project, err := ctx.resolveSpawnProject(cmd.Context(), opts.project)
 			if err != nil {
@@ -189,6 +201,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.from, "from", "", "REQUIRED source branch the worktree is created from, e.g. main (matches the UI \"Start from\" field)")
 	f.StringVar(&opts.branch, "branch", "", "New branch name for the session worktree (default: AI-named from the task, like the UI when left blank)")
 	f.StringVar(&opts.prompt, "prompt", "", "Initial prompt for the agent")
+	f.StringVar(&opts.promptFile, "prompt-file", "", "Read the initial prompt from a file, or '-' for stdin; mutually exclusive with --prompt. Use for large prompts that would exceed the shell's argument-length limit.")
 	f.StringVar(&opts.issue, "issue", "", "Issue id to associate with the session")
 	f.StringVar(&opts.name, "name", "", "Display name shown in the sidebar (default: derived from --prompt, max 20 characters)")
 	f.StringVar(&opts.claimPR, "claim-pr", "", "Immediately claim an existing PR for the spawned session: a github.com PR URL/number, or a full GitLab merge-request URL")
@@ -333,6 +346,37 @@ func resolveSpawnHarness(explicit string, project projectDetails) (string, error
 		}
 	}
 	return "", usageError{fmt.Errorf("agent could not be resolved; pass --agent or configure `ao project set-config %s --worker-agent <agent>`", project.ID)}
+}
+
+// resolvePrompt returns the effective initial prompt from --prompt /
+// --prompt-file. The two are mutually exclusive. --prompt-file "-" reads stdin;
+// any other value reads that file. Loading from a file (or stdin) also lets a
+// large prompt bypass the shell's ARG_MAX that a literal --prompt would hit on
+// the command line. Mirrors `ao review submit --body`.
+func resolvePrompt(prompt, promptFile string, stdin io.Reader) (string, error) {
+	file := strings.TrimSpace(promptFile)
+	if file == "" {
+		return prompt, nil
+	}
+	if prompt != "" {
+		return "", usageError{errors.New("--prompt and --prompt-file are mutually exclusive; pass only one")}
+	}
+	var (
+		raw []byte
+		err error
+	)
+	if file == "-" {
+		raw, err = io.ReadAll(stdin)
+	} else {
+		raw, err = os.ReadFile(file)
+	}
+	if err != nil {
+		return "", usageError{fmt.Errorf("read prompt file %q: %w", file, err)}
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", usageError{fmt.Errorf("prompt file %q is empty", file)}
+	}
+	return string(raw), nil
 }
 
 func resolveSpawnDisplayName(explicit, prompt string) string {

@@ -23,7 +23,14 @@ import (
 )
 
 const (
-	maxPromptLen      = 4096
+	// maxPromptLen bounds the spawn prompt. It is a defensive guard against a
+	// runaway body, not an agent/model context limit: the prompt is delivered to
+	// the agent as a positional CLI argument (e.g. `claude … -- <prompt>`), so
+	// the real ceiling is the OS ARG_MAX (~1 MiB on macOS/Linux for the whole
+	// argv+env). 128 KiB leaves comfortable headroom for env and shell-quote
+	// expansion while still rejecting pathological multi-megabyte bodies. Keep in
+	// sync with the `maxLength` tag on SpawnSessionRequest.Prompt in dto.go.
+	maxPromptLen      = 128 * 1024
 	maxMessageLen     = 4096
 	maxDisplayNameLen = 20
 )

@@ -75,6 +75,14 @@ leaving it blank asks the daemon to AI-name the branch from the task — the sam
 `baseBranch` + `autoNameBranch` request the desktop New task modal sends — so the
 CLI and UI take an identical spawn path.
 
+The initial prompt comes from either `--prompt "<text>"` or `--prompt-file
+<path>` (the two are mutually exclusive — passing both is a usage error).
+`--prompt-file -` reads the prompt from stdin. Loading the prompt from a file or
+stdin keeps a large brief off the command line, avoiding the shell's
+argument-length limit (`ARG_MAX`); the daemon accepts prompts up to 128 KiB. An
+empty or unreadable `--prompt-file` fails fast with a usage error before any
+daemon call.
+
 If `--agent` / `--harness` is omitted, `ao spawn` uses the resolved project's
 `worker.agent` config. Before spawning, the CLI refreshes the advisory agent
 catalog and fails early when the selected agent is unsupported, not installed,

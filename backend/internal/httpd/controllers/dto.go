@@ -181,8 +181,11 @@ type SpawnSessionRequest struct {
 	BaseBranch string `json:"baseBranch,omitempty"`
 	// AutoNameBranch asks the manager to generate a gitflow branch name via
 	// the session's agent (one-shot) when Branch is empty.
-	AutoNameBranch bool   `json:"autoNameBranch,omitempty"`
-	Prompt         string `json:"prompt,omitempty" maxLength:"4096"`
+	AutoNameBranch bool `json:"autoNameBranch,omitempty"`
+	// Prompt is the initial task for the agent. The 128 KiB cap mirrors
+	// maxPromptLen in sessions.go — a defensive bound well under ARG_MAX, not an
+	// agent/model context limit. Keep the two in sync.
+	Prompt string `json:"prompt,omitempty" maxLength:"131072"`
 	// DisplayName is the sidebar label for the session, capped at 20 characters.
 	// `ao spawn --name` always sets it; other clients (e.g. the desktop new-task
 	// dialog) may omit it and fall back to the session id in the read model.

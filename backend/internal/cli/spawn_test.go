@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func authorizedAgentsJSON(agent string) string {
@@ -744,6 +746,125 @@ func TestSpawnRequiresFromBranch(t *testing.T) {
 	_, _, err := executeCLI(t, Deps{}, "spawn", "--project", "demo", "--agent", "codex", "--name", "worker", "--prompt", "Fix it")
 	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "--from") {
 		t.Fatalf("err=%v exit=%d, want a --from usage error", err, ExitCode(err))
+	}
+}
+
+// spawnPromptServer captures the prompt the daemon receives from a spawn.
+func spawnPromptServer(t *testing.T, capture *spawnRequest) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","defaultBranch":"main"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			if err := json.NewDecoder(r.Body).Decode(capture); err != nil {
+				t.Errorf("decode spawn body: %v", err)
+			}
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-9","status":"idle"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestSpawnPromptFileReadsFile asserts `--prompt-file <path>` loads the prompt
+// from a file and forwards it verbatim — including a body far larger than the
+// old 4 KB cap — so large prompts no longer need to fit on the command line.
+func TestSpawnPromptFileReadsFile(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var req spawnRequest
+	srv := spawnPromptServer(t, &req)
+	writeRunFileFor(t, cfg, srv)
+
+	prompt := strings.Repeat("A very long brief. ", 500) // ~9.5 KB
+	path := filepath.Join(t.TempDir(), "brief.md")
+	if err := os.WriteFile(path, []byte(prompt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "main", "--project", "demo", "--agent", "codex", "--name", "worker", "--prompt-file", path)
+	if err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if req.Prompt != prompt {
+		t.Fatalf("prompt len = %d, want %d (file content forwarded verbatim)", len(req.Prompt), len(prompt))
+	}
+}
+
+// TestSpawnPromptFileFromStdin asserts `--prompt-file -` reads the prompt from
+// stdin, so a caller can pipe a large brief without a temp file.
+func TestSpawnPromptFileFromStdin(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var req spawnRequest
+	srv := spawnPromptServer(t, &req)
+	writeRunFileFor(t, cfg, srv)
+
+	prompt := "read me from stdin\nwith multiple lines\n"
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }, In: strings.NewReader(prompt)},
+		"spawn", "--from", "main", "--project", "demo", "--agent", "codex", "--name", "worker", "--prompt-file", "-")
+	if err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if req.Prompt != prompt {
+		t.Fatalf("prompt = %q, want %q (stdin forwarded verbatim)", req.Prompt, prompt)
+	}
+}
+
+// TestSpawnPromptAndPromptFileMutuallyExclusive asserts passing both --prompt
+// and --prompt-file is a usage error (exit 2) that never contacts the daemon.
+func TestSpawnPromptAndPromptFileMutuallyExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "brief.md")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := executeCLI(t, Deps{}, "spawn", "--from", "main", "--project", "demo", "--agent", "codex", "--name", "worker",
+		"--prompt", "inline", "--prompt-file", path)
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err=%v exit=%d, want a mutually-exclusive usage error", err, ExitCode(err))
+	}
+}
+
+// TestSpawnChecksFromBeforeReadingStdinPrompt asserts the cheap synchronous
+// flag validations (here --from) run before `--prompt-file -` reads stdin, so a
+// missing --from exits 2 immediately instead of an interactive invocation
+// hanging on stdin. The stdin reader errors if read: if prompt resolution ran
+// first, the error would mention "read prompt file", not "--from".
+func TestSpawnChecksFromBeforeReadingStdinPrompt(t *testing.T) {
+	deps := Deps{In: iotest.ErrReader(errors.New("stdin-sentinel-read"))}
+	_, _, err := executeCLI(t, deps, "spawn", "--project", "demo", "--agent", "codex", "--name", "worker", "--prompt-file", "-")
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "--from") {
+		t.Fatalf("err=%v exit=%d, want a --from usage error before stdin is read", err, ExitCode(err))
+	}
+}
+
+// TestSpawnPromptFileMissing asserts a missing --prompt-file path surfaces a
+// clear error before any daemon round-trip.
+func TestSpawnPromptFileMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.md")
+	_, _, err := executeCLI(t, Deps{}, "spawn", "--from", "main", "--project", "demo", "--agent", "codex", "--name", "worker",
+		"--prompt-file", missing)
+	if err == nil || !strings.Contains(err.Error(), "prompt file") {
+		t.Fatalf("err=%v, want a read error mentioning the prompt file", err)
+	}
+}
+
+// TestSpawnPromptFileEmpty asserts an empty --prompt-file is rejected as a usage
+// error so a mistyped path can't silently spawn a promptless agent.
+func TestSpawnPromptFileEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.md")
+	if err := os.WriteFile(path, []byte("   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := executeCLI(t, Deps{}, "spawn", "--from", "main", "--project", "demo", "--agent", "codex", "--name", "worker",
+		"--prompt-file", path)
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("err=%v exit=%d, want an empty-prompt-file usage error", err, ExitCode(err))
 	}
 }
 

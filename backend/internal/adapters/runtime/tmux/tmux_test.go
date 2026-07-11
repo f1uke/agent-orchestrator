@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -271,6 +272,70 @@ func TestCreateIssuesNewSessionAndStatusOff(t *testing.T) {
 	// Call 3: has-session (IsAlive, uses exact-match target =sess-1).
 	if got, want := fr.calls[3].args, hasSessionArgs("sess-1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("call[3] = %#v, want %#v", got, want)
+	}
+}
+
+// TestCreateWritesScriptForOversizedLaunchCommand asserts that when the launch
+// command exceeds tmux's inline command-length limit (a large prompt/system
+// prompt), the runtime hands the shell a self-deleting script FILE instead of
+// `sh -c <cmd>`, so tmux's ~16 KiB "command too long" limit does not cap prompt
+// size. The prompt then reaches the agent as a normal argv element (ARG_MAX).
+func TestCreateWritesScriptForOversizedLaunchCommand(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{nil, nil, nil, nil}
+	dataDir := t.TempDir()
+	bigPrompt := strings.Repeat("P", 20*1024) // exceeds tmux's inline command limit
+
+	_, err := r.Create(context.Background(), ports.RuntimeConfig{
+		SessionID:     "sess-1",
+		WorkspacePath: "/tmp/ws",
+		Argv:          []string{"/usr/bin/claude", "--", bigPrompt},
+		Env:           map[string]string{"AO_DATA_DIR": dataDir},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	nsArgs := fr.calls[0].args
+	// The oversized launch is `<shell> <scriptPath>` (no "-c"): the last arg is
+	// the script path, and the one before it is the shell, not "-c".
+	if n := len(nsArgs); nsArgs[n-2] == "-c" {
+		t.Fatalf("expected script-file launch, got inline -c: %v", nsArgs)
+	}
+	scriptPath := nsArgs[len(nsArgs)-1]
+	if !strings.HasPrefix(scriptPath, dataDir) {
+		t.Fatalf("script path %q not under data dir %q", scriptPath, dataDir)
+	}
+	data, rerr := os.ReadFile(scriptPath)
+	if rerr != nil {
+		t.Fatalf("read launch script: %v", rerr)
+	}
+	if !strings.HasPrefix(string(data), `rm -f -- "$0"`) {
+		t.Fatalf("launch script missing self-delete header")
+	}
+	if !strings.Contains(string(data), bigPrompt) {
+		t.Fatal("launch script does not contain the full prompt")
+	}
+}
+
+// TestCreateUsesInlineCommandForNormalLaunch guards that an ordinary (small)
+// launch still uses `sh -c <cmd>` — the script-file path is a targeted fallback
+// for oversized commands only, so normal sessions are unchanged.
+func TestCreateUsesInlineCommandForNormalLaunch(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{nil, nil, nil, nil}
+
+	_, err := r.Create(context.Background(), ports.RuntimeConfig{
+		SessionID:     "sess-1",
+		WorkspacePath: "/tmp/ws",
+		Argv:          []string{"echo", "hi"},
+		Env:           map[string]string{"AO_DATA_DIR": t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	nsArgs := fr.calls[0].args
+	if n := len(nsArgs); nsArgs[n-2] != "-c" {
+		t.Fatalf("expected inline `-c` launch for a small command, got: %v", nsArgs)
 	}
 }
 
