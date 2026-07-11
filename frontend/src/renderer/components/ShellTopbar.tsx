@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { GitBranch, LayoutDashboard, PanelRightClose, PanelRightOpen, Plus, Square, Trash2 } from "lucide-react";
+import { GitBranch, PanelRightClose, PanelRightOpen, Plus, Square, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { NotificationCenter } from "./NotificationCenter";
 import {
@@ -40,11 +40,13 @@ const TOPBAR_ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: 
 // (.is-under-titlebar-nav pads past them). The
 // variant is derived from the route, not props: a sessionId in the URL swaps
 // the lead to the session identity (orchestrator crumb + mode badge, or worker
-// branch + status pill) and the actions to board/orchestrator + inspector
-// controls (orchestrators open the Kanban board; workers open their orchestrator);
-// otherwise it's the dashboard crumb plus the Orchestrator launcher when a
-// project is in scope. Merges the old DashboardTopbar/Topbar pair —
-// agent-orchestrator keeps those as two components aligned only by CSS.
+// branch + status pill). The top-right actions are a single shared cluster —
+// the primary "New task" button + the notifications bell, identical in order and
+// style — on both the project board and the orchestrator session; worker sessions
+// add their own controls (kill · orchestrator link · inspector) after the bell.
+// Board ↔ orchestrator switching lives in the sidebar's per-project buttons, not
+// here. Merges the old DashboardTopbar/Topbar pair — agent-orchestrator keeps
+// those as two components aligned only by CSS.
 export function ShellTopbar() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -72,9 +74,10 @@ export function ShellTopbar() {
 	const projectLabel = project?.name ?? session?.workspaceName ?? (projectId ? "" : "agent-orchestrator");
 	const orchestrator = projectId ? findProjectOrchestrator(all, projectId) : undefined;
 	const isProjectRestarting = projectId ? restartingProjectIds.has(projectId) : false;
-
-	const openBoard = () =>
-		projectId ? void navigate({ to: "/projects/$projectId", params: { projectId } }) : void navigate({ to: "/" });
+	// The New task action + bell form one shared top-right cluster, shown on the
+	// project board and the orchestrator session (identical order + style).
+	// Worker sessions keep their own action controls instead.
+	const showNewTask = isProjectBoardRoute || (isSessionRoute && isOrchestrator);
 
 	const openNewTask = () => {
 		if (!projectId || isProjectRestarting) return;
@@ -161,37 +164,30 @@ export function ShellTopbar() {
 			<div className="dashboard-app-header__spacer" />
 
 			<div className="dashboard-app-header__actions">
+				{/* Shared top-right cluster — primary New task then the bell, in the
+				    same order + style on both the board and the orchestrator. */}
+				{showNewTask ? (
+					<button
+						aria-label="New task"
+						className="dashboard-app-header__primary-btn"
+						disabled={isProjectRestarting}
+						onClick={openNewTask}
+						style={noDragStyle}
+						type="button"
+					>
+						<Plus className="h-3.5 w-3.5" aria-hidden="true" />
+						New task
+					</button>
+				) : null}
 				<NotificationCenter style={noDragStyle} />
-				{isSessionRoute ? (
+				{/* Worker sessions keep their own controls after the bell (kill ·
+				    orchestrator link · inspector). Page switching for the board and
+				    orchestrator now lives in the sidebar's per-project buttons. */}
+				{isSessionRoute && !isOrchestrator ? (
 					<>
-						{isOrchestrator ? (
-							<>
-								<button
-									aria-label="New task"
-									className="dashboard-app-header__primary-btn"
-									disabled={isProjectRestarting}
-									onClick={openNewTask}
-									style={noDragStyle}
-									type="button"
-								>
-									<Plus className="h-3.5 w-3.5" aria-hidden="true" />
-									New task
-								</button>
-								<button
-									aria-label="Open Kanban"
-									className="dashboard-app-header__accent-btn"
-									onClick={openBoard}
-									style={noDragStyle}
-									type="button"
-								>
-									<LayoutDashboard className="h-3.5 w-3.5" aria-hidden="true" />
-									Kanban
-								</button>
-							</>
-						) : null}
 						{/* Kill control sits beside the orchestrator link for active workers —
 						    moved here from the inspector's Summary "Danger zone". */}
-						{!isOrchestrator && session && sessionIsActive(session) ? (
+						{session && sessionIsActive(session) ? (
 							<TopbarKillButton
 								session={session}
 								orchestratorId={orchestrator?.id}
@@ -207,37 +203,33 @@ export function ShellTopbar() {
 								}}
 							/>
 						) : null}
-						{!isOrchestrator && (
-							<button
-								aria-label="Open orchestrator"
-								className="dashboard-app-header__primary-btn dashboard-app-header__primary-btn--compact"
-								disabled={isSpawning || isProjectRestarting}
-								onClick={() => void openOrchestrator()}
-								style={noDragStyle}
-								type="button"
-							>
-								<OrchestratorIcon className="h-3.5 w-3.5" aria-hidden="true" />
-								{isProjectRestarting ? "Restarting…" : isSpawning ? "Spawning…" : "Orchestrator"}
-							</button>
-						)}
+						<button
+							aria-label="Open orchestrator"
+							className="dashboard-app-header__primary-btn dashboard-app-header__primary-btn--compact"
+							disabled={isSpawning || isProjectRestarting}
+							onClick={() => void openOrchestrator()}
+							style={noDragStyle}
+							type="button"
+						>
+							<OrchestratorIcon className="h-3.5 w-3.5" aria-hidden="true" />
+							{isProjectRestarting ? "Restarting…" : isSpawning ? "Spawning…" : "Orchestrator"}
+						</button>
 						{/* Inspector collapse (worker sessions only — orchestrators have no rail). */}
-						{!isOrchestrator && (
-							<button
-								aria-label={isInspectorOpen ? "Close inspector panel" : "Open inspector panel"}
-								aria-pressed={isInspectorOpen}
-								className="dashboard-app-header__icon-btn"
-								onClick={toggleInspector}
-								style={noDragStyle}
-								title={`${isInspectorOpen ? "Close" : "Open"} inspector · ⌘⇧B`}
-								type="button"
-							>
-								{isInspectorOpen ? (
-									<PanelRightClose className="h-[15px] w-[15px]" aria-hidden="true" />
-								) : (
-									<PanelRightOpen className="h-[15px] w-[15px]" aria-hidden="true" />
-								)}
-							</button>
-						)}
+						<button
+							aria-label={isInspectorOpen ? "Close inspector panel" : "Open inspector panel"}
+							aria-pressed={isInspectorOpen}
+							className="dashboard-app-header__icon-btn"
+							onClick={toggleInspector}
+							style={noDragStyle}
+							title={`${isInspectorOpen ? "Close" : "Open"} inspector · ⌘⇧B`}
+							type="button"
+						>
+							{isInspectorOpen ? (
+								<PanelRightClose className="h-[15px] w-[15px]" aria-hidden="true" />
+							) : (
+								<PanelRightOpen className="h-[15px] w-[15px]" aria-hidden="true" />
+							)}
+						</button>
 					</>
 				) : null}
 			</div>

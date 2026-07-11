@@ -2,7 +2,7 @@ import { type KeyboardEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, ChevronDown, CircleCheck, MoreHorizontal, Play, Plus, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, CircleCheck, MoreHorizontal, Play, RotateCw, Trash2 } from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { captureRendererEvent } from "../lib/telemetry";
@@ -12,7 +12,6 @@ import {
 	type WorkspaceSession,
 	attentionZone,
 	canonicalTrackerIssueId,
-	newestActiveOrchestrator,
 	orchestratorHealth,
 	primaryPR,
 	workerSessions,
@@ -20,12 +19,9 @@ import {
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { OrchestratorIcon } from "./icons";
-import { NewTaskDialog } from "./NewTaskDialog";
 import { TodoDetailDialog } from "./TodoDetailDialog";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
-import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, prKindLabel, prRef, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
@@ -51,10 +47,7 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const workspaces = projectId ? all.filter((w) => w.id === projectId) : all;
 	const workspace = projectId ? workspaces[0] : undefined;
 	const sessions = workspaces.flatMap((w) => workerSessions(w.sessions));
-	const orchestrator = projectId ? newestActiveOrchestrator(workspaces[0]?.sessions ?? []) : undefined;
-	const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
 	const [todoDetail, setTodoDetail] = useState<WorkspaceSession | null>(null);
-	const [isSpawning, setIsSpawning] = useState(false);
 	const restartingProjectIds = useUiStore((state) => state.restartingProjectIds);
 	const setProjectRestarting = useUiStore((state) => state.setProjectRestarting);
 	const setOrchestratorReplacementError = useUiStore((state) => state.setOrchestratorReplacementError);
@@ -90,28 +83,6 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 		});
 	};
 
-	const openOrchestrator = async () => {
-		if (!projectId || isProjectRestarting) return;
-		if (orchestrator) {
-			void navigate({
-				to: "/projects/$projectId/sessions/$sessionId",
-				params: { projectId, sessionId: orchestrator.id },
-			});
-			return;
-		}
-		setIsSpawning(true);
-		try {
-			const sessionId = await spawnOrchestrator(projectId, "board");
-			await queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
-			void navigate({
-				to: "/projects/$projectId/sessions/$sessionId",
-				params: { projectId, sessionId },
-			});
-		} finally {
-			setIsSpawning(false);
-		}
-	};
-
 	const restartOrchestrator = async () => {
 		if (!projectId) return;
 		await restartProjectOrchestrator({
@@ -123,53 +94,12 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 		});
 	};
 
-	const handleTaskCreated = async (sessionId: string) => {
-		if (!projectId) return;
-		await queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
-		void navigate({
-			to: "/projects/$projectId/sessions/$sessionId",
-			params: { projectId, sessionId },
-		});
-	};
-
-	const actions = projectId ? (
-		<>
-			<button
-				aria-label="New task"
-				className="dashboard-app-header__accent-btn"
-				disabled={isProjectRestarting}
-				onClick={() => setIsNewTaskOpen(true)}
-				type="button"
-			>
-				<Plus className="h-3.5 w-3.5" aria-hidden="true" />
-				New task
-			</button>
-			<button
-				aria-label={orchestrator ? "Orchestrator" : "Spawn Orchestrator"}
-				className="dashboard-app-header__primary-btn"
-				disabled={isSpawning || isProjectRestarting}
-				onClick={() => void openOrchestrator()}
-				type="button"
-			>
-				<OrchestratorIcon className="h-3.5 w-3.5" aria-hidden="true" />
-				{isProjectRestarting
-					? "Restarting..."
-					: isSpawning
-						? "Spawning..."
-						: orchestrator
-							? "Orchestrator"
-							: "Spawn Orchestrator"}
-			</button>
-		</>
-	) : undefined;
-
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-			<DashboardSubhead
-				title="Board"
-				subtitle="Live agent sessions flowing from work → review → merge."
-				actions={actions}
-			/>
+			{/* Actions (New task + bell) live in the shared ShellTopbar so they sit
+			    top-right identically on the board and the orchestrator; the subhead
+			    keeps just the page title + subtitle. */}
+			<DashboardSubhead title="Board" subtitle="Live agent sessions flowing from work → review → merge." />
 
 			<div className="min-h-0 flex-1 overflow-hidden p-[18px]">
 				{projectId && health.state !== "ok" ? (
@@ -246,12 +176,6 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 					)}
 				</div>
 			)}
-			<NewTaskDialog
-				open={isNewTaskOpen}
-				projectId={projectId}
-				onCreated={(sessionId) => void handleTaskCreated(sessionId)}
-				onOpenChange={setIsNewTaskOpen}
-			/>
 			<TodoDetailDialog
 				session={todoDetail}
 				onOpenChange={(open) => !open && setTodoDetail(null)}
