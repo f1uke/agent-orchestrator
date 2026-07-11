@@ -14,12 +14,15 @@ type UiState = {
 	isInspectorOpen: boolean;
 	theme: Theme;
 	restartingProjectIds: ReadonlySet<string>;
+	/** Projects whose sidebar section is collapsed (heading only). Absent = expanded. */
+	collapsedProjectIds: ReadonlySet<string>;
 	orchestratorReplacementErrors: Record<string, string>;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
 	toggleTheme: () => void;
 	toggleSidebar: () => void;
 	toggleInspector: () => void;
+	toggleProjectCollapsed: (projectId: string) => void;
 	setProjectRestarting: (projectId: string, restarting: boolean) => void;
 	setOrchestratorReplacementError: (projectId: string, message: string | null) => void;
 };
@@ -27,6 +30,7 @@ type UiState = {
 const sidebarStorageKey = "ao.sidebar.open";
 const inspectorStorageKey = "ao.inspector.open";
 const themeStorageKey = "ao.theme";
+const collapsedProjectsStorageKey = "ao.projects.collapsed";
 
 function getLocalStorage() {
 	if (typeof window === "undefined" || !window.localStorage) return null;
@@ -39,6 +43,17 @@ function initialSidebarOpen() {
 
 function initialInspectorOpen() {
 	return getLocalStorage()?.getItem(inspectorStorageKey) !== "false";
+}
+
+function initialCollapsedProjectIds(): Set<string> {
+	const raw = getLocalStorage()?.getItem(collapsedProjectsStorageKey);
+	if (!raw) return new Set();
+	try {
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? new Set(parsed.filter((id): id is string => typeof id === "string")) : new Set();
+	} catch {
+		return new Set();
+	}
 }
 
 function systemTheme(): Theme {
@@ -63,6 +78,7 @@ export const useUiStore = create<UiState>((set) => ({
 	isInspectorOpen: initialInspectorOpen(),
 	theme: initialTheme(),
 	restartingProjectIds: new Set<string>(),
+	collapsedProjectIds: initialCollapsedProjectIds(),
 	orchestratorReplacementErrors: {},
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setTheme: (theme) => {
@@ -86,6 +102,17 @@ export const useUiStore = create<UiState>((set) => ({
 			const isInspectorOpen = !state.isInspectorOpen;
 			getLocalStorage()?.setItem(inspectorStorageKey, String(isInspectorOpen));
 			return { isInspectorOpen };
+		}),
+	toggleProjectCollapsed: (projectId) =>
+		set((state) => {
+			const collapsedProjectIds = new Set(state.collapsedProjectIds);
+			if (collapsedProjectIds.has(projectId)) {
+				collapsedProjectIds.delete(projectId);
+			} else {
+				collapsedProjectIds.add(projectId);
+			}
+			getLocalStorage()?.setItem(collapsedProjectsStorageKey, JSON.stringify([...collapsedProjectIds]));
+			return { collapsedProjectIds };
 		}),
 	setProjectRestarting: (projectId, restarting) =>
 		set((state) => {

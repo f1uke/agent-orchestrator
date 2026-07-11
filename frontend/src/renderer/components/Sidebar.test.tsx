@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import { agentsQueryKey } from "../hooks/useAgentsQuery";
+import { useUiStore } from "../stores/ui-store";
 
 const { getMock, navigateMock, mockParams, renameSessionMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
@@ -140,6 +141,8 @@ beforeEach(() => {
 	navigateMock.mockReset();
 	renameSessionMock.mockReset().mockResolvedValue(undefined);
 	mockParams.projectId = undefined;
+	localStorage.clear();
+	useUiStore.setState({ collapsedProjectIds: new Set() });
 	vi.spyOn(window, "confirm").mockReturnValue(true);
 	vi.spyOn(window, "alert").mockImplementation(() => undefined);
 });
@@ -504,13 +507,66 @@ describe("Sidebar", () => {
 		expect(screen.getByLabelText("Open fix login")).toBeInTheDocument();
 	});
 
-	it("always shows action icons and reserves padding for them", () => {
+	function projectHeading(name = "Project One"): HTMLButtonElement {
+		const heading = screen.getByText(name).closest("button");
+		if (!heading) throw new Error("Project heading button not found");
+		return heading as HTMLButtonElement;
+	}
+
+	it("collapses the section on heading click, hiding the action buttons and sessions", async () => {
+		const user = userEvent.setup();
+		renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+		// Expanded by default: labeled buttons + session row visible.
+		expect(screen.getByLabelText("Open Project One dashboard")).toBeInTheDocument();
+		expect(screen.getByLabelText("Open fix login")).toBeInTheDocument();
+		const heading = projectHeading();
+		expect(heading).toHaveAttribute("aria-expanded", "true");
+
+		await user.click(heading);
+
+		expect(heading).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByLabelText("Open Project One dashboard")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Spawn Project One orchestrator")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Open fix login")).not.toBeInTheDocument();
+
+		// Clicking the heading toggles; it does not navigate.
+		expect(navigateMock).not.toHaveBeenCalled();
+
+		await user.click(heading);
+		expect(heading).toHaveAttribute("aria-expanded", "true");
+		expect(screen.getByLabelText("Open Project One dashboard")).toBeInTheDocument();
+	});
+
+	it("persists collapse to the ui-store when a project is toggled", async () => {
+		const user = userEvent.setup();
 		renderSidebar();
 
-		const projectRow = screen.getByText("Project One").closest("button");
+		await user.click(projectHeading());
 
-		if (!projectRow) throw new Error("Project row button not found");
-		// Padding is always reserved for the action cluster (not hover-gated)
-		expect(projectRow).toHaveClass("pr-[84px]");
+		expect(useUiStore.getState().collapsedProjectIds.has("proj-1")).toBe(true);
+	});
+
+	it("renders a project collapsed when the ui-store marks it collapsed", () => {
+		useUiStore.setState({ collapsedProjectIds: new Set(["proj-1"]) });
+		renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+		expect(projectHeading()).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByLabelText("Open Project One dashboard")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Open fix login")).not.toBeInTheDocument();
+	});
+
+	it("does not collapse the project when the overflow menu is opened", async () => {
+		const user = userEvent.setup();
+		renderSidebar();
+		const heading = projectHeading();
+		expect(heading).toHaveAttribute("aria-expanded", "true");
+
+		await user.click(screen.getByLabelText("Project actions for Project One"));
+
+		// The overflow trigger opens its menu without toggling the section collapse.
+		expect(await screen.findByRole("menuitem", { name: "Project settings" })).toBeInTheDocument();
+		expect(heading).toHaveAttribute("aria-expanded", "true");
+		expect(screen.getByLabelText("Open Project One dashboard")).toBeInTheDocument();
 	});
 });

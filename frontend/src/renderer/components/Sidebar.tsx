@@ -24,7 +24,6 @@ import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
 	newestActiveOrchestrator,
-	projectRowActive,
 	sessionIsActive,
 	type ProjectKind,
 	type WorkspaceSession,
@@ -78,11 +77,26 @@ import { Button } from "./ui/button";
 const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
 const noDragStyle = isMac ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
-// Shared styling for the per-project hover action buttons (dashboard,
-// orchestrator, kebab): a 20px square icon button that tints on hover, matching
-// the old SidebarMenuAction footprint.
+// Shared styling for the per-project hover action buttons (session rename
+// pencil): a 20px square icon button that tints on hover, matching the old
+// SidebarMenuAction footprint.
 const HOVER_ACTION_CLASS =
 	"grid size-5 shrink-0 place-items-center rounded-md text-passive transition-colors hover:bg-interactive-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-interactive-hover data-[state=open]:text-foreground [&_svg]:size-[15px]";
+
+// The labeled Dashboard / Orchestrator buttons that sit inside a project's
+// section box (per the redesign prototype): a full-width split of two 36px
+// segments. Plain clickable — hover lifts the surface, press flashes
+// refined-blue — with NO persistent active/current-page highlight (both segments
+// always look identical regardless of which view is open). font-size/weight take
+// `!` because styles.css resets `button { font: inherit }` (unlayered → beats
+// Tailwind's layered utilities); `!important` is the codebase's override idiom.
+const SEG_CLASS =
+	"flex flex-1 items-center justify-center gap-[7px] h-9 rounded-[9px] border text-[12.5px]! font-semibold! " +
+	"bg-raised border-border-strong text-muted-foreground transition-colors " +
+	"hover:bg-overlay hover:text-foreground " +
+	"active:border-accent-dim active:bg-accent-weak active:text-accent " +
+	"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 " +
+	"disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[15px] [&_svg]:shrink-0";
 
 // Mirrors the daemon's display-name cap (maxDisplayNameLen) and the spawn
 // `--name` flag, so inline edits never round-trip a value the API would reject.
@@ -164,14 +178,10 @@ export function Sidebar({
 	const theme = useUiStore((s) => s.theme);
 	const toggleTheme = useUiStore((s) => s.toggleTheme);
 	// Disclosure state: projects are expanded by default; a project id present in
-	// this set is collapsed (sessions hidden).
-	const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
-	const toggleCollapsed = (id: string) =>
-		setCollapsedIds((prev) => {
-			const next = new Set(prev);
-			next.has(id) ? next.delete(id) : next.add(id);
-			return next;
-		});
+	// this set is collapsed (buttons + sessions hidden). Persisted per project via
+	// the ui-store (localStorage) so it survives reloads.
+	const collapsedProjectIds = useUiStore((s) => s.collapsedProjectIds);
+	const toggleProjectCollapsed = useUiStore((s) => s.toggleProjectCollapsed);
 	// Fetch the running app version to derive the build channel. Channel is
 	// identity: derived from the version string, not the update-channel setting
 	// (the setting can be changed mid-session; the binary cannot).
@@ -283,9 +293,9 @@ export function Sidebar({
 									<ProjectItem
 										key={workspace.id}
 										workspace={workspace}
-										expanded={!collapsedIds.has(workspace.id)}
+										expanded={!collapsedProjectIds.has(workspace.id)}
 										selection={selection}
-										onToggle={() => toggleCollapsed(workspace.id)}
+										onToggle={() => toggleProjectCollapsed(workspace.id)}
 										onRemoveProject={onRemoveProject}
 									/>
 								))}
@@ -442,13 +452,11 @@ function ProjectItem({
 	onToggle: () => void;
 	onRemoveProject: (projectId: string) => Promise<void>;
 }) {
-	// The board OR the project's orchestrator being open highlights this row; a
-	// worker session highlights its own child row instead (see projectRowActive).
-	const projectActive = projectRowActive(workspace, selection.activeProjectId, selection.activeSessionId);
-	// Whether the board itself is the open view. Drives the click affordance
-	// (re-click the board row to collapse the tree); a highlighted-because-of-
-	// orchestrator row still navigates to the board on click, as before.
-	const boardActive = selection.activeProjectId === workspace.id && !selection.activeSessionId;
+	// When the whole sidebar is collapsed into the 48px icon rail there is no room
+	// for the section box or labeled buttons, so the heading becomes a letter tile
+	// that navigates to the board (matching the pre-redesign rail behaviour).
+	const { state: sidebarState } = useSidebar();
+	const isIconRail = sidebarState === "collapsed";
 	const queryClient = useQueryClient();
 	const [removeError, setRemoveError] = useState<string | null>(null);
 	const [isRemoving, setIsRemoving] = useState(false);
@@ -486,15 +494,15 @@ function ProjectItem({
 		}
 	};
 
-	const onProjectClick = () => {
-		if (!expanded) {
-			onToggle();
+	// Expanded sidebar: the heading is a pure collapse toggle — Dashboard /
+	// Orchestrator navigation lives in the labeled buttons below. Icon rail: the
+	// letter tile has no buttons, so it navigates to the board directly.
+	const onHeadingClick = () => {
+		if (isIconRail) {
 			selection.goProject(workspace.id);
-		} else if (boardActive) {
-			onToggle();
-		} else {
-			selection.goProject(workspace.id);
+			return;
 		}
+		onToggle();
 	};
 
 	const removeProject = async () => {
@@ -520,105 +528,116 @@ function ProjectItem({
 
 	return (
 		<SidebarMenuItem className="mb-px group-data-[collapsible=icon]:mb-0">
-			{/* project-sidebar__proj-row */}
-			<SidebarMenuButton
-				aria-current={projectActive ? "page" : undefined}
-				aria-expanded={expanded}
-				isActive={projectActive}
-				onClick={onProjectClick}
-				tooltip={workspace.name}
-				className={cn(
-					"relative h-9 gap-[9px] rounded-[5px] px-1.5 py-0 text-[13px] font-medium text-muted-foreground transition-[background-color,padding,color]",
-					"before:absolute before:top-2 before:bottom-2 before:left-0 before:w-px before:rounded-full before:bg-transparent",
-					"hover:bg-interactive-hover hover:text-foreground active:bg-interactive-hover active:text-foreground",
-					"data-[active=true]:bg-interactive-active data-[active=true]:font-semibold data-[active=true]:text-foreground data-[active=true]:before:bg-accent",
-					// Always reserve room for the action cluster (dashboard,
-					// orchestrator, kebab) — icons are always visible, not hover-gated.
-					"pr-[84px]",
-					// Icon rail: the old 36px letter tile.
-					"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:font-semibold",
-				)}
-			>
-				<ChevronRight
-					className={cn(
-						"h-[9px]! w-[9px]! shrink-0 text-passive transition-transform group-data-[collapsible=icon]:hidden",
-						expanded && "rotate-90",
-					)}
-					strokeWidth={2.5}
-					aria-hidden="true"
-				/>
-				<span className="hidden group-data-[collapsible=icon]:block">{workspace.name.charAt(0).toUpperCase()}</span>
-				<span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">{workspace.name}</span>
-				<span className="hidden h-4 min-w-4 shrink-0 place-items-center rounded bg-interactive-hover px-1 font-mono text-[10px] leading-none text-passive">
-					{sessions.length}
-				</span>
-			</SidebarMenuButton>
-			{/* Per-project actions: dashboard board, orchestrator, and a kebab
-			menu. Always visible (not hover-gated) to avoid CSS :hover group
-			propagation issues in Electron's Chromium. Hidden in the icon rail. */}
+			{/* Project SECTION: heading + labeled buttons share one box. Expanded →
+			the box is highlighted (subtle surface + hairline); collapsed → it is
+			de-emphasised (transparent) and only the heading shows. The icon rail
+			drops the box chrome entirely, leaving a letter tile. */}
 			<div
 				className={cn(
-					"absolute top-0 right-1 z-10 flex h-9 items-center gap-px",
-					"group-data-[collapsible=icon]:hidden",
+					"rounded-[10px] border p-1 transition-colors",
+					expanded ? "border-border-strong bg-surface" : "border-transparent bg-transparent",
+					"group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0",
 				)}
 			>
-				<Tooltip>
-					<TooltipTrigger asChild>
+				{/* Heading row is a pure collapse toggle; the overflow menu is pinned
+				to its right end. */}
+				<div className="relative">
+					<SidebarMenuButton
+						aria-expanded={expanded}
+						onClick={onHeadingClick}
+						tooltip={workspace.name}
+						className={cn(
+							"relative h-9 gap-[9px] rounded-lg py-0 pr-9 pl-1.5 font-medium transition-colors",
+							"hover:bg-interactive-hover active:bg-interactive-hover",
+							// Icon rail: the old 36px letter tile.
+							"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:pr-0! group-data-[collapsible=icon]:font-semibold",
+						)}
+					>
+						<ChevronRight
+							className={cn(
+								"h-[11px]! w-[11px]! shrink-0 text-passive transition-transform group-data-[collapsible=icon]:hidden",
+								expanded && "rotate-90",
+							)}
+							strokeWidth={2.5}
+							aria-hidden="true"
+						/>
+						{/* Folder chip: neutral when collapsed, refined-blue tint when expanded. */}
+						<span
+							className={cn(
+								"grid size-[22px] shrink-0 place-items-center rounded-[6px] transition-colors group-data-[collapsible=icon]:hidden [&_svg]:size-[13px]",
+								expanded ? "bg-accent-weak text-accent" : "bg-raised text-passive",
+							)}
+						>
+							<Folder aria-hidden="true" />
+						</span>
+						<span className="hidden group-data-[collapsible=icon]:block">{workspace.name.charAt(0).toUpperCase()}</span>
+						<span
+							className={cn(
+								"min-w-0 flex-1 truncate text-[15.5px] font-bold tracking-[-0.01em] group-data-[collapsible=icon]:hidden",
+								expanded ? "text-foreground" : "text-muted-foreground",
+							)}
+						>
+							{workspace.name}
+						</span>
+					</SidebarMenuButton>
+					{/* Overflow menu — same per-project menu as before, now at the right
+					end of the heading. It is a sibling of the toggle (not nested) and
+					stops propagation defensively, so opening it never toggles collapse.
+					Hidden in the icon rail. */}
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<button
+								aria-label={`Project actions for ${workspace.name}`}
+								className="absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center rounded-lg text-passive transition-colors hover:bg-interactive-hover hover:text-foreground data-[state=open]:bg-interactive-hover data-[state=open]:text-foreground group-data-[collapsible=icon]:hidden [&_svg]:size-[17px]"
+								onClick={(e) => e.stopPropagation()}
+								type="button"
+							>
+								<MoreVertical aria-hidden="true" />
+							</button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent side="right" align="start" className="min-w-44">
+							<DropdownMenuItem onSelect={() => selection.goSettings(workspace.id)}>
+								<Settings aria-hidden="true" />
+								Project settings
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								className="text-destructive focus:text-destructive [&_svg]:text-destructive"
+								disabled={isRemoving}
+								onSelect={() => void removeProject()}
+							>
+								<Trash2 aria-hidden="true" />
+								Remove project
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				</div>
+				{/* Dashboard + Orchestrator: labeled, full-width split, ~36px tall.
+				Plain clickable (no persistent current-page highlight); they navigate
+				to today's Dashboard / Orchestrator views. Shown only when expanded. */}
+				{expanded && (
+					<div className="flex gap-[7px] px-1 pt-0.5 pb-1 group-data-[collapsible=icon]:hidden">
 						<button
 							aria-label={`Open ${workspace.name} dashboard`}
-							className={HOVER_ACTION_CLASS}
+							className={SEG_CLASS}
 							onClick={() => selection.goProject(workspace.id)}
 							type="button"
 						>
 							<LayoutDashboard aria-hidden="true" />
+							Dashboard
 						</button>
-					</TooltipTrigger>
-					<TooltipContent>Dashboard</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger asChild>
 						<button
 							aria-label={orchestrator ? `Open ${workspace.name} orchestrator` : `Spawn ${workspace.name} orchestrator`}
-							className={HOVER_ACTION_CLASS}
+							className={SEG_CLASS}
 							disabled={isSpawning || isProjectRestarting}
 							onClick={() => void openOrchestrator()}
 							type="button"
 						>
 							<OrchestratorIcon aria-hidden="true" />
+							Orchestrator
 						</button>
-					</TooltipTrigger>
-					<TooltipContent>
-						{isProjectRestarting
-							? "Restarting…"
-							: isSpawning
-								? "Spawning…"
-								: orchestrator
-									? "Orchestrator"
-									: "Spawn orchestrator"}
-					</TooltipContent>
-				</Tooltip>
-				<DropdownMenu>
-					<DropdownMenuTrigger asChild>
-						<button aria-label={`Project actions for ${workspace.name}`} className={HOVER_ACTION_CLASS} type="button">
-							<MoreVertical aria-hidden="true" />
-						</button>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent side="right" align="start" className="min-w-44">
-						<DropdownMenuItem onSelect={() => selection.goSettings(workspace.id)}>
-							<Settings aria-hidden="true" />
-							Project settings
-						</DropdownMenuItem>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							className="text-destructive focus:text-destructive [&_svg]:text-destructive"
-							disabled={isRemoving}
-							onSelect={() => void removeProject()}
-						>
-							<Trash2 aria-hidden="true" />
-							Remove project
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
+					</div>
+				)}
 			</div>
 			{removeError && (
 				<span className="sr-only" role="status">
@@ -726,9 +745,10 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					<span className={cn("block truncate text-[12px]", active ? "text-foreground" : "text-muted-foreground")}>
 						{session.title}
 					</span>
-					{/* Canonical session reference (@<project>-<num>): muted mono, ellipsized
-					when tight; full id on hover via the native title. */}
-					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
+					{/* Canonical session reference (@<project>-<num>): refined-blue mono
+					(matches the redesign prototype), ellipsized when tight; full id on
+					hover via the native title. */}
+					<span className="block truncate font-mono text-[10.5px] leading-tight text-accent" title={sessionRef}>
 						{sessionRef}
 					</span>
 				</span>
