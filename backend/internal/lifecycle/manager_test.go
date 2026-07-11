@@ -95,6 +95,131 @@ func working(id domain.SessionID) domain.SessionRecord {
 	return domain.SessionRecord{ID: id, ProjectID: "mer", Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()}}
 }
 
+func TestRuntimeObservation_SuspendedNotTerminated(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now().Add(-100 * time.Hour)}
+	rec.IsSuspended = true
+	st.sessions["mer-1"] = rec
+	// A dead-runtime probe against a suspended session must be ignored: its tmux
+	// is intentionally gone, so this is not proof of death.
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Probe: ports.ProbeDead}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.IsTerminated {
+		t.Fatal("suspended session must not be terminated by a dead-runtime probe")
+	}
+	if !got.IsSuspended {
+		t.Fatal("suspended flag must be preserved")
+	}
+}
+
+func TestApplyActivitySignal_SuspendedIgnored(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.IsSuspended = true
+	rec.FirstSignalAt = time.Now().Add(-time.Hour)
+	st.sessions["mer-1"] = rec
+	// The reap that suspends a session kills its agent, which fires a SessionEnd
+	// "exited" hook. That late signal must NOT terminate the suspended card —
+	// otherwise it would archive to Done, defeating suspend.
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityExited}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.IsTerminated {
+		t.Fatal("a late exited hook must not terminate a suspended session")
+	}
+	if !got.IsSuspended {
+		t.Fatal("suspended flag must be preserved")
+	}
+}
+
+func TestMarkSuspended_SetsFlagKeepsLaneFacts(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity = domain.Activity{State: domain.ActivityWaitingInput, LastActivityAt: time.Now().Add(-80 * time.Hour)}
+	st.sessions["mer-1"] = rec
+	if err := m.MarkSuspended(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if !got.IsSuspended {
+		t.Fatal("MarkSuspended must set is_suspended")
+	}
+	if got.IsTerminated {
+		t.Fatal("MarkSuspended must NOT terminate (card stays on the board)")
+	}
+	if got.Activity.State != domain.ActivityWaitingInput {
+		t.Fatalf("activity state changed to %s, want waiting_input (lane must be preserved)", got.Activity.State)
+	}
+}
+
+func TestMarkSuspended_TerminatedIsNoOp(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.IsTerminated = true
+	st.sessions["mer-1"] = rec
+	if err := m.MarkSuspended(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if st.sessions["mer-1"].IsSuspended {
+		t.Fatal("a terminated session must never be marked suspended")
+	}
+}
+
+func TestTouchActivity_ResetsReferenceKeepsState(t *testing.T) {
+	m, st, _ := newManager()
+	old := time.Now().Add(-70 * time.Hour)
+	rec := working("mer-1")
+	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: old}
+	st.sessions["mer-1"] = rec
+	if err := m.TouchActivity(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if !got.Activity.LastActivityAt.After(old) {
+		t.Fatalf("LastActivityAt not advanced: %v", got.Activity.LastActivityAt)
+	}
+	if got.Activity.State != domain.ActivityIdle {
+		t.Fatalf("activity state changed to %s, want idle (touch must not disturb the lane)", got.Activity.State)
+	}
+}
+
+func TestTouchActivity_TerminatedIsNoOp(t *testing.T) {
+	m, st, _ := newManager()
+	old := time.Now().Add(-2 * time.Hour)
+	rec := working("mer-1")
+	rec.IsTerminated = true
+	rec.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: old}
+	st.sessions["mer-1"] = rec
+	if err := m.TouchActivity(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !st.sessions["mer-1"].Activity.LastActivityAt.Equal(old) {
+		t.Fatal("touch must never resurrect / re-stamp a terminated session")
+	}
+}
+
+func TestMarkSpawned_ClearsSuspended(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.IsSuspended = true
+	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now().Add(-80 * time.Hour)}
+	st.sessions["mer-1"] = rec
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h-new"}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.IsSuspended {
+		t.Fatal("resuming a suspended session must clear is_suspended")
+	}
+	if got.Reactivated {
+		t.Fatal("resuming a non-terminated suspended session must NOT set reactivated (no false 'Needs you')")
+	}
+}
+
 func TestRuntimeObservation_InferredDeathSetsTerminated(t *testing.T) {
 	m, st, _ := newManager()
 	rec := working("mer-1")

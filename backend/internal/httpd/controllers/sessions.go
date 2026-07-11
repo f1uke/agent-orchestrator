@@ -50,6 +50,9 @@ type SessionService interface {
 	Get(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Restart(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	// Wake resumes a suspended session in place or resets a live session's
+	// idle-close countdown; the UI calls it when the user opens/selects a session.
+	Wake(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	Delete(ctx context.Context, id domain.SessionID, force bool) error
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (sessionsvc.RollbackOutcome, error)
@@ -104,6 +107,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/start", c.start)
 	r.Post("/sessions/{sessionId}/restore", c.restore)
 	r.Post("/sessions/{sessionId}/restart", c.restart)
+	r.Post("/sessions/{sessionId}/wake", c.wake)
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
@@ -552,6 +556,25 @@ func (c *SessionsController) restart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, RestartSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
+}
+
+// wake is the user-open hook. The desktop app POSTs here when the user
+// opens/selects a session: a suspended session resumes in place, a live session
+// has its idle-close countdown reset, and a terminated one is returned
+// unchanged. The response carries the fresh read model (isSuspended cleared,
+// idleCloseAt pushed forward) so the UI reflects the reset without waiting for a
+// CDC round-trip.
+func (c *SessionsController) wake(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/wake")
+		return
+	}
+	sess, err := c.Svc.Wake(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, WakeSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
 }
 
 // rollback undoes a partially-completed spawn: if the session row is still in

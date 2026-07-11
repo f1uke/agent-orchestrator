@@ -78,6 +78,12 @@ const hookBinaryName = "ao"
 type lifecycleRecorder interface {
 	MarkSpawned(ctx context.Context, id domain.SessionID, metadata domain.SessionMetadata) error
 	MarkTerminated(ctx context.Context, id domain.SessionID) error
+	// MarkSuspended records that the idle sweep tore a session's runtime down
+	// while keeping it on the board (not terminated). See CloseIdleSessions.
+	MarkSuspended(ctx context.Context, id domain.SessionID) error
+	// TouchActivity resets a session's idle reference to now without changing its
+	// activity state, so a user-open restarts the idle-close countdown. See Wake.
+	TouchActivity(ctx context.Context, id domain.SessionID) error
 }
 
 type runtimeController interface {
@@ -1160,6 +1166,13 @@ func (m *Manager) SaveAndTeardownAll(ctx context.Context) error {
 		if rec.IsTerminated {
 			continue
 		}
+		// A suspended session already has no runtime and keeps its worktree on disk
+		// so it can resume in place; do not stash+terminate+destroy it on shutdown.
+		// It stays suspended on the board across the restart (reconcileLive skips it
+		// too), rather than being torn down and auto-relaunched by RestoreAll.
+		if rec.IsSuspended {
+			continue
+		}
 		if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
 			continue
 		}
@@ -1239,14 +1252,23 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 // restart instead of silently abandoning the session.
 //
 // Exception: a gone-runtime session that is ALSO idle past the auto-close TTL
-// is closed the way CloseIdleSessions would (marked terminated, worktree left
-// in place, no restore marker) instead of captured and relaunched — a session
-// the user let go idle must stay closed across a reboot, not come back.
+// is SUSPENDED the way CloseIdleSessions would (kept on the board in its lane,
+// worktree left in place, no restore marker) instead of captured and relaunched
+// — a session the user let go idle stays paused across a reboot, resuming only
+// when opened, rather than auto-coming-back live.
 //
 // If the work capture fails we mark terminated WITHOUT a marker and leave the
 // worktree intact: better to skip the relaunch than to tear down un-preserved
 // work or relaunch onto an inconsistent worktree.
 func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) error {
+	// A suspended session intentionally has no runtime and must stay on the board,
+	// paused, across a daemon restart: never relaunch it (that would resurrect a
+	// session the idle sweep paused) and never terminate it. It resumes only when
+	// the user opens it. Its worktree is kept on disk (SaveAndTeardownAll skips it
+	// too), so Resume can recreate the runtime.
+	if rec.IsSuspended {
+		return nil
+	}
 	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
 		return nil
 	}
@@ -1261,14 +1283,14 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 			return nil // adopt: the session survived the crash.
 		}
 	}
-	// Runtime is gone. If the session is idle past the auto-close TTL, close it
+	// Runtime is gone. If the session is idle past the auto-close TTL, SUSPEND it
 	// the way CloseIdleSessions would instead of capturing + relaunching: mark it
-	// terminated and leave the worktree in place (its uncommitted work sits on
-	// disk for on-demand Restore) with no restore marker, so this boot does not
-	// relaunch a session the user let go idle past the window.
+	// suspended (kept on the board in its lane, not terminated) and leave the
+	// worktree in place, so this boot does not relaunch a session the user let go
+	// idle past the window — the user resumes it on demand.
 	if m.idleCloseTTL > 0 && m.clock().Sub(idleReference(rec)) > m.idleCloseTTL {
-		if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
-			return fmt.Errorf("reconcile %s: mark terminated (idle): %w", rec.ID, err)
+		if err := m.lcm.MarkSuspended(ctx, rec.ID); err != nil {
+			return fmt.Errorf("reconcile %s: mark suspended (idle): %w", rec.ID, err)
 		}
 		return nil
 	}
@@ -1318,11 +1340,14 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	return m.RestoreAll(ctx)
 }
 
-// CloseIdleSessions auto-closes every session idle longer than the configured
-// TTL: it destroys the session's runtime (tmux) and marks it terminated while
-// KEEPING its worktree on disk, so the session stays restorable via the existing
-// Restore path. A non-positive TTL disables the sweep. Best-effort: a per-session
-// failure is logged and never aborts the pass.
+// CloseIdleSessions auto-suspends every LIVE session idle longer than the
+// configured TTL: it tears the session's tmux down to free machine resources but
+// KEEPS the session on the board in its current lane (MarkSuspended, not
+// MarkTerminated) with its worktree on disk, so opening it resumes it in place.
+// Already-suspended sessions are skipped (nothing left to reap). A terminated
+// session with a leaked shared-handle tmux is still reaped (the orchestrator
+// app-reopen safety). A non-positive TTL disables the sweep. Best-effort: a
+// per-session failure is logged and never aborts the pass.
 func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 	if m.idleCloseTTL <= 0 {
 		return nil
@@ -1348,6 +1373,11 @@ func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 	}
 	now := m.clock()
 	for _, rec := range recs {
+		// Already suspended: its tmux is gone and it stays on the board until the
+		// user resumes it — re-processing would be a churny no-op. Leave it be.
+		if rec.IsSuspended {
+			continue
+		}
 		if now.Sub(idleReference(rec)) <= m.idleCloseTTL {
 			continue
 		}
@@ -1375,17 +1405,22 @@ func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveH
 		}
 		return nil
 	}
-	// Live session idle past the TTL: destroy its own runtime, keep the worktree.
+	// Live session idle past the TTL: SUSPEND it. Keep the card on the board in
+	// its current lane (MarkSuspended leaves activity_state and is_terminated
+	// intact, so status derivation is unchanged) and keep the worktree on disk.
+	// Opening the session resumes it in place (Resume). Deliberately NOT
+	// terminated and NOT torn down: no restore marker is written or cleared, so
+	// boot leaves it suspended.
+	//
+	// Mark suspended BEFORE reaping the runtime: reaping the tmux makes the agent
+	// fire its SessionEnd hook, and setting is_suspended first guarantees that
+	// late "exited" signal is ignored (ApplyActivitySignal skips suspended
+	// sessions) rather than racing in to terminate the card into Done.
+	if err := m.lcm.MarkSuspended(ctx, rec.ID); err != nil {
+		return fmt.Errorf("close idle %s: mark suspended: %w", rec.ID, err)
+	}
 	if err := m.reapRuntimeIfAlive(ctx, rec.ID, handle); err != nil {
 		return err
-	}
-	// Clear any shutdown-restore marker so boot never auto-relaunches it: the
-	// user restores on demand. The worktree is deliberately kept on disk.
-	if err := m.store.DeleteSessionWorktrees(ctx, rec.ID); err != nil {
-		return fmt.Errorf("close idle %s: clear restore marker: %w", rec.ID, err)
-	}
-	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
-		return fmt.Errorf("close idle %s: mark terminated: %w", rec.ID, err)
 	}
 	return nil
 }
@@ -1435,6 +1470,82 @@ func idleReference(rec domain.SessionRecord) time.Time {
 		return rec.Activity.LastActivityAt
 	}
 	return rec.CreatedAt
+}
+
+// IdleReference is the exported form of idleReference for the service read layer,
+// so the board's idle-close countdown (idleReference + TTL) is computed from the
+// exact same "last activity" definition the sweep uses to decide when to suspend.
+func IdleReference(rec domain.SessionRecord) time.Time {
+	return idleReference(rec)
+}
+
+// Resume wakes a suspended session in place: it recreates the runtime from the
+// kept worktree and clears the suspend flag (MarkSpawned, at the tail of the
+// shared relaunch path, does the clearing), keeping the session's board lane and
+// position. Unlike Restore it carries NO terminate semantics — the session was
+// never terminated, only paused — so it does not re-mark it reactivated and does
+// not touch restore markers. A session that is not suspended is returned
+// unchanged (idempotent), so a double-open is a safe no-op.
+func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, err)
+	}
+	if !ok {
+		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, ErrNotFound)
+	}
+	if !rec.IsSuspended {
+		return rec, nil
+	}
+	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
+		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, ErrIncompleteHandle)
+	}
+	// The tmux was torn down at suspend, but defensively adopt a still-alive
+	// runtime (e.g. a suspend that raced this open) instead of colliding on
+	// `tmux new-session` — mirror Restore's adopt-if-alive guard.
+	if handleID := strings.TrimSpace(rec.Metadata.RuntimeHandleID); handleID != "" {
+		if alive, aliveErr := m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID}); aliveErr == nil && alive {
+			if err := m.lcm.MarkSpawned(ctx, id, rec.Metadata); err != nil {
+				return domain.SessionRecord{}, fmt.Errorf("resume %s: adopt live runtime: %w", id, err)
+			}
+			return m.getRecord(ctx, id)
+		}
+	}
+	project, err := m.loadProject(ctx, rec.ProjectID)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, err)
+	}
+	ws, err := m.restoreSessionWorkspace(ctx, project, rec)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("resume %s: workspace: %w", id, err)
+	}
+	return m.relaunchRestoredSession(ctx, rec, project, ws)
+}
+
+// Wake is the user-open hook that keeps a session's idle-close timer honest: a
+// user genuinely opening/selecting a session counts as activity. It resumes a
+// suspended session in place (Resume), or, for a live session, resets its
+// idle-close countdown (TouchActivity). A terminated session is left untouched —
+// reviving one is Restore's job, not an idle-timer reset — so Wake can never
+// resurrect a session the user finished. Returns the resulting record.
+func (m *Manager) Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("wake %s: %w", id, err)
+	}
+	if !ok {
+		return domain.SessionRecord{}, fmt.Errorf("wake %s: %w", id, ErrNotFound)
+	}
+	if rec.IsSuspended {
+		return m.Resume(ctx, id)
+	}
+	if rec.IsTerminated {
+		return rec, nil
+	}
+	if err := m.lcm.TouchActivity(ctx, id); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("wake %s: touch: %w", id, err)
+	}
+	return m.getRecord(ctx, id)
 }
 
 // RestoreAll relaunches every terminated session that was saved by the last

@@ -20,6 +20,7 @@ import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSession
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { TodoDetailDialog } from "./TodoDetailDialog";
+import { IdleStatusChip } from "./IdleStatusChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
@@ -775,7 +776,11 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 	};
 	return (
 		<div
-			className="group w-full overflow-hidden rounded-[10px] text-left transition-colors"
+			className={cn(
+				"group w-full overflow-hidden rounded-[10px] text-left transition-colors",
+				// A suspended card stays in its real lane but reads as dormant.
+				session.isSuspended && "opacity-80",
+			)}
 			style={{
 				background: "var(--kanban-card-bg)",
 				border: "1px solid var(--kanban-card-border)",
@@ -808,6 +813,7 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 						</span>
 					)}
 					<div className="ml-auto flex shrink-0 items-center gap-1.5">
+						<IdleStatusChip session={session} />
 						<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
 							{agentLabel(session.provider)}
 						</span>

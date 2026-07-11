@@ -2404,6 +2404,46 @@ paths:
       summary: Start (materialize) a prepared TODO session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/wake:
+    post:
+      operationId: wakeSession
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeSessionResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: 'Wake a session on user-open: resume it if the idle sweep suspended
+        it, else reset its idle-close countdown'
+      tags:
+      - sessions
   /api/v1/sessions/cleanup:
     post:
       operationId: cleanupSessions
@@ -2972,6 +3012,13 @@ components:
           type: string
         id:
           type: string
+        idleCloseAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        isSuspended:
+          type: boolean
         isTerminated:
           type: boolean
         isTodo:
@@ -4691,6 +4738,19 @@ components:
           type:
           - "null"
           - string
+      type: object
+    WakeSessionResponse:
+      properties:
+        ok:
+          type: boolean
+        session:
+          $ref: '#/components/schemas/ControllersSessionView'
+        sessionId:
+          type: string
+      required:
+      - ok
+      - sessionId
+      - session
       type: object
     WorkspaceRepo:
       properties:

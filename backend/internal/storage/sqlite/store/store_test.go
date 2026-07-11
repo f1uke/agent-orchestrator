@@ -679,6 +679,80 @@ func TestCDCTriggersPopulateChangeLog(t *testing.T) {
 	}
 }
 
+// TestSessionSuspendedRoundTripAndCDC covers the idle-suspend flag: it must
+// persist through UpdateSession/GetSession, and flipping it (while activity and
+// is_terminated stay put) must fire a session_updated CDC event whose payload
+// carries isSuspended — the board learns a card was paused without a poll.
+func TestSessionSuspendedRoundTripAndCDC(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+
+	r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+	if r.IsSuspended {
+		t.Fatal("fresh session must not be suspended")
+	}
+	base, _ := s.LatestSeq(ctx)
+
+	// Flip only is_suspended: activity + is_terminated unchanged.
+	r.IsSuspended = true
+	if err := s.UpdateSession(ctx, r); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok {
+		t.Fatalf("get session: found=%v err=%v", ok, err)
+	}
+	if !got.IsSuspended {
+		t.Fatal("is_suspended did not round-trip through the store")
+	}
+
+	evs, err := s.EventsAfter(ctx, base, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	updates := 0
+	for _, e := range evs {
+		if string(e.Type) != "session_updated" {
+			continue
+		}
+		updates++
+		if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
+			t.Fatalf("session payload JSON: %v", err)
+		}
+	}
+	if updates != 1 {
+		t.Fatalf("session_updated events on is_suspended flip = %d, want 1", updates)
+	}
+	if suspended, _ := payload["isSuspended"].(bool); !suspended {
+		t.Fatalf("isSuspended payload = %v, want true", payload["isSuspended"])
+	}
+
+	// Clearing it fires another event carrying isSuspended=false.
+	base2, _ := s.LatestSeq(ctx)
+	got.IsSuspended = false
+	if err := s.UpdateSession(ctx, got); err != nil {
+		t.Fatalf("update clear: %v", err)
+	}
+	evs2, _ := s.EventsAfter(ctx, base2, 100)
+	cleared := false
+	for _, e := range evs2 {
+		if string(e.Type) != "session_updated" {
+			continue
+		}
+		var p map[string]any
+		_ = json.Unmarshal([]byte(e.Payload), &p)
+		if v, ok := p["isSuspended"].(bool); ok && !v {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatal("clearing is_suspended must fire session_updated with isSuspended=false")
+	}
+}
+
 func TestSetSessionPreviewURLBumpsRevisionAndFiresCDCOnSameURL(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -95,6 +95,10 @@ func (f *fakeSessionService) Restart(context.Context, domain.SessionID) (domain.
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) Wake(context.Context, domain.SessionID) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Kill(context.Context, domain.SessionID) (bool, error) {
 	return false, nil
 }

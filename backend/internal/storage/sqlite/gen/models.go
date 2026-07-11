@@ -191,6 +191,7 @@ type Session struct {
 	AutoNameBranch    bool
 	PRTarget          string
 	CreatedBy         string
+	IsSuspended       bool
 }
 
 type SessionWorktree struct {

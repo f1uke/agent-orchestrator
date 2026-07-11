@@ -4,6 +4,8 @@ import {
 	canonicalTrackerIssueId,
 	findProjectOrchestrator,
 	formatNextTransition,
+	idleCountdown,
+	IDLE_COUNTDOWN_THRESHOLD_MS,
 	newestActiveOrchestrator,
 	orchestratorHealth,
 	projectRowActive,
@@ -59,6 +61,49 @@ const pr = (overrides: Partial<PullRequestFacts> & { number: number; state: PRSt
 	reviewComments: false,
 	updatedAt: "2026-01-01T00:00:00Z",
 	...overrides,
+});
+
+describe("idleCountdown", () => {
+	const now = Date.parse("2026-01-01T12:00:00Z");
+	const at = (msFromNow: number) => new Date(now + msFromNow).toISOString();
+
+	it("returns null far from expiry (beyond the threshold)", () => {
+		const session = sessionWith({ idleCloseAt: at(IDLE_COUNTDOWN_THRESHOLD_MS + 60_000) });
+		expect(idleCountdown(session, now)).toBeNull();
+	});
+
+	it("shows a 'soon' countdown just inside the threshold", () => {
+		const session = sessionWith({ idleCloseAt: at(50 * 60_000) }); // 50m out
+		const c = idleCountdown(session, now);
+		expect(c?.level).toBe("soon");
+		expect(c?.label).toBe("50m");
+	});
+
+	it("escalates to 'urgent' at ≤10m", () => {
+		const session = sessionWith({ idleCloseAt: at(9 * 60_000) });
+		expect(idleCountdown(session, now)?.level).toBe("urgent");
+	});
+
+	it("escalates to 'imminent' at ≤1m", () => {
+		const session = sessionWith({ idleCloseAt: at(45_000) });
+		const c = idleCountdown(session, now);
+		expect(c?.level).toBe("imminent");
+		expect(c?.label).toBe("45s");
+	});
+
+	it("returns null once the deadline has passed", () => {
+		const session = sessionWith({ idleCloseAt: at(-1000) });
+		expect(idleCountdown(session, now)).toBeNull();
+	});
+
+	it("returns null for a suspended session (it shows a paused affordance instead)", () => {
+		const session = sessionWith({ isSuspended: true, idleCloseAt: at(5 * 60_000) });
+		expect(idleCountdown(session, now)).toBeNull();
+	});
+
+	it("returns null when no deadline is set", () => {
+		expect(idleCountdown(sessionWith({}), now)).toBeNull();
+	});
 });
 
 describe("toSessionStatus", () => {
@@ -396,8 +441,15 @@ describe("toStatusReason", () => {
 describe("statusReasonLabel", () => {
 	it("has a non-empty label for every real reason code", () => {
 		for (const r of [
-			"working", "waiting_input", "active_stale", "idle_aged",
-			"idle", "no_signal", "pr_pipeline", "terminated", "merged",
+			"working",
+			"waiting_input",
+			"active_stale",
+			"idle_aged",
+			"idle",
+			"no_signal",
+			"pr_pipeline",
+			"terminated",
+			"merged",
 		] as const) {
 			expect(statusReasonLabel[r].length).toBeGreaterThan(0);
 		}
@@ -411,14 +463,18 @@ describe("formatNextTransition", () => {
 		expect(
 			formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "needs_input" }, now),
 		).toBe("→ Needs input in 4m");
-		expect(
-			formatNextTransition({ nextTransitionAt: "2026-01-01T00:00:30Z", nextTransitionTo: "no_signal" }, now),
-		).toBe("→ No signal in 30s");
+		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:00:30Z", nextTransitionTo: "no_signal" }, now)).toBe(
+			"→ No signal in 30s",
+		);
 	});
 
 	it("is empty when already due, missing, or targeting a non-countdown status", () => {
-		expect(formatNextTransition({ nextTransitionAt: "2025-12-31T23:59:00Z", nextTransitionTo: "needs_input" }, now)).toBe("");
+		expect(
+			formatNextTransition({ nextTransitionAt: "2025-12-31T23:59:00Z", nextTransitionTo: "needs_input" }, now),
+		).toBe("");
 		expect(formatNextTransition({}, now)).toBe("");
-		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "working" }, now)).toBe("");
+		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "working" }, now)).toBe(
+			"",
+		);
 	});
 });

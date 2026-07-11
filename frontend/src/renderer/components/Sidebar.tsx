@@ -70,6 +70,7 @@ import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
+import { IdleStatusChip } from "./IdleStatusChip";
 import { Button } from "./ui/button";
 
 // The macOS hiddenInset traffic lights and the fixed TitlebarNav overlay live
@@ -798,6 +799,13 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
 						{sessionRef}
 					</span>
+				</span>
+				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
+				(most rows show nothing). Sits left of the pr-7 rename zone so the
+				hover pencil never collides with it; hidden while collapsed to the icon
+				rail. */}
+				<span className="shrink-0 group-data-[collapsible=icon]:hidden">
+					<IdleStatusChip session={session} compact />
 				</span>
 			</button>
 			{/* Pencil reveals on row hover/focus (named group on SidebarMenuSubItem);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
@@ -10,7 +11,8 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resiz
 import { useUiStore } from "../stores/ui-store";
 import { useShell } from "../lib/shell-context";
 import { useBrowserView } from "../hooks/useBrowserView";
-import { useWorkspaceQuery } from "../hooks/useWorkspaceQuery";
+import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { apiClient } from "../lib/api-client";
 import { isOrchestratorSession } from "../types/workspace";
 import type { TerminalTarget } from "../types/terminal";
 
@@ -40,6 +42,7 @@ type SessionViewProps = {
 // flex-grow transition in styles.css. Content keeps a stable min-width inside
 // the clipped panel so nothing reflows mid-animation; split width persists.
 export function SessionView({ sessionId }: SessionViewProps) {
+	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
 	const workspaces = workspaceQuery.data ?? [];
 	const { theme } = useUiStore();
@@ -85,6 +88,30 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setInspectorView("summary");
 		setFileView(null);
 	}, [sessionId]);
+
+	// Opening/selecting a session counts as activity: POST /wake so the daemon
+	// resumes it in place if the idle sweep suspended it (recreate tmux, clear the
+	// paused flag), or resets its idle-close countdown if it is live. Then refetch
+	// the workspace so the fresh read model (isSuspended cleared, idleCloseAt
+	// pushed forward) lands immediately — a live-session touch changes no
+	// CDC-watched column, so we invalidate explicitly rather than wait for an
+	// event. Idempotent, so React StrictMode's double-invoke is harmless.
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/wake", {
+				params: { path: { sessionId } },
+			});
+			// A 404 (session not loaded yet / already gone) is a benign no-op; only a
+			// successful wake needs the refetch to reflect the reset/resume.
+			if (!cancelled && !error) {
+				void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [sessionId, queryClient]);
 
 	// `ao preview` sets session.previewUrl and bumps previewRevision (streamed over
 	// CDC); surface a *live* preview in the inspector rail's Browser tab (opening

@@ -137,6 +137,46 @@ export function formatNextTransition(
 	return `→ ${target} in ${formatCountdown(ms)}`;
 }
 
+/** Escalating urgency of an approaching idle-suspend, most urgent last. */
+export type IdleCountdownLevel = "soon" | "urgent" | "imminent";
+
+export type IdleCountdown = {
+	/** Milliseconds until the idle sweep suspends the session (> 0). */
+	remainingMs: number;
+	/** Escalation bucket driving the chip's prominence/colour. */
+	level: IdleCountdownLevel;
+	/** Compact label, e.g. "58m", "9m", "45s". */
+	label: string;
+};
+
+/** Show the idle-suspend countdown only within this window of the deadline. */
+export const IDLE_COUNTDOWN_THRESHOLD_MS = 60 * 60 * 1000; // 1h
+const IDLE_URGENT_MS = 10 * 60 * 1000; // 10m
+const IDLE_IMMINENT_MS = 60 * 1000; // 1m
+
+/**
+ * The idle-suspend countdown to render for a session, or null when nothing
+ * should show. Deliberately surfaced only NEAR expiry (≤ {@link
+ * IDLE_COUNTDOWN_THRESHOLD_MS}) so a session tens of hours from suspension is not
+ * noise, and it ESCALATES as the deadline nears: "soon" (≤1h) → "urgent" (≤10m)
+ * → "imminent" (≤1m). A suspended session shows a "paused — click to resume"
+ * affordance instead of a countdown, so this returns null for it. `now` (ms since
+ * epoch) is injected so the function stays pure and testable.
+ */
+export function idleCountdown(
+	session: Pick<WorkspaceSession, "idleCloseAt" | "isSuspended">,
+	now: number,
+): IdleCountdown | null {
+	if (session.isSuspended || !session.idleCloseAt) return null;
+	const deadline = Date.parse(session.idleCloseAt);
+	if (Number.isNaN(deadline)) return null;
+	const remainingMs = deadline - now;
+	if (remainingMs <= 0 || remainingMs > IDLE_COUNTDOWN_THRESHOLD_MS) return null;
+	const level: IdleCountdownLevel =
+		remainingMs <= IDLE_IMMINENT_MS ? "imminent" : remainingMs <= IDLE_URGENT_MS ? "urgent" : "soon";
+	return { remainingMs, level, label: formatCountdown(remainingMs) };
+}
+
 export type AgentProvider =
 	| "codex"
 	| "claude-code"
@@ -250,6 +290,20 @@ export type WorkspaceSession = {
 	displayStatus?: WorkerDisplayStatus;
 	/** True for a prepared-but-not-started TODO (status === "todo"). */
 	isTodo?: boolean;
+	/**
+	 * True when the idle sweep tore this session's tmux down to free resources
+	 * while KEEPING it on the board in its current lane (worktree kept on disk).
+	 * Orthogonal to {@link status} — the card stays in its real lane and this only
+	 * drives a "paused — click to resume" affordance. Opening it resumes in place.
+	 */
+	isSuspended?: boolean;
+	/**
+	 * ISO timestamp when the idle sweep will suspend this live session if no
+	 * further activity arrives (idle reference + the daemon's idle TTL). Absent
+	 * when the sweep is disabled or the session is not a live suspend candidate
+	 * (terminated / todo / already suspended). Drives the board/sidebar countdown.
+	 */
+	idleCloseAt?: string;
 	/** TODO spec (present only while `isTodo`): the branch the worktree will start
 	 * from, the intended PR merge target, whether to auto-name the new branch, the
 	 * queuing orchestrator, and the task prompt — all editable before Start. */

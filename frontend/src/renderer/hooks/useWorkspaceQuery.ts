@@ -71,6 +71,8 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				previewRevision: session.previewRevision,
 				prs: (session.prs ?? []).map(toPullRequestFacts),
 				isTodo: session.isTodo,
+				isSuspended: session.isSuspended,
+				idleCloseAt: session.idleCloseAt ?? undefined,
 				baseBranch: session.baseBranch,
 				prTarget: session.prTarget,
 				autoNameBranch: session.autoNameBranch,

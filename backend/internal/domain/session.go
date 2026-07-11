@@ -76,6 +76,14 @@ type SessionRecord struct {
 	// so the id carries through into the live session. Durable fact; drives the
 	// StatusTodo display status.
 	IsTodo bool `json:"isTodo,omitempty"`
+	// IsSuspended marks a session whose tmux runtime the idle sweep tore down to
+	// free machine resources while KEEPING it on the board in its current lane
+	// (worktree kept on disk). It is deliberately orthogonal to IsTerminated:
+	// status derivation never reads it, so the card stays in its real lane and
+	// the flag only drives a "paused — click to resume" affordance. Opening the
+	// session resumes it in place (recreate tmux, clear this flag). Durable fact,
+	// surfaced in the API read model for the paused affordance + countdown.
+	IsSuspended bool `json:"isSuspended,omitempty"`
 	// BaseBranch, AutoNameBranch, PRTarget and CreatedBy are the deferred spec
 	// captured at TODO create-time and replayed verbatim on Start. BaseBranch is
 	// the branch the worktree is created from; AutoNameBranch asks for an AI
@@ -105,7 +113,13 @@ type Session struct {
 	// is what it becomes. Both derived on read.
 	NextTransitionAt *time.Time    `json:"nextTransitionAt,omitempty"`
 	NextTransitionTo SessionStatus `json:"nextTransitionTo,omitempty" enum:"todo,working,pr_open,draft,ci_failed,review_pending,changes_requested,approved,mergeable,merged,needs_input,idle,terminated,no_signal"`
-	TerminalHandleID string        `json:"terminalHandleId,omitempty"`
+	// IdleCloseAt is when this live session will be auto-suspended by the idle
+	// sweep if no further activity arrives: idleReference(rec) + the configured
+	// idle TTL. Nil when the sweep is disabled (TTL 0) or the session is not a
+	// live suspend candidate (terminated, a prepared TODO, or already suspended).
+	// Derived on read from durable facts; drives the board/sidebar countdown.
+	IdleCloseAt      *time.Time `json:"idleCloseAt,omitempty"`
+	TerminalHandleID string     `json:"terminalHandleId,omitempty"`
 	// PRs are the session's attributed pull requests (one session can own many).
 	// They feed status derivation and are surfaced on the API read model. Not
 	// serialized here: the HTTP boundary maps them to the curated wire shape.

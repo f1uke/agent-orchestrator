@@ -294,6 +294,15 @@ type RestartSessionResponse struct {
 	Session   SessionView      `json:"session"`
 }
 
+// WakeSessionResponse is the body of POST /api/v1/sessions/{sessionId}/wake:
+// the fresh read model after resuming a suspended session or resetting a live
+// session's idle-close countdown.
+type WakeSessionResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+	Session   SessionView      `json:"session"`
+}
+
 // DeleteSessionResponse is the body of DELETE /api/v1/sessions/{sessionId}.
 type DeleteSessionResponse struct {
 	OK        bool             `json:"ok"`
