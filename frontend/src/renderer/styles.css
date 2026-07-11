@@ -112,6 +112,9 @@
 	--amber: #e8c14a;
 	--red: #ef6b6b;
 	--purple: #a78bfa;
+	/* Semantic "done/success" alias for the raw green (used by the Jira status
+	   tint on the Summary pill + board/sidebar badge). */
+	--success: var(--green);
 	/* Terminal — dark palette (light override below). */
 	--term-bg: #15171b;
 	--term-fg: #d7d7d2;
@@ -171,6 +174,7 @@
 	--amber: #9a6b00;
 	--red: #c0392b;
 	--purple: #7c3aed;
+	--success: var(--green);
 	--interactive-hover: rgb(0 0 0 / 0.04);
 	--interactive-active: rgb(0 0 0 / 0.07);
 	--kanban-column-bg: rgb(0 0 0 / 0.02);
@@ -1557,6 +1561,64 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 
 .jira-adf__date {
 	color: var(--fg-muted);
+}
+
+/* Board-card / sidebar Jira badge (JiraKeyBadge) — display-only KEY · type ·
+   status chip. Decoupled from the board lane (no drift/alignment cue). */
+.jira-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 100%;
+	min-width: 0;
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	line-height: 1.4;
+	border-radius: 6px;
+	padding: 2px 7px;
+	border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+	background: color-mix(in srgb, var(--fg) 5%, transparent);
+	white-space: nowrap;
+}
+
+.jira-badge__sq {
+	width: 9px;
+	height: 9px;
+	border-radius: 2px;
+	flex-shrink: 0;
+}
+
+.jira-badge__diamond {
+	color: var(--accent);
+	font-size: 10px;
+	flex-shrink: 0;
+}
+
+.jira-badge__key {
+	font-weight: 700;
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+	flex-shrink: 0;
+}
+
+.jira-badge__sep {
+	color: var(--fg-muted);
+	flex-shrink: 0;
+}
+
+.jira-badge__status {
+	font-weight: 600;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Sidebar variant: slightly smaller + transparent so it recedes under the row. */
+.jira-badge--row {
+	font-size: 10px;
+	gap: 5px;
+	padding: 1px 6px;
+	border-color: transparent;
+	background: transparent;
 }
 
 .inspector-timeline {

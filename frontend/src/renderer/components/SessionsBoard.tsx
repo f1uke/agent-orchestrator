@@ -12,10 +12,12 @@ import {
 	type WorkspaceSession,
 	attentionZone,
 	canonicalTrackerIssueId,
+	jiraKeyFromIssueId,
 	orchestratorHealth,
 	primaryPR,
 	workerSessions,
 } from "../types/workspace";
+import { JiraKeyBadge } from "./JiraKeyBadge";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -765,6 +767,9 @@ function TodoCard({
 function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col: LaneConfig; onOpen: () => void }) {
 	const badge = sessionBadge(session);
 	const issueId = canonicalTrackerIssueId(session.issueId);
+	// A Jira-linked session gets the richer display-only Jira badge (KEY · type ·
+	// status) below the branch instead of the raw provider-prefixed intake chip.
+	const jiraKey = jiraKeyFromIssueId(session.issueId);
 	const branch = session.branch || "";
 	const showBranch = branch !== "" && !sameLabel(branch, session.title) && !sameLabel(branch, session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, useSessionScmSummary(session.id).data);
@@ -804,7 +809,7 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 						/>
 						{badge.label}
 					</span>
-					{issueId && (
+					{issueId && !jiraKey && (
 						<span
 							className="inline-flex max-w-[13rem] items-center truncate rounded-[4px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-1.5 py-0.5 font-mono text-[10px] text-accent"
 							title={`Intake issue: ${issueId}`}
@@ -830,6 +835,11 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 					{session.title}
 				</div>
 				{showBranch && <div className="px-[13px] pb-2.5 font-mono text-[10.5px] text-passive">{branch}</div>}
+				{jiraKey && (
+					<div className="px-[13px] pb-2.5">
+						<JiraKeyBadge sessionId={session.id} issueKey={jiraKey} variant="card" />
+					</div>
+				)}
 			</div>
 			<div
 				className="px-[13px] py-2 font-mono text-[10.5px] text-passive"

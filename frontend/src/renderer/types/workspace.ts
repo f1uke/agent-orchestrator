@@ -332,6 +332,20 @@ export function canonicalTrackerIssueId(issueId?: string): string | undefined {
 	return TRACKER_PROVIDER_PREFIXES.some((prefix) => issueId.startsWith(prefix)) ? issueId : undefined;
 }
 
+const JIRA_ISSUE_PREFIX = "jira:";
+
+/**
+ * The bare Jira issue key (`DEMO-101`) for a Jira-bound session, or undefined when
+ * the session is not linked to a Jira issue. Drives the board/sidebar Jira badge;
+ * the key is known from the binding alone (no fetch), so the badge can render it
+ * immediately and enrich type/status once the Jira context loads.
+ */
+export function jiraKeyFromIssueId(issueId?: string): string | undefined {
+	if (!issueId || !issueId.startsWith(JIRA_ISSUE_PREFIX)) return undefined;
+	const key = issueId.slice(JIRA_ISSUE_PREFIX.length);
+	return key || undefined;
+}
+
 export type ProjectKind = "single_repo" | "workspace";
 
 export type WorkspaceRepoSummary = {
