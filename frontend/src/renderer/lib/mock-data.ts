@@ -1,5 +1,6 @@
 import type { PRState, PullRequestFacts, WorkspaceSummary } from "../types/workspace";
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
+import type { components } from "../../api/schema";
 
 const now = new Date().toISOString();
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
@@ -92,6 +93,7 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
 				title: "Build screenshot-ready dashboard data",
+				issueId: "jira:DEMO-101",
 				provider: "codex",
 				branch: "demo/dashboard-screenshot",
 				status: "working",
@@ -496,4 +498,126 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 			},
 		}),
 	],
+};
+
+// Mock Jira context for the standalone (VITE_NO_ELECTRON) preview, so the
+// Summary tab's JIRA ISSUE section renders without a daemon. Keyed by session id;
+// demo-working carries issueId "jira:DEMO-101". The description exercises the
+// main ADF node kinds (bold "heading" paragraphs, nested bullets, an attachment
+// chip, a smart link, and an acceptance-criteria checklist).
+export const mockSessionJiraContexts: Record<string, components["schemas"]["JiraContextResponse"]> = {
+	"demo-working": {
+		sessionId: "demo-working",
+		linked: true,
+		issue: {
+			key: "DEMO-101",
+			url: "https://example.atlassian.net/browse/DEMO-101",
+			type: "Story",
+			title: "Participating funds eligibility UI",
+			status: "Ready for QA",
+			statusCategory: "new",
+			statusColor: "blue-gray",
+			priority: "Medium",
+			assignee: "Alex Rivera",
+			reporter: "Sam Chen",
+			sprint: {
+				name: "Sprint 2026-14",
+				state: "active",
+				startDate: "2026-06-29T09:38:37.895Z",
+				endDate: "2026-07-10T11:00:00.000Z",
+			},
+			subtasks: [
+				{
+					key: "DEMO-102",
+					type: "Sub-task",
+					title: "iOS",
+					status: "Pull Request",
+					statusCategory: "indeterminate",
+					statusColor: "yellow",
+				},
+				{
+					key: "DEMO-103",
+					type: "Sub-task",
+					title: "ADR",
+					status: "Pull Request",
+					statusCategory: "indeterminate",
+					statusColor: "yellow",
+				},
+			],
+			description: [
+				{ type: "paragraph", content: [{ type: "text", text: "Background", marks: [{ type: "strong" }] }] },
+				{
+					type: "paragraph",
+					content: [
+						{
+							type: "text",
+							text: "Move the eligibility panel from the result screen to the review screen so customers benefit earlier.",
+						},
+					],
+				},
+				{ type: "paragraph", content: [{ type: "text", text: "Story", marks: [{ type: "strong" }] }] },
+				{
+					type: "bulletList",
+					content: [
+						{
+							type: "listItem",
+							content: [
+								{
+									type: "paragraph",
+									content: [
+										{ type: "text", text: "Build the participating-funds UI from the usable-coupon API response." },
+									],
+								},
+							],
+						},
+						{
+							type: "listItem",
+							content: [
+								{ type: "paragraph", content: [{ type: "text", text: "Participating funds CTA" }] },
+								{
+									type: "bulletList",
+									content: [
+										{
+											type: "listItem",
+											content: [
+												{
+													type: "paragraph",
+													content: [
+														{ type: "text", text: "Open a webview as a bottom sheet at " },
+														{ type: "text", text: "/promotions/eligible/funds", marks: [{ type: "code" }] },
+													],
+												},
+											],
+										},
+									],
+								},
+							],
+						},
+					],
+				},
+				{ type: "mediaSingle", content: [{ type: "media", attrs: { filename: "order-eligible-ui.png" } }] },
+				{ type: "paragraph", content: [{ type: "text", text: "Design", marks: [{ type: "strong" }] }] },
+				{
+					type: "paragraph",
+					content: [{ type: "inlineCard", attrs: { url: "https://example.com/design/participating-funds" } }],
+				},
+				{ type: "paragraph", content: [{ type: "text", text: "Acceptance Criteria", marks: [{ type: "strong" }] }] },
+				{
+					type: "taskList",
+					content: [
+						{
+							type: "taskItem",
+							attrs: { state: "TODO" },
+							content: [{ type: "text", text: "UI renders participating funds from the usable API correctly." }],
+						},
+						{
+							type: "taskItem",
+							attrs: { state: "DONE" },
+							content: [{ type: "text", text: "Summary totals across all fund types are correct." }],
+						},
+					],
+				},
+			],
+		},
+	},
 };

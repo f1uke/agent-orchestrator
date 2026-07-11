@@ -1,0 +1,519 @@
+{
+ "type": "doc",
+ "version": 1,
+ "content": [
+  {
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "Summary totals stay accurate when.",
+     "marks": [
+      {
+       "type": "strong"
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "9cdec381f64f"
+   }
+  },
+  {
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "Is applied before checkout and verify."
+    }
+   ],
+   "attrs": {
+    "localId": "2524e933471f"
+   }
+  },
+  {
+   "type": "bulletList",
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "7e6634d51c2f"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Eligible list renders from the usable coupon."
+        }
+       ],
+       "attrs": {
+        "localId": "bd84f4e9202f"
+       }
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "568958cabec9"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Response. Configure the participating funds panel so the."
+        }
+       ],
+       "attrs": {
+        "localId": "9be95ede5f51"
+       }
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "56f74c8d8298"
+   }
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "localId": "289049cdf87d"
+   }
+  },
+  {
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "The summary totals stay accurate when a coupon is.",
+     "marks": [
+      {
+       "type": "strong"
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "997d80b3f97c"
+   }
+  },
+  {
+   "type": "bulletList",
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "24344513ad16"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Coupon is applied before checkout and verify the eligible list."
+        }
+       ],
+       "attrs": {
+        "localId": "f8a934bb2c8b"
+       }
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "24344513ad16"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "The eligible list renders from the usable coupon response. Configure the."
+        }
+       ],
+       "attrs": {
+        "localId": "11a60496675a"
+       }
+      },
+      {
+       "type": "bulletList",
+       "content": [
+        {
+         "type": "listItem",
+         "attrs": {
+          "localId": "24344513ad16"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "text",
+             "text": "Coupon response. Configure the."
+            }
+           ],
+           "attrs": {
+            "localId": "1ab3eca5a6e6"
+           }
+          }
+         ]
+        },
+        {
+         "type": "listItem",
+         "attrs": {
+          "localId": "24344513ad16"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "text",
+             "text": "So the summary totals stay."
+            }
+           ],
+           "attrs": {
+            "localId": "471559482f58"
+           }
+          }
+         ]
+        },
+        {
+         "type": "listItem",
+         "attrs": {
+          "localId": "24344513ad16"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "text",
+             "text": "A coupon is applied before checkout."
+            }
+           ],
+           "attrs": {
+            "localId": "810eb979ddf3"
+           }
+          }
+         ]
+        }
+       ],
+       "attrs": {
+        "localId": "6046029add43"
+       }
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "054fb07749d3"
+   }
+  },
+  {
+   "type": "mediaSingle",
+   "attrs": {
+    "width": 277,
+    "widthType": "pixel",
+    "localId": "7a4526d1ce6f",
+    "layout": "align-start"
+   },
+   "content": [
+    {
+     "type": "media",
+     "attrs": {
+      "type": "file",
+      "id": "61d5e60c-835c-472e-9c0c-7e61a1f699cc",
+      "alt": "attachment-10.png",
+      "collection": "",
+      "localId": "19d496f55ddc",
+      "height": 558,
+      "width": 277
+     }
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "localId": "9d9ace4b8c1c"
+   }
+  },
+  {
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "Verify the eligible list renders from the.",
+     "marks": [
+      {
+       "type": "strong"
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "97febc561205"
+   }
+  },
+  {
+   "type": "bulletList",
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "91524bf52cee"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Usable coupon response. Configure the participating funds panel."
+        },
+        {
+         "type": "inlineCard",
+         "attrs": {
+          "url": "https://example.com/doc/12",
+          "localId": "b51c8fa2bc2c"
+         }
+        }
+       ],
+       "attrs": {
+        "localId": "d5e236b28cbc"
+       }
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "4f3bd64af9fa"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Panel so the summary totals stay accurate when a."
+        },
+        {
+         "type": "inlineCard",
+         "attrs": {
+          "url": "https://example.com/doc/13",
+          "localId": "107d28bce3da"
+         }
+        }
+       ],
+       "attrs": {
+        "localId": "b2bfc7b26b7b"
+       }
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "7723ceb4828d"
+   }
+  },
+  {
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "When a coupon is applied before checkout and verify the.",
+     "marks": [
+      {
+       "type": "strong"
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "defe14db2698"
+   }
+  },
+  {
+   "type": "bulletList",
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "4c2383713394"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "And verify the eligible list renders from the usable coupon response.."
+        },
+        {
+         "type": "inlineCard",
+         "attrs": {
+          "url": "https://example.com/doc/15",
+          "localId": "7a1e9090b349"
+         }
+        }
+       ],
+       "attrs": {
+        "localId": "7ddb9f97830f"
+       }
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "ef9c2d1e8a2d"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "The usable coupon response.."
+        },
+        {
+         "type": "inlineCard",
+         "attrs": {
+          "url": "https://example.com/doc/16",
+          "localId": "36bd0d2e59fb"
+         }
+        },
+        {
+         "type": "text",
+         "text": "Funds panel so the summary."
+        }
+       ],
+       "attrs": {
+        "localId": "4c9610ac1f66"
+       }
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "b973a1a3907e"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Accurate when a coupon is applied."
+        },
+        {
+         "type": "inlineCard",
+         "attrs": {
+          "url": "https://example.com/doc/18",
+          "localId": "85c34d1d4681"
+         }
+        },
+        {
+         "type": "text",
+         "text": "Checkout and verify the eligible list renders."
+        }
+       ],
+       "attrs": {
+        "localId": "44b898dc7f13"
+       }
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "localId": "423498a0efae"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "From the usable coupon response. Configure the participating."
+        },
+        {
+         "type": "inlineCard",
+         "attrs": {
+          "url": "https://example.com/doc/20",
+          "localId": "91137266afe4"
+         }
+        },
+        {
+         "type": "text",
+         "text": "Participating funds panel so the summary totals stay accurate."
+        }
+       ],
+       "attrs": {
+        "localId": "328f889651f3"
+       }
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "069485ab1aef"
+   }
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "localId": "4952fbee758f"
+   }
+  },
+  {
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "Stay accurate when a coupon is applied before checkout and.",
+     "marks": [
+      {
+       "type": "strong"
+      }
+     ]
+    }
+   ],
+   "attrs": {
+    "localId": "221aa3dc7531"
+   }
+  },
+  {
+   "type": "taskList",
+   "content": [
+    {
+     "type": "taskItem",
+     "content": [
+      {
+       "type": "text",
+       "text": "Before checkout and verify the eligible list renders from the usable."
+      }
+     ],
+     "attrs": {
+      "localId": "4505ec36-4edd-403f-b626-50bd0d7cd9bd",
+      "state": "TODO"
+     }
+    }
+   ],
+   "attrs": {
+    "localId": "99401c25-7f9b-47cc-aab8-d6b1103634e6"
+   }
+  }
+ ]
+}

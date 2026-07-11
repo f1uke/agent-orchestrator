@@ -24,6 +24,7 @@ type APIDeps struct {
 	Projects           projectsvc.Manager
 	Sessions           controllers.SessionService
 	Activity           controllers.ActivityRecorder
+	Jira               controllers.JiraService
 	PRs                prsvc.ActionManager
 	Reviews            reviewsvc.Manager
 	Smoke              smokesvc.Manager
@@ -47,6 +48,7 @@ type API struct {
 	agents        *controllers.AgentsController
 	projects      *controllers.ProjectsController
 	sessions      *controllers.SessionsController
+	jira          *controllers.JiraController
 	prs           *controllers.PRsController
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
@@ -72,6 +74,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Svc:      deps.Sessions,
 			Activity: deps.Activity,
 		},
+		jira:          &controllers.JiraController{Svc: deps.Jira},
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
@@ -99,6 +102,7 @@ func (a *API) Register(root chi.Router) {
 			a.agents.Register(r)
 			a.projects.Register(r)
 			a.sessions.Register(r)
+			a.jira.Register(r)
 			a.prs.Register(r)
 			a.reviews.Register(r)
 			a.smoke.Register(r)

@@ -185,6 +185,13 @@ var schemaNames = map[string]string{
 	"ControllersSessionPRMergeabilitySummary":     "SessionPRMergeabilitySummary",
 	"ControllersSessionPRConflictFile":            "SessionPRConflictFile",
 	"ControllersListSessionPRsResponse":           "ListSessionPRsResponse",
+	"ControllersJiraContextResponse":              "JiraContextResponse",
+	"ControllersJiraIssue":                        "JiraIssue",
+	"ControllersJiraSprint":                       "JiraSprint",
+	"ControllersJiraSubtask":                      "JiraSubtask",
+	"AdfNode":                                     "AdfNode",
+	"AdfMark":                                     "AdfMark",
+	"AdfAttrs":                                    "AdfAttrs",
 	"ControllersListSessionPRCommentsResponse":    "ListSessionPRCommentsResponse",
 	"ControllersSessionPRCommentGroup":            "SessionPRCommentGroup",
 	"ControllersSessionPRCommentThread":           "SessionPRCommentThread",
@@ -338,6 +345,7 @@ func operations() []operation {
 	ops = append(ops, agentOperations()...)
 	ops = append(ops, projectOperations()...)
 	ops = append(ops, sessionOperations()...)
+	ops = append(ops, jiraOperations()...)
 	ops = append(ops, settingsOperations()...)
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
@@ -451,6 +459,23 @@ func notificationOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 			contentTypes: map[int]string{http.StatusOK: "text/event-stream"},
+		},
+	}
+}
+
+// jiraOperations declares the session-scoped /jira operation. Must stay 1:1
+// with the routes JiraController.Register mounts (enforced by the parity test).
+func jiraOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/jira", id: "getSessionJira", tag: "jira",
+			summary:    "Return the display-only Jira issue context for a session bound to a Jira key",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.JiraContextResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
 		},
 	}
 }

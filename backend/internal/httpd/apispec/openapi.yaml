@@ -1303,6 +1303,40 @@ paths:
       summary: Return the diff hunk or full file a review comment anchors to
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/jira:
+    get:
+      operationId: getSessionJira
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraContextResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return the display-only Jira issue context for a session bound to a
+        Jira key
+      tags:
+      - jira
   /api/v1/sessions/{sessionId}/kill:
     post:
       operationId: killSession
@@ -2867,6 +2901,55 @@ components:
       required:
       - path
       type: object
+    AdfAttrs:
+      properties:
+        color:
+          type: string
+        filename:
+          type: string
+        language:
+          type: string
+        layout:
+          type: string
+        level:
+          type: integer
+        panelType:
+          type: string
+        state:
+          type: string
+        text:
+          type: string
+        url:
+          type: string
+      type: object
+    AdfMark:
+      properties:
+        href:
+          type: string
+        type:
+          type: string
+      required:
+      - type
+      type: object
+    AdfNode:
+      properties:
+        attrs:
+          $ref: '#/components/schemas/AdfAttrs'
+        content:
+          items:
+            $ref: '#/components/schemas/AdfNode'
+          type: array
+        marks:
+          items:
+            $ref: '#/components/schemas/AdfMark'
+          type: array
+        text:
+          type: string
+        type:
+          type: string
+      required:
+      - type
+      type: object
     AgentConfig:
       properties:
         model:
@@ -3270,6 +3353,85 @@ components:
       required:
       - available
       - legacyRoot
+      type: object
+    JiraContextResponse:
+      properties:
+        fetchError:
+          type: string
+        issue:
+          $ref: '#/components/schemas/JiraIssue'
+        linked:
+          type: boolean
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - linked
+      type: object
+    JiraIssue:
+      properties:
+        assignee:
+          type: string
+        description:
+          items:
+            $ref: '#/components/schemas/AdfNode'
+          type: array
+        key:
+          type: string
+        priority:
+          type: string
+        reporter:
+          type: string
+        sprint:
+          $ref: '#/components/schemas/JiraSprint'
+        status:
+          type: string
+        statusCategory:
+          type: string
+        statusColor:
+          type: string
+        subtasks:
+          items:
+            $ref: '#/components/schemas/JiraSubtask'
+          type: array
+        title:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+      required:
+      - key
+      type: object
+    JiraSprint:
+      properties:
+        endDate:
+          type: string
+        name:
+          type: string
+        startDate:
+          type: string
+        state:
+          type: string
+      required:
+      - name
+      type: object
+    JiraSubtask:
+      properties:
+        key:
+          type: string
+        status:
+          type: string
+        statusCategory:
+          type: string
+        statusColor:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+      required:
+      - key
       type: object
     KillSessionResponse:
       properties:

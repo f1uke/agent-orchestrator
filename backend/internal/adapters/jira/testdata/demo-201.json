@@ -1,0 +1,324 @@
+{
+ "key": "DEMO-201",
+ "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+ "fields": {
+  "summary": "Sample issue summary for DEMO-201",
+  "issuetype": {
+   "name": "Bug",
+   "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10303?size=medium"
+  },
+  "status": {
+   "name": "Done",
+   "statusCategory": {
+    "key": "done",
+    "colorName": "green",
+    "name": "Done"
+   }
+  },
+  "priority": {
+   "name": "Medium"
+  },
+  "assignee": {
+   "displayName": "Sam Chen"
+  },
+  "reporter": {
+   "displayName": "Alex Rivera"
+  },
+  "customfield_10001": [
+   {
+    "id": 6985,
+    "name": "Sprint 2026-14",
+    "state": "closed",
+    "boardId": 113,
+    "goal": "Sample sprint goal.",
+    "startDate": "2026-06-02T04:54:20.042Z",
+    "endDate": "2026-06-12T11:00:00.000Z",
+    "completeDate": "2026-06-15T09:32:58.495Z"
+   }
+  ],
+  "subtasks": [],
+  "description": {
+   "type": "doc",
+   "version": 1,
+   "content": [
+    {
+     "type": "table",
+     "attrs": {
+      "isNumberColumnEnabled": false,
+      "layout": "align-start",
+      "localId": "d3caa926-c462-4090-8012-59384d0ce03e"
+     },
+     "content": [
+      {
+       "type": "tableRow",
+       "attrs": {
+        "localId": "c4ebe3c21d16"
+       },
+       "content": [
+        {
+         "type": "tableHeader",
+         "attrs": {
+          "localId": "43166faaadea"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "text",
+             "text": "Summary totals stay accurate when.",
+             "marks": [
+              {
+               "type": "strong"
+              }
+             ]
+            }
+           ],
+           "attrs": {
+            "localId": "acb624f84568"
+           }
+          }
+         ]
+        },
+        {
+         "type": "tableHeader",
+         "attrs": {
+          "localId": "b67534046e74"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "text",
+             "text": "Is applied before checkout and verify.",
+             "marks": [
+              {
+               "type": "strong"
+              }
+             ]
+            }
+           ],
+           "attrs": {
+            "localId": "f14a190b058d"
+           }
+          }
+         ]
+        },
+        {
+         "type": "tableHeader",
+         "attrs": {
+          "localId": "305039198b28"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "text",
+             "text": "Eligible list renders from the usable coupon.",
+             "marks": [
+              {
+               "type": "strong"
+              }
+             ]
+            }
+           ],
+           "attrs": {
+            "localId": "29a13f6aa8fb"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableRow",
+       "attrs": {
+        "localId": "a965ee6a14da"
+       },
+       "content": [
+        {
+         "type": "tableCell",
+         "attrs": {
+          "localId": "6efadc489518"
+         },
+         "content": [
+          {
+           "type": "bulletList",
+           "content": [
+            {
+             "type": "listItem",
+             "attrs": {
+              "localId": "09dc484be310"
+             },
+             "content": [
+              {
+               "type": "paragraph",
+               "content": [
+                {
+                 "type": "text",
+                 "text": "Response. Configure the participating funds panel so the."
+                },
+                {
+                 "type": "hardBreak"
+                }
+               ],
+               "attrs": {
+                "localId": "72c5378acc59"
+               }
+              },
+              {
+               "type": "mediaSingle",
+               "attrs": {
+                "width": 182,
+                "widthType": "pixel",
+                "localId": "16e825505aa9",
+                "layout": "align-start"
+               },
+               "content": [
+                {
+                 "type": "media",
+                 "attrs": {
+                  "type": "file",
+                  "id": "6514d1bc-6382-4a7f-a4d3-8123c4a839f4",
+                  "alt": "attachment-4.png",
+                  "collection": "",
+                  "localId": "460ebbec7a2e",
+                  "height": 1201,
+                  "width": 722
+                 }
+                }
+               ]
+              }
+             ]
+            }
+           ],
+           "attrs": {
+            "localId": "483a9597bea1"
+           }
+          }
+         ]
+        },
+        {
+         "type": "tableCell",
+         "attrs": {
+          "localId": "518d74a504a0"
+         },
+         "content": [
+          {
+           "type": "bulletList",
+           "content": [
+            {
+             "type": "listItem",
+             "attrs": {
+              "localId": "0747461b95be"
+             },
+             "content": [
+              {
+               "type": "paragraph",
+               "content": [
+                {
+                 "type": "text",
+                 "text": "The summary totals stay accurate when a coupon is."
+                }
+               ],
+               "attrs": {
+                "localId": "882e83243d06"
+               }
+              }
+             ]
+            }
+           ],
+           "attrs": {
+            "localId": "78101d43aca3"
+           }
+          }
+         ]
+        },
+        {
+         "type": "tableCell",
+         "attrs": {
+          "localId": "86c737152543"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "content": [
+            {
+             "type": "status",
+             "attrs": {
+              "text": "TAG",
+              "color": "green",
+              "localId": "7a2ebd1d-7e88-4e72-a188-7f837a1f927c",
+              "style": ""
+             }
+            },
+            {
+             "type": "text",
+             "text": "Coupon is applied before checkout and verify the eligible list."
+            },
+            {
+             "type": "hardBreak"
+            }
+           ],
+           "attrs": {
+            "localId": "05ccc7388f13"
+           }
+          },
+          {
+           "type": "mediaSingle",
+           "attrs": {
+            "width": 391,
+            "widthType": "pixel",
+            "localId": "8c071a7a6dfc",
+            "layout": "align-start"
+           },
+           "content": [
+            {
+             "type": "media",
+             "attrs": {
+              "type": "file",
+              "id": "9311b3b1-cc13-4d35-9e27-c102eb4e9dac",
+              "alt": "attachment-6.png",
+              "collection": "",
+              "localId": "05b5672b0b03",
+              "height": 1188,
+              "width": 575
+             }
+            }
+           ]
+          },
+          {
+           "type": "mediaSingle",
+           "attrs": {
+            "width": 391,
+            "widthType": "pixel",
+            "localId": "330f2c77a203",
+            "layout": "align-start"
+           },
+           "content": [
+            {
+             "type": "media",
+             "attrs": {
+              "type": "file",
+              "id": "183cdbd9-3228-4d4c-b1dd-5f0e67809bed",
+              "alt": "attachment-6.png",
+              "collection": "",
+              "localId": "8faeea88ae35",
+              "height": 1167,
+              "width": 573
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

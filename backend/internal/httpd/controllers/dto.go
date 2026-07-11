@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira/adf"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/legacyimport"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
@@ -479,6 +480,60 @@ type SessionPRConflictFile struct {
 type ListSessionPRsResponse struct {
 	SessionID domain.SessionID   `json:"sessionId"`
 	PRs       []SessionPRSummary `json:"prs"`
+}
+
+// JiraContextResponse is the body of GET /sessions/{sessionId}/jira — the
+// display-only Jira context for a session bound to a "jira:<KEY>" issue id.
+// Linked is false when the session has no Jira binding (the UI renders nothing).
+// Issue is present when the bound key resolved; FetchError carries a user-facing
+// message when the session IS Jira-linked but the live fetch failed (missing
+// issue, auth, or jira-cli unavailable) — returned as 200 so a Jira hiccup never
+// breaks the Summary tab.
+type JiraContextResponse struct {
+	SessionID  domain.SessionID `json:"sessionId"`
+	Linked     bool             `json:"linked"`
+	Issue      *JiraIssue       `json:"issue,omitempty"`
+	FetchError string           `json:"fetchError,omitempty"`
+}
+
+// JiraIssue is the display projection of one Jira issue. Structured fields drive
+// the surrounding UI; Description is the faithful ADF render tree (never parsed
+// into cards).
+type JiraIssue struct {
+	Key   string `json:"key"`
+	URL   string `json:"url,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Title string `json:"title,omitempty"`
+	// Status is the human status name; StatusCategory is Jira's category key
+	// (new|indeterminate|done); StatusColor is the category colorName. The UI
+	// tints the status pill from the category, not the free-form name.
+	Status         string        `json:"status,omitempty"`
+	StatusCategory string        `json:"statusCategory,omitempty"`
+	StatusColor    string        `json:"statusColor,omitempty"`
+	Priority       string        `json:"priority,omitempty"`
+	Assignee       string        `json:"assignee,omitempty"`
+	Reporter       string        `json:"reporter,omitempty"`
+	Sprint         *JiraSprint   `json:"sprint,omitempty"`
+	Description    []adf.Node    `json:"description,omitempty"`
+	Subtasks       []JiraSubtask `json:"subtasks,omitempty"`
+}
+
+// JiraSprint is the issue's current/most-relevant sprint.
+type JiraSprint struct {
+	Name      string `json:"name"`
+	State     string `json:"state,omitempty"`
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+}
+
+// JiraSubtask is a display-only child issue row (status movable in a later slice).
+type JiraSubtask struct {
+	Key            string `json:"key"`
+	Title          string `json:"title,omitempty"`
+	Type           string `json:"type,omitempty"`
+	Status         string `json:"status,omitempty"`
+	StatusCategory string `json:"statusCategory,omitempty"`
+	StatusColor    string `json:"statusColor,omitempty"`
 }
 
 // NewSessionPRSummary maps the service PR summary model to its HTTP DTO.
