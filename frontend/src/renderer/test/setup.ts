@@ -72,6 +72,9 @@ if (typeof window !== "undefined") {
 			xcode: async () => undefined,
 			xcodegen: async () => ({ status: "no-specs", root: "" }),
 		},
+		shell: {
+			openExternal: async () => undefined,
+		},
 		daemon: {
 			getStatus: async () => ({ state: "stopped" }),
 			start: async () => ({ state: "starting" }),

@@ -56,6 +56,9 @@ const api = {
 		xcode: (targetPath: string) => ipcRenderer.invoke("openIn:xcode", targetPath) as Promise<void>,
 		xcodegen: (dir: string) => ipcRenderer.invoke("openIn:xcodegen", dir) as Promise<RunXcodegenResult>,
 	},
+	shell: {
+		openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
+	},
 	daemon: {
 		getStatus: () => ipcRenderer.invoke("daemon:getStatus") as Promise<DaemonStatus>,
 		start: () => ipcRenderer.invoke("daemon:start") as Promise<DaemonStatus>,
