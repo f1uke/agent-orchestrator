@@ -221,6 +221,19 @@ var schemaNames = map[string]string{
 	// domain review entities
 	"DomainReviewRun":     "ReviewRun",
 	"ReviewPRReviewState": "PRReviewState",
+	// httpd/controllers — smoke-test wire envelopes
+	"ControllersSmokeCheckParam":         "SmokeCheckParam",
+	"ControllersSmokeEvidenceParam":      "SmokeEvidenceParam",
+	"ControllersSmokeAuthoredCaseInput":  "SmokeAuthoredCaseInput",
+	"ControllersAuthorSmokeChecksInput":  "AuthorSmokeChecksInput",
+	"ControllersListSmokeChecksResponse": "ListSmokeChecksResponse",
+	"ControllersSmokeCheckResponse":      "SmokeCheckResponse",
+	"ControllersSetSmokeVerdictInput":    "SetSmokeVerdictInput",
+	"ControllersSmokeEvidenceResponse":   "SmokeEvidenceResponse",
+	"ControllersReportSmokeResponse":     "ReportSmokeResponse",
+	// domain smoke entities
+	"DomainSmokeCheck":    "SmokeCheck",
+	"DomainSmokeEvidence": "SmokeEvidence",
 	// httpd/controllers: import wire envelopes
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
@@ -327,6 +340,7 @@ func operations() []operation {
 	ops = append(ops, settingsOperations()...)
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
+	ops = append(ops, smokeOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, importOperations()...)
 	return ops
@@ -490,6 +504,90 @@ func reviewOperations() []operation {
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
+		},
+	}
+}
+
+// smokeOperations declares the session-scoped /smoke-checks operations. Must
+// stay 1:1 with the routes SmokeController.Register mounts (enforced by the
+// parity test).
+func smokeOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/smoke-checks", id: "listSmokeChecks", tag: "smoke",
+			summary:    "List a session's smoke-test checklist",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/smoke-checks", id: "authorSmokeChecks", tag: "smoke",
+			summary:    "Author/replace a session's smoke-test checklist (results preserved by case id)",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AuthorSmokeChecksInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/report", id: "reportSmokeChecks", tag: "smoke",
+			summary:    "Report a session's smoke-test results back to the worker",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReportSmokeResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict", id: "setSmokeVerdict", tag: "smoke",
+			summary:    "Record the user's verdict + note for a smoke-test case",
+			pathParams: []any{controllers.SmokeCheckParam{}},
+			reqBody:    controllers.SetSmokeVerdictInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SmokeCheckResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset", id: "resetSmokeCheck", tag: "smoke",
+			summary:    "Clear a smoke-test case's verdict/note/evidence",
+			pathParams: []any{controllers.SmokeCheckParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SmokeCheckResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence", id: "uploadSmokeEvidence", tag: "smoke",
+			summary:    "Attach a screenshot/short clip to a smoke-test case (multipart/form-data 'file' or raw body)",
+			pathParams: []any{controllers.SmokeCheckParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SmokeEvidenceResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", id: "serveSmokeEvidence", tag: "smoke",
+			summary:      "Serve a stored smoke-test evidence blob",
+			pathParams:   []any{controllers.SmokeEvidenceParam{}},
+			resps:        []respUnit{{http.StatusOK, ""}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
 		},
 	}
 }

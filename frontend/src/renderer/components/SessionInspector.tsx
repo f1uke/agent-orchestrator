@@ -19,6 +19,7 @@ import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonL
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { CommentsView, type FileDiffTarget } from "./CommentsView";
+import { SmokeTestView } from "./SmokeTestView";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/utils";
@@ -29,7 +30,7 @@ type PRReviewState = components["schemas"]["PRReviewState"];
 type ReviewsResponse = components["schemas"]["ListReviewsResponse"];
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "comments" | "browser";
+export type InspectorView = "summary" | "reviews" | "comments" | "tests" | "browser";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -61,6 +62,15 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		icon: (
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
 				<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+			</svg>
+		),
+	},
+	{
+		id: "tests",
+		label: "Tests",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<path d="M20 6 9 17l-5-5" />
 			</svg>
 		),
 	},
@@ -157,11 +167,14 @@ export function SessionInspector({
 					// The Comments inbox owns its full-height layout (fixed header,
 					// scrolling list, pinned batch bar), so it also renders flush.
 					view === "comments" && "session-inspector__body--comments",
+					// The Tests tab (smoke checklist) owns the same full-height layout.
+					view === "tests" && "session-inspector__body--tests",
 				)}
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
 				{view === "reviews" ? <ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} session={session} /> : null}
 				{view === "comments" ? <CommentsView sessionId={session.id} onOpenFile={onOpenFile} /> : null}
+				{view === "tests" ? <SmokeTestView sessionId={session.id} worker={session.title} /> : null}
 				{view === "browser" ? (
 					<BrowserView
 						browserPoppedOut={browserPoppedOut}

@@ -166,6 +166,11 @@ type Manager struct {
 	// avoid an import cycle; nil in tests/wiring that omit it, in which case
 	// teardown simply skips reviewer reaping.
 	reviewerReaper func(context.Context, domain.SessionID) error
+	// smokeEvidencePurger hard-deletes a session's on-disk smoke-test evidence
+	// tree when the session is purged (the DB rows cascade separately). Injected
+	// by the daemon after the smoke service is built, same as reviewerReaper; nil
+	// in tests/wiring that omit it, in which case purge simply skips it.
+	smokeEvidencePurger func(context.Context, domain.SessionID) error
 }
 
 // Deps are the collaborators a Session Manager needs; New wires them together.
@@ -262,6 +267,25 @@ func (m *Manager) reapReviewer(ctx context.Context, id domain.SessionID) {
 	}
 	if err := m.reviewerReaper(ctx, id); err != nil {
 		m.logger.Warn("reviewer pane teardown failed", "sessionID", id, "error", err)
+	}
+}
+
+// SetSmokeEvidencePurger wires the hook that hard-deletes a session's smoke-test
+// evidence blobs on purge. Wired by the daemon after the smoke service exists,
+// mirroring SetReviewerReaper. A manager with no purger set skips it.
+func (m *Manager) SetSmokeEvidencePurger(fn func(context.Context, domain.SessionID) error) {
+	m.smokeEvidencePurger = fn
+}
+
+// purgeSmokeEvidence best-effort removes the session's on-disk evidence tree.
+// Purge of the session must never fail because its evidence blobs could not be
+// removed, so any error is logged and swallowed. A nil purger is a no-op.
+func (m *Manager) purgeSmokeEvidence(ctx context.Context, id domain.SessionID) {
+	if m.smokeEvidencePurger == nil {
+		return
+	}
+	if err := m.smokeEvidencePurger(ctx, id); err != nil {
+		m.logger.Warn("smoke evidence purge failed", "sessionID", id, "error", err)
 	}
 }
 
@@ -892,6 +916,9 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	// Close the worker's reviewer pane before the row (and its cascading review
 	// rows) are hard-deleted, so a delete never orphans the reviewer's tmux.
 	m.reapReviewer(ctx, id)
+	// Hard-delete the session's smoke-test evidence blobs; the DB rows cascade
+	// with the session row below.
+	m.purgeSmokeEvidence(ctx, id)
 	return m.store.PurgeSession(ctx, id)
 }
 
@@ -2057,6 +2084,12 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	// and worker prompts, so it is injected here rather than baked into either
 	// editable base — it stays present even when a base is overridden or cleared.
 	base += prompts.ReferenceConvention()
+	// Workers additionally get the always-injected smoke-test checklist protocol,
+	// placed here (not in the editable base) so it survives a cleared/overridden
+	// base, same as the reference convention.
+	if kind == domain.KindWorker {
+		base += prompts.SmokeChecklistProtocol()
+	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {
 		return "", err

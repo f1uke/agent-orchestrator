@@ -155,6 +155,24 @@ Non-negotiable: review only — do not push commits, edit files, or modify the b
 // Leading "\n\n" so it appends cleanly after the preceding section.
 func ReferenceConvention() string { return referenceConvention }
 
+// SmokeChecklistProtocol is the always-injected worker instruction to author a
+// manual smoke-test checklist during wrap-up when a change's runtime behavior
+// unit tests can't fully cover. Injected in buildSystemPrompt for KindWorker
+// only, alongside ReferenceConvention, so it survives an edited/cleared base or
+// an agent override (user decision 2026-07-11: trigger is always-on, prompt-
+// driven; no `ao spawn` flag). Leading "\n\n" so it appends cleanly.
+func SmokeChecklistProtocol() string { return smokeChecklistProtocol }
+
+const smokeChecklistProtocol = "\n\n" + `## Smoke-test checklist (AO)
+
+When you finish a change whose runtime behavior unit tests can't fully cover — UI flows, live SCM/CI polling, native-app behavior, timing/race windows — author a short manual smoke-test checklist (3–6 cases) as part of your wrap-up, after CI is green. Each case is: a one-line ` + "`name`" + ` (what to verify), ` + "`why`" + ` it matters, ordered ` + "`steps`" + `, the ` + "`expected`" + ` result, and the ` + "`prNum`" + ` / ` + "`fileRef`" + ` (file:line) it covers. Author the whole checklist in one call, JSON on stdin so nothing lands in your checkout:
+
+` + "```bash\n" + `cat <<'JSON' | ao smoke set "$AO_SESSION_ID" --from-file -
+{ "cases": [ { "name": "…", "why": "…", "steps": ["…","…"], "expected": "…", "prNum": 0, "fileRef": "file.go:1" } ] }
+JSON` + "\n```" + `
+
+The user plays each case live in the Tests tab, attaches evidence, and reports results back to you. Skip this for pure-logic changes already covered by tests. Run ` + "`ao smoke set --help`" + ` for the exact case schema.`
+
 const referenceConvention = "\n\n" + `## Referring to sessions, pull requests, and merge requests
 
 Prefer a work item's human-readable name in conversation, but whenever you do write an id or number, disambiguate it with a sigil so sessions, pull requests, and merge requests never get confused:
