@@ -4,6 +4,7 @@ import { getApiBaseUrl, hasTrustedApiBaseUrl, subscribeApiBaseUrl } from "./api-
 import { setEventsConnectionState } from "./events-connection";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { sessionScmSummaryQueryKey } from "../hooks/useSessionScmSummary";
+import { sessionPRCommentsQueryPrefix } from "../hooks/useSessionPRComments";
 
 export type EventTransport = {
 	connect: () => () => void;
@@ -52,6 +53,15 @@ export function createEventTransport(queryClient: QueryClient): EventTransport {
 				debounce = setTimeout(() => {
 					void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 					void queryClient.invalidateQueries({ queryKey: sessionScmSummaryQueryKey() });
+					// The Reviews tab's comment/thread data — and the derived
+					// Resolved section + count — reads from ["session-pr-comments",
+					// sessionId], which has no refetch interval and (with
+					// refetchOnWindowFocus off) only refetches on remount. A CDC
+					// thread event (pr_review_thread_added/_resolved) must invalidate
+					// it too, or an externally resolved/added GitLab MR thread never
+					// live-updates the open tab. Prefix key matches every session's
+					// query; inactive ones are only marked stale (no wasted fetch).
+					void queryClient.invalidateQueries({ queryKey: sessionPRCommentsQueryPrefix });
 				}, INVALIDATE_DEBOUNCE_MS);
 			};
 

@@ -597,16 +597,12 @@ type restApprovals struct {
 func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error) {
 	mrPath := "projects/" + projectID(ref.Repo) + "/merge_requests/" + strconv.Itoa(ref.Number)
 
-	resp, err := p.client.doREST(ctx, mrPath+"/discussions", nil)
+	discussions, err := p.fetchAllDiscussions(ctx, mrPath)
 	if err != nil {
 		return ports.SCMReviewObservation{}, err
 	}
-	var discussions []restDiscussion
-	if err := json.Unmarshal(resp.Body, &discussions); err != nil {
-		return ports.SCMReviewObservation{}, fmt.Errorf("gitlab scm: decode MR discussions: %w", err)
-	}
 
-	resp, err = p.client.doREST(ctx, mrPath+"/approvals", nil)
+	resp, err := p.client.doREST(ctx, mrPath+"/approvals", nil)
 	if err != nil {
 		return ports.SCMReviewObservation{}, err
 	}
@@ -631,6 +627,42 @@ func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (
 		Threads:                threads,
 		Partial:                false,
 	}, nil
+}
+
+// maxDiscussionPages bounds the discussions pagination loop as a safety net
+// against a server that never signals a final page. 100 pages × 100 per page =
+// 10k discussions, far beyond any real MR.
+const maxDiscussionPages = 100
+
+// fetchAllDiscussions pages through GitLab's MR discussions endpoint and returns
+// every discussion. GitLab paginates discussions (default 20, max 100 per page)
+// and system notes count toward the total, so an active MR easily exceeds one
+// page. Reading only the first page silently dropped the newest review threads
+// (and any later resolve/unresolve of them), freezing AO's Resolved/unresolved
+// view once the MR got busy — see fix/reviews-gitlab-resolved-refresh. Offset
+// pagination guarantees a short page (< perPage, including empty) is the last
+// one, so the loop stops there.
+func (p *Provider) fetchAllDiscussions(ctx context.Context, mrPath string) ([]restDiscussion, error) {
+	const perPage = 100
+	var all []restDiscussion
+	for page := 1; page <= maxDiscussionPages; page++ {
+		q := url.Values{}
+		q.Set("per_page", strconv.Itoa(perPage))
+		q.Set("page", strconv.Itoa(page))
+		resp, err := p.client.doREST(ctx, mrPath+"/discussions", q)
+		if err != nil {
+			return nil, err
+		}
+		var batch []restDiscussion
+		if err := json.Unmarshal(resp.Body, &batch); err != nil {
+			return nil, fmt.Errorf("gitlab scm: decode MR discussions page %d: %w", page, err)
+		}
+		all = append(all, batch...)
+		if len(batch) < perPage {
+			break
+		}
+	}
+	return all, nil
 }
 
 // discussionToThread normalizes one discussion into a review thread. It
