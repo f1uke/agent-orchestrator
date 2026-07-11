@@ -310,7 +310,7 @@ function CaseCard({
 		>
 			<div
 				onClick={() => setOpen((o) => !o)}
-				style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", cursor: "pointer" }}
+				style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", cursor: "pointer" }}
 			>
 				<span
 					aria-hidden="true"
@@ -344,19 +344,15 @@ function CaseCard({
 							fontSize: 13,
 							fontWeight: 600,
 							color: P.text,
-							overflow: "hidden",
-							textOverflow: "ellipsis",
-							whiteSpace: "nowrap",
+							lineHeight: 1.42,
 						}}
 					>
 						{check.name}
 					</div>
+					<div style={{ marginTop: 6, fontSize: 10.5, color: hasEvidence ? P.evidenceOn : P.muted }}>
+						{hasEvidence ? "▣ evidence attached" : "□ no evidence yet"}
+					</div>
 				</div>
-				<span
-					style={{ flex: "none", fontSize: 10.5, color: hasEvidence ? P.evidenceOn : P.muted, whiteSpace: "nowrap" }}
-				>
-					{hasEvidence ? "▣ evidence attached" : "□ no evidence yet"}
-				</span>
 				<span aria-hidden="true" style={{ flex: "none", fontSize: 10, color: P.muted, width: 10 }}>
 					{open ? "▾" : "▸"}
 				</span>
