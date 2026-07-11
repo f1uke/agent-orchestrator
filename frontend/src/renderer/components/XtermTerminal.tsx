@@ -30,6 +30,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import type { AttachableTerminal, TerminalUserInputSource } from "../hooks/useTerminalSession";
 import { aoBridge } from "../lib/bridge";
 import type { SessionLinkMatch } from "../lib/session-ref";
+import type { ExternalRefMatch } from "../lib/terminal-scm-links";
 import { registerTerminalFocus } from "../lib/terminal-focus";
 import { buildTerminalThemes } from "../lib/terminal-themes";
 import type { Theme } from "../stores/ui-store";
@@ -65,6 +66,14 @@ export type XtermTerminalProps = {
 	 * browser — unlike http/OSC-8 links which go through openTerminalLink.
 	 */
 	onSessionLinkActivate?: (sessionId: string) => void;
+	/**
+	 * Resolve SCM reference tokens (`#<num>` GitHub PR/issue, `!<num>` GitLab MR)
+	 * on a line of terminal text to link ranges + external URLs. TerminalPane
+	 * supplies this from the session's own remote(s); the URL is opened in the OS
+	 * browser (via {@link openTerminalLink}), NOT navigated internally like a
+	 * session ref. Absent → no PR/MR linkification.
+	 */
+	externalRefResolver?: (line: string) => ExternalRefMatch[];
 	/** Terminal construction failed; the owner decides how to surface it. */
 	onError?: (error: unknown) => void;
 	/**
@@ -603,6 +612,47 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			},
 		});
 
+		// Linkify SCM reference tokens (`#<num>` GitHub PR/issue, `!<num>` GitLab
+		// MR) so a click opens the PR/MR in the OS browser. Sibling to the session
+		// provider above, but the activation differs: session refs navigate
+		// INTERNALLY, while these open EXTERNALLY via openTerminalLink (the same
+		// hardened https path the other terminal links use). The resolver only
+		// yields tokens for a provider the session's own remote actually has (so a
+		// GitHub-only project never linkifies `!`, and vice versa), and the URL is
+		// built from that remote's trusted base — the token only supplies the
+		// numeric id. Different sigils than the session provider (`#`/`!` vs
+		// `@`/bare id), so the two never contend for the same range.
+		const externalRefLinks = term.registerLinkProvider({
+			provideLinks(bufferLineNumber, callback) {
+				const resolver = callbacksRef.current.externalRefResolver;
+				if (!resolver) {
+					callback(undefined);
+					return;
+				}
+				const line = term.buffer.active.getLine(bufferLineNumber - 1);
+				if (!line) {
+					callback(undefined);
+					return;
+				}
+				const text = line.translateToString(true);
+				const matches = resolver(text);
+				if (matches.length === 0) {
+					callback(undefined);
+					return;
+				}
+				callback(
+					matches.map((match) => ({
+						text: text.slice(match.startIndex, match.endIndex),
+						range: {
+							start: { x: match.startIndex + 1, y: bufferLineNumber },
+							end: { x: match.endIndex, y: bufferLineNumber },
+						},
+						activate: () => openTerminalLink(match.url),
+					})),
+				);
+			},
+		});
+
 		// Translate wheel motion into SGR wheel reports for the pane (see
 		// sgrWheelReport), one report per scrolled line. WheelEvent.deltaMode
 		// varies by platform/device: trackpads and normalized wheels report
@@ -712,6 +762,7 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			mouseData.dispose();
 			mouseBinary.dispose();
 			sessionLinks.dispose();
+			externalRefLinks.dispose();
 			userInputListeners.clear();
 			try {
 				term.dispose();
