@@ -38,6 +38,9 @@ var (
 	ErrUnavailable = errors.New("jira: unavailable")
 	// ErrBadKey is a syntactically invalid issue key.
 	ErrBadKey = errors.New("jira: malformed issue key")
+	// errBadTransition backs ErrBadTransition (surfaced in transitions.go): an
+	// unknown transition id or one Jira's workflow refuses (validator/condition).
+	errBadTransition = errors.New("jira: transition rejected")
 )
 
 // keyPattern is the Jira issue-key shape (PROJECT-123). Validated before we ever
@@ -50,12 +53,17 @@ var keyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
 // can inject canned fixtures without a real jira binary.
 type Runner func(ctx context.Context, key string) ([]byte, error)
 
-// Client reads Jira issues via a Runner.
+// Client reads Jira issues via a Runner, and lists/applies status transitions
+// via the REST endpoints (see transitions.go).
 type Client struct {
 	run Runner
 	// sprintFieldID is an optional explicit sprint custom-field id. Empty means
 	// auto-detect (the default), which is robust across Jira instances.
 	sprintFieldID string
+	// httpDo + config back the REST transition endpoints; both are seams so tests
+	// drive an httptest server with a static identity (no jira binary, no network).
+	httpDo HTTPDoer
+	config ConfigSource
 }
 
 // Option configures a Client.
@@ -72,7 +80,7 @@ func WithSprintField(id string) Option {
 // NewClient returns a Client. With no WithRunner option it shells out to the
 // `jira` binary on PATH (override the binary via AO_JIRA_BIN).
 func NewClient(opts ...Option) *Client {
-	c := &Client{run: cliRunner}
+	c := &Client{run: cliRunner, httpDo: defaultHTTPClient.Do, config: defaultConfigSource}
 	for _, opt := range opts {
 		opt(c)
 	}

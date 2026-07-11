@@ -1337,6 +1337,90 @@ paths:
         Jira key
       tags:
       - jira
+  /api/v1/sessions/{sessionId}/jira/move:
+    post:
+      operationId: moveSessionJiraStatus
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraMoveRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraMoveResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Move the linked Jira issue's status (the one sanctioned Jira write)
+      tags:
+      - jira
+  /api/v1/sessions/{sessionId}/jira/transitions:
+    get:
+      operationId: listSessionJiraTransitions
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraTransitionsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the linked Jira issue's available status transitions (read live)
+      tags:
+      - jira
   /api/v1/sessions/{sessionId}/kill:
     post:
       operationId: killSession
@@ -3403,6 +3487,29 @@ components:
       required:
       - key
       type: object
+    JiraMoveRequest:
+      properties:
+        transitionId:
+          type: string
+      required:
+      - transitionId
+      type: object
+    JiraMoveResponse:
+      properties:
+        key:
+          type: string
+        sessionId:
+          type: string
+        status:
+          type: string
+        statusCategory:
+          type: string
+        statusColor:
+          type: string
+      required:
+      - sessionId
+      - key
+      type: object
     JiraSprint:
       properties:
         endDate:
@@ -3432,6 +3539,34 @@ components:
           type: string
       required:
       - key
+      type: object
+    JiraTransition:
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        to:
+          type: string
+        toCategory:
+          type: string
+        toColor:
+          type: string
+      required:
+      - id
+      - name
+      type: object
+    JiraTransitionsResponse:
+      properties:
+        sessionId:
+          type: string
+        transitions:
+          items:
+            $ref: '#/components/schemas/JiraTransition'
+          type: array
+      required:
+      - sessionId
+      - transitions
       type: object
     KillSessionResponse:
       properties:

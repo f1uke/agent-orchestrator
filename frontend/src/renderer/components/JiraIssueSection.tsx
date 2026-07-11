@@ -1,6 +1,8 @@
-import { ArrowUpRight } from "lucide-react";
+import { useState } from "react";
+import { ArrowUpRight, ChevronDown } from "lucide-react";
 import { useSessionJiraContext, type JiraIssue, type JiraSubtask } from "../hooks/useSessionJiraContext";
 import { JiraAdf } from "./JiraAdf";
+import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
 
 /**
  * The JIRA ISSUE section rendered at the top of the Summary tab for a session
@@ -41,7 +43,7 @@ export function JiraIssueSection({ sessionId, linked }: { sessionId: string; lin
 	return (
 		<section className="jira-section">
 			<JiraEyebrow />
-			<IssueLead issue={data.issue} />
+			<IssueLead sessionId={sessionId} issue={data.issue} />
 			{data.issue.description && data.issue.description.length > 0 ? (
 				<div className="jira-card">
 					<p className="jira-sect-label">Description</p>
@@ -69,7 +71,10 @@ function JiraEyebrow() {
 	);
 }
 
-function IssueLead({ issue }: { issue: JiraIssue }) {
+function IssueLead({ sessionId, issue }: { sessionId: string; issue: JiraIssue }) {
+	// The status pill doubles as the entry point to the ONE sanctioned Jira write
+	// (Move status). Placed in Slice 1, wired here.
+	const [moveOpen, setMoveOpen] = useState(false);
 	return (
 		<div className="jira-card jira-card--lead">
 			<div className="jira-head">
@@ -81,11 +86,20 @@ function IssueLead({ issue }: { issue: JiraIssue }) {
 					</span>
 				) : null}
 				{issue.status ? (
-					<span className="jira-status" style={statusPillStyle(issue.statusCategory)}>
+					<button
+						type="button"
+						className="jira-status jira-status--btn"
+						style={statusPillStyle(issue.statusCategory)}
+						onClick={() => setMoveOpen(true)}
+						title="Move status"
+						aria-haspopup="dialog"
+					>
 						{issue.status}
-					</span>
+						<ChevronDown className="jira-status__caret" aria-hidden="true" />
+					</button>
 				) : null}
 			</div>
+			<JiraMoveStatusDialog sessionId={sessionId} issue={issue} open={moveOpen} onOpenChange={setMoveOpen} />
 			{issue.title ? <div className="jira-title">{issue.title}</div> : null}
 			{issue.url ? (
 				<a className="jira-openlink" href={issue.url} target="_blank" rel="noopener noreferrer">

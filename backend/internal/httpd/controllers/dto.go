@@ -526,7 +526,8 @@ type JiraSprint struct {
 	EndDate   string `json:"endDate,omitempty"`
 }
 
-// JiraSubtask is a display-only child issue row (status movable in a later slice).
+// JiraSubtask is a display-only child issue row (status movable via the Move
+// action).
 type JiraSubtask struct {
 	Key            string `json:"key"`
 	Title          string `json:"title,omitempty"`
@@ -534,6 +535,39 @@ type JiraSubtask struct {
 	Status         string `json:"status,omitempty"`
 	StatusCategory string `json:"statusCategory,omitempty"`
 	StatusColor    string `json:"statusColor,omitempty"`
+}
+
+// JiraTransition is one available status transition, read LIVE from Jira (never
+// hardcoded — the set differs per issue type and current status).
+type JiraTransition struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	To         string `json:"to,omitempty"`         // target status name
+	ToCategory string `json:"toCategory,omitempty"` // target status category (new|indeterminate|done)
+	ToColor    string `json:"toColor,omitempty"`
+}
+
+// JiraTransitionsResponse is the body of GET /sessions/{sessionId}/jira/transitions.
+type JiraTransitionsResponse struct {
+	SessionID   domain.SessionID `json:"sessionId"`
+	Transitions []JiraTransition `json:"transitions"`
+}
+
+// JiraMoveRequest is the body of POST /sessions/{sessionId}/jira/move — apply a
+// status transition by its id. This is the ONLY write AO makes to Jira; it
+// carries nothing but the transition id (no comment, no field edit).
+type JiraMoveRequest struct {
+	TransitionID string `json:"transitionId"`
+}
+
+// JiraMoveResponse reports the issue's status after a successful move so the UI
+// can update the pill without a round trip.
+type JiraMoveResponse struct {
+	SessionID      domain.SessionID `json:"sessionId"`
+	Key            string           `json:"key"`
+	Status         string           `json:"status,omitempty"`
+	StatusCategory string           `json:"statusCategory,omitempty"`
+	StatusColor    string           `json:"statusColor,omitempty"`
 }
 
 // NewSessionPRSummary maps the service PR summary model to its HTTP DTO.

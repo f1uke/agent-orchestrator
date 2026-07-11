@@ -3,8 +3,10 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -19,18 +21,36 @@ import (
 type stubJira struct {
 	res jirasvc.Result
 	err error
+
+	transitions []jiraadapter.Transition
+	transErr    error
+	moveRes     jirasvc.MoveResult
+	moveErr     error
 }
 
 func (s stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, error) {
 	return s.res, s.err
 }
 
+func (s stubJira) Transitions(context.Context, domain.SessionID) ([]jiraadapter.Transition, error) {
+	return s.transitions, s.transErr
+}
+
+func (s stubJira) Move(context.Context, domain.SessionID, string) (jirasvc.MoveResult, error) {
+	return s.moveRes, s.moveErr
+}
+
 func serveJira(t *testing.T, svc JiraService) *httptest.ResponseRecorder {
+	t.Helper()
+	return serveJiraReq(t, svc, http.MethodGet, "/sessions/s1/jira", nil)
+}
+
+func serveJiraReq(t *testing.T, svc JiraService, method, path string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 	c := &JiraController{Svc: svc}
 	r := chi.NewRouter()
 	c.Register(r)
-	req := httptest.NewRequest(http.MethodGet, "/sessions/s1/jira", nil)
+	req := httptest.NewRequest(method, path, body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	return rec
@@ -101,6 +121,92 @@ func TestJiraGet_SessionNotFoundIs404(t *testing.T) {
 
 func TestJiraGet_NilServiceNotImplemented(t *testing.T) {
 	rec := serveJira(t, nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+func getTransitions(t *testing.T, svc JiraService) *httptest.ResponseRecorder {
+	t.Helper()
+	return serveJiraReq(t, svc, http.MethodGet, "/sessions/s1/jira/transitions", nil)
+}
+
+func postMove(t *testing.T, svc JiraService, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return serveJiraReq(t, svc, http.MethodPost, "/sessions/s1/jira/move", strings.NewReader(body))
+}
+
+func TestJiraTransitions_ListsLive(t *testing.T) {
+	rec := getTransitions(t, stubJira{transitions: []jiraadapter.Transition{
+		{ID: "11", Name: "Start Testing", To: "In Progress", ToCategory: "indeterminate"},
+		{ID: "21", Name: "Abandoned", To: "Abandoned", ToCategory: "done"},
+	}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var body JiraTransitionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.SessionID != "s1" || len(body.Transitions) != 2 {
+		t.Fatalf("body = %+v", body)
+	}
+	if body.Transitions[0].ID != "11" || body.Transitions[0].Name != "Start Testing" || body.Transitions[0].To != "In Progress" {
+		t.Errorf("transition mapped wrong: %+v", body.Transitions[0])
+	}
+}
+
+func TestJiraTransitions_NotLinkedIs400(t *testing.T) {
+	rec := getTransitions(t, stubJira{transErr: jirasvc.ErrNotLinked})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestJiraTransitions_NilServiceNotImplemented(t *testing.T) {
+	rec := getTransitions(t, nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+func TestJiraMove_AppliesAndReturnsNewStatus(t *testing.T) {
+	rec := postMove(t, stubJira{moveRes: jirasvc.MoveResult{Key: "DEMO-101", Status: "In Progress", StatusCategory: "indeterminate"}}, `{"transitionId":"11"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var body JiraMoveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Key != "DEMO-101" || body.Status != "In Progress" || body.StatusCategory != "indeterminate" {
+		t.Errorf("move response = %+v", body)
+	}
+}
+
+func TestJiraMove_MissingTransitionIs400(t *testing.T) {
+	rec := postMove(t, stubJira{}, `{"transitionId":""}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestJiraMove_MalformedBodyIs400(t *testing.T) {
+	rec := postMove(t, stubJira{}, `not json`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestJiraMove_RejectionIs400(t *testing.T) {
+	rec := postMove(t, stubJira{moveErr: jiraadapter.ErrBadTransition}, `{"transitionId":"99"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a workflow rejection must be 4xx, got %d", rec.Code)
+	}
+}
+
+func TestJiraMove_NilServiceNotImplemented(t *testing.T) {
+	rec := postMove(t, nil, `{"transitionId":"11"}`)
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501", rec.Code)
 	}

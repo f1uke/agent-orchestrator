@@ -1,9 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { useJiraMock } = vi.hoisted(() => ({ useJiraMock: vi.fn() }));
 vi.mock("../hooks/useSessionJiraContext", () => ({
 	useSessionJiraContext: useJiraMock,
+	// The lead now mounts the (closed) Move-status dialog, whose hooks run on
+	// render; stub them so the section tests stay focused on the display.
+	useJiraTransitions: () => ({ data: [], isLoading: false, isError: false, error: null }),
+	useMoveJiraStatus: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false, error: null }),
 }));
 
 import { JiraIssueSection } from "./JiraIssueSection";
@@ -62,6 +66,14 @@ describe("JiraIssueSection", () => {
 		expect(screen.getByText("Subtasks · 1")).toBeTruthy();
 		const open = screen.getByRole("link", { name: /open in jira/i });
 		expect(open.getAttribute("href")).toBe("https://example.atlassian.net/browse/DEMO-101");
+	});
+
+	it("opens the Move-status dialog from the status pill", () => {
+		mockQuery(fullIssue);
+		render(<JiraIssueSection sessionId="s1" linked={true} />);
+		// The status pill is the Move-status entry point (title "Move status").
+		fireEvent.click(screen.getByTitle("Move status"));
+		expect(screen.getByText(/move jira status/i)).toBeTruthy();
 	});
 
 	it("shows a graceful note when linked but the Jira fetch failed", () => {
