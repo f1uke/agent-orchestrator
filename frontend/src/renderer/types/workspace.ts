@@ -109,7 +109,7 @@ const transitionTargetLabel: Partial<Record<SessionStatus, string>> = {
 	no_signal: "No signal",
 };
 
-/** Compact human duration for a countdown, e.g. "45s", "4m", "2h". */
+/** Compact human duration for a countdown, e.g. "45s", "4m", "2h", "3d". */
 export function formatCountdown(ms: number): string {
 	// floor, not round: a countdown must never name a unit the clock hasn't
 	// reached (59s should read "59s", not "1m").
@@ -117,7 +117,9 @@ export function formatCountdown(ms: number): string {
 	if (s < 60) return `${s}s`;
 	const m = Math.floor(s / 60);
 	if (m < 60) return `${m}m`;
-	return `${Math.floor(m / 60)}h`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h`;
+	return `${Math.floor(h / 24)}d`;
 }
 
 /**
@@ -150,18 +152,18 @@ export type IdleCountdown = {
 };
 
 /** Show the idle-suspend countdown only within this window of the deadline. */
-export const IDLE_COUNTDOWN_THRESHOLD_MS = 60 * 60 * 1000; // 1h
-const IDLE_URGENT_MS = 10 * 60 * 1000; // 10m
-const IDLE_IMMINENT_MS = 60 * 1000; // 1m
+export const IDLE_COUNTDOWN_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 1d
+const IDLE_URGENT_MS = 6 * 60 * 60 * 1000; // 6h
+const IDLE_IMMINENT_MS = 60 * 60 * 1000; // 1h
 
 /**
  * The idle-suspend countdown to render for a session, or null when nothing
  * should show. Deliberately surfaced only NEAR expiry (≤ {@link
- * IDLE_COUNTDOWN_THRESHOLD_MS}) so a session tens of hours from suspension is not
- * noise, and it ESCALATES as the deadline nears: "soon" (≤1h) → "urgent" (≤10m)
- * → "imminent" (≤1m). A suspended session shows a "paused — click to resume"
- * affordance instead of a countdown, so this returns null for it. `now` (ms since
- * epoch) is injected so the function stays pure and testable.
+ * IDLE_COUNTDOWN_THRESHOLD_MS}) so a session far from suspension is not noise, and
+ * it ESCALATES as the deadline nears: "soon" (≤1d) → "urgent" (≤6h) → "imminent"
+ * (≤1h). A suspended session shows a "paused — click to resume" affordance instead
+ * of a countdown, so this returns null for it. `now` (ms since epoch) is injected
+ * so the function stays pure and testable.
  */
 export function idleCountdown(
 	session: Pick<WorkspaceSession, "idleCloseAt" | "isSuspended">,

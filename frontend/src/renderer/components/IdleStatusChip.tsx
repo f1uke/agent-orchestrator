@@ -3,8 +3,8 @@ import { cn } from "../lib/utils";
 import type { IdleCountdownLevel, WorkspaceSession } from "../types/workspace";
 import { useIdleCountdown } from "../hooks/useIdleCountdown";
 
-// Escalating text colour as the deadline nears: muted → amber (≤10m) → red
-// (≤1m). Maps to the DESIGN status palette (passive / warning / error).
+// Escalating text colour as the deadline nears: muted (≤1d) → amber (≤6h) → red
+// (≤1h). Maps to the DESIGN status palette (passive / warning / error).
 const LEVEL_TEXT: Record<IdleCountdownLevel, string> = {
 	soon: "text-passive",
 	urgent: "text-warning",
@@ -24,7 +24,7 @@ const LEVEL_BORDER: Record<IdleCountdownLevel, string> = {
  *  - Suspended: a "Paused — open to resume" chip (the idle sweep freed its tmux;
  *    the worktree is kept and opening the session resumes it in place).
  *  - Approaching suspension: an escalating countdown chip, surfaced ONLY within
- *    ~1h of the deadline (amber ≤10m, red + pulse ≤1m) so a session far from
+ *    ~1d of the deadline (amber ≤6h, red + pulse ≤1h) so a session far from
  *    expiry stays quiet.
  *
  * Renders nothing when neither applies. `compact` shrinks it for the sidebar row

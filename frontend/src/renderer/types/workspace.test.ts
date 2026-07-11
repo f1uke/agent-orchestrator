@@ -67,24 +67,28 @@ describe("idleCountdown", () => {
 	const now = Date.parse("2026-01-01T12:00:00Z");
 	const at = (msFromNow: number) => new Date(now + msFromNow).toISOString();
 
+	const H = 60 * 60_000;
+
 	it("returns null far from expiry (beyond the threshold)", () => {
-		const session = sessionWith({ idleCloseAt: at(IDLE_COUNTDOWN_THRESHOLD_MS + 60_000) });
+		const session = sessionWith({ idleCloseAt: at(IDLE_COUNTDOWN_THRESHOLD_MS + 2 * H) }); // 26h out
 		expect(idleCountdown(session, now)).toBeNull();
 	});
 
-	it("shows a 'soon' countdown just inside the threshold", () => {
-		const session = sessionWith({ idleCloseAt: at(50 * 60_000) }); // 50m out
+	it("shows a 'soon' countdown within a day of expiry", () => {
+		const session = sessionWith({ idleCloseAt: at(20 * H) }); // 20h out
 		const c = idleCountdown(session, now);
 		expect(c?.level).toBe("soon");
-		expect(c?.label).toBe("50m");
+		expect(c?.label).toBe("20h");
 	});
 
-	it("escalates to 'urgent' at ≤10m", () => {
-		const session = sessionWith({ idleCloseAt: at(9 * 60_000) });
-		expect(idleCountdown(session, now)?.level).toBe("urgent");
+	it("escalates to 'urgent' at ≤6h", () => {
+		const session = sessionWith({ idleCloseAt: at(5 * H) });
+		const c = idleCountdown(session, now);
+		expect(c?.level).toBe("urgent");
+		expect(c?.label).toBe("5h");
 	});
 
-	it("escalates to 'imminent' at ≤1m", () => {
+	it("escalates to 'imminent' at ≤1h", () => {
 		const session = sessionWith({ idleCloseAt: at(45_000) });
 		const c = idleCountdown(session, now);
 		expect(c?.level).toBe("imminent");
