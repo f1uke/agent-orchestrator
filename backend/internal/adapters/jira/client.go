@@ -41,6 +41,10 @@ var (
 	// errBadTransition backs ErrBadTransition (surfaced in transitions.go): an
 	// unknown transition id or one Jira's workflow refuses (validator/condition).
 	errBadTransition = errors.New("jira: transition rejected")
+	// errBadQuery backs ErrBadQuery (surfaced in search.go): a 400 from a search,
+	// usually invalid JQL (e.g. a project key that doesn't exist). Lets the service
+	// fall back from a project-scoped guess to a plain text search.
+	errBadQuery = errors.New("jira: invalid search query")
 )
 
 // keyPattern is the Jira issue-key shape (PROJECT-123). Validated before we ever

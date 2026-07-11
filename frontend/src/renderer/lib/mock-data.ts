@@ -631,3 +631,56 @@ export const mockSessionJiraTransitions: Record<string, components["schemas"]["J
 		{ id: "31", name: "Cancel", to: "Cancelled", toCategory: "done" },
 	],
 };
+
+// A synthetic cross-project issue pool for the New-task / link-existing pickers
+// under preview (VITE_NO_ELECTRON=1). Fully fictional — DEMO/ACME keys only.
+const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
+	{
+		key: "DEMO-101",
+		type: "Story",
+		title: "Participating funds eligibility UI",
+		status: "Ready for QA",
+		statusCategory: "new",
+		assignee: "Alex Rivera",
+		url: "https://example.atlassian.net/browse/DEMO-101",
+	},
+	{
+		key: "DEMO-140",
+		type: "Story",
+		title: "Example story summary",
+		status: "In Progress",
+		statusCategory: "indeterminate",
+		assignee: "Sam Chen",
+		url: "https://example.atlassian.net/browse/DEMO-140",
+	},
+	{
+		key: "DEMO-88",
+		type: "Bug",
+		title: "Example bug summary",
+		status: "To Do",
+		statusCategory: "new",
+		assignee: "",
+		url: "https://example.atlassian.net/browse/DEMO-88",
+	},
+	{
+		key: "ACME-12",
+		type: "Task",
+		title: "Example task summary",
+		status: "Ready for UAT",
+		statusCategory: "done",
+		assignee: "Jamie Lee",
+		url: "https://example.atlassian.net/browse/ACME-12",
+	},
+];
+
+/** Preview-mode search: filters the synthetic pool by key/title (or project). */
+export function mockJiraSearch(project: string, query: string): components["schemas"]["JiraIssueSummary"][] {
+	const q = query.trim().toLowerCase();
+	const proj = project.trim().toUpperCase();
+	return mockJiraIssuePool.filter((it) => {
+		const key = it.key ?? "";
+		if (proj && !key.toUpperCase().startsWith(`${proj}-`)) return false;
+		if (!q) return true;
+		return key.toLowerCase().includes(q) || (it.title ?? "").toLowerCase().includes(q);
+	});
+}

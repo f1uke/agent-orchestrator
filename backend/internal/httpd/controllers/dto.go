@@ -570,6 +570,62 @@ type JiraMoveResponse struct {
 	StatusColor    string           `json:"statusColor,omitempty"`
 }
 
+// JiraIssueSummary is one search-result / picker row — the structured fields
+// needed to render and pick an issue (the full description/subtasks live in the
+// display projection, JiraIssue).
+type JiraIssueSummary struct {
+	Key            string `json:"key"`
+	Type           string `json:"type,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Status         string `json:"status,omitempty"`
+	StatusCategory string `json:"statusCategory,omitempty"`
+	StatusColor    string `json:"statusColor,omitempty"`
+	Assignee       string `json:"assignee,omitempty"`
+	URL            string `json:"url,omitempty"`
+}
+
+// JiraSearchResponse is the body of GET /jira/search — matching issues for a
+// free-text query (or exact key), read live via REST.
+type JiraSearchResponse struct {
+	Issues []JiraIssueSummary `json:"issues"`
+}
+
+// JiraProject is one Jira project for the project picker.
+type JiraProject struct {
+	Key  string `json:"key"`
+	Name string `json:"name,omitempty"`
+}
+
+// JiraProjectsResponse is the body of GET /jira/projects.
+type JiraProjectsResponse struct {
+	Projects []JiraProject `json:"projects"`
+}
+
+// JiraSearchQuery is the query string of GET /jira/search.
+type JiraSearchQuery struct {
+	Q       string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
+	Project string `query:"project,omitempty" description:"Optional project key to scope the search to."`
+}
+
+// JiraProjectsQuery is the query string of GET /jira/projects.
+type JiraProjectsQuery struct {
+	Q string `query:"q,omitempty" description:"Optional filter matched against project key/name."`
+}
+
+// JiraLinkRequest is the body of PUT /sessions/{sessionId}/jira — bind an
+// existing session to a Jira issue after the fact.
+type JiraLinkRequest struct {
+	IssueKey string `json:"issueKey" description:"Jira issue key to bind (e.g. PROJ-123)."`
+}
+
+// JiraLinkResponse reports a session's Jira binding after a link or unlink.
+// Linked is false after an unlink; Issue is the resolved issue on a link.
+type JiraLinkResponse struct {
+	SessionID domain.SessionID  `json:"sessionId"`
+	Linked    bool              `json:"linked"`
+	Issue     *JiraIssueSummary `json:"issue,omitempty"`
+}
+
 // NewSessionPRSummary maps the service PR summary model to its HTTP DTO.
 func NewSessionPRSummary(in sessionsvc.PRSummary) SessionPRSummary {
 	return SessionPRSummary{

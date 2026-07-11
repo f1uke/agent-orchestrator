@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { mockSessionJiraContexts, mockSessionJiraTransitions } from "../lib/mock-data";
+import { workspaceQueryKey } from "./useWorkspaceQuery";
+import { mockJiraSearch, mockSessionJiraContexts, mockSessionJiraTransitions } from "../lib/mock-data";
 
 export type JiraContext = components["schemas"]["JiraContextResponse"];
 export type JiraIssue = components["schemas"]["JiraIssue"];
 export type JiraSubtask = components["schemas"]["JiraSubtask"];
 export type JiraTransition = components["schemas"]["JiraTransition"];
 export type JiraMoveResponse = components["schemas"]["JiraMoveResponse"];
+export type JiraIssueSummary = components["schemas"]["JiraIssueSummary"];
+export type JiraLinkResponse = components["schemas"]["JiraLinkResponse"];
 export type AdfNode = components["schemas"]["AdfNode"];
 
 export const sessionJiraQueryKey = (sessionId?: string) =>
@@ -15,6 +18,8 @@ export const sessionJiraQueryKey = (sessionId?: string) =>
 
 export const sessionJiraTransitionsQueryKey = (sessionId?: string) =>
 	sessionId ? (["session-jira-transitions", sessionId] as const) : (["session-jira-transitions"] as const);
+
+export const jiraSearchQueryKey = (project: string, query: string) => ["jira-search", project, query] as const;
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -96,6 +101,74 @@ export function useMoveJiraStatus(sessionId: string) {
 		onSuccess: () => {
 			void qc.invalidateQueries({ queryKey: sessionJiraQueryKey(sessionId) });
 			void qc.invalidateQueries({ queryKey: sessionJiraTransitionsQueryKey(sessionId) });
+		},
+	});
+}
+
+async function fetchJiraSearch(project: string, query: string): Promise<JiraIssueSummary[]> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/search", {
+		params: { query: { q: query, project: project || undefined } },
+	});
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't search Jira"));
+	return data?.issues ?? [];
+}
+
+/**
+ * Cross-project issue search for the New-task + link-existing pickers, read LIVE
+ * via REST (jira-cli list is unusable here). Enable only when there is at least a
+ * two-character query so an empty box never fans out a search. A failure throws so
+ * the picker can surface it (e.g. a missing JIRA_API_TOKEN).
+ */
+export function useJiraSearch(query: string, project: string, enabled: boolean) {
+	const q = query.trim();
+	return useQuery({
+		queryKey: jiraSearchQueryKey(project, q),
+		enabled: enabled && q.length >= 2,
+		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraSearch(project, q)) : fetchJiraSearch(project, q)),
+		staleTime: 15_000,
+	});
+}
+
+/**
+ * Binds an EXISTING session to a Jira issue after the fact (PUT). The key is
+ * validated server-side before it binds. On success it refreshes the session's
+ * Jira context AND the workspace (board/sidebar badge). Preview mode is a no-op
+ * success so the flow can be demoed without a daemon.
+ */
+export function useSetJiraBinding(sessionId: string) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (issueKey: string): Promise<JiraLinkResponse> => {
+			if (usePreviewData) return { sessionId, linked: true };
+			const { data, error } = await apiClient.PUT("/api/v1/sessions/{sessionId}/jira", {
+				params: { path: { sessionId } },
+				body: { issueKey },
+			});
+			if (error) throw new Error(apiErrorMessage(error, "Couldn't link the Jira issue"));
+			return data!;
+		},
+		onSuccess: () => {
+			void qc.invalidateQueries({ queryKey: sessionJiraQueryKey(sessionId) });
+			void qc.invalidateQueries({ queryKey: workspaceQueryKey });
+		},
+	});
+}
+
+/** Removes a session's Jira binding (DELETE). Refreshes context + workspace. */
+export function useUnlinkJira(sessionId: string) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (): Promise<JiraLinkResponse> => {
+			if (usePreviewData) return { sessionId, linked: false };
+			const { data, error } = await apiClient.DELETE("/api/v1/sessions/{sessionId}/jira", {
+				params: { path: { sessionId } },
+			});
+			if (error) throw new Error(apiErrorMessage(error, "Couldn't unlink the Jira issue"));
+			return data!;
+		},
+		onSuccess: () => {
+			void qc.invalidateQueries({ queryKey: sessionJiraQueryKey(sessionId) });
+			void qc.invalidateQueries({ queryKey: workspaceQueryKey });
 		},
 	});
 }

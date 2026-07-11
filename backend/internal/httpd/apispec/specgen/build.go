@@ -193,6 +193,14 @@ var schemaNames = map[string]string{
 	"ControllersJiraTransitionsResponse":          "JiraTransitionsResponse",
 	"ControllersJiraMoveRequest":                  "JiraMoveRequest",
 	"ControllersJiraMoveResponse":                 "JiraMoveResponse",
+	"ControllersJiraIssueSummary":                 "JiraIssueSummary",
+	"ControllersJiraSearchResponse":               "JiraSearchResponse",
+	"ControllersJiraProject":                      "JiraProject",
+	"ControllersJiraProjectsResponse":             "JiraProjectsResponse",
+	"ControllersJiraSearchQuery":                  "JiraSearchQuery",
+	"ControllersJiraProjectsQuery":                "JiraProjectsQuery",
+	"ControllersJiraLinkRequest":                  "JiraLinkRequest",
+	"ControllersJiraLinkResponse":                 "JiraLinkResponse",
 	"AdfNode":                                     "AdfNode",
 	"AdfMark":                                     "AdfMark",
 	"AdfAttrs":                                    "AdfAttrs",
@@ -472,11 +480,56 @@ func notificationOperations() []operation {
 func jiraOperations() []operation {
 	return []operation{
 		{
+			method: http.MethodGet, path: "/api/v1/jira/search", id: "searchJira", tag: "jira",
+			summary:    "Search Jira issues cross-project (free-text or exact key), read live via REST",
+			pathParams: []any{controllers.JiraSearchQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.JiraSearchResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/jira/projects", id: "listJiraProjects", tag: "jira",
+			summary:    "List the user's Jira projects for the project picker",
+			pathParams: []any{controllers.JiraProjectsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.JiraProjectsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/jira", id: "getSessionJira", tag: "jira",
 			summary:    "Return the display-only Jira issue context for a session bound to a Jira key",
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.JiraContextResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/jira", id: "linkSessionJira", tag: "jira",
+			summary:    "Bind an existing session to a Jira issue (validated) after the fact",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.JiraLinkRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.JiraLinkResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/jira", id: "unlinkSessionJira", tag: "jira",
+			summary:    "Remove a session's Jira binding",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.JiraLinkResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

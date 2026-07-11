@@ -189,6 +189,83 @@ paths:
       summary: Run the legacy AO project import through the daemon store
       tags:
       - import
+  /api/v1/jira/projects:
+    get:
+      operationId: listJiraProjects
+      parameters:
+      - description: Optional filter matched against project key/name.
+        in: query
+        name: q
+        schema:
+          description: Optional filter matched against project key/name.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraProjectsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the user's Jira projects for the project picker
+      tags:
+      - jira
+  /api/v1/jira/search:
+    get:
+      operationId: searchJira
+      parameters:
+      - description: Free-text query, or an exact issue key (e.g. PROJ-123).
+        in: query
+        name: q
+        schema:
+          description: Free-text query, or an exact issue key (e.g. PROJ-123).
+          type: string
+      - description: Optional project key to scope the search to.
+        in: query
+        name: project
+        schema:
+          description: Optional project key to scope the search to.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraSearchResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Search Jira issues cross-project (free-text or exact key), read live
+        via REST
+      tags:
+      - jira
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -1304,6 +1381,44 @@ paths:
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/jira:
+    delete:
+      operationId: unlinkSessionJira
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraLinkResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Remove a session's Jira binding
+      tags:
+      - jira
     get:
       operationId: getSessionJira
       parameters:
@@ -1335,6 +1450,56 @@ paths:
           description: Not Implemented
       summary: Return the display-only Jira issue context for a session bound to a
         Jira key
+      tags:
+      - jira
+    put:
+      operationId: linkSessionJira
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraLinkRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraLinkResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Bind an existing session to a Jira issue (validated) after the fact
       tags:
       - jira
   /api/v1/sessions/{sessionId}/jira/move:
@@ -3487,6 +3652,47 @@ components:
       required:
       - key
       type: object
+    JiraIssueSummary:
+      properties:
+        assignee:
+          type: string
+        key:
+          type: string
+        status:
+          type: string
+        statusCategory:
+          type: string
+        statusColor:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+      required:
+      - key
+      type: object
+    JiraLinkRequest:
+      properties:
+        issueKey:
+          description: Jira issue key to bind (e.g. PROJ-123).
+          type: string
+      required:
+      - issueKey
+      type: object
+    JiraLinkResponse:
+      properties:
+        issue:
+          $ref: '#/components/schemas/JiraIssueSummary'
+        linked:
+          type: boolean
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - linked
+      type: object
     JiraMoveRequest:
       properties:
         transitionId:
@@ -3509,6 +3715,33 @@ components:
       required:
       - sessionId
       - key
+      type: object
+    JiraProject:
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+      required:
+      - key
+      type: object
+    JiraProjectsResponse:
+      properties:
+        projects:
+          items:
+            $ref: '#/components/schemas/JiraProject'
+          type: array
+      required:
+      - projects
+      type: object
+    JiraSearchResponse:
+      properties:
+        issues:
+          items:
+            $ref: '#/components/schemas/JiraIssueSummary'
+          type: array
+      required:
+      - issues
       type: object
     JiraSprint:
       properties:

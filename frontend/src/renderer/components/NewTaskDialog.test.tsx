@@ -11,6 +11,12 @@ const { getMock, postMock } = vi.hoisted(() => ({
 	postMock: vi.fn(),
 }));
 
+// The Jira field now embeds the live search picker; stub the search hook so these
+// dialog tests stay focused on task creation (and never hit the network).
+vi.mock("../hooks/useSessionJiraContext", () => ({
+	useJiraSearch: () => ({ data: [], isFetching: false, isError: false, error: null }),
+}));
+
 vi.mock("../lib/api-client", () => ({
 	apiClient: {
 		GET: (...args: unknown[]) => getMock(...args),
@@ -327,15 +333,15 @@ describe("NewTaskDialog", () => {
 		await waitForAgentCatalog();
 
 		await user.type(screen.getByLabelText(/Jira issue/i), "demo-101");
-		await user.type(screen.getByLabelText("Title"), "Order Eligible UI");
-		await user.type(screen.getByLabelText("Brief"), "Build the participating-funds UI.");
+		await user.type(screen.getByLabelText("Title"), "Example story");
+		await user.type(screen.getByLabelText("Brief"), "Build the sample UI.");
 		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		const body = spawnBody();
 		expect(body.issueId).toBe("jira:DEMO-101");
-		expect(body.displayName).toBe("Order Eligible UI");
-		expect(body.prompt).toBe("Build the participating-funds UI.");
+		expect(body.displayName).toBe("Example story");
+		expect(body.prompt).toBe("Build the sample UI.");
 	});
 
 	it("caps displayName at 20 characters for a Jira-linked task", async () => {
@@ -377,7 +383,7 @@ describe("NewTaskDialog", () => {
 		await user.type(screen.getByLabelText("Brief"), "B");
 		await user.click(screen.getByRole("button", { name: "Start now" }));
 
-		expect(await screen.findByText(/valid Jira issue key/i)).toBeInTheDocument();
+		expect(await screen.findByText(/Pick a Jira issue from the list/i)).toBeInTheDocument();
 		expect(postMock).not.toHaveBeenCalled();
 	});
 });
