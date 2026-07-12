@@ -513,7 +513,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the linked Jira issue's available status transitions (read live) */
+        /** List the linked Jira issue's (or a subtask's) available status transitions (read live) */
         get: operations["listSessionJiraTransitions"];
         put?: never;
         post?: never;
@@ -1295,6 +1295,7 @@ export interface components {
             sessionId: string;
         };
         JiraMoveRequest: {
+            issueKey?: string;
             transitionId: string;
         };
         JiraMoveResponse: {
@@ -3841,7 +3842,10 @@ export interface operations {
     };
     listSessionJiraTransitions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional issue key (a subtask of the bound issue) to list transitions for instead of the bound issue. */
+                key?: string;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */

@@ -1557,6 +1557,25 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	white-space: nowrap;
 }
 
+/* The subtask status pill as a Move-status entry point (a button): a caret + hover
+   cue, mirroring the parent issue's .jira-status--btn. */
+.jira-sub__pill--btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	cursor: pointer;
+	transition: filter 0.12s ease;
+}
+
+.jira-sub__pill--btn:hover {
+	filter: brightness(1.12);
+}
+
+.jira-sub__pill--btn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
 /* ── ADF rendered description ─────────────────────────────────────────────── */
 
 .jira-adf {

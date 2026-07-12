@@ -1558,6 +1558,14 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
+      - description: Optional issue key (a subtask of the bound issue) to list transitions
+          for instead of the bound issue.
+        in: query
+        name: key
+        schema:
+          description: Optional issue key (a subtask of the bound issue) to list transitions
+            for instead of the bound issue.
+          type: string
       responses:
         "200":
           content:
@@ -1583,7 +1591,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: List the linked Jira issue's available status transitions (read live)
+      summary: List the linked Jira issue's (or a subtask's) available status transitions
+        (read live)
       tags:
       - jira
   /api/v1/sessions/{sessionId}/kill:
@@ -3695,6 +3704,8 @@ components:
       type: object
     JiraMoveRequest:
       properties:
+        issueKey:
+          type: string
         transitionId:
           type: string
       required:

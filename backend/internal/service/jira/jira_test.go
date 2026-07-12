@@ -171,7 +171,7 @@ func TestContext_SessionErrorPropagates(t *testing.T) {
 func TestTransitions_Success(t *testing.T) {
 	mover := &fakeMover{transitions: []jiraadapter.Transition{{ID: "11", Name: "Start Testing", To: "In Progress"}}}
 	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-101")}, &fakeIssues{}, mover, nil)
-	ts, err := svc.Transitions(context.Background(), "s1")
+	ts, err := svc.Transitions(context.Background(), "s1", "")
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
@@ -186,7 +186,7 @@ func TestTransitions_Success(t *testing.T) {
 func TestTransitions_NotLinked(t *testing.T) {
 	mover := &fakeMover{}
 	svc := New(fakeSessions{sess: sessionWith("github:acme/repo#1")}, &fakeIssues{}, mover, nil)
-	if _, err := svc.Transitions(context.Background(), "s1"); !errors.Is(err, ErrNotLinked) {
+	if _, err := svc.Transitions(context.Background(), "s1", ""); !errors.Is(err, ErrNotLinked) {
 		t.Errorf("err = %v, want ErrNotLinked", err)
 	}
 	if mover.gotKey != "" {
@@ -196,7 +196,7 @@ func TestTransitions_NotLinked(t *testing.T) {
 
 func TestTransitions_NilMover(t *testing.T) {
 	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-1")}, &fakeIssues{}, nil, nil)
-	if _, err := svc.Transitions(context.Background(), "s1"); !errors.Is(err, jiraadapter.ErrUnavailable) {
+	if _, err := svc.Transitions(context.Background(), "s1", ""); !errors.Is(err, jiraadapter.ErrUnavailable) {
 		t.Errorf("err = %v, want ErrUnavailable", err)
 	}
 }
@@ -205,7 +205,7 @@ func TestMove_SuccessReReadsStatus(t *testing.T) {
 	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101", Status: "In Progress", StatusCategory: "indeterminate"}}
 	mover := &fakeMover{}
 	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-101")}, issues, mover, nil)
-	res, err := svc.Move(context.Background(), "s1", "11")
+	res, err := svc.Move(context.Background(), "s1", "", "11")
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
@@ -220,7 +220,7 @@ func TestMove_SuccessReReadsStatus(t *testing.T) {
 func TestMove_NotLinked(t *testing.T) {
 	mover := &fakeMover{}
 	svc := New(fakeSessions{sess: sessionWith("")}, &fakeIssues{}, mover, nil)
-	if _, err := svc.Move(context.Background(), "s1", "11"); !errors.Is(err, ErrNotLinked) {
+	if _, err := svc.Move(context.Background(), "s1", "", "11"); !errors.Is(err, ErrNotLinked) {
 		t.Errorf("err = %v, want ErrNotLinked", err)
 	}
 	if mover.gotID != "" {
@@ -231,7 +231,7 @@ func TestMove_NotLinked(t *testing.T) {
 func TestMove_RejectionPropagates(t *testing.T) {
 	mover := &fakeMover{moveErr: jiraadapter.ErrBadTransition}
 	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-1")}, &fakeIssues{}, mover, nil)
-	if _, err := svc.Move(context.Background(), "s1", "99"); !errors.Is(err, jiraadapter.ErrBadTransition) {
+	if _, err := svc.Move(context.Background(), "s1", "", "99"); !errors.Is(err, jiraadapter.ErrBadTransition) {
 		t.Errorf("err = %v, want ErrBadTransition", err)
 	}
 }
@@ -241,12 +241,63 @@ func TestMove_SucceedsEvenIfReReadFails(t *testing.T) {
 	// best-effort status re-read errors.
 	issues := &fakeIssues{err: jiraadapter.ErrUnavailable}
 	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-1")}, issues, &fakeMover{}, nil)
-	res, err := svc.Move(context.Background(), "s1", "11")
+	res, err := svc.Move(context.Background(), "s1", "", "11")
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
 	if res.Key != "DEMO-1" || res.Status != "" {
 		t.Errorf("result = %+v, want key set and empty status", res)
+	}
+}
+
+// A subtask of the bound issue can be listed + moved by naming its key.
+func TestTransitions_SubtaskOfBound(t *testing.T) {
+	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101", Subtasks: []jiraadapter.Subtask{{Key: "DEMO-102"}}}}
+	mover := &fakeMover{transitions: []jiraadapter.Transition{{ID: "21", Name: "Ship"}}}
+	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-101")}, issues, mover, nil)
+	if _, err := svc.Transitions(context.Background(), "s1", "DEMO-102"); err != nil {
+		t.Fatalf("err %v", err)
+	}
+	if mover.gotKey != "DEMO-102" {
+		t.Errorf("mover got key %q, want the subtask DEMO-102", mover.gotKey)
+	}
+}
+
+func TestMove_SubtaskOfBound(t *testing.T) {
+	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101", Subtasks: []jiraadapter.Subtask{{Key: "DEMO-102"}}}}
+	mover := &fakeMover{}
+	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-101")}, issues, mover, nil)
+	res, err := svc.Move(context.Background(), "s1", "demo-102", "21") // lower-cased on purpose
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	if mover.gotKey != "DEMO-102" || mover.gotID != "21" {
+		t.Errorf("mover got key=%q id=%q, want DEMO-102/21", mover.gotKey, mover.gotID)
+	}
+	if res.Key != "DEMO-102" {
+		t.Errorf("result key = %q, want the subtask key", res.Key)
+	}
+}
+
+// A key that is neither the bound issue nor one of its subtasks is refused — the
+// move stays scoped to the session's own issue tree.
+func TestMove_ForeignKeyRejected(t *testing.T) {
+	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101", Subtasks: []jiraadapter.Subtask{{Key: "DEMO-102"}}}}
+	mover := &fakeMover{}
+	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-101")}, issues, mover, nil)
+	if _, err := svc.Move(context.Background(), "s1", "OTHER-9", "21"); !errors.Is(err, ErrKeyNotInIssueTree) {
+		t.Errorf("err = %v, want ErrKeyNotInIssueTree", err)
+	}
+	if mover.gotID != "" {
+		t.Errorf("must not apply a move for a foreign key")
+	}
+}
+
+func TestMove_MalformedTargetKeyRejected(t *testing.T) {
+	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101"}}
+	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-101")}, issues, &fakeMover{}, nil)
+	if _, err := svc.Move(context.Background(), "s1", "not-a-key", "21"); !errors.Is(err, jiraadapter.ErrBadKey) {
+		t.Errorf("err = %v, want ErrBadKey", err)
 	}
 }
 

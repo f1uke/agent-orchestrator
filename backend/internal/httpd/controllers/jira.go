@@ -22,8 +22,8 @@ import (
 // SetBinding/Unlink link an existing session to an issue after the fact.
 type JiraService interface {
 	Context(ctx context.Context, id domain.SessionID) (jirasvc.Result, error)
-	Transitions(ctx context.Context, id domain.SessionID) ([]jiraadapter.Transition, error)
-	Move(ctx context.Context, id domain.SessionID, transitionID string) (jirasvc.MoveResult, error)
+	Transitions(ctx context.Context, id domain.SessionID, key string) ([]jiraadapter.Transition, error)
+	Move(ctx context.Context, id domain.SessionID, key, transitionID string) (jirasvc.MoveResult, error)
 	Search(ctx context.Context, project, text string) ([]jiraadapter.IssueSummary, error)
 	Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
 	SetBinding(ctx context.Context, id domain.SessionID, key string) (jiraadapter.IssueSummary, error)
@@ -143,14 +143,16 @@ func (c *JiraController) get(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, jiraContextResponse(id, res))
 }
 
-// transitions lists the linked issue's available status transitions (read live).
+// transitions lists the available status transitions (read live) for the linked
+// issue, or — with ?key=<KEY> naming a subtask of it — for that subtask.
 func (c *JiraController) transitions(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/jira/transitions")
 		return
 	}
 	id := sessionID(r)
-	ts, err := c.Svc.Transitions(r.Context(), id)
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	ts, err := c.Svc.Transitions(r.Context(), id, key)
 	if err != nil {
 		writeJiraError(w, r, err)
 		return
@@ -166,7 +168,8 @@ func (c *JiraController) transitions(w http.ResponseWriter, r *http.Request) {
 
 // move applies a status transition — the ONE sanctioned Jira write. It is always
 // user-initiated (and the UI confirms first); the body carries only a transition
-// id, so nothing but the status can change.
+// id (and optionally a subtask key in the session's issue tree), so nothing but
+// the status can change.
 func (c *JiraController) move(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/jira/move")
@@ -182,7 +185,7 @@ func (c *JiraController) move(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, apierr.Invalid("JIRA_TRANSITION_REQUIRED", "A transition id is required.", nil))
 		return
 	}
-	res, err := c.Svc.Move(r.Context(), id, req.TransitionID)
+	res, err := c.Svc.Move(r.Context(), id, strings.TrimSpace(req.IssueKey), req.TransitionID)
 	if err != nil {
 		writeJiraError(w, r, err)
 		return
@@ -209,6 +212,8 @@ func writeJiraError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, jirasvc.ErrNotLinked):
 		envelope.WriteError(w, r, apierr.Invalid("SESSION_NOT_JIRA_LINKED", "This session is not linked to a Jira issue.", nil))
+	case errors.Is(err, jirasvc.ErrKeyNotInIssueTree):
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_KEY_NOT_IN_TREE", "That issue isn't part of this session's Jira issue (only the issue or its subtasks can be moved).", nil))
 	case errors.Is(err, jiraadapter.ErrNotFound):
 		envelope.WriteError(w, r, apierr.NotFound("JIRA_ISSUE_NOT_FOUND", "Jira issue not found or not visible to your account."))
 	case errors.Is(err, jiraadapter.ErrBadKey):

@@ -7,9 +7,10 @@ import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
 
 /**
  * The JIRA ISSUE section rendered at the top of the Summary tab for a session
- * bound to a Jira key. Display-only: the status pill shows the live status (its
- * Move-status action is wired in a later slice); subtasks are shown for context.
- * Renders nothing when the session is not Jira-linked.
+ * bound to a Jira key. Display-only except the status pills: the issue's pill and
+ * each subtask's pill are Move-status entry points (the one sanctioned Jira write),
+ * scoped server-side to the session's own issue tree. Renders nothing when the
+ * session is not Jira-linked.
  */
 export function JiraIssueSection({ sessionId, linked }: { sessionId: string; linked: boolean }) {
 	const query = useSessionJiraContext(sessionId, linked);
@@ -57,7 +58,7 @@ export function JiraIssueSection({ sessionId, linked }: { sessionId: string; lin
 				<div className="jira-card">
 					<p className="jira-sect-label">Subtasks · {data.issue.subtasks.length}</p>
 					{data.issue.subtasks.map((s) => (
-						<SubtaskRow key={s.key} subtask={s} />
+						<SubtaskRow key={s.key} sessionId={sessionId} subtask={s} />
 					))}
 				</div>
 			) : null}
@@ -137,7 +138,7 @@ function IssueLead({ sessionId, issue }: { sessionId: string; issue: JiraIssue }
 					{unlink.error instanceof Error ? unlink.error.message : "Couldn't unlink the Jira issue."}
 				</p>
 			) : null}
-			<JiraMoveStatusDialog sessionId={sessionId} issue={issue} open={moveOpen} onOpenChange={setMoveOpen} />
+			<JiraMoveStatusDialog sessionId={sessionId} target={issue} open={moveOpen} onOpenChange={setMoveOpen} />
 			{issue.title ? <div className="jira-title">{issue.title}</div> : null}
 			{issue.url ? (
 				<a className="jira-openlink" href={issue.url} target="_blank" rel="noopener noreferrer">
@@ -184,19 +185,43 @@ function IssueLead({ sessionId, issue }: { sessionId: string; issue: JiraIssue }
 	);
 }
 
-function SubtaskRow({ subtask }: { subtask: JiraSubtask }) {
-	const meta = [subtask.title, subtask.type].filter(Boolean).join(" · ");
+function SubtaskRow({ sessionId, subtask }: { sessionId: string; subtask: JiraSubtask }) {
+	// The subtask's status pill is its own Move-status entry point — same sanctioned
+	// write as the parent, scoped to the subtask's key (validated server-side as a
+	// subtask of the session's bound issue).
+	const [moveOpen, setMoveOpen] = useState(false);
 	return (
 		<div className="jira-sub">
 			<span className="jira-sub__key">{subtask.key}</span>
-			{meta ? <span className="jira-sub__meta">{meta}</span> : <span className="jira-sub__meta" />}
+			{meta(subtask) ? <span className="jira-sub__meta">{meta(subtask)}</span> : <span className="jira-sub__meta" />}
 			{subtask.status ? (
-				<span className="jira-sub__pill" style={statusPillStyle(subtask.statusCategory)}>
+				<button
+					type="button"
+					className="jira-sub__pill jira-sub__pill--btn"
+					style={statusPillStyle(subtask.statusCategory)}
+					onClick={() => setMoveOpen(true)}
+					title="Move status"
+					aria-haspopup="dialog"
+				>
 					{subtask.status}
-				</span>
+					<ChevronDown className="jira-status__caret" aria-hidden="true" />
+				</button>
+			) : null}
+			{subtask.key ? (
+				<JiraMoveStatusDialog
+					sessionId={sessionId}
+					target={subtask}
+					issueKey={subtask.key}
+					open={moveOpen}
+					onOpenChange={setMoveOpen}
+				/>
 			) : null}
 		</div>
 	);
+}
+
+function meta(subtask: JiraSubtask): string {
+	return [subtask.title, subtask.type].filter(Boolean).join(" · ");
 }
 
 function MetaRow({ k, v }: { k: string; v: React.ReactNode }) {

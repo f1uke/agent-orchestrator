@@ -555,9 +555,13 @@ type JiraTransitionsResponse struct {
 
 // JiraMoveRequest is the body of POST /sessions/{sessionId}/jira/move — apply a
 // status transition by its id. This is the ONLY write AO makes to Jira; it
-// carries nothing but the transition id (no comment, no field edit).
+// carries nothing but the transition id (no comment, no field edit) and an
+// optional target key.
 type JiraMoveRequest struct {
 	TransitionID string `json:"transitionId"`
+	// IssueKey optionally targets a subtask of the session's bound issue instead
+	// of the bound issue itself. Empty = the bound issue (the original behavior).
+	IssueKey string `json:"issueKey,omitempty"`
 }
 
 // JiraMoveResponse reports the issue's status after a successful move so the UI
@@ -610,6 +614,11 @@ type JiraSearchQuery struct {
 // JiraProjectsQuery is the query string of GET /jira/projects.
 type JiraProjectsQuery struct {
 	Q string `query:"q,omitempty" description:"Optional filter matched against project key/name."`
+}
+
+// JiraTransitionsQuery is the query string of GET /sessions/{sessionId}/jira/transitions.
+type JiraTransitionsQuery struct {
+	Key string `query:"key,omitempty" description:"Optional issue key (a subtask of the bound issue) to list transitions for instead of the bound issue."`
 }
 
 // JiraLinkRequest is the body of PUT /sessions/{sessionId}/jira — bind an
