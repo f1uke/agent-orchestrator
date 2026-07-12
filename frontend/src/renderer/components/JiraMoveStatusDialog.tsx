@@ -47,7 +47,13 @@ export function JiraMoveStatusDialog({
 	const transitions = useJiraTransitions(sessionId, open, issueKey);
 	const move = useMoveJiraStatus(sessionId, issueKey);
 	return (
-		<MoveStatusDialogBody target={target} transitions={transitions} move={move} open={open} onOpenChange={onOpenChange} />
+		<MoveStatusDialogBody
+			target={target}
+			transitions={transitions}
+			move={move}
+			open={open}
+			onOpenChange={onOpenChange}
+		/>
 	);
 }
 
@@ -68,7 +74,13 @@ export function JiraIssueMoveDialog({
 	const transitions = useJiraIssueTransitions(target.key, open);
 	const move = useMoveJiraIssue(target.key);
 	return (
-		<MoveStatusDialogBody target={target} transitions={transitions} move={move} open={open} onOpenChange={onOpenChange} />
+		<MoveStatusDialogBody
+			target={target}
+			transitions={transitions}
+			move={move}
+			open={open}
+			onOpenChange={onOpenChange}
+		/>
 	);
 }
 

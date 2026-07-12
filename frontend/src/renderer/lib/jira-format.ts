@@ -29,7 +29,8 @@ export function statusTone(category?: string): string {
 
 export function priorityTone(priority: string): string {
 	const p = priority.toLowerCase();
-	if (p.includes("highest") || p.includes("high") || p.includes("critical") || p.includes("blocker")) return "var(--red)";
+	if (p.includes("highest") || p.includes("high") || p.includes("critical") || p.includes("blocker"))
+		return "var(--red)";
 	if (p.includes("low")) return "var(--fg-muted)";
 	return "var(--orange)";
 }
