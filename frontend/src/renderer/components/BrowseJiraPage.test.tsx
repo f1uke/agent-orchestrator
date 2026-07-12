@@ -32,6 +32,7 @@ type Row = {
 	statusCategory: string;
 	assignee: string;
 	assigneeAccountId?: string;
+	parent?: { key: string; title?: string };
 	sprint?: { name: string; state: string };
 };
 
@@ -39,8 +40,17 @@ type Row = {
 // the component now calls useJiraSearch twice — an UNFILTERED base fetch (opts
 // undefined, feeds the assignee dropdown) and a FILTERED results fetch (opts set).
 // This mirrors that server-side filtering so the mock returns what Jira would.
-function applyServerFilters(data: Row[], opts?: { assignee?: string; types?: string[] }): Row[] {
+function applyServerFilters(data: Row[], opts?: { assignee?: string; types?: string[]; jql?: string }): Row[] {
 	if (!opts) return data; // base fetch — unfiltered dropdown source
+	// Advanced / parent-inclusion path: only `key in (...)` is interpreted here.
+	if (opts.jql) {
+		const m = opts.jql.match(/key in \(([^)]*)\)/i);
+		if (m) {
+			const keys = new Set(m[1].split(",").map((k) => k.trim()));
+			return data.filter((it) => keys.has(it.key));
+		}
+		return data;
+	}
 	let out = data;
 	const types = (opts.types ?? []).map((t) => t.toLowerCase());
 	if (types.length > 0) {
@@ -73,7 +83,12 @@ function setSearch(over: { data?: Row[] | undefined; isFetching?: boolean; isErr
 				{ key: "DEMO-88", type: "Bug", title: "Bug two", status: "To Do", statusCategory: "new", assignee: "" },
 			];
 	searchMock.mockImplementation(
-		(_query: string, _project: string, _enabled: boolean, opts?: { assignee?: string; types?: string[] }) => ({
+		(
+			_query: string,
+			_project: string,
+			_enabled: boolean,
+			opts?: { assignee?: string; types?: string[]; jql?: string },
+		) => ({
 			data: currentData === undefined ? undefined : applyServerFilters(currentData, opts),
 			isFetching: over.isFetching ?? false,
 			isError: over.isError ?? false,
@@ -283,6 +298,48 @@ describe("BrowseJiraPage", () => {
 		// A clear way back to structured mode.
 		fireEvent.click(screen.getByRole("button", { name: /Back to filters/ }));
 		expect(screen.getByLabelText("Filter by assignee")).toBeTruthy();
+	});
+
+	it("under an assignee filter, pulls in the parent of a matched subtask as dimmed context", () => {
+		// Sam owns a subtask whose parent story is Alex's. Filtering to Sam must still
+		// show the parent (for hierarchy), fetched via the key-in context query.
+		const hierData: Row[] = [
+			{
+				key: "DEMO-101",
+				type: "Story",
+				title: "Parent story",
+				status: "To Do",
+				statusCategory: "new",
+				assignee: "Alex",
+				assigneeAccountId: "acc-alex",
+			},
+			{
+				key: "DEMO-102",
+				type: "Sub-task",
+				title: "Sam's subtask",
+				status: "To Do",
+				statusCategory: "new",
+				assignee: "Sam",
+				assigneeAccountId: "acc-sam",
+				parent: { key: "DEMO-101", title: "Parent story" },
+			},
+		];
+		setSearch({ data: hierData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.change(screen.getByLabelText("Filter by assignee"), { target: { value: "Sam" } });
+
+		// The matched subtask AND its (context) parent both render…
+		expect(screen.getByText("DEMO-102")).toBeTruthy();
+		expect(screen.getByText("DEMO-101")).toBeTruthy();
+		// …with the parent marked as context, not a direct match.
+		expect(screen.getByText(/parent · context/i)).toBeTruthy();
+		// The context parent was fetched via a `key in (...)` query.
+		const sawKeyIn = searchMock.mock.calls.some((c: unknown[]) =>
+			(c[3] as { jql?: string } | undefined)?.jql?.includes("key in (DEMO-101)"),
+		);
+		expect(sawKeyIn).toBe(true);
 	});
 
 	it("restores advanced JQL mode + text on return (no project needed)", () => {

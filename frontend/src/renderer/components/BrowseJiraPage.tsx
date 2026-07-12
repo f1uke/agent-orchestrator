@@ -6,7 +6,16 @@ import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { useJiraSearch, type JiraIssueSummary, type JiraProject } from "../hooks/useSessionJiraContext";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { groupBySprint, hasUnassigned, UNASSIGNED, UNASSIGNED_QUERY, uniqueAssignees } from "../lib/jira-browse";
+import {
+	buildHierarchy,
+	groupRowsBySprint,
+	hasUnassigned,
+	type HierarchyRow,
+	missingParentKeys,
+	UNASSIGNED,
+	UNASSIGNED_QUERY,
+	uniqueAssignees,
+} from "../lib/jira-browse";
 import { readBrowsePrefs, writeBrowsePrefs } from "../lib/jira-browse-prefs";
 import { readLastJiraProject, writeLastJiraProject } from "../lib/jira-last-project";
 import { cn } from "../lib/utils";
@@ -107,10 +116,30 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 			: { assignee: assigneeQuery, types: selectedTypes, hideDone, activeSprint: activeSprintOnly },
 	);
 	const results = resultsQuery.data ?? [];
-	const isFetching = base.isFetching || resultsQuery.isFetching;
+
+	// Parent-inclusion: under an assignee filter the matches may be subtasks whose
+	// parent (assigned to someone else) isn't in the set. Fetch those parents for
+	// CONTEXT — reusing the advanced-JQL path with `key in (...)` — so the hierarchy
+	// stays intact and the user can open the parent. Skipped in advanced mode (the
+	// user's JQL is authoritative). The hook self-gates on a non-empty JQL.
+	const includeParents = !advancedMode && assigneeQuery !== "";
+	const missingKeys = includeParents ? missingParentKeys(results) : [];
+	const parentJql = missingKeys.length > 0 ? `key in (${missingKeys.join(", ")}) ORDER BY updated DESC` : "";
+	const contextQuery = useJiraSearch("", "", missingKeys.length > 0, { jql: parentJql });
+
+	// Merge the direct matches with the context parents (dimmed), then nest subtasks
+	// under their parents like the Jira backlog.
+	const resultKeys = new Set(results.map((r) => r.key));
+	const contextParents = (missingKeys.length > 0 ? (contextQuery.data ?? []) : []).filter(
+		(p) => !resultKeys.has(p.key),
+	);
+	const contextKeys = new Set(contextParents.map((p) => p.key));
+	const hierarchy = buildHierarchy([...results, ...contextParents], contextKeys);
+	const rowGroups = groupSprints ? groupRowsBySprint(hierarchy) : null;
+
+	const isFetching = base.isFetching || resultsQuery.isFetching || contextQuery.isFetching;
 	const isError = resultsQuery.isError;
 	const error = resultsQuery.error;
-	const groups = groupSprints ? groupBySprint(results) : [];
 
 	const toggleCollapsed = (name: string) => {
 		setCollapsed((prev) => {
@@ -137,11 +166,27 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		void navigate({ to: "/projects/$projectId", params: { projectId } });
 	};
 
-	const renderRow = (issue: JiraIssueSummary) => (
-		<div key={issue.key} className="jira-browse__row">
+	const renderRow = (
+		issue: JiraIssueSummary,
+		opts: { indent?: boolean; isSubtask?: boolean; isContext?: boolean } = {},
+	) => (
+		<div
+			key={issue.key}
+			className={cn(
+				"jira-browse__row",
+				opts.indent && "jira-browse__row--child",
+				opts.isContext && "jira-browse__row--context",
+			)}
+		>
+			{opts.isSubtask ? (
+				<span className="jira-browse__subtask-mark" aria-hidden="true">
+					↳
+				</span>
+			) : null}
 			<span className={cn("jira-browse__sq", issueSquareClass(issue.type))} aria-hidden="true" />
 			<span className="jira-browse__k">{issue.key}</span>
 			<span className="jira-browse__t">{issue.title}</span>
+			{opts.isContext ? <span className="jira-browse__context-tag">parent · context</span> : null}
 			{issue.assignee ? <span className="jira-browse__assignee">{issue.assignee}</span> : null}
 			{issue.status ? (
 				<span className="jira-browse__st" style={browseStatusStyle(issue.statusCategory)}>
@@ -151,6 +196,20 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 			<button type="button" className="jira-browse__create" onClick={() => setCreateIssue(issue)}>
 				Create session ▷
 			</button>
+		</div>
+	);
+
+	// A hierarchy row: the top-level issue, then its subtasks indented beneath (Image
+	// #37). A top-level issue that is itself a subtask (its parent isn't in the set)
+	// gets the subtask marker; a context parent (pulled in for a matched subtask) is
+	// dimmed.
+	const renderTreeRow = (row: HierarchyRow) => (
+		<div key={row.issue.key} className="jira-browse__tree">
+			{renderRow(row.issue, {
+				isContext: row.isContext,
+				isSubtask: !row.isContext && Boolean(row.issue.parent),
+			})}
+			{row.children.map((child) => renderRow(child, { indent: true, isSubtask: true }))}
 		</div>
 	);
 
@@ -317,9 +376,10 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							<p className="jira-browse__note">Searching…</p>
 						) : results.length === 0 ? (
 							<p className="jira-browse__note">No issues match.</p>
-						) : groupSprints ? (
-							groups.map((group) => {
+						) : rowGroups ? (
+							rowGroups.map((group) => {
 								const isCollapsed = collapsed.has(group.name);
+								const count = group.rows.reduce((n, row) => n + 1 + row.children.length, 0);
 								return (
 									<div key={group.name} className="jira-browse__sprint">
 										<button
@@ -338,15 +398,15 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 												<span className="jira-browse__sprint-active">active</span>
 											) : null}
 											<span className="jira-browse__sprint-count">
-												· {group.issues.length} {group.issues.length === 1 ? "work item" : "work items"}
+												· {count} {count === 1 ? "work item" : "work items"}
 											</span>
 										</button>
-										{isCollapsed ? null : group.issues.map(renderRow)}
+										{isCollapsed ? null : group.rows.map(renderTreeRow)}
 									</div>
 								);
 							})
 						) : (
-							results.map(renderRow)
+							hierarchy.map(renderTreeRow)
 						)}
 					</div>
 				)}

@@ -1297,6 +1297,7 @@ export interface components {
             assignee?: string;
             assigneeAccountId?: string;
             key: string;
+            parent?: components["schemas"]["JiraParentRef"];
             sprint?: components["schemas"]["JiraSprint"];
             status?: string;
             statusCategory?: string;
@@ -1324,6 +1325,10 @@ export interface components {
             status?: string;
             statusCategory?: string;
             statusColor?: string;
+        };
+        JiraParentRef: {
+            key: string;
+            title?: string;
         };
         JiraProject: {
             key: string;

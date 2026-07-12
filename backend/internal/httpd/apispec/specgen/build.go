@@ -189,6 +189,7 @@ var schemaNames = map[string]string{
 	"ControllersJiraContextResponse":              "JiraContextResponse",
 	"ControllersJiraIssue":                        "JiraIssue",
 	"ControllersJiraSprint":                       "JiraSprint",
+	"ControllersJiraParentRef":                    "JiraParentRef",
 	"ControllersJiraSubtask":                      "JiraSubtask",
 	"ControllersJiraTransition":                   "JiraTransition",
 	"ControllersJiraTransitionsResponse":          "JiraTransitionsResponse",

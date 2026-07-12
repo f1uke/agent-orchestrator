@@ -601,10 +601,19 @@ type JiraIssueSummary struct {
 	// assignee dropdown can filter by assignee server-side (JQL) rather than paring
 	// down a capped page. Empty when the issue is unassigned.
 	AssigneeAccountId string `json:"assigneeAccountId,omitempty"`
+	// Parent is the row's parent issue (set for subtasks / epic children), so Browse
+	// Jira can nest a subtask beneath its parent like the backlog. nil for top-level.
+	Parent *JiraParentRef `json:"parent,omitempty"`
 	// Sprint is the row's current/most-relevant sprint, so Browse Jira can group
 	// results by sprint like the Jira board. nil when the issue is in no sprint.
 	Sprint *JiraSprint `json:"sprint,omitempty"`
 	URL    string      `json:"url,omitempty"`
+}
+
+// JiraParentRef is a summary row's parent issue (key + title).
+type JiraParentRef struct {
+	Key   string `json:"key"`
+	Title string `json:"title,omitempty"`
 }
 
 // JiraSearchResponse is the body of GET /jira/search — matching issues for a

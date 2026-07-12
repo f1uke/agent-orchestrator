@@ -2355,6 +2355,34 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--fg-passive);
 }
 
+/* Subtask hierarchy: children indented under their parent (Browse Jira #37). */
+.jira-browse__row--child {
+	margin-left: 22px;
+	border-left: 2px solid color-mix(in srgb, var(--border-1) 80%, transparent);
+	padding-left: 10px;
+}
+
+.jira-browse__subtask-mark {
+	color: var(--fg-passive);
+	font-size: 12px;
+	margin-right: 2px;
+}
+
+/* A parent pulled in only for context under an assignee filter — dimmed. */
+.jira-browse__row--context {
+	opacity: 0.62;
+}
+
+.jira-browse__context-tag {
+	font-size: 10px;
+	letter-spacing: 0.03em;
+	color: var(--fg-passive);
+	border: 1px solid var(--border-1);
+	border-radius: 5px;
+	padding: 0 5px;
+	white-space: nowrap;
+}
+
 .jira-browse__assignee-filter select {
 	font-size: 11.5px;
 	color: var(--fg);

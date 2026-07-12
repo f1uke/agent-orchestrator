@@ -166,6 +166,34 @@ func TestSearchIssues_DecodesAssigneeAccountId(t *testing.T) {
 	}
 }
 
+func TestSearchIssues_DecodesParent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"issues":[
+			{"key":"DEMO-102","fields":{"summary":"a subtask","issuetype":{"name":"Sub-task"},
+				"status":{"name":"To Do","statusCategory":{"key":"new"}},
+				"parent":{"key":"DEMO-101","fields":{"summary":"the parent story"}}}},
+			{"key":"DEMO-101","fields":{"summary":"the parent story","issuetype":{"name":"Story"},
+				"status":{"name":"To Do","statusCategory":{"key":"new"}}}}
+		]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	out, err := c.SearchIssues(context.Background(), `project = "DEMO"`, 25)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("rows = %+v", out)
+	}
+	if out[0].Parent == nil || out[0].Parent.Key != "DEMO-101" || out[0].Parent.Title != "the parent story" {
+		t.Errorf("row[0].Parent = %+v, want DEMO-101 / the parent story", out[0].Parent)
+	}
+	if out[1].Parent != nil {
+		t.Errorf("row[1] (a story) should have no parent, got %+v", out[1].Parent)
+	}
+}
+
 func TestSearchIssues_PaginatesEnhancedByToken(t *testing.T) {
 	var tokens []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

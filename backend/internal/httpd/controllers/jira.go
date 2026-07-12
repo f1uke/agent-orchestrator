@@ -293,9 +293,18 @@ func jiraIssueSummaryDTO(it jiraadapter.IssueSummary) JiraIssueSummary {
 		StatusColor:       it.StatusColor,
 		Assignee:          it.Assignee,
 		AssigneeAccountId: it.AssigneeAccountId,
+		Parent:            jiraParentDTO(it.Parent),
 		Sprint:            jiraSprintDTO(it.Sprint),
 		URL:               it.URL,
 	}
+}
+
+// jiraParentDTO maps an adapter parent ref to its wire shape (nil-safe).
+func jiraParentDTO(p *jiraadapter.ParentRef) *JiraParentRef {
+	if p == nil {
+		return nil
+	}
+	return &JiraParentRef{Key: p.Key, Title: p.Title}
 }
 
 // jiraSprintDTO maps an adapter sprint to its wire shape (nil-safe).

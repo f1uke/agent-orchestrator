@@ -3758,6 +3758,8 @@ components:
           type: string
         key:
           type: string
+        parent:
+          $ref: '#/components/schemas/JiraParentRef'
         sprint:
           $ref: '#/components/schemas/JiraSprint'
         status:
@@ -3818,6 +3820,15 @@ components:
           type: string
       required:
       - sessionId
+      - key
+      type: object
+    JiraParentRef:
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+      required:
       - key
       type: object
     JiraProject:

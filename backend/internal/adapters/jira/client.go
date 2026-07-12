@@ -232,6 +232,24 @@ func decodeStatus(raw json.RawMessage) *statusRef {
 	return &s
 }
 
+// decodeParent extracts a row's/issue's parent (key + summary) from the raw
+// `parent` field, present on subtasks and epic children. nil when absent/malformed.
+func decodeParent(raw json.RawMessage) *ParentRef {
+	if len(raw) == 0 {
+		return nil
+	}
+	var p struct {
+		Key    string `json:"key"`
+		Fields struct {
+			Summary string `json:"summary"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.Key == "" {
+		return nil
+	}
+	return &ParentRef{Key: p.Key, Title: p.Fields.Summary}
+}
+
 func decodeSubtasks(raw json.RawMessage) []Subtask {
 	if len(raw) == 0 {
 		return nil
