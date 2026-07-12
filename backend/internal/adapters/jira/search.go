@@ -49,12 +49,12 @@ type ProjectRef struct {
 	Name string
 }
 
-// Ask for the navigable field set (what Jira's issue navigator / board columns
-// use) rather than a fixed list, so the Agile sprint custom-field — whose id
-// varies per instance — is present for detectSprint to find and Browse Jira can
-// group rows by sprint. Lighter than *all (no ADF description/comments/worklog),
-// which the list view does not need.
-const searchFields = "*navigable"
+// Ask for every field (like the single-issue display path) so the Agile sprint
+// custom-field — whose id varies per instance, and which some instances do NOT
+// expose under *navigable — is reliably present for detectSprint to find, letting
+// Browse Jira group rows by sprint. The list is capped (≤50) so the heavier
+// payload is acceptable for a manual, user-initiated browse.
+const searchFields = "*all"
 
 // SearchIssues runs a JQL query and returns matching issues (capped). The JQL is
 // built by the service — this adapter is a dumb executor so the query semantics
