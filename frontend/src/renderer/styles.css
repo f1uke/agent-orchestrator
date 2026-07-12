@@ -3073,6 +3073,194 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
 
+/* Summary-tab readiness / gating strip — a merge-pipeline "spine" pinned to the
+   top of the Summary tab. `--rs-hue` (a board lane hue) is set inline per verdict;
+   `--tone` per gate. See components/ReadinessStrip.tsx + lib/readiness.ts. */
+.readiness {
+	position: relative;
+	margin-bottom: 18px;
+	padding: 13px 14px 14px;
+	border: 1px solid var(--rs-edge, var(--border));
+	--rs-edge: color-mix(in oklab, var(--rs-hue) 34%, var(--border));
+	border-radius: 11px;
+	background: linear-gradient(180deg, color-mix(in oklab, var(--rs-hue) 7%, transparent), transparent 46%), var(--bg-1);
+	overflow: hidden;
+}
+
+/* A thin colored strap down the left edge → the block is color-coded even in
+   peripheral vision. */
+.readiness::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 3px;
+	background: var(--rs-hue);
+}
+
+.readiness__verdict {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+}
+
+.readiness__dot {
+	flex: none;
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background: var(--rs-hue);
+	box-shadow: 0 0 0 4px color-mix(in oklab, var(--rs-hue) 18%, transparent);
+}
+
+.readiness__dot--pulse {
+	animation: readiness-pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes readiness-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 3px color-mix(in oklab, var(--rs-hue) 26%, transparent);
+	}
+	50% {
+		box-shadow: 0 0 0 7px color-mix(in oklab, var(--rs-hue) 4%, transparent);
+	}
+}
+
+.readiness__headline {
+	font-size: 14.5px;
+	font-weight: 680;
+	letter-spacing: -0.01em;
+	line-height: 1.1;
+	color: var(--rs-hue);
+}
+
+.readiness__ctx {
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--fg-passive);
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.readiness__caption {
+	margin: 4px 0 0 18px;
+	font-size: 12px;
+	line-height: 1.35;
+	color: var(--fg-muted);
+}
+
+/* The gate pipeline: an even row of stations connected by a hairline rail. */
+.readiness__pipe {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+	margin-top: 13px;
+}
+
+.readiness-gate {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	padding-top: 12px;
+}
+
+/* The connecting rail, drawn as the two half-segments either side of each node. */
+.readiness-gate::before,
+.readiness-gate::after {
+	content: "";
+	position: absolute;
+	top: 5px;
+	height: 2px;
+	background: var(--border);
+}
+
+.readiness-gate::before {
+	left: 0;
+	right: 50%;
+}
+
+.readiness-gate::after {
+	left: 50%;
+	right: 0;
+}
+
+.readiness-gate:first-child::before,
+.readiness-gate:last-child::after {
+	display: none;
+}
+
+/* A satisfied rail glows green — the "progress behind you". */
+.readiness-gate[data-tone="pass"]::before,
+.readiness-gate[data-tone="pass"]::after {
+	background: color-mix(in oklab, var(--green) 55%, transparent);
+}
+
+.readiness-gate__node {
+	position: absolute;
+	top: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 1;
+	width: 11px;
+	height: 11px;
+	border-radius: 50%;
+	background: var(--bg-1);
+	border: 2px solid var(--tone);
+}
+
+.readiness-gate__node--fill {
+	background: var(--tone);
+}
+
+.readiness-gate__node--ring {
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--tone) 22%, transparent);
+}
+
+/* A blocked node reads as a lit hollow stop (the "you are here"). */
+.readiness-gate__node--block::after {
+	content: "";
+	position: absolute;
+	inset: 2px;
+	border-radius: 50%;
+	background: var(--bg-1);
+}
+
+.readiness-gate__label {
+	font-size: 10.5px;
+	font-weight: 600;
+	line-height: 1;
+	text-align: center;
+	color: var(--fg-muted);
+}
+
+.readiness-gate__state {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 1.1;
+	text-align: center;
+	color: var(--tone);
+}
+
+.readiness-gate[data-tone="idle"] .readiness-gate__label,
+.readiness-gate[data-tone="idle"] .readiness-gate__state {
+	color: var(--fg-passive);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.readiness__dot--pulse {
+		animation: none;
+	}
+}
+
 .inspector-timeline {
 	position: relative;
 	padding-left: 20px;
