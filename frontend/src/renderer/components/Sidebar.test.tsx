@@ -239,6 +239,16 @@ describe("Sidebar", () => {
 			expect(id.className).toContain("text-[10.5px]");
 			expect(id.tagName).toBe("SPAN");
 		});
+
+		it("places the Jira key badge on line 2 — above the @<project>-<num> id (enhancement #4)", () => {
+			const jiraSession: WorkspaceSession = { ...session, issueId: "jira:STAR-2272" };
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [jiraSession] }] });
+			const key = screen.getByText("STAR-2272");
+			const ref = screen.getByText("@proj-1-1");
+			// The badge is rendered directly under the work name, so it precedes the
+			// id line in DOM order.
+			expect(key.compareDocumentPosition(ref) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
 	});
 
 	// Breathing status dot (decision 2026-07-11): the lane glyph gently pulses

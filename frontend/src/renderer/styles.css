@@ -1865,7 +1865,9 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .jira-badge--row {
 	font-size: 10px;
 	gap: 5px;
-	padding: 1px 6px;
+	/* No left inset: the badge's front edge lines up with the work-name / id
+	   column so the sidebar rows share one consistent left edge (enhancement #4). */
+	padding: 1px 6px 1px 0;
 	border-color: transparent;
 	background: transparent;
 }
@@ -2554,27 +2556,75 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--red);
 }
 
+/* A project row = star toggle + the selectable option (two sibling buttons so
+   neither nests inside the other). The whole row shares one hover/selected wash. */
+.jira-proj-picker__item {
+	display: flex;
+	align-items: center;
+	transition: background 0.12s ease;
+}
+
+.jira-proj-picker__item:hover,
+.jira-proj-picker__item:focus-within {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.jira-proj-picker__item.is-selected {
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Star toggle: pins a project to the top "Starred" group; filled when on. */
+.jira-proj-picker__star {
+	flex: 0 0 auto;
+	display: grid;
+	place-items: center;
+	padding: 6px 4px 6px 10px;
+	border: none;
+	background: transparent;
+	color: var(--fg-passive);
+	cursor: pointer;
+	transition: color 0.12s ease;
+}
+
+.jira-proj-picker__star:hover,
+.jira-proj-picker__star:focus-visible {
+	color: var(--amber);
+	outline: none;
+}
+
+.jira-proj-picker__star.is-on {
+	color: var(--amber);
+}
+
+.jira-proj-picker__star.is-on svg {
+	fill: currentColor;
+}
+
+/* Group header for the pinned "Starred" / "All projects" sections. */
+.jira-proj-picker__group {
+	font-size: 9.5px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--fg-passive);
+	padding: 8px 12px 4px;
+}
+
 .jira-proj-picker__opt {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	width: 100%;
+	flex: 1;
+	min-width: 0;
 	text-align: left;
-	padding: 9px 12px;
+	padding: 9px 12px 9px 2px;
 	border: none;
 	background: transparent;
 	cursor: pointer;
-	transition: background 0.12s ease;
 }
 
-.jira-proj-picker__opt:hover,
 .jira-proj-picker__opt:focus-visible {
-	background: color-mix(in srgb, var(--accent) 12%, transparent);
 	outline: none;
-}
-
-.jira-proj-picker__opt.is-selected {
-	background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .jira-proj-picker__opt-k {
