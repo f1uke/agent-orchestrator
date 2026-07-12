@@ -8,6 +8,8 @@ vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div>terminal body</div> 
 // The restart control pulls in react-query machinery irrelevant to the toolbar
 // under test; stub it so we can assert only on where it is (and isn't) shown.
 vi.mock("./RestartSessionButton", () => ({ RestartSessionButton: () => <div>restart control</div> }));
+// Same for the kill control (react-query + router); stub to assert placement only.
+vi.mock("./KillSessionButton", () => ({ KillSessionButton: () => <div>kill control</div> }));
 
 const worker = {
 	id: "sess-1",
@@ -71,5 +73,44 @@ describe("CenterPane restart control", () => {
 			/>,
 		);
 		expect(screen.queryByText("restart control")).not.toBeInTheDocument();
+	});
+});
+
+describe("CenterPane kill control", () => {
+	it("offers kill for an active worker session", () => {
+		render(<CenterPane session={worker} theme="dark" daemonReady />);
+		expect(screen.getByText("kill control")).toBeInTheDocument();
+	});
+
+	it("hides kill for an orchestrator session (worker-only)", () => {
+		render(<CenterPane session={{ ...worker, id: "sess-orch", kind: "orchestrator" }} theme="dark" daemonReady />);
+		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
+	});
+
+	it("hides kill for a terminated session (its Restore control takes over)", () => {
+		render(<CenterPane session={{ ...worker, status: "terminated" }} theme="dark" daemonReady />);
+		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
+	});
+
+	it("hides kill for a merged/done session", () => {
+		render(<CenterPane session={{ ...worker, status: "merged" }} theme="dark" daemonReady />);
+		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
+	});
+
+	it("hides kill when there is no session", () => {
+		render(<CenterPane theme="dark" daemonReady />);
+		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
+	});
+
+	it("hides kill on the reviewer terminal", () => {
+		render(
+			<CenterPane
+				session={worker}
+				theme="dark"
+				daemonReady
+				terminalTarget={{ kind: "reviewer", handleId: "h-1", harness: "claude-code" }}
+			/>,
+		);
+		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
 	});
 });

@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TerminalTarget } from "../types/terminal";
-import type { WorkspaceSession } from "../types/workspace";
+import type { SessionStatus, WorkspaceSession } from "../types/workspace";
 import type { Theme } from "../stores/ui-store";
 import { useTerminalSession, type AttachableTerminal, type TerminalSessionState } from "../hooks/useTerminalSession";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -209,7 +209,13 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 	}, [workspaces, currentProjectId, session, jiraBrowseBase]);
 	const externalRefResolver = useCallback((line: string) => findExternalRefLinks(line, scmRemotes), [scmRemotes]);
 	const hadAttachmentRef = useRef(false);
-	const canRestoreSession = terminalTarget?.kind !== "reviewer" && session?.status === "terminated";
+	// Gate on the durable `isTerminated` fact, NOT the derived display status: a
+	// Done session (PR merged) reads status "merged" but is still terminated and
+	// fully restorable at the backend. Keying on status "terminated" alone left
+	// Done/merged sessions with a dead-end banner and no Restore button. This also
+	// matches the backend `Restore` precondition and excludes suspended/keep-warm
+	// sessions (resumed by wake-on-open, not terminated).
+	const canRestoreSession = terminalTarget?.kind !== "reviewer" && session?.isTerminated === true;
 
 	const handleReady = useCallback((handle: AttachableTerminal) => {
 		setTerminal(handle);
@@ -285,6 +291,7 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 					error={restoreError}
 					isRestoring={isRestoring}
 					onRestore={restoreSession}
+					status={session?.status}
 					variant={terminalTarget?.kind === "reviewer" ? "reviewer" : "session"}
 				/>
 			)}
@@ -334,15 +341,45 @@ type TerminalEndedStripProps = {
 	error?: string;
 	isRestoring: boolean;
 	onRestore: () => void;
+	status?: SessionStatus;
 	variant: "reviewer" | "session";
 };
 
-function TerminalEndedStrip({ canRestore, error, isRestoring, onRestore, variant }: TerminalEndedStripProps) {
-	const message = canRestore
-		? "Restore the session to attach a live terminal and continue writing."
-		: variant === "reviewer"
-			? "This reviewer terminal has ended. Re-run review from the summary panel, or switch back to the agent terminal."
-			: "This terminal process ended, but the session is not marked terminated yet.";
+// The banner copy under "Terminal ended". A restorable session OFFERS restore —
+// with Done-specific wording when its PR merged (status "merged") so the button
+// doesn't read as a dead end. A reviewer terminal points back to the agent; a
+// non-restorable session terminal is one whose process exited while the session
+// is not (yet) terminated, which the Restore action can't help.
+export function terminalEndedMessage({
+	canRestore,
+	status,
+	variant,
+}: {
+	canRestore: boolean;
+	status?: SessionStatus;
+	variant: "reviewer" | "session";
+}): string {
+	if (variant === "reviewer") {
+		return "This reviewer terminal has ended. Re-run review from the summary panel, or switch back to the agent terminal.";
+	}
+	if (!canRestore) {
+		return "This terminal process ended, but the session is not marked terminated yet.";
+	}
+	if (status === "merged") {
+		return "This session is done (PR merged). Restore it to attach a live terminal and continue.";
+	}
+	return "Restore the session to attach a live terminal and continue writing.";
+}
+
+export function TerminalEndedStrip({
+	canRestore,
+	error,
+	isRestoring,
+	onRestore,
+	status,
+	variant,
+}: TerminalEndedStripProps) {
+	const message = terminalEndedMessage({ canRestore, status, variant });
 
 	return (
 		<div className="shrink-0 border-b border-border bg-surface/80 px-4 py-2">
