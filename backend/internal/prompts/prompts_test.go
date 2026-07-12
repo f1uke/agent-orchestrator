@@ -79,6 +79,25 @@ func TestOrchestratorDefault_ReconcilesGitflow(t *testing.T) {
 	}
 }
 
+// TestOrchestratorDefault_DocumentsTodoFlag: the orchestrator base must teach
+// the dispatcher that `ao spawn --todo` stages a TODO instead of starting the
+// worker now (nothing created until `ao session start <id>`), and that a
+// queue/stage/hold-style request should use --todo. Without this the
+// orchestrator defaults to spawn-and-start and cannot stage a deferred TODO.
+func TestOrchestratorDefault_DocumentsTodoFlag(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"`--todo`",                     // the flag is named
+		"stage the worker as a TODO",   // what it does
+		"ao session start <id>",        // how a staged TODO is started later
+		"queue, stage, or hold a task", // the trigger vocabulary
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing --todo guidance %q:\n%s", want, base)
+		}
+	}
+}
+
 // TestOrchestratorDefault_RefersToWorkByBoardName: the orchestrator base must
 // tell the dispatcher to name worker sessions and their PRs by the human-readable
 // board label when talking to the human, keeping the internal session id / PR
