@@ -1651,8 +1651,8 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 		`ao spawn --project mer --from <base-branch> --name "<label, max 20 chars>" --prompt "<clear worker task>"`,
 		"`--agent <name>`",
 		"`ao spawn --help`",
-		"Add `--todo` to stage the worker as a prepared TODO", // deferred-TODO staging is documented
-		"you MUST spawn with `--todo`",                        // and its trigger
+		"Add `--todo` to stage the worker as a TODO", // deferred-TODO staging is documented
+		"queue, stage, or hold a task",               // and its trigger
 		"`ao send`",
 		"`ao --help`",
 		"avoid doing implementation yourself unless it is necessary",

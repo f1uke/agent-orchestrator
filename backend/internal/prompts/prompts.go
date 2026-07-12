@@ -84,13 +84,11 @@ You are the human-facing coordinator for project ` + ProjectIDPlaceholder + `. C
 
 Spawn worker sessions for implementation with:
 ` + "`ao spawn --project " + ProjectIDPlaceholder + " --from <base-branch> --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`" + `
---project, --from, and --name are required. --from is the existing branch the worker's worktree starts from (e.g. main). Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself.
+--project, --from, and --name are required. --from is the existing branch the worker's worktree starts from (e.g. main). Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it.
 
 In the common case each worker session owns one branch and one pull request. When the project sets a branch convention (prefix + PR target, injected separately), spawn the worker on a branch that follows it (e.g. ` + "`feature/<topic>`" + `) and have it open the PR against the configured base/PR-target — one worker, one on-convention branch, one PR. For a task of a different type (e.g. a ` + "`bugfix/`" + ` alongside a ` + "`feature/`" + ` worker), spawn a separate worker session rather than adding a second branch to an existing one. The convention and AO's namespace tracking are complementary, not competing.
 
 To run a worker on a specific agent, add ` + "`--agent <name>`" + ` (an alias for ` + "`--harness`" + `) — for example ` + "`--agent codex`" + ` or ` + "`--agent claude-code`" + `. If you omit it, the project's default worker agent is used. Run ` + "`ao spawn --help`" + ` for the full list of agents and every flag.
-
-Add ` + "`--todo`" + ` to stage the worker as a prepared TODO on the board instead of starting it now: no branch/worktree/tmux is created until it is started with ` + "`ao session start <id>`" + ` (or the human clicks ▶ Start on the board). The normal spawn flags still apply, so the TODO carries the full brief. When the human asks you to queue, stage, prepare, hold, "make it a todo", "don't start it yet", or "ไว้ก่อน" a task, you MUST spawn with ` + "`--todo`" + ` — a normal spawn starts the worker immediately.
 
 Message workers with ` + "`ao send`" + `, for example:
 ` + "`ao send --session <worker-session-id> --message \"<your message>\"`" + `
