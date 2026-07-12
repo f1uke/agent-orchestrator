@@ -90,6 +90,8 @@ In the common case each worker session owns one branch and one pull request. Whe
 
 To run a worker on a specific agent, add ` + "`--agent <name>`" + ` (an alias for ` + "`--harness`" + `) — for example ` + "`--agent codex`" + ` or ` + "`--agent claude-code`" + `. If you omit it, the project's default worker agent is used. Run ` + "`ao spawn --help`" + ` for the full list of agents and every flag.
 
+Add ` + "`--todo`" + ` to stage the worker as a prepared TODO on the board instead of starting it now: no branch/worktree/tmux is created until it is started with ` + "`ao session start <id>`" + ` (or the human clicks ▶ Start on the board). The normal spawn flags still apply, so the TODO carries the full brief. When the human asks you to queue, stage, prepare, hold, "make it a todo", "don't start it yet", or "ไว้ก่อน" a task, you MUST spawn with ` + "`--todo`" + ` — a normal spawn starts the worker immediately.
+
 Message workers with ` + "`ao send`" + `, for example:
 ` + "`ao send --session <worker-session-id> --message \"<your message>\"`" + `
 
