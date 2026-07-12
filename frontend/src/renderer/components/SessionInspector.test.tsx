@@ -146,6 +146,28 @@ describe("SessionInspector PR section", () => {
 		expect(cards).toEqual(["PR #41", "PR #42", "PR #40"]);
 	});
 
+	it("pins active PRs on top and archives merged/closed under a de-emphasized label", () => {
+		renderWithQuery(
+			<SessionInspector session={session([pr(40, "merged"), pr(41, "open"), pr(42, "draft"), pr(43, "closed")])} />,
+		);
+		const section = prSection("Pull requests (4)");
+		// Active (open, draft) first; archived (merged, closed) last.
+		const cards = section.getAllByText(/^PR #\d+$/).map((el) => el.textContent);
+		expect(cards).toEqual(["PR #41", "PR #42", "PR #40", "PR #43"]);
+		// A separator counts the archived (terminal) PRs.
+		expect(section.getByText("Archived · 2")).toBeInTheDocument();
+		// Archived cards are de-emphasized; active ones are not.
+		const cardOf = (label: string) => section.getByText(label).closest(".bg-surface") as HTMLElement;
+		expect(cardOf("PR #40").className).toContain("opacity-65");
+		expect(cardOf("PR #43").className).toContain("opacity-65");
+		expect(cardOf("PR #41").className).not.toContain("opacity-65");
+	});
+
+	it("shows no Archived label when every PR is still active", () => {
+		renderWithQuery(<SessionInspector session={session([pr(41, "open"), pr(42, "draft")])} />);
+		expect(screen.queryByText(/^Archived ·/)).not.toBeInTheDocument();
+	});
+
 	it("uses the singular heading and shows enriched facts for a single PR", () => {
 		renderWithQuery(<SessionInspector session={session([pr(7, "open")])} />);
 

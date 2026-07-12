@@ -2,7 +2,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest } from "lucide-react";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
-import { prBrowserUrl, prNoun, prTitleLabel, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
+import {
+	isArchivedPRState,
+	prBrowserUrl,
+	prNoun,
+	prTitleLabel,
+	providerFromPRURL,
+	sessionPRDisplaySummaries,
+} from "../lib/pr-display";
 import type { SessionActivityState, WorkspaceSession } from "../types/workspace";
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
@@ -192,6 +199,12 @@ function Section({
 function SummaryView({ session }: { session: WorkspaceSession }) {
 	const query = useSessionScmSummary(session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, query.data);
+	// Pin the still-actionable PRs/MRs (open, draft) to the top — they're what
+	// needs attention — and sink merged/closed ones into a de-emphasized "archive"
+	// below. prSummaries is already sorted actionable-first, so the partition keeps
+	// each side's order.
+	const activePRs = prSummaries.filter((pr) => !isArchivedPRState(pr.state));
+	const archivedPRs = prSummaries.filter((pr) => isArchivedPRState(pr.state));
 	// Singular title follows the one PR's provider ("Pull request" / "Merge
 	// request"); a mixed list keeps the generic plural.
 	const singularNoun = prSummaries.length === 1 ? prNoun(prSummaries[0].provider) : "pull request";
@@ -212,9 +225,21 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 					<p className="inspector-empty">No pull request opened yet.</p>
 				) : (
 					<div className="flex flex-col gap-2">
-						{prSummaries.map((pr) => (
+						{activePRs.map((pr) => (
 							<PRSummaryCard key={pr.number} pr={pr} />
 						))}
+						{archivedPRs.length > 0 ? (
+							<>
+								{activePRs.length > 0 ? (
+									<div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-passive">
+										Archived · {archivedPRs.length}
+									</div>
+								) : null}
+								{archivedPRs.map((pr) => (
+									<PRSummaryCard key={pr.number} pr={pr} archived />
+								))}
+							</>
+						) : null}
 					</div>
 				)}
 			</Section>
@@ -236,9 +261,16 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	);
 }
 
-function PRSummaryCard({ pr }: { pr: SessionPRSummary }) {
+function PRSummaryCard({ pr, archived = false }: { pr: SessionPRSummary; archived?: boolean }) {
 	return (
-		<div className="rounded-[7px] border border-border bg-surface px-3 py-2.5">
+		<div
+			className={cn(
+				"rounded-[7px] border border-border bg-surface px-3 py-2.5",
+				// Archived (merged/closed): de-emphasized so the eye lands on the
+				// actionable PRs above, without hiding the record.
+				archived && "opacity-65",
+			)}
+		>
 			<div className="flex items-center gap-2">
 				<GitPullRequest className="h-3.5 w-3.5 shrink-0 text-passive" aria-hidden="true" />
 				<span className="text-[12.5px] font-medium text-foreground">{prTitleLabel(pr.provider, pr.number)}</span>

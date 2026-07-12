@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import {
+	isArchivedPRState,
 	prBrowserUrl,
 	prDiffSummary,
 	prKindLabel,
@@ -376,5 +377,14 @@ describe("prSummaryParts", () => {
 			status: "None",
 			summary: "Draft PR · Not ready for review",
 		});
+	});
+});
+
+describe("isArchivedPRState", () => {
+	it("treats merged and closed as archived, open and draft as active", () => {
+		expect(isArchivedPRState("merged")).toBe(true);
+		expect(isArchivedPRState("closed")).toBe(true);
+		expect(isArchivedPRState("open")).toBe(false);
+		expect(isArchivedPRState("draft")).toBe(false);
 	});
 });

@@ -90,6 +90,13 @@ export function prTitleLabel(provider: PRProvider, number: number): string {
 	return `${prKindLabel(provider)} ${prRef(provider, number)}`;
 }
 
+// isArchivedPRState marks a PR/MR whose lifecycle is over (merged or closed). In
+// the Summary these sink below the still-actionable open/draft ones and render
+// de-emphasized — an "archive" you can glance past. open/draft are active.
+export function isArchivedPRState(state: SessionPRSummary["state"]): boolean {
+	return state === "merged" || state === "closed";
+}
+
 export function sessionPRDisplaySummaries(
 	session: WorkspaceSession,
 	summaries: SessionPRSummary[] = [],
