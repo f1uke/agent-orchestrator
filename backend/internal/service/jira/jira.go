@@ -234,20 +234,89 @@ func jiraKey(issueID string) (string, bool) {
 	return key, true
 }
 
-// Search returns issues matching a free-text query, optionally scoped to a
-// project key and narrowed by assignee (accountId, or the "unassigned" sentinel)
-// and issue types. The filters are pushed into the JQL (buildJQL) so Jira returns
-// the right rows server-side rather than the client paring down a capped page —
-// which is why "assignee = Fluke" surfaces all of Fluke's issues, not just those
-// in the most-recent page. The adapter is a dumb executor.
-func (s *Service) Search(ctx context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error) {
+// SearchParams is the structured Browse Jira query. The structured fields are
+// pushed into the JQL server-side (buildJQL) so Jira returns the right rows rather
+// than the client paring a capped page. JQL, when set, is raw advanced JQL that
+// REPLACES the whole structured query (the structured fields are then ignored) —
+// Jira's advanced-search behavior.
+type SearchParams struct {
+	Project      string
+	Text         string
+	Assignee     string   // accountId, or the "unassigned" sentinel
+	Types        []string // issue-type names for `issuetype in (...)`
+	HideDone     bool     // exclude done issues: `statusCategory != Done`
+	ActiveSprint bool     // only open sprints: `sprint in openSprints()`
+	JQL          string   // raw advanced JQL; when non-empty, replaces everything above
+}
+
+// Search returns issues matching the query. Structured filters are ANDed into the
+// JQL server-side — which is why "assignee = Fluke" surfaces all of Fluke's issues,
+// not just those in the most-recent page. Advanced JQL (p.JQL), when set, drives the
+// search verbatim. The adapter is a dumb executor.
+func (s *Service) Search(ctx context.Context, p SearchParams) ([]jiraadapter.IssueSummary, error) {
 	if s.searcher == nil {
 		return nil, fmt.Errorf("%w: Jira search is not configured", jiraadapter.ErrUnavailable)
 	}
 	// Page up to the adapter's browse cap: Browse Jira groups results by sprint and
-	// filters by assignee/type in the JQL, so a wide, paginated set gives each
-	// section its issues instead of only what fits in one page.
-	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, project, text, assignee, types), jiraadapter.SearchMaxResults)
+	// filters in the JQL, so a wide, paginated set gives each section its issues
+	// instead of only what fits in one page.
+	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, p), jiraadapter.SearchMaxResults)
+}
+
+// GetIssue fetches one issue's full display projection by key — the read behind the
+// Browse Jira detail view (pre-session, so no session binding). Validates the key
+// shape, then reads live. Errors surface to the caller so the detail panel can show
+// why the fetch failed (unlike the session Context path, which folds them into a
+// FetchError). Reuses the same adapter read as the session display.
+func (s *Service) GetIssue(ctx context.Context, key string) (jiraadapter.Issue, error) {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if !fullKeyRE.MatchString(key) {
+		return jiraadapter.Issue{}, fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.issues == nil {
+		return jiraadapter.Issue{}, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	return s.issues.Get(ctx, key)
+}
+
+// IssueTransitions lists the live status transitions for any issue by key — the
+// Browse Jira detail view's Move-status entry, pre-session. Unlike the session
+// Transitions path it is not scoped to a session's issue tree (there is no session);
+// the user is acting directly on the issue they opened.
+func (s *Service) IssueTransitions(ctx context.Context, key string) ([]jiraadapter.Transition, error) {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if !fullKeyRE.MatchString(key) {
+		return nil, fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.moves == nil {
+		return nil, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	return s.moves.Transitions(ctx, key)
+}
+
+// MoveIssue applies a status transition to any issue by key — the one sanctioned
+// write, from the Browse Jira detail view (pre-session). On success it re-reads the
+// issue (best-effort) so the result carries the new status.
+func (s *Service) MoveIssue(ctx context.Context, key, transitionID string) (MoveResult, error) {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if !fullKeyRE.MatchString(key) {
+		return MoveResult{}, fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.moves == nil {
+		return MoveResult{}, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	if err := s.moves.Move(ctx, key, transitionID); err != nil {
+		return MoveResult{}, err
+	}
+	res := MoveResult{Key: key}
+	if s.issues != nil {
+		if iss, err := s.issues.Get(ctx, key); err == nil {
+			res.Status = iss.Status
+			res.StatusCategory = iss.StatusCategory
+			res.StatusColor = iss.StatusColor
+		}
+	}
+	return res, nil
 }
 
 // Projects lists the user's Jira projects (optionally filtered) for the project
@@ -330,15 +399,21 @@ func (s *Service) Unlink(ctx context.Context, id domain.SessionID) (domain.Sessi
 // (a real accountId is never this word), mapped to the JQL `assignee is EMPTY`.
 const assigneeUnassigned = "unassigned"
 
-// buildJQL classifies the query into JQL. A full key resolves that one issue
-// (ignoring the filters — an exact lookup is unambiguous); a bare project key
-// (confirmed to exist, so we never send a 400-inducing `project = NOPE`) scopes to
-// that project — which is how "demo" surfaces DEMO-* that a text match never would;
-// anything else is a summary/text contains-search. The assignee (accountId) and
-// issue types, when set, are ANDed in as server-side filters. Always newest-first.
-func (s *Service) buildJQL(ctx context.Context, project, text, assignee string, types []string) string {
-	project = strings.TrimSpace(project)
-	text = strings.TrimSpace(text)
+// buildJQL classifies the query into JQL. Raw advanced JQL (p.JQL), when set, is
+// returned verbatim and drives the search fully (the structured fields are ignored)
+// — Jira's advanced search; a malformed query surfaces as a 400 the caller renders.
+// Otherwise: a full key resolves that one issue (ignoring the filters — an exact
+// lookup is unambiguous); a bare project key (confirmed to exist, so we never send a
+// 400-inducing `project = NOPE`) scopes to that project — which is how "demo"
+// surfaces DEMO-* that a text match never would; anything else is a summary/text
+// contains-search. Assignee (accountId), issue types, hide-done and active-sprint,
+// when set, are ANDed in as server-side filters. Always newest-first.
+func (s *Service) buildJQL(ctx context.Context, p SearchParams) string {
+	if raw := strings.TrimSpace(p.JQL); raw != "" {
+		return raw
+	}
+	project := strings.TrimSpace(p.Project)
+	text := strings.TrimSpace(p.Text)
 	if fullKeyRE.MatchString(strings.ToUpper(text)) {
 		return `key = "` + strings.ToUpper(text) + `"`
 	}
@@ -357,15 +432,21 @@ func (s *Service) buildJQL(ctx context.Context, project, text, assignee string, 
 		esc := escapeJQL(text)
 		clauses = append(clauses, `(summary ~ "`+esc+`*" OR text ~ "`+esc+`*")`)
 	}
-	if a := strings.TrimSpace(assignee); a != "" {
+	if a := strings.TrimSpace(p.Assignee); a != "" {
 		if strings.EqualFold(a, assigneeUnassigned) {
 			clauses = append(clauses, "assignee is EMPTY")
 		} else {
 			clauses = append(clauses, `assignee = "`+escapeJQL(a)+`"`)
 		}
 	}
-	if clause := issueTypeClause(types); clause != "" {
+	if clause := issueTypeClause(p.Types); clause != "" {
 		clauses = append(clauses, clause)
+	}
+	if p.HideDone {
+		clauses = append(clauses, "statusCategory != Done")
+	}
+	if p.ActiveSprint {
+		clauses = append(clauses, "sprint in openSprints()")
 	}
 	jql := strings.Join(clauses, " AND ")
 	if jql != "" {

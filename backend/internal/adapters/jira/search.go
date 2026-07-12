@@ -38,9 +38,17 @@ type IssueSummary struct {
 	StatusCategory    string // Jira category key: new|indeterminate|done
 	StatusColor       string
 	Assignee          string
-	AssigneeAccountId string  // opaque Jira accountId, so the UI can filter by assignee server-side (JQL)
-	Sprint            *Sprint // current/most-relevant sprint, for Browse Jira grouping (nil = none)
-	URL               string  // human browse URL, derived from the site base
+	AssigneeAccountId string     // opaque Jira accountId, so the UI can filter by assignee server-side (JQL)
+	Parent            *ParentRef // set for subtasks / epic children, so Browse Jira can nest under the parent
+	Sprint            *Sprint    // current/most-relevant sprint, for Browse Jira grouping (nil = none)
+	URL               string     // human browse URL, derived from the site base
+}
+
+// ParentRef is a row's parent issue (set for subtasks and epic children) so Browse
+// Jira can nest a subtask beneath its parent like the Jira backlog.
+type ParentRef struct {
+	Key   string
+	Title string
 }
 
 // ProjectRef is one Jira project for the project picker (Browse Jira, Slice 5;
@@ -193,6 +201,7 @@ func (c *Client) searchPage(ctx context.Context, cfg restConfig, path, jql strin
 			Title:             decodeString(f["summary"]),
 			Assignee:          assignee.DisplayName,
 			AssigneeAccountId: assignee.AccountId,
+			Parent:            decodeParent(f["parent"]),
 			Sprint:            c.detectSprint(f),
 			URL:               cfg.baseURL + "/browse/" + it.Key,
 		}

@@ -1,22 +1,35 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { useJiraTransitions, useMoveJiraStatus } from "../hooks/useSessionJiraContext";
+import {
+	type JiraTransition,
+	useJiraIssueTransitions,
+	useJiraTransitions,
+	useMoveJiraIssue,
+	useMoveJiraStatus,
+} from "../hooks/useSessionJiraContext";
 import { cn } from "../lib/utils";
 
 // The minimal display shape the dialog needs — satisfied by both the bound issue
 // (JiraIssue) and a subtask (JiraSubtask).
 export type MoveTarget = { key: string; type?: string; title?: string; status?: string };
 
+// The transition list + move mutation the dialog body needs — satisfied by both the
+// session hooks (useJiraTransitions / useMoveJiraStatus) and the by-key hooks
+// (useJiraIssueTransitions / useMoveJiraIssue), so the same UI backs both.
+type TransitionsState = { data?: JiraTransition[]; isLoading: boolean; isError: boolean; error: unknown };
+type MoveState = {
+	mutate: (id: string, opts?: { onSuccess?: () => void }) => void;
+	reset: () => void;
+	isPending: boolean;
+	isError: boolean;
+	error: unknown;
+};
+
 /**
- * The Move-status dialog — the ONLY Jira write AO makes (a status transition,
- * user-initiated + confirmed; no comment, no field edit). Transitions are read
- * LIVE from the issue (never hardcoded — they differ per issue type and current
- * status). On confirm it POSTs the chosen transition and, on success, the mutation
- * invalidates the Jira context so the pill reflects the new status. Mockup 05.
- *
- * `target` is the issue shown/moved; `issueKey` scopes the transitions+move to a
- * subtask of the session's bound issue (omit it to move the bound issue itself).
+ * The session-scoped Move-status dialog — the ONLY Jira write AO makes for a bound
+ * session. `target` is the issue shown/moved; `issueKey` scopes the transitions+move
+ * to a subtask of the session's bound issue (omit it to move the bound issue itself).
  */
 export function JiraMoveStatusDialog({
 	sessionId,
@@ -33,6 +46,63 @@ export function JiraMoveStatusDialog({
 }) {
 	const transitions = useJiraTransitions(sessionId, open, issueKey);
 	const move = useMoveJiraStatus(sessionId, issueKey);
+	return (
+		<MoveStatusDialogBody
+			target={target}
+			transitions={transitions}
+			move={move}
+			open={open}
+			onOpenChange={onOpenChange}
+		/>
+	);
+}
+
+/**
+ * The by-key Move-status dialog — the SAME sanctioned write, from the pre-session
+ * Browse Jira detail view (no session binding). Transitions + move are scoped to the
+ * target's key directly.
+ */
+export function JiraIssueMoveDialog({
+	target,
+	open,
+	onOpenChange,
+}: {
+	target: MoveTarget;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+}) {
+	const transitions = useJiraIssueTransitions(target.key, open);
+	const move = useMoveJiraIssue(target.key);
+	return (
+		<MoveStatusDialogBody
+			target={target}
+			transitions={transitions}
+			move={move}
+			open={open}
+			onOpenChange={onOpenChange}
+		/>
+	);
+}
+
+/**
+ * The Move-status dialog body — a status transition, user-initiated + confirmed (no
+ * comment, no field edit). Transitions are read LIVE from the issue (never hardcoded
+ * — they differ per issue type and current status). On confirm it applies the chosen
+ * transition via the injected `move` mutation (session- or key-scoped). Mockup 05.
+ */
+export function MoveStatusDialogBody({
+	target,
+	transitions,
+	move,
+	open,
+	onOpenChange,
+}: {
+	target: MoveTarget;
+	transitions: TransitionsState;
+	move: MoveState;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+}) {
 	const [selected, setSelected] = useState<string | null>(null);
 
 	// Reset the choice and any prior error each time the dialog opens.

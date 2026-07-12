@@ -519,15 +519,18 @@ type JiraIssue struct {
 	// Status is the human status name; StatusCategory is Jira's category key
 	// (new|indeterminate|done); StatusColor is the category colorName. The UI
 	// tints the status pill from the category, not the free-form name.
-	Status         string        `json:"status,omitempty"`
-	StatusCategory string        `json:"statusCategory,omitempty"`
-	StatusColor    string        `json:"statusColor,omitempty"`
-	Priority       string        `json:"priority,omitempty"`
-	Assignee       string        `json:"assignee,omitempty"`
-	Reporter       string        `json:"reporter,omitempty"`
-	Sprint         *JiraSprint   `json:"sprint,omitempty"`
-	Description    []adf.Node    `json:"description,omitempty"`
-	Subtasks       []JiraSubtask `json:"subtasks,omitempty"`
+	Status         string `json:"status,omitempty"`
+	StatusCategory string `json:"statusCategory,omitempty"`
+	StatusColor    string `json:"statusColor,omitempty"`
+	Priority       string `json:"priority,omitempty"`
+	Assignee       string `json:"assignee,omitempty"`
+	Reporter       string `json:"reporter,omitempty"`
+	// Parent is the issue's parent (set for subtasks / epic children), so the
+	// Browse Jira detail view can show a clickable parent breadcrumb.
+	Parent      *JiraParentRef `json:"parent,omitempty"`
+	Sprint      *JiraSprint    `json:"sprint,omitempty"`
+	Description []adf.Node     `json:"description,omitempty"`
+	Subtasks    []JiraSubtask  `json:"subtasks,omitempty"`
 }
 
 // JiraSprint is the issue's current/most-relevant sprint.
@@ -586,6 +589,26 @@ type JiraMoveResponse struct {
 	StatusColor    string           `json:"statusColor,omitempty"`
 }
 
+// JiraIssueResponse is the body of GET /jira/issue — one issue's full display
+// projection, read live by key for the pre-session Browse Jira detail view.
+type JiraIssueResponse struct {
+	Issue *JiraIssue `json:"issue,omitempty"`
+}
+
+// JiraIssueQuery is the query string of GET /jira/issue and GET
+// /jira/issue/transitions (the pre-session detail view reads by key).
+type JiraIssueQuery struct {
+	Key string `query:"key" description:"The issue key to read (e.g. PROJ-123)."`
+}
+
+// JiraIssueMoveRequest is the body of POST /jira/issue/move — a by-key status move
+// (the pre-session detail view's Move-status). Carries only a key + transition id;
+// still the ONE sanctioned Jira write.
+type JiraIssueMoveRequest struct {
+	Key          string `json:"key" description:"The issue key to move (e.g. PROJ-123)."`
+	TransitionID string `json:"transitionId" description:"The chosen transition id (read live from the issue)."`
+}
+
 // JiraIssueSummary is one search-result / picker row — the structured fields
 // needed to render and pick an issue (the full description/subtasks live in the
 // display projection, JiraIssue).
@@ -601,10 +624,19 @@ type JiraIssueSummary struct {
 	// assignee dropdown can filter by assignee server-side (JQL) rather than paring
 	// down a capped page. Empty when the issue is unassigned.
 	AssigneeAccountId string `json:"assigneeAccountId,omitempty"`
+	// Parent is the row's parent issue (set for subtasks / epic children), so Browse
+	// Jira can nest a subtask beneath its parent like the backlog. nil for top-level.
+	Parent *JiraParentRef `json:"parent,omitempty"`
 	// Sprint is the row's current/most-relevant sprint, so Browse Jira can group
 	// results by sprint like the Jira board. nil when the issue is in no sprint.
 	Sprint *JiraSprint `json:"sprint,omitempty"`
 	URL    string      `json:"url,omitempty"`
+}
+
+// JiraParentRef is a summary row's parent issue (key + title).
+type JiraParentRef struct {
+	Key   string `json:"key"`
+	Title string `json:"title,omitempty"`
 }
 
 // JiraSearchResponse is the body of GET /jira/search — matching issues for a
@@ -626,10 +658,13 @@ type JiraProjectsResponse struct {
 
 // JiraSearchQuery is the query string of GET /jira/search.
 type JiraSearchQuery struct {
-	Q        string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
-	Project  string `query:"project,omitempty" description:"Optional project key to scope the search to."`
-	Assignee string `query:"assignee,omitempty" description:"Optional assignee accountId to filter by, or 'unassigned' for issues with no assignee."`
-	Type     string `query:"type,omitempty" description:"Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types."`
+	Q            string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
+	Project      string `query:"project,omitempty" description:"Optional project key to scope the search to."`
+	Assignee     string `query:"assignee,omitempty" description:"Optional assignee accountId to filter by, or 'unassigned' for issues with no assignee."`
+	Type         string `query:"type,omitempty" description:"Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types."`
+	HideDone     bool   `query:"hideDone,omitempty" description:"When true, exclude done issues (statusCategory != Done)."`
+	ActiveSprint bool   `query:"activeSprint,omitempty" description:"When true, only issues in an open sprint (sprint in openSprints())."`
+	JQL          string `query:"jql,omitempty" description:"Raw advanced JQL. When set, it drives the search verbatim and the structured filters above are ignored."`
 }
 
 // JiraProjectsQuery is the query string of GET /jira/projects.

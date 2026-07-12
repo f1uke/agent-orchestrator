@@ -8,9 +8,25 @@ export type BrowsePrefs = {
 	groupBySprint: boolean;
 	/** Selected assignee filter: "" = all, the UNASSIGNED sentinel, or a name. */
 	assignee: string;
+	/** Exclude done issues (statusCategory != Done). Default off. */
+	hideDone: boolean;
+	/** Only issues in an open sprint (sprint in openSprints()). Default off. */
+	activeSprintOnly: boolean;
+	/** Advanced (raw-JQL) mode: the JQL box drives the search and the structured
+	 *  filters are hidden. Default off. */
+	advancedMode: boolean;
+	/** The raw JQL typed in advanced mode (remembered across visits). */
+	advancedJql: string;
 };
 
-const defaultPrefs: BrowsePrefs = { groupBySprint: true, assignee: "" };
+const defaultPrefs: BrowsePrefs = {
+	groupBySprint: true,
+	assignee: "",
+	hideDone: false,
+	activeSprintOnly: false,
+	advancedMode: false,
+	advancedJql: "",
+};
 
 function getLocalStorage(): Storage | null {
 	if (typeof window === "undefined" || !window.localStorage) return null;
@@ -26,6 +42,11 @@ export function readBrowsePrefs(): BrowsePrefs {
 		return {
 			groupBySprint: typeof parsed.groupBySprint === "boolean" ? parsed.groupBySprint : defaultPrefs.groupBySprint,
 			assignee: typeof parsed.assignee === "string" ? parsed.assignee : defaultPrefs.assignee,
+			hideDone: typeof parsed.hideDone === "boolean" ? parsed.hideDone : defaultPrefs.hideDone,
+			activeSprintOnly:
+				typeof parsed.activeSprintOnly === "boolean" ? parsed.activeSprintOnly : defaultPrefs.activeSprintOnly,
+			advancedMode: typeof parsed.advancedMode === "boolean" ? parsed.advancedMode : defaultPrefs.advancedMode,
+			advancedJql: typeof parsed.advancedJql === "string" ? parsed.advancedJql : defaultPrefs.advancedJql,
 		};
 	} catch {
 		// Corrupt value — fall back to defaults.

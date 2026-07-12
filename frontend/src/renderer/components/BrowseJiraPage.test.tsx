@@ -22,6 +22,29 @@ vi.mock("./NewTaskDialog", () => ({
 		open ? <div data-testid="new-task">dialog:{initialIssue?.key}</div> : null,
 }));
 
+// Stub the read-only detail drawer: record which issue it opened for, and expose a
+// button that fires its Create-session handoff so we can assert the wiring without
+// the drawer's own hooks (which the module mock above doesn't provide).
+vi.mock("./JiraIssueDetail", () => ({
+	JiraIssueDetail: ({
+		issueKey,
+		open,
+		onCreateSession,
+	}: {
+		issueKey: string | null;
+		open: boolean;
+		onCreateSession: (issue: { key: string }) => void;
+	}) =>
+		open ? (
+			<div data-testid="jira-detail">
+				detail:{issueKey}
+				<button type="button" onClick={() => onCreateSession({ key: issueKey! })}>
+					detail-create
+				</button>
+			</div>
+		) : null,
+}));
+
 import { BrowseJiraPage } from "./BrowseJiraPage";
 
 type Row = {
@@ -32,6 +55,7 @@ type Row = {
 	statusCategory: string;
 	assignee: string;
 	assigneeAccountId?: string;
+	parent?: { key: string; title?: string };
 	sprint?: { name: string; state: string };
 };
 
@@ -39,8 +63,17 @@ type Row = {
 // the component now calls useJiraSearch twice — an UNFILTERED base fetch (opts
 // undefined, feeds the assignee dropdown) and a FILTERED results fetch (opts set).
 // This mirrors that server-side filtering so the mock returns what Jira would.
-function applyServerFilters(data: Row[], opts?: { assignee?: string; types?: string[] }): Row[] {
+function applyServerFilters(data: Row[], opts?: { assignee?: string; types?: string[]; jql?: string }): Row[] {
 	if (!opts) return data; // base fetch — unfiltered dropdown source
+	// Advanced / parent-inclusion path: only `key in (...)` is interpreted here.
+	if (opts.jql) {
+		const m = opts.jql.match(/key in \(([^)]*)\)/i);
+		if (m) {
+			const keys = new Set(m[1].split(",").map((k) => k.trim()));
+			return data.filter((it) => keys.has(it.key));
+		}
+		return data;
+	}
 	let out = data;
 	const types = (opts.types ?? []).map((t) => t.toLowerCase());
 	if (types.length > 0) {
@@ -73,7 +106,12 @@ function setSearch(over: { data?: Row[] | undefined; isFetching?: boolean; isErr
 				{ key: "DEMO-88", type: "Bug", title: "Bug two", status: "To Do", statusCategory: "new", assignee: "" },
 			];
 	searchMock.mockImplementation(
-		(_query: string, _project: string, _enabled: boolean, opts?: { assignee?: string; types?: string[] }) => ({
+		(
+			_query: string,
+			_project: string,
+			_enabled: boolean,
+			opts?: { assignee?: string; types?: string[]; jql?: string },
+		) => ({
 			data: currentData === undefined ? undefined : applyServerFilters(currentData, opts),
 			isFetching: over.isFetching ?? false,
 			isError: over.isError ?? false,
@@ -173,6 +211,37 @@ describe("BrowseJiraPage", () => {
 		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
 	});
 
+	it("opens the read-only detail drawer when a row is clicked", () => {
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		// Clicking the row body (not the Create button) opens the detail drawer for it.
+		fireEvent.click(screen.getByRole("button", { name: "Open DEMO-101" }));
+		expect(screen.getByTestId("jira-detail")).toHaveTextContent("detail:DEMO-101");
+		// The Create-session button never opens the drawer — it hands off to New-task.
+		expect(screen.queryByTestId("new-task")).toBeNull();
+	});
+
+	it("Create session on a row does not open the detail drawer", () => {
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getAllByRole("button", { name: /Create session/i })[0]);
+		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
+		expect(screen.queryByTestId("jira-detail")).toBeNull();
+	});
+
+	it("Create session from inside the detail drawer hands off to the New-task modal", () => {
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Open DEMO-101" }));
+		fireEvent.click(screen.getByRole("button", { name: "detail-create" }));
+		// The drawer closes and the New-task modal opens pre-filled with the issue.
+		expect(screen.queryByTestId("jira-detail")).toBeNull();
+		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
+	});
+
 	it("surfaces a search failure inline", () => {
 		setSearch({ data: undefined, isError: true, error: new Error("set JIRA_API_TOKEN") });
 		renderPage();
@@ -239,5 +308,111 @@ describe("BrowseJiraPage", () => {
 		expect(screen.queryByText("Sprint 2026-14")).toBeNull();
 		expect(screen.getByText("DEMO-1")).toBeTruthy();
 		expect(screen.queryByText("DEMO-4")).toBeNull(); // Sam's, filtered out
+	});
+
+	it("pushes hide-done + active-sprint toggles into the server-side query and remembers them", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Hide done" }));
+		fireEvent.click(screen.getByRole("button", { name: "Active sprint" }));
+
+		const sawHideDone = searchMock.mock.calls.some(
+			(c: unknown[]) => (c[3] as { hideDone?: boolean } | undefined)?.hideDone === true,
+		);
+		const sawActiveSprint = searchMock.mock.calls.some(
+			(c: unknown[]) => (c[3] as { activeSprint?: boolean } | undefined)?.activeSprint === true,
+		);
+		expect(sawHideDone).toBe(true);
+		expect(sawActiveSprint).toBe(true);
+		const prefs = JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!);
+		expect(prefs.hideDone).toBe(true);
+		expect(prefs.activeSprintOnly).toBe(true);
+	});
+
+	it("advanced JQL mode hides the structured filters and drives the search with the raw query", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Advanced JQL" }));
+		// Structured filters gone; the JQL box appears.
+		expect(screen.queryByRole("button", { name: "Bug" })).toBeNull();
+		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
+		fireEvent.change(screen.getByLabelText("Advanced JQL query"), {
+			target: { value: "project = STAR AND labels = urgent" },
+		});
+
+		const sawJql = searchMock.mock.calls.some(
+			(c: unknown[]) => (c[3] as { jql?: string } | undefined)?.jql === "project = STAR AND labels = urgent",
+		);
+		expect(sawJql).toBe(true);
+
+		// A clear way back to structured mode.
+		fireEvent.click(screen.getByRole("button", { name: /Back to filters/ }));
+		expect(screen.getByLabelText("Filter by assignee")).toBeTruthy();
+	});
+
+	it("under an assignee filter, pulls in the parent of a matched subtask as dimmed context", () => {
+		// Sam owns a subtask whose parent story is Alex's. Filtering to Sam must still
+		// show the parent (for hierarchy), fetched via the key-in context query.
+		const hierData: Row[] = [
+			{
+				key: "DEMO-101",
+				type: "Story",
+				title: "Parent story",
+				status: "To Do",
+				statusCategory: "new",
+				assignee: "Alex",
+				assigneeAccountId: "acc-alex",
+			},
+			{
+				key: "DEMO-102",
+				type: "Sub-task",
+				title: "Sam's subtask",
+				status: "To Do",
+				statusCategory: "new",
+				assignee: "Sam",
+				assigneeAccountId: "acc-sam",
+				parent: { key: "DEMO-101", title: "Parent story" },
+			},
+		];
+		setSearch({ data: hierData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.change(screen.getByLabelText("Filter by assignee"), { target: { value: "Sam" } });
+
+		// The matched subtask AND its (context) parent both render…
+		expect(screen.getByText("DEMO-102")).toBeTruthy();
+		expect(screen.getByText("DEMO-101")).toBeTruthy();
+		// …with the parent marked as context, not a direct match.
+		expect(screen.getByText(/parent · context/i)).toBeTruthy();
+		// The context parent was fetched via a `key in (...)` query.
+		const sawKeyIn = searchMock.mock.calls.some((c: unknown[]) =>
+			(c[3] as { jql?: string } | undefined)?.jql?.includes("key in (DEMO-101)"),
+		);
+		expect(sawKeyIn).toBe(true);
+	});
+
+	it("restores advanced JQL mode + text on return (no project needed)", () => {
+		window.localStorage.setItem(
+			"ao.jira.browsePrefs",
+			JSON.stringify({
+				groupBySprint: true,
+				assignee: "",
+				hideDone: false,
+				activeSprintOnly: false,
+				advancedMode: true,
+				advancedJql: "project = STAR",
+			}),
+		);
+		setSearch({ data: richData });
+		renderPage();
+
+		const jql = screen.getByLabelText("Advanced JQL query") as HTMLInputElement;
+		expect(jql.value).toBe("project = STAR");
+		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
 	});
 });

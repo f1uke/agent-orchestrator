@@ -2,11 +2,21 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { useEffect, useState } from "react";
+import { JiraIssueDetail } from "./JiraIssueDetail";
 import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { useJiraSearch, type JiraIssueSummary, type JiraProject } from "../hooks/useSessionJiraContext";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { groupBySprint, hasUnassigned, UNASSIGNED, UNASSIGNED_QUERY, uniqueAssignees } from "../lib/jira-browse";
+import {
+	buildHierarchy,
+	groupRowsBySprint,
+	hasUnassigned,
+	type HierarchyRow,
+	missingParentKeys,
+	UNASSIGNED,
+	UNASSIGNED_QUERY,
+	uniqueAssignees,
+} from "../lib/jira-browse";
 import { readBrowsePrefs, writeBrowsePrefs } from "../lib/jira-browse-prefs";
 import { readLastJiraProject, writeLastJiraProject } from "../lib/jira-last-project";
 import { cn } from "../lib/utils";
@@ -40,11 +50,17 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	const [debounced, setDebounced] = useState("");
 	const [filter, setFilter] = useState(0);
 	const [createIssue, setCreateIssue] = useState<JiraIssueSummary | null>(null);
-	// View prefs remembered across visits (grouping + assignee); last-project is
-	// remembered separately (jira-last-project).
+	// The key of the issue open in the read-only detail drawer (mockup #36), or null.
+	const [detailKey, setDetailKey] = useState<string | null>(null);
+	// View prefs remembered across visits (grouping, assignee, hide-done, active
+	// sprint, advanced mode + JQL); last-project is remembered separately.
 	const initialPrefs = readBrowsePrefs();
 	const [groupSprints, setGroupSprints] = useState(initialPrefs.groupBySprint);
 	const [assignee, setAssignee] = useState(initialPrefs.assignee);
+	const [hideDone, setHideDone] = useState(initialPrefs.hideDone);
+	const [activeSprintOnly, setActiveSprintOnly] = useState(initialPrefs.activeSprintOnly);
+	const [advancedMode, setAdvancedMode] = useState(initialPrefs.advancedMode);
+	const [advancedJql, setAdvancedJql] = useState(initialPrefs.advancedJql);
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
 	// Debounce the free-text search so typing doesn't fan out a request per keystroke.
@@ -53,26 +69,29 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		return () => clearTimeout(t);
 	}, [query]);
 
-	// Persist grouping + assignee so the view returns as the user left it.
+	// Persist the view prefs so the view returns as the user left it.
 	useEffect(() => {
-		writeBrowsePrefs({ groupBySprint: groupSprints, assignee });
-	}, [groupSprints, assignee]);
+		writeBrowsePrefs({ groupBySprint: groupSprints, assignee, hideDone, activeSprintOnly, advancedMode, advancedJql });
+	}, [groupSprints, assignee, hideDone, activeSprintOnly, advancedMode, advancedJql]);
 
 	const projectKey = project?.key ?? "";
 	const selectedTypes = TYPE_FILTERS[filter].jql;
+	// In advanced mode the raw JQL drives the search verbatim and the structured
+	// filters (project/search/type/assignee/hide-done/active-sprint) are hidden.
+	const structuredEnabled = Boolean(projectKey) && !advancedMode;
 
-	// Base fetch: project + text only, NO assignee/type filter. It's the source for
-	// the assignee dropdown (so the option list stays complete regardless of the
-	// active filter) and, when no filter is active, shares its request with the
-	// results below. With a project scoped it fires even with no text (lists recent
-	// issues in that project); typing narrows it. See useJiraSearch's enable rule.
-	const base = useJiraSearch(debounced, projectKey, Boolean(projectKey));
+	// Base fetch (structured mode): project + text + hide-done/active-sprint, NO
+	// assignee/type — the source for the assignee dropdown, kept complete across the
+	// assignee filter. Shares its request with the results when no assignee/type is set.
+	const base = useJiraSearch(debounced, projectKey, structuredEnabled, {
+		hideDone,
+		activeSprint: activeSprintOnly,
+	});
 	const baseResults = base.data ?? [];
 
-	// Assignee options (name + accountId) come from the unfiltered base set. A
-	// remembered assignee that isn't present in this project falls back to "all"
-	// without hiding everything — but stays in state so returning to a project that
-	// has them re-applies the filter.
+	// Assignee options (name + accountId) come from the base set. A remembered
+	// assignee that isn't present in this project falls back to "all" without hiding
+	// everything — but stays in state so returning to a project that has them re-applies.
 	const assignees = uniqueAssignees(baseResults);
 	const unassignedPresent = hasUnassigned(baseResults);
 	const assigneeValid =
@@ -87,18 +106,43 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 				? UNASSIGNED_QUERY
 				: (assignees.find((a) => a.name === effectiveAssignee)?.accountId ?? "");
 
-	// Results fetch: project + text + type + assignee, ALL pushed into the JQL so
-	// the set is complete (not pared from a capped page). With no filter active this
-	// collapses to the base query's key, so React Query serves one shared request.
-	const resultsQuery = useJiraSearch(debounced, projectKey, Boolean(projectKey), {
-		assignee: assigneeQuery,
-		types: selectedTypes,
-	});
+	// Results fetch. Structured mode: project + text + type + assignee + hide-done +
+	// active-sprint, all in the JQL (complete, not pared from a capped page); it
+	// shares the base request when no assignee/type is set. Advanced mode: the raw
+	// JQL drives it verbatim (fires with no project/text; the hook gates on non-empty JQL).
+	const resultsQuery = useJiraSearch(
+		advancedMode ? "" : debounced,
+		advancedMode ? "" : projectKey,
+		advancedMode || Boolean(projectKey),
+		advancedMode
+			? { jql: advancedJql }
+			: { assignee: assigneeQuery, types: selectedTypes, hideDone, activeSprint: activeSprintOnly },
+	);
 	const results = resultsQuery.data ?? [];
-	const isFetching = base.isFetching || resultsQuery.isFetching;
+
+	// Parent-inclusion: under an assignee filter the matches may be subtasks whose
+	// parent (assigned to someone else) isn't in the set. Fetch those parents for
+	// CONTEXT — reusing the advanced-JQL path with `key in (...)` — so the hierarchy
+	// stays intact and the user can open the parent. Skipped in advanced mode (the
+	// user's JQL is authoritative). The hook self-gates on a non-empty JQL.
+	const includeParents = !advancedMode && assigneeQuery !== "";
+	const missingKeys = includeParents ? missingParentKeys(results) : [];
+	const parentJql = missingKeys.length > 0 ? `key in (${missingKeys.join(", ")}) ORDER BY updated DESC` : "";
+	const contextQuery = useJiraSearch("", "", missingKeys.length > 0, { jql: parentJql });
+
+	// Merge the direct matches with the context parents (dimmed), then nest subtasks
+	// under their parents like the Jira backlog.
+	const resultKeys = new Set(results.map((r) => r.key));
+	const contextParents = (missingKeys.length > 0 ? (contextQuery.data ?? []) : []).filter(
+		(p) => !resultKeys.has(p.key),
+	);
+	const contextKeys = new Set(contextParents.map((p) => p.key));
+	const hierarchy = buildHierarchy([...results, ...contextParents], contextKeys);
+	const rowGroups = groupSprints ? groupRowsBySprint(hierarchy) : null;
+
+	const isFetching = base.isFetching || resultsQuery.isFetching || contextQuery.isFetching;
 	const isError = resultsQuery.isError;
 	const error = resultsQuery.error;
-	const groups = groupSprints ? groupBySprint(results) : [];
 
 	const toggleCollapsed = (name: string) => {
 		setCollapsed((prev) => {
@@ -125,20 +169,69 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		void navigate({ to: "/projects/$projectId", params: { projectId } });
 	};
 
-	const renderRow = (issue: JiraIssueSummary) => (
-		<div key={issue.key} className="jira-browse__row">
+	const renderRow = (
+		issue: JiraIssueSummary,
+		opts: { indent?: boolean; isSubtask?: boolean; isContext?: boolean } = {},
+	) => (
+		// The row body opens the read-only detail drawer (mockup #36); the Create button
+		// stops propagation so it still hands off to the New-task modal instead.
+		<div
+			key={issue.key}
+			role="button"
+			tabIndex={0}
+			aria-label={`Open ${issue.key}`}
+			className={cn(
+				"jira-browse__row",
+				opts.indent && "jira-browse__row--child",
+				opts.isContext && "jira-browse__row--context",
+			)}
+			onClick={() => setDetailKey(issue.key)}
+			onKeyDown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					setDetailKey(issue.key);
+				}
+			}}
+		>
+			{opts.isSubtask ? (
+				<span className="jira-browse__subtask-mark" aria-hidden="true">
+					↳
+				</span>
+			) : null}
 			<span className={cn("jira-browse__sq", issueSquareClass(issue.type))} aria-hidden="true" />
 			<span className="jira-browse__k">{issue.key}</span>
 			<span className="jira-browse__t">{issue.title}</span>
+			{opts.isContext ? <span className="jira-browse__context-tag">parent · context</span> : null}
 			{issue.assignee ? <span className="jira-browse__assignee">{issue.assignee}</span> : null}
 			{issue.status ? (
 				<span className="jira-browse__st" style={browseStatusStyle(issue.statusCategory)}>
 					{issue.status}
 				</span>
 			) : null}
-			<button type="button" className="jira-browse__create" onClick={() => setCreateIssue(issue)}>
+			<button
+				type="button"
+				className="jira-browse__create"
+				onClick={(event) => {
+					event.stopPropagation();
+					setCreateIssue(issue);
+				}}
+			>
 				Create session ▷
 			</button>
+		</div>
+	);
+
+	// A hierarchy row: the top-level issue, then its subtasks indented beneath (Image
+	// #37). A top-level issue that is itself a subtask (its parent isn't in the set)
+	// gets the subtask marker; a context parent (pulled in for a matched subtask) is
+	// dimmed.
+	const renderTreeRow = (row: HierarchyRow) => (
+		<div key={row.issue.key} className="jira-browse__tree">
+			{renderRow(row.issue, {
+				isContext: row.isContext,
+				isSubtask: !row.isContext && Boolean(row.issue.parent),
+			})}
+			{row.children.map((child) => renderRow(child, { indent: true, isSubtask: true }))}
 		</div>
 	);
 
@@ -156,55 +249,112 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 
 			<div className="jira-browse__content">
 				<div className="jira-browse__controls">
-					<JiraProjectPicker value={project} onSelect={selectProject} lastUsedKey={project?.key} />
-					<div className="jira-browse__search">
-						<Search className="jira-browse__mag size-3.5" aria-hidden="true" />
-						<input
-							value={query}
-							disabled={!projectKey}
-							placeholder={projectKey ? `Search issues in ${projectKey}…` : "Pick a project first"}
-							autoComplete="off"
-							autoCapitalize="none"
-							spellCheck={false}
-							aria-label="Search issues"
-							onChange={(event) => setQuery(event.target.value)}
-						/>
-						{isFetching && projectKey ? (
-							<Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" />
-						) : null}
-					</div>
+					{advancedMode ? (
+						<div className="jira-browse__search jira-browse__jql">
+							<span className="jira-browse__jql-tag" aria-hidden="true">
+								JQL
+							</span>
+							<input
+								value={advancedJql}
+								placeholder="project = STAR AND assignee = currentUser() ORDER BY updated DESC"
+								autoComplete="off"
+								autoCapitalize="none"
+								spellCheck={false}
+								aria-label="Advanced JQL query"
+								onChange={(event) => setAdvancedJql(event.target.value)}
+							/>
+							{isFetching ? <Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" /> : null}
+						</div>
+					) : (
+						<>
+							<JiraProjectPicker value={project} onSelect={selectProject} lastUsedKey={project?.key} />
+							<div className="jira-browse__search">
+								<Search className="jira-browse__mag size-3.5" aria-hidden="true" />
+								<input
+									value={query}
+									disabled={!projectKey}
+									placeholder={projectKey ? `Search issues in ${projectKey}…` : "Pick a project first"}
+									autoComplete="off"
+									autoCapitalize="none"
+									spellCheck={false}
+									aria-label="Search issues"
+									onChange={(event) => setQuery(event.target.value)}
+								/>
+								{isFetching && projectKey ? (
+									<Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" />
+								) : null}
+							</div>
+						</>
+					)}
 				</div>
 
 				<div className="jira-browse__filters" role="group" aria-label="Filter and group issues">
-					{TYPE_FILTERS.map((entry, index) => (
-						<button
-							key={entry.label}
-							type="button"
-							aria-pressed={index === filter}
-							className={cn("jira-browse__chip", index === filter && "is-active")}
-							onClick={() => setFilter(index)}
-						>
-							{entry.label}
-						</button>
-					))}
-					<span className="jira-browse__filters-gap" aria-hidden="true" />
-					<label className="jira-browse__assignee-filter">
-						<span className="jira-browse__assignee-label">Assignee</span>
-						<select
-							value={effectiveAssignee}
-							aria-label="Filter by assignee"
-							onChange={(event) => setAssignee(event.target.value)}
-							disabled={!projectKey}
-						>
-							<option value="">All assignees</option>
-							{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
-							{assignees.map((a) => (
-								<option key={a.name} value={a.name}>
-									{a.name}
-								</option>
+					{advancedMode ? (
+						<>
+							<span className="jira-browse__advanced-note">
+								Advanced JQL drives the search — the structured filters are off.
+							</span>
+							<span className="jira-browse__filters-gap" aria-hidden="true" />
+							<button
+								type="button"
+								className="jira-browse__chip"
+								onClick={() => setAdvancedMode(false)}
+								title="Return to the structured filters"
+							>
+								← Back to filters
+							</button>
+						</>
+					) : (
+						<>
+							{TYPE_FILTERS.map((entry, index) => (
+								<button
+									key={entry.label}
+									type="button"
+									aria-pressed={index === filter}
+									className={cn("jira-browse__chip", index === filter && "is-active")}
+									onClick={() => setFilter(index)}
+								>
+									{entry.label}
+								</button>
 							))}
-						</select>
-					</label>
+							<span className="jira-browse__filters-gap" aria-hidden="true" />
+							<label className="jira-browse__assignee-filter">
+								<span className="jira-browse__assignee-label">Assignee</span>
+								<select
+									value={effectiveAssignee}
+									aria-label="Filter by assignee"
+									onChange={(event) => setAssignee(event.target.value)}
+									disabled={!projectKey}
+								>
+									<option value="">All assignees</option>
+									{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
+									{assignees.map((a) => (
+										<option key={a.name} value={a.name}>
+											{a.name}
+										</option>
+									))}
+								</select>
+							</label>
+							<button
+								type="button"
+								aria-pressed={hideDone}
+								className={cn("jira-browse__chip", hideDone && "is-active")}
+								onClick={() => setHideDone((on) => !on)}
+								title="Hide issues whose status category is Done"
+							>
+								Hide done
+							</button>
+							<button
+								type="button"
+								aria-pressed={activeSprintOnly}
+								className={cn("jira-browse__chip", activeSprintOnly && "is-active")}
+								onClick={() => setActiveSprintOnly((on) => !on)}
+								title="Only issues in an open (active/future) sprint"
+							>
+								Active sprint
+							</button>
+						</>
+					)}
 					<button
 						type="button"
 						aria-pressed={groupSprints}
@@ -214,9 +364,19 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					>
 						Group by sprint
 					</button>
+					{advancedMode ? null : (
+						<button
+							type="button"
+							className="jira-browse__chip"
+							onClick={() => setAdvancedMode(true)}
+							title="Type raw JQL (replaces the structured filters)"
+						>
+							Advanced JQL
+						</button>
+					)}
 				</div>
 
-				{!projectKey ? (
+				{!advancedMode && !projectKey ? (
 					<div className="jira-browse__empty">Pick a project to browse its issues.</div>
 				) : (
 					<div className="jira-browse__list">
@@ -224,20 +384,24 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							<span className="jira-browse__live" aria-hidden="true" />
 							MATCHING ISSUES
 							<span className="jira-browse__n">
-								{project?.name ? `${project.name} (${projectKey})` : projectKey} · {results.length} shown
+								{advancedMode ? "Advanced JQL" : project?.name ? `${project.name} (${projectKey})` : projectKey} ·{" "}
+								{results.length} shown
 							</span>
 						</div>
 						{isError ? (
 							<p className="jira-browse__note jira-browse__note--err">
 								{error instanceof Error ? error.message : "Couldn't search Jira."}
 							</p>
+						) : advancedMode && advancedJql.trim().length === 0 ? (
+							<p className="jira-browse__note">Type a JQL query to search.</p>
 						) : isFetching && results.length === 0 ? (
 							<p className="jira-browse__note">Searching…</p>
 						) : results.length === 0 ? (
 							<p className="jira-browse__note">No issues match.</p>
-						) : groupSprints ? (
-							groups.map((group) => {
+						) : rowGroups ? (
+							rowGroups.map((group) => {
 								const isCollapsed = collapsed.has(group.name);
+								const count = group.rows.reduce((n, row) => n + 1 + row.children.length, 0);
 								return (
 									<div key={group.name} className="jira-browse__sprint">
 										<button
@@ -256,15 +420,15 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 												<span className="jira-browse__sprint-active">active</span>
 											) : null}
 											<span className="jira-browse__sprint-count">
-												· {group.issues.length} {group.issues.length === 1 ? "work item" : "work items"}
+												· {count} {count === 1 ? "work item" : "work items"}
 											</span>
 										</button>
-										{isCollapsed ? null : group.issues.map(renderRow)}
+										{isCollapsed ? null : group.rows.map(renderTreeRow)}
 									</div>
 								);
 							})
 						) : (
-							results.map(renderRow)
+							hierarchy.map(renderTreeRow)
 						)}
 					</div>
 				)}
@@ -275,6 +439,18 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					· one manual create.
 				</p>
 			</div>
+
+			<JiraIssueDetail
+				issueKey={detailKey}
+				open={Boolean(detailKey)}
+				onOpenChange={(open) => {
+					if (!open) setDetailKey(null);
+				}}
+				onCreateSession={(issue) => {
+					setDetailKey(null);
+					setCreateIssue(issue);
+				}}
+			/>
 
 			<NewTaskDialog
 				open={Boolean(createIssue)}

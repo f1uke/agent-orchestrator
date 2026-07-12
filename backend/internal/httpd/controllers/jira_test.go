@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -30,18 +31,28 @@ type stubJira struct {
 	gotMoveKey  string
 	gotMoveID   string
 
-	searchRes   []jiraadapter.IssueSummary
-	searchErr   error
-	gotProject  string
-	gotText     string
-	gotAssignee string
-	gotTypes    []string
-	projectRes  []jiraadapter.ProjectRef
-	projectErr  error
-	bindRes     jiraadapter.IssueSummary
-	bindErr     error
-	gotBindKey  string
-	unlinkErr   error
+	searchRes    []jiraadapter.IssueSummary
+	searchErr    error
+	gotProject   string
+	gotText      string
+	gotAssignee  string
+	gotTypes     []string
+	gotHideDone  bool
+	gotActiveSpr bool
+	gotJQL       string
+	projectRes   []jiraadapter.ProjectRef
+	projectErr   error
+	bindRes      jiraadapter.IssueSummary
+	bindErr      error
+	gotBindKey   string
+	unlinkErr    error
+
+	issueRes         jiraadapter.Issue
+	issueErr         error
+	gotIssueKey      string
+	gotIssueTransKey string
+	gotIssueMoveKey  string
+	gotIssueMoveID   string
 }
 
 func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, error) {
@@ -59,8 +70,9 @@ func (s *stubJira) Move(_ context.Context, _ domain.SessionID, key, transitionID
 	return s.moveRes, s.moveErr
 }
 
-func (s *stubJira) Search(_ context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error) {
-	s.gotProject, s.gotText, s.gotAssignee, s.gotTypes = project, text, assignee, types
+func (s *stubJira) Search(_ context.Context, p jirasvc.SearchParams) ([]jiraadapter.IssueSummary, error) {
+	s.gotProject, s.gotText, s.gotAssignee, s.gotTypes = p.Project, p.Text, p.Assignee, p.Types
+	s.gotHideDone, s.gotActiveSpr, s.gotJQL = p.HideDone, p.ActiveSprint, p.JQL
 	return s.searchRes, s.searchErr
 }
 
@@ -75,6 +87,21 @@ func (s *stubJira) SetBinding(_ context.Context, _ domain.SessionID, key string)
 
 func (s *stubJira) Unlink(context.Context, domain.SessionID) (domain.Session, error) {
 	return domain.Session{}, s.unlinkErr
+}
+
+func (s *stubJira) GetIssue(_ context.Context, key string) (jiraadapter.Issue, error) {
+	s.gotIssueKey = key
+	return s.issueRes, s.issueErr
+}
+
+func (s *stubJira) IssueTransitions(_ context.Context, key string) ([]jiraadapter.Transition, error) {
+	s.gotIssueTransKey = key
+	return s.transitions, s.transErr
+}
+
+func (s *stubJira) MoveIssue(_ context.Context, key, transitionID string) (jirasvc.MoveResult, error) {
+	s.gotIssueMoveKey, s.gotIssueMoveID = key, transitionID
+	return s.moveRes, s.moveErr
 }
 
 func serveJira(t *testing.T, svc JiraService) *httptest.ResponseRecorder {
@@ -282,7 +309,7 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 			Sprint: &jiraadapter.Sprint{Name: "Sprint 2026-14", State: "active"}},
 	}}
 	rec := serveJiraReq(t, stub, http.MethodGet,
-		"/jira/search?q=eligible&project=DEMO&assignee=acc-123&type=Story,Bug", nil)
+		"/jira/search?q=eligible&project=DEMO&assignee=acc-123&type=Story,Bug&hideDone=true&activeSprint=1", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -297,6 +324,10 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 	if len(stub.gotTypes) != 2 || stub.gotTypes[0] != "Story" || stub.gotTypes[1] != "Bug" {
 		t.Errorf("service got types=%v, want [Story Bug]", stub.gotTypes)
 	}
+	// hideDone=true and activeSprint=1 both parse to true.
+	if !stub.gotHideDone || !stub.gotActiveSpr {
+		t.Errorf("service got hideDone=%v activeSprint=%v, want both true", stub.gotHideDone, stub.gotActiveSpr)
+	}
 	var body JiraSearchResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -307,6 +338,22 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 	// The sprint rides the search row so Browse Jira can group by it.
 	if body.Issues[0].Sprint == nil || body.Issues[0].Sprint.Name != "Sprint 2026-14" {
 		t.Errorf("issue sprint = %+v", body.Issues[0].Sprint)
+	}
+}
+
+func TestJiraSearch_AdvancedJQLPassthrough(t *testing.T) {
+	stub := &stubJira{}
+	rec := serveJiraReq(t, stub, http.MethodGet,
+		"/jira/search?jql="+url.QueryEscape(`project = STAR AND labels = urgent`), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if stub.gotJQL != `project = STAR AND labels = urgent` {
+		t.Errorf("service got jql=%q, want the raw advanced query", stub.gotJQL)
+	}
+	// Structured params are absent, so the service must have received none of them.
+	if stub.gotProject != "" || stub.gotAssignee != "" || len(stub.gotTypes) != 0 {
+		t.Errorf("advanced mode must not carry structured params: %+v", stub)
 	}
 }
 
@@ -321,6 +368,96 @@ func TestJiraSearch_NilServiceNotImplemented(t *testing.T) {
 	rec := serveJiraReq(t, nil, http.MethodGet, "/jira/search?q=x", nil)
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+func TestJiraIssue_ReturnsFullProjectionByKey(t *testing.T) {
+	iss := jiraadapter.Issue{
+		Key: "DEMO-102", Type: "Sub-task", Title: "a subtask", Status: "To Do", StatusCategory: "new",
+		Parent:   &jiraadapter.ParentRef{Key: "DEMO-101", Title: "Parent story"},
+		Subtasks: []jiraadapter.Subtask{},
+	}
+	stub := &stubJira{issueRes: iss}
+	rec := serveJiraReq(t, stub, http.MethodGet, "/jira/issue?key=DEMO-102", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if stub.gotIssueKey != "DEMO-102" {
+		t.Errorf("service got key=%q", stub.gotIssueKey)
+	}
+	var body JiraIssueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Issue == nil || body.Issue.Key != "DEMO-102" {
+		t.Fatalf("issue = %+v", body.Issue)
+	}
+	// The parent rides the detail projection so the breadcrumb can render + link.
+	if body.Issue.Parent == nil || body.Issue.Parent.Key != "DEMO-101" || body.Issue.Parent.Title != "Parent story" {
+		t.Errorf("issue parent = %+v", body.Issue.Parent)
+	}
+}
+
+func TestJiraIssue_KeyRequiredIs400(t *testing.T) {
+	rec := serveJiraReq(t, &stubJira{}, http.MethodGet, "/jira/issue", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestJiraIssue_NotFoundIs404(t *testing.T) {
+	rec := serveJiraReq(t, &stubJira{issueErr: jiraadapter.ErrNotFound}, http.MethodGet, "/jira/issue?key=DEMO-9", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestJiraIssueTransitions_ListsByKey(t *testing.T) {
+	stub := &stubJira{transitions: []jiraadapter.Transition{{ID: "11", Name: "Start", To: "In Progress"}}}
+	rec := serveJiraReq(t, stub, http.MethodGet, "/jira/issue/transitions?key=DEMO-102", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if stub.gotIssueTransKey != "DEMO-102" {
+		t.Errorf("service got key=%q", stub.gotIssueTransKey)
+	}
+	var body JiraTransitionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Transitions) != 1 || body.Transitions[0].ID != "11" {
+		t.Errorf("transitions = %+v", body.Transitions)
+	}
+}
+
+func TestJiraIssueMove_AppliesByKey(t *testing.T) {
+	stub := &stubJira{moveRes: jirasvc.MoveResult{Key: "DEMO-102", Status: "In Progress", StatusCategory: "indeterminate"}}
+	rec := serveJiraReq(t, stub, http.MethodPost, "/jira/issue/move", strings.NewReader(`{"key":"DEMO-102","transitionId":"11"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if stub.gotIssueMoveKey != "DEMO-102" || stub.gotIssueMoveID != "11" {
+		t.Errorf("service got key=%q id=%q", stub.gotIssueMoveKey, stub.gotIssueMoveID)
+	}
+	var body JiraMoveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Key != "DEMO-102" || body.Status != "In Progress" {
+		t.Errorf("move response = %+v", body)
+	}
+}
+
+func TestJiraIssueMove_KeyAndTransitionRequired(t *testing.T) {
+	// Missing key.
+	rec := serveJiraReq(t, &stubJira{}, http.MethodPost, "/jira/issue/move", strings.NewReader(`{"transitionId":"11"}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing key: status = %d, want 400", rec.Code)
+	}
+	// Missing transition id.
+	rec = serveJiraReq(t, &stubJira{}, http.MethodPost, "/jira/issue/move", strings.NewReader(`{"key":"DEMO-102"}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing transition: status = %d, want 400", rec.Code)
 	}
 }
 

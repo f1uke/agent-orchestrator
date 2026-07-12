@@ -24,10 +24,14 @@ type JiraService interface {
 	Context(ctx context.Context, id domain.SessionID) (jirasvc.Result, error)
 	Transitions(ctx context.Context, id domain.SessionID, key string) ([]jiraadapter.Transition, error)
 	Move(ctx context.Context, id domain.SessionID, key, transitionID string) (jirasvc.MoveResult, error)
-	Search(ctx context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error)
+	Search(ctx context.Context, p jirasvc.SearchParams) ([]jiraadapter.IssueSummary, error)
 	Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
 	SetBinding(ctx context.Context, id domain.SessionID, key string) (jiraadapter.IssueSummary, error)
 	Unlink(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	// By-key reads for the pre-session Browse Jira detail view (no session binding).
+	GetIssue(ctx context.Context, key string) (jiraadapter.Issue, error)
+	IssueTransitions(ctx context.Context, key string) ([]jiraadapter.Transition, error)
+	MoveIssue(ctx context.Context, key, transitionID string) (jirasvc.MoveResult, error)
 }
 
 // JiraController serves the session-scoped, display-only Jira context route.
@@ -41,6 +45,9 @@ type JiraController struct {
 func (c *JiraController) Register(r chi.Router) {
 	r.Get("/jira/search", c.search)
 	r.Get("/jira/projects", c.projects)
+	r.Get("/jira/issue", c.issue)
+	r.Get("/jira/issue/transitions", c.issueTransitions)
+	r.Post("/jira/issue/move", c.issueMove)
 	r.Get("/sessions/{sessionId}/jira", c.get)
 	r.Put("/sessions/{sessionId}/jira", c.link)
 	r.Delete("/sessions/{sessionId}/jira", c.unlink)
@@ -50,18 +57,24 @@ func (c *JiraController) Register(r chi.Router) {
 
 // search resolves the pre-session issue picker query (New task + link-existing)
 // and the Browse Jira list. A free-text query or an exact key; optionally scoped
-// to a project and narrowed by assignee (accountId or "unassigned") and a
-// comma-separated list of issue types — all pushed into the server-side JQL.
+// to a project and narrowed by assignee (accountId or "unassigned"), issue types,
+// hide-done and active-sprint — all pushed into the server-side JQL. A raw `jql`
+// param, when set, drives the search verbatim (advanced mode).
 func (c *JiraController) search(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/search")
 		return
 	}
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	project := strings.TrimSpace(r.URL.Query().Get("project"))
-	assignee := strings.TrimSpace(r.URL.Query().Get("assignee"))
-	types := splitTypes(r.URL.Query().Get("type"))
-	issues, err := c.Svc.Search(r.Context(), project, q, assignee, types)
+	q := r.URL.Query()
+	issues, err := c.Svc.Search(r.Context(), jirasvc.SearchParams{
+		Project:      strings.TrimSpace(q.Get("project")),
+		Text:         strings.TrimSpace(q.Get("q")),
+		Assignee:     strings.TrimSpace(q.Get("assignee")),
+		Types:        splitTypes(q.Get("type")),
+		HideDone:     queryBool(q.Get("hideDone")),
+		ActiveSprint: queryBool(q.Get("activeSprint")),
+		JQL:          strings.TrimSpace(q.Get("jql")),
+	})
 	if err != nil {
 		writeJiraError(w, r, err)
 		return
@@ -89,6 +102,87 @@ func (c *JiraController) projects(w http.ResponseWriter, r *http.Request) {
 		out.Projects = append(out.Projects, JiraProject{Key: p.Key, Name: p.Name})
 	}
 	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// issue reads one issue's full display projection by key for the pre-session Browse
+// Jira detail view. Unlike the session display read, a Jira-side failure surfaces as
+// a real HTTP error so the detail panel can show it.
+func (c *JiraController) issue(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/issue")
+		return
+	}
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_KEY_REQUIRED", "An issue key is required.", nil))
+		return
+	}
+	iss, err := c.Svc.GetIssue(r.Context(), key)
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, JiraIssueResponse{Issue: jiraIssueDTO(iss)})
+}
+
+// issueTransitions lists the live status transitions for any issue by key — the
+// detail view's Move-status entry, pre-session.
+func (c *JiraController) issueTransitions(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/issue/transitions")
+		return
+	}
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_KEY_REQUIRED", "An issue key is required.", nil))
+		return
+	}
+	ts, err := c.Svc.IssueTransitions(r.Context(), key)
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	out := JiraTransitionsResponse{Transitions: make([]JiraTransition, 0, len(ts))}
+	for _, t := range ts {
+		out.Transitions = append(out.Transitions, JiraTransition{
+			ID: t.ID, Name: t.Name, To: t.To, ToCategory: t.ToCategory, ToColor: t.ToColor,
+		})
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// issueMove applies a status transition to any issue by key — the ONE sanctioned
+// write, from the pre-session detail view. User-initiated (UI confirms first); the
+// body carries only the key and a transition id.
+func (c *JiraController) issueMove(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/jira/issue/move")
+		return
+	}
+	var req JiraIssueMoveRequest
+	if err := decodeJSON(r, &req); err != nil {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_MOVE_BODY_INVALID", "Malformed request body.", nil))
+		return
+	}
+	if strings.TrimSpace(req.Key) == "" {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_KEY_REQUIRED", "An issue key is required.", nil))
+		return
+	}
+	if strings.TrimSpace(req.TransitionID) == "" {
+		envelope.WriteError(w, r, apierr.Invalid("JIRA_TRANSITION_REQUIRED", "A transition id is required.", nil))
+		return
+	}
+	res, err := c.Svc.MoveIssue(r.Context(), strings.TrimSpace(req.Key), req.TransitionID)
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, JiraMoveResponse{
+		Key:            res.Key,
+		Status:         res.Status,
+		StatusCategory: res.StatusCategory,
+		StatusColor:    res.StatusColor,
+	})
 }
 
 // link binds an existing session to a Jira issue (issue_id = "jira:<KEY>"). The
@@ -253,6 +347,17 @@ func jiraContextResponse(id domain.SessionID, res jirasvc.Result) JiraContextRes
 	return out
 }
 
+// queryBool reads a boolean query param — "true"/"1" (case-insensitive) are true,
+// everything else (including absent) is false.
+func queryBool(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1":
+		return true
+	default:
+		return false
+	}
+}
+
 // splitTypes turns the comma-separated `type` query param into a trimmed,
 // non-empty list of issue-type names for the JQL `issuetype in (...)` clause.
 func splitTypes(raw string) []string {
@@ -276,9 +381,18 @@ func jiraIssueSummaryDTO(it jiraadapter.IssueSummary) JiraIssueSummary {
 		StatusColor:       it.StatusColor,
 		Assignee:          it.Assignee,
 		AssigneeAccountId: it.AssigneeAccountId,
+		Parent:            jiraParentDTO(it.Parent),
 		Sprint:            jiraSprintDTO(it.Sprint),
 		URL:               it.URL,
 	}
+}
+
+// jiraParentDTO maps an adapter parent ref to its wire shape (nil-safe).
+func jiraParentDTO(p *jiraadapter.ParentRef) *JiraParentRef {
+	if p == nil {
+		return nil
+	}
+	return &JiraParentRef{Key: p.Key, Title: p.Title}
 }
 
 // jiraSprintDTO maps an adapter sprint to its wire shape (nil-safe).
@@ -308,6 +422,7 @@ func jiraIssueDTO(iss jiraadapter.Issue) *JiraIssue {
 		Reporter:       iss.Reporter,
 		Description:    iss.Description,
 	}
+	dto.Parent = jiraParentDTO(iss.Parent)
 	dto.Sprint = jiraSprintDTO(iss.Sprint)
 	for _, s := range iss.Subtasks {
 		dto.Subtasks = append(dto.Subtasks, JiraSubtask{

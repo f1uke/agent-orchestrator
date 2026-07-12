@@ -634,6 +634,13 @@ export const mockSessionJiraTransitions: Record<string, components["schemas"]["J
 
 // A synthetic cross-project issue pool for the New-task / link-existing pickers
 // under preview (VITE_NO_ELECTRON=1). Fully fictional — DEMO/ACME keys only.
+const activeSprint = {
+	name: "Sprint 2026-14",
+	state: "active",
+	startDate: "2026-06-29T09:38:37.895Z",
+	endDate: "2026-07-10T11:00:00.000Z",
+};
+
 const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 	{
 		key: "DEMO-101",
@@ -643,6 +650,7 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 		statusCategory: "new",
 		assignee: "Alex Rivera",
 		url: "https://example.atlassian.net/browse/DEMO-101",
+		sprint: activeSprint,
 	},
 	{
 		key: "DEMO-140",
@@ -652,6 +660,20 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 		statusCategory: "indeterminate",
 		assignee: "Sam Chen",
 		url: "https://example.atlassian.net/browse/DEMO-140",
+		sprint: activeSprint,
+	},
+	{
+		// A sub-task of DEMO-140 assigned to someone else — exercises the list's
+		// parent-under-subtask nesting (#37) and the detail parent breadcrumb (#36).
+		key: "DEMO-141",
+		type: "Sub-task",
+		title: "Backend eligibility endpoint",
+		status: "In Progress",
+		statusCategory: "indeterminate",
+		assignee: "Alex Rivera",
+		url: "https://example.atlassian.net/browse/DEMO-141",
+		parent: { key: "DEMO-140", title: "Example story summary" },
+		sprint: activeSprint,
 	},
 	{
 		key: "DEMO-88",
@@ -678,21 +700,30 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 const mockAccountId = (name: string): string =>
 	name.trim() ? `acc-${name.trim().toLowerCase().replace(/\s+/g, "-")}` : "";
 
+type MockSearchFilters = {
+	assignee?: string;
+	types?: string[];
+	hideDone?: boolean;
+	activeSprint?: boolean;
+	jql?: string;
+};
+
 /**
  * Preview-mode search: filters the synthetic pool by key/title (or project), then
  * mirrors the server-side JQL filters — assignee (a derived accountId, or the
- * "unassigned" token) and issue types — so Browse Jira behaves in preview as it
- * does live. Each row carries its derived assigneeAccountId for the dropdown.
+ * "unassigned" token), issue types, hide-done and active-sprint — so Browse Jira
+ * behaves in preview as it does live. Advanced JQL can't be parsed here, so it just
+ * returns the project pool. Each row carries its derived assigneeAccountId.
  */
 export function mockJiraSearch(
 	project: string,
 	query: string,
-	assignee = "",
-	types: string[] = [],
+	filters: MockSearchFilters = {},
 ): components["schemas"]["JiraIssueSummary"][] {
 	const q = query.trim().toLowerCase();
 	const proj = project.trim().toUpperCase();
-	const typeNames = types.map((t) => t.trim().toLowerCase()).filter(Boolean);
+	const assignee = filters.assignee ?? "";
+	const typeNames = (filters.types ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
 	return mockJiraIssuePool
 		.map((it) => ({ ...it, assigneeAccountId: it.assigneeAccountId ?? mockAccountId(it.assignee ?? "") }))
 		.filter((it) => {
@@ -708,8 +739,55 @@ export function mockJiraSearch(
 				const t = (it.type ?? "").toLowerCase();
 				if (!typeNames.some((name) => t === name || t.includes(name) || name.includes(t))) return false;
 			}
+			if (filters.hideDone && (it.statusCategory ?? "") === "done") return false;
+			if (filters.activeSprint && it.sprint?.state !== "active") return false;
 			return true;
 		});
+}
+
+/** Preview-mode detail read: build a full issue projection from the pool summary,
+ *  deriving subtasks from any pool rows that name this issue as their parent and
+ *  synthesizing a short description so the Browse-Jira detail drawer (#36) renders
+ *  end-to-end without a daemon. */
+export function mockJiraIssue(key: string): components["schemas"]["JiraIssue"] | null {
+	const row = mockJiraIssuePool.find((it) => it.key === key);
+	if (!row) return null;
+	const subtasks = mockJiraIssuePool
+		.filter((it) => it.parent?.key === key)
+		.map((it) => ({
+			key: it.key,
+			type: it.type,
+			title: it.title,
+			status: it.status,
+			statusCategory: it.statusCategory,
+			statusColor: it.statusColor,
+		}));
+	return {
+		key: row.key ?? key,
+		type: row.type,
+		title: row.title,
+		status: row.status,
+		statusCategory: row.statusCategory,
+		statusColor: row.statusColor,
+		assignee: row.assignee,
+		reporter: "Sam Chen",
+		priority: row.type === "Bug" ? "High" : "Medium",
+		url: row.url,
+		parent: row.parent,
+		sprint: row.sprint,
+		description: [
+			{
+				type: "paragraph",
+				content: [
+					{
+						type: "text",
+						text: `Read-only preview of ${row.key ?? key}. Live Jira data replaces this when a JIRA_API_TOKEN is configured.`,
+					},
+				],
+			},
+		],
+		subtasks: subtasks.length > 0 ? subtasks : undefined,
+	};
 }
 
 const mockJiraProjectPool: components["schemas"]["JiraProject"][] = [

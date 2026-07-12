@@ -90,6 +90,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jira/issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one Jira issue's full display projection by key (pre-session detail view) */
+        get: operations["getJiraIssue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jira/issue/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply a status transition to any Jira issue by key — the one sanctioned write */
+        post: operations["moveJiraIssue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jira/issue/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List any Jira issue's available status transitions by key (read live) */
+        get: operations["listJiraIssueTransitions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jira/projects": {
         parameters: {
             query?: never;
@@ -1282,6 +1333,7 @@ export interface components {
             assignee?: string;
             description?: components["schemas"]["AdfNode"][];
             key: string;
+            parent?: components["schemas"]["JiraParentRef"];
             priority?: string;
             reporter?: string;
             sprint?: components["schemas"]["JiraSprint"];
@@ -1293,10 +1345,20 @@ export interface components {
             type?: string;
             url?: string;
         };
+        JiraIssueMoveRequest: {
+            /** @description The issue key to move (e.g. PROJ-123). */
+            key: string;
+            /** @description The chosen transition id (read live from the issue). */
+            transitionId: string;
+        };
+        JiraIssueResponse: {
+            issue?: components["schemas"]["JiraIssue"];
+        };
         JiraIssueSummary: {
             assignee?: string;
             assigneeAccountId?: string;
             key: string;
+            parent?: components["schemas"]["JiraParentRef"];
             sprint?: components["schemas"]["JiraSprint"];
             status?: string;
             statusCategory?: string;
@@ -1324,6 +1386,10 @@ export interface components {
             status?: string;
             statusCategory?: string;
             statusColor?: string;
+        };
+        JiraParentRef: {
+            key: string;
+            title?: string;
         };
         JiraProject: {
             key: string;
@@ -2190,6 +2256,184 @@ export interface operations {
             };
         };
     };
+    getJiraIssue: {
+        parameters: {
+            query?: {
+                /** @description The issue key to read (e.g. PROJ-123). */
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraIssueResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    moveJiraIssue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JiraIssueMoveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraMoveResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listJiraIssueTransitions: {
+        parameters: {
+            query?: {
+                /** @description The issue key to read (e.g. PROJ-123). */
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraTransitionsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listJiraProjects: {
         parameters: {
             query?: {
@@ -2242,6 +2486,12 @@ export interface operations {
                 assignee?: string;
                 /** @description Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types. */
                 type?: string;
+                /** @description When true, exclude done issues (statusCategory != Done). */
+                hideDone?: boolean;
+                /** @description When true, only issues in an open sprint (sprint in openSprints()). */
+                activeSprint?: boolean;
+                /** @description Raw advanced JQL. When set, it drives the search verbatim and the structured filters above are ignored. */
+                jql?: string;
             };
             header?: never;
             path?: never;

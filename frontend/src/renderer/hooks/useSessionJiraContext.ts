@@ -3,6 +3,7 @@ import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { workspaceQueryKey } from "./useWorkspaceQuery";
 import {
+	mockJiraIssue,
 	mockJiraProjects,
 	mockJiraSearch,
 	mockSessionJiraContexts,
@@ -33,10 +34,33 @@ export const sessionJiraTransitionsQueryKey = (sessionId?: string, issueKey?: st
 		: (["session-jira-transitions", sessionId] as const);
 };
 
-export const jiraSearchQueryKey = (project: string, query: string, assignee = "", typesCsv = "") =>
-	["jira-search", project, query, assignee, typesCsv] as const;
+/** Filters pushed into the server-side Jira search JQL (Browse Jira). All optional;
+ *  `jql`, when set, is raw advanced JQL that replaces the structured filters. */
+export type JiraSearchFilters = {
+	assignee?: string;
+	types?: string[];
+	hideDone?: boolean;
+	activeSprint?: boolean;
+	jql?: string;
+};
+
+export const jiraSearchQueryKey = (project: string, query: string, filters: JiraSearchFilters = {}) =>
+	[
+		"jira-search",
+		project,
+		query,
+		filters.assignee ?? "",
+		(filters.types ?? []).join(","),
+		filters.hideDone ? "1" : "",
+		filters.activeSprint ? "1" : "",
+		filters.jql ?? "",
+	] as const;
 
 export const jiraProjectsQueryKey = (query: string) => ["jira-projects", query] as const;
+
+export const jiraIssueQueryKey = (key: string) => ["jira-issue", key] as const;
+
+export const jiraIssueTransitionsQueryKey = (key: string) => ["jira-issue-transitions", key] as const;
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -128,16 +152,19 @@ export function useMoveJiraStatus(sessionId: string, issueKey?: string) {
 async function fetchJiraSearch(
 	project: string,
 	query: string,
-	assignee: string,
-	types: string[],
+	filters: JiraSearchFilters,
 ): Promise<JiraIssueSummary[]> {
+	const types = filters.types ?? [];
 	const { data, error } = await apiClient.GET("/api/v1/jira/search", {
 		params: {
 			query: {
 				q: query,
 				project: project || undefined,
-				assignee: assignee || undefined,
+				assignee: filters.assignee || undefined,
 				type: types.length > 0 ? types.join(",") : undefined,
+				hideDone: filters.hideDone || undefined,
+				activeSprint: filters.activeSprint || undefined,
+				jql: filters.jql || undefined,
 			},
 		},
 	});
@@ -153,29 +180,21 @@ async function fetchJiraSearch(
  * pass project="") still wait for two characters. A failure throws so the caller
  * can surface it (e.g. a missing JIRA_API_TOKEN).
  *
- * `opts.assignee` (an accountId, or the "unassigned" token) and `opts.types`
- * (issue-type names) are pushed into the server-side JQL, so Browse Jira can
- * filter without paring down a capped page. Omitting both yields the same query
- * key as the unfiltered fetch, so React Query shares that one request.
+ * The `filters` (assignee accountId / "unassigned" token, issue types, hide-done,
+ * active-sprint) are pushed into the server-side JQL, so Browse Jira can filter
+ * without paring down a capped page; omitting them yields the same query key as the
+ * unfiltered fetch, so React Query shares that request. `filters.jql`, when set, is
+ * raw advanced JQL that drives the search verbatim (fires even with no project/text).
  */
-export function useJiraSearch(
-	query: string,
-	project: string,
-	enabled: boolean,
-	opts?: { assignee?: string; types?: string[] },
-) {
+export function useJiraSearch(query: string, project: string, enabled: boolean, filters: JiraSearchFilters = {}) {
 	const q = query.trim();
 	const scoped = project.trim().length > 0;
-	const assignee = opts?.assignee ?? "";
-	const types = opts?.types ?? [];
-	const typesCsv = types.join(",");
+	const advanced = Boolean(filters.jql && filters.jql.trim().length > 0);
 	return useQuery({
-		queryKey: jiraSearchQueryKey(project, q, assignee, typesCsv),
-		enabled: enabled && (q.length >= 2 || scoped),
+		queryKey: jiraSearchQueryKey(project, q, filters),
+		enabled: enabled && (q.length >= 2 || scoped || advanced),
 		queryFn: () =>
-			usePreviewData
-				? Promise.resolve(mockJiraSearch(project, q, assignee, types))
-				: fetchJiraSearch(project, q, assignee, types),
+			usePreviewData ? Promise.resolve(mockJiraSearch(project, q, filters)) : fetchJiraSearch(project, q, filters),
 		staleTime: 15_000,
 	});
 }
@@ -200,6 +219,69 @@ export function useJiraProjects(query: string, enabled: boolean) {
 		enabled,
 		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraProjects(q)) : fetchJiraProjects(q)),
 		staleTime: 60_000,
+	});
+}
+
+async function fetchJiraIssue(key: string): Promise<JiraIssue | null> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/issue", { params: { query: { key } } });
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't load the Jira issue"));
+	return data?.issue ?? null;
+}
+
+/**
+ * Reads one issue's full display projection by KEY (pre-session), for the Browse
+ * Jira detail view — the same projection the Summary tab renders, but not scoped to
+ * a session. Enable only while the detail panel is open. A failure throws so the
+ * panel can surface it (e.g. a missing token).
+ */
+export function useJiraIssue(key: string | undefined, enabled: boolean) {
+	return useQuery({
+		queryKey: jiraIssueQueryKey(key ?? ""),
+		enabled: Boolean(key) && enabled,
+		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraIssue(key!)) : fetchJiraIssue(key!)),
+		staleTime: 30_000,
+	});
+}
+
+async function fetchJiraIssueTransitions(key: string): Promise<JiraTransition[]> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/issue/transitions", { params: { query: { key } } });
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't load Jira transitions"));
+	return data?.transitions ?? [];
+}
+
+/**
+ * Lists an issue's live status transitions by KEY — the detail view's Move-status
+ * entry (pre-session). Enable only while the move dialog is open. A failure throws.
+ */
+export function useJiraIssueTransitions(key: string | undefined, enabled: boolean) {
+	return useQuery({
+		queryKey: jiraIssueTransitionsQueryKey(key ?? ""),
+		enabled: Boolean(key) && enabled,
+		queryFn: () => (usePreviewData ? Promise.resolve([]) : fetchJiraIssueTransitions(key!)),
+		staleTime: 15_000,
+	});
+}
+
+/**
+ * Applies a status transition to an issue by KEY — the ONE sanctioned Jira write,
+ * from the pre-session Browse Jira detail view. On success it invalidates the issue
+ * and its transitions so the pill reflects the new status. Preview = no-op success.
+ */
+export function useMoveJiraIssue(key: string) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (transitionId: string): Promise<JiraMoveResponse> => {
+			if (usePreviewData) return { sessionId: "", key, status: "", statusCategory: "" };
+			const { data, error } = await apiClient.POST("/api/v1/jira/issue/move", {
+				body: { key, transitionId },
+			});
+			if (error) throw new Error(apiErrorMessage(error, "Couldn't move the Jira status"));
+			return data!;
+		},
+		onSuccess: () => {
+			void qc.invalidateQueries({ queryKey: jiraIssueQueryKey(key) });
+			void qc.invalidateQueries({ queryKey: jiraIssueTransitionsQueryKey(key) });
+		},
 	});
 }
 
