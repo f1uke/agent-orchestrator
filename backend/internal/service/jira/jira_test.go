@@ -309,7 +309,7 @@ func newSearchSvc(searcher IssueSearcher) *Service {
 
 func TestBuildJQL_ExactKey(t *testing.T) {
 	s := &fakeSearcher{issues: []jiraadapter.IssueSummary{{Key: "DEMO-101"}}}
-	if _, err := newSearchSvc(s).Search(context.Background(), "", "demo-101"); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), "", "demo-101", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if s.gotJQL != `key = "DEMO-101"` {
@@ -319,7 +319,7 @@ func TestBuildJQL_ExactKey(t *testing.T) {
 
 func TestBuildJQL_TextSearch(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), "", "eligible"); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), "", "eligible", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(s.gotJQL, `summary ~ "eligible*"`) || !strings.Contains(s.gotJQL, `text ~ "eligible*"`) {
@@ -334,7 +334,7 @@ func TestBuildJQL_BareProjectKeyScopes(t *testing.T) {
 	// "demo" is confirmed to be a real project key → scope to it (so DEMO-* show,
 	// which a text match never would).
 	s := &fakeSearcher{projects: []jiraadapter.ProjectRef{{Key: "DEMO", Name: "DEMO project"}}}
-	if _, err := newSearchSvc(s).Search(context.Background(), "", "demo"); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), "", "demo", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if s.gotJQL != `project = "DEMO" ORDER BY updated DESC` {
@@ -345,7 +345,7 @@ func TestBuildJQL_BareProjectKeyScopes(t *testing.T) {
 func TestBuildJQL_BareTokenNotAProjectFallsBackToText(t *testing.T) {
 	// No project matches "demo" → do NOT emit `project = "DEMO"` (a 400); text search.
 	s := &fakeSearcher{projects: nil}
-	if _, err := newSearchSvc(s).Search(context.Background(), "", "demo"); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), "", "demo", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(s.gotJQL, "project =") {
@@ -358,7 +358,7 @@ func TestBuildJQL_BareTokenNotAProjectFallsBackToText(t *testing.T) {
 
 func TestBuildJQL_ExplicitProjectAndText(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), "DEMO", "coupon"); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), "DEMO", "coupon", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(s.gotJQL, `project = "DEMO" AND (summary ~ "coupon*"`) {
@@ -366,9 +366,83 @@ func TestBuildJQL_ExplicitProjectAndText(t *testing.T) {
 	}
 }
 
+func TestBuildJQL_AssigneeFilterServerSide(t *testing.T) {
+	// The assignee (an accountId) is pushed into the JQL so Jira returns all of that
+	// person's issues — not just those in the most-recent page the client can pare.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), "STAR", "", "6192fbf4d2e64c00718e026d", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.gotJQL, `assignee = "6192fbf4d2e64c00718e026d"`) {
+		t.Errorf("jql = %q, want a server-side assignee clause", s.gotJQL)
+	}
+	if !strings.HasPrefix(s.gotJQL, `project = "STAR" AND assignee =`) {
+		t.Errorf("jql = %q, want project AND assignee", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_UnassignedSentinel(t *testing.T) {
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), "STAR", "", "unassigned", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.gotJQL, "assignee is EMPTY") {
+		t.Errorf("jql = %q, want `assignee is EMPTY` for the unassigned sentinel", s.gotJQL)
+	}
+	if strings.Contains(s.gotJQL, `assignee = "unassigned"`) {
+		t.Errorf("jql = %q, the sentinel must not become a literal assignee", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_TypeFilterServerSide(t *testing.T) {
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), "STAR", "", "", []string{"Sub-task", "Subtask"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.gotJQL, `issuetype in ("Sub-task", "Subtask")`) {
+		t.Errorf("jql = %q, want an issuetype IN clause covering the type variants", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_AssigneeAndTypeCombine(t *testing.T) {
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), "STAR", "", "acc-9", []string{"Bug"}); err != nil {
+		t.Fatal(err)
+	}
+	// project + assignee + issuetype are all ANDed, newest-first.
+	if !strings.HasPrefix(s.gotJQL, `project = "STAR" AND assignee = "acc-9" AND issuetype in ("Bug")`) {
+		t.Errorf("jql = %q, want project AND assignee AND issuetype", s.gotJQL)
+	}
+	if !strings.HasSuffix(s.gotJQL, "ORDER BY updated DESC") {
+		t.Errorf("jql = %q, want newest-first", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_EmptyTypesAllTypes(t *testing.T) {
+	// "All types" (no names) must not emit an issuetype clause.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), "STAR", "", "", []string{"", "  "}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.gotJQL, "issuetype") {
+		t.Errorf("jql = %q, want no issuetype clause for All types", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_ExactKeyIgnoresFilters(t *testing.T) {
+	// An exact key is an unambiguous lookup — assignee/type must not narrow it.
+	s := &fakeSearcher{issues: []jiraadapter.IssueSummary{{Key: "DEMO-101"}}}
+	if _, err := newSearchSvc(s).Search(context.Background(), "", "DEMO-101", "acc-9", []string{"Bug"}); err != nil {
+		t.Fatal(err)
+	}
+	if s.gotJQL != `key = "DEMO-101"` {
+		t.Errorf("jql = %q, want a bare exact-key lookup", s.gotJQL)
+	}
+}
+
 func TestSearch_NilSearcher(t *testing.T) {
 	svc := New(fakeSessions{}, &fakeIssues{}, nil, nil)
-	if _, err := svc.Search(context.Background(), "", "x"); !errors.Is(err, jiraadapter.ErrUnavailable) {
+	if _, err := svc.Search(context.Background(), "", "x", "", nil); !errors.Is(err, jiraadapter.ErrUnavailable) {
 		t.Errorf("err = %v, want ErrUnavailable", err)
 	}
 }

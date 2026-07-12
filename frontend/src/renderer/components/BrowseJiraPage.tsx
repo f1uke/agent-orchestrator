@@ -6,21 +6,22 @@ import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { useJiraSearch, type JiraIssueSummary, type JiraProject } from "../hooks/useSessionJiraContext";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { filterByAssignee, groupBySprint, hasUnassigned, UNASSIGNED, uniqueAssignees } from "../lib/jira-browse";
+import { groupBySprint, hasUnassigned, UNASSIGNED, UNASSIGNED_QUERY, uniqueAssignees } from "../lib/jira-browse";
 import { readBrowsePrefs, writeBrowsePrefs } from "../lib/jira-browse-prefs";
 import { readLastJiraProject, writeLastJiraProject } from "../lib/jira-last-project";
 import { cn } from "../lib/utils";
 
-// Type filter chips (client-side, over the returned results). "Assigned to me"
-// from the mockup is intentionally omitted — it needs current-user resolution the
-// reused search endpoints don't provide. Matching is substring-on-type so it holds
-// up across Jira's type-name variance (e.g. "Sub-task" / "Subtask").
-const TYPE_FILTERS: { label: string; match: (type: string) => boolean }[] = [
-	{ label: "All types", match: () => true },
-	{ label: "Story", match: (t) => t.includes("story") },
-	{ label: "Bug", match: (t) => t.includes("bug") },
-	{ label: "Sub-task", match: (t) => t.includes("sub") },
-	{ label: "Support", match: (t) => t.includes("support") || t.includes("service") },
+// Type filter chips. Each carries the JQL issue-type name(s) pushed into the
+// server-side search (All types = no clause), so a type filter is complete rather
+// than pared from a capped page; multiple names cover Jira's type-name variance
+// (e.g. "Sub-task" / "Subtask"). "Assigned to me" from the mockup is intentionally
+// omitted — it needs current-user resolution the reused search endpoints lack.
+const TYPE_FILTERS: { label: string; jql: string[] }[] = [
+	{ label: "All types", jql: [] },
+	{ label: "Story", jql: ["Story"] },
+	{ label: "Bug", jql: ["Bug"] },
+	{ label: "Sub-task", jql: ["Sub-task", "Subtask"] },
+	{ label: "Support", jql: ["Support", "Service Request"] },
 ];
 
 /**
@@ -58,22 +59,45 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	}, [groupSprints, assignee]);
 
 	const projectKey = project?.key ?? "";
-	// With a project scoped, the search fires even with no text (lists recent issues
-	// in that project); typing narrows it. See useJiraSearch's enable rule.
-	const { data, isFetching, isError, error } = useJiraSearch(debounced, projectKey, Boolean(projectKey));
-	const allResults = data ?? [];
+	const selectedTypes = TYPE_FILTERS[filter].jql;
 
-	// Assignee options come from the full loaded set (stable across type/grouping
-	// changes). A remembered assignee that isn't present in this project falls back
-	// to "all" without hiding everything — but stays in state so returning to a
-	// project that has them re-applies the filter.
-	const assignees = uniqueAssignees(allResults);
-	const unassignedPresent = hasUnassigned(allResults);
-	const assigneeValid = assignee === "" || (assignee === UNASSIGNED ? unassignedPresent : assignees.includes(assignee));
+	// Base fetch: project + text only, NO assignee/type filter. It's the source for
+	// the assignee dropdown (so the option list stays complete regardless of the
+	// active filter) and, when no filter is active, shares its request with the
+	// results below. With a project scoped it fires even with no text (lists recent
+	// issues in that project); typing narrows it. See useJiraSearch's enable rule.
+	const base = useJiraSearch(debounced, projectKey, Boolean(projectKey));
+	const baseResults = base.data ?? [];
+
+	// Assignee options (name + accountId) come from the unfiltered base set. A
+	// remembered assignee that isn't present in this project falls back to "all"
+	// without hiding everything — but stays in state so returning to a project that
+	// has them re-applies the filter.
+	const assignees = uniqueAssignees(baseResults);
+	const unassignedPresent = hasUnassigned(baseResults);
+	const assigneeValid =
+		assignee === "" || (assignee === UNASSIGNED ? unassignedPresent : assignees.some((a) => a.name === assignee));
 	const effectiveAssignee = assigneeValid ? assignee : "";
+	// Map the selected display name → the server-side filter value: an accountId,
+	// the unassigned token, or "" for no filter.
+	const assigneeQuery =
+		effectiveAssignee === ""
+			? ""
+			: effectiveAssignee === UNASSIGNED
+				? UNASSIGNED_QUERY
+				: (assignees.find((a) => a.name === effectiveAssignee)?.accountId ?? "");
 
-	const typeFiltered = allResults.filter((issue) => TYPE_FILTERS[filter].match((issue.type ?? "").toLowerCase()));
-	const results = filterByAssignee(typeFiltered, effectiveAssignee);
+	// Results fetch: project + text + type + assignee, ALL pushed into the JQL so
+	// the set is complete (not pared from a capped page). With no filter active this
+	// collapses to the base query's key, so React Query serves one shared request.
+	const resultsQuery = useJiraSearch(debounced, projectKey, Boolean(projectKey), {
+		assignee: assigneeQuery,
+		types: selectedTypes,
+	});
+	const results = resultsQuery.data ?? [];
+	const isFetching = base.isFetching || resultsQuery.isFetching;
+	const isError = resultsQuery.isError;
+	const error = resultsQuery.error;
 	const groups = groupSprints ? groupBySprint(results) : [];
 
 	const toggleCollapsed = (name: string) => {
@@ -174,9 +198,9 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 						>
 							<option value="">All assignees</option>
 							{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
-							{assignees.map((name) => (
-								<option key={name} value={name}>
-									{name}
+							{assignees.map((a) => (
+								<option key={a.name} value={a.name}>
+									{a.name}
 								</option>
 							))}
 						</select>
@@ -207,7 +231,7 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							<p className="jira-browse__note jira-browse__note--err">
 								{error instanceof Error ? error.message : "Couldn't search Jira."}
 							</p>
-						) : isFetching && allResults.length === 0 ? (
+						) : isFetching && results.length === 0 ? (
 							<p className="jira-browse__note">Searching…</p>
 						) : results.length === 0 ? (
 							<p className="jira-browse__note">No issues match.</p>

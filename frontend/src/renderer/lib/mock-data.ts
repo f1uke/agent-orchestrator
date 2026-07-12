@@ -673,16 +673,43 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 	},
 ];
 
-/** Preview-mode search: filters the synthetic pool by key/title (or project). */
-export function mockJiraSearch(project: string, query: string): components["schemas"]["JiraIssueSummary"][] {
+/** A stable synthetic accountId for a mock assignee name (real Jira ids are
+ *  opaque; preview just needs a consistent key to filter/dropdown on). */
+const mockAccountId = (name: string): string =>
+	name.trim() ? `acc-${name.trim().toLowerCase().replace(/\s+/g, "-")}` : "";
+
+/**
+ * Preview-mode search: filters the synthetic pool by key/title (or project), then
+ * mirrors the server-side JQL filters — assignee (a derived accountId, or the
+ * "unassigned" token) and issue types — so Browse Jira behaves in preview as it
+ * does live. Each row carries its derived assigneeAccountId for the dropdown.
+ */
+export function mockJiraSearch(
+	project: string,
+	query: string,
+	assignee = "",
+	types: string[] = [],
+): components["schemas"]["JiraIssueSummary"][] {
 	const q = query.trim().toLowerCase();
 	const proj = project.trim().toUpperCase();
-	return mockJiraIssuePool.filter((it) => {
-		const key = it.key ?? "";
-		if (proj && !key.toUpperCase().startsWith(`${proj}-`)) return false;
-		if (!q) return true;
-		return key.toLowerCase().includes(q) || (it.title ?? "").toLowerCase().includes(q);
-	});
+	const typeNames = types.map((t) => t.trim().toLowerCase()).filter(Boolean);
+	return mockJiraIssuePool
+		.map((it) => ({ ...it, assigneeAccountId: it.assigneeAccountId ?? mockAccountId(it.assignee ?? "") }))
+		.filter((it) => {
+			const key = it.key ?? "";
+			if (proj && !key.toUpperCase().startsWith(`${proj}-`)) return false;
+			if (q && !(key.toLowerCase().includes(q) || (it.title ?? "").toLowerCase().includes(q))) return false;
+			if (assignee === "unassigned") {
+				if ((it.assignee ?? "").trim()) return false;
+			} else if (assignee && it.assigneeAccountId !== assignee) {
+				return false;
+			}
+			if (typeNames.length > 0) {
+				const t = (it.type ?? "").toLowerCase();
+				if (!typeNames.some((name) => t === name || t.includes(name) || name.includes(t))) return false;
+			}
+			return true;
+		});
 }
 
 const mockJiraProjectPool: components["schemas"]["JiraProject"][] = [

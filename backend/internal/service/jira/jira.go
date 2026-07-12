@@ -235,15 +235,19 @@ func jiraKey(issueID string) (string, bool) {
 }
 
 // Search returns issues matching a free-text query, optionally scoped to a
-// project key. The JQL is built here (buildJQL) so the query semantics stay
-// testable; the adapter is a dumb executor.
-func (s *Service) Search(ctx context.Context, project, text string) ([]jiraadapter.IssueSummary, error) {
+// project key and narrowed by assignee (accountId, or the "unassigned" sentinel)
+// and issue types. The filters are pushed into the JQL (buildJQL) so Jira returns
+// the right rows server-side rather than the client paring down a capped page —
+// which is why "assignee = Fluke" surfaces all of Fluke's issues, not just those
+// in the most-recent page. The adapter is a dumb executor.
+func (s *Service) Search(ctx context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error) {
 	if s.searcher == nil {
 		return nil, fmt.Errorf("%w: Jira search is not configured", jiraadapter.ErrUnavailable)
 	}
-	// 50 (the adapter's max window) rather than 25: Browse Jira groups results by
-	// sprint, so a wider set gives each sprint section more of its issues.
-	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, project, text), 50)
+	// Page up to the adapter's browse cap: Browse Jira groups results by sprint and
+	// filters by assignee/type in the JQL, so a wide, paginated set gives each
+	// section its issues instead of only what fits in one page.
+	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, project, text, assignee, types), jiraadapter.SearchMaxResults)
 }
 
 // Projects lists the user's Jira projects (optionally filtered) for the project
@@ -322,12 +326,17 @@ func (s *Service) Unlink(ctx context.Context, id domain.SessionID) (domain.Sessi
 	return s.sessions.SetIssueBinding(ctx, id, label, label)
 }
 
-// buildJQL classifies the query into JQL. A full key resolves that one issue; a
-// bare project key (confirmed to exist, so we never send a 400-inducing
-// `project = NOPE`) scopes to that project — which is how "demo" surfaces DEMO-*
-// that a text match never would; anything else is a summary/text contains-search.
-// Always newest-first.
-func (s *Service) buildJQL(ctx context.Context, project, text string) string {
+// assigneeUnassigned is the sentinel the client sends for the "Unassigned" filter
+// (a real accountId is never this word), mapped to the JQL `assignee is EMPTY`.
+const assigneeUnassigned = "unassigned"
+
+// buildJQL classifies the query into JQL. A full key resolves that one issue
+// (ignoring the filters — an exact lookup is unambiguous); a bare project key
+// (confirmed to exist, so we never send a 400-inducing `project = NOPE`) scopes to
+// that project — which is how "demo" surfaces DEMO-* that a text match never would;
+// anything else is a summary/text contains-search. The assignee (accountId) and
+// issue types, when set, are ANDed in as server-side filters. Always newest-first.
+func (s *Service) buildJQL(ctx context.Context, project, text, assignee string, types []string) string {
 	project = strings.TrimSpace(project)
 	text = strings.TrimSpace(text)
 	if fullKeyRE.MatchString(strings.ToUpper(text)) {
@@ -348,11 +357,38 @@ func (s *Service) buildJQL(ctx context.Context, project, text string) string {
 		esc := escapeJQL(text)
 		clauses = append(clauses, `(summary ~ "`+esc+`*" OR text ~ "`+esc+`*")`)
 	}
+	if a := strings.TrimSpace(assignee); a != "" {
+		if strings.EqualFold(a, assigneeUnassigned) {
+			clauses = append(clauses, "assignee is EMPTY")
+		} else {
+			clauses = append(clauses, `assignee = "`+escapeJQL(a)+`"`)
+		}
+	}
+	if clause := issueTypeClause(types); clause != "" {
+		clauses = append(clauses, clause)
+	}
 	jql := strings.Join(clauses, " AND ")
 	if jql != "" {
 		jql += " "
 	}
 	return jql + "ORDER BY updated DESC"
+}
+
+// issueTypeClause builds an `issuetype in (...)` clause from the selected type
+// names, or "" when none are selected (All types). Blanks are dropped and each
+// name is quoted/escaped; multiple names (e.g. Sub-task / Subtask spelling
+// variants) widen the match.
+func issueTypeClause(types []string) string {
+	quoted := make([]string, 0, len(types))
+	for _, t := range types {
+		if t = strings.TrimSpace(t); t != "" {
+			quoted = append(quoted, `"`+escapeJQL(t)+`"`)
+		}
+	}
+	if len(quoted) == 0 {
+		return ""
+	}
+	return "issuetype in (" + strings.Join(quoted, ", ") + ")"
 }
 
 // confirmProjectKey returns the canonical project key when text names a real

@@ -156,6 +156,7 @@ type rawIssue struct {
 type namedRef struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
+	AccountId   string `json:"accountId"` // set for user refs (assignee/reporter); pushes assignee into server-side JQL
 }
 
 type statusRef struct {

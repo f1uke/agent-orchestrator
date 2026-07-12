@@ -33,7 +33,8 @@ export const sessionJiraTransitionsQueryKey = (sessionId?: string, issueKey?: st
 		: (["session-jira-transitions", sessionId] as const);
 };
 
-export const jiraSearchQueryKey = (project: string, query: string) => ["jira-search", project, query] as const;
+export const jiraSearchQueryKey = (project: string, query: string, assignee = "", typesCsv = "") =>
+	["jira-search", project, query, assignee, typesCsv] as const;
 
 export const jiraProjectsQueryKey = (query: string) => ["jira-projects", query] as const;
 
@@ -124,9 +125,21 @@ export function useMoveJiraStatus(sessionId: string, issueKey?: string) {
 	});
 }
 
-async function fetchJiraSearch(project: string, query: string): Promise<JiraIssueSummary[]> {
+async function fetchJiraSearch(
+	project: string,
+	query: string,
+	assignee: string,
+	types: string[],
+): Promise<JiraIssueSummary[]> {
 	const { data, error } = await apiClient.GET("/api/v1/jira/search", {
-		params: { query: { q: query, project: project || undefined } },
+		params: {
+			query: {
+				q: query,
+				project: project || undefined,
+				assignee: assignee || undefined,
+				type: types.length > 0 ? types.join(",") : undefined,
+			},
+		},
 	});
 	if (error) throw new Error(apiErrorMessage(error, "Couldn't search Jira"));
 	return data?.issues ?? [];
@@ -139,14 +152,30 @@ async function fetchJiraSearch(project: string, query: string): Promise<JiraIssu
  * lists a project's recent issues with no text typed, while the pickers (which
  * pass project="") still wait for two characters. A failure throws so the caller
  * can surface it (e.g. a missing JIRA_API_TOKEN).
+ *
+ * `opts.assignee` (an accountId, or the "unassigned" token) and `opts.types`
+ * (issue-type names) are pushed into the server-side JQL, so Browse Jira can
+ * filter without paring down a capped page. Omitting both yields the same query
+ * key as the unfiltered fetch, so React Query shares that one request.
  */
-export function useJiraSearch(query: string, project: string, enabled: boolean) {
+export function useJiraSearch(
+	query: string,
+	project: string,
+	enabled: boolean,
+	opts?: { assignee?: string; types?: string[] },
+) {
 	const q = query.trim();
 	const scoped = project.trim().length > 0;
+	const assignee = opts?.assignee ?? "";
+	const types = opts?.types ?? [];
+	const typesCsv = types.join(",");
 	return useQuery({
-		queryKey: jiraSearchQueryKey(project, q),
+		queryKey: jiraSearchQueryKey(project, q, assignee, typesCsv),
 		enabled: enabled && (q.length >= 2 || scoped),
-		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraSearch(project, q)) : fetchJiraSearch(project, q)),
+		queryFn: () =>
+			usePreviewData
+				? Promise.resolve(mockJiraSearch(project, q, assignee, types))
+				: fetchJiraSearch(project, q, assignee, types),
 		staleTime: 15_000,
 	});
 }

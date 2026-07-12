@@ -3,12 +3,39 @@ package jira
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+// issuesJSON builds a search-response body: one minimal issue per key, plus an
+// optional nextPageToken (empty = last page) so paging tests can chain pages.
+func issuesJSON(keys []string, nextToken string) string {
+	rows := make([]string, 0, len(keys))
+	for _, k := range keys {
+		rows = append(rows, fmt.Sprintf(
+			`{"key":%q,"fields":{"summary":"row %s","issuetype":{"name":"Task"},"status":{"name":"To Do","statusCategory":{"key":"new"}}}}`,
+			k, k))
+	}
+	body := `{"issues":[` + strings.Join(rows, ",") + `]`
+	if nextToken != "" {
+		body += `,"nextPageToken":` + strconv.Quote(nextToken)
+	}
+	return body + `}`
+}
+
+// keysN makes n synthetic issue keys (DEMO-<i>) for filling a full page.
+func keysN(prefix string, n int) []string {
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, fmt.Sprintf("%s-%d", prefix, i))
+	}
+	return out
+}
 
 func TestSearchIssues_ParsesRows(t *testing.T) {
 	var gotPath, gotJQL, gotFields string
@@ -116,6 +143,110 @@ func TestSearchIssues_FallsBackToClassicEndpoint(t *testing.T) {
 	}
 	if len(out) != 1 || out[0].Key != "DEMO-1" {
 		t.Errorf("rows = %+v", out)
+	}
+}
+
+func TestSearchIssues_DecodesAssigneeAccountId(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"issues":[
+			{"key":"DEMO-101","fields":{"summary":"x","issuetype":{"name":"Story"},
+				"status":{"name":"To Do","statusCategory":{"key":"new"}},
+				"assignee":{"displayName":"Alex Rivera","accountId":"acc-alex"}}}
+		]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	out, err := c.SearchIssues(context.Background(), `project = "DEMO"`, 25)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(out) != 1 || out[0].Assignee != "Alex Rivera" || out[0].AssigneeAccountId != "acc-alex" {
+		t.Errorf("row = %+v, want assignee Alex Rivera / accountId acc-alex", out[0])
+	}
+}
+
+func TestSearchIssues_PaginatesEnhancedByToken(t *testing.T) {
+	var tokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok := r.URL.Query().Get("nextPageToken")
+		tokens = append(tokens, tok)
+		switch tok {
+		case "":
+			// First page: a short page that STILL carries a token — the loop must
+			// follow the token, not stop at the short page.
+			_, _ = io.WriteString(w, issuesJSON([]string{"DEMO-1", "DEMO-2"}, "TOK2"))
+		case "TOK2":
+			_, _ = io.WriteString(w, issuesJSON([]string{"DEMO-3"}, "")) // last page: no token
+		default:
+			t.Errorf("unexpected nextPageToken %q", tok)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	out, err := c.SearchIssues(context.Background(), `project = "DEMO"`, SearchMaxResults)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(out) != 3 || out[0].Key != "DEMO-1" || out[2].Key != "DEMO-3" {
+		t.Fatalf("rows = %+v, want 3 across two pages", out)
+	}
+	if len(tokens) != 2 || tokens[0] != "" || tokens[1] != "TOK2" {
+		t.Errorf("tokens = %v, want [\"\", TOK2]", tokens)
+	}
+}
+
+func TestSearchIssues_PaginatesClassicByStartAt(t *testing.T) {
+	var starts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/api/3/search/jql" {
+			w.WriteHeader(http.StatusNotFound) // force the classic (startAt) path
+			return
+		}
+		starts = append(starts, r.URL.Query().Get("startAt"))
+		if r.URL.Query().Get("startAt") == "0" {
+			_, _ = io.WriteString(w, issuesJSON(keysN("DEMO", searchPageSize), "")) // a FULL page → keep going
+			return
+		}
+		_, _ = io.WriteString(w, issuesJSON([]string{"DEMO-last"}, "")) // short page → stop
+	}))
+	defer srv.Close()
+
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	out, err := c.SearchIssues(context.Background(), `project = "DEMO"`, SearchMaxResults)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(out) != searchPageSize+1 {
+		t.Fatalf("rows = %d, want %d across two pages", len(out), searchPageSize+1)
+	}
+	// startAt advanced by the first page's length.
+	if len(starts) != 2 || starts[0] != "0" || starts[1] != strconv.Itoa(searchPageSize) {
+		t.Errorf("startAt sequence = %v, want [0 %d]", starts, searchPageSize)
+	}
+}
+
+func TestSearchIssues_CapsAtMaxResults(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		// Always a full page WITH a token — an unbounded result set. The cap must
+		// stop paging so this can't loop forever.
+		_, _ = io.WriteString(w, issuesJSON(keysN("DEMO", searchPageSize), "MORE"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	out, err := c.SearchIssues(context.Background(), `project = "DEMO"`, SearchMaxResults)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(out) != SearchMaxResults {
+		t.Errorf("rows = %d, want the cap %d", len(out), SearchMaxResults)
+	}
+	if requests != SearchMaxResults/searchPageSize {
+		t.Errorf("requests = %d, want %d (cap / page size)", requests, SearchMaxResults/searchPageSize)
 	}
 }
 

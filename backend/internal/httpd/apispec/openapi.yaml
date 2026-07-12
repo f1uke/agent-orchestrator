@@ -237,6 +237,22 @@ paths:
         schema:
           description: Optional project key to scope the search to.
           type: string
+      - description: Optional assignee accountId to filter by, or 'unassigned' for
+          issues with no assignee.
+        in: query
+        name: assignee
+        schema:
+          description: Optional assignee accountId to filter by, or 'unassigned' for
+            issues with no assignee.
+          type: string
+      - description: Optional comma-separated issue-type names to filter by (e.g.
+          Story,Bug). Empty matches all types.
+        in: query
+        name: type
+        schema:
+          description: Optional comma-separated issue-type names to filter by (e.g.
+            Story,Bug). Empty matches all types.
+          type: string
       responses:
         "200":
           content:
@@ -3717,6 +3733,8 @@ components:
     JiraIssueSummary:
       properties:
         assignee:
+          type: string
+        assigneeAccountId:
           type: string
         key:
           type: string

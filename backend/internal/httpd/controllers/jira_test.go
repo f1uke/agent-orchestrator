@@ -30,16 +30,18 @@ type stubJira struct {
 	gotMoveKey  string
 	gotMoveID   string
 
-	searchRes  []jiraadapter.IssueSummary
-	searchErr  error
-	gotProject string
-	gotText    string
-	projectRes []jiraadapter.ProjectRef
-	projectErr error
-	bindRes    jiraadapter.IssueSummary
-	bindErr    error
-	gotBindKey string
-	unlinkErr  error
+	searchRes   []jiraadapter.IssueSummary
+	searchErr   error
+	gotProject  string
+	gotText     string
+	gotAssignee string
+	gotTypes    []string
+	projectRes  []jiraadapter.ProjectRef
+	projectErr  error
+	bindRes     jiraadapter.IssueSummary
+	bindErr     error
+	gotBindKey  string
+	unlinkErr   error
 }
 
 func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, error) {
@@ -57,8 +59,8 @@ func (s *stubJira) Move(_ context.Context, _ domain.SessionID, key, transitionID
 	return s.moveRes, s.moveErr
 }
 
-func (s *stubJira) Search(_ context.Context, project, text string) ([]jiraadapter.IssueSummary, error) {
-	s.gotProject, s.gotText = project, text
+func (s *stubJira) Search(_ context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error) {
+	s.gotProject, s.gotText, s.gotAssignee, s.gotTypes = project, text, assignee, types
 	return s.searchRes, s.searchErr
 }
 
@@ -279,12 +281,21 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 		{Key: "DEMO-2272", Type: "Story", Title: "Example issue summary", Status: "Ready for QA", StatusCategory: "new",
 			Sprint: &jiraadapter.Sprint{Name: "Sprint 2026-14", State: "active"}},
 	}}
-	rec := serveJiraReq(t, stub, http.MethodGet, "/jira/search?q=eligible&project=DEMO", nil)
+	rec := serveJiraReq(t, stub, http.MethodGet,
+		"/jira/search?q=eligible&project=DEMO&assignee=acc-123&type=Story,Bug", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	if stub.gotText != "eligible" || stub.gotProject != "DEMO" {
 		t.Errorf("service got text=%q project=%q", stub.gotText, stub.gotProject)
+	}
+	// The assignee (accountId) and comma-separated types are threaded into the
+	// service so it can push them into the server-side JQL.
+	if stub.gotAssignee != "acc-123" {
+		t.Errorf("service got assignee=%q, want acc-123", stub.gotAssignee)
+	}
+	if len(stub.gotTypes) != 2 || stub.gotTypes[0] != "Story" || stub.gotTypes[1] != "Bug" {
+		t.Errorf("service got types=%v, want [Story Bug]", stub.gotTypes)
 	}
 	var body JiraSearchResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
