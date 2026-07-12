@@ -19,6 +19,7 @@ type Issue struct {
 	Assignee string
 	Reporter string
 
+	Parent      *ParentRef // set for subtasks / epic children (breadcrumb in the detail view)
 	Sprint      *Sprint
 	Description []adf.Node
 	Subtasks    []Subtask

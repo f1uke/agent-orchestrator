@@ -519,15 +519,18 @@ type JiraIssue struct {
 	// Status is the human status name; StatusCategory is Jira's category key
 	// (new|indeterminate|done); StatusColor is the category colorName. The UI
 	// tints the status pill from the category, not the free-form name.
-	Status         string        `json:"status,omitempty"`
-	StatusCategory string        `json:"statusCategory,omitempty"`
-	StatusColor    string        `json:"statusColor,omitempty"`
-	Priority       string        `json:"priority,omitempty"`
-	Assignee       string        `json:"assignee,omitempty"`
-	Reporter       string        `json:"reporter,omitempty"`
-	Sprint         *JiraSprint   `json:"sprint,omitempty"`
-	Description    []adf.Node    `json:"description,omitempty"`
-	Subtasks       []JiraSubtask `json:"subtasks,omitempty"`
+	Status         string `json:"status,omitempty"`
+	StatusCategory string `json:"statusCategory,omitempty"`
+	StatusColor    string `json:"statusColor,omitempty"`
+	Priority       string `json:"priority,omitempty"`
+	Assignee       string `json:"assignee,omitempty"`
+	Reporter       string `json:"reporter,omitempty"`
+	// Parent is the issue's parent (set for subtasks / epic children), so the
+	// Browse Jira detail view can show a clickable parent breadcrumb.
+	Parent      *JiraParentRef `json:"parent,omitempty"`
+	Sprint      *JiraSprint    `json:"sprint,omitempty"`
+	Description []adf.Node     `json:"description,omitempty"`
+	Subtasks    []JiraSubtask  `json:"subtasks,omitempty"`
 }
 
 // JiraSprint is the issue's current/most-relevant sprint.
@@ -584,6 +587,26 @@ type JiraMoveResponse struct {
 	Status         string           `json:"status,omitempty"`
 	StatusCategory string           `json:"statusCategory,omitempty"`
 	StatusColor    string           `json:"statusColor,omitempty"`
+}
+
+// JiraIssueResponse is the body of GET /jira/issue — one issue's full display
+// projection, read live by key for the pre-session Browse Jira detail view.
+type JiraIssueResponse struct {
+	Issue *JiraIssue `json:"issue,omitempty"`
+}
+
+// JiraIssueQuery is the query string of GET /jira/issue and GET
+// /jira/issue/transitions (the pre-session detail view reads by key).
+type JiraIssueQuery struct {
+	Key string `query:"key" description:"The issue key to read (e.g. PROJ-123)."`
+}
+
+// JiraIssueMoveRequest is the body of POST /jira/issue/move — a by-key status move
+// (the pre-session detail view's Move-status). Carries only a key + transition id;
+// still the ONE sanctioned Jira write.
+type JiraIssueMoveRequest struct {
+	Key          string `json:"key" description:"The issue key to move (e.g. PROJ-123)."`
+	TransitionID string `json:"transitionId" description:"The chosen transition id (read live from the issue)."`
 }
 
 // JiraIssueSummary is one search-result / picker row — the structured fields

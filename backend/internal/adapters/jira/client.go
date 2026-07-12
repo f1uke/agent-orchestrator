@@ -201,6 +201,7 @@ func (c *Client) mapIssue(raw rawIssue) Issue {
 		iss.StatusCategory = st.StatusCategory.Key
 		iss.StatusColor = st.StatusCategory.ColorName
 	}
+	iss.Parent = decodeParent(f["parent"])
 	iss.Sprint = c.detectSprint(f)
 	iss.Subtasks = decodeSubtasks(f["subtasks"])
 	return iss

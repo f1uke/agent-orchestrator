@@ -516,6 +516,49 @@ func TestSearch_NilSearcher(t *testing.T) {
 	}
 }
 
+func TestGetIssue_ValidatesKeyThenReads(t *testing.T) {
+	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101", Title: "hi"}}
+	svc := New(fakeSessions{}, issues, nil, nil)
+
+	// Malformed key never hits the adapter.
+	if _, err := svc.GetIssue(context.Background(), "not a key"); !errors.Is(err, jiraadapter.ErrBadKey) {
+		t.Errorf("err = %v, want ErrBadKey", err)
+	}
+	// A valid key (case-normalized) reads via the adapter.
+	iss, err := svc.GetIssue(context.Background(), "demo-101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iss.Key != "DEMO-101" || issues.got != "DEMO-101" {
+		t.Errorf("got issue %+v, adapter key %q", iss, issues.got)
+	}
+}
+
+func TestMoveIssue_MovesByKeyAndReReadsStatus(t *testing.T) {
+	mover := &fakeMover{}
+	issues := &fakeIssues{iss: jiraadapter.Issue{Key: "DEMO-101", Status: "In Progress", StatusCategory: "indeterminate"}}
+	svc := New(fakeSessions{}, issues, mover, nil)
+
+	res, err := svc.MoveIssue(context.Background(), "DEMO-101", "31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mover.gotKey != "DEMO-101" || mover.gotID != "31" {
+		t.Errorf("mover got key=%q id=%q", mover.gotKey, mover.gotID)
+	}
+	// Best-effort re-read carries the new status back (no session/tree scope).
+	if res.Key != "DEMO-101" || res.Status != "In Progress" || res.StatusCategory != "indeterminate" {
+		t.Errorf("move result = %+v", res)
+	}
+}
+
+func TestIssueTransitions_ValidatesKey(t *testing.T) {
+	svc := New(fakeSessions{}, &fakeIssues{}, &fakeMover{}, nil)
+	if _, err := svc.IssueTransitions(context.Background(), "nope"); !errors.Is(err, jiraadapter.ErrBadKey) {
+		t.Errorf("err = %v, want ErrBadKey", err)
+	}
+}
+
 func TestResolve_BadKey(t *testing.T) {
 	if _, err := newSearchSvc(&fakeSearcher{}).Resolve(context.Background(), "not a key"); !errors.Is(err, jiraadapter.ErrBadKey) {
 		t.Errorf("err = %v, want ErrBadKey", err)

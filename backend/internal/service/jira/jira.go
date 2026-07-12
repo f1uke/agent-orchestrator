@@ -263,6 +263,62 @@ func (s *Service) Search(ctx context.Context, p SearchParams) ([]jiraadapter.Iss
 	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, p), jiraadapter.SearchMaxResults)
 }
 
+// GetIssue fetches one issue's full display projection by key — the read behind the
+// Browse Jira detail view (pre-session, so no session binding). Validates the key
+// shape, then reads live. Errors surface to the caller so the detail panel can show
+// why the fetch failed (unlike the session Context path, which folds them into a
+// FetchError). Reuses the same adapter read as the session display.
+func (s *Service) GetIssue(ctx context.Context, key string) (jiraadapter.Issue, error) {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if !fullKeyRE.MatchString(key) {
+		return jiraadapter.Issue{}, fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.issues == nil {
+		return jiraadapter.Issue{}, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	return s.issues.Get(ctx, key)
+}
+
+// IssueTransitions lists the live status transitions for any issue by key — the
+// Browse Jira detail view's Move-status entry, pre-session. Unlike the session
+// Transitions path it is not scoped to a session's issue tree (there is no session);
+// the user is acting directly on the issue they opened.
+func (s *Service) IssueTransitions(ctx context.Context, key string) ([]jiraadapter.Transition, error) {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if !fullKeyRE.MatchString(key) {
+		return nil, fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.moves == nil {
+		return nil, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	return s.moves.Transitions(ctx, key)
+}
+
+// MoveIssue applies a status transition to any issue by key — the one sanctioned
+// write, from the Browse Jira detail view (pre-session). On success it re-reads the
+// issue (best-effort) so the result carries the new status.
+func (s *Service) MoveIssue(ctx context.Context, key, transitionID string) (MoveResult, error) {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if !fullKeyRE.MatchString(key) {
+		return MoveResult{}, fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.moves == nil {
+		return MoveResult{}, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	if err := s.moves.Move(ctx, key, transitionID); err != nil {
+		return MoveResult{}, err
+	}
+	res := MoveResult{Key: key}
+	if s.issues != nil {
+		if iss, err := s.issues.Get(ctx, key); err == nil {
+			res.Status = iss.Status
+			res.StatusCategory = iss.StatusCategory
+			res.StatusColor = iss.StatusColor
+		}
+	}
+	return res, nil
+}
+
 // Projects lists the user's Jira projects (optionally filtered) for the project
 // picker.
 func (s *Service) Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error) {

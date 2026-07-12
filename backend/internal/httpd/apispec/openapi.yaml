@@ -189,6 +189,139 @@ paths:
       summary: Run the legacy AO project import through the daemon store
       tags:
       - import
+  /api/v1/jira/issue:
+    get:
+      operationId: getJiraIssue
+      parameters:
+      - description: The issue key to read (e.g. PROJ-123).
+        in: query
+        name: key
+        schema:
+          description: The issue key to read (e.g. PROJ-123).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraIssueResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read one Jira issue's full display projection by key (pre-session detail
+        view)
+      tags:
+      - jira
+  /api/v1/jira/issue/move:
+    post:
+      operationId: moveJiraIssue
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraIssueMoveRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraMoveResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Apply a status transition to any Jira issue by key — the one sanctioned
+        write
+      tags:
+      - jira
+  /api/v1/jira/issue/transitions:
+    get:
+      operationId: listJiraIssueTransitions
+      parameters:
+      - description: The issue key to read (e.g. PROJ-123).
+        in: query
+        name: key
+        schema:
+          description: The issue key to read (e.g. PROJ-123).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraTransitionsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List any Jira issue's available status transitions by key (read live)
+      tags:
+      - jira
   /api/v1/jira/projects:
     get:
       operationId: listJiraProjects
@@ -3725,6 +3858,8 @@ components:
           type: array
         key:
           type: string
+        parent:
+          $ref: '#/components/schemas/JiraParentRef'
         priority:
           type: string
         reporter:
@@ -3749,6 +3884,23 @@ components:
           type: string
       required:
       - key
+      type: object
+    JiraIssueMoveRequest:
+      properties:
+        key:
+          description: The issue key to move (e.g. PROJ-123).
+          type: string
+        transitionId:
+          description: The chosen transition id (read live from the issue).
+          type: string
+      required:
+      - key
+      - transitionId
+      type: object
+    JiraIssueResponse:
+      properties:
+        issue:
+          $ref: '#/components/schemas/JiraIssue'
       type: object
     JiraIssueSummary:
       properties:
