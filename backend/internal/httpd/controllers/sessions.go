@@ -60,6 +60,7 @@ type SessionService interface {
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
 	SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
+	SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
@@ -97,6 +98,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/preview", c.setPreview)
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
 	r.Put("/sessions/{sessionId}/auto-nudge", c.setAutoNudge)
+	r.Put("/sessions/{sessionId}/keep-warm", c.setKeepWarm)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
 	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
@@ -168,7 +170,7 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 	if in.Kind == "" {
 		in.Kind = domain.KindWorker
 	}
-	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy}
+	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge}
 	// startImmediately absent/null/true keeps the current spawn-now behavior;
 	// false stages the worker as a prepared TODO on the board.
 	deferred := in.StartImmediately != nil && !*in.StartImmediately
@@ -392,6 +394,27 @@ func (c *SessionsController) setAutoNudge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	updated, err := c.Svc.SetAutoNudge(r.Context(), sessionID(r), in.Override)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
+}
+
+// setKeepWarm toggles whether a worker suspends-in-place on merge (card stays on
+// the board, resumable) rather than terminating to Done
+// (feature/merge-suspend-in-place).
+func (c *SessionsController) setKeepWarm(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/keep-warm")
+		return
+	}
+	var in SetSessionKeepWarmRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	updated, err := c.Svc.SetKeepWarmOnMerge(r.Context(), sessionID(r), in.Enabled)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

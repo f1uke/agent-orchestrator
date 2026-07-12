@@ -153,6 +153,7 @@ var schemaNames = map[string]string{
 	"ControllersSessionPreviewResponse":           "SessionPreviewResponse",
 	"ControllersSetSessionPreviewRequest":         "SetSessionPreviewRequest",
 	"ControllersSetAutoNudgeRequest":              "SetAutoNudgeRequest",
+	"ControllersSetSessionKeepWarmRequest":        "SetSessionKeepWarmRequest",
 	"ControllersRenameSessionRequest":             "RenameSessionRequest",
 	"ControllersUpdateTodoSpecRequest":            "UpdateTodoSpecRequest",
 	"ControllersRenameSessionResponse":            "RenameSessionResponse",
@@ -862,6 +863,19 @@ func sessionOperations() []operation {
 			summary:    "Set (or clear) the per-session auto-nudge-on-comments override",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.SetAutoNudgeRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SessionResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/keep-warm", id: "setSessionKeepWarm", tag: "sessions",
+			summary:    "Toggle suspend-in-place-on-merge (keep-warm) for a worker session",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetSessionKeepWarmRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SessionResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},

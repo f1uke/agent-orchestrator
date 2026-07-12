@@ -17,7 +17,7 @@ const getSession = `-- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
 FROM sessions WHERE id = ?
 `
 
@@ -54,6 +54,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.CreatedBy,
 		&i.IsSuspended,
 		&i.LastOpenedAt,
+		&i.KeepWarmOnMerge,
 	)
 	return i, err
 }
@@ -64,8 +65,8 @@ INSERT INTO sessions (
     activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -96,6 +97,7 @@ type InsertSessionParams struct {
 	CreatedBy         string
 	IsSuspended       bool
 	LastOpenedAt      sql.NullTime
+	KeepWarmOnMerge   bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -129,6 +131,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.CreatedBy,
 		arg.IsSuspended,
 		arg.LastOpenedAt,
+		arg.KeepWarmOnMerge,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -139,7 +142,7 @@ const listAllSessions = `-- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
 FROM sessions ORDER BY project_id, num
 `
 
@@ -182,6 +185,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.CreatedBy,
 			&i.IsSuspended,
 			&i.LastOpenedAt,
+			&i.KeepWarmOnMerge,
 		); err != nil {
 			return nil, err
 		}
@@ -200,7 +204,7 @@ const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -243,6 +247,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.CreatedBy,
 			&i.IsSuspended,
 			&i.LastOpenedAt,
+			&i.KeepWarmOnMerge,
 		); err != nil {
 			return nil, err
 		}
@@ -355,6 +360,27 @@ func (q *Queries) SetSessionIssueBinding(ctx context.Context, arg SetSessionIssu
 	return result.RowsAffected()
 }
 
+const setSessionKeepWarmOnMerge = `-- name: SetSessionKeepWarmOnMerge :execrows
+UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionKeepWarmOnMergeParams struct {
+	KeepWarmOnMerge bool
+	UpdatedAt       time.Time
+	ID              domain.SessionID
+}
+
+// Toggle whether a worker suspends-in-place (keeps its card on the board) rather
+// than terminating to Done when its PR merges (feature/merge-suspend-in-place).
+// Bumps updated_at so the sessions_cdc_update trigger refreshes the board.
+func (q *Queries) SetSessionKeepWarmOnMerge(ctx context.Context, arg SetSessionKeepWarmOnMergeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionKeepWarmOnMerge, arg.KeepWarmOnMerge, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setSessionPreviewURL = `-- name: SetSessionPreviewURL :execrows
 UPDATE sessions SET preview_url = ?, preview_revision = preview_revision + 1, updated_at = ? WHERE id = ?
 `
@@ -382,7 +408,7 @@ UPDATE sessions SET
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
     preview_url = ?, preview_revision = ?, auto_nudge_comments = ?,
-    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, updated_at = ?
+    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, keep_warm_on_merge = ?, updated_at = ?
 WHERE id = ?
 `
 
@@ -411,6 +437,7 @@ type UpdateSessionParams struct {
 	CreatedBy         string
 	IsSuspended       bool
 	LastOpenedAt      sql.NullTime
+	KeepWarmOnMerge   bool
 	UpdatedAt         time.Time
 	ID                domain.SessionID
 }
@@ -441,6 +468,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.CreatedBy,
 		arg.IsSuspended,
 		arg.LastOpenedAt,
+		arg.KeepWarmOnMerge,
 		arg.UpdatedAt,
 		arg.ID,
 	)

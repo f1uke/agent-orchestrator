@@ -7,8 +7,8 @@ INSERT INTO sessions (
     activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateSession :exec
 UPDATE sessions SET
@@ -16,28 +16,28 @@ UPDATE sessions SET
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
     preview_url = ?, preview_revision = ?, auto_nudge_comments = ?,
-    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, updated_at = ?
+    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, keep_warm_on_merge = ?, updated_at = ?
 WHERE id = ?;
 
 -- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
 FROM sessions WHERE id = ?;
 
 -- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
 FROM sessions WHERE project_id = ? ORDER BY num;
 
 -- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
 FROM sessions ORDER BY project_id, num;
 
 
@@ -52,6 +52,12 @@ UPDATE sessions SET preview_url = ?, preview_revision = preview_revision + 1, up
 
 -- name: SetSessionAutoNudge :execrows
 UPDATE sessions SET auto_nudge_comments = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetSessionKeepWarmOnMerge :execrows
+-- Toggle whether a worker suspends-in-place (keeps its card on the board) rather
+-- than terminating to Done when its PR merges (feature/merge-suspend-in-place).
+-- Bumps updated_at so the sessions_cdc_update trigger refreshes the board.
+UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetSessionIssueBinding :execrows
 -- Set (or clear) a session's Jira binding after it is created: issue_id becomes

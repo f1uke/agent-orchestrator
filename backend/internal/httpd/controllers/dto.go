@@ -220,6 +220,11 @@ type SpawnSessionRequest struct {
 	// CreatedBy is the orchestrator session id queuing a deferred TODO, kept for
 	// the report-back. `ao spawn --todo` sets it from AO_SESSION_ID.
 	CreatedBy domain.SessionID `json:"createdBy,omitempty"`
+	// KeepWarmOnMerge marks a worker expected to open more PRs: when its PR merges
+	// it SUSPENDS in place (card stays on the board, resumable) instead of
+	// terminating to Done (feature/merge-suspend-in-place). Default false — an
+	// ordinary single-PR worker still auto-archives on merge.
+	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
 }
 
 // UpdateTodoSpecRequest is the body of PATCH /api/v1/sessions/{sessionId}/spec:
@@ -265,6 +270,13 @@ type SetSessionPreviewRequest struct {
 // clears it so the session inherits the global auto-nudge default.
 type SetAutoNudgeRequest struct {
 	Override *bool `json:"override"`
+}
+
+// SetSessionKeepWarmRequest is the body of PUT
+// /api/v1/sessions/{sessionId}/keep-warm: enable/disable
+// suspend-in-place-on-merge for a worker.
+type SetSessionKeepWarmRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
 // RenameSessionResponse is the body of PATCH /api/v1/sessions/{sessionId}.

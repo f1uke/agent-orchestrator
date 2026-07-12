@@ -238,6 +238,40 @@ func TestReactivatedSessionSurfacesAsNeedsYou(t *testing.T) {
 	}
 }
 
+// A WORKER suspended after its PR merged (feature/merge-suspend-in-place) must
+// surface as needs_input — the "Needs you" lane — so its card stays visible with
+// a Continue/Close chip instead of the merged status archiving it to Done. The
+// override is narrow: it fires only on the merge signature (suspended + a merged
+// PR + no open PR). A non-suspended merged session still reads merged; an open PR
+// still wins (an idle-suspended in-review session keeps its lane); a suspended
+// session with no merged PR is unaffected (idle-suspend unchanged).
+func TestSuspendedMergedSurfacesAsNeedsYou(t *testing.T) {
+	suspended := func(activity domain.ActivityState) domain.SessionRecord {
+		r := statusRec(activity, false)
+		r.IsSuspended = true
+		return r
+	}
+	tests := []struct {
+		name string
+		rec  domain.SessionRecord
+		prs  []domain.PRFacts
+		want domain.SessionStatus
+	}{
+		{"suspended-merged-needs-you", suspended(domain.ActivityIdle), statusPR(domain.PRFacts{Merged: true}), domain.StatusNeedsInput},
+		{"non-suspended-merged-stays-merged", statusRec(domain.ActivityIdle, false), statusPR(domain.PRFacts{Merged: true}), domain.StatusMerged},
+		{"suspended-open-pr-keeps-its-lane", suspended(domain.ActivityIdle), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), domain.StatusMergeable},
+		{"suspended-no-merged-pr-unaffected", suspended(domain.ActivityIdle), nil, domain.StatusIdle},
+		{"suspended-but-terminated-stays-merged", func() domain.SessionRecord { r := suspended(domain.ActivityIdle); r.IsTerminated = true; return r }(), statusPR(domain.PRFacts{Merged: true}), domain.StatusMerged},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deriveStatus(tt.rec, tt.prs, statusNow, true, domain.ApprovalRule{}); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A recap / auto-summary turn ends the turn (a Stop hook -> idle); Claude Code
 // then emits an idle_prompt Notification while the session sits quiet. That
 // notification is INFORMATIONAL and must not make an idle, finished session look

@@ -300,6 +300,13 @@ export type WorkspaceSession = {
 	 */
 	isSuspended?: boolean;
 	/**
+	 * True when this worker is expected to open MORE PRs, so a PR merge SUSPENDS it
+	 * in place (card stays on the board, resumable) instead of terminating it to
+	 * Done (feature/merge-suspend-in-place). Opt-in per session via
+	 * `ao spawn --keep-warm` or the board card toggle; default false.
+	 */
+	keepWarmOnMerge?: boolean;
+	/**
 	 * ISO timestamp when the idle sweep will suspend this live session if no
 	 * further activity arrives (idle reference + the daemon's idle TTL). Absent
 	 * when the sweep is disabled or the session is not a live suspend candidate
@@ -397,6 +404,28 @@ export function openPRs(session: WorkspaceSession): PullRequestFacts[] {
 
 export function mergedPRCount(session: WorkspaceSession): number {
 	return session.prs.filter((pr) => pr.state === "merged").length;
+}
+
+/**
+ * A worker SUSPENDED after its PR merged (feature/merge-suspend-in-place): its
+ * card stays on the board (the daemon surfaces it as needs_input, not merged) with
+ * a "Merged · Continue / Close" affordance instead of vanishing to Done. This is
+ * exactly the backend completion bar — suspended AND every PR is terminal AND at
+ * least one merged — so it never collides with an idle-suspended session (which
+ * has no merged-completion state, hence shows the plain "Paused" chip).
+ */
+export function isMergeSuspended(session: WorkspaceSession): boolean {
+	if (!session.isSuspended || session.prs.length === 0) return false;
+	return (
+		session.prs.every((pr) => pr.state === "merged" || pr.state === "closed") &&
+		session.prs.some((pr) => pr.state === "merged")
+	);
+}
+
+/** The merged PR to name in the merge-suspend chip: the highest (most recent) number. */
+export function mergedSuspendPRNumber(session: WorkspaceSession): number | undefined {
+	const merged = session.prs.filter((pr) => pr.state === "merged").map((pr) => pr.number);
+	return merged.length ? Math.max(...merged) : undefined;
 }
 
 /** The highest-priority PR for compact one-line surfaces (board card, sidebar). */

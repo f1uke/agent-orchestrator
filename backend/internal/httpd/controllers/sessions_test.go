@@ -182,6 +182,16 @@ func (f *fakeSessionService) SetAutoNudge(_ context.Context, id domain.SessionID
 	return s, nil
 }
 
+func (f *fakeSessionService) SetKeepWarmOnMerge(_ context.Context, id domain.SessionID, enabled bool) (domain.Session, error) {
+	s, ok := f.sessions[id]
+	if !ok {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	s.KeepWarmOnMerge = enabled
+	f.sessions[id] = s
+	return s, nil
+}
+
 func (f *fakeSessionService) Restore(_ context.Context, id domain.SessionID) (domain.Session, error) {
 	s := f.sessions[id]
 	s.IsTerminated = false

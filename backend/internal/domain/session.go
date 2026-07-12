@@ -84,6 +84,15 @@ type SessionRecord struct {
 	// session resumes it in place (recreate tmux, clear this flag). Durable fact,
 	// surfaced in the API read model for the paused affordance + countdown.
 	IsSuspended bool `json:"isSuspended,omitempty"`
+	// KeepWarmOnMerge marks a WORKER expected to open MORE PRs after the current
+	// one merges (an orchestrator-dispatched multi-slice worker). When true, a PR
+	// merge that would finish the session SUSPENDS it in place (card stays on the
+	// board, resumable) instead of terminating it to Done
+	// (feature/merge-suspend-in-place). Default false: an ordinary single-PR worker
+	// still auto-archives to Done on merge. Opt-in per session via
+	// `ao spawn --keep-warm` or the board card toggle. Durable fact, surfaced in the
+	// API read model so the toggle reflects its state.
+	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
 	// LastOpenedAt is when the user last OPENED/selected this session in the UI
 	// (the /wake signal). It feeds ONLY the idle-suspend keepalive — idleReference
 	// takes the later of Activity.LastActivityAt and this — so viewing a session

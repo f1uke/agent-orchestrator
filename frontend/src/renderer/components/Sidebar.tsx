@@ -23,6 +23,7 @@ import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
+	isMergeSuspended,
 	isOrchestratorSession,
 	jiraKeyFromIssueId,
 	newestActiveOrchestrator,
@@ -72,6 +73,7 @@ import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { MergeSuspendChip } from "./MergeSuspendChip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { Button } from "./ui/button";
 
@@ -817,7 +819,11 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 				hover pencil never collides with it; hidden while collapsed to the icon
 				rail. */}
 				<span className="shrink-0 group-data-[collapsible=icon]:hidden">
-					<IdleStatusChip session={session} compact />
+					{isMergeSuspended(session) ? (
+						<MergeSuspendChip session={session} compact />
+					) : (
+						<IdleStatusChip session={session} compact />
+					)}
 				</span>
 			</button>
 			{/* Pencil reveals on row hover/focus (named group on SidebarMenuSubItem);

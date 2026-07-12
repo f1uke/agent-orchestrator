@@ -19,6 +19,8 @@ import {
 	workerStatusPulses,
 	openPRs,
 	mergedPRCount,
+	isMergeSuspended,
+	mergedSuspendPRNumber,
 	primaryPR,
 	sortedPRs,
 	type AttentionZone,
@@ -402,6 +404,45 @@ describe("PR helpers", () => {
 
 	it("primaryPR is undefined when there are no PRs", () => {
 		expect(primaryPR(sessionWith({ prs: [] }))).toBeUndefined();
+	});
+});
+
+describe("isMergeSuspended / mergedSuspendPRNumber", () => {
+	it("is true for a suspended worker whose PRs are all terminal with ≥1 merged", () => {
+		const s = sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "merged" })] });
+		expect(isMergeSuspended(s)).toBe(true);
+		expect(mergedSuspendPRNumber(s)).toBe(7);
+	});
+
+	it("names the highest merged PR number when several merged", () => {
+		const s = sessionWith({
+			isSuspended: true,
+			prs: [pr({ number: 3, state: "merged" }), pr({ number: 9, state: "merged" }), pr({ number: 5, state: "closed" })],
+		});
+		expect(isMergeSuspended(s)).toBe(true);
+		expect(mergedSuspendPRNumber(s)).toBe(9);
+	});
+
+	it("is false when NOT suspended (a plain merged session archives to Done)", () => {
+		expect(isMergeSuspended(sessionWith({ isSuspended: false, prs: [pr({ number: 7, state: "merged" })] }))).toBe(
+			false,
+		);
+	});
+
+	it("is false when an open PR remains (still live) — this is idle-suspend territory", () => {
+		const s = sessionWith({
+			isSuspended: true,
+			prs: [pr({ number: 7, state: "merged" }), pr({ number: 8, state: "open" })],
+		});
+		expect(isMergeSuspended(s)).toBe(false);
+	});
+
+	it("is false when suspended but nothing merged (all closed, or no PRs) — idle-suspend", () => {
+		expect(isMergeSuspended(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] }))).toBe(false);
+		expect(isMergeSuspended(sessionWith({ isSuspended: true, prs: [] }))).toBe(false);
+		expect(
+			mergedSuspendPRNumber(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] })),
+		).toBeUndefined();
 	});
 });
 

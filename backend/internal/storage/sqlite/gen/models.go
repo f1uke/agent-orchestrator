@@ -193,6 +193,7 @@ type Session struct {
 	CreatedBy         string
 	IsSuspended       bool
 	LastOpenedAt      sql.NullTime
+	KeepWarmOnMerge   bool
 }
 
 type SessionWorktree struct {

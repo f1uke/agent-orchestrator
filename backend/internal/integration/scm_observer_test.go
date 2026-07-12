@@ -386,8 +386,14 @@ func TestSCMObserverEndToEnd(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 		}
+		// An ordinary worker (keep_warm_on_merge=false, the default) still terminates
+		// to Done on merge. The suspend-in-place path is opt-in (keep-warm) and
+		// covered by the lifecycle unit tests (feature/merge-suspend-in-place).
 		if !rec.IsTerminated {
 			t.Fatalf("merged observation should MarkTerminated the session: %+v", rec)
+		}
+		if rec.IsSuspended {
+			t.Fatalf("a non-keep-warm worker must terminate, not suspend, on merge: %+v", rec)
 		}
 		if got := f.spy.count(); got != 0 {
 			t.Fatalf("merged observation must not nudge, got %d msgs: %+v", got, f.spy.snapshot())
@@ -558,7 +564,9 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 		}
 
 		// Poll 3: the child merges too. Now every PR is merged/closed and at least
-		// one merged, so the session completes and terminates.
+		// one merged, so the session completes and (keep_warm_on_merge=false, the
+		// default) terminates. The opt-in suspend-in-place path is covered by the
+		// lifecycle unit tests (feature/merge-suspend-in-place).
 		f.provider.observations[202] = mergedSCMObservationBranches(childURL, 202, "sha-child", "feat/x/auth", "feat/x")
 		if err := f.observer.Poll(ctx); err != nil {
 			t.Fatalf("Poll 3: %v", err)

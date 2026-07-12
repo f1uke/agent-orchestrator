@@ -70,6 +70,7 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/sessions/{sessionId}/comment-reply",
 	"/api/v1/sessions/{sessionId}/comment-resolve",
 	"/api/v1/sessions/{sessionId}/diff-context",
+	"/api/v1/sessions/{sessionId}/keep-warm",
 	"/api/v1/sessions/{sessionId}/kill",
 	"/api/v1/sessions/{sessionId}/pr",
 	"/api/v1/sessions/{sessionId}/pr-comments",
