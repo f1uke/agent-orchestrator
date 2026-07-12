@@ -322,6 +322,32 @@ paths:
       summary: List any Jira issue's available status transitions by key (read live)
       tags:
       - jira
+  /api/v1/jira/myself:
+    get:
+      operationId: getJiraMyself
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraMyselfResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Resolve the authenticated Jira account (accountId) so Browse Jira can
+        highlight the viewer's rows
+      tags:
+      - jira
   /api/v1/jira/projects:
     get:
       operationId: listJiraProjects
@@ -3973,6 +3999,15 @@ components:
       required:
       - sessionId
       - key
+      type: object
+    JiraMyselfResponse:
+      properties:
+        accountId:
+          type: string
+        displayName:
+          type: string
+      required:
+      - accountId
       type: object
     JiraParentRef:
       properties:

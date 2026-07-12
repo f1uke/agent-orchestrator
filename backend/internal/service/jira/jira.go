@@ -42,12 +42,13 @@ type SessionGateway interface {
 	SetIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string) (domain.Session, error)
 }
 
-// IssueSearcher runs cross-project issue search and lists projects — the REST
-// path that replaces the unusable `jira issue list`. Satisfied by
-// *adapters/jira.Client.
+// IssueSearcher runs cross-project issue search, lists projects, and resolves the
+// authenticated account — the live-REST cluster powering Browse Jira (replacing the
+// unusable `jira issue list`). Satisfied by *adapters/jira.Client.
 type IssueSearcher interface {
 	SearchIssues(ctx context.Context, jql string, limit int) ([]jiraadapter.IssueSummary, error)
 	ListProjects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
+	Myself(ctx context.Context) (jiraadapter.CurrentUser, error)
 }
 
 // IssueReader fetches one Jira issue's display projection. Satisfied by
@@ -317,6 +318,16 @@ func (s *Service) MoveIssue(ctx context.Context, key, transitionID string) (Move
 		}
 	}
 	return res, nil
+}
+
+// CurrentUser returns the Jira account that owns the configured API token, so
+// Browse Jira can highlight the rows assigned to the viewer. The id is stable; the
+// caller (and the frontend hook) cache it.
+func (s *Service) CurrentUser(ctx context.Context) (jiraadapter.CurrentUser, error) {
+	if s.searcher == nil {
+		return jiraadapter.CurrentUser{}, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	return s.searcher.Myself(ctx)
 }
 
 // Projects lists the user's Jira projects (optionally filtered) for the project

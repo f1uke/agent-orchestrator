@@ -53,6 +53,9 @@ type stubJira struct {
 	gotIssueTransKey string
 	gotIssueMoveKey  string
 	gotIssueMoveID   string
+
+	me    jiraadapter.CurrentUser
+	meErr error
 }
 
 func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, error) {
@@ -78,6 +81,10 @@ func (s *stubJira) Search(_ context.Context, p jirasvc.SearchParams) ([]jiraadap
 
 func (s *stubJira) Projects(context.Context, string) ([]jiraadapter.ProjectRef, error) {
 	return s.projectRes, s.projectErr
+}
+
+func (s *stubJira) CurrentUser(context.Context) (jiraadapter.CurrentUser, error) {
+	return s.me, s.meErr
 }
 
 func (s *stubJira) SetBinding(_ context.Context, _ domain.SessionID, key string) (jiraadapter.IssueSummary, error) {
@@ -472,6 +479,20 @@ func TestJiraProjects_ReturnsList(t *testing.T) {
 	}
 	if len(body.Projects) != 1 || body.Projects[0].Key != "DEMO" || body.Projects[0].Name != "DEMO project" {
 		t.Errorf("projects = %+v", body.Projects)
+	}
+}
+
+func TestJiraMyself_ReturnsAccount(t *testing.T) {
+	rec := serveJiraReq(t, &stubJira{me: jiraadapter.CurrentUser{AccountID: "acc-42", DisplayName: "Fluke Sattra"}}, http.MethodGet, "/jira/myself", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var body JiraMyselfResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.AccountID != "acc-42" || body.DisplayName != "Fluke Sattra" {
+		t.Errorf("myself = %+v", body)
 	}
 }
 

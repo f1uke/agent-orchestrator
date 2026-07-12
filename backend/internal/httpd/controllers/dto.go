@@ -656,6 +656,14 @@ type JiraProjectsResponse struct {
 	Projects []JiraProject `json:"projects"`
 }
 
+// JiraMyselfResponse is the body of GET /jira/myself — the authenticated Jira
+// account, so Browse Jira can highlight the viewer's own rows. AccountID is empty
+// when Jira access is unconfigured (the endpoint still 200s so the UI degrades).
+type JiraMyselfResponse struct {
+	AccountID   string `json:"accountId"`
+	DisplayName string `json:"displayName,omitempty"`
+}
+
 // JiraSearchQuery is the query string of GET /jira/search.
 type JiraSearchQuery struct {
 	Q            string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`

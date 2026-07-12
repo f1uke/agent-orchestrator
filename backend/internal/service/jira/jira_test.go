@@ -73,6 +73,7 @@ func (f *fakeMover) Move(_ context.Context, key, transitionID string) error {
 type fakeSearcher struct {
 	issues   []jiraadapter.IssueSummary
 	projects []jiraadapter.ProjectRef
+	me       jiraadapter.CurrentUser
 	err      error
 	gotJQL   string
 	gotMax   int
@@ -86,6 +87,10 @@ func (f *fakeSearcher) SearchIssues(_ context.Context, jql string, limit int) ([
 
 func (f *fakeSearcher) ListProjects(_ context.Context, _ string) ([]jiraadapter.ProjectRef, error) {
 	return f.projects, f.err
+}
+
+func (f *fakeSearcher) Myself(_ context.Context) (jiraadapter.CurrentUser, error) {
+	return f.me, f.err
 }
 
 func sessionWith(issueID string) domain.Session {
@@ -305,6 +310,24 @@ func TestMove_MalformedTargetKeyRejected(t *testing.T) {
 
 func newSearchSvc(searcher IssueSearcher) *Service {
 	return New(fakeSessions{sess: sessionWith("")}, &fakeIssues{}, nil, searcher)
+}
+
+func TestCurrentUser(t *testing.T) {
+	s := &fakeSearcher{me: jiraadapter.CurrentUser{AccountID: "acc-42", DisplayName: "Fluke Sattra"}}
+	me, err := newSearchSvc(s).CurrentUser(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if me.AccountID != "acc-42" || me.DisplayName != "Fluke Sattra" {
+		t.Errorf("CurrentUser = %+v, want acc-42/Fluke Sattra", me)
+	}
+}
+
+func TestCurrentUser_Unconfigured(t *testing.T) {
+	svc := New(fakeSessions{sess: sessionWith("")}, &fakeIssues{}, nil, nil)
+	if _, err := svc.CurrentUser(context.Background()); !errors.Is(err, jiraadapter.ErrUnavailable) {
+		t.Errorf("err = %v, want ErrUnavailable when searcher is nil", err)
+	}
 }
 
 func TestBuildJQL_ExactKey(t *testing.T) {
