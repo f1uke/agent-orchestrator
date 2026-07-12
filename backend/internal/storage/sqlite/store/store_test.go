@@ -753,6 +753,53 @@ func TestSessionSuspendedRoundTripAndCDC(t *testing.T) {
 	}
 }
 
+// TestSessionLastOpenedAtRoundTripAndNoCDC covers the user-open keepalive
+// timestamp: it must persist through UpdateSession/GetSession, and stamping it
+// alone (the /wake path — activity + is_terminated unchanged) must fire NO
+// session_updated CDC event. Keeping wake quiet is deliberate: an open must not
+// churn the board or re-render the session; the opening client refetches via its
+// own query invalidation. It is the counterpart to is_suspended, which DOES fire.
+func TestSessionLastOpenedAtRoundTripAndNoCDC(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+
+	r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+	if !r.LastOpenedAt.IsZero() {
+		t.Fatal("fresh session must have a zero LastOpenedAt (never opened)")
+	}
+	base, _ := s.LatestSeq(ctx)
+
+	// Stamp only last_opened_at: activity + is_terminated unchanged.
+	opened := time.Now().UTC().Truncate(time.Second)
+	r.LastOpenedAt = opened
+	if err := s.UpdateSession(ctx, r); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok {
+		t.Fatalf("get session: found=%v err=%v", ok, err)
+	}
+	if !got.LastOpenedAt.Equal(opened) {
+		t.Fatalf("last_opened_at did not round-trip: got %v, want %v", got.LastOpenedAt, opened)
+	}
+
+	evs, err := s.EventsAfter(ctx, base, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := 0
+	for _, e := range evs {
+		if string(e.Type) == "session_updated" {
+			updates++
+		}
+	}
+	if updates != 0 {
+		t.Fatalf("stamping last_opened_at alone must fire no session_updated CDC event; got %d", updates)
+	}
+}
+
 func TestSetSessionPreviewURLBumpsRevisionAndFiresCDCOnSameURL(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

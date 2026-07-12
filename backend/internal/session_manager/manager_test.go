@@ -150,7 +150,7 @@ type fakeLCM struct {
 	terminated map[domain.SessionID]int
 	// suspended counts MarkSuspended calls per session id.
 	suspended map[domain.SessionID]int
-	// touched counts TouchActivity calls per session id.
+	// touched counts TouchIdleClose calls per session id.
 	touched map[domain.SessionID]int
 }
 
@@ -191,7 +191,7 @@ func (l *fakeLCM) MarkSuspended(_ context.Context, id domain.SessionID) error {
 	l.store.sessions[id] = rec
 	return nil
 }
-func (l *fakeLCM) TouchActivity(_ context.Context, id domain.SessionID) error {
+func (l *fakeLCM) TouchIdleClose(_ context.Context, id domain.SessionID) error {
 	if l.touched == nil {
 		l.touched = map[domain.SessionID]int{}
 	}
@@ -200,7 +200,9 @@ func (l *fakeLCM) TouchActivity(_ context.Context, id domain.SessionID) error {
 		return nil
 	}
 	l.touched[id]++
-	rec.Activity.LastActivityAt = time.Now()
+	// Mirror the real lifecycle manager: stamp the user-open time only, never
+	// the activity signal (that is what keeps a mere open from re-aging status).
+	rec.LastOpenedAt = time.Now()
 	l.store.sessions[id] = rec
 	return nil
 }
@@ -3778,10 +3780,17 @@ func TestWake_LiveTouchesResetsIdleReference(t *testing.T) {
 	if rt.created != 0 || rt.destroyed != 0 {
 		t.Fatal("Wake on a live session must not recreate/destroy the runtime")
 	}
-	if !st.sessions["s1"].Activity.LastActivityAt.After(old) {
-		t.Fatal("Wake must reset the idle reference (LastActivityAt) on a live session")
+	got := st.sessions["s1"]
+	// Wake refreshes the idle-suspend keepalive via LastOpenedAt, NOT the
+	// activity signal — so a mere open never re-ages the needs-input/working
+	// status (the open-session status-flip fix).
+	if !got.LastOpenedAt.After(old) {
+		t.Fatal("Wake must stamp LastOpenedAt forward (idle-suspend keepalive) on a live session")
 	}
-	if st.sessions["s1"].Activity.State != domain.ActivityIdle {
+	if !got.Activity.LastActivityAt.Equal(old) {
+		t.Fatalf("Wake must NOT bump Activity.LastActivityAt (status must survive a mere view); was %v, now %v", old, got.Activity.LastActivityAt)
+	}
+	if got.Activity.State != domain.ActivityIdle {
 		t.Fatal("Wake touch must not change the activity state (lane preserved)")
 	}
 }

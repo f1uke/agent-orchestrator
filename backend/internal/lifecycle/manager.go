@@ -353,19 +353,23 @@ func (m *Manager) MarkSuspended(ctx context.Context, id domain.SessionID) error 
 	})
 }
 
-// TouchActivity resets a session's idle reference to now WITHOUT changing its
-// activity state, so opening/selecting the session in the UI restarts its
-// idle-close countdown while leaving its board lane unchanged. A terminated
-// session is left alone (touch must never resurrect one — Restore owns
-// revival). The activity_state is preserved, so the sessions_cdc_update trigger
-// stays quiet on this write alone; the wake endpoint returns the fresh read
-// model and the UI invalidates its workspace query to reflect the reset.
-func (m *Manager) TouchActivity(ctx context.Context, id domain.SessionID) error {
+// TouchIdleClose stamps a session's user-open time (LastOpenedAt) to now, which
+// idleReference folds into the idle-suspend keepalive — so opening/selecting the
+// session in the UI restarts its idle-close countdown while leaving its board
+// lane unchanged. It deliberately does NOT touch Activity.LastActivityAt: status
+// derivation ages needs_input/working off that timestamp, so touching it would
+// re-age an already-"Needs you" session back to idle/"Recently active" with a
+// fresh countdown just because it was viewed. A terminated session is left alone
+// (touch must never resurrect one — Restore owns revival). activity_state is
+// preserved AND last_opened_at is not CDC-watched, so this write fans out no
+// session_updated event; the wake endpoint returns the fresh read model and the
+// UI invalidates its workspace query to reflect the pushed-forward IdleCloseAt.
+func (m *Manager) TouchIdleClose(ctx context.Context, id domain.SessionID) error {
 	return m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated {
 			return cur, false
 		}
-		cur.Activity.LastActivityAt = now
+		cur.LastOpenedAt = now
 		return cur, true
 	})
 }

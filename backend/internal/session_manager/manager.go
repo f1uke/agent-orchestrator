@@ -81,9 +81,11 @@ type lifecycleRecorder interface {
 	// MarkSuspended records that the idle sweep tore a session's runtime down
 	// while keeping it on the board (not terminated). See CloseIdleSessions.
 	MarkSuspended(ctx context.Context, id domain.SessionID) error
-	// TouchActivity resets a session's idle reference to now without changing its
-	// activity state, so a user-open restarts the idle-close countdown. See Wake.
-	TouchActivity(ctx context.Context, id domain.SessionID) error
+	// TouchIdleClose stamps a session's user-open time (LastOpenedAt) to now,
+	// restarting only the idle-close (suspend) countdown. It deliberately does
+	// NOT touch Activity.LastActivityAt, so a user-open never re-ages the
+	// needs-input/working status. See Wake.
+	TouchIdleClose(ctx context.Context, id domain.SessionID) error
 }
 
 type runtimeController interface {
@@ -1462,12 +1464,22 @@ func (m *Manager) reapRuntimeIfAlive(ctx context.Context, sessionID domain.Sessi
 	return nil
 }
 
-// idleReference is the timestamp idle time is measured from: the last activity
-// signal, or the session's creation time when no signal has arrived yet (so a
-// freshly-spawned, not-yet-reporting session is not closed immediately).
+// idleReference is the timestamp idle time is measured from: the LATER of the
+// last agent-activity signal and the last user-open (LastOpenedAt), or the
+// session's creation time when neither has landed yet (so a freshly-spawned,
+// not-yet-reporting session is not closed immediately). Folding in LastOpenedAt
+// is what lets a mere open refresh the idle-suspend TTL — "don't suspend a
+// session you're actively viewing" — WITHOUT the open touching
+// Activity.LastActivityAt, which status derivation ages needs_input/working off.
+// Taking the max means opening never suspends a session EARLIER than activity
+// alone would; it can only extend the keepalive.
 func idleReference(rec domain.SessionRecord) time.Time {
-	if !rec.Activity.LastActivityAt.IsZero() {
-		return rec.Activity.LastActivityAt
+	ref := rec.Activity.LastActivityAt
+	if rec.LastOpenedAt.After(ref) {
+		ref = rec.LastOpenedAt
+	}
+	if !ref.IsZero() {
+		return ref
 	}
 	return rec.CreatedAt
 }
@@ -1523,11 +1535,13 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.Sessi
 }
 
 // Wake is the user-open hook that keeps a session's idle-close timer honest: a
-// user genuinely opening/selecting a session counts as activity. It resumes a
-// suspended session in place (Resume), or, for a live session, resets its
-// idle-close countdown (TouchActivity). A terminated session is left untouched —
-// reviving one is Restore's job, not an idle-timer reset — so Wake can never
-// resurrect a session the user finished. Returns the resulting record.
+// user genuinely opening/selecting a session should not be suspended out from
+// under them. It resumes a suspended session in place (Resume), or, for a live
+// session, refreshes ONLY its idle-close (suspend) countdown (TouchIdleClose) —
+// deliberately NOT its activity signal, so a mere open never re-ages the
+// needs-input/working status. A terminated session is left untouched — reviving
+// one is Restore's job, not an idle-timer reset — so Wake can never resurrect a
+// session the user finished. Returns the resulting record.
 func (m *Manager) Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
@@ -1542,7 +1556,7 @@ func (m *Manager) Wake(ctx context.Context, id domain.SessionID) (domain.Session
 	if rec.IsTerminated {
 		return rec, nil
 	}
-	if err := m.lcm.TouchActivity(ctx, id); err != nil {
+	if err := m.lcm.TouchIdleClose(ctx, id); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("wake %s: touch: %w", id, err)
 	}
 	return m.getRecord(ctx, id)

@@ -169,36 +169,51 @@ func TestMarkSuspended_TerminatedIsNoOp(t *testing.T) {
 	}
 }
 
-func TestTouchActivity_ResetsReferenceKeepsState(t *testing.T) {
+// TestTouchIdleClose_StampsOpenNotActivity locks in the open-session status-flip
+// fix (user report 2026-07-12): opening/selecting an idle session (which POSTs
+// /wake → TouchIdleClose) must refresh the idle-suspend keepalive by stamping
+// LastOpenedAt, WITHOUT bumping Activity.LastActivityAt. Status derivation ages
+// needs_input/working off LastActivityAt, so touching it re-ages an already-
+// "Needs you" session back to idle/"Recently active" with a fresh countdown just
+// for being viewed. The state must also stay put (lane unchanged).
+func TestTouchIdleClose_StampsOpenNotActivity(t *testing.T) {
 	m, st, _ := newManager()
 	old := time.Now().Add(-70 * time.Hour)
 	rec := working("mer-1")
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: old}
+	// LastOpenedAt starts zero (never opened).
 	st.sessions["mer-1"] = rec
-	if err := m.TouchActivity(ctx, "mer-1"); err != nil {
+	if err := m.TouchIdleClose(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
-	if !got.Activity.LastActivityAt.After(old) {
-		t.Fatalf("LastActivityAt not advanced: %v", got.Activity.LastActivityAt)
+	if !got.Activity.LastActivityAt.Equal(old) {
+		t.Fatalf("Touch on open must NOT age Activity.LastActivityAt (was %v, now %v): the needs-input aging must survive a mere view", old, got.Activity.LastActivityAt)
+	}
+	if !got.LastOpenedAt.After(old) {
+		t.Fatalf("Touch on open must stamp LastOpenedAt forward (idle-suspend keepalive), got %v", got.LastOpenedAt)
 	}
 	if got.Activity.State != domain.ActivityIdle {
 		t.Fatalf("activity state changed to %s, want idle (touch must not disturb the lane)", got.Activity.State)
 	}
 }
 
-func TestTouchActivity_TerminatedIsNoOp(t *testing.T) {
+func TestTouchIdleClose_TerminatedIsNoOp(t *testing.T) {
 	m, st, _ := newManager()
 	old := time.Now().Add(-2 * time.Hour)
 	rec := working("mer-1")
 	rec.IsTerminated = true
 	rec.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: old}
 	st.sessions["mer-1"] = rec
-	if err := m.TouchActivity(ctx, "mer-1"); err != nil {
+	if err := m.TouchIdleClose(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
 	}
-	if !st.sessions["mer-1"].Activity.LastActivityAt.Equal(old) {
+	got := st.sessions["mer-1"]
+	if !got.Activity.LastActivityAt.Equal(old) {
 		t.Fatal("touch must never resurrect / re-stamp a terminated session")
+	}
+	if !got.LastOpenedAt.IsZero() {
+		t.Fatal("touch on a terminated session must not stamp LastOpenedAt")
 	}
 }
 
