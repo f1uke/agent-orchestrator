@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { JiraIssueDetail } from "./JiraIssueDetail";
 import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
 import {
 	type JiraIssueSummary,
 	type JiraProject,
@@ -34,12 +35,12 @@ import { cn } from "../lib/utils";
 // server-side search (All types = no clause), so a type filter is complete rather
 // than pared from a capped page; multiple names cover Jira's type-name variance
 // (e.g. "Sub-task" / "Subtask").
-const TYPE_FILTERS: { label: string; jql: string[] }[] = [
-	{ label: "All types", jql: [] },
-	{ label: "Story", jql: ["Story"] },
-	{ label: "Bug", jql: ["Bug"] },
-	{ label: "Sub-task", jql: ["Sub-task", "Subtask"] },
-	{ label: "Support", jql: ["Support", "Service Request"] },
+const TYPE_FILTERS: { label: string; jql: string[]; tip: string }[] = [
+	{ label: "All types", jql: [], tip: "Show every issue type" },
+	{ label: "Story", jql: ["Story"], tip: "Show only Stories" },
+	{ label: "Bug", jql: ["Bug"], tip: "Show only Bugs" },
+	{ label: "Sub-task", jql: ["Sub-task", "Subtask"], tip: "Show only Sub-tasks" },
+	{ label: "Support", jql: ["Support", "Service Request"], tip: "Show only Support requests" },
 ];
 
 const TOAST_MS = 3200;
@@ -252,22 +253,24 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	// A collapse/expand twisty for a node with children, or an aligning spacer.
 	const renderTwisty = (node: TreeNode, hasChildren: boolean, isCollapsed: boolean): ReactNode =>
 		hasChildren ? (
-			<button
-				type="button"
-				className="jira-browse__twisty"
-				aria-label={isCollapsed ? `Expand ${node.issue.key}` : `Collapse ${node.issue.key}`}
-				aria-expanded={!isCollapsed}
-				onClick={(event) => {
-					event.stopPropagation();
-					toggleNode(node.issue.key);
-				}}
-			>
-				{isCollapsed ? (
-					<ChevronRight className="size-3.5" aria-hidden="true" />
-				) : (
-					<ChevronDown className="size-3.5" aria-hidden="true" />
-				)}
-			</button>
+			<SimpleTooltip label={isCollapsed ? "Expand subtasks" : "Collapse subtasks"}>
+				<button
+					type="button"
+					className="jira-browse__twisty"
+					aria-label={isCollapsed ? `Expand ${node.issue.key}` : `Collapse ${node.issue.key}`}
+					aria-expanded={!isCollapsed}
+					onClick={(event) => {
+						event.stopPropagation();
+						toggleNode(node.issue.key);
+					}}
+				>
+					{isCollapsed ? (
+						<ChevronRight className="size-3.5" aria-hidden="true" />
+					) : (
+						<ChevronDown className="size-3.5" aria-hidden="true" />
+					)}
+				</button>
+			</SimpleTooltip>
 		) : (
 			<span className="jira-browse__twisty jira-browse__twisty--spacer" aria-hidden="true" />
 		);
@@ -361,31 +364,40 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 						{issue.status}
 					</span>
 				) : null}
-				<button
-					type="button"
-					className="jira-browse__act"
-					title={orchestrator ? "Send to the project's Orchestrator" : "Start this project's Orchestrator first"}
-					aria-label={`Send ${issue.key} to the Orchestrator`}
-					disabled={!orchestrator || send.isPending}
-					onClick={(event) => {
-						event.stopPropagation();
-						sendToOrchestrator([issue.key]);
-					}}
+				<SimpleTooltip
+					label={orchestrator ? "Send this issue to the Orchestrator" : "Start this project's Orchestrator first"}
 				>
-					<Send className="size-3.5" aria-hidden="true" />
-				</button>
-				<button
-					type="button"
-					className="jira-browse__act jira-browse__act--add"
-					title="Create a session for this issue"
-					aria-label={`Create a session for ${issue.key}`}
-					onClick={(event) => {
-						event.stopPropagation();
-						setCreateIssue(issue);
-					}}
-				>
-					<Plus className="size-3.5" aria-hidden="true" />
-				</button>
+					{/* Wrapped in a span so the tooltip still shows when the button is
+					    disabled (no live Orchestrator) — disabled buttons swallow hover. */}
+					<span className="jira-browse__tipwrap">
+						<button
+							type="button"
+							className="jira-browse__act jira-browse__act--send"
+							aria-label={`Send ${issue.key} to the Orchestrator`}
+							disabled={!orchestrator || send.isPending}
+							onClick={(event) => {
+								event.stopPropagation();
+								sendToOrchestrator([issue.key]);
+							}}
+						>
+							<Send className="size-3.5" aria-hidden="true" />
+							<span className="jira-browse__act-label">Send</span>
+						</button>
+					</span>
+				</SimpleTooltip>
+				<SimpleTooltip label="Start a session for this issue">
+					<button
+						type="button"
+						className="jira-browse__act jira-browse__act--add"
+						aria-label={`Create a session for ${issue.key}`}
+						onClick={(event) => {
+							event.stopPropagation();
+							setCreateIssue(issue);
+						}}
+					>
+						<Plus className="size-3.5" aria-hidden="true" />
+					</button>
+				</SimpleTooltip>
 			</div>
 		);
 	};
@@ -407,262 +419,275 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	};
 
 	return (
-		<div className="jira-browse">
-			<header className="jira-browse__head">
-				<h1 className="jira-browse__h1">
-					Browse Jira <span className="jira-browse__manual">◈ MANUAL · YOU PICK</span>
-				</h1>
-				<p className="jira-browse__sub">
-					Pick a project, then an issue, and start a worker — or hand issues to the Orchestrator. Your last project is
-					remembered. Nothing is imported automatically.
-				</p>
-			</header>
+		<TooltipProvider delayDuration={0}>
+			<div className="jira-browse">
+				<header className="jira-browse__head">
+					<h1 className="jira-browse__h1">
+						Browse Jira <span className="jira-browse__manual">◈ MANUAL · YOU PICK</span>
+					</h1>
+					<p className="jira-browse__sub">
+						Pick a project, then an issue, and start a worker — or hand issues to the Orchestrator. Your last project is
+						remembered. Nothing is imported automatically.
+					</p>
+				</header>
 
-			<div className="jira-browse__content">
-				<div className="jira-browse__controls">
-					{advancedMode ? (
-						<div className="jira-browse__search jira-browse__jql">
-							<span className="jira-browse__jql-tag" aria-hidden="true">
-								JQL
-							</span>
-							<input
-								value={advancedJql}
-								placeholder="project = STAR AND assignee = currentUser() ORDER BY updated DESC"
-								autoComplete="off"
-								autoCapitalize="none"
-								spellCheck={false}
-								aria-label="Advanced JQL query"
-								onChange={(event) => setAdvancedJql(event.target.value)}
-							/>
-							{isFetching ? <Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" /> : null}
-						</div>
-					) : (
-						<>
-							<JiraProjectPicker value={project} onSelect={selectProject} lastUsedKey={project?.key} />
-							<div className="jira-browse__search">
-								<Search className="jira-browse__mag size-3.5" aria-hidden="true" />
+				<div className="jira-browse__content">
+					<div className="jira-browse__controls">
+						{advancedMode ? (
+							<div className="jira-browse__search jira-browse__jql">
+								<span className="jira-browse__jql-tag" aria-hidden="true">
+									JQL
+								</span>
 								<input
-									value={query}
-									disabled={!projectKey}
-									placeholder={projectKey ? `Search issues in ${projectKey}…` : "Pick a project first"}
+									value={advancedJql}
+									placeholder="project = STAR AND assignee = currentUser() ORDER BY updated DESC"
 									autoComplete="off"
 									autoCapitalize="none"
 									spellCheck={false}
-									aria-label="Search issues"
-									onChange={(event) => setQuery(event.target.value)}
+									aria-label="Advanced JQL query"
+									onChange={(event) => setAdvancedJql(event.target.value)}
 								/>
-								{isFetching && projectKey ? (
-									<Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" />
-								) : null}
+								{isFetching ? <Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" /> : null}
 							</div>
-						</>
-					)}
-				</div>
-
-				<div className="jira-browse__filters" role="group" aria-label="Filter and group issues">
-					{advancedMode ? (
-						<>
-							<span className="jira-browse__advanced-note">
-								Advanced JQL drives the search — the structured filters are off.
-							</span>
-							<span className="jira-browse__filters-gap" aria-hidden="true" />
-							<button
-								type="button"
-								className="jira-browse__chip"
-								onClick={() => setAdvancedMode(false)}
-								title="Return to the structured filters"
-							>
-								← Back to filters
-							</button>
-						</>
-					) : (
-						<>
-							{TYPE_FILTERS.map((entry, index) => (
-								<button
-									key={entry.label}
-									type="button"
-									aria-pressed={index === filter}
-									className={cn("jira-browse__chip", index === filter && "is-active")}
-									onClick={() => setFilter(index)}
-								>
-									{entry.label}
-								</button>
-							))}
-							<span className="jira-browse__filters-gap" aria-hidden="true" />
-							<label className="jira-browse__assignee-filter">
-								<span className="jira-browse__assignee-label">Assignee</span>
-								<select
-									value={effectiveAssignee}
-									aria-label="Filter by assignee"
-									onChange={(event) => setAssignee(event.target.value)}
-									disabled={!projectKey}
-								>
-									<option value="">All assignees</option>
-									{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
-									{assignees.map((a) => (
-										<option key={a.name} value={a.name}>
-											{a.name}
-										</option>
-									))}
-								</select>
-							</label>
-							<button
-								type="button"
-								aria-pressed={hideDone}
-								className={cn("jira-browse__chip", hideDone && "is-active")}
-								onClick={() => setHideDone((on) => !on)}
-								title="Hide issues whose status category is Done"
-							>
-								Hide done
-							</button>
-							<button
-								type="button"
-								aria-pressed={activeSprintOnly}
-								className={cn("jira-browse__chip", activeSprintOnly && "is-active")}
-								onClick={() => setActiveSprintOnly((on) => !on)}
-								title="Only issues in an open (active/future) sprint"
-							>
-								Active sprint
-							</button>
-						</>
-					)}
-					<button
-						type="button"
-						aria-pressed={groupSprints}
-						className={cn("jira-browse__chip jira-browse__group-toggle", groupSprints && "is-active")}
-						onClick={() => setGroupSprints((on) => !on)}
-						title="Group issues into sprint sections like the Jira board"
-					>
-						Group by sprint
-					</button>
-					{advancedMode ? null : (
-						<button
-							type="button"
-							className="jira-browse__chip"
-							onClick={() => setAdvancedMode(true)}
-							title="Type raw JQL (replaces the structured filters)"
-						>
-							Advanced JQL
-						</button>
-					)}
-				</div>
-
-				{selected.size > 0 ? (
-					<div className="jira-browse__batchbar" role="group" aria-label="Batch actions">
-						<span className="jira-browse__batchbar-n">{selected.size} selected</span>
-						<button
-							type="button"
-							className="jira-browse__batchbar-send"
-							disabled={!orchestrator || send.isPending}
-							onClick={() => sendToOrchestrator([...selected])}
-							title={`Send ${selected.size} selected to the Orchestrator`}
-							aria-label={`Send ${selected.size} selected to the Orchestrator`}
-						>
-							<Send className="size-3.5" aria-hidden="true" />
-							{send.isPending ? "Sending…" : "Send"}
-						</button>
-						<button type="button" className="jira-browse__batchbar-clear" onClick={() => setSelected(new Set())}>
-							Clear
-						</button>
-						{!orchestrator ? (
-							<span className="jira-browse__batchbar-warn">Start this project's Orchestrator first</span>
-						) : null}
-					</div>
-				) : null}
-
-				{toast ? (
-					<div className="jira-browse__toast" role="status">
-						{toast}
-					</div>
-				) : null}
-
-				{!advancedMode && !projectKey ? (
-					<div className="jira-browse__empty">Pick a project to browse its issues.</div>
-				) : (
-					<div className="jira-browse__list">
-						<div className="jira-browse__lhead">
-							<span className="jira-browse__live" aria-hidden="true" />
-							MATCHING ISSUES
-							<span className="jira-browse__n">
-								{advancedMode ? "Advanced JQL" : project?.name ? `${project.name} (${projectKey})` : projectKey} ·{" "}
-								{results.length} shown
-							</span>
-						</div>
-						{isError ? (
-							<p className="jira-browse__note jira-browse__note--err">
-								{error instanceof Error ? error.message : "Couldn't search Jira."}
-							</p>
-						) : advancedMode && advancedJql.trim().length === 0 ? (
-							<p className="jira-browse__note">Type a JQL query to search.</p>
-						) : isFetching && results.length === 0 ? (
-							<p className="jira-browse__note">Searching…</p>
-						) : results.length === 0 ? (
-							<p className="jira-browse__note">No issues match.</p>
-						) : treeGroups ? (
-							treeGroups.map((group) => {
-								const isCollapsed = collapsedSprints.has(group.name);
-								const count = countTreeNodes(group.nodes);
-								return (
-									<div key={group.name} className="jira-browse__sprint">
-										<button
-											type="button"
-											className="jira-browse__sprint-head"
-											aria-expanded={!isCollapsed}
-											onClick={() => toggleSprint(group.name)}
-										>
-											{isCollapsed ? (
-												<ChevronRight className="size-3.5" aria-hidden="true" />
-											) : (
-												<ChevronDown className="size-3.5" aria-hidden="true" />
-											)}
-											<span className="jira-browse__sprint-name">{group.name}</span>
-											{group.state === "active" && !group.isBacklog ? (
-												<span className="jira-browse__sprint-active">active</span>
-											) : null}
-											<span className="jira-browse__sprint-count">
-												· {count} {count === 1 ? "work item" : "work items"}
-											</span>
-										</button>
-										{isCollapsed ? null : group.nodes.map((node) => renderNode(node, 0))}
-									</div>
-								);
-							})
 						) : (
-							tree.map((node) => renderNode(node, 0))
+							<>
+								<JiraProjectPicker value={project} onSelect={selectProject} lastUsedKey={project?.key} />
+								<div className="jira-browse__search">
+									<Search className="jira-browse__mag size-3.5" aria-hidden="true" />
+									<input
+										value={query}
+										disabled={!projectKey}
+										placeholder={projectKey ? `Search issues in ${projectKey}…` : "Pick a project first"}
+										autoComplete="off"
+										autoCapitalize="none"
+										spellCheck={false}
+										aria-label="Search issues"
+										onChange={(event) => setQuery(event.target.value)}
+									/>
+									{isFetching && projectKey ? (
+										<Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" />
+									) : null}
+								</div>
+							</>
 						)}
 					</div>
-				)}
 
-				<p className="jira-browse__manual-note">
-					◈ <b>Manual by design</b> — open a card for detail, start a worker with <b>+</b>, or{" "}
-					<b>Send to Orchestrator</b> to let it decide. Epics are context-only group headers; subtasks nest under their
-					story. Nothing auto-imports. Read-only search · Move-status is the only write.
-				</p>
+					<div className="jira-browse__filters" role="group" aria-label="Filter and group issues">
+						{advancedMode ? (
+							<>
+								<span className="jira-browse__advanced-note">
+									Advanced JQL drives the search — the structured filters are off.
+								</span>
+								<span className="jira-browse__filters-gap" aria-hidden="true" />
+								<SimpleTooltip label="Return to the structured filters">
+									<button type="button" className="jira-browse__chip" onClick={() => setAdvancedMode(false)}>
+										← Back to filters
+									</button>
+								</SimpleTooltip>
+							</>
+						) : (
+							<>
+								{TYPE_FILTERS.map((entry, index) => (
+									<SimpleTooltip key={entry.label} label={entry.tip}>
+										<button
+											type="button"
+											aria-pressed={index === filter}
+											className={cn("jira-browse__chip", index === filter && "is-active")}
+											onClick={() => setFilter(index)}
+										>
+											{entry.label}
+										</button>
+									</SimpleTooltip>
+								))}
+								<span className="jira-browse__filters-gap" aria-hidden="true" />
+								<label className="jira-browse__assignee-filter">
+									<span className="jira-browse__assignee-label">Assignee</span>
+									<select
+										value={effectiveAssignee}
+										aria-label="Filter by assignee"
+										onChange={(event) => setAssignee(event.target.value)}
+										disabled={!projectKey}
+									>
+										<option value="">All assignees</option>
+										{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
+										{assignees.map((a) => (
+											<option key={a.name} value={a.name}>
+												{a.name}
+											</option>
+										))}
+									</select>
+								</label>
+								<SimpleTooltip label="Hide issues that are Done">
+									<button
+										type="button"
+										aria-pressed={hideDone}
+										className={cn("jira-browse__chip", hideDone && "is-active")}
+										onClick={() => setHideDone((on) => !on)}
+									>
+										Hide done
+									</button>
+								</SimpleTooltip>
+								<SimpleTooltip label="Show only issues in an open sprint">
+									<button
+										type="button"
+										aria-pressed={activeSprintOnly}
+										className={cn("jira-browse__chip", activeSprintOnly && "is-active")}
+										onClick={() => setActiveSprintOnly((on) => !on)}
+									>
+										Active sprint
+									</button>
+								</SimpleTooltip>
+							</>
+						)}
+						<SimpleTooltip label="Group issues into sprint sections">
+							<button
+								type="button"
+								aria-pressed={groupSprints}
+								className={cn("jira-browse__chip jira-browse__group-toggle", groupSprints && "is-active")}
+								onClick={() => setGroupSprints((on) => !on)}
+							>
+								Group by sprint
+							</button>
+						</SimpleTooltip>
+						{advancedMode ? null : (
+							<SimpleTooltip label="Search with raw JQL instead of the filters">
+								<button type="button" className="jira-browse__chip" onClick={() => setAdvancedMode(true)}>
+									Advanced JQL
+								</button>
+							</SimpleTooltip>
+						)}
+					</div>
+
+					{selected.size > 0 ? (
+						<div className="jira-browse__batchbar" role="group" aria-label="Batch actions">
+							<span className="jira-browse__batchbar-n">{selected.size} selected</span>
+							<SimpleTooltip
+								label={
+									orchestrator
+										? `Send ${selected.size} selected to the Orchestrator`
+										: "Start this project's Orchestrator first"
+								}
+							>
+								<span className="jira-browse__tipwrap">
+									<button
+										type="button"
+										className="jira-browse__batchbar-send"
+										disabled={!orchestrator || send.isPending}
+										onClick={() => sendToOrchestrator([...selected])}
+										aria-label={`Send ${selected.size} selected to the Orchestrator`}
+									>
+										<Send className="size-3.5" aria-hidden="true" />
+										{send.isPending ? "Sending…" : "Send"}
+									</button>
+								</span>
+							</SimpleTooltip>
+							<SimpleTooltip label="Clear the selection">
+								<button type="button" className="jira-browse__batchbar-clear" onClick={() => setSelected(new Set())}>
+									Clear
+								</button>
+							</SimpleTooltip>
+							{!orchestrator ? (
+								<span className="jira-browse__batchbar-warn">Start this project's Orchestrator first</span>
+							) : null}
+						</div>
+					) : null}
+
+					{toast ? (
+						<div className="jira-browse__toast" role="status">
+							{toast}
+						</div>
+					) : null}
+
+					{!advancedMode && !projectKey ? (
+						<div className="jira-browse__empty">Pick a project to browse its issues.</div>
+					) : (
+						<div className="jira-browse__list">
+							<div className="jira-browse__lhead">
+								<span className="jira-browse__live" aria-hidden="true" />
+								MATCHING ISSUES
+								<span className="jira-browse__n">
+									{advancedMode ? "Advanced JQL" : project?.name ? `${project.name} (${projectKey})` : projectKey} ·{" "}
+									{results.length} shown
+								</span>
+							</div>
+							{isError ? (
+								<p className="jira-browse__note jira-browse__note--err">
+									{error instanceof Error ? error.message : "Couldn't search Jira."}
+								</p>
+							) : advancedMode && advancedJql.trim().length === 0 ? (
+								<p className="jira-browse__note">Type a JQL query to search.</p>
+							) : isFetching && results.length === 0 ? (
+								<p className="jira-browse__note">Searching…</p>
+							) : results.length === 0 ? (
+								<p className="jira-browse__note">No issues match.</p>
+							) : treeGroups ? (
+								treeGroups.map((group) => {
+									const isCollapsed = collapsedSprints.has(group.name);
+									const count = countTreeNodes(group.nodes);
+									return (
+										<div key={group.name} className="jira-browse__sprint">
+											<SimpleTooltip label={isCollapsed ? "Expand this sprint" : "Collapse this sprint"}>
+												<button
+													type="button"
+													className="jira-browse__sprint-head"
+													aria-expanded={!isCollapsed}
+													onClick={() => toggleSprint(group.name)}
+												>
+													{isCollapsed ? (
+														<ChevronRight className="size-3.5" aria-hidden="true" />
+													) : (
+														<ChevronDown className="size-3.5" aria-hidden="true" />
+													)}
+													<span className="jira-browse__sprint-name">{group.name}</span>
+													{group.state === "active" && !group.isBacklog ? (
+														<span className="jira-browse__sprint-active">active</span>
+													) : null}
+													<span className="jira-browse__sprint-count">
+														· {count} {count === 1 ? "work item" : "work items"}
+													</span>
+												</button>
+											</SimpleTooltip>
+											{isCollapsed ? null : group.nodes.map((node) => renderNode(node, 0))}
+										</div>
+									);
+								})
+							) : (
+								tree.map((node) => renderNode(node, 0))
+							)}
+						</div>
+					)}
+
+					<p className="jira-browse__manual-note">
+						◈ <b>Manual by design</b> — open a card for detail, start a worker with <b>+</b>, or{" "}
+						<b>Send to Orchestrator</b> to let it decide. Epics are context-only group headers; subtasks nest under
+						their story. Nothing auto-imports. Read-only search · Move-status is the only write.
+					</p>
+				</div>
+
+				<JiraIssueDetail
+					issueKey={detailKey}
+					open={Boolean(detailKey)}
+					onOpenChange={(open) => {
+						if (!open) setDetailKey(null);
+					}}
+					onCreateSession={(issue) => {
+						setDetailKey(null);
+						setCreateIssue(issue);
+					}}
+				/>
+
+				<NewTaskDialog
+					open={Boolean(createIssue)}
+					projectId={projectId}
+					initialIssue={createIssue}
+					onCreated={(sessionId) => void handleCreated(sessionId)}
+					onQueued={() => void handleQueued()}
+					onOpenChange={(open) => {
+						if (!open) setCreateIssue(null);
+					}}
+				/>
 			</div>
-
-			<JiraIssueDetail
-				issueKey={detailKey}
-				open={Boolean(detailKey)}
-				onOpenChange={(open) => {
-					if (!open) setDetailKey(null);
-				}}
-				onCreateSession={(issue) => {
-					setDetailKey(null);
-					setCreateIssue(issue);
-				}}
-			/>
-
-			<NewTaskDialog
-				open={Boolean(createIssue)}
-				projectId={projectId}
-				initialIssue={createIssue}
-				onCreated={(sessionId) => void handleCreated(sessionId)}
-				onQueued={() => void handleQueued()}
-				onOpenChange={(open) => {
-					if (!open) setCreateIssue(null);
-				}}
-			/>
-		</div>
+		</TooltipProvider>
 	);
 }
 

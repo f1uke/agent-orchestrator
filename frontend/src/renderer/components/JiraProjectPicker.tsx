@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Folder, Loader2, Search, Star } from "lucide-react";
 import { useJiraProjects, type JiraProject } from "../hooks/useSessionJiraContext";
 import { readStarredProjects, writeStarredProjects } from "../lib/jira-starred-projects";
+import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
 import { cn } from "../lib/utils";
 
 /**
@@ -83,16 +84,17 @@ export function JiraProjectPicker({
 		const isStarred = starredKeys.has(project.key);
 		return (
 			<div key={project.key} className={cn("jira-proj-picker__item", selected && "is-selected")}>
-				<button
-					type="button"
-					className={cn("jira-proj-picker__star", isStarred && "is-on")}
-					aria-pressed={isStarred}
-					aria-label={isStarred ? `Unstar ${project.key}` : `Star ${project.key}`}
-					title={isStarred ? "Unstar — remove from favorites" : "Star — pin to top"}
-					onClick={() => toggleStar(project)}
-				>
-					<Star className="size-3.5" aria-hidden="true" />
-				</button>
+				<SimpleTooltip label={isStarred ? "Remove from favorites" : "Pin to the top"}>
+					<button
+						type="button"
+						className={cn("jira-proj-picker__star", isStarred && "is-on")}
+						aria-pressed={isStarred}
+						aria-label={isStarred ? `Unstar ${project.key}` : `Star ${project.key}`}
+						onClick={() => toggleStar(project)}
+					>
+						<Star className="size-3.5" aria-hidden="true" />
+					</button>
+				</SimpleTooltip>
 				<button
 					type="button"
 					role="option"
@@ -112,74 +114,78 @@ export function JiraProjectPicker({
 	};
 
 	return (
-		<div className="jira-proj-picker" ref={containerRef}>
-			<button
-				type="button"
-				className="jira-proj-picker__trigger"
-				aria-haspopup="listbox"
-				aria-expanded={open}
-				onClick={() => setOpen((o) => !o)}
-			>
-				<Folder className="jira-proj-picker__fol size-3.5" aria-hidden="true" />
-				{value ? (
-					<>
-						<span className="jira-proj-picker__k">{value.key}</span>
-						{value.name ? <span className="jira-proj-picker__n">· {value.name}</span> : null}
-					</>
-				) : (
-					<span className="jira-proj-picker__placeholder">Select a project</span>
-				)}
-				<ChevronDown className="jira-proj-picker__car size-3" aria-hidden="true" />
-			</button>
-
-			{open ? (
-				<div className="jira-proj-picker__drop">
-					<div className="jira-proj-picker__search">
-						<Search className="size-3.5 text-passive" aria-hidden="true" />
-						<input
-							autoFocus
-							value={query}
-							placeholder="Filter your Jira projects…"
-							autoComplete="off"
-							autoCapitalize="none"
-							spellCheck={false}
-							onChange={(event) => setQuery(event.target.value)}
-							onKeyDown={(event) => {
-								if (event.key === "Escape") setOpen(false);
-							}}
-						/>
-						{isFetching ? <Loader2 className="size-3.5 animate-spin text-passive" aria-hidden="true" /> : null}
-					</div>
-
-					<div className="jira-proj-picker__list" role="listbox" aria-label="Jira projects">
-						{isError ? (
-							<p className="jira-proj-picker__note jira-proj-picker__note--err">
-								{error instanceof Error ? error.message : "Couldn't load projects."}
-							</p>
-						) : isFetching && starredList.length === 0 && otherList.length === 0 ? (
-							<p className="jira-proj-picker__note">Loading projects…</p>
-						) : starredList.length === 0 && otherList.length === 0 ? (
-							<p className="jira-proj-picker__note">No matching projects.</p>
-						) : (
+		<TooltipProvider delayDuration={0}>
+			<div className="jira-proj-picker" ref={containerRef}>
+				<SimpleTooltip label={value ? "Change the Jira project" : "Choose a Jira project"}>
+					<button
+						type="button"
+						className="jira-proj-picker__trigger"
+						aria-haspopup="listbox"
+						aria-expanded={open}
+						onClick={() => setOpen((o) => !o)}
+					>
+						<Folder className="jira-proj-picker__fol size-3.5" aria-hidden="true" />
+						{value ? (
 							<>
-								{starredList.length > 0 ? (
-									<>
-										<div className="jira-proj-picker__group">Starred</div>
-										{starredList.map(renderOption)}
-										{otherList.length > 0 ? <div className="jira-proj-picker__group">All projects</div> : null}
-									</>
-								) : null}
-								{otherList.map(renderOption)}
+								<span className="jira-proj-picker__k">{value.key}</span>
+								{value.name ? <span className="jira-proj-picker__n">· {value.name}</span> : null}
 							</>
+						) : (
+							<span className="jira-proj-picker__placeholder">Select a project</span>
 						)}
-					</div>
+						<ChevronDown className="jira-proj-picker__car size-3" aria-hidden="true" />
+					</button>
+				</SimpleTooltip>
 
-					<div className="jira-proj-picker__foot">
-						{projects.length} {projects.length === 1 ? "project" : "projects"} · ★ star to pin · remembers your last
-						pick
+				{open ? (
+					<div className="jira-proj-picker__drop">
+						<div className="jira-proj-picker__search">
+							<Search className="size-3.5 text-passive" aria-hidden="true" />
+							<input
+								autoFocus
+								value={query}
+								placeholder="Filter your Jira projects…"
+								autoComplete="off"
+								autoCapitalize="none"
+								spellCheck={false}
+								onChange={(event) => setQuery(event.target.value)}
+								onKeyDown={(event) => {
+									if (event.key === "Escape") setOpen(false);
+								}}
+							/>
+							{isFetching ? <Loader2 className="size-3.5 animate-spin text-passive" aria-hidden="true" /> : null}
+						</div>
+
+						<div className="jira-proj-picker__list" role="listbox" aria-label="Jira projects">
+							{isError ? (
+								<p className="jira-proj-picker__note jira-proj-picker__note--err">
+									{error instanceof Error ? error.message : "Couldn't load projects."}
+								</p>
+							) : isFetching && starredList.length === 0 && otherList.length === 0 ? (
+								<p className="jira-proj-picker__note">Loading projects…</p>
+							) : starredList.length === 0 && otherList.length === 0 ? (
+								<p className="jira-proj-picker__note">No matching projects.</p>
+							) : (
+								<>
+									{starredList.length > 0 ? (
+										<>
+											<div className="jira-proj-picker__group">Starred</div>
+											{starredList.map(renderOption)}
+											{otherList.length > 0 ? <div className="jira-proj-picker__group">All projects</div> : null}
+										</>
+									) : null}
+									{otherList.map(renderOption)}
+								</>
+							)}
+						</div>
+
+						<div className="jira-proj-picker__foot">
+							{projects.length} {projects.length === 1 ? "project" : "projects"} · ★ star to pin · remembers your last
+							pick
+						</div>
 					</div>
-				</div>
-			) : null}
-		</div>
+				) : null}
+			</div>
+		</TooltipProvider>
 	);
 }

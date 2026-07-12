@@ -2627,11 +2627,47 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .jira-browse__act:disabled {
 	opacity: 0.4;
 	cursor: not-allowed;
+	pointer-events: none;
 }
 
 .jira-browse__act--add:hover:not(:disabled) {
 	background: var(--success);
 	border-color: var(--success);
+}
+
+/* Send-to-Orchestrator — the view's primary row handoff. Icon + "Send" label,
+   accent-tinted at rest so it reads as the action without shouting; fills solid on
+   hover like the batch-bar Send. Height matches the icon-only "+" beside it. */
+.jira-browse__act--send {
+	width: auto;
+	gap: 5px;
+	padding: 0 9px;
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.jira-browse__act--send:hover:not(:disabled) {
+	background: var(--accent);
+	color: var(--accent-fg);
+	border-color: var(--accent);
+}
+
+.jira-browse__act-label {
+	line-height: 1;
+}
+
+/* Wraps a button that carries a tooltip so the tooltip still triggers when the
+   button is disabled (disabled buttons swallow their own hover events). */
+.jira-browse__tipwrap {
+	display: inline-flex;
+	flex: 0 0 auto;
+}
+
+.jira-browse__tipwrap:has(:disabled) {
+	cursor: not-allowed;
 }
 
 /* Batch action bar shown while rows are selected. */
@@ -2669,6 +2705,7 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .jira-browse__batchbar-send:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+	pointer-events: none;
 }
 
 .jira-browse__batchbar-clear {
@@ -2736,6 +2773,16 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	background: var(--bg-1);
 	border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 	box-shadow: var(--shadow);
+}
+
+/* Tooltips are hover hints and must float above everything, including the detail
+   drawer (z 60) and the Move-status dialog (z 70) they can be triggered over. Radix
+   sets the popper WRAPPER (the fixed, positioned stacking context) to an INLINE
+   z-index of 50, so tooltips slip under those layers. Lift only tooltip poppers
+   (scoped via :has([role="tooltip"])) above them; !important is required to beat the
+   library's inline z-index. Dropdown/select poppers are untouched. */
+[data-radix-popper-content-wrapper]:has([role="tooltip"]) {
+	z-index: 80 !important;
 }
 
 .jira-detail__bar {

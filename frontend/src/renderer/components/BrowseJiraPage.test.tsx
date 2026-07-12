@@ -496,6 +496,15 @@ describe("BrowseJiraPage", () => {
 
 	// ── Fix 4: Send to Orchestrator + multi-select ────────────────────────────────
 
+	it("labels the per-row Send button with a visible 'Send' next to its icon", () => {
+		orchMock.mockReturnValue({ id: "proj-1-orchestrator" });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		const send = screen.getByRole("button", { name: "Send DEMO-101 to the Orchestrator" });
+		expect(send.textContent).toContain("Send");
+	});
+
 	it("sends a single issue to the project's orchestrator", async () => {
 		orchMock.mockReturnValue({ id: "proj-1-orchestrator" });
 		renderPage();

@@ -5,6 +5,7 @@ import { type JiraIssue, type JiraIssueSummary, type JiraSubtask, useJiraIssue }
 import { formatSprintDates, priorityTone, statusPillStyle } from "../lib/jira-format";
 import { JiraAdf } from "./JiraAdf";
 import { JiraIssueMoveDialog, type MoveTarget } from "./JiraMoveStatusDialog";
+import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
 
 /**
  * Browse Jira issue detail — a READ-ONLY drawer over an issue, reusing the Summary
@@ -36,194 +37,219 @@ export function JiraIssueDetail({
 	const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
 
 	return (
-		<Dialog.Root open={open} onOpenChange={onOpenChange}>
-			<Dialog.Portal>
-				<Dialog.Overlay className="jira-detail__overlay" />
-				<Dialog.Content className="jira-detail__drawer" aria-label="Jira issue detail">
-					<div className="jira-detail__bar">
-						{issue?.parent ? (
-							<button
-								type="button"
-								className="jira-detail__crumb"
-								onClick={() => setCurrentKey(issue.parent!.key)}
-								aria-label={`Open parent ${issue.parent.key}`}
-								title={`Open parent ${issue.parent.key}`}
-							>
-								<ChevronRight className="jira-detail__crumb-caret size-3" aria-hidden="true" />
-								<span className="jira-detail__crumb-key">{issue.parent.key}</span>
-								{issue.parent.title ? <span className="jira-detail__crumb-title"> · {issue.parent.title}</span> : null}
-							</button>
-						) : (
-							<span className="jira-detail__crumb jira-detail__crumb--none">Issue detail</span>
-						)}
-						<Dialog.Close asChild>
-							<button type="button" className="jira-detail__close" aria-label="Close">
-								<X className="size-4" aria-hidden="true" />
-							</button>
-						</Dialog.Close>
-					</div>
-					<Dialog.Title className="sr-only">Jira issue {currentKey ?? ""}</Dialog.Title>
+		<TooltipProvider delayDuration={0}>
+			<Dialog.Root open={open} onOpenChange={onOpenChange}>
+				<Dialog.Portal>
+					<Dialog.Overlay className="jira-detail__overlay" />
+					<Dialog.Content className="jira-detail__drawer" aria-label="Jira issue detail">
+						<div className="jira-detail__bar">
+							{issue?.parent ? (
+								<SimpleTooltip label="Open the parent issue">
+									<button
+										type="button"
+										className="jira-detail__crumb"
+										onClick={() => setCurrentKey(issue.parent!.key)}
+										aria-label={`Open parent ${issue.parent.key}`}
+									>
+										<ChevronRight className="jira-detail__crumb-caret size-3" aria-hidden="true" />
+										<span className="jira-detail__crumb-key">{issue.parent.key}</span>
+										{issue.parent.title ? (
+											<span className="jira-detail__crumb-title"> · {issue.parent.title}</span>
+										) : null}
+									</button>
+								</SimpleTooltip>
+							) : (
+								<span className="jira-detail__crumb jira-detail__crumb--none">Issue detail</span>
+							)}
+							<SimpleTooltip label="Close">
+								<Dialog.Close asChild>
+									<button type="button" className="jira-detail__close" aria-label="Close">
+										<X className="size-4" aria-hidden="true" />
+									</button>
+								</Dialog.Close>
+							</SimpleTooltip>
+						</div>
+						<Dialog.Title className="sr-only">Jira issue {currentKey ?? ""}</Dialog.Title>
 
-					<div className="jira-detail__body">
-						{isLoading ? (
-							<p className="inspector-empty">Loading Jira issue…</p>
-						) : isError ? (
-							<p className="jira-fetch-error">
-								{error instanceof Error ? error.message : "Couldn't load the Jira issue."}
-							</p>
-						) : !issue ? (
-							<p className="jira-fetch-error">Jira issue not found.</p>
-						) : (
-							<>
-								<div className="jira-card jira-card--lead">
-									<div className="jira-head">
-										<span className="jira-key">{issue.key}</span>
-										{issue.type ? (
-											<span className="jira-type">
-												<span className="jira-type__sq" />
-												{issue.type}
-											</span>
-										) : null}
-										{issue.status ? (
-											<button
-												type="button"
-												className="jira-status jira-status--btn"
-												style={statusPillStyle(issue.statusCategory)}
-												onClick={() =>
-													setMoveTarget({ key: issue.key, type: issue.type, title: issue.title, status: issue.status })
-												}
-												title="Move status"
-												aria-haspopup="dialog"
-											>
-												{issue.status}
-												<ChevronDown className="jira-status__caret" aria-hidden="true" />
-											</button>
-										) : null}
-									</div>
-									{issue.title ? <div className="jira-title">{issue.title}</div> : null}
-									{issue.url ? (
-										<a className="jira-openlink" href={issue.url} target="_blank" rel="noopener noreferrer">
-											Open in Jira
-											<ArrowUpRight className="jira-openlink__icon" aria-hidden="true" />
-										</a>
-									) : null}
-									<dl className="jira-meta">
-										{issue.parent ? (
-											<MetaRow
-												k="Parent"
-												v={
+						<div className="jira-detail__body">
+							{isLoading ? (
+								<p className="inspector-empty">Loading Jira issue…</p>
+							) : isError ? (
+								<p className="jira-fetch-error">
+									{error instanceof Error ? error.message : "Couldn't load the Jira issue."}
+								</p>
+							) : !issue ? (
+								<p className="jira-fetch-error">Jira issue not found.</p>
+							) : (
+								<>
+									<div className="jira-card jira-card--lead">
+										<div className="jira-head">
+											<span className="jira-key">{issue.key}</span>
+											{issue.type ? (
+												<span className="jira-type">
+													<span className="jira-type__sq" />
+													{issue.type}
+												</span>
+											) : null}
+											{issue.status ? (
+												<SimpleTooltip label="Move this issue's status">
 													<button
 														type="button"
-														className="jira-detail__parent-link"
-														onClick={() => setCurrentKey(issue.parent!.key)}
+														className="jira-status jira-status--btn"
+														style={statusPillStyle(issue.statusCategory)}
+														onClick={() =>
+															setMoveTarget({
+																key: issue.key,
+																type: issue.type,
+																title: issue.title,
+																status: issue.status,
+															})
+														}
+														aria-haspopup="dialog"
 													>
-														{issue.parent.key}
-														{issue.parent.title ? ` · ${issue.parent.title}` : ""}
+														{issue.status}
+														<ChevronDown className="jira-status__caret" aria-hidden="true" />
 													</button>
-												}
-											/>
+												</SimpleTooltip>
+											) : null}
+										</div>
+										{issue.title ? <div className="jira-title">{issue.title}</div> : null}
+										{issue.url ? (
+											<SimpleTooltip label="Open this issue in Jira">
+												<a className="jira-openlink" href={issue.url} target="_blank" rel="noopener noreferrer">
+													Open in Jira
+													<ArrowUpRight className="jira-openlink__icon" aria-hidden="true" />
+												</a>
+											</SimpleTooltip>
 										) : null}
-										{issue.assignee ? <MetaRow k="Assignee" v={issue.assignee} /> : null}
-										{issue.reporter ? <MetaRow k="Reporter" v={issue.reporter} /> : null}
-										{issue.priority ? (
-											<MetaRow
-												k="Priority"
-												v={
-													<span className="jira-priority">
-														<span className="jira-priority__dot" style={{ background: priorityTone(issue.priority) }} />
-														{issue.priority}
-													</span>
-												}
-											/>
-										) : null}
-										{issue.sprint ? (
-											<MetaRow
-												k="Sprint"
-												v={
-													<span className="jira-sprint">
-														{issue.sprint.name}
-														{issue.sprint.state ? (
-															<span className="jira-sprint__badge" data-state={issue.sprint.state}>
-																{issue.sprint.state}
-															</span>
-														) : null}
-														{formatSprintDates(issue.sprint.startDate, issue.sprint.endDate) ? (
-															<span className="jira-sprint__dates">
-																{formatSprintDates(issue.sprint.startDate, issue.sprint.endDate)}
-															</span>
-														) : null}
-													</span>
-												}
-											/>
-										) : null}
-									</dl>
-									<div className="jira-detail__actions">
-										<button
-											type="button"
-											className="jira-browse__create"
-											onClick={() => onCreateSession(toSummary(issue))}
-										>
-											Create session ▷
-										</button>
+										<dl className="jira-meta">
+											{issue.parent ? (
+												<MetaRow
+													k="Parent"
+													v={
+														<SimpleTooltip label="Open the parent issue">
+															<button
+																type="button"
+																className="jira-detail__parent-link"
+																onClick={() => setCurrentKey(issue.parent!.key)}
+															>
+																{issue.parent.key}
+																{issue.parent.title ? ` · ${issue.parent.title}` : ""}
+															</button>
+														</SimpleTooltip>
+													}
+												/>
+											) : null}
+											{issue.assignee ? <MetaRow k="Assignee" v={issue.assignee} /> : null}
+											{issue.reporter ? <MetaRow k="Reporter" v={issue.reporter} /> : null}
+											{issue.priority ? (
+												<MetaRow
+													k="Priority"
+													v={
+														<span className="jira-priority">
+															<span
+																className="jira-priority__dot"
+																style={{ background: priorityTone(issue.priority) }}
+															/>
+															{issue.priority}
+														</span>
+													}
+												/>
+											) : null}
+											{issue.sprint ? (
+												<MetaRow
+													k="Sprint"
+													v={
+														<span className="jira-sprint">
+															{issue.sprint.name}
+															{issue.sprint.state ? (
+																<span className="jira-sprint__badge" data-state={issue.sprint.state}>
+																	{issue.sprint.state}
+																</span>
+															) : null}
+															{formatSprintDates(issue.sprint.startDate, issue.sprint.endDate) ? (
+																<span className="jira-sprint__dates">
+																	{formatSprintDates(issue.sprint.startDate, issue.sprint.endDate)}
+																</span>
+															) : null}
+														</span>
+													}
+												/>
+											) : null}
+										</dl>
+										<div className="jira-detail__actions">
+											<SimpleTooltip label="Start a worker session for this issue">
+												<button
+													type="button"
+													className="jira-browse__create"
+													onClick={() => onCreateSession(toSummary(issue))}
+												>
+													Create session ▷
+												</button>
+											</SimpleTooltip>
+										</div>
 									</div>
-								</div>
 
-								{issue.description && issue.description.length > 0 ? (
-									<div className="jira-card">
-										<p className="jira-sect-label">Description</p>
-										<JiraAdf nodes={issue.description} />
-									</div>
-								) : null}
+									{issue.description && issue.description.length > 0 ? (
+										<div className="jira-card">
+											<p className="jira-sect-label">Description</p>
+											<JiraAdf nodes={issue.description} />
+										</div>
+									) : null}
 
-								{issue.subtasks && issue.subtasks.length > 0 ? (
-									<div className="jira-card">
-										<p className="jira-sect-label">Subtasks · {issue.subtasks.length}</p>
-										{issue.subtasks.map((s) => (
-											<SubtaskRow
-												key={s.key}
-												subtask={s}
-												onOpen={() => setCurrentKey(s.key)}
-												onMove={() => setMoveTarget({ key: s.key, type: s.type, title: s.title, status: s.status })}
-											/>
-										))}
-									</div>
-								) : null}
-							</>
-						)}
-					</div>
+									{issue.subtasks && issue.subtasks.length > 0 ? (
+										<div className="jira-card">
+											<p className="jira-sect-label">Subtasks · {issue.subtasks.length}</p>
+											{issue.subtasks.map((s) => (
+												<SubtaskRow
+													key={s.key}
+													subtask={s}
+													onOpen={() => setCurrentKey(s.key)}
+													onMove={() => setMoveTarget({ key: s.key, type: s.type, title: s.title, status: s.status })}
+												/>
+											))}
+										</div>
+									) : null}
+								</>
+							)}
+						</div>
 
-					{moveTarget ? (
-						<JiraIssueMoveDialog
-							target={moveTarget}
-							open={Boolean(moveTarget)}
-							onOpenChange={(o) => !o && setMoveTarget(null)}
-						/>
-					) : null}
-				</Dialog.Content>
-			</Dialog.Portal>
-		</Dialog.Root>
+						{moveTarget ? (
+							<JiraIssueMoveDialog
+								target={moveTarget}
+								open={Boolean(moveTarget)}
+								onOpenChange={(o) => !o && setMoveTarget(null)}
+							/>
+						) : null}
+					</Dialog.Content>
+				</Dialog.Portal>
+			</Dialog.Root>
+		</TooltipProvider>
 	);
 }
 
 function SubtaskRow({ subtask, onOpen, onMove }: { subtask: JiraSubtask; onOpen: () => void; onMove: () => void }) {
 	return (
 		<div className="jira-sub">
-			<button type="button" className="jira-sub__key jira-sub__key--btn" onClick={onOpen} title={`Open ${subtask.key}`}>
-				{subtask.key}
-			</button>
+			<SimpleTooltip label="Open this subtask">
+				<button type="button" className="jira-sub__key jira-sub__key--btn" onClick={onOpen}>
+					{subtask.key}
+				</button>
+			</SimpleTooltip>
 			{meta(subtask) ? <span className="jira-sub__meta">{meta(subtask)}</span> : <span className="jira-sub__meta" />}
 			{subtask.status ? (
-				<button
-					type="button"
-					className="jira-sub__pill jira-sub__pill--btn"
-					style={statusPillStyle(subtask.statusCategory)}
-					onClick={onMove}
-					title="Move status"
-					aria-haspopup="dialog"
-				>
-					{subtask.status}
-					<ChevronDown className="jira-status__caret" aria-hidden="true" />
-				</button>
+				<SimpleTooltip label="Move this subtask's status">
+					<button
+						type="button"
+						className="jira-sub__pill jira-sub__pill--btn"
+						style={statusPillStyle(subtask.statusCategory)}
+						onClick={onMove}
+						aria-haspopup="dialog"
+					>
+						{subtask.status}
+						<ChevronDown className="jira-status__caret" aria-hidden="true" />
+					</button>
+				</SimpleTooltip>
 			) : null}
 		</div>
 	);

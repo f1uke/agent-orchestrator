@@ -23,3 +23,27 @@ export function TooltipContent({
 		</TooltipPrimitive.Portal>
 	);
 }
+
+/**
+ * A one-liner tooltip: hover copy attached to a single trigger element. Composes the
+ * shared Tooltip primitives so delay/styling stay identical to the rest of the app.
+ * `children` must be a single element that forwards a ref (Radix `asChild`); to give a
+ * disabled control a tooltip, wrap it in a `<span>` since disabled elements swallow
+ * hover events.
+ */
+export function SimpleTooltip({
+	label,
+	side = "top",
+	children,
+}: {
+	label: React.ReactNode;
+	side?: React.ComponentProps<typeof TooltipContent>["side"];
+	children: React.ReactNode;
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>{children}</TooltipTrigger>
+			<TooltipContent side={side}>{label}</TooltipContent>
+		</Tooltip>
+	);
+}
