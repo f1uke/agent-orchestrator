@@ -64,3 +64,33 @@ export function writeBrowsePrefs(prefs: BrowsePrefs): void {
 		// Storage full or unavailable — remembering is a nicety, never fatal.
 	}
 }
+
+// Per-node collapse state for the Browse Jira issue tree (Fix 2): the set of node
+// keys the user has collapsed. Default is expanded (a key absent = expanded), so an
+// empty set shows the whole tree. Kept separate from BrowsePrefs — it's a growing
+// set of issue keys, not a fixed view config.
+const collapsedNodesKey = "ao.jira.browseCollapsed";
+
+/** Reads the set of collapsed tree-node keys (empty when none/invalid). */
+export function readCollapsedNodes(): Set<string> {
+	const raw = getLocalStorage()?.getItem(collapsedNodesKey);
+	if (!raw) return new Set();
+	try {
+		const parsed = JSON.parse(raw);
+		if (Array.isArray(parsed)) return new Set(parsed.filter((k): k is string => typeof k === "string"));
+	} catch {
+		// Corrupt value — start expanded.
+	}
+	return new Set();
+}
+
+/** Persists the collapsed tree-node keys (best-effort). */
+export function writeCollapsedNodes(keys: ReadonlySet<string>): void {
+	const store = getLocalStorage();
+	if (!store) return;
+	try {
+		store.setItem(collapsedNodesKey, JSON.stringify([...keys]));
+	} catch {
+		// Storage full or unavailable — remembering is a nicety, never fatal.
+	}
+}

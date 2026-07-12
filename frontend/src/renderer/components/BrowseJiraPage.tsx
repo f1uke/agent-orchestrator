@@ -1,31 +1,39 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2, Plus, Search, Send } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { JiraIssueDetail } from "./JiraIssueDetail";
 import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
-import { useJiraSearch, type JiraIssueSummary, type JiraProject } from "../hooks/useSessionJiraContext";
-import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import {
-	buildHierarchy,
-	groupRowsBySprint,
+	type JiraIssueSummary,
+	type JiraProject,
+	useJiraMyself,
+	useJiraSearch,
+	useJiraTreeContext,
+} from "../hooks/useSessionJiraContext";
+import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import {
+	buildTree,
+	countTreeNodes,
+	groupTreeBySprint,
 	hasUnassigned,
-	type HierarchyRow,
-	missingParentKeys,
+	isEpicIssue,
+	type TreeNode,
 	UNASSIGNED,
 	UNASSIGNED_QUERY,
 	uniqueAssignees,
 } from "../lib/jira-browse";
-import { readBrowsePrefs, writeBrowsePrefs } from "../lib/jira-browse-prefs";
+import { readBrowsePrefs, readCollapsedNodes, writeBrowsePrefs, writeCollapsedNodes } from "../lib/jira-browse-prefs";
 import { readLastJiraProject, writeLastJiraProject } from "../lib/jira-last-project";
+import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { findProjectOrchestrator } from "../types/workspace";
 import { cn } from "../lib/utils";
 
 // Type filter chips. Each carries the JQL issue-type name(s) pushed into the
 // server-side search (All types = no clause), so a type filter is complete rather
 // than pared from a capped page; multiple names cover Jira's type-name variance
-// (e.g. "Sub-task" / "Subtask"). "Assigned to me" from the mockup is intentionally
-// omitted — it needs current-user resolution the reused search endpoints lack.
+// (e.g. "Sub-task" / "Subtask").
 const TYPE_FILTERS: { label: string; jql: string[] }[] = [
 	{ label: "All types", jql: [] },
 	{ label: "Story", jql: ["Story"] },
@@ -34,26 +42,32 @@ const TYPE_FILTERS: { label: string; jql: string[] }[] = [
 	{ label: "Support", jql: ["Support", "Service Request"] },
 ];
 
+const TOAST_MS = 3200;
+
 /**
- * Browse Jira — the manual, project-first discovery surface (mockup 02, the last
- * slice of the Jira build). Pick a project from the real project list (remembered
- * across visits), search/pick a Story within it, and "Create session" hands off to
- * the New-task modal (mockup 03) pre-filled with the issue, creating a worker bound
- * to its key. Read-only + one manual create — nothing auto-imports onto the board.
- * Reuses the Slice-4 REST endpoints (`/jira/search`, `/jira/projects`); no new backend.
+ * Browse Jira — the manual, project-first discovery surface. Pick a project
+ * (remembered across visits), browse its issues nested as an Epic→Story→Sub-task
+ * tree (a card's real subtasks are fetched even when they don't match the filter,
+ * dimmed as context), highlight your own rows, and act per row: open the read-only
+ * detail drawer, start a session, or hand the issue(s) to the project's Orchestrator.
+ * Display-only apart from Move-status (in the detail drawer); nothing auto-imports.
  */
 export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const workspaceQuery = useWorkspaceQuery();
+	// The project's LIVE orchestrator session (undefined when none is running), the
+	// target of "Send to Orchestrator" (Fix 4).
+	const orchestrator = findProjectOrchestrator(workspaceQuery.data ?? [], projectId);
+
 	const [project, setProject] = useState<JiraProject | null>(() => readLastJiraProject());
 	const [query, setQuery] = useState("");
 	const [debounced, setDebounced] = useState("");
 	const [filter, setFilter] = useState(0);
 	const [createIssue, setCreateIssue] = useState<JiraIssueSummary | null>(null);
-	// The key of the issue open in the read-only detail drawer (mockup #36), or null.
+	// The key of the issue open in the read-only detail drawer, or null.
 	const [detailKey, setDetailKey] = useState<string | null>(null);
-	// View prefs remembered across visits (grouping, assignee, hide-done, active
-	// sprint, advanced mode + JQL); last-project is remembered separately.
+	// View prefs remembered across visits.
 	const initialPrefs = readBrowsePrefs();
 	const [groupSprints, setGroupSprints] = useState(initialPrefs.groupBySprint);
 	const [assignee, setAssignee] = useState(initialPrefs.assignee);
@@ -61,7 +75,13 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	const [activeSprintOnly, setActiveSprintOnly] = useState(initialPrefs.activeSprintOnly);
 	const [advancedMode, setAdvancedMode] = useState(initialPrefs.advancedMode);
 	const [advancedJql, setAdvancedJql] = useState(initialPrefs.advancedJql);
-	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+	// Sprint-section collapse (by group name, in-memory) + tree-node collapse (by
+	// issue key, persisted — Fix 2).
+	const [collapsedSprints, setCollapsedSprints] = useState<Set<string>>(() => new Set());
+	const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => readCollapsedNodes());
+	// Multi-select for batch "Send to Orchestrator" (Fix 4).
+	const [selected, setSelected] = useState<Set<string>>(() => new Set());
+	const [toast, setToast] = useState<string | null>(null);
 
 	// Debounce the free-text search so typing doesn't fan out a request per keystroke.
 	useEffect(() => {
@@ -69,16 +89,30 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		return () => clearTimeout(t);
 	}, [query]);
 
-	// Persist the view prefs so the view returns as the user left it.
+	// Persist the view prefs + collapse state so the view returns as the user left it.
 	useEffect(() => {
 		writeBrowsePrefs({ groupBySprint: groupSprints, assignee, hideDone, activeSprintOnly, advancedMode, advancedJql });
 	}, [groupSprints, assignee, hideDone, activeSprintOnly, advancedMode, advancedJql]);
+	useEffect(() => {
+		writeCollapsedNodes(collapsedNodes);
+	}, [collapsedNodes]);
+
+	// Auto-dismiss the transient toast.
+	useEffect(() => {
+		if (!toast) return;
+		const t = setTimeout(() => setToast(null), TOAST_MS);
+		return () => clearTimeout(t);
+	}, [toast]);
 
 	const projectKey = project?.key ?? "";
 	const selectedTypes = TYPE_FILTERS[filter].jql;
 	// In advanced mode the raw JQL drives the search verbatim and the structured
-	// filters (project/search/type/assignee/hide-done/active-sprint) are hidden.
+	// filters are hidden.
 	const structuredEnabled = Boolean(projectKey) && !advancedMode;
+
+	// The authenticated Jira account, to highlight the viewer's own rows (Fix 3).
+	const me = useJiraMyself(Boolean(projectKey) || advancedMode);
+	const myAccountId = me.data?.accountId ?? "";
 
 	// Base fetch (structured mode): project + text + hide-done/active-sprint, NO
 	// assignee/type — the source for the assignee dropdown, kept complete across the
@@ -89,16 +123,11 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	});
 	const baseResults = base.data ?? [];
 
-	// Assignee options (name + accountId) come from the base set. A remembered
-	// assignee that isn't present in this project falls back to "all" without hiding
-	// everything — but stays in state so returning to a project that has them re-applies.
 	const assignees = uniqueAssignees(baseResults);
 	const unassignedPresent = hasUnassigned(baseResults);
 	const assigneeValid =
 		assignee === "" || (assignee === UNASSIGNED ? unassignedPresent : assignees.some((a) => a.name === assignee));
 	const effectiveAssignee = assigneeValid ? assignee : "";
-	// Map the selected display name → the server-side filter value: an accountId,
-	// the unassigned token, or "" for no filter.
 	const assigneeQuery =
 		effectiveAssignee === ""
 			? ""
@@ -106,10 +135,7 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 				? UNASSIGNED_QUERY
 				: (assignees.find((a) => a.name === effectiveAssignee)?.accountId ?? "");
 
-	// Results fetch. Structured mode: project + text + type + assignee + hide-done +
-	// active-sprint, all in the JQL (complete, not pared from a capped page); it
-	// shares the base request when no assignee/type is set. Advanced mode: the raw
-	// JQL drives it verbatim (fires with no project/text; the hook gates on non-empty JQL).
+	// Results fetch (the direct matches).
 	const resultsQuery = useJiraSearch(
 		advancedMode ? "" : debounced,
 		advancedMode ? "" : projectKey,
@@ -120,36 +146,89 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	);
 	const results = resultsQuery.data ?? [];
 
-	// Parent-inclusion: under an assignee filter the matches may be subtasks whose
-	// parent (assigned to someone else) isn't in the set. Fetch those parents for
-	// CONTEXT — reusing the advanced-JQL path with `key in (...)` — so the hierarchy
-	// stays intact and the user can open the parent. Skipped in advanced mode (the
-	// user's JQL is authoritative). The hook self-gates on a non-empty JQL.
-	const includeParents = !advancedMode && assigneeQuery !== "";
-	const missingKeys = includeParents ? missingParentKeys(results) : [];
-	const parentJql = missingKeys.length > 0 ? `key in (${missingKeys.join(", ")}) ORDER BY updated DESC` : "";
-	const contextQuery = useJiraSearch("", "", missingKeys.length > 0, { jql: parentJql });
+	// Tree-context (Fix 2): the ancestors + descendants of the matches — a card's own
+	// (unmatched) subtasks and the parents above them — so the list nests the full
+	// Epic→Story→Sub-task tree, not just what matched. Descendants respect hide-done /
+	// active-sprint; ancestors are always shown (dimmed). Skipped in advanced mode.
+	const treeContext = useJiraTreeContext(results, {
+		hideDone,
+		activeSprint: activeSprintOnly,
+		enabled: !advancedMode && Boolean(projectKey),
+	});
+	const matchedKeys = new Set(results.map((r) => r.key));
+	const contextIssues = advancedMode ? [] : (treeContext.data ?? []).filter((p) => !matchedKeys.has(p.key));
+	// Direct matches emphasized; context (ancestors/descendants outside the filter) dimmed.
+	const union = [...results, ...contextIssues];
+	const tree = buildTree(union, matchedKeys);
+	// Grouped by sprint: unwrap epics so stories still group by their OWN sprint
+	// (preserving #83) with subtasks nested; the full 3-level tree with epic headers
+	// shows when grouping is off. A leaf epic (no children) stays as its own row.
+	const groupingRoots = tree.flatMap((n) => (isEpicIssue(n.issue) && n.children.length > 0 ? n.children : [n]));
+	const treeGroups = groupSprints ? groupTreeBySprint(groupingRoots) : null;
 
-	// Merge the direct matches with the context parents (dimmed), then nest subtasks
-	// under their parents like the Jira backlog.
-	const resultKeys = new Set(results.map((r) => r.key));
-	const contextParents = (missingKeys.length > 0 ? (contextQuery.data ?? []) : []).filter(
-		(p) => !resultKeys.has(p.key),
-	);
-	const contextKeys = new Set(contextParents.map((p) => p.key));
-	const hierarchy = buildHierarchy([...results, ...contextParents], contextKeys);
-	const rowGroups = groupSprints ? groupRowsBySprint(hierarchy) : null;
+	// A key → issue map so a selection of keys can be turned back into the issues the
+	// Orchestrator message describes.
+	const issuesByKey = new Map<string, JiraIssueSummary>();
+	for (const it of union) if (!issuesByKey.has(it.key)) issuesByKey.set(it.key, it);
 
-	const isFetching = base.isFetching || resultsQuery.isFetching || contextQuery.isFetching;
+	const isFetching = base.isFetching || resultsQuery.isFetching || treeContext.isFetching;
 	const isError = resultsQuery.isError;
 	const error = resultsQuery.error;
 
-	const toggleCollapsed = (name: string) => {
-		setCollapsed((prev) => {
+	// POST a message into the project's orchestrator session — the same daemon path
+	// `ao send` uses. The orchestrator (an AI session) reads it and decides whether to
+	// spawn; Browse Jira never spawns workers directly.
+	const send = useMutation({
+		mutationFn: async (message: string) => {
+			if (!orchestrator) throw new Error("no-orchestrator");
+			const { error: sendErr } = await apiClient.POST("/api/v1/sessions/{sessionId}/send", {
+				params: { path: { sessionId: orchestrator.id } },
+				body: { message },
+			});
+			if (sendErr) throw new Error(apiErrorMessage(sendErr, "Couldn't reach the Orchestrator"));
+		},
+	});
+
+	const toggleSprint = (name: string) =>
+		setCollapsedSprints((prev) => {
 			const next = new Set(prev);
 			if (next.has(name)) next.delete(name);
 			else next.add(name);
 			return next;
+		});
+
+	const toggleNode = (key: string) =>
+		setCollapsedNodes((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+
+	const toggleSelected = (key: string) =>
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+
+	const sendToOrchestrator = (keys: string[]) => {
+		const issues = keys.map((k) => issuesByKey.get(k)).filter((it): it is JiraIssueSummary => Boolean(it));
+		if (issues.length === 0) return;
+		if (!orchestrator) {
+			setToast("Start this project's Orchestrator first, then send.");
+			return;
+		}
+		send.mutate(buildOrchestratorMessage(issues), {
+			onSuccess: () => {
+				setSelected(new Set());
+				setToast(`Sent ${issues.length} issue${issues.length === 1 ? "" : "s"} to the Orchestrator.`);
+			},
+			onError: (e) =>
+				setToast(
+					e instanceof Error && e.message !== "no-orchestrator" ? e.message : "Couldn't send to the Orchestrator.",
+				),
 		});
 	};
 
@@ -157,6 +236,7 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		setProject(next);
 		writeLastJiraProject(next);
 		setQuery("");
+		setSelected(new Set());
 	};
 
 	const handleCreated = async (sessionId: string) => {
@@ -169,71 +249,162 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		void navigate({ to: "/projects/$projectId", params: { projectId } });
 	};
 
-	const renderRow = (
-		issue: JiraIssueSummary,
-		opts: { indent?: boolean; isSubtask?: boolean; isContext?: boolean } = {},
-	) => (
-		// The row body opens the read-only detail drawer (mockup #36); the Create button
-		// stops propagation so it still hands off to the New-task modal instead.
-		<div
-			key={issue.key}
-			role="button"
-			tabIndex={0}
-			aria-label={`Open ${issue.key}`}
-			className={cn(
-				"jira-browse__row",
-				opts.indent && "jira-browse__row--child",
-				opts.isContext && "jira-browse__row--context",
-			)}
-			onClick={() => setDetailKey(issue.key)}
-			onKeyDown={(event) => {
-				if (event.key === "Enter" || event.key === " ") {
-					event.preventDefault();
-					setDetailKey(issue.key);
-				}
-			}}
-		>
-			{opts.isSubtask ? (
-				<span className="jira-browse__subtask-mark" aria-hidden="true">
-					↳
-				</span>
-			) : null}
-			<span className={cn("jira-browse__sq", issueSquareClass(issue.type))} aria-hidden="true" />
-			<span className="jira-browse__k">{issue.key}</span>
-			<span className="jira-browse__t">{issue.title}</span>
-			{opts.isContext ? <span className="jira-browse__context-tag">parent · context</span> : null}
-			{issue.assignee ? <span className="jira-browse__assignee">{issue.assignee}</span> : null}
-			{issue.status ? (
-				<span className="jira-browse__st" style={browseStatusStyle(issue.statusCategory)}>
-					{issue.status}
-				</span>
-			) : null}
+	// A collapse/expand twisty for a node with children, or an aligning spacer.
+	const renderTwisty = (node: TreeNode, hasChildren: boolean, isCollapsed: boolean): ReactNode =>
+		hasChildren ? (
 			<button
 				type="button"
-				className="jira-browse__create"
+				className="jira-browse__twisty"
+				aria-label={isCollapsed ? `Expand ${node.issue.key}` : `Collapse ${node.issue.key}`}
+				aria-expanded={!isCollapsed}
 				onClick={(event) => {
 					event.stopPropagation();
-					setCreateIssue(issue);
+					toggleNode(node.issue.key);
 				}}
 			>
-				Create session ▷
+				{isCollapsed ? (
+					<ChevronRight className="size-3.5" aria-hidden="true" />
+				) : (
+					<ChevronDown className="size-3.5" aria-hidden="true" />
+				)}
 			</button>
-		</div>
-	);
+		) : (
+			<span className="jira-browse__twisty jira-browse__twisty--spacer" aria-hidden="true" />
+		);
 
-	// A hierarchy row: the top-level issue, then its subtasks indented beneath (Image
-	// #37). A top-level issue that is itself a subtask (its parent isn't in the set)
-	// gets the subtask marker; a context parent (pulled in for a matched subtask) is
-	// dimmed.
-	const renderTreeRow = (row: HierarchyRow) => (
-		<div key={row.issue.key} className="jira-browse__tree">
-			{renderRow(row.issue, {
-				isContext: row.isContext,
-				isSubtask: !row.isContext && Boolean(row.issue.parent),
-			})}
-			{row.children.map((child) => renderRow(child, { indent: true, isSubtask: true }))}
-		</div>
-	);
+	// An Epic row: a context-only group header (Fix 5) — no status pill, no create/+,
+	// no Send-to-Orchestrator, not batch-selectable. Its children nest beneath it.
+	const renderEpicRow = (node: TreeNode, depth: number, hasChildren: boolean, isCollapsed: boolean): ReactNode => {
+		const issue = node.issue;
+		const childCount = countTreeNodes(node.children);
+		return (
+			<div
+				role="button"
+				tabIndex={0}
+				aria-label={`Open ${issue.key}`}
+				className={cn("jira-browse__row jira-browse__row--epic", node.isContext && "jira-browse__row--context")}
+				style={{ paddingLeft: 14 + depth * 22 }}
+				onClick={() => setDetailKey(issue.key)}
+				onKeyDown={(event) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						setDetailKey(issue.key);
+					}
+				}}
+			>
+				{renderTwisty(node, hasChildren, isCollapsed)}
+				<span className="jira-browse__epic-badge" aria-hidden="true">
+					EPIC
+				</span>
+				<span className="jira-browse__k">{issue.key}</span>
+				<span className="jira-browse__t">{issue.title}</span>
+				{childCount > 0 ? (
+					<span className="jira-browse__sprint-count">
+						· {childCount} {childCount === 1 ? "item" : "items"}
+					</span>
+				) : null}
+			</div>
+		);
+	};
+
+	// A startable issue row: opens the detail drawer on click; carries the select
+	// checkbox, "You" highlight (Fix 3), Send-to-Orchestrator + "+" actions (Fix 4).
+	const renderIssueRow = (node: TreeNode, depth: number, hasChildren: boolean, isCollapsed: boolean): ReactNode => {
+		const issue = node.issue;
+		const isMe = Boolean(myAccountId) && issue.assigneeAccountId === myAccountId;
+		const isSel = selected.has(issue.key);
+		return (
+			<div
+				role="button"
+				tabIndex={0}
+				aria-label={`Open ${issue.key}`}
+				className={cn(
+					"jira-browse__row",
+					node.isContext && "jira-browse__row--context",
+					isMe && "jira-browse__row--me",
+					isSel && "jira-browse__row--selected",
+				)}
+				style={{ paddingLeft: 14 + depth * 22 }}
+				onClick={() => setDetailKey(issue.key)}
+				onKeyDown={(event) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						setDetailKey(issue.key);
+					}
+				}}
+			>
+				{renderTwisty(node, hasChildren, isCollapsed)}
+				<input
+					type="checkbox"
+					className="jira-browse__check"
+					checked={isSel}
+					aria-label={`Select ${issue.key} for Send to Orchestrator`}
+					onClick={(event) => event.stopPropagation()}
+					onChange={(event) => {
+						event.stopPropagation();
+						toggleSelected(issue.key);
+					}}
+				/>
+				<span className={cn("jira-browse__sq", issueSquareClass(issue.type))} aria-hidden="true" />
+				<span className="jira-browse__k">{issue.key}</span>
+				<span className="jira-browse__t">{issue.title}</span>
+				{node.isContext ? <span className="jira-browse__context-tag">context</span> : null}
+				{isMe ? (
+					<span className="jira-browse__you" title={issue.assignee || "Assigned to you"}>
+						You
+					</span>
+				) : issue.assignee ? (
+					<span className="jira-browse__assignee">{issue.assignee}</span>
+				) : null}
+				{issue.status ? (
+					<span className="jira-browse__st" style={browseStatusStyle(issue.statusCategory)}>
+						{issue.status}
+					</span>
+				) : null}
+				<button
+					type="button"
+					className="jira-browse__act"
+					title={orchestrator ? "Send to the project's Orchestrator" : "Start this project's Orchestrator first"}
+					aria-label={`Send ${issue.key} to the Orchestrator`}
+					disabled={!orchestrator || send.isPending}
+					onClick={(event) => {
+						event.stopPropagation();
+						sendToOrchestrator([issue.key]);
+					}}
+				>
+					<Send className="size-3.5" aria-hidden="true" />
+				</button>
+				<button
+					type="button"
+					className="jira-browse__act jira-browse__act--add"
+					title="Create a session for this issue"
+					aria-label={`Create a session for ${issue.key}`}
+					onClick={(event) => {
+						event.stopPropagation();
+						setCreateIssue(issue);
+					}}
+				>
+					<Plus className="size-3.5" aria-hidden="true" />
+				</button>
+			</div>
+		);
+	};
+
+	// Render a node and (unless collapsed) its children. `depth` is the RENDER depth
+	// (0 at each list/section root), so grouped mode can promote stories out of epics
+	// and still indent correctly.
+	const renderNode = (node: TreeNode, depth: number): ReactNode => {
+		const hasChildren = node.children.length > 0;
+		const isCollapsed = collapsedNodes.has(node.issue.key);
+		return (
+			<div key={node.issue.key} className="jira-browse__treenode">
+				{isEpicIssue(node.issue)
+					? renderEpicRow(node, depth, hasChildren, isCollapsed)
+					: renderIssueRow(node, depth, hasChildren, isCollapsed)}
+				{hasChildren && !isCollapsed ? node.children.map((child) => renderNode(child, depth + 1)) : null}
+			</div>
+		);
+	};
 
 	return (
 		<div className="jira-browse">
@@ -242,8 +413,8 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					Browse Jira <span className="jira-browse__manual">◈ MANUAL · YOU PICK</span>
 				</h1>
 				<p className="jira-browse__sub">
-					Pick a project, then an issue, and start a worker. Your last project is remembered. Nothing is imported
-					automatically.
+					Pick a project, then an issue, and start a worker — or hand issues to the Orchestrator. Your last project is
+					remembered. Nothing is imported automatically.
 				</p>
 			</header>
 
@@ -376,6 +547,35 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					)}
 				</div>
 
+				{selected.size > 0 ? (
+					<div className="jira-browse__batchbar" role="group" aria-label="Batch actions">
+						<span className="jira-browse__batchbar-n">{selected.size} selected</span>
+						<button
+							type="button"
+							className="jira-browse__batchbar-send"
+							disabled={!orchestrator || send.isPending}
+							onClick={() => sendToOrchestrator([...selected])}
+							title={`Send ${selected.size} selected to the Orchestrator`}
+							aria-label={`Send ${selected.size} selected to the Orchestrator`}
+						>
+							<Send className="size-3.5" aria-hidden="true" />
+							{send.isPending ? "Sending…" : "Send"}
+						</button>
+						<button type="button" className="jira-browse__batchbar-clear" onClick={() => setSelected(new Set())}>
+							Clear
+						</button>
+						{!orchestrator ? (
+							<span className="jira-browse__batchbar-warn">Start this project's Orchestrator first</span>
+						) : null}
+					</div>
+				) : null}
+
+				{toast ? (
+					<div className="jira-browse__toast" role="status">
+						{toast}
+					</div>
+				) : null}
+
 				{!advancedMode && !projectKey ? (
 					<div className="jira-browse__empty">Pick a project to browse its issues.</div>
 				) : (
@@ -398,17 +598,17 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							<p className="jira-browse__note">Searching…</p>
 						) : results.length === 0 ? (
 							<p className="jira-browse__note">No issues match.</p>
-						) : rowGroups ? (
-							rowGroups.map((group) => {
-								const isCollapsed = collapsed.has(group.name);
-								const count = group.rows.reduce((n, row) => n + 1 + row.children.length, 0);
+						) : treeGroups ? (
+							treeGroups.map((group) => {
+								const isCollapsed = collapsedSprints.has(group.name);
+								const count = countTreeNodes(group.nodes);
 								return (
 									<div key={group.name} className="jira-browse__sprint">
 										<button
 											type="button"
 											className="jira-browse__sprint-head"
 											aria-expanded={!isCollapsed}
-											onClick={() => toggleCollapsed(group.name)}
+											onClick={() => toggleSprint(group.name)}
 										>
 											{isCollapsed ? (
 												<ChevronRight className="size-3.5" aria-hidden="true" />
@@ -423,20 +623,20 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 												· {count} {count === 1 ? "work item" : "work items"}
 											</span>
 										</button>
-										{isCollapsed ? null : group.rows.map(renderTreeRow)}
+										{isCollapsed ? null : group.nodes.map((node) => renderNode(node, 0))}
 									</div>
 								);
 							})
 						) : (
-							hierarchy.map(renderTreeRow)
+							tree.map((node) => renderNode(node, 0))
 						)}
 					</div>
 				)}
 
 				<p className="jira-browse__manual-note">
-					◈ <b>Manual by design</b> — pick a Story to start a worker tracked by its key. Subtasks show for context in
-					the session's Summary; they aren't started on their own. Nothing auto-imports onto the board. Read-only search
-					· one manual create.
+					◈ <b>Manual by design</b> — open a card for detail, start a worker with <b>+</b>, or{" "}
+					<b>Send to Orchestrator</b> to let it decide. Epics are context-only group headers; subtasks nest under their
+					story. Nothing auto-imports. Read-only search · Move-status is the only write.
 				</p>
 			</div>
 
@@ -466,8 +666,26 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	);
 }
 
-// issueSquareClass tints the leading square by issue type (bug red, sub-task
-// purple, support blue; story/task fall through to the default green).
+// buildOrchestratorMessage frames the selected issues as a clear, actionable request
+// for the orchestrator session (which decides whether to spawn). Carries key + summary
+// + status + type per issue; capped under the daemon's 4096-char send limit.
+function buildOrchestratorMessage(issues: JiraIssueSummary[]): string {
+	const lines = issues.map(
+		(i) => `- ${i.key} (${i.title ?? ""})${i.status ? ` [${i.status}]` : ""}${i.type ? ` · ${i.type}` : ""}`,
+	);
+	const header =
+		issues.length === 1
+			? "Please start work on this Jira issue:"
+			: `Please start work on these ${issues.length} Jira issues:`;
+	const footer =
+		"\n\nEach is a jira:<KEY> task — decide whether to spawn a worker for each (I'm not spawning directly).";
+	let body = `${header}\n${lines.join("\n")}${footer}`;
+	if (body.length > 3900) body = `${body.slice(0, 3860)}\n… (list truncated)${footer}`;
+	return body;
+}
+
+// issueSquareClass tints the leading square by issue type (bug red, sub-task purple,
+// support blue; story/task fall through to the default green).
 function issueSquareClass(type?: string): string {
 	const t = (type ?? "").toLowerCase();
 	if (t.includes("bug")) return "is-bug";
@@ -476,8 +694,8 @@ function issueSquareClass(type?: string): string {
 	return "";
 }
 
-// browseStatusStyle tints a row's status pill by Jira's status CATEGORY, matching
-// the picker/inspector treatment (new → amber, indeterminate → accent, done → success).
+// browseStatusStyle tints a row's status pill by Jira's status CATEGORY, matching the
+// picker/inspector treatment (new → amber, indeterminate → accent, done → success).
 function browseStatusStyle(category?: string): React.CSSProperties {
 	const tone = category === "done" ? "var(--success)" : category === "indeterminate" ? "var(--accent)" : "var(--amber)";
 	return {

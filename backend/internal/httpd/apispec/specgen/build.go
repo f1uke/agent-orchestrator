@@ -200,6 +200,7 @@ var schemaNames = map[string]string{
 	"ControllersJiraIssueQuery":                   "JiraIssueQuery",
 	"ControllersJiraIssueMoveRequest":             "JiraIssueMoveRequest",
 	"ControllersJiraSearchResponse":               "JiraSearchResponse",
+	"ControllersJiraMyselfResponse":               "JiraMyselfResponse",
 	"ControllersJiraProject":                      "JiraProject",
 	"ControllersJiraProjectsResponse":             "JiraProjectsResponse",
 	"ControllersJiraSearchQuery":                  "JiraSearchQuery",
@@ -502,6 +503,15 @@ func jiraOperations() []operation {
 			pathParams: []any{controllers.JiraProjectsQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.JiraProjectsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/jira/myself", id: "getJiraMyself", tag: "jira",
+			summary: "Resolve the authenticated Jira account (accountId) so Browse Jira can highlight the viewer's rows",
+			resps: []respUnit{
+				{http.StatusOK, controllers.JiraMyselfResponse{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

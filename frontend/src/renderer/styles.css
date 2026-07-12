@@ -1874,10 +1874,14 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 
 /* Move-status dialog (JiraMoveStatusDialog) — the one sanctioned Jira write.
    Mockup 05: current→next flow, live-fetched transitions, confirm. */
+/* z-index 70 keeps the Move-status modal (and its backdrop) ABOVE the Browse Jira
+   detail drawer (z-index 60) when opened from inside it — otherwise the drawer
+   covers/dims the modal (bug from #92). Harmless when opened from the Summary tab
+   (no drawer present). Its backdrop dims the drawer too. */
 .jira-move__overlay {
 	position: fixed;
 	inset: 0;
-	z-index: 50;
+	z-index: 70;
 	background: rgb(4 5 7 / 0.62);
 	backdrop-filter: blur(2px);
 }
@@ -1886,7 +1890,7 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	position: fixed;
 	left: 50%;
 	top: 50%;
-	z-index: 50;
+	z-index: 70;
 	transform: translate(-50%, -50%);
 	width: 520px;
 	max-width: 92vw;
@@ -2586,6 +2590,184 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .jira-browse__create:hover {
 	background: var(--accent);
 	color: var(--accent-fg);
+}
+
+/* ── Tree nesting + per-row controls (Browse Jira follow-ups) ────────────────── */
+.jira-browse__treenode {
+	display: contents;
+}
+
+/* Collapse/expand twisty on a node with children (or an aligning spacer). */
+.jira-browse__twisty {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	margin: -2px 0;
+	border: none;
+	border-radius: 5px;
+	background: none;
+	color: var(--fg-muted);
+	cursor: pointer;
+	transition: background 0.12s ease;
+}
+
+.jira-browse__twisty:hover {
+	background: color-mix(in srgb, var(--fg) 10%, transparent);
+	color: var(--fg);
+}
+
+.jira-browse__twisty--spacer {
+	pointer-events: none;
+}
+
+/* Multi-select checkbox (Send-to-Orchestrator batch). */
+.jira-browse__check {
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	accent-color: var(--accent);
+	cursor: pointer;
+}
+
+/* "You" accent chip — the viewer's own rows pop even when not filtering to self. */
+.jira-browse__you {
+	flex: 0 0 auto;
+	font-size: 10.5px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	color: var(--accent-fg);
+	background: var(--accent);
+	border-radius: 999px;
+	padding: 1px 8px;
+}
+
+.jira-browse__row--me {
+	box-shadow: inset 2px 0 0 var(--accent);
+	background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.jira-browse__row--selected {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Epic row = context-only group header: a labelled container, no start actions. */
+.jira-browse__row--epic {
+	background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.jira-browse__epic-badge {
+	flex: 0 0 auto;
+	font-size: 9.5px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	color: #a98be0;
+	background: color-mix(in srgb, #8f7ad0 16%, transparent);
+	border: 1px solid color-mix(in srgb, #8f7ad0 40%, transparent);
+	border-radius: 5px;
+	padding: 1px 6px;
+}
+
+/* Compact per-row icon actions: Send-to-Orchestrator + "+" create. */
+.jira-browse__act {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	color: var(--fg-muted);
+	background: color-mix(in srgb, var(--fg) 6%, transparent);
+	border: 1px solid var(--border-1);
+	border-radius: 7px;
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+
+.jira-browse__act:hover:not(:disabled) {
+	background: var(--accent);
+	color: var(--accent-fg);
+	border-color: var(--accent);
+}
+
+.jira-browse__act:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.jira-browse__act--add:hover:not(:disabled) {
+	background: var(--success);
+	border-color: var(--success);
+}
+
+/* Batch action bar shown while rows are selected. */
+.jira-browse__batchbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	margin-bottom: 10px;
+	border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.jira-browse__batchbar-n {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--fg);
+}
+
+.jira-browse__batchbar-send {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--accent-fg);
+	background: var(--accent);
+	border: none;
+	border-radius: 8px;
+	padding: 5px 12px;
+	cursor: pointer;
+}
+
+.jira-browse__batchbar-send:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.jira-browse__batchbar-clear {
+	font-size: 12px;
+	color: var(--fg-muted);
+	background: none;
+	border: none;
+	cursor: pointer;
+}
+
+.jira-browse__batchbar-clear:hover {
+	color: var(--fg);
+	text-decoration: underline;
+}
+
+.jira-browse__batchbar-warn {
+	font-size: 11.5px;
+	color: var(--amber);
+}
+
+/* Transient confirmation / warning after a Send-to-Orchestrator. */
+.jira-browse__toast {
+	padding: 8px 12px;
+	margin-bottom: 10px;
+	border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--success) 10%, transparent);
+	color: color-mix(in srgb, var(--success) 75%, var(--fg));
+	font-size: 12px;
 }
 
 .jira-browse__manual-note {

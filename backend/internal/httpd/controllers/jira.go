@@ -26,6 +26,7 @@ type JiraService interface {
 	Move(ctx context.Context, id domain.SessionID, key, transitionID string) (jirasvc.MoveResult, error)
 	Search(ctx context.Context, p jirasvc.SearchParams) ([]jiraadapter.IssueSummary, error)
 	Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
+	CurrentUser(ctx context.Context) (jiraadapter.CurrentUser, error)
 	SetBinding(ctx context.Context, id domain.SessionID, key string) (jiraadapter.IssueSummary, error)
 	Unlink(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	// By-key reads for the pre-session Browse Jira detail view (no session binding).
@@ -45,6 +46,7 @@ type JiraController struct {
 func (c *JiraController) Register(r chi.Router) {
 	r.Get("/jira/search", c.search)
 	r.Get("/jira/projects", c.projects)
+	r.Get("/jira/myself", c.myself)
 	r.Get("/jira/issue", c.issue)
 	r.Get("/jira/issue/transitions", c.issueTransitions)
 	r.Post("/jira/issue/move", c.issueMove)
@@ -102,6 +104,21 @@ func (c *JiraController) projects(w http.ResponseWriter, r *http.Request) {
 		out.Projects = append(out.Projects, JiraProject{Key: p.Key, Name: p.Name})
 	}
 	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// myself resolves the authenticated Jira account so Browse Jira can highlight the
+// viewer's own rows. The account id is stable; the frontend caches it.
+func (c *JiraController) myself(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/myself")
+		return
+	}
+	me, err := c.Svc.CurrentUser(r.Context())
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, JiraMyselfResponse{AccountID: me.AccountID, DisplayName: me.DisplayName})
 }
 
 // issue reads one issue's full display projection by key for the pre-session Browse
