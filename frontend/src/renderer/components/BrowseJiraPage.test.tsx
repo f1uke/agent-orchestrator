@@ -518,7 +518,7 @@ describe("BrowseJiraPage", () => {
 		fireEvent.click(screen.getByRole("checkbox", { name: /Select DEMO-1 / }));
 		fireEvent.click(screen.getByRole("checkbox", { name: /Select DEMO-4 / }));
 		expect(screen.getByText("2 selected")).toBeTruthy();
-		fireEvent.click(screen.getByRole("button", { name: "Send to Orchestrator" }));
+		fireEvent.click(screen.getByRole("button", { name: "Send 2 selected to the Orchestrator" }));
 
 		await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
 		const message = sendMock.mock.calls[0][1].body.message as string;

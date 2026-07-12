@@ -555,9 +555,11 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							className="jira-browse__batchbar-send"
 							disabled={!orchestrator || send.isPending}
 							onClick={() => sendToOrchestrator([...selected])}
+							title={`Send ${selected.size} selected to the Orchestrator`}
+							aria-label={`Send ${selected.size} selected to the Orchestrator`}
 						>
 							<Send className="size-3.5" aria-hidden="true" />
-							{send.isPending ? "Sending…" : "Send to Orchestrator"}
+							{send.isPending ? "Sending…" : "Send"}
 						</button>
 						<button type="button" className="jira-browse__batchbar-clear" onClick={() => setSelected(new Set())}>
 							Clear
