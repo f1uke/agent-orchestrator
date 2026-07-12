@@ -22,6 +22,29 @@ vi.mock("./NewTaskDialog", () => ({
 		open ? <div data-testid="new-task">dialog:{initialIssue?.key}</div> : null,
 }));
 
+// Stub the read-only detail drawer: record which issue it opened for, and expose a
+// button that fires its Create-session handoff so we can assert the wiring without
+// the drawer's own hooks (which the module mock above doesn't provide).
+vi.mock("./JiraIssueDetail", () => ({
+	JiraIssueDetail: ({
+		issueKey,
+		open,
+		onCreateSession,
+	}: {
+		issueKey: string | null;
+		open: boolean;
+		onCreateSession: (issue: { key: string }) => void;
+	}) =>
+		open ? (
+			<div data-testid="jira-detail">
+				detail:{issueKey}
+				<button type="button" onClick={() => onCreateSession({ key: issueKey! })}>
+					detail-create
+				</button>
+			</div>
+		) : null,
+}));
+
 import { BrowseJiraPage } from "./BrowseJiraPage";
 
 type Row = {
@@ -185,6 +208,37 @@ describe("BrowseJiraPage", () => {
 		fireEvent.click(screen.getByText("picker:none"));
 
 		fireEvent.click(screen.getAllByRole("button", { name: /Create session/i })[0]);
+		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
+	});
+
+	it("opens the read-only detail drawer when a row is clicked", () => {
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		// Clicking the row body (not the Create button) opens the detail drawer for it.
+		fireEvent.click(screen.getByRole("button", { name: "Open DEMO-101" }));
+		expect(screen.getByTestId("jira-detail")).toHaveTextContent("detail:DEMO-101");
+		// The Create-session button never opens the drawer — it hands off to New-task.
+		expect(screen.queryByTestId("new-task")).toBeNull();
+	});
+
+	it("Create session on a row does not open the detail drawer", () => {
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getAllByRole("button", { name: /Create session/i })[0]);
+		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
+		expect(screen.queryByTestId("jira-detail")).toBeNull();
+	});
+
+	it("Create session from inside the detail drawer hands off to the New-task modal", () => {
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Open DEMO-101" }));
+		fireEvent.click(screen.getByRole("button", { name: "detail-create" }));
+		// The drawer closes and the New-task modal opens pre-filled with the issue.
+		expect(screen.queryByTestId("jira-detail")).toBeNull();
 		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
 	});
 

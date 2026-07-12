@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { useEffect, useState } from "react";
+import { JiraIssueDetail } from "./JiraIssueDetail";
 import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { useJiraSearch, type JiraIssueSummary, type JiraProject } from "../hooks/useSessionJiraContext";
@@ -49,6 +50,8 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	const [debounced, setDebounced] = useState("");
 	const [filter, setFilter] = useState(0);
 	const [createIssue, setCreateIssue] = useState<JiraIssueSummary | null>(null);
+	// The key of the issue open in the read-only detail drawer (mockup #36), or null.
+	const [detailKey, setDetailKey] = useState<string | null>(null);
 	// View prefs remembered across visits (grouping, assignee, hide-done, active
 	// sprint, advanced mode + JQL); last-project is remembered separately.
 	const initialPrefs = readBrowsePrefs();
@@ -170,13 +173,25 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		issue: JiraIssueSummary,
 		opts: { indent?: boolean; isSubtask?: boolean; isContext?: boolean } = {},
 	) => (
+		// The row body opens the read-only detail drawer (mockup #36); the Create button
+		// stops propagation so it still hands off to the New-task modal instead.
 		<div
 			key={issue.key}
+			role="button"
+			tabIndex={0}
+			aria-label={`Open ${issue.key}`}
 			className={cn(
 				"jira-browse__row",
 				opts.indent && "jira-browse__row--child",
 				opts.isContext && "jira-browse__row--context",
 			)}
+			onClick={() => setDetailKey(issue.key)}
+			onKeyDown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					setDetailKey(issue.key);
+				}
+			}}
 		>
 			{opts.isSubtask ? (
 				<span className="jira-browse__subtask-mark" aria-hidden="true">
@@ -193,7 +208,14 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					{issue.status}
 				</span>
 			) : null}
-			<button type="button" className="jira-browse__create" onClick={() => setCreateIssue(issue)}>
+			<button
+				type="button"
+				className="jira-browse__create"
+				onClick={(event) => {
+					event.stopPropagation();
+					setCreateIssue(issue);
+				}}
+			>
 				Create session ▷
 			</button>
 		</div>
@@ -417,6 +439,18 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					· one manual create.
 				</p>
 			</div>
+
+			<JiraIssueDetail
+				issueKey={detailKey}
+				open={Boolean(detailKey)}
+				onOpenChange={(open) => {
+					if (!open) setDetailKey(null);
+				}}
+				onCreateSession={(issue) => {
+					setDetailKey(null);
+					setCreateIssue(issue);
+				}}
+			/>
 
 			<NewTaskDialog
 				open={Boolean(createIssue)}

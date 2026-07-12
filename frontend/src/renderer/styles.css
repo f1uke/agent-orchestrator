@@ -2497,6 +2497,7 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	gap: 12px;
 	padding: 12px 14px;
 	border-bottom: 1px solid var(--border);
+	cursor: pointer;
 }
 
 .jira-browse__row:last-child {
@@ -2505,6 +2506,12 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 
 .jira-browse__row:hover {
 	background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.jira-browse__row:focus-visible {
+	outline: none;
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+	box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .jira-browse__sq {
@@ -2590,6 +2597,158 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 
 .jira-browse__manual-note b {
 	color: color-mix(in srgb, var(--success) 70%, var(--fg));
+}
+
+/* ── Browse Jira issue detail drawer (read-only, mockup #36) ──────────────────
+   A right-side drawer over the list. Reuses the Summary tab's issue classes
+   (jira-card / jira-head / jira-meta / jira-sub / jira-adf) so an issue renders
+   identically; the only extras are the top bar + parent breadcrumb + actions. */
+.jira-detail__overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	background: rgb(4 5 7 / 0.55);
+	backdrop-filter: blur(2px);
+}
+
+.jira-detail__drawer {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 60;
+	display: flex;
+	flex-direction: column;
+	width: 560px;
+	max-width: 94vw;
+	background: var(--bg-1);
+	border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+	box-shadow: var(--shadow);
+}
+
+.jira-detail__bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--border);
+	flex: 0 0 auto;
+}
+
+/* Parent breadcrumb (top-left) — clicking navigates the drawer to the parent. */
+.jira-detail__crumb {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex: 1;
+	min-width: 0;
+	font-size: 12px;
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	text-align: left;
+}
+
+.jira-detail__crumb:hover {
+	text-decoration: underline;
+}
+
+.jira-detail__crumb--none {
+	color: var(--fg-passive);
+	cursor: default;
+}
+
+.jira-detail__crumb--none:hover {
+	text-decoration: none;
+}
+
+.jira-detail__crumb-caret {
+	color: var(--fg-passive);
+	flex: 0 0 auto;
+}
+
+.jira-detail__crumb-key {
+	font-family: var(--font-mono);
+	font-weight: 700;
+}
+
+.jira-detail__crumb-title {
+	color: var(--fg-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jira-detail__close {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 7px;
+	border: 1px solid var(--border-1);
+	background: color-mix(in srgb, var(--fg) 4%, transparent);
+	color: var(--fg-muted);
+	cursor: pointer;
+	transition: background 0.12s ease;
+}
+
+.jira-detail__close:hover {
+	background: color-mix(in srgb, var(--fg) 9%, transparent);
+	color: var(--fg);
+}
+
+.jira-detail__body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.jira-detail__actions {
+	margin-top: 14px;
+	display: flex;
+	justify-content: flex-end;
+}
+
+/* The Parent value in the details list — same navigate-to-parent action. */
+.jira-detail__parent-link {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+}
+
+.jira-detail__parent-link:hover {
+	text-decoration: underline;
+}
+
+/* The subtask key rendered as a button (opens that subtask in the drawer) —
+   reset the button chrome so it reads like the .jira-sub__key span. */
+.jira-sub__key--btn {
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+}
+
+.jira-sub__key--btn:hover {
+	text-decoration: underline;
+}
+
+.jira-sub__key--btn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+	border-radius: 3px;
 }
 
 /* Project picker dropdown (used inside Browse controls) */

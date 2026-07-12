@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowUpRight, ChevronDown, Plus } from "lucide-react";
 import { useSessionJiraContext, useUnlinkJira, type JiraIssue, type JiraSubtask } from "../hooks/useSessionJiraContext";
+import { formatSprintDates, priorityTone, statusPillStyle } from "../lib/jira-format";
 import { JiraAdf } from "./JiraAdf";
 import { JiraLinkDialog } from "./JiraLinkDialog";
 import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
@@ -233,49 +234,3 @@ function MetaRow({ k, v }: { k: string; v: React.ReactNode }) {
 	);
 }
 
-// statusPillStyle tints the status pill from Jira's status CATEGORY (not the
-// free-form name): new → amber (to-do / needs attention), indeterminate → blue
-// (in progress), done → green. Mirrors the TimelinePill color-mix treatment.
-function statusPillStyle(category?: string): React.CSSProperties {
-	const tone = statusTone(category);
-	return {
-		color: tone,
-		background: `color-mix(in srgb, ${tone} 14%, transparent)`,
-		borderColor: `color-mix(in srgb, ${tone} 42%, transparent)`,
-	};
-}
-
-function statusTone(category?: string): string {
-	switch (category) {
-		case "done":
-			return "var(--success)";
-		case "indeterminate":
-			return "var(--accent)";
-		default:
-			return "var(--amber)";
-	}
-}
-
-function priorityTone(priority: string): string {
-	const p = priority.toLowerCase();
-	if (p.includes("highest") || p.includes("high") || p.includes("critical") || p.includes("blocker"))
-		return "var(--red)";
-	if (p.includes("low")) return "var(--fg-muted)";
-	return "var(--orange)";
-}
-
-// formatSprintDates renders "29 Jun – 10 Jul" from ISO start/end, dropping the
-// pair when either date is missing/unparseable.
-function formatSprintDates(start?: string, end?: string): string {
-	const s = parseDate(start);
-	const e = parseDate(end);
-	if (!s || !e) return "";
-	const fmt = (d: Date) => d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-	return `${fmt(s)} – ${fmt(e)}`;
-}
-
-function parseDate(iso?: string): Date | null {
-	if (!iso) return null;
-	const d = new Date(iso);
-	return Number.isNaN(d.getTime()) ? null : d;
-}

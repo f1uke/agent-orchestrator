@@ -3,6 +3,7 @@ import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { workspaceQueryKey } from "./useWorkspaceQuery";
 import {
+	mockJiraIssue,
 	mockJiraProjects,
 	mockJiraSearch,
 	mockSessionJiraContexts,
@@ -56,6 +57,10 @@ export const jiraSearchQueryKey = (project: string, query: string, filters: Jira
 	] as const;
 
 export const jiraProjectsQueryKey = (query: string) => ["jira-projects", query] as const;
+
+export const jiraIssueQueryKey = (key: string) => ["jira-issue", key] as const;
+
+export const jiraIssueTransitionsQueryKey = (key: string) => ["jira-issue-transitions", key] as const;
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -214,6 +219,69 @@ export function useJiraProjects(query: string, enabled: boolean) {
 		enabled,
 		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraProjects(q)) : fetchJiraProjects(q)),
 		staleTime: 60_000,
+	});
+}
+
+async function fetchJiraIssue(key: string): Promise<JiraIssue | null> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/issue", { params: { query: { key } } });
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't load the Jira issue"));
+	return data?.issue ?? null;
+}
+
+/**
+ * Reads one issue's full display projection by KEY (pre-session), for the Browse
+ * Jira detail view — the same projection the Summary tab renders, but not scoped to
+ * a session. Enable only while the detail panel is open. A failure throws so the
+ * panel can surface it (e.g. a missing token).
+ */
+export function useJiraIssue(key: string | undefined, enabled: boolean) {
+	return useQuery({
+		queryKey: jiraIssueQueryKey(key ?? ""),
+		enabled: Boolean(key) && enabled,
+		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraIssue(key!)) : fetchJiraIssue(key!)),
+		staleTime: 30_000,
+	});
+}
+
+async function fetchJiraIssueTransitions(key: string): Promise<JiraTransition[]> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/issue/transitions", { params: { query: { key } } });
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't load Jira transitions"));
+	return data?.transitions ?? [];
+}
+
+/**
+ * Lists an issue's live status transitions by KEY — the detail view's Move-status
+ * entry (pre-session). Enable only while the move dialog is open. A failure throws.
+ */
+export function useJiraIssueTransitions(key: string | undefined, enabled: boolean) {
+	return useQuery({
+		queryKey: jiraIssueTransitionsQueryKey(key ?? ""),
+		enabled: Boolean(key) && enabled,
+		queryFn: () => (usePreviewData ? Promise.resolve([]) : fetchJiraIssueTransitions(key!)),
+		staleTime: 15_000,
+	});
+}
+
+/**
+ * Applies a status transition to an issue by KEY — the ONE sanctioned Jira write,
+ * from the pre-session Browse Jira detail view. On success it invalidates the issue
+ * and its transitions so the pill reflects the new status. Preview = no-op success.
+ */
+export function useMoveJiraIssue(key: string) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (transitionId: string): Promise<JiraMoveResponse> => {
+			if (usePreviewData) return { sessionId: "", key, status: "", statusCategory: "" };
+			const { data, error } = await apiClient.POST("/api/v1/jira/issue/move", {
+				body: { key, transitionId },
+			});
+			if (error) throw new Error(apiErrorMessage(error, "Couldn't move the Jira status"));
+			return data!;
+		},
+		onSuccess: () => {
+			void qc.invalidateQueries({ queryKey: jiraIssueQueryKey(key) });
+			void qc.invalidateQueries({ queryKey: jiraIssueTransitionsQueryKey(key) });
+		},
 	});
 }
 
