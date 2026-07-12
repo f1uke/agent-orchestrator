@@ -3667,6 +3667,8 @@ components:
           type: string
         key:
           type: string
+        sprint:
+          $ref: '#/components/schemas/JiraSprint'
         status:
           type: string
         statusCategory:

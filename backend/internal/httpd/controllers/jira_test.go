@@ -276,7 +276,8 @@ func TestJiraMove_NilServiceNotImplemented(t *testing.T) {
 
 func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 	stub := &stubJira{searchRes: []jiraadapter.IssueSummary{
-		{Key: "DEMO-2272", Type: "Story", Title: "Example issue summary", Status: "Ready for QA", StatusCategory: "new"},
+		{Key: "DEMO-2272", Type: "Story", Title: "Example issue summary", Status: "Ready for QA", StatusCategory: "new",
+			Sprint: &jiraadapter.Sprint{Name: "Sprint 2026-14", State: "active"}},
 	}}
 	rec := serveJiraReq(t, stub, http.MethodGet, "/jira/search?q=eligible&project=DEMO", nil)
 	if rec.Code != http.StatusOK {
@@ -291,6 +292,10 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 	}
 	if len(body.Issues) != 1 || body.Issues[0].Key != "DEMO-2272" || body.Issues[0].Type != "Story" {
 		t.Errorf("issues = %+v", body.Issues)
+	}
+	// The sprint rides the search row so Browse Jira can group by it.
+	if body.Issues[0].Sprint == nil || body.Issues[0].Sprint.Name != "Sprint 2026-14" {
+		t.Errorf("issue sprint = %+v", body.Issues[0].Sprint)
 	}
 }
 

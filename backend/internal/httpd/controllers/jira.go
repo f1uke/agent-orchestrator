@@ -259,7 +259,21 @@ func jiraIssueSummaryDTO(it jiraadapter.IssueSummary) JiraIssueSummary {
 		StatusCategory: it.StatusCategory,
 		StatusColor:    it.StatusColor,
 		Assignee:       it.Assignee,
+		Sprint:         jiraSprintDTO(it.Sprint),
 		URL:            it.URL,
+	}
+}
+
+// jiraSprintDTO maps an adapter sprint to its wire shape (nil-safe).
+func jiraSprintDTO(sp *jiraadapter.Sprint) *JiraSprint {
+	if sp == nil {
+		return nil
+	}
+	return &JiraSprint{
+		Name:      sp.Name,
+		State:     sp.State,
+		StartDate: sp.StartDate,
+		EndDate:   sp.EndDate,
 	}
 }
 
@@ -277,14 +291,7 @@ func jiraIssueDTO(iss jiraadapter.Issue) *JiraIssue {
 		Reporter:       iss.Reporter,
 		Description:    iss.Description,
 	}
-	if iss.Sprint != nil {
-		dto.Sprint = &JiraSprint{
-			Name:      iss.Sprint.Name,
-			State:     iss.Sprint.State,
-			StartDate: iss.Sprint.StartDate,
-			EndDate:   iss.Sprint.EndDate,
-		}
-	}
+	dto.Sprint = jiraSprintDTO(iss.Sprint)
 	for _, s := range iss.Subtasks {
 		dto.Subtasks = append(dto.Subtasks, JiraSubtask{
 			Key:            s.Key,
