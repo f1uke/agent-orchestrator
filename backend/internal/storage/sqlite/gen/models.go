@@ -192,6 +192,7 @@ type Session struct {
 	PRTarget          string
 	CreatedBy         string
 	IsSuspended       bool
+	LastOpenedAt      sql.NullTime
 }
 
 type SessionWorktree struct {
