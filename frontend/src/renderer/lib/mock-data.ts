@@ -678,21 +678,30 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 const mockAccountId = (name: string): string =>
 	name.trim() ? `acc-${name.trim().toLowerCase().replace(/\s+/g, "-")}` : "";
 
+type MockSearchFilters = {
+	assignee?: string;
+	types?: string[];
+	hideDone?: boolean;
+	activeSprint?: boolean;
+	jql?: string;
+};
+
 /**
  * Preview-mode search: filters the synthetic pool by key/title (or project), then
  * mirrors the server-side JQL filters — assignee (a derived accountId, or the
- * "unassigned" token) and issue types — so Browse Jira behaves in preview as it
- * does live. Each row carries its derived assigneeAccountId for the dropdown.
+ * "unassigned" token), issue types, hide-done and active-sprint — so Browse Jira
+ * behaves in preview as it does live. Advanced JQL can't be parsed here, so it just
+ * returns the project pool. Each row carries its derived assigneeAccountId.
  */
 export function mockJiraSearch(
 	project: string,
 	query: string,
-	assignee = "",
-	types: string[] = [],
+	filters: MockSearchFilters = {},
 ): components["schemas"]["JiraIssueSummary"][] {
 	const q = query.trim().toLowerCase();
 	const proj = project.trim().toUpperCase();
-	const typeNames = types.map((t) => t.trim().toLowerCase()).filter(Boolean);
+	const assignee = filters.assignee ?? "";
+	const typeNames = (filters.types ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
 	return mockJiraIssuePool
 		.map((it) => ({ ...it, assigneeAccountId: it.assigneeAccountId ?? mockAccountId(it.assignee ?? "") }))
 		.filter((it) => {
@@ -708,6 +717,8 @@ export function mockJiraSearch(
 				const t = (it.type ?? "").toLowerCase();
 				if (!typeNames.some((name) => t === name || t.includes(name) || name.includes(t))) return false;
 			}
+			if (filters.hideDone && (it.statusCategory ?? "") === "done") return false;
+			if (filters.activeSprint && it.sprint?.state !== "active") return false;
 			return true;
 		});
 }

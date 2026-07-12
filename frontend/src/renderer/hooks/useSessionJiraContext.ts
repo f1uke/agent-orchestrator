@@ -33,8 +33,27 @@ export const sessionJiraTransitionsQueryKey = (sessionId?: string, issueKey?: st
 		: (["session-jira-transitions", sessionId] as const);
 };
 
-export const jiraSearchQueryKey = (project: string, query: string, assignee = "", typesCsv = "") =>
-	["jira-search", project, query, assignee, typesCsv] as const;
+/** Filters pushed into the server-side Jira search JQL (Browse Jira). All optional;
+ *  `jql`, when set, is raw advanced JQL that replaces the structured filters. */
+export type JiraSearchFilters = {
+	assignee?: string;
+	types?: string[];
+	hideDone?: boolean;
+	activeSprint?: boolean;
+	jql?: string;
+};
+
+export const jiraSearchQueryKey = (project: string, query: string, filters: JiraSearchFilters = {}) =>
+	[
+		"jira-search",
+		project,
+		query,
+		filters.assignee ?? "",
+		(filters.types ?? []).join(","),
+		filters.hideDone ? "1" : "",
+		filters.activeSprint ? "1" : "",
+		filters.jql ?? "",
+	] as const;
 
 export const jiraProjectsQueryKey = (query: string) => ["jira-projects", query] as const;
 
@@ -128,16 +147,19 @@ export function useMoveJiraStatus(sessionId: string, issueKey?: string) {
 async function fetchJiraSearch(
 	project: string,
 	query: string,
-	assignee: string,
-	types: string[],
+	filters: JiraSearchFilters,
 ): Promise<JiraIssueSummary[]> {
+	const types = filters.types ?? [];
 	const { data, error } = await apiClient.GET("/api/v1/jira/search", {
 		params: {
 			query: {
 				q: query,
 				project: project || undefined,
-				assignee: assignee || undefined,
+				assignee: filters.assignee || undefined,
 				type: types.length > 0 ? types.join(",") : undefined,
+				hideDone: filters.hideDone || undefined,
+				activeSprint: filters.activeSprint || undefined,
+				jql: filters.jql || undefined,
 			},
 		},
 	});
@@ -153,29 +175,21 @@ async function fetchJiraSearch(
  * pass project="") still wait for two characters. A failure throws so the caller
  * can surface it (e.g. a missing JIRA_API_TOKEN).
  *
- * `opts.assignee` (an accountId, or the "unassigned" token) and `opts.types`
- * (issue-type names) are pushed into the server-side JQL, so Browse Jira can
- * filter without paring down a capped page. Omitting both yields the same query
- * key as the unfiltered fetch, so React Query shares that one request.
+ * The `filters` (assignee accountId / "unassigned" token, issue types, hide-done,
+ * active-sprint) are pushed into the server-side JQL, so Browse Jira can filter
+ * without paring down a capped page; omitting them yields the same query key as the
+ * unfiltered fetch, so React Query shares that request. `filters.jql`, when set, is
+ * raw advanced JQL that drives the search verbatim (fires even with no project/text).
  */
-export function useJiraSearch(
-	query: string,
-	project: string,
-	enabled: boolean,
-	opts?: { assignee?: string; types?: string[] },
-) {
+export function useJiraSearch(query: string, project: string, enabled: boolean, filters: JiraSearchFilters = {}) {
 	const q = query.trim();
 	const scoped = project.trim().length > 0;
-	const assignee = opts?.assignee ?? "";
-	const types = opts?.types ?? [];
-	const typesCsv = types.join(",");
+	const advanced = Boolean(filters.jql && filters.jql.trim().length > 0);
 	return useQuery({
-		queryKey: jiraSearchQueryKey(project, q, assignee, typesCsv),
-		enabled: enabled && (q.length >= 2 || scoped),
+		queryKey: jiraSearchQueryKey(project, q, filters),
+		enabled: enabled && (q.length >= 2 || scoped || advanced),
 		queryFn: () =>
-			usePreviewData
-				? Promise.resolve(mockJiraSearch(project, q, assignee, types))
-				: fetchJiraSearch(project, q, assignee, types),
+			usePreviewData ? Promise.resolve(mockJiraSearch(project, q, filters)) : fetchJiraSearch(project, q, filters),
 		staleTime: 15_000,
 	});
 }

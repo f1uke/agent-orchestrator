@@ -626,10 +626,13 @@ type JiraProjectsResponse struct {
 
 // JiraSearchQuery is the query string of GET /jira/search.
 type JiraSearchQuery struct {
-	Q        string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
-	Project  string `query:"project,omitempty" description:"Optional project key to scope the search to."`
-	Assignee string `query:"assignee,omitempty" description:"Optional assignee accountId to filter by, or 'unassigned' for issues with no assignee."`
-	Type     string `query:"type,omitempty" description:"Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types."`
+	Q            string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
+	Project      string `query:"project,omitempty" description:"Optional project key to scope the search to."`
+	Assignee     string `query:"assignee,omitempty" description:"Optional assignee accountId to filter by, or 'unassigned' for issues with no assignee."`
+	Type         string `query:"type,omitempty" description:"Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types."`
+	HideDone     bool   `query:"hideDone,omitempty" description:"When true, exclude done issues (statusCategory != Done)."`
+	ActiveSprint bool   `query:"activeSprint,omitempty" description:"When true, only issues in an open sprint (sprint in openSprints())."`
+	JQL          string `query:"jql,omitempty" description:"Raw advanced JQL. When set, it drives the search verbatim and the structured filters above are ignored."`
 }
 
 // JiraProjectsQuery is the query string of GET /jira/projects.

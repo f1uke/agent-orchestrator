@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -30,18 +31,21 @@ type stubJira struct {
 	gotMoveKey  string
 	gotMoveID   string
 
-	searchRes   []jiraadapter.IssueSummary
-	searchErr   error
-	gotProject  string
-	gotText     string
-	gotAssignee string
-	gotTypes    []string
-	projectRes  []jiraadapter.ProjectRef
-	projectErr  error
-	bindRes     jiraadapter.IssueSummary
-	bindErr     error
-	gotBindKey  string
-	unlinkErr   error
+	searchRes    []jiraadapter.IssueSummary
+	searchErr    error
+	gotProject   string
+	gotText      string
+	gotAssignee  string
+	gotTypes     []string
+	gotHideDone  bool
+	gotActiveSpr bool
+	gotJQL       string
+	projectRes   []jiraadapter.ProjectRef
+	projectErr   error
+	bindRes      jiraadapter.IssueSummary
+	bindErr      error
+	gotBindKey   string
+	unlinkErr    error
 }
 
 func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, error) {
@@ -59,8 +63,9 @@ func (s *stubJira) Move(_ context.Context, _ domain.SessionID, key, transitionID
 	return s.moveRes, s.moveErr
 }
 
-func (s *stubJira) Search(_ context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error) {
-	s.gotProject, s.gotText, s.gotAssignee, s.gotTypes = project, text, assignee, types
+func (s *stubJira) Search(_ context.Context, p jirasvc.SearchParams) ([]jiraadapter.IssueSummary, error) {
+	s.gotProject, s.gotText, s.gotAssignee, s.gotTypes = p.Project, p.Text, p.Assignee, p.Types
+	s.gotHideDone, s.gotActiveSpr, s.gotJQL = p.HideDone, p.ActiveSprint, p.JQL
 	return s.searchRes, s.searchErr
 }
 
@@ -282,7 +287,7 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 			Sprint: &jiraadapter.Sprint{Name: "Sprint 2026-14", State: "active"}},
 	}}
 	rec := serveJiraReq(t, stub, http.MethodGet,
-		"/jira/search?q=eligible&project=DEMO&assignee=acc-123&type=Story,Bug", nil)
+		"/jira/search?q=eligible&project=DEMO&assignee=acc-123&type=Story,Bug&hideDone=true&activeSprint=1", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -297,6 +302,10 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 	if len(stub.gotTypes) != 2 || stub.gotTypes[0] != "Story" || stub.gotTypes[1] != "Bug" {
 		t.Errorf("service got types=%v, want [Story Bug]", stub.gotTypes)
 	}
+	// hideDone=true and activeSprint=1 both parse to true.
+	if !stub.gotHideDone || !stub.gotActiveSpr {
+		t.Errorf("service got hideDone=%v activeSprint=%v, want both true", stub.gotHideDone, stub.gotActiveSpr)
+	}
 	var body JiraSearchResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -307,6 +316,22 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 	// The sprint rides the search row so Browse Jira can group by it.
 	if body.Issues[0].Sprint == nil || body.Issues[0].Sprint.Name != "Sprint 2026-14" {
 		t.Errorf("issue sprint = %+v", body.Issues[0].Sprint)
+	}
+}
+
+func TestJiraSearch_AdvancedJQLPassthrough(t *testing.T) {
+	stub := &stubJira{}
+	rec := serveJiraReq(t, stub, http.MethodGet,
+		"/jira/search?jql="+url.QueryEscape(`project = STAR AND labels = urgent`), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if stub.gotJQL != `project = STAR AND labels = urgent` {
+		t.Errorf("service got jql=%q, want the raw advanced query", stub.gotJQL)
+	}
+	// Structured params are absent, so the service must have received none of them.
+	if stub.gotProject != "" || stub.gotAssignee != "" || len(stub.gotTypes) != 0 {
+		t.Errorf("advanced mode must not carry structured params: %+v", stub)
 	}
 }
 

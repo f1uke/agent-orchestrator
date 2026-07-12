@@ -240,4 +240,68 @@ describe("BrowseJiraPage", () => {
 		expect(screen.getByText("DEMO-1")).toBeTruthy();
 		expect(screen.queryByText("DEMO-4")).toBeNull(); // Sam's, filtered out
 	});
+
+	it("pushes hide-done + active-sprint toggles into the server-side query and remembers them", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Hide done" }));
+		fireEvent.click(screen.getByRole("button", { name: "Active sprint" }));
+
+		const sawHideDone = searchMock.mock.calls.some(
+			(c: unknown[]) => (c[3] as { hideDone?: boolean } | undefined)?.hideDone === true,
+		);
+		const sawActiveSprint = searchMock.mock.calls.some(
+			(c: unknown[]) => (c[3] as { activeSprint?: boolean } | undefined)?.activeSprint === true,
+		);
+		expect(sawHideDone).toBe(true);
+		expect(sawActiveSprint).toBe(true);
+		const prefs = JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!);
+		expect(prefs.hideDone).toBe(true);
+		expect(prefs.activeSprintOnly).toBe(true);
+	});
+
+	it("advanced JQL mode hides the structured filters and drives the search with the raw query", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Advanced JQL" }));
+		// Structured filters gone; the JQL box appears.
+		expect(screen.queryByRole("button", { name: "Bug" })).toBeNull();
+		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
+		fireEvent.change(screen.getByLabelText("Advanced JQL query"), {
+			target: { value: "project = STAR AND labels = urgent" },
+		});
+
+		const sawJql = searchMock.mock.calls.some(
+			(c: unknown[]) => (c[3] as { jql?: string } | undefined)?.jql === "project = STAR AND labels = urgent",
+		);
+		expect(sawJql).toBe(true);
+
+		// A clear way back to structured mode.
+		fireEvent.click(screen.getByRole("button", { name: /Back to filters/ }));
+		expect(screen.getByLabelText("Filter by assignee")).toBeTruthy();
+	});
+
+	it("restores advanced JQL mode + text on return (no project needed)", () => {
+		window.localStorage.setItem(
+			"ao.jira.browsePrefs",
+			JSON.stringify({
+				groupBySprint: true,
+				assignee: "",
+				hideDone: false,
+				activeSprintOnly: false,
+				advancedMode: true,
+				advancedJql: "project = STAR",
+			}),
+		);
+		setSearch({ data: richData });
+		renderPage();
+
+		const jql = screen.getByLabelText("Advanced JQL query") as HTMLInputElement;
+		expect(jql.value).toBe("project = STAR");
+		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
+	});
 });

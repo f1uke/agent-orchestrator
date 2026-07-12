@@ -40,11 +40,15 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	const [debounced, setDebounced] = useState("");
 	const [filter, setFilter] = useState(0);
 	const [createIssue, setCreateIssue] = useState<JiraIssueSummary | null>(null);
-	// View prefs remembered across visits (grouping + assignee); last-project is
-	// remembered separately (jira-last-project).
+	// View prefs remembered across visits (grouping, assignee, hide-done, active
+	// sprint, advanced mode + JQL); last-project is remembered separately.
 	const initialPrefs = readBrowsePrefs();
 	const [groupSprints, setGroupSprints] = useState(initialPrefs.groupBySprint);
 	const [assignee, setAssignee] = useState(initialPrefs.assignee);
+	const [hideDone, setHideDone] = useState(initialPrefs.hideDone);
+	const [activeSprintOnly, setActiveSprintOnly] = useState(initialPrefs.activeSprintOnly);
+	const [advancedMode, setAdvancedMode] = useState(initialPrefs.advancedMode);
+	const [advancedJql, setAdvancedJql] = useState(initialPrefs.advancedJql);
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
 	// Debounce the free-text search so typing doesn't fan out a request per keystroke.
@@ -53,26 +57,29 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		return () => clearTimeout(t);
 	}, [query]);
 
-	// Persist grouping + assignee so the view returns as the user left it.
+	// Persist the view prefs so the view returns as the user left it.
 	useEffect(() => {
-		writeBrowsePrefs({ groupBySprint: groupSprints, assignee });
-	}, [groupSprints, assignee]);
+		writeBrowsePrefs({ groupBySprint: groupSprints, assignee, hideDone, activeSprintOnly, advancedMode, advancedJql });
+	}, [groupSprints, assignee, hideDone, activeSprintOnly, advancedMode, advancedJql]);
 
 	const projectKey = project?.key ?? "";
 	const selectedTypes = TYPE_FILTERS[filter].jql;
+	// In advanced mode the raw JQL drives the search verbatim and the structured
+	// filters (project/search/type/assignee/hide-done/active-sprint) are hidden.
+	const structuredEnabled = Boolean(projectKey) && !advancedMode;
 
-	// Base fetch: project + text only, NO assignee/type filter. It's the source for
-	// the assignee dropdown (so the option list stays complete regardless of the
-	// active filter) and, when no filter is active, shares its request with the
-	// results below. With a project scoped it fires even with no text (lists recent
-	// issues in that project); typing narrows it. See useJiraSearch's enable rule.
-	const base = useJiraSearch(debounced, projectKey, Boolean(projectKey));
+	// Base fetch (structured mode): project + text + hide-done/active-sprint, NO
+	// assignee/type — the source for the assignee dropdown, kept complete across the
+	// assignee filter. Shares its request with the results when no assignee/type is set.
+	const base = useJiraSearch(debounced, projectKey, structuredEnabled, {
+		hideDone,
+		activeSprint: activeSprintOnly,
+	});
 	const baseResults = base.data ?? [];
 
-	// Assignee options (name + accountId) come from the unfiltered base set. A
-	// remembered assignee that isn't present in this project falls back to "all"
-	// without hiding everything — but stays in state so returning to a project that
-	// has them re-applies the filter.
+	// Assignee options (name + accountId) come from the base set. A remembered
+	// assignee that isn't present in this project falls back to "all" without hiding
+	// everything — but stays in state so returning to a project that has them re-applies.
 	const assignees = uniqueAssignees(baseResults);
 	const unassignedPresent = hasUnassigned(baseResults);
 	const assigneeValid =
@@ -87,13 +94,18 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 				? UNASSIGNED_QUERY
 				: (assignees.find((a) => a.name === effectiveAssignee)?.accountId ?? "");
 
-	// Results fetch: project + text + type + assignee, ALL pushed into the JQL so
-	// the set is complete (not pared from a capped page). With no filter active this
-	// collapses to the base query's key, so React Query serves one shared request.
-	const resultsQuery = useJiraSearch(debounced, projectKey, Boolean(projectKey), {
-		assignee: assigneeQuery,
-		types: selectedTypes,
-	});
+	// Results fetch. Structured mode: project + text + type + assignee + hide-done +
+	// active-sprint, all in the JQL (complete, not pared from a capped page); it
+	// shares the base request when no assignee/type is set. Advanced mode: the raw
+	// JQL drives it verbatim (fires with no project/text; the hook gates on non-empty JQL).
+	const resultsQuery = useJiraSearch(
+		advancedMode ? "" : debounced,
+		advancedMode ? "" : projectKey,
+		advancedMode || Boolean(projectKey),
+		advancedMode
+			? { jql: advancedJql }
+			: { assignee: assigneeQuery, types: selectedTypes, hideDone, activeSprint: activeSprintOnly },
+	);
 	const results = resultsQuery.data ?? [];
 	const isFetching = base.isFetching || resultsQuery.isFetching;
 	const isError = resultsQuery.isError;
@@ -156,55 +168,112 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 
 			<div className="jira-browse__content">
 				<div className="jira-browse__controls">
-					<JiraProjectPicker value={project} onSelect={selectProject} lastUsedKey={project?.key} />
-					<div className="jira-browse__search">
-						<Search className="jira-browse__mag size-3.5" aria-hidden="true" />
-						<input
-							value={query}
-							disabled={!projectKey}
-							placeholder={projectKey ? `Search issues in ${projectKey}…` : "Pick a project first"}
-							autoComplete="off"
-							autoCapitalize="none"
-							spellCheck={false}
-							aria-label="Search issues"
-							onChange={(event) => setQuery(event.target.value)}
-						/>
-						{isFetching && projectKey ? (
-							<Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" />
-						) : null}
-					</div>
+					{advancedMode ? (
+						<div className="jira-browse__search jira-browse__jql">
+							<span className="jira-browse__jql-tag" aria-hidden="true">
+								JQL
+							</span>
+							<input
+								value={advancedJql}
+								placeholder="project = STAR AND assignee = currentUser() ORDER BY updated DESC"
+								autoComplete="off"
+								autoCapitalize="none"
+								spellCheck={false}
+								aria-label="Advanced JQL query"
+								onChange={(event) => setAdvancedJql(event.target.value)}
+							/>
+							{isFetching ? <Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" /> : null}
+						</div>
+					) : (
+						<>
+							<JiraProjectPicker value={project} onSelect={selectProject} lastUsedKey={project?.key} />
+							<div className="jira-browse__search">
+								<Search className="jira-browse__mag size-3.5" aria-hidden="true" />
+								<input
+									value={query}
+									disabled={!projectKey}
+									placeholder={projectKey ? `Search issues in ${projectKey}…` : "Pick a project first"}
+									autoComplete="off"
+									autoCapitalize="none"
+									spellCheck={false}
+									aria-label="Search issues"
+									onChange={(event) => setQuery(event.target.value)}
+								/>
+								{isFetching && projectKey ? (
+									<Loader2 className="jira-browse__spin size-3.5 animate-spin" aria-hidden="true" />
+								) : null}
+							</div>
+						</>
+					)}
 				</div>
 
 				<div className="jira-browse__filters" role="group" aria-label="Filter and group issues">
-					{TYPE_FILTERS.map((entry, index) => (
-						<button
-							key={entry.label}
-							type="button"
-							aria-pressed={index === filter}
-							className={cn("jira-browse__chip", index === filter && "is-active")}
-							onClick={() => setFilter(index)}
-						>
-							{entry.label}
-						</button>
-					))}
-					<span className="jira-browse__filters-gap" aria-hidden="true" />
-					<label className="jira-browse__assignee-filter">
-						<span className="jira-browse__assignee-label">Assignee</span>
-						<select
-							value={effectiveAssignee}
-							aria-label="Filter by assignee"
-							onChange={(event) => setAssignee(event.target.value)}
-							disabled={!projectKey}
-						>
-							<option value="">All assignees</option>
-							{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
-							{assignees.map((a) => (
-								<option key={a.name} value={a.name}>
-									{a.name}
-								</option>
+					{advancedMode ? (
+						<>
+							<span className="jira-browse__advanced-note">
+								Advanced JQL drives the search — the structured filters are off.
+							</span>
+							<span className="jira-browse__filters-gap" aria-hidden="true" />
+							<button
+								type="button"
+								className="jira-browse__chip"
+								onClick={() => setAdvancedMode(false)}
+								title="Return to the structured filters"
+							>
+								← Back to filters
+							</button>
+						</>
+					) : (
+						<>
+							{TYPE_FILTERS.map((entry, index) => (
+								<button
+									key={entry.label}
+									type="button"
+									aria-pressed={index === filter}
+									className={cn("jira-browse__chip", index === filter && "is-active")}
+									onClick={() => setFilter(index)}
+								>
+									{entry.label}
+								</button>
 							))}
-						</select>
-					</label>
+							<span className="jira-browse__filters-gap" aria-hidden="true" />
+							<label className="jira-browse__assignee-filter">
+								<span className="jira-browse__assignee-label">Assignee</span>
+								<select
+									value={effectiveAssignee}
+									aria-label="Filter by assignee"
+									onChange={(event) => setAssignee(event.target.value)}
+									disabled={!projectKey}
+								>
+									<option value="">All assignees</option>
+									{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
+									{assignees.map((a) => (
+										<option key={a.name} value={a.name}>
+											{a.name}
+										</option>
+									))}
+								</select>
+							</label>
+							<button
+								type="button"
+								aria-pressed={hideDone}
+								className={cn("jira-browse__chip", hideDone && "is-active")}
+								onClick={() => setHideDone((on) => !on)}
+								title="Hide issues whose status category is Done"
+							>
+								Hide done
+							</button>
+							<button
+								type="button"
+								aria-pressed={activeSprintOnly}
+								className={cn("jira-browse__chip", activeSprintOnly && "is-active")}
+								onClick={() => setActiveSprintOnly((on) => !on)}
+								title="Only issues in an open (active/future) sprint"
+							>
+								Active sprint
+							</button>
+						</>
+					)}
 					<button
 						type="button"
 						aria-pressed={groupSprints}
@@ -214,9 +283,19 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					>
 						Group by sprint
 					</button>
+					{advancedMode ? null : (
+						<button
+							type="button"
+							className="jira-browse__chip"
+							onClick={() => setAdvancedMode(true)}
+							title="Type raw JQL (replaces the structured filters)"
+						>
+							Advanced JQL
+						</button>
+					)}
 				</div>
 
-				{!projectKey ? (
+				{!advancedMode && !projectKey ? (
 					<div className="jira-browse__empty">Pick a project to browse its issues.</div>
 				) : (
 					<div className="jira-browse__list">
@@ -224,13 +303,16 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							<span className="jira-browse__live" aria-hidden="true" />
 							MATCHING ISSUES
 							<span className="jira-browse__n">
-								{project?.name ? `${project.name} (${projectKey})` : projectKey} · {results.length} shown
+								{advancedMode ? "Advanced JQL" : project?.name ? `${project.name} (${projectKey})` : projectKey} ·{" "}
+								{results.length} shown
 							</span>
 						</div>
 						{isError ? (
 							<p className="jira-browse__note jira-browse__note--err">
 								{error instanceof Error ? error.message : "Couldn't search Jira."}
 							</p>
+						) : advancedMode && advancedJql.trim().length === 0 ? (
+							<p className="jira-browse__note">Type a JQL query to search.</p>
 						) : isFetching && results.length === 0 ? (
 							<p className="jira-browse__note">Searching…</p>
 						) : results.length === 0 ? (

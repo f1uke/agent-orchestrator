@@ -2242,6 +2242,12 @@ export interface operations {
                 assignee?: string;
                 /** @description Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types. */
                 type?: string;
+                /** @description When true, exclude done issues (statusCategory != Done). */
+                hideDone?: boolean;
+                /** @description When true, only issues in an open sprint (sprint in openSprints()). */
+                activeSprint?: boolean;
+                /** @description Raw advanced JQL. When set, it drives the search verbatim and the structured filters above are ignored. */
+                jql?: string;
             };
             header?: never;
             path?: never;

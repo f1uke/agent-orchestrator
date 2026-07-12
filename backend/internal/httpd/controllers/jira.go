@@ -24,7 +24,7 @@ type JiraService interface {
 	Context(ctx context.Context, id domain.SessionID) (jirasvc.Result, error)
 	Transitions(ctx context.Context, id domain.SessionID, key string) ([]jiraadapter.Transition, error)
 	Move(ctx context.Context, id domain.SessionID, key, transitionID string) (jirasvc.MoveResult, error)
-	Search(ctx context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error)
+	Search(ctx context.Context, p jirasvc.SearchParams) ([]jiraadapter.IssueSummary, error)
 	Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
 	SetBinding(ctx context.Context, id domain.SessionID, key string) (jiraadapter.IssueSummary, error)
 	Unlink(ctx context.Context, id domain.SessionID) (domain.Session, error)
@@ -50,18 +50,24 @@ func (c *JiraController) Register(r chi.Router) {
 
 // search resolves the pre-session issue picker query (New task + link-existing)
 // and the Browse Jira list. A free-text query or an exact key; optionally scoped
-// to a project and narrowed by assignee (accountId or "unassigned") and a
-// comma-separated list of issue types — all pushed into the server-side JQL.
+// to a project and narrowed by assignee (accountId or "unassigned"), issue types,
+// hide-done and active-sprint — all pushed into the server-side JQL. A raw `jql`
+// param, when set, drives the search verbatim (advanced mode).
 func (c *JiraController) search(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/search")
 		return
 	}
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	project := strings.TrimSpace(r.URL.Query().Get("project"))
-	assignee := strings.TrimSpace(r.URL.Query().Get("assignee"))
-	types := splitTypes(r.URL.Query().Get("type"))
-	issues, err := c.Svc.Search(r.Context(), project, q, assignee, types)
+	q := r.URL.Query()
+	issues, err := c.Svc.Search(r.Context(), jirasvc.SearchParams{
+		Project:      strings.TrimSpace(q.Get("project")),
+		Text:         strings.TrimSpace(q.Get("q")),
+		Assignee:     strings.TrimSpace(q.Get("assignee")),
+		Types:        splitTypes(q.Get("type")),
+		HideDone:     queryBool(q.Get("hideDone")),
+		ActiveSprint: queryBool(q.Get("activeSprint")),
+		JQL:          strings.TrimSpace(q.Get("jql")),
+	})
 	if err != nil {
 		writeJiraError(w, r, err)
 		return
@@ -251,6 +257,17 @@ func jiraContextResponse(id domain.SessionID, res jirasvc.Result) JiraContextRes
 		out.Issue = jiraIssueDTO(*res.Issue)
 	}
 	return out
+}
+
+// queryBool reads a boolean query param — "true"/"1" (case-insensitive) are true,
+// everything else (including absent) is false.
+func queryBool(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1":
+		return true
+	default:
+		return false
+	}
 }
 
 // splitTypes turns the comma-separated `type` query param into a trimmed,

@@ -253,6 +253,26 @@ paths:
           description: Optional comma-separated issue-type names to filter by (e.g.
             Story,Bug). Empty matches all types.
           type: string
+      - description: When true, exclude done issues (statusCategory != Done).
+        in: query
+        name: hideDone
+        schema:
+          description: When true, exclude done issues (statusCategory != Done).
+          type: boolean
+      - description: When true, only issues in an open sprint (sprint in openSprints()).
+        in: query
+        name: activeSprint
+        schema:
+          description: When true, only issues in an open sprint (sprint in openSprints()).
+          type: boolean
+      - description: Raw advanced JQL. When set, it drives the search verbatim and
+          the structured filters above are ignored.
+        in: query
+        name: jql
+        schema:
+          description: Raw advanced JQL. When set, it drives the search verbatim and
+            the structured filters above are ignored.
+          type: string
       responses:
         "200":
           content:

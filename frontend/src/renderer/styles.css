@@ -2328,6 +2328,33 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--fg-passive);
 }
 
+/* Advanced JQL mode (Browse Jira enhancements) */
+.jira-browse__jql-tag {
+	position: absolute;
+	left: 9px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+	border-radius: 5px;
+	padding: 1px 5px;
+	pointer-events: none;
+}
+
+.jira-browse__jql input {
+	padding-left: 46px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12.5px;
+}
+
+.jira-browse__advanced-note {
+	align-self: center;
+	font-size: 11.5px;
+	color: var(--fg-passive);
+}
+
 .jira-browse__assignee-filter select {
 	font-size: 11.5px;
 	color: var(--fg);
