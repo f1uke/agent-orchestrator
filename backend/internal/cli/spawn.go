@@ -37,6 +37,7 @@ type spawnOptions struct {
 	noTakeover     bool
 	skipAgentCheck bool
 	todo           bool
+	keepWarm       bool
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -60,6 +61,10 @@ type spawnRequest struct {
 	// CreatedBy records the orchestrator session queuing a `--todo`, for the
 	// report-back once the worker finishes.
 	CreatedBy string `json:"createdBy,omitempty"`
+	// KeepWarmOnMerge asks the daemon to SUSPEND the worker in place (card stays
+	// on the board, resumable) instead of terminating it to Done when its PR
+	// merges — for a worker expected to open more PRs (feature/merge-suspend-in-place).
+	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
 }
 
 type spawnResult struct {
@@ -147,14 +152,15 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			// branch from the task; a non-empty value is honored verbatim.
 			newBranch := strings.TrimSpace(opts.branch)
 			req := spawnRequest{
-				ProjectID:      opts.project,
-				IssueID:        opts.issue,
-				Harness:        opts.harness,
-				Branch:         newBranch,
-				BaseBranch:     baseBranch,
-				AutoNameBranch: newBranch == "",
-				Prompt:         opts.prompt,
-				DisplayName:    name,
+				ProjectID:       opts.project,
+				IssueID:         opts.issue,
+				Harness:         opts.harness,
+				Branch:          newBranch,
+				BaseBranch:      baseBranch,
+				AutoNameBranch:  newBranch == "",
+				Prompt:          opts.prompt,
+				DisplayName:     name,
+				KeepWarmOnMerge: opts.keepWarm,
 			}
 			if opts.todo {
 				// --todo stages a prepared TODO (no branch/worktree/tmux until
@@ -218,6 +224,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the claimed PR (requires --claim-pr)")
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
+	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs")
 	return cmd
 }
 

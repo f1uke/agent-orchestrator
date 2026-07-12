@@ -2,9 +2,25 @@ import { type KeyboardEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, ChevronDown, CircleCheck, MoreHorizontal, Play, RotateCw, Trash2 } from "lucide-react";
+import {
+	AlertTriangle,
+	Check,
+	ChevronDown,
+	CircleCheck,
+	Flame,
+	MoreHorizontal,
+	Play,
+	RotateCw,
+	Trash2,
+} from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { captureRendererEvent } from "../lib/telemetry";
 import { DashboardSubhead } from "./DashboardSubhead";
 import {
@@ -12,6 +28,7 @@ import {
 	type WorkspaceSession,
 	attentionZone,
 	canonicalTrackerIssueId,
+	isMergeSuspended,
 	jiraKeyFromIssueId,
 	orchestratorHealth,
 	primaryPR,
@@ -23,6 +40,7 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { TodoDetailDialog } from "./TodoDetailDialog";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { MergeSuspendChip } from "./MergeSuspendChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
@@ -554,6 +572,21 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 		},
 	});
 
+	// Toggle keep-warm-on-merge: when on, a PR merge suspends the worker in place
+	// (card stays on the board, resumable) instead of archiving it to Done. Keeps
+	// the menu open so the checkmark updates in place.
+	const keepWarm = useMutation({
+		mutationFn: async () => {
+			const { error: apiError } = await apiClient.PUT("/api/v1/sessions/{sessionId}/keep-warm", {
+				params: { path: { sessionId: session.id } },
+				body: { enabled: !session.keepWarmOnMerge },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError));
+		},
+		onSuccess: () => void queryClient.invalidateQueries({ queryKey: workspaceQueryKey }),
+		onError: (e) => setError(e instanceof Error ? e.message : "Keep-warm toggle failed"),
+	});
+
 	return (
 		<DropdownMenu
 			open={open}
@@ -618,17 +651,38 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 						) : null}
 					</>
 				) : (
-					<DropdownMenuItem
-						className="text-error focus:text-error [&_svg]:text-error"
-						onSelect={(event) => {
-							event.preventDefault();
-							setError(null);
-							setConfirming(true);
-						}}
-					>
-						<CircleCheck aria-hidden="true" />
-						Move to Done
-					</DropdownMenuItem>
+					<>
+						<DropdownMenuItem
+							disabled={keepWarm.isPending}
+							onSelect={(event) => {
+								// Keep the menu open so the checkmark flips in place.
+								event.preventDefault();
+								setError(null);
+								keepWarm.mutate();
+							}}
+						>
+							<Flame aria-hidden="true" />
+							Keep warm after merge
+							{session.keepWarmOnMerge ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden="true" /> : null}
+						</DropdownMenuItem>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							className="text-error focus:text-error [&_svg]:text-error"
+							onSelect={(event) => {
+								event.preventDefault();
+								setError(null);
+								setConfirming(true);
+							}}
+						>
+							<CircleCheck aria-hidden="true" />
+							Move to Done
+						</DropdownMenuItem>
+						{error ? (
+							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
+								{error}
+							</div>
+						) : null}
+					</>
 				)}
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -818,7 +872,7 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 						</span>
 					)}
 					<div className="ml-auto flex shrink-0 items-center gap-1.5">
-						<IdleStatusChip session={session} />
+						{isMergeSuspended(session) ? <MergeSuspendChip session={session} /> : <IdleStatusChip session={session} />}
 						<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
 							{agentLabel(session.provider)}
 						</span>

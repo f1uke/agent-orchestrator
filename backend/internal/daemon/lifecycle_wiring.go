@@ -130,6 +130,11 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// spawn/restore without a daemon restart.
 		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },
 	})
+	// When a worker's PR merges, the lifecycle reducer suspends it in place (card
+	// stays on the board) and calls back here to tear its tmux down, mirroring the
+	// idle sweep. Wired after the manager exists; lifecycle has no runtime of its
+	// own (feature/merge-suspend-in-place).
+	lcm.SetRuntimeSuspender(mgr.SuspendRuntime)
 	// The PR-claim path shares the observer's provider set so a claimed GitLab
 	// merge request resolves through the same GitLab client + auth as background
 	// observation, not GitHub alone. GitHub is always present; GitLab is added

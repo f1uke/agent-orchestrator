@@ -107,6 +107,17 @@ func (f *fakeStore) SetSessionAutoNudge(_ context.Context, id domain.SessionID, 
 	return true, nil
 }
 
+func (f *fakeStore) SetSessionKeepWarmOnMerge(_ context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error) {
+	r, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	r.KeepWarmOnMerge = enabled
+	r.UpdatedAt = updatedAt
+	f.sessions[id] = r
+	return true, nil
+}
+
 func (f *fakeStore) SetSessionIssueBinding(_ context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error) {
 	r, ok := f.sessions[id]
 	if !ok {

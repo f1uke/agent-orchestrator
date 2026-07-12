@@ -30,6 +30,7 @@ type Store interface {
 	RenameSession(ctx context.Context, id domain.SessionID, displayName string, updatedAt time.Time) (bool, error)
 	SetSessionPreviewURL(ctx context.Context, id domain.SessionID, previewURL string, updatedAt time.Time) (bool, error)
 	SetSessionAutoNudge(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
+	SetSessionKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error)
 	SetSessionIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
@@ -602,6 +603,21 @@ func (s *Service) SetAutoNudge(ctx context.Context, id domain.SessionID, overrid
 	updated, err := s.store.SetSessionAutoNudge(ctx, id, override, time.Now().UTC())
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("set auto-nudge %s: %w", id, err)
+	}
+	if !updated {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	return s.Get(ctx, id)
+}
+
+// SetKeepWarmOnMerge toggles whether a worker suspends-in-place on merge (card
+// stays on the board, resumable) rather than terminating to Done, then returns
+// the refreshed read model (feature/merge-suspend-in-place). Returns 404 when the
+// session id is unknown.
+func (s *Service) SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error) {
+	updated, err := s.store.SetSessionKeepWarmOnMerge(ctx, id, enabled, time.Now().UTC())
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("set keep-warm-on-merge %s: %w", id, err)
 	}
 	if !updated {
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")

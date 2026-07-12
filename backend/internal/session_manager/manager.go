@@ -1427,6 +1427,24 @@ func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveH
 	return nil
 }
 
+// SuspendRuntime tears a worker's tmux down (best-effort) without touching its
+// worktree, board lane, or terminated flag — the runtime half of the
+// merge-suspend path, injected into the lifecycle reducer via SetRuntimeSuspender
+// and called after the reducer has flagged the session suspended. It mirrors the
+// idle sweep's reap (reapRuntimeIfAlive). Only WORKERS take this path, and a
+// worker owns its own tmux handle (only orchestrators share handles), so no
+// liveHandles guard is needed. A blank or already-dead handle is a no-op.
+func (m *Manager) SuspendRuntime(ctx context.Context, id domain.SessionID) error {
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return fmt.Errorf("suspend runtime %s: %w", id, err)
+	}
+	if !ok {
+		return nil
+	}
+	return m.reapRuntimeIfAlive(ctx, id, runtimeHandle(rec.Metadata))
+}
+
 // agentAlive reports whether a live AGENT process is attached to handle, seeing
 // past a keep-alive shell that IsAlive (session existence) cannot. It is the
 // reap-safety gate: an inferred/stale-terminated session whose pane still runs a
@@ -2087,14 +2105,15 @@ func (m *Manager) cleanupRecords(ctx context.Context, project domain.ProjectID) 
 
 func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 	return domain.SessionRecord{
-		ProjectID:   cfg.ProjectID,
-		IssueID:     cfg.IssueID,
-		Kind:        cfg.Kind,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Harness:     cfg.Harness,
-		DisplayName: cfg.DisplayName,
-		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		ProjectID:       cfg.ProjectID,
+		IssueID:         cfg.IssueID,
+		Kind:            cfg.Kind,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Harness:         cfg.Harness,
+		DisplayName:     cfg.DisplayName,
+		Activity:        domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 	}
 }
 
@@ -2105,20 +2124,21 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 // derivation reads it as StatusTodo and it never counts as a live session.
 func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 	return domain.SessionRecord{
-		ProjectID:      cfg.ProjectID,
-		IssueID:        cfg.IssueID,
-		Kind:           cfg.Kind,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		Harness:        cfg.Harness,
-		DisplayName:    cfg.DisplayName,
-		Activity:       domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
-		IsTodo:         true,
-		BaseBranch:     cfg.BaseBranch,
-		AutoNameBranch: cfg.AutoNameBranch,
-		PRTarget:       cfg.PRTarget,
-		CreatedBy:      cfg.CreatedBy,
-		Metadata:       domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
+		ProjectID:       cfg.ProjectID,
+		IssueID:         cfg.IssueID,
+		Kind:            cfg.Kind,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Harness:         cfg.Harness,
+		DisplayName:     cfg.DisplayName,
+		Activity:        domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		IsTodo:          true,
+		BaseBranch:      cfg.BaseBranch,
+		AutoNameBranch:  cfg.AutoNameBranch,
+		PRTarget:        cfg.PRTarget,
+		CreatedBy:       cfg.CreatedBy,
+		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
+		Metadata:        domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }
 

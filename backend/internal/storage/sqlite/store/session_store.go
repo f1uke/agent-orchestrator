@@ -91,6 +91,25 @@ func (s *Store) SetSessionAutoNudge(ctx context.Context, id domain.SessionID, ov
 	return rows > 0, nil
 }
 
+// SetSessionKeepWarmOnMerge toggles whether a worker suspends-in-place (keeps its
+// card on the board) rather than terminating to Done when its PR merges
+// (feature/merge-suspend-in-place). Returns ok=false when the session id does not
+// exist. Bumping updated_at trips the sessions_cdc_update trigger so the board
+// reflects the toggle live.
+func (s *Store) SetSessionKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionKeepWarmOnMerge(ctx, gen.SetSessionKeepWarmOnMergeParams{
+		ID:              id,
+		KeepWarmOnMerge: enabled,
+		UpdatedAt:       updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set keep-warm-on-merge for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionIssueBinding sets a session's issue_id and display_name together —
 // the after-the-fact Jira link/unlink path. issue_id becomes "jira:<KEY>" (with
 // display_name = the issue title) on link, or a plain title on unlink. Returns
@@ -275,6 +294,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		AutoNudgeComments: nullInt64ToBoolPtr(row.AutoNudgeComments),
 		IsTodo:            row.IsTodo,
 		IsSuspended:       row.IsSuspended,
+		KeepWarmOnMerge:   row.KeepWarmOnMerge,
 		LastOpenedAt:      nullTimeToTime(row.LastOpenedAt),
 		BaseBranch:        row.BaseBranch,
 		AutoNameBranch:    row.AutoNameBranch,
@@ -324,6 +344,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		CreatedBy:         string(rec.CreatedBy),
 		IsSuspended:       rec.IsSuspended,
 		LastOpenedAt:      timeToNullTime(rec.LastOpenedAt),
+		KeepWarmOnMerge:   rec.KeepWarmOnMerge,
 		CreatedAt:         rec.CreatedAt,
 		UpdatedAt:         rec.UpdatedAt,
 	}
@@ -357,6 +378,7 @@ func recordToUpdate(rec domain.SessionRecord) gen.UpdateSessionParams {
 		CreatedBy:         string(rec.CreatedBy),
 		IsSuspended:       rec.IsSuspended,
 		LastOpenedAt:      timeToNullTime(rec.LastOpenedAt),
+		KeepWarmOnMerge:   rec.KeepWarmOnMerge,
 		UpdatedAt:         rec.UpdatedAt,
 	}
 }

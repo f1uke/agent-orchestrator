@@ -89,6 +89,38 @@ type Manager struct {
 	// unresolved PR review comments, read when a session has no per-session
 	// override. Never nil after New (defaults to "off").
 	autoNudgeDefault func() bool
+	// runtimeSuspender tears a worker's tmux down when its PR merges
+	// (feature/merge-suspend-in-place), mirroring the idle sweep's reap. Lifecycle
+	// is a pure fact layer with no runtime access, so the session manager injects
+	// this via SetRuntimeSuspender after it is built. Nil until wired (the flag
+	// flip alone still keeps the card in its lane); best-effort when set.
+	runtimeSuspender func(context.Context, domain.SessionID) error
+}
+
+// SetRuntimeSuspender wires the hook the merge-suspend path uses to tear a
+// worker's tmux down when its PR merges — the runtime half of suspend-in-place,
+// injected by the session manager (like SetReviewerReaper on the manager side)
+// because lifecycle has no runtime. A manager with no suspender set skips the
+// reap: the session still suspends (card stays in its lane) and the stray tmux is
+// reaped later (agent exit / daemon restart).
+func (m *Manager) SetRuntimeSuspender(fn func(context.Context, domain.SessionID) error) {
+	m.runtimeSuspender = fn
+}
+
+// anyMergedPR reports whether the session owns at least one merged PR. MarkSpawned
+// reads it to keep a resumed merge-completed worker visible (reactivated) instead
+// of re-deriving merged→Done; it mirrors sessionComplete's merged check.
+func (m *Manager) anyMergedPR(ctx context.Context, id domain.SessionID) (bool, error) {
+	prs, err := m.store.ListPRsBySession(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	for _, pr := range prs {
+		if pr.Merged {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // New builds a Lifecycle Manager over the session store it writes and the messenger it uses for agent nudges.
@@ -299,11 +331,21 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 		return fmt.Errorf("lifecycle: MarkSpawned for unknown session %q", id)
 	}
 	now := m.clock()
-	// A spawn that revives a terminated record is a restore/reopen: mark it
-	// reactivated so status derivation surfaces it as needs_input (the "Needs you"
-	// zone) rather than letting a previously-merged PR pin it to Done. A fresh
-	// spawn reads is_terminated=false here, so it stays reactivated=false.
-	rec.Reactivated = rec.IsTerminated
+	// A (re)launch that revives a terminated OR merge-completed record is a
+	// restore/reopen/continue: mark it reactivated so status derivation surfaces it
+	// as needs_input (the "Needs you" zone) rather than letting a previously-merged
+	// PR pin it to Done. This covers both Restore of a terminated-merged session AND
+	// Resume of a WORKER suspended after its PR merged
+	// (feature/merge-suspend-in-place): once Resume clears is_suspended, the
+	// still-merged worker must stay visible while it opens its NEXT PR instead of
+	// re-deriving merged→Done. An idle-suspended session has NO merged PR, so
+	// anyMerged is false and it stays reactivated=false (idle-suspend's "resume must
+	// not land in Needs you" is preserved); a fresh spawn has no PRs either.
+	merged, err := m.anyMergedPR(ctx, id)
+	if err != nil {
+		return err
+	}
+	rec.Reactivated = rec.IsTerminated || merged
 	rec.IsTerminated = false
 	// A (re)launch always brings a live runtime back, so it clears the idle-sweep
 	// suspend flag: resuming a suspended session, or restoring a terminated one,

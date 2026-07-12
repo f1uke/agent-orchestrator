@@ -37,6 +37,12 @@ type SpawnConfig struct {
 	// so it can be pinged with the report-back when the worker finishes. Empty
 	// for a normal interactive spawn.
 	CreatedBy domain.SessionID
+	// KeepWarmOnMerge marks a worker expected to open MORE PRs after the current
+	// one merges: when set, a merge that would finish the session SUSPENDS it in
+	// place (card stays on the board) instead of terminating it to Done
+	// (feature/merge-suspend-in-place). Default false — an ordinary single-PR
+	// worker still auto-archives on merge. Set by `ao spawn --keep-warm`.
+	KeepWarmOnMerge bool
 }
 
 // TodoSpecPatch carries the editable fields of a prepared TODO. A nil pointer
