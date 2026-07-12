@@ -2,6 +2,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest } from "lucide-react";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
+import { useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
+import { progressFor } from "../lib/smoke-test";
+import { deriveReadiness } from "../lib/readiness";
+import { ReadinessStrip } from "./ReadinessStrip";
 import {
 	isArchivedPRState,
 	prBrowserUrl,
@@ -201,6 +205,12 @@ function Section({
 function SummaryView({ session }: { session: WorkspaceSession }) {
 	const query = useSessionScmSummary(session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, query.data);
+	// Readiness strip: the "how far along, ready to merge?" verdict + gate row,
+	// derived purely from the PR summaries + the smoke rollup + session activity.
+	// Skipped for prepared TODOs and orchestrator sessions (no merge pipeline).
+	const smokeQuery = useSessionSmokeChecks(session.id, session.title);
+	const readiness = deriveReadiness(session, prSummaries, progressFor(smokeQuery.data?.checks ?? []));
+	const showReadiness = session.kind !== "orchestrator" && !session.isTodo;
 	// Pin the still-actionable PRs/MRs (open, draft) to the top — they're what
 	// needs attention — and sink merged/closed ones into a de-emphasized "archive"
 	// below. prSummaries is already sorted actionable-first, so the partition keeps
@@ -220,6 +230,8 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 
 	return (
 		<div role="tabpanel">
+			{showReadiness ? <ReadinessStrip readiness={readiness} /> : null}
+
 			<JiraIssueSection sessionId={session.id} linked={jiraLinked} />
 
 			<Section title={prSectionTitle}>

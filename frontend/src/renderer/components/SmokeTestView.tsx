@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage, getApiBaseUrl } from "../lib/api-client";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { sessionSmokeQueryKey, useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
 import {
 	ACCENT,
 	MONO,
@@ -22,7 +23,6 @@ import { Toast } from "./inbox-ui";
 import { JiraLinkDialog } from "./JiraLinkDialog";
 import { jiraKeyFromIssueId } from "../types/workspace";
 
-type SmokeResponse = components["schemas"]["ListSmokeChecksResponse"];
 type PostToJiraResponse = components["schemas"]["PostSmokeToJiraResponse"];
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
@@ -66,25 +66,10 @@ export function SmokeTestView({
 	}, []);
 	useEffect(() => () => void (toastTimer.current && clearTimeout(toastTimer.current)), []);
 
-	const query = useQuery({
-		queryKey: ["session-smoke", sessionId],
-		refetchInterval: (q) => {
-			if (usePreviewData) return false;
-			const data = q.state.data as SmokeResponse | undefined;
-			return (data?.checks ?? []).some((c) => c.verdict === "pending") ? 6000 : false;
-		},
-		queryFn: async () => {
-			if (usePreviewData) return mockSmokeChecks(sessionId, worker);
-			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/smoke-checks", {
-				params: { path: { sessionId } },
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to load smoke checks"));
-			return data ?? ({ worker: worker ?? "", checks: [] } satisfies SmokeResponse);
-		},
-	});
+	const query = useSessionSmokeChecks(sessionId, worker);
 
 	const invalidate = useCallback(() => {
-		void queryClient.invalidateQueries({ queryKey: ["session-smoke", sessionId] });
+		void queryClient.invalidateQueries({ queryKey: sessionSmokeQueryKey(sessionId) });
 		void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 	}, [queryClient, sessionId]);
 
@@ -954,105 +939,4 @@ function EmptyState() {
 			</div>
 		</div>
 	);
-}
-
-// Mock checklist for the VITE_NO_ELECTRON renderer harness (no daemon). Only the
-// primary demo worker has a checklist; other sessions render the empty state
-// (not every worker authors one).
-function mockSmokeChecks(sessionId: string, worker?: string): SmokeResponse {
-	const now = new Date().toISOString();
-	if (sessionId !== "demo-working") {
-		return { worker: worker || "worker", checks: [] };
-	}
-	return {
-		worker: worker || "fix gl note render",
-		checks: [
-			{
-				id: "gitlab-mr-appears",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 1,
-				name: "A fresh GitLab MR shows up in Reviews on its own",
-				why: "The fix broadens re-polling to every open MR; this confirms one appears without a manual refresh.",
-				steps: [
-					"Open the gitlab-mr-review project and go to the Reviews tab.",
-					"On GitLab, open a brand-new MR against the tracked branch.",
-					"Wait one review interval (~60s) without touching the app.",
-				],
-				expected: "The new MR appears in Reviews automatically, with CI + review status filled in.",
-				prNum: 36,
-				fileRef: "scmobserver.go:936",
-				verdict: "pass",
-				note: "Appeared after ~55s, statuses correct.",
-				evidence: [],
-				decidedAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "canceling-pipeline",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 2,
-				name: 'A canceling pipeline reads as "In progress", never "Unknown"',
-				why: "A canceling GitLab pipeline briefly reported Unknown before; this verifies it stays In progress.",
-				steps: ["Trigger a pipeline then cancel it.", "Watch the badge during the cancel."],
-				expected: 'The badge shows "In progress" then the terminal state — never "Unknown".',
-				prNum: 36,
-				fileRef: "normalize.go:451",
-				verdict: "fail",
-				note: "Flashed Unknown for ~1s before In progress.",
-				evidence: [
-					{
-						id: "ev_demo1",
-						checkId: "canceling-pipeline",
-						sessionId,
-						kind: "image",
-						filename: "unknown-flash.png",
-						mime: "image/png",
-						sizeBytes: 84213,
-						createdAt: now,
-					},
-				],
-				decidedAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "reviewers-unchanged",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 3,
-				name: "GitHub PRs still review exactly as before",
-				why: "The change only touches the GitLab path; GitHub review flow must be untouched.",
-				steps: ["Open a GitHub-backed session with an open PR.", "Trigger a review and watch it complete."],
-				expected: "GitHub review behaves identically to before the change.",
-				prNum: 34,
-				fileRef: "observer.go:201",
-				verdict: "skip",
-				note: "No GitHub project handy right now.",
-				evidence: [],
-				decidedAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "ios-sim",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 4,
-				name: "iOS simulator smoke of the share sheet",
-				why: "Native share-sheet timing can't be unit-tested.",
-				steps: ["Open the app in the iOS simulator.", "Tap Share."],
-				expected: "The share sheet opens without a frame drop.",
-				prNum: 31,
-				fileRef: "ShareView.swift:88",
-				verdict: "pending",
-				note: "",
-				evidence: [],
-				createdAt: now,
-				updatedAt: now,
-			},
-		],
-	};
 }
