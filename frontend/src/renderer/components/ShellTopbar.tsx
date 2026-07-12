@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { GitBranch, PanelRightClose, PanelRightOpen, Plus, Square, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { NotificationCenter } from "./NotificationCenter";
@@ -51,6 +51,9 @@ export function ShellTopbar() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const params = useParams({ strict: false }) as { projectId?: string; sessionId?: string };
+	// The current routed path (hash-router pathname) tells us when Browse Jira is
+	// the active surface so its topbar entry can light up.
+	const pathname = useRouterState({ select: (state) => state.location.pathname });
 	const isInspectorOpen = useUiStore((state) => state.isInspectorOpen);
 	const toggleInspector = useUiStore((state) => state.toggleInspector);
 	const restartingProjectIds = useUiStore((state) => state.restartingProjectIds);
@@ -78,10 +81,18 @@ export function ShellTopbar() {
 	// project board and the orchestrator session (identical order + style).
 	// Worker sessions keep their own action controls instead.
 	const showNewTask = isProjectBoardRoute || (isSessionRoute && isOrchestrator);
+	// Browse Jira sits next to New task wherever a project is in scope. It lights up
+	// while its own full-page surface (/projects/<id>/jira) is showing.
+	const isJiraRoute = /\/projects\/[^/]+\/jira$/.test(pathname);
 
 	const openNewTask = () => {
 		if (!projectId || isProjectRestarting) return;
 		setIsNewTaskOpen(true);
+	};
+
+	const openBrowseJira = () => {
+		if (!projectId) return;
+		void navigate({ to: "/projects/$projectId/jira", params: { projectId } });
 	};
 
 	const handleTaskCreated = async (sessionId: string) => {
@@ -164,8 +175,21 @@ export function ShellTopbar() {
 			<div className="dashboard-app-header__spacer" />
 
 			<div className="dashboard-app-header__actions">
-				{/* Shared top-right cluster — primary New task then the bell, in the
-				    same order + style on both the board and the orchestrator. */}
+				{/* Shared top-right cluster — Browse Jira, then primary New task, then the
+				    bell, in the same order + style on both the board and the orchestrator. */}
+				{showNewTask ? (
+					<button
+						aria-label="Browse Jira"
+						className={cn("jira-browse-btn", isJiraRoute && "is-active")}
+						disabled={isProjectRestarting}
+						onClick={openBrowseJira}
+						style={noDragStyle}
+						type="button"
+					>
+						<span aria-hidden="true">◈</span>
+						Browse Jira
+					</button>
+				) : null}
 				{showNewTask ? (
 					<button
 						aria-label="New task"

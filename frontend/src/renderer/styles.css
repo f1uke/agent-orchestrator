@@ -2112,6 +2112,494 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	white-space: nowrap;
 }
 
+/* ===========================================================================
+   Browse Jira — manual, project-first discovery surface (mockup 02) + its
+   topbar entry point. Reuses the Slice-4 search/projects endpoints; read-only
+   plus one manual "Create session" that hands off to the New-task modal.
+   =========================================================================== */
+
+/* Topbar entry point — a subtle secondary button that lights up on the surface. */
+.jira-browse-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--fg);
+	background: color-mix(in srgb, var(--fg) 6%, transparent);
+	border: 1px solid var(--border-1);
+	border-radius: 8px;
+	padding: 6px 12px;
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease,
+		color 0.12s ease;
+}
+
+.jira-browse-btn:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+
+.jira-browse-btn.is-active {
+	border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
+	color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+	box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.jira-browse-btn:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+/* Page shell */
+.jira-browse {
+	height: 100%;
+	overflow-y: auto;
+	padding: 22px 26px;
+}
+
+.jira-browse__head {
+	max-width: 920px;
+	margin: 0 auto;
+}
+
+.jira-browse__h1 {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	font-size: 22px;
+	font-weight: 700;
+	color: var(--fg);
+	margin: 0;
+}
+
+.jira-browse__manual {
+	font-size: 10.5px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	color: color-mix(in srgb, var(--success) 70%, var(--fg));
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+	border-radius: 999px;
+	padding: 2px 9px;
+}
+
+.jira-browse__sub {
+	color: var(--fg-muted);
+	font-size: 13px;
+	margin: 3px 0 0;
+}
+
+.jira-browse__content {
+	max-width: 920px;
+	margin: 16px auto 0;
+}
+
+/* Controls: project picker + free-text search */
+.jira-browse__controls {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	margin-bottom: 14px;
+}
+
+.jira-browse__search {
+	position: relative;
+	flex: 1;
+	display: flex;
+	align-items: center;
+}
+
+.jira-browse__mag {
+	position: absolute;
+	left: 11px;
+	color: var(--fg-passive);
+	pointer-events: none;
+}
+
+.jira-browse__search input {
+	width: 100%;
+	background: var(--bg-1);
+	border: 1px solid var(--border-1);
+	border-radius: 9px;
+	padding: 9px 32px 9px 34px;
+	color: var(--fg);
+	font-size: 13.5px;
+	outline: none;
+	transition: border-color 0.12s ease;
+}
+
+.jira-browse__search input:focus-visible {
+	border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.jira-browse__search input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.jira-browse__search input::placeholder {
+	color: var(--fg-passive);
+}
+
+.jira-browse__spin {
+	position: absolute;
+	right: 11px;
+	color: var(--fg-passive);
+}
+
+/* Type filter chips */
+.jira-browse__filters {
+	display: flex;
+	gap: 7px;
+	flex-wrap: wrap;
+	margin-bottom: 12px;
+}
+
+.jira-browse__chip {
+	font-size: 11.5px;
+	border: 1px solid var(--border-1);
+	border-radius: 999px;
+	padding: 4px 11px;
+	color: var(--fg-muted);
+	background: color-mix(in srgb, var(--fg) 5%, transparent);
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease,
+		color 0.12s ease;
+}
+
+.jira-browse__chip:hover {
+	color: var(--fg);
+}
+
+.jira-browse__chip.is-active {
+	border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
+	color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+}
+
+/* Empty / list */
+.jira-browse__empty {
+	border: 1px dashed var(--border-1);
+	border-radius: 12px;
+	padding: 28px;
+	text-align: center;
+	color: var(--fg-muted);
+	font-size: 13px;
+}
+
+.jira-browse__list {
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	overflow: hidden;
+	background: var(--bg-1);
+}
+
+.jira-browse__lhead {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 14px;
+	background: color-mix(in srgb, var(--fg) 4%, transparent);
+	border-bottom: 1px solid var(--border);
+	font-size: 11px;
+	letter-spacing: 0.05em;
+	color: var(--fg-passive);
+}
+
+.jira-browse__live {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--success);
+	box-shadow: 0 0 8px var(--success);
+}
+
+.jira-browse__n {
+	margin-left: auto;
+	letter-spacing: 0.02em;
+}
+
+.jira-browse__note {
+	font-size: 12.5px;
+	color: var(--fg-muted);
+	padding: 16px 14px;
+	margin: 0;
+}
+
+.jira-browse__note--err {
+	color: var(--red);
+}
+
+.jira-browse__row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.jira-browse__row:last-child {
+	border-bottom: none;
+}
+
+.jira-browse__row:hover {
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.jira-browse__sq {
+	width: 12px;
+	height: 12px;
+	border-radius: 3px;
+	flex: 0 0 12px;
+	background: #8fb45a;
+}
+
+.jira-browse__sq.is-bug {
+	background: #e05a4d;
+}
+
+.jira-browse__sq.is-sub {
+	background: #8f7ad0;
+}
+
+.jira-browse__sq.is-support {
+	background: #4aa3c2;
+}
+
+.jira-browse__k {
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	font-weight: 700;
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+	flex: 0 0 auto;
+}
+
+.jira-browse__t {
+	flex: 1;
+	min-width: 0;
+	font-size: 13px;
+	color: var(--fg);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.jira-browse__assignee {
+	font-size: 11px;
+	color: var(--fg-passive);
+	flex: 0 0 auto;
+}
+
+.jira-browse__st {
+	flex: 0 0 auto;
+	font-size: 10.5px;
+	font-weight: 700;
+	border-radius: 999px;
+	padding: 2px 9px;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+
+.jira-browse__create {
+	flex: 0 0 auto;
+	font-size: 11.5px;
+	font-weight: 700;
+	color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+	background: color-mix(in srgb, var(--fg) 6%, transparent);
+	border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+	border-radius: 8px;
+	padding: 5px 11px;
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		filter 0.12s ease;
+}
+
+.jira-browse__create:hover {
+	background: var(--accent);
+	color: var(--accent-fg);
+}
+
+.jira-browse__manual-note {
+	color: var(--fg-passive);
+	font-size: 11.5px;
+	margin-top: 12px;
+	line-height: 1.5;
+}
+
+.jira-browse__manual-note b {
+	color: color-mix(in srgb, var(--success) 70%, var(--fg));
+}
+
+/* Project picker dropdown (used inside Browse controls) */
+.jira-proj-picker {
+	position: relative;
+	flex: 0 0 auto;
+}
+
+.jira-proj-picker__trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	background: var(--bg-1);
+	border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+	border-radius: 9px;
+	padding: 9px 13px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--fg);
+	cursor: pointer;
+	white-space: nowrap;
+	max-width: 320px;
+}
+
+.jira-proj-picker__fol {
+	color: var(--accent);
+}
+
+.jira-proj-picker__k {
+	font-family: var(--font-mono);
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+
+.jira-proj-picker__n {
+	color: var(--fg-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.jira-proj-picker__placeholder {
+	color: var(--fg-muted);
+}
+
+.jira-proj-picker__car {
+	color: var(--fg-muted);
+	margin-left: 2px;
+}
+
+.jira-proj-picker__drop {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	width: 344px;
+	max-width: 90vw;
+	background: var(--bg-1);
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	box-shadow: var(--shadow);
+	z-index: 20;
+	overflow: hidden;
+}
+
+.jira-proj-picker__search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--border);
+}
+
+.jira-proj-picker__search input {
+	flex: 1;
+	background: transparent;
+	border: none;
+	color: var(--fg);
+	font-size: 13px;
+	outline: none;
+}
+
+.jira-proj-picker__search input::placeholder {
+	color: var(--fg-passive);
+}
+
+.jira-proj-picker__list {
+	max-height: 264px;
+	overflow-y: auto;
+}
+
+.jira-proj-picker__note {
+	font-size: 12px;
+	color: var(--fg-muted);
+	padding: 10px 12px;
+	margin: 0;
+}
+
+.jira-proj-picker__note--err {
+	color: var(--red);
+}
+
+.jira-proj-picker__opt {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	text-align: left;
+	padding: 9px 12px;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	transition: background 0.12s ease;
+}
+
+.jira-proj-picker__opt:hover,
+.jira-proj-picker__opt:focus-visible {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	outline: none;
+}
+
+.jira-proj-picker__opt.is-selected {
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.jira-proj-picker__opt-k {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+	flex: 0 0 82px;
+}
+
+.jira-proj-picker__opt-n {
+	flex: 1;
+	min-width: 0;
+	font-size: 13px;
+	color: var(--fg);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.jira-proj-picker__lastused {
+	flex: 0 0 auto;
+	font-size: 9.5px;
+	font-weight: 700;
+	color: color-mix(in srgb, var(--success) 70%, var(--fg));
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+	border-radius: 999px;
+	padding: 1px 6px;
+	white-space: nowrap;
+}
+
+.jira-proj-picker__chk {
+	flex: 0 0 auto;
+	color: var(--accent);
+}
+
+.jira-proj-picker__foot {
+	font-size: 10.5px;
+	color: var(--fg-passive);
+	padding: 8px 12px;
+	border-top: 1px solid var(--border);
+	background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
 .inspector-timeline {
 	position: relative;
 	padding-left: 20px;

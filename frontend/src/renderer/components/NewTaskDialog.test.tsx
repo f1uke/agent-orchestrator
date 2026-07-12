@@ -386,4 +386,35 @@ describe("NewTaskDialog", () => {
 		expect(await screen.findByText(/Pick a Jira issue from the list/i)).toBeInTheDocument();
 		expect(postMock).not.toHaveBeenCalled();
 	});
+
+	it("pre-fills from an initialIssue and binds its key (Browse-Jira handoff)", async () => {
+		const onCreated = vi.fn();
+		const onOpenChange = vi.fn();
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<NewTaskDialog
+					open
+					projectId="proj-1"
+					initialIssue={{ key: "DEMO-2272", title: "Example story", status: "Ready for QA", statusCategory: "new" }}
+					onCreated={onCreated}
+					onOpenChange={onOpenChange}
+				/>
+			</QueryClientProvider>,
+		);
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		// The issue arrives already linked (chip) with the title pre-filled from it.
+		expect(screen.getByText("DEMO-2272")).toBeInTheDocument();
+		expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Example story");
+
+		await user.type(screen.getByLabelText("Brief"), "Do the thing.");
+		await user.click(screen.getByRole("button", { name: "Start now" }));
+
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		const body = spawnBody();
+		expect(body.issueId).toBe("jira:DEMO-2272");
+		expect(body.displayName).toBe("Example story");
+		expect(onCreated).toHaveBeenCalledWith("task-1");
+	}, 10_000);
 });
