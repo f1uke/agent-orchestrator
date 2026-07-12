@@ -1,15 +1,16 @@
 // Package jira reads a single Jira issue for display inside AO's Summary tab.
 //
-// Access is by shelling out to the user's jira-cli (`jira issue view <KEY>
-// --raw`), which returns the full Jira Cloud REST v3 issue JSON. This reuses the
-// jira-cli auth the user already has (config + macOS-keychain token) instead of
-// AO managing a Jira credential itself — matching the project decision to
-// "prefer jira-cli". Nothing is hardcoded: the browse host is derived from the
-// response `self` URL, the sprint custom-field is auto-detected, and the issue
-// key is per-request.
+// Access is via the Jira Cloud REST v3 issue endpoint
+// (`GET /rest/api/3/issue/{key}?fields=*all`) over the SAME auth seam as search
+// and status transitions: base URL + login from env or jira-cli's config file,
+// and the API token from AO_JIRA_TOKEN → JIRA_API_TOKEN. There is no jira-cli
+// shell-out and no keychain read — one credential path (the REST API token)
+// serves display, search, and the status move. Nothing is hardcoded: the browse
+// host is derived from the response `self` URL, the sprint custom-field is
+// auto-detected, and the issue key is per-request.
 //
 // This adapter is READ-ONLY. The single sanctioned write (a status transition)
-// is a separate, later concern.
+// is a separate concern (transitions.go).
 package jira
 
 import (
@@ -17,8 +18,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -29,12 +30,12 @@ import (
 // envelopes.
 var (
 	// ErrNotFound is a missing issue or one the credential cannot see (Jira
-	// conflates the two in its error text, so we cannot distinguish them).
+	// conflates the two in its 404, so we cannot distinguish them).
 	ErrNotFound = errors.New("jira: issue not found")
 	// ErrAuthFailed is a rejected/absent credential.
 	ErrAuthFailed = errors.New("jira: authentication failed")
-	// ErrUnavailable is a transport/tooling failure: the jira binary is missing,
-	// times out, or returns unparseable output.
+	// ErrUnavailable is a transport/tooling failure: Jira is unreachable, times
+	// out, or returns unparseable output.
 	ErrUnavailable = errors.New("jira: unavailable")
 	// ErrBadKey is a syntactically invalid issue key.
 	ErrBadKey = errors.New("jira: malformed issue key")
@@ -47,25 +48,20 @@ var (
 	errBadQuery = errors.New("jira: invalid search query")
 )
 
-// keyPattern is the Jira issue-key shape (PROJECT-123). Validated before we ever
-// shell out, so an untrusted string can never become CLI arguments.
+// keyPattern is the Jira issue-key shape (PROJECT-123). Validated before we build
+// a request URL, so an untrusted string can never form a malformed path segment.
 var keyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
 
-// Runner executes the jira CLI for one issue key and returns its stdout. On a
-// non-zero exit it returns a non-nil error whose message includes the CLI's
-// stderr, so Get can classify not-found / auth failures. It is a seam so tests
-// can inject canned fixtures without a real jira binary.
-type Runner func(ctx context.Context, key string) ([]byte, error)
-
-// Client reads Jira issues via a Runner, and lists/applies status transitions
-// via the REST endpoints (see transitions.go).
+// Client reads Jira issues, lists/applies status transitions, and runs
+// cross-project search — all via the Jira Cloud REST v3 API over a shared auth
+// seam (see transitions.go). httpDo + config are seams so tests drive an httptest
+// server with a static identity instead of a real network.
 type Client struct {
-	run Runner
 	// sprintFieldID is an optional explicit sprint custom-field id. Empty means
 	// auto-detect (the default), which is robust across Jira instances.
 	sprintFieldID string
-	// httpDo + config back the REST transition endpoints; both are seams so tests
-	// drive an httptest server with a static identity (no jira binary, no network).
+	// httpDo + config back every REST call (display, transitions, search); both are
+	// seams so tests drive an httptest server with a static identity.
 	httpDo HTTPDoer
 	config ConfigSource
 }
@@ -73,81 +69,77 @@ type Client struct {
 // Option configures a Client.
 type Option func(*Client)
 
-// WithRunner injects a Runner (tests inject a fixture runner).
-func WithRunner(r Runner) Option { return func(c *Client) { c.run = r } }
-
 // WithSprintField pins the sprint custom-field id instead of auto-detecting it.
 func WithSprintField(id string) Option {
 	return func(c *Client) { c.sprintFieldID = strings.TrimSpace(id) }
 }
 
-// NewClient returns a Client. With no WithRunner option it shells out to the
-// `jira` binary on PATH (override the binary via AO_JIRA_BIN).
+// NewClient returns a Client backed by the Jira Cloud REST v3 API. Auth resolves
+// from env then jira-cli's config file (see defaultConfigSource); a missing token
+// surfaces as ErrAuthFailed at call time, never a panic.
 func NewClient(opts ...Option) *Client {
-	c := &Client{run: cliRunner, httpDo: defaultHTTPClient.Do, config: defaultConfigSource}
+	c := &Client{httpDo: defaultHTTPClient.Do, config: defaultConfigSource}
 	for _, opt := range opts {
 		opt(c)
 	}
 	return c
 }
 
-// cliRunner is the production Runner: `jira issue view <key> --raw`.
-func cliRunner(ctx context.Context, key string) ([]byte, error) {
-	bin := strings.TrimSpace(os.Getenv("AO_JIRA_BIN"))
-	if bin == "" {
-		bin = "jira"
-	}
-	path, err := exec.LookPath(bin)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %q not found on PATH — install jira-cli (https://github.com/ankitpokhrel/jira-cli) or set AO_JIRA_BIN", ErrUnavailable, bin)
-	}
-	cmd := exec.CommandContext(ctx, path, "issue", "view", key, "--raw")
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("jira issue view %s: %w: %s", key, err, strings.TrimSpace(stderr.String()))
-	}
-	return []byte(stdout.String()), nil
-}
+// issueFields asks for every field so the sprint custom-field (whose id varies
+// per Jira instance) is present for auto-detection, alongside the ADF description
+// and subtasks the Summary tab renders.
+const issueFields = "*all"
 
-// Get fetches and normalizes one issue for display.
+// Get fetches and normalizes one issue for display via REST.
 func (c *Client) Get(ctx context.Context, key string) (Issue, error) {
 	key = strings.TrimSpace(key)
 	if !keyPattern.MatchString(key) {
 		return Issue{}, fmt.Errorf("%w: %q", ErrBadKey, key)
 	}
-	out, err := c.run(ctx, key)
+	cfg, err := c.config()
 	if err != nil {
-		return Issue{}, classify(err)
+		return Issue{}, err
 	}
-	if strings.TrimSpace(string(out)) == "" {
-		return Issue{}, fmt.Errorf("%w: empty response for %s", ErrUnavailable, key)
+	q := url.Values{}
+	q.Set("fields", issueFields)
+	req, err := newJiraRequest(ctx, cfg, http.MethodGet, cfg.baseURL+"/rest/api/3/issue/"+key+"?"+q.Encode(), nil)
+	if err != nil {
+		return Issue{}, err
+	}
+	resp, err := c.httpDo(req)
+	if err != nil {
+		return Issue{}, fmt.Errorf("%w: get issue %s: %w", ErrUnavailable, key, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := issueStatusError(resp, key); err != nil {
+		return Issue{}, err
 	}
 	var raw rawIssue
-	if err := json.Unmarshal(out, &raw); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return Issue{}, fmt.Errorf("%w: decode %s: %w", ErrUnavailable, key, err)
+	}
+	if strings.TrimSpace(raw.Key) == "" && len(raw.Fields) == 0 {
+		return Issue{}, fmt.Errorf("%w: empty response for %s", ErrUnavailable, key)
 	}
 	return c.mapIssue(raw), nil
 }
 
-// classify maps a Runner error onto a sentinel using the CLI's stderr text.
-// jira-cli reports both "no such issue" and "no permission" with the same 404
-// message, so both surface as ErrNotFound.
-func classify(err error) error {
-	if errors.Is(err, ErrUnavailable) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrAuthFailed) {
-		return err
+// issueStatusError maps a single-issue GET response status onto a sentinel. Jira
+// returns 404 both for a missing issue and one the credential cannot see, so both
+// surface as ErrNotFound; 401/403 → auth; any other non-2xx → unavailable. 2xx →
+// nil.
+func issueStatusError(resp *http.Response, key string) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
 	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "404") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "not found"):
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
-	case strings.Contains(msg, "401") || strings.Contains(msg, "403") ||
-		strings.Contains(msg, "unauthor") || strings.Contains(msg, "authenticat") ||
-		strings.Contains(msg, "invalid token") || strings.Contains(msg, "login"):
-		return fmt.Errorf("%w: %w", ErrAuthFailed, err)
+	snippet := errorSnippet(resp.Body)
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return fmt.Errorf("%w: %s", ErrNotFound, key)
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%w: %s%s", ErrAuthFailed, key, suffix(snippet))
 	default:
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: %s: HTTP %d%s", ErrUnavailable, key, resp.StatusCode, suffix(snippet))
 	}
 }
 

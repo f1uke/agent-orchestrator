@@ -3,20 +3,43 @@ package jira
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// fixtureRunner returns a Runner that serves testdata/<lowercased-key>.json.
-func fixtureRunner(t *testing.T) Runner {
+// restClient wires a Client to an httptest server + a static REST identity so the
+// display Get() runs entirely in-process (no jira binary, no network, no keychain).
+func restClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
-	return func(_ context.Context, key string) ([]byte, error) {
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return NewClient(
+		WithHTTPDoer(srv.Client().Do),
+		WithConfigSource(func() (restConfig, error) {
+			return restConfig{baseURL: srv.URL, email: "e@example.com", token: "tok"}, nil
+		}),
+	)
+}
+
+// issueFixtureHandler serves testdata/<lowercased-key>.json for a
+// GET /rest/api/3/issue/{key} request; an unknown key 404s like Jira.
+func issueFixtureHandler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := path.Base(r.URL.Path)
 		b, err := os.ReadFile(filepath.Join("testdata", toLowerKey(key)+".json"))
 		if err != nil {
-			return nil, err
+			http.Error(w, `{"errorMessages":["Issue does not exist"]}`, http.StatusNotFound)
+			return
 		}
-		return b, nil
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
 	}
 }
 
@@ -32,8 +55,8 @@ func toLowerKey(key string) string {
 	return string(out)
 }
 
-func TestGet_Star2272_MapsStructuredFields(t *testing.T) {
-	c := NewClient(WithRunner(fixtureRunner(t)))
+func TestGet_MapsStructuredFields(t *testing.T) {
+	c := restClient(t, issueFixtureHandler(t))
 	iss, err := c.Get(context.Background(), "DEMO-101")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -76,8 +99,8 @@ func TestGet_Star2272_MapsStructuredFields(t *testing.T) {
 	}
 }
 
-func TestGet_Star2312_BugNoSprint(t *testing.T) {
-	c := NewClient(WithRunner(fixtureRunner(t)))
+func TestGet_BugNoSprint(t *testing.T) {
+	c := restClient(t, issueFixtureHandler(t))
 	iss, err := c.Get(context.Background(), "DEMO-201")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -90,50 +113,107 @@ func TestGet_Star2312_BugNoSprint(t *testing.T) {
 	}
 }
 
-func TestGet_InvalidKeyRejectedBeforeShellOut(t *testing.T) {
+// The display Get() hits the REST v3 issue endpoint with a basic-auth header and a
+// fields param — the same seam search/transitions use.
+func TestGet_RequestsIssueEndpointWithAuth(t *testing.T) {
+	var gotMethod, gotPath, gotAuth, gotFields string
+	c := restClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotFields = r.URL.Query().Get("fields")
+		b, _ := os.ReadFile(filepath.Join("testdata", "demo-101.json"))
+		_, _ = w.Write(b)
+	})
+	if _, err := c.Get(context.Background(), "DEMO-101"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method = %q, want GET", gotMethod)
+	}
+	if gotPath != "/rest/api/3/issue/DEMO-101" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Basic ") {
+		t.Errorf("auth = %q, want Basic …", gotAuth)
+	}
+	if gotFields == "" {
+		t.Errorf("fields query param missing")
+	}
+}
+
+func TestGet_InvalidKeyRejectedBeforeRequest(t *testing.T) {
 	called := false
-	c := NewClient(WithRunner(func(context.Context, string) ([]byte, error) {
+	c := restClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		called = true
-		return nil, nil
-	}))
+		_, _ = w.Write([]byte("{}"))
+	})
 	for _, bad := range []string{"", "nope", "demo-101", "STAR 2272", "STAR-", "-1", "DROP;TABLE-1"} {
 		if _, err := c.Get(context.Background(), bad); !errors.Is(err, ErrBadKey) {
 			t.Errorf("Get(%q) err = %v, want ErrBadKey", bad, err)
 		}
 	}
 	if called {
-		t.Errorf("runner must not be invoked for invalid keys")
+		t.Errorf("no HTTP request must be made for invalid keys")
 	}
 }
 
-func TestGet_ClassifiesRunnerErrors(t *testing.T) {
+func TestGet_ClassifiesHTTPStatus(t *testing.T) {
 	cases := []struct {
 		name   string
-		runErr error
+		status int
 		want   error
 	}{
-		{"not found", errors.New("jira issue view X: exit status 1: 404 Not Found"), ErrNotFound},
-		{"permission", errors.New("Issue does not exist or you do not have permission"), ErrNotFound},
-		{"auth", errors.New("401 Unauthorized: invalid token"), ErrAuthFailed},
-		{"other", errors.New("dial tcp: connection refused"), ErrUnavailable},
+		{"not found", http.StatusNotFound, ErrNotFound},
+		{"no permission (404)", http.StatusNotFound, ErrNotFound},
+		{"unauthorized", http.StatusUnauthorized, ErrAuthFailed},
+		{"forbidden", http.StatusForbidden, ErrAuthFailed},
+		{"server error", http.StatusInternalServerError, ErrUnavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := NewClient(WithRunner(func(context.Context, string) ([]byte, error) {
-				return nil, tc.runErr
-			}))
-			_, err := c.Get(context.Background(), "DEMO-1")
-			if !errors.Is(err, tc.want) {
+			c := restClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`{"errorMessages":["boom"]}`))
+			})
+			if _, err := c.Get(context.Background(), "DEMO-1"); !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
 		})
 	}
 }
 
-func TestGet_EmptyOutputIsUnavailable(t *testing.T) {
-	c := NewClient(WithRunner(func(context.Context, string) ([]byte, error) { return []byte("  \n"), nil }))
+// A missing/invalid credential resolves to a config error the caller surfaces
+// (degrade to an inline error, never a crash) — the same as the other REST paths.
+func TestGet_ConfigErrorPropagates(t *testing.T) {
+	c := NewClient(WithConfigSource(func() (restConfig, error) {
+		return restConfig{}, fmt.Errorf("%w: no Jira API token", ErrAuthFailed)
+	}))
+	if _, err := c.Get(context.Background(), "DEMO-1"); !errors.Is(err, ErrAuthFailed) {
+		t.Errorf("config err = %v, want ErrAuthFailed", err)
+	}
+}
+
+func TestGet_TransportErrorIsUnavailable(t *testing.T) {
+	// Point the client at a server we immediately close so the request cannot
+	// connect; the dial failure must classify as ErrUnavailable.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	base := srv.URL
+	srv.Close()
+	c := NewClient(WithConfigSource(func() (restConfig, error) {
+		return restConfig{baseURL: base, email: "e@example.com", token: "tok"}, nil
+	}))
 	if _, err := c.Get(context.Background(), "DEMO-1"); !errors.Is(err, ErrUnavailable) {
-		t.Errorf("empty output err = %v, want ErrUnavailable", err)
+		t.Errorf("transport err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestGet_MalformedBodyIsUnavailable(t *testing.T) {
+	c := restClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("not json"))
+	})
+	if _, err := c.Get(context.Background(), "DEMO-1"); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("malformed body err = %v, want ErrUnavailable", err)
 	}
 }
 

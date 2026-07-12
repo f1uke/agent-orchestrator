@@ -487,7 +487,7 @@ type ListSessionPRsResponse struct {
 // Linked is false when the session has no Jira binding (the UI renders nothing).
 // Issue is present when the bound key resolved; FetchError carries a user-facing
 // message when the session IS Jira-linked but the live fetch failed (missing
-// issue, auth, or jira-cli unavailable) — returned as 200 so a Jira hiccup never
+// issue, auth, or Jira unavailable) — returned as 200 so a Jira hiccup never
 // breaks the Summary tab.
 type JiraContextResponse struct {
 	SessionID  domain.SessionID `json:"sessionId"`
