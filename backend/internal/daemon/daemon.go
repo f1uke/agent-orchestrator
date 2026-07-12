@@ -173,11 +173,18 @@ func Run() error {
 		return fmt.Errorf("spawn-confirm settings: %w", err)
 	}
 
+	// One jira client backs the display read, the status transitions, cross-project
+	// search, AND the smoke-results comment/attachment write — all over Jira Cloud
+	// REST v3 (a single API-token auth path). It satisfies IssueReader,
+	// TransitionMover, IssueSearcher, and smoke's JiraPoster. Built before the
+	// session service so the smoke service can take it as its Jira write seam.
+	jiraClient := jiraadapter.NewClient()
+
 	// Wire the controller-facing session service over the same store + LCM, the
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, log)
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, jiraClient, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -211,11 +218,7 @@ func Run() error {
 		}
 	}()
 
-	// One jira client backs the display read, the status transitions, and
-	// cross-project search — all over Jira Cloud REST v3 (a single API-token auth
-	// path). It satisfies IssueReader, TransitionMover, and IssueSearcher.
-	// sessionSvc is the SessionGateway (read + set the after-the-fact Jira binding).
-	jiraClient := jiraadapter.NewClient()
+	// sessionSvc is the Jira SessionGateway (read + set the after-the-fact binding).
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,

@@ -90,7 +90,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, jiraPoster smokesvc.JiraPoster, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -190,8 +190,11 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// blobs under <dataDir>/evidence, and report-back over the same Send path
 	// `ao send` uses (sessionSvc). Built after sessionSvc so it can deliver
 	// results; its evidence-purge hook is wired into the manager like the
-	// reviewer reaper so a purged session leaves no blobs behind.
-	smokeSvc := smokesvc.New(store, cfg.DataDir, sessionSvc)
+	// reviewer reaper so a purged session leaves no blobs behind. The jiraPoster
+	// is the write seam behind the Tests tab's "Post to Jira" button (comment +
+	// attachment upload); nil leaves the button's endpoint reporting Jira as
+	// unconfigured rather than panicking.
+	smokeSvc := smokesvc.New(store, cfg.DataDir, sessionSvc, smokesvc.WithJiraPoster(jiraPoster))
 	mgr.SetSmokeEvidencePurger(smokeSvc.PurgeSessionEvidence)
 	return sessionSvc, reviewSvc, smokeSvc, mgr, nil
 }

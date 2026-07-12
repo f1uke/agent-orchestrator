@@ -2801,6 +2801,52 @@ paths:
       summary: Record the user's verdict + note for a smoke-test case
       tags:
       - smoke
+  /api/v1/sessions/{sessionId}/smoke-checks/jira:
+    post:
+      operationId: postSmokeToJira
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostSmokeToJiraResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Post a session's smoke-test results to its linked Jira issue as a table
+        comment with evidence attachments
+      tags:
+      - smoke
   /api/v1/sessions/{sessionId}/smoke-checks/report:
     post:
       operationId: reportSmokeChecks
@@ -4386,6 +4432,32 @@ components:
       - title
       - targetSha
       - status
+      type: object
+    PostSmokeToJiraResponse:
+      properties:
+        attachmentsUploaded:
+          description: Number of evidence files uploaded as Jira attachments.
+          type: integer
+        commentUrl:
+          description: Deep link to the created comment (empty if Jira returned no
+            self link).
+          type: string
+        embeddedMedia:
+          description: Whether image evidence embedded inline (false = attachment-link
+            fallback).
+          type: boolean
+        key:
+          description: The Jira issue key the results were posted to.
+          type: string
+        rowsPosted:
+          description: Number of run rows (verdict set) posted in the table.
+          type: integer
+      required:
+      - key
+      - commentUrl
+      - attachmentsUploaded
+      - rowsPosted
+      - embeddedMedia
       type: object
     ProbeAgentResponse:
       properties:

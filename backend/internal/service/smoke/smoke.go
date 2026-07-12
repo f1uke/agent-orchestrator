@@ -57,6 +57,7 @@ type Manager interface {
 	AttachEvidence(ctx context.Context, sessionID domain.SessionID, checkID string, upload EvidenceUpload) (domain.SmokeEvidence, error)
 	OpenEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (EvidenceBlob, error)
 	Report(ctx context.Context, sessionID domain.SessionID) (ReportOutcome, error)
+	PostToJira(ctx context.Context, sessionID domain.SessionID) (JiraPostOutcome, error)
 	PurgeSessionEvidence(ctx context.Context, sessionID domain.SessionID) error
 }
 
@@ -117,6 +118,7 @@ type ReportOutcome struct {
 type Service struct {
 	store        Store
 	messenger    Messenger
+	jira         JiraPoster
 	evidenceRoot string
 	clock        func() time.Time
 }
@@ -129,6 +131,13 @@ type Option func(*Service)
 // WithClock overrides the service clock for tests.
 func WithClock(clock func() time.Time) Option {
 	return func(s *Service) { s.clock = clock }
+}
+
+// WithJiraPoster wires the Jira write client used by PostToJira (comment +
+// attachment upload). Left unset (nil) the button's endpoint reports Jira as
+// unconfigured rather than panicking, mirroring the other nil-dependency guards.
+func WithJiraPoster(poster JiraPoster) Option {
+	return func(s *Service) { s.jira = poster }
 }
 
 // New builds the smoke service. dataDir is the resolved AO data dir; evidence

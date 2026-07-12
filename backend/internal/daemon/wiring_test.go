@@ -162,7 +162,7 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptoverrides.NewStore: %v", err)
 	}
-	svc, reviewSvc, _, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, log)
+	svc, reviewSvc, _, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, nil, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptoverrides.NewStore: %v", err)
 	}
-	svc, _, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, log)
+	svc, _, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, nil, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}

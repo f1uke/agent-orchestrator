@@ -27,6 +27,8 @@ type fakeSmokeService struct {
 	uploadBytes []byte
 	blob        smokesvc.EvidenceBlob
 	reported    smokesvc.ReportOutcome
+	jiraOutcome smokesvc.JiraPostOutcome
+	jiraErr     error
 }
 
 func (f *fakeSmokeService) List(context.Context, domain.SessionID) (smokesvc.SessionSmoke, error) {
@@ -61,6 +63,13 @@ func (f *fakeSmokeService) OpenEvidence(context.Context, domain.SessionID, strin
 
 func (f *fakeSmokeService) Report(context.Context, domain.SessionID) (smokesvc.ReportOutcome, error) {
 	return f.reported, nil
+}
+
+func (f *fakeSmokeService) PostToJira(context.Context, domain.SessionID) (smokesvc.JiraPostOutcome, error) {
+	if f.jiraErr != nil {
+		return smokesvc.JiraPostOutcome{}, f.jiraErr
+	}
+	return f.jiraOutcome, nil
 }
 
 func (f *fakeSmokeService) PurgeSessionEvidence(context.Context, domain.SessionID) error { return nil }
@@ -189,6 +198,32 @@ func TestSmokeEvidenceServeSetsContentType(t *testing.T) {
 	if string(body) != "PNGBYTES" {
 		t.Fatalf("served bytes = %q", body)
 	}
+}
+
+func TestSmokePostJiraReturnsOutcome(t *testing.T) {
+	svc := &fakeSmokeService{jiraOutcome: smokesvc.JiraPostOutcome{
+		Key: "DEMO-101", CommentURL: "https://acme.atlassian.net/browse/DEMO-101?focusedCommentId=10101",
+		AttachmentsUploaded: 2, RowsPosted: 3, EmbeddedMedia: true,
+	}}
+	srv := newSmokeTestServer(t, svc)
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/jira", "")
+	assertJSON(t, headers)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	for _, want := range []string{`"key":"DEMO-101"`, `"attachmentsUploaded":2`, `"rowsPosted":3`, `"embeddedMedia":true`, `focusedCommentId=10101`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestSmokePostJiraNotLinkedMapsCode(t *testing.T) {
+	svc := &fakeSmokeService{jiraErr: smokesvc.ErrNotLinked}
+	srv := newSmokeTestServer(t, svc)
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/jira", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusUnprocessableEntity, "SMOKE_JIRA_NOT_LINKED")
 }
 
 func TestSmokeReportReturnsOutcome(t *testing.T) {

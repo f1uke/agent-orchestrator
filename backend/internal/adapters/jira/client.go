@@ -46,6 +46,10 @@ var (
 	// usually invalid JQL (e.g. a project key that doesn't exist). Lets the service
 	// fall back from a project-scoped guess to a plain text search.
 	errBadQuery = errors.New("jira: invalid search query")
+	// errBadRequest backs ErrBadRequest (surfaced in comments.go): a 400 from a
+	// comment/attachment write, usually a malformed ADF body (e.g. an unrenderable
+	// media node). Lets the smoke service retry a comment without inline media.
+	errBadRequest = errors.New("jira: bad request")
 )
 
 // keyPattern is the Jira issue-key shape (PROJECT-123). Validated before we build

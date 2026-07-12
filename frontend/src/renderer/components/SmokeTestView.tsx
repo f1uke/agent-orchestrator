@@ -19,8 +19,11 @@ import {
 	type SmokeProgress,
 } from "../lib/smoke-test";
 import { Toast } from "./inbox-ui";
+import { JiraLinkDialog } from "./JiraLinkDialog";
+import { jiraKeyFromIssueId } from "../types/workspace";
 
 type SmokeResponse = components["schemas"]["ListSmokeChecksResponse"];
+type PostToJiraResponse = components["schemas"]["PostSmokeToJiraResponse"];
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -41,9 +44,20 @@ const DECIDED_CAPTION: Record<string, string> = {
  * sibling Comments tab's inline-style approach. Always visible with an empty
  * state, even when the session has no checklist.
  */
-export function SmokeTestView({ sessionId, worker }: { sessionId: string; worker?: string }) {
+export function SmokeTestView({
+	sessionId,
+	worker,
+	issueId,
+}: {
+	sessionId: string;
+	worker?: string;
+	issueId?: string;
+}) {
 	const queryClient = useQueryClient();
 	const [toast, setToast] = useState<string | null>(null);
+	const [linkOpen, setLinkOpen] = useState(false);
+	const jiraKey = jiraKeyFromIssueId(issueId);
+	const jiraLinked = Boolean(jiraKey);
 	const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const showToast = useCallback((text: string) => {
 		setToast(text);
@@ -114,6 +128,42 @@ export function SmokeTestView({ sessionId, worker }: { sessionId: string; worker
 		},
 	});
 
+	const postJira = useMutation({
+		mutationFn: async (): Promise<PostToJiraResponse> => {
+			if (usePreviewData) {
+				return {
+					key: jiraKey ?? "DEMO-101",
+					commentUrl: "",
+					attachmentsUploaded: 0,
+					rowsPosted: progress.checked,
+					embeddedMedia: false,
+				};
+			}
+			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/smoke-checks/jira", {
+				params: { path: { sessionId } },
+			});
+			if (error) throw new Error(apiErrorMessage(error, "Unable to post results to Jira"));
+			return data!;
+		},
+		onSuccess: (data) => {
+			invalidate();
+			const rows = data.rowsPosted;
+			showToast(`Posted ${rows} result${rows === 1 ? "" : "s"} to ${data.key}`);
+			if (data.commentUrl) window.open(data.commentUrl, "_blank", "noopener,noreferrer");
+		},
+		onError: (err) => showToast(apiErrorMessage(err, "Couldn't post to Jira")),
+	});
+
+	// The button guides an unlinked session to the link flow first (locked
+	// decision #2); a linked session posts the run rows as a Jira table comment.
+	const onPostJira = () => {
+		if (!jiraLinked) {
+			setLinkOpen(true);
+			return;
+		}
+		postJira.mutate();
+	};
+
 	const uploadEvidence = useCallback(
 		async (checkId: string, file: File) => {
 			const form = new FormData();
@@ -183,8 +233,17 @@ export function SmokeTestView({ sessionId, worker }: { sessionId: string; worker
 			</div>
 
 			{progress.checked > 0 && (
-				<ReportBar progress={progress} busy={report.isPending} onReport={() => report.mutate()} />
+				<ReportBar
+					progress={progress}
+					busy={report.isPending}
+					jiraBusy={postJira.isPending}
+					jiraLinked={jiraLinked}
+					onReport={() => report.mutate()}
+					onPostJira={onPostJira}
+				/>
 			)}
+
+			<JiraLinkDialog sessionId={sessionId} open={linkOpen} onOpenChange={setLinkOpen} />
 
 			{toast && <Toast text={toast} />}
 		</div>
@@ -791,7 +850,21 @@ function verdictButton(color: string, border: string, bg: string): React.CSSProp
 	};
 }
 
-function ReportBar({ progress, busy, onReport }: { progress: SmokeProgress; busy: boolean; onReport: () => void }) {
+function ReportBar({
+	progress,
+	busy,
+	jiraBusy,
+	jiraLinked,
+	onReport,
+	onPostJira,
+}: {
+	progress: SmokeProgress;
+	busy: boolean;
+	jiraBusy: boolean;
+	jiraLinked: boolean;
+	onReport: () => void;
+	onPostJira: () => void;
+}) {
 	const parts = [`${progress.checked} of ${progress.total} checked`, `${progress.pass} pass, ${progress.fail} fail`];
 	if (progress.skip > 0) parts[1] += `, ${progress.skip} skipped`;
 	return (
@@ -803,11 +876,38 @@ function ReportBar({ progress, busy, onReport }: { progress: SmokeProgress; busy
 				background: P.reportBg,
 				display: "flex",
 				alignItems: "center",
-				gap: 12,
+				gap: 8,
+				flexWrap: "wrap",
 			}}
 		>
 			<span style={{ fontSize: 12, fontWeight: 600, color: P.body }}>{parts.join(" · ")}</span>
-			<div style={{ flex: 1 }} />
+			<div style={{ flex: 1, minWidth: 8 }} />
+			<button
+				type="button"
+				disabled={jiraBusy}
+				onClick={onPostJira}
+				title={
+					jiraLinked
+						? "Post these results to the linked Jira issue as a comment, with evidence attached"
+						: "Link a Jira issue first, then post results"
+				}
+				style={{
+					display: "inline-flex",
+					alignItems: "center",
+					gap: 6,
+					fontSize: 12.5,
+					fontWeight: 600,
+					color: ACCENT,
+					background: accentMix(10),
+					border: `1px solid ${accentMix(38)}`,
+					borderRadius: 8,
+					padding: "8px 12px",
+					cursor: "pointer",
+					opacity: jiraBusy ? 0.7 : 1,
+				}}
+			>
+				◈ Post to Jira
+			</button>
 			<button
 				type="button"
 				disabled={busy}

@@ -46,11 +46,11 @@ beforeEach(() => {
 		.mockResolvedValue({ data: { delivered: true, target: "worker", summary: "1 pass" }, error: undefined });
 });
 
-function renderView(sessionId = "s1") {
+function renderView(sessionId = "s1", issueId?: string) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	render(
 		<QueryClientProvider client={qc}>
-			<SmokeTestView sessionId={sessionId} worker="fix gl note" />
+			<SmokeTestView sessionId={sessionId} worker="fix gl note" issueId={issueId} />
 		</QueryClientProvider>,
 	);
 }
@@ -130,5 +130,35 @@ describe("SmokeTestView", () => {
 			expect(postMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/smoke-checks/report")).toBe(true),
 		);
 		expect(await screen.findByText(/Reported results/)).toBeInTheDocument();
+	});
+
+	it("posts run results to Jira for a linked session", async () => {
+		checks = [check({ verdict: "pass", decidedAt: "2026-07-11T10:05:00Z" })];
+		postMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/smoke-checks/jira") {
+				return {
+					data: { key: "DEMO-101", commentUrl: "", attachmentsUploaded: 1, rowsPosted: 1, embeddedMedia: true },
+					error: undefined,
+				};
+			}
+			return { data: { delivered: true, target: "worker", summary: "1 pass" }, error: undefined };
+		});
+		renderView("s1", "jira:DEMO-101");
+		await userEvent.click(await screen.findByRole("button", { name: /Post to Jira/ }));
+		await waitFor(() =>
+			expect(postMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/smoke-checks/jira")).toBe(true),
+		);
+		const call = postMock.mock.calls.find(([p]) => p === "/api/v1/sessions/{sessionId}/smoke-checks/jira");
+		expect(call![1].params.path).toMatchObject({ sessionId: "s1" });
+		expect(await screen.findByText(/Posted 1 result to DEMO-101/)).toBeInTheDocument();
+	});
+
+	it("guides an unlinked session to the link flow instead of posting", async () => {
+		checks = [check({ verdict: "pass", decidedAt: "2026-07-11T10:05:00Z" })];
+		renderView("s1"); // no issueId → not Jira-linked
+		await userEvent.click(await screen.findByRole("button", { name: /Post to Jira/ }));
+		// The link dialog opens; nothing is posted to the Jira endpoint.
+		expect(await screen.findByText(/Link a Jira issue/)).toBeInTheDocument();
+		expect(postMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/smoke-checks/jira")).toBe(false);
 	});
 });

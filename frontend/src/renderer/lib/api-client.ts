@@ -85,6 +85,7 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/sessions/{sessionId}/reviews/trigger",
 	"/api/v1/sessions/{sessionId}/smoke-checks",
 	"/api/v1/sessions/{sessionId}/smoke-checks/report",
+	"/api/v1/sessions/{sessionId}/smoke-checks/jira",
 	"/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict",
 	"/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset",
 	"/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence",
