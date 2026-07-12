@@ -199,6 +199,7 @@ var schemaNames = map[string]string{
 	"ControllersJiraProjectsResponse":             "JiraProjectsResponse",
 	"ControllersJiraSearchQuery":                  "JiraSearchQuery",
 	"ControllersJiraProjectsQuery":                "JiraProjectsQuery",
+	"ControllersJiraTransitionsQuery":             "JiraTransitionsQuery",
 	"ControllersJiraLinkRequest":                  "JiraLinkRequest",
 	"ControllersJiraLinkResponse":                 "JiraLinkResponse",
 	"AdfNode":                                     "AdfNode",
@@ -536,8 +537,8 @@ func jiraOperations() []operation {
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/jira/transitions", id: "listSessionJiraTransitions", tag: "jira",
-			summary:    "List the linked Jira issue's available status transitions (read live)",
-			pathParams: []any{controllers.SessionIDParam{}},
+			summary:    "List the linked Jira issue's (or a subtask's) available status transitions (read live)",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.JiraTransitionsQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.JiraTransitionsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},

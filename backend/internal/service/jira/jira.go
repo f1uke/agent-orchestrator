@@ -18,6 +18,12 @@ import (
 // binding. The controller maps it to a 4xx (nothing to move).
 var ErrNotLinked = errors.New("jira: session is not linked to a Jira issue")
 
+// ErrKeyNotInIssueTree reports that a status action named an issue key that is
+// neither the session's bound issue nor one of its subtasks. It scopes the move
+// write to the session's own issue tree so a session can never move an unrelated
+// issue. The controller maps it to a 4xx.
+var ErrKeyNotInIssueTree = errors.New("jira: issue is not in this session's issue tree")
+
 // issueIDPrefix is the canonical prefix a Jira-bound session carries in
 // sessions.issue_id (domain.CanonicalIssueID form "<provider>:<native>").
 const issueIDPrefix = string(domain.TrackerProviderJira) + ":"
@@ -125,45 +131,79 @@ func (s *Service) Context(ctx context.Context, id domain.SessionID) (Result, err
 	return Result{Linked: true, Issue: &iss}, nil
 }
 
-// Transitions lists the session's Jira issue's available status transitions,
-// read live. Errors surface to the caller (unlike Context's display fetch) so the
-// Move-status dialog can show why the list is unavailable.
-func (s *Service) Transitions(ctx context.Context, id domain.SessionID) ([]jiraadapter.Transition, error) {
-	key, err := s.requireKey(ctx, id)
+// Transitions lists the available status transitions for the session's issue, or
+// — when key names a subtask of that issue — for the subtask, read live. Errors
+// surface to the caller (unlike Context's display fetch) so the Move-status dialog
+// can show why the list is unavailable. An empty key means the bound issue.
+func (s *Service) Transitions(ctx context.Context, id domain.SessionID, key string) ([]jiraadapter.Transition, error) {
+	target, err := s.resolveActionKey(ctx, id, key)
 	if err != nil {
 		return nil, err
 	}
 	if s.moves == nil {
 		return nil, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
 	}
-	return s.moves.Transitions(ctx, key)
+	return s.moves.Transitions(ctx, target)
 }
 
-// Move applies a status transition to the session's Jira issue — the one
-// sanctioned write. On success it re-reads the issue (best-effort) so the result
-// carries the new status.
-func (s *Service) Move(ctx context.Context, id domain.SessionID, transitionID string) (MoveResult, error) {
-	key, err := s.requireKey(ctx, id)
+// Move applies a status transition to the session's issue — or to a subtask of it
+// when key is set — the one sanctioned write. On success it re-reads the moved
+// issue (best-effort) so the result carries the new status. An empty key means the
+// bound issue.
+func (s *Service) Move(ctx context.Context, id domain.SessionID, key, transitionID string) (MoveResult, error) {
+	target, err := s.resolveActionKey(ctx, id, key)
 	if err != nil {
 		return MoveResult{}, err
 	}
 	if s.moves == nil {
 		return MoveResult{}, fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
 	}
-	if err := s.moves.Move(ctx, key, transitionID); err != nil {
+	if err := s.moves.Move(ctx, target, transitionID); err != nil {
 		return MoveResult{}, err
 	}
-	res := MoveResult{Key: key}
+	res := MoveResult{Key: target}
 	// Best-effort re-read so the UI reflects the new status immediately; a read
 	// failure here does not undo the (already successful) move.
 	if s.issues != nil {
-		if iss, err := s.issues.Get(ctx, key); err == nil {
+		if iss, err := s.issues.Get(ctx, target); err == nil {
 			res.Status = iss.Status
 			res.StatusCategory = iss.StatusCategory
 			res.StatusColor = iss.StatusColor
 		}
 	}
 	return res, nil
+}
+
+// resolveActionKey returns the issue key a status action targets. An empty key (or
+// the bound key itself) means the session's bound issue — the original behavior. A
+// non-empty key must be a subtask of the bound issue: the status-move write stays
+// scoped to the session's own issue tree, so a session can never move an unrelated
+// issue. Confirming membership costs one display read of the parent.
+func (s *Service) resolveActionKey(ctx context.Context, id domain.SessionID, key string) (string, error) {
+	bound, err := s.requireKey(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if key == "" || key == bound {
+		return bound, nil
+	}
+	if !fullKeyRE.MatchString(key) {
+		return "", fmt.Errorf("%w: %q", jiraadapter.ErrBadKey, key)
+	}
+	if s.issues == nil {
+		return "", fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	parent, err := s.issues.Get(ctx, bound)
+	if err != nil {
+		return "", err
+	}
+	for _, sub := range parent.Subtasks {
+		if strings.EqualFold(sub.Key, key) {
+			return sub.Key, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s is not a subtask of %s", ErrKeyNotInIssueTree, key, bound)
 }
 
 // requireKey resolves the session's bound Jira key, returning ErrNotLinked when

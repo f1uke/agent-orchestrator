@@ -24,8 +24,11 @@ type stubJira struct {
 
 	transitions []jiraadapter.Transition
 	transErr    error
+	gotTransKey string
 	moveRes     jirasvc.MoveResult
 	moveErr     error
+	gotMoveKey  string
+	gotMoveID   string
 
 	searchRes  []jiraadapter.IssueSummary
 	searchErr  error
@@ -43,11 +46,14 @@ func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, e
 	return s.res, s.err
 }
 
-func (s *stubJira) Transitions(context.Context, domain.SessionID) ([]jiraadapter.Transition, error) {
+func (s *stubJira) Transitions(_ context.Context, _ domain.SessionID, key string) ([]jiraadapter.Transition, error) {
+	s.gotTransKey = key
 	return s.transitions, s.transErr
 }
 
-func (s *stubJira) Move(context.Context, domain.SessionID, string) (jirasvc.MoveResult, error) {
+func (s *stubJira) Move(_ context.Context, _ domain.SessionID, key, transitionID string) (jirasvc.MoveResult, error) {
+	s.gotMoveKey = key
+	s.gotMoveID = transitionID
 	return s.moveRes, s.moveErr
 }
 
@@ -222,6 +228,31 @@ func TestJiraMove_MissingTransitionIs400(t *testing.T) {
 
 func TestJiraMove_MalformedBodyIs400(t *testing.T) {
 	rec := postMove(t, &stubJira{}, `not json`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// The ?key= query on transitions and the issueKey body field on move must reach
+// the service so a subtask can be targeted.
+func TestJiraTransitions_PassesSubtaskKey(t *testing.T) {
+	stub := &stubJira{}
+	serveJiraReq(t, stub, http.MethodGet, "/sessions/s1/jira/transitions?key=DEMO-102", nil)
+	if stub.gotTransKey != "DEMO-102" {
+		t.Errorf("transitions got key %q, want DEMO-102", stub.gotTransKey)
+	}
+}
+
+func TestJiraMove_PassesSubtaskKey(t *testing.T) {
+	stub := &stubJira{moveRes: jirasvc.MoveResult{Key: "DEMO-102"}}
+	postMove(t, stub, `{"transitionId":"21","issueKey":"DEMO-102"}`)
+	if stub.gotMoveKey != "DEMO-102" || stub.gotMoveID != "21" {
+		t.Errorf("move got key=%q id=%q, want DEMO-102/21", stub.gotMoveKey, stub.gotMoveID)
+	}
+}
+
+func TestJiraMove_KeyNotInTreeIs400(t *testing.T) {
+	rec := postMove(t, &stubJira{moveErr: jirasvc.ErrKeyNotInIssueTree}, `{"transitionId":"21","issueKey":"OTHER-9"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}

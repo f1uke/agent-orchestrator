@@ -84,12 +84,23 @@ describe("JiraIssueSection", () => {
 		expect(open.getAttribute("href")).toBe("https://example.atlassian.net/browse/DEMO-101");
 	});
 
-	it("opens the Move-status dialog from the status pill", () => {
+	it("opens the Move-status dialog from the issue's status pill", () => {
 		mockQuery(fullIssue);
 		render(<JiraIssueSection sessionId="s1" linked={true} />);
-		// The status pill is the Move-status entry point (title "Move status").
-		fireEvent.click(screen.getByTitle("Move status"));
+		// The issue's pill is a Move-status entry point (its own status text).
+		fireEvent.click(screen.getByRole("button", { name: /Ready for QA/i }));
 		expect(screen.getByText(/move jira status/i)).toBeTruthy();
+	});
+
+	it("opens the Move-status dialog from a subtask's status pill (movable subtasks)", () => {
+		mockQuery(fullIssue);
+		render(<JiraIssueSection sessionId="s1" linked={true} />);
+		// The subtask's status pill is its own Move-status entry point.
+		fireEvent.click(screen.getByRole("button", { name: /Pull Request/i }));
+		// The dialog opens targeting the subtask key (now shown in both the row and
+		// the dialog).
+		expect(screen.getByText(/move jira status/i)).toBeTruthy();
+		expect(screen.getAllByText("DEMO-102").length).toBeGreaterThanOrEqual(2);
 	});
 
 	it("shows a graceful note when linked but the Jira fetch failed", () => {

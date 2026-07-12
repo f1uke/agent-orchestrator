@@ -1,8 +1,12 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { useJiraTransitions, useMoveJiraStatus, type JiraIssue } from "../hooks/useSessionJiraContext";
+import { useJiraTransitions, useMoveJiraStatus } from "../hooks/useSessionJiraContext";
 import { cn } from "../lib/utils";
+
+// The minimal display shape the dialog needs — satisfied by both the bound issue
+// (JiraIssue) and a subtask (JiraSubtask).
+export type MoveTarget = { key: string; type?: string; title?: string; status?: string };
 
 /**
  * The Move-status dialog — the ONLY Jira write AO makes (a status transition,
@@ -10,20 +14,25 @@ import { cn } from "../lib/utils";
  * LIVE from the issue (never hardcoded — they differ per issue type and current
  * status). On confirm it POSTs the chosen transition and, on success, the mutation
  * invalidates the Jira context so the pill reflects the new status. Mockup 05.
+ *
+ * `target` is the issue shown/moved; `issueKey` scopes the transitions+move to a
+ * subtask of the session's bound issue (omit it to move the bound issue itself).
  */
 export function JiraMoveStatusDialog({
 	sessionId,
-	issue,
+	target,
+	issueKey,
 	open,
 	onOpenChange,
 }: {
 	sessionId: string;
-	issue: JiraIssue;
+	target: MoveTarget;
+	issueKey?: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
-	const transitions = useJiraTransitions(sessionId, open);
-	const move = useMoveJiraStatus(sessionId);
+	const transitions = useJiraTransitions(sessionId, open, issueKey);
+	const move = useMoveJiraStatus(sessionId, issueKey);
 	const [selected, setSelected] = useState<string | null>(null);
 
 	// Reset the choice and any prior error each time the dialog opens.
@@ -56,14 +65,14 @@ export function JiraMoveStatusDialog({
 					</Dialog.Description>
 
 					<div className="jira-move__target">
-						Issue <span className="jira-move__key">{issue.key}</span>
-						{[issue.type, issue.title].filter(Boolean).length > 0 ? (
-							<span className="jira-move__target-meta">{[issue.type, issue.title].filter(Boolean).join(" · ")}</span>
+						Issue <span className="jira-move__key">{target.key}</span>
+						{[target.type, target.title].filter(Boolean).length > 0 ? (
+							<span className="jira-move__target-meta">{[target.type, target.title].filter(Boolean).join(" · ")}</span>
 						) : null}
 					</div>
 
 					<div className="jira-move__flow">
-						<span className="jira-move__chip jira-move__chip--cur">{issue.status || "current"}</span>
+						<span className="jira-move__chip jira-move__chip--cur">{target.status || "current"}</span>
 						<ArrowRight className="jira-move__arrow" aria-hidden="true" />
 						<span className="jira-move__chip jira-move__chip--next">{chosen ? chosen.to || chosen.name : "…"}</span>
 					</div>
@@ -124,7 +133,7 @@ export function JiraMoveStatusDialog({
 						</Dialog.Close>
 						{chosen ? (
 							<span className="jira-move__audit">
-								Moves {issue.key}: {issue.status || "current"} → {chosen.to || chosen.name}
+								Moves {target.key}: {target.status || "current"} → {chosen.to || chosen.name}
 							</span>
 						) : null}
 					</div>

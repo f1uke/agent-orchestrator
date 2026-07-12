@@ -22,8 +22,16 @@ export type AdfNode = components["schemas"]["AdfNode"];
 export const sessionJiraQueryKey = (sessionId?: string) =>
 	sessionId ? (["session-jira", sessionId] as const) : (["session-jira"] as const);
 
-export const sessionJiraTransitionsQueryKey = (sessionId?: string) =>
-	sessionId ? (["session-jira-transitions", sessionId] as const) : (["session-jira-transitions"] as const);
+// Transitions are cached per (session, targetKey): the bound issue and each
+// subtask have their own transition set. An undefined issueKey = the bound issue.
+// Invalidating with just (sessionId) prefix-matches the bound issue AND every
+// subtask, so one move refreshes them all.
+export const sessionJiraTransitionsQueryKey = (sessionId?: string, issueKey?: string) => {
+	if (!sessionId) return ["session-jira-transitions"] as const;
+	return issueKey
+		? (["session-jira-transitions", sessionId, issueKey] as const)
+		: (["session-jira-transitions", sessionId] as const);
+};
 
 export const jiraSearchQueryKey = (project: string, query: string) => ["jira-search", project, query] as const;
 
@@ -60,48 +68,51 @@ export function useSessionJiraContext(sessionId: string | undefined, enabled: bo
 	});
 }
 
-async function fetchJiraTransitions(sessionId: string): Promise<JiraTransition[]> {
+async function fetchJiraTransitions(sessionId: string, issueKey?: string): Promise<JiraTransition[]> {
 	const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/jira/transitions", {
-		params: { path: { sessionId } },
+		params: { path: { sessionId }, query: issueKey ? { key: issueKey } : undefined },
 	});
 	if (error) throw new Error(apiErrorMessage(error, "Couldn't load Jira transitions"));
 	return data?.transitions ?? [];
 }
 
 /**
- * Fetches the linked issue's available status transitions, LIVE (never
- * hardcoded — they differ per issue type and current status). Enable only while
- * the Move-status dialog is open so we don't poll otherwise. Unlike the display
- * context, a failure here throws so the dialog can surface it (e.g. a missing
- * JIRA_API_TOKEN).
+ * Fetches the available status transitions, LIVE (never hardcoded — they differ
+ * per issue type and current status), for the session's bound issue or — with an
+ * issueKey (a subtask of it) — for that subtask. Enable only while the Move-status
+ * dialog is open so we don't poll otherwise. Unlike the display context, a failure
+ * here throws so the dialog can surface it (e.g. a missing JIRA_API_TOKEN).
  */
-export function useJiraTransitions(sessionId: string | undefined, enabled: boolean) {
+export function useJiraTransitions(sessionId: string | undefined, enabled: boolean, issueKey?: string) {
 	return useQuery({
-		queryKey: sessionJiraTransitionsQueryKey(sessionId),
+		queryKey: sessionJiraTransitionsQueryKey(sessionId, issueKey),
 		enabled: Boolean(sessionId) && enabled,
 		queryFn: () =>
-			usePreviewData ? Promise.resolve(mockSessionJiraTransitions[sessionId!] ?? []) : fetchJiraTransitions(sessionId!),
+			usePreviewData
+				? Promise.resolve(mockSessionJiraTransitions[sessionId!] ?? [])
+				: fetchJiraTransitions(sessionId!, issueKey),
 		// Transitions become stale the moment the status moves; keep them short.
 		staleTime: 15_000,
 	});
 }
 
 /**
- * Applies a status transition — the ONE sanctioned Jira write. On success it
- * invalidates the display context (new status) and the transitions list (the new
- * status has a different available set). In preview mode it is a no-op success so
- * the dialog flow can be demoed without a daemon.
+ * Applies a status transition — the ONE sanctioned Jira write — to the session's
+ * bound issue, or to a subtask of it when issueKey is set. On success it
+ * invalidates the display context (new status, incl. the subtasks list) and the
+ * transitions cache for the session (bound issue + every subtask). In preview mode
+ * it is a no-op success so the dialog flow can be demoed without a daemon.
  */
-export function useMoveJiraStatus(sessionId: string) {
+export function useMoveJiraStatus(sessionId: string, issueKey?: string) {
 	const qc = useQueryClient();
 	return useMutation({
 		mutationFn: async (transitionId: string): Promise<JiraMoveResponse> => {
 			if (usePreviewData) {
-				return { sessionId, key: "", status: "", statusCategory: "" };
+				return { sessionId, key: issueKey ?? "", status: "", statusCategory: "" };
 			}
 			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/jira/move", {
 				params: { path: { sessionId } },
-				body: { transitionId },
+				body: { transitionId, issueKey: issueKey || undefined },
 			});
 			if (error) throw new Error(apiErrorMessage(error, "Couldn't move the Jira status"));
 			return data!;

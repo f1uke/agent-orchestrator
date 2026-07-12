@@ -11,15 +11,13 @@ vi.mock("../hooks/useSessionJiraContext", () => ({
 	useMoveJiraStatus: moveMock,
 }));
 
-import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
-import type { JiraIssue } from "../hooks/useSessionJiraContext";
+import { JiraMoveStatusDialog, type MoveTarget } from "./JiraMoveStatusDialog";
 
-const issue: JiraIssue = {
+const target: MoveTarget = {
 	key: "DEMO-101",
 	type: "Story",
-	title: "Order Eligible UI",
+	title: "Example story",
 	status: "Ready for QA",
-	statusCategory: "new",
 };
 
 function setTransitions(over: Record<string, unknown> = {}) {
@@ -46,8 +44,10 @@ function setMove(over: Record<string, unknown> = {}) {
 	});
 }
 
-function renderDialog(onOpenChange = vi.fn()) {
-	return render(<JiraMoveStatusDialog sessionId="s1" issue={issue} open={true} onOpenChange={onOpenChange} />);
+function renderDialog(onOpenChange = vi.fn(), issueKey?: string) {
+	return render(
+		<JiraMoveStatusDialog sessionId="s1" target={target} issueKey={issueKey} open={true} onOpenChange={onOpenChange} />,
+	);
 }
 
 describe("JiraMoveStatusDialog", () => {
@@ -109,5 +109,18 @@ describe("JiraMoveStatusDialog", () => {
 		setTransitions({ data: [] });
 		renderDialog();
 		expect(screen.getByText(/no transitions are available/i)).toBeTruthy();
+	});
+
+	it("scopes the transitions + move to a subtask key when given", () => {
+		renderDialog(vi.fn(), "DEMO-102");
+		// The subtask key is threaded into both hooks so the write targets the subtask.
+		expect(transitionsMock).toHaveBeenCalledWith("s1", true, "DEMO-102");
+		expect(moveMock).toHaveBeenCalledWith("s1", "DEMO-102");
+	});
+
+	it("moves the bound issue (no subtask key) by default", () => {
+		renderDialog();
+		expect(transitionsMock).toHaveBeenCalledWith("s1", true, undefined);
+		expect(moveMock).toHaveBeenCalledWith("s1", undefined);
 	});
 });
