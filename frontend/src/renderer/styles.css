@@ -2780,9 +2780,18 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    sets the popper WRAPPER (the fixed, positioned stacking context) to an INLINE
    z-index of 50, so tooltips slip under those layers. Lift only tooltip poppers
    (scoped via :has([role="tooltip"])) above them; !important is required to beat the
-   library's inline z-index. Dropdown/select poppers are untouched. */
+   library's inline z-index. Dropdown/select poppers are untouched.
+
+   A tooltip is a passive hint — the popper must NOT capture the pointer, or moving
+   the mouse onto the bubble keeps Radix's open state alive (tooltip stays stuck open)
+   and lets its copy be drag-selected. The WRAPPER is the outermost hit target, so
+   pointer-events:none must live here (setting it only on the inner content still
+   leaves the wrapper catching the pointer). user-select:none inherits down to the
+   copy. The primitive (components/ui/tooltip.tsx) also sets these on the content. */
 [data-radix-popper-content-wrapper]:has([role="tooltip"]) {
 	z-index: 80 !important;
+	pointer-events: none;
+	user-select: none;
 }
 
 .jira-detail__bar {
