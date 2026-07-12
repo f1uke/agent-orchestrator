@@ -597,6 +597,10 @@ type JiraIssueSummary struct {
 	StatusCategory string `json:"statusCategory,omitempty"`
 	StatusColor    string `json:"statusColor,omitempty"`
 	Assignee       string `json:"assignee,omitempty"`
+	// AssigneeAccountId is the assignee's opaque Jira accountId, so the Browse Jira
+	// assignee dropdown can filter by assignee server-side (JQL) rather than paring
+	// down a capped page. Empty when the issue is unassigned.
+	AssigneeAccountId string `json:"assigneeAccountId,omitempty"`
 	// Sprint is the row's current/most-relevant sprint, so Browse Jira can group
 	// results by sprint like the Jira board. nil when the issue is in no sprint.
 	Sprint *JiraSprint `json:"sprint,omitempty"`
@@ -622,8 +626,10 @@ type JiraProjectsResponse struct {
 
 // JiraSearchQuery is the query string of GET /jira/search.
 type JiraSearchQuery struct {
-	Q       string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
-	Project string `query:"project,omitempty" description:"Optional project key to scope the search to."`
+	Q        string `query:"q" description:"Free-text query, or an exact issue key (e.g. PROJ-123)."`
+	Project  string `query:"project,omitempty" description:"Optional project key to scope the search to."`
+	Assignee string `query:"assignee,omitempty" description:"Optional assignee accountId to filter by, or 'unassigned' for issues with no assignee."`
+	Type     string `query:"type,omitempty" description:"Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types."`
 }
 
 // JiraProjectsQuery is the query string of GET /jira/projects.

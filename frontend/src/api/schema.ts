@@ -1295,6 +1295,7 @@ export interface components {
         };
         JiraIssueSummary: {
             assignee?: string;
+            assigneeAccountId?: string;
             key: string;
             sprint?: components["schemas"]["JiraSprint"];
             status?: string;
@@ -2237,6 +2238,10 @@ export interface operations {
                 q?: string;
                 /** @description Optional project key to scope the search to. */
                 project?: string;
+                /** @description Optional assignee accountId to filter by, or 'unassigned' for issues with no assignee. */
+                assignee?: string;
+                /** @description Optional comma-separated issue-type names to filter by (e.g. Story,Bug). Empty matches all types. */
+                type?: string;
             };
             header?: never;
             path?: never;

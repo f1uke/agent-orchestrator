@@ -24,7 +24,7 @@ type JiraService interface {
 	Context(ctx context.Context, id domain.SessionID) (jirasvc.Result, error)
 	Transitions(ctx context.Context, id domain.SessionID, key string) ([]jiraadapter.Transition, error)
 	Move(ctx context.Context, id domain.SessionID, key, transitionID string) (jirasvc.MoveResult, error)
-	Search(ctx context.Context, project, text string) ([]jiraadapter.IssueSummary, error)
+	Search(ctx context.Context, project, text, assignee string, types []string) ([]jiraadapter.IssueSummary, error)
 	Projects(ctx context.Context, query string) ([]jiraadapter.ProjectRef, error)
 	SetBinding(ctx context.Context, id domain.SessionID, key string) (jiraadapter.IssueSummary, error)
 	Unlink(ctx context.Context, id domain.SessionID) (domain.Session, error)
@@ -48,8 +48,10 @@ func (c *JiraController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/jira/move", c.move)
 }
 
-// search resolves the pre-session issue picker query (New task + link-existing).
-// A free-text query or an exact key; optionally scoped to a project.
+// search resolves the pre-session issue picker query (New task + link-existing)
+// and the Browse Jira list. A free-text query or an exact key; optionally scoped
+// to a project and narrowed by assignee (accountId or "unassigned") and a
+// comma-separated list of issue types — all pushed into the server-side JQL.
 func (c *JiraController) search(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/jira/search")
@@ -57,7 +59,9 @@ func (c *JiraController) search(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
-	issues, err := c.Svc.Search(r.Context(), project, q)
+	assignee := strings.TrimSpace(r.URL.Query().Get("assignee"))
+	types := splitTypes(r.URL.Query().Get("type"))
+	issues, err := c.Svc.Search(r.Context(), project, q, assignee, types)
 	if err != nil {
 		writeJiraError(w, r, err)
 		return
@@ -249,18 +253,31 @@ func jiraContextResponse(id domain.SessionID, res jirasvc.Result) JiraContextRes
 	return out
 }
 
+// splitTypes turns the comma-separated `type` query param into a trimmed,
+// non-empty list of issue-type names for the JQL `issuetype in (...)` clause.
+func splitTypes(raw string) []string {
+	var types []string
+	for _, t := range strings.Split(raw, ",") {
+		if s := strings.TrimSpace(t); s != "" {
+			types = append(types, s)
+		}
+	}
+	return types
+}
+
 // jiraIssueSummaryDTO maps a search/resolve row to its wire shape.
 func jiraIssueSummaryDTO(it jiraadapter.IssueSummary) JiraIssueSummary {
 	return JiraIssueSummary{
-		Key:            it.Key,
-		Type:           it.Type,
-		Title:          it.Title,
-		Status:         it.Status,
-		StatusCategory: it.StatusCategory,
-		StatusColor:    it.StatusColor,
-		Assignee:       it.Assignee,
-		Sprint:         jiraSprintDTO(it.Sprint),
-		URL:            it.URL,
+		Key:               it.Key,
+		Type:              it.Type,
+		Title:             it.Title,
+		Status:            it.Status,
+		StatusCategory:    it.StatusCategory,
+		StatusColor:       it.StatusColor,
+		Assignee:          it.Assignee,
+		AssigneeAccountId: it.AssigneeAccountId,
+		Sprint:            jiraSprintDTO(it.Sprint),
+		URL:               it.URL,
 	}
 }
 

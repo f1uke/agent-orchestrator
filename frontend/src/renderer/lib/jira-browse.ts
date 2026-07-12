@@ -1,14 +1,24 @@
 import type { JiraIssueSummary } from "../hooks/useSessionJiraContext";
 
-// Pure helpers for the Browse Jira view: assignee filtering + sprint grouping over
-// the loaded result set (client-side; the search response carries assignee +
-// sprint per row). Kept here so the semantics stay unit-tested in one place.
+// Pure helpers for the Browse Jira view: deriving the assignee dropdown options +
+// sprint grouping over the loaded result set. Assignee and type filtering itself
+// is pushed into the server-side JQL (so a filtered set is complete, not pared
+// from a capped page) — these helpers only shape what the UI renders. Kept here so
+// the semantics stay unit-tested in one place.
 
-/** Sentinel assignee value meaning "only unassigned issues". */
+/** Sentinel assignee value (UI + persistence) meaning "only unassigned issues". */
 export const UNASSIGNED = "__unassigned__";
+
+/** Server-side query token for the unassigned filter; buildJQL maps it to
+ *  `assignee is EMPTY`. (A real accountId is never this word.) */
+export const UNASSIGNED_QUERY = "unassigned";
 
 /** Header label for issues that belong to no sprint. */
 export const BACKLOG_LABEL = "No sprint";
+
+/** One assignee dropdown option: the human display name plus the opaque Jira
+ *  accountId the server-side filter needs. */
+export type AssigneeOption = { name: string; accountId: string };
 
 export type SprintGroup = {
 	/** Sprint name, or BACKLOG_LABEL for the no-sprint group. */
@@ -24,26 +34,26 @@ function assigneeOf(issue: JiraIssueSummary): string {
 	return (issue.assignee ?? "").trim();
 }
 
-/** Sorted, unique assignee display names present in the set. */
-export function uniqueAssignees(issues: JiraIssueSummary[]): string[] {
-	const set = new Set<string>();
+/**
+ * Sorted, unique assignee options (display name + accountId) present in the set,
+ * for the dropdown. Derived from the UNFILTERED base fetch so the list stays
+ * complete regardless of the active assignee filter; the accountId is what the
+ * server-side JQL filter is keyed on. The first accountId seen for a name wins.
+ */
+export function uniqueAssignees(issues: JiraIssueSummary[]): AssigneeOption[] {
+	const byName = new Map<string, string>(); // display name → accountId
 	for (const issue of issues) {
-		const a = assigneeOf(issue);
-		if (a) set.add(a);
+		const name = assigneeOf(issue);
+		if (name && !byName.has(name)) byName.set(name, (issue.assigneeAccountId ?? "").trim());
 	}
-	return [...set].sort((a, b) => a.localeCompare(b));
+	return [...byName.entries()]
+		.map(([name, accountId]) => ({ name, accountId }))
+		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Whether any issue in the set is unassigned. */
 export function hasUnassigned(issues: JiraIssueSummary[]): boolean {
 	return issues.some((issue) => !assigneeOf(issue));
-}
-
-/** Filter by assignee: "" = all, UNASSIGNED = only unassigned, else exact name match. */
-export function filterByAssignee(issues: JiraIssueSummary[], assignee: string): JiraIssueSummary[] {
-	if (!assignee) return issues;
-	if (assignee === UNASSIGNED) return issues.filter((issue) => !assigneeOf(issue));
-	return issues.filter((issue) => assigneeOf(issue) === assignee);
 }
 
 /**

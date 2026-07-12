@@ -1,42 +1,43 @@
 import { describe, expect, it } from "vitest";
 import type { JiraIssueSummary } from "../hooks/useSessionJiraContext";
-import {
-	BACKLOG_LABEL,
-	filterByAssignee,
-	groupBySprint,
-	hasUnassigned,
-	UNASSIGNED,
-	uniqueAssignees,
-} from "./jira-browse";
+import { BACKLOG_LABEL, groupBySprint, hasUnassigned, uniqueAssignees } from "./jira-browse";
 
 function issue(over: Partial<JiraIssueSummary> & { key: string }): JiraIssueSummary {
 	return { type: "Story", title: over.key, ...over };
 }
 
 const rows: JiraIssueSummary[] = [
-	issue({ key: "DEMO-1", assignee: "Alex Rivera", sprint: { name: "Sprint 2026-15", state: "future" } }),
-	issue({ key: "DEMO-2", assignee: "Sam Chen", sprint: { name: "Sprint 2026-14", state: "active" } }),
-	issue({ key: "DEMO-3", assignee: "Alex Rivera", sprint: { name: "Sprint 2026-14", state: "active" } }),
+	issue({
+		key: "DEMO-1",
+		assignee: "Alex Rivera",
+		assigneeAccountId: "acc-alex",
+		sprint: { name: "Sprint 2026-15", state: "future" },
+	}),
+	issue({
+		key: "DEMO-2",
+		assignee: "Sam Chen",
+		assigneeAccountId: "acc-sam",
+		sprint: { name: "Sprint 2026-14", state: "active" },
+	}),
+	issue({
+		key: "DEMO-3",
+		assignee: "Alex Rivera",
+		assigneeAccountId: "acc-alex",
+		sprint: { name: "Sprint 2026-14", state: "active" },
+	}),
 	issue({ key: "DEMO-4" }), // no assignee, no sprint
 ];
 
 describe("uniqueAssignees / hasUnassigned", () => {
-	it("returns sorted unique assignees and detects unassigned", () => {
-		expect(uniqueAssignees(rows)).toEqual(["Alex Rivera", "Sam Chen"]);
+	it("returns sorted unique assignee options (name + accountId) and detects unassigned", () => {
+		// The dropdown needs the accountId so the filter can go server-side; the
+		// list is deduped by name and sorted.
+		expect(uniqueAssignees(rows)).toEqual([
+			{ name: "Alex Rivera", accountId: "acc-alex" },
+			{ name: "Sam Chen", accountId: "acc-sam" },
+		]);
 		expect(hasUnassigned(rows)).toBe(true);
 		expect(hasUnassigned([rows[0], rows[1]])).toBe(false);
-	});
-});
-
-describe("filterByAssignee", () => {
-	it("passes everything through for the empty (all) filter", () => {
-		expect(filterByAssignee(rows, "")).toHaveLength(4);
-	});
-	it("matches a specific assignee exactly", () => {
-		expect(filterByAssignee(rows, "Alex Rivera").map((i) => i.key)).toEqual(["DEMO-1", "DEMO-3"]);
-	});
-	it("selects only unassigned issues for the UNASSIGNED sentinel", () => {
-		expect(filterByAssignee(rows, UNASSIGNED).map((i) => i.key)).toEqual(["DEMO-4"]);
 	});
 });
 
