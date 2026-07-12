@@ -1,10 +1,30 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { searchMock, navigateMock } = vi.hoisted(() => ({ searchMock: vi.fn(), navigateMock: vi.fn() }));
+const { searchMock, treeMock, myselfMock, navigateMock, orchMock, sendMock } = vi.hoisted(() => ({
+	searchMock: vi.fn(),
+	treeMock: vi.fn(),
+	myselfMock: vi.fn(),
+	navigateMock: vi.fn(),
+	orchMock: vi.fn(),
+	sendMock: vi.fn(),
+}));
 
-vi.mock("../hooks/useSessionJiraContext", () => ({ useJiraSearch: searchMock }));
+vi.mock("../hooks/useSessionJiraContext", () => ({
+	useJiraSearch: searchMock,
+	useJiraTreeContext: treeMock,
+	useJiraMyself: myselfMock,
+}));
+vi.mock("../hooks/useWorkspaceQuery", () => ({
+	useWorkspaceQuery: () => ({ data: [] }),
+	workspaceQueryKey: ["workspaces"],
+}));
+vi.mock("../types/workspace", () => ({ findProjectOrchestrator: orchMock }));
+vi.mock("../lib/api-client", () => ({
+	apiClient: { POST: sendMock },
+	apiErrorMessage: (_e: unknown, fallback: string) => fallback,
+}));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock }));
 
 // Stub the project picker so the test drives project selection directly.
@@ -23,8 +43,7 @@ vi.mock("./NewTaskDialog", () => ({
 }));
 
 // Stub the read-only detail drawer: record which issue it opened for, and expose a
-// button that fires its Create-session handoff so we can assert the wiring without
-// the drawer's own hooks (which the module mock above doesn't provide).
+// button that fires its Create-session handoff.
 vi.mock("./JiraIssueDetail", () => ({
 	JiraIssueDetail: ({
 		issueKey,
@@ -59,21 +78,10 @@ type Row = {
 	sprint?: { name: string; state: string };
 };
 
-// The real search pushes assignee (accountId / "unassigned") + type into the JQL;
-// the component now calls useJiraSearch twice — an UNFILTERED base fetch (opts
-// undefined, feeds the assignee dropdown) and a FILTERED results fetch (opts set).
-// This mirrors that server-side filtering so the mock returns what Jira would.
+// Mirror the server-side JQL filtering (assignee accountId / "unassigned" + types)
+// for the results fetch; the base fetch (no assignee/types) returns everything.
 function applyServerFilters(data: Row[], opts?: { assignee?: string; types?: string[]; jql?: string }): Row[] {
-	if (!opts) return data; // base fetch — unfiltered dropdown source
-	// Advanced / parent-inclusion path: only `key in (...)` is interpreted here.
-	if (opts.jql) {
-		const m = opts.jql.match(/key in \(([^)]*)\)/i);
-		if (m) {
-			const keys = new Set(m[1].split(",").map((k) => k.trim()));
-			return data.filter((it) => keys.has(it.key));
-		}
-		return data;
-	}
+	if (!opts || opts.jql) return data;
 	let out = data;
 	const types = (opts.types ?? []).map((t) => t.toLowerCase());
 	if (types.length > 0) {
@@ -85,6 +93,36 @@ function applyServerFilters(data: Row[], opts?: { assignee?: string; types?: str
 	const assignee = opts.assignee ?? "";
 	if (assignee === "unassigned") out = out.filter((it) => !it.assignee.trim());
 	else if (assignee) out = out.filter((it) => it.assigneeAccountId === assignee);
+	return out;
+}
+
+// The tree-context hook, computed from the FULL set: the ancestors + descendants of
+// the roots (excluding the roots) — what collectTreeContext fetches live.
+function computeTreeContext(roots: Row[], all: Row[]): Row[] {
+	const seen = new Set(roots.map((r) => r.key));
+	const out: Row[] = [];
+	let frontier = new Set(roots.map((r) => r.key));
+	for (let step = 0; step < 2 && frontier.size > 0; step += 1) {
+		const next = new Set<string>();
+		for (const r of all) {
+			if (r.parent?.key && frontier.has(r.parent.key) && !seen.has(r.key)) {
+				seen.add(r.key);
+				out.push(r);
+				next.add(r.key);
+			}
+		}
+		frontier = next;
+	}
+	let pending = [...roots, ...out];
+	for (let step = 0; step < 2; step += 1) {
+		const wanted = new Set<string>();
+		for (const r of pending) if (r.parent?.key && !seen.has(r.parent.key)) wanted.add(r.parent.key);
+		if (wanted.size === 0) break;
+		const found = all.filter((r) => wanted.has(r.key) && !seen.has(r.key));
+		found.forEach((r) => seen.add(r.key));
+		out.push(...found);
+		pending = found;
+	}
 	return out;
 }
 
@@ -118,10 +156,15 @@ function setSearch(over: { data?: Row[] | undefined; isFetching?: boolean; isErr
 			error: over.error ?? null,
 		}),
 	);
+	treeMock.mockImplementation((roots: Row[], opts?: { enabled?: boolean }) => ({
+		data: currentData && opts?.enabled ? computeTreeContext(roots, currentData) : [],
+		isFetching: false,
+		isError: false,
+		error: null,
+	}));
 }
 
-// A richer set spanning two sprints + a no-sprint issue, for the grouping /
-// assignee tests. Assignees carry their accountId (what the server filter keys on).
+// A richer set spanning two sprints + a no-sprint issue, for the grouping / assignee tests.
 const richData: Row[] = [
 	{
 		key: "DEMO-1",
@@ -167,6 +210,13 @@ function renderPage() {
 describe("BrowseJiraPage", () => {
 	beforeEach(() => {
 		searchMock.mockReset();
+		treeMock.mockReset();
+		myselfMock.mockReset();
+		orchMock.mockReset();
+		sendMock.mockReset();
+		myselfMock.mockReturnValue({ data: { accountId: "" } });
+		orchMock.mockReturnValue(undefined); // no orchestrator by default
+		sendMock.mockResolvedValue({ error: null });
 		setSearch();
 		navigateMock.mockReset();
 		window.localStorage.clear();
@@ -184,7 +234,6 @@ describe("BrowseJiraPage", () => {
 
 		expect(screen.getByText("DEMO-101")).toBeTruthy();
 		expect(screen.getByText("Bug two")).toBeTruthy();
-		// The pick is persisted for the next visit.
 		expect(window.localStorage.getItem("ao.jira.lastProject")).toContain("DEMO");
 	});
 
@@ -195,19 +244,17 @@ describe("BrowseJiraPage", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Bug" }));
 		expect(screen.queryByText("DEMO-101")).toBeNull();
 		expect(screen.getByText("DEMO-88")).toBeTruthy();
-		// The type is pushed into the server-side query (its JQL name), not filtered
-		// client-side over a capped page.
 		const sawBugType = searchMock.mock.calls.some((call: unknown[]) =>
 			(call[3] as { types?: string[] } | undefined)?.types?.includes("Bug"),
 		);
 		expect(sawBugType).toBe(true);
 	});
 
-	it("opens the New-task modal pre-filled when Create session is clicked", () => {
+	it("opens the New-task modal pre-filled when the + action is clicked", () => {
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 
-		fireEvent.click(screen.getAllByRole("button", { name: /Create session/i })[0]);
+		fireEvent.click(screen.getByRole("button", { name: "Create a session for DEMO-101" }));
 		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
 	});
 
@@ -215,18 +262,16 @@ describe("BrowseJiraPage", () => {
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 
-		// Clicking the row body (not the Create button) opens the detail drawer for it.
 		fireEvent.click(screen.getByRole("button", { name: "Open DEMO-101" }));
 		expect(screen.getByTestId("jira-detail")).toHaveTextContent("detail:DEMO-101");
-		// The Create-session button never opens the drawer — it hands off to New-task.
 		expect(screen.queryByTestId("new-task")).toBeNull();
 	});
 
-	it("Create session on a row does not open the detail drawer", () => {
+	it("the + action does not open the detail drawer", () => {
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 
-		fireEvent.click(screen.getAllByRole("button", { name: /Create session/i })[0]);
+		fireEvent.click(screen.getByRole("button", { name: "Create a session for DEMO-101" }));
 		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
 		expect(screen.queryByTestId("jira-detail")).toBeNull();
 	});
@@ -237,7 +282,6 @@ describe("BrowseJiraPage", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Open DEMO-101" }));
 		fireEvent.click(screen.getByRole("button", { name: "detail-create" }));
-		// The drawer closes and the New-task modal opens pre-filled with the issue.
 		expect(screen.queryByTestId("jira-detail")).toBeNull();
 		expect(screen.getByTestId("new-task")).toHaveTextContent("dialog:DEMO-101");
 	});
@@ -257,10 +301,9 @@ describe("BrowseJiraPage", () => {
 		expect(screen.getByText("Sprint 2026-14")).toBeTruthy();
 		expect(screen.getByText("Sprint 2026-15")).toBeTruthy();
 		expect(screen.getByText("No sprint")).toBeTruthy();
-		expect(screen.getByText(/2 work items/)).toBeTruthy(); // Sprint 2026-14 has two
-		expect(screen.getByText("active")).toBeTruthy(); // active-sprint badge
+		expect(screen.getByText(/2 work items/)).toBeTruthy();
+		expect(screen.getByText("active")).toBeTruthy();
 
-		// Collapsing a sprint hides its rows but keeps the header.
 		fireEvent.click(screen.getByRole("button", { name: /Sprint 2026-14/ }));
 		expect(screen.queryByText("DEMO-1")).toBeNull();
 		expect(screen.getByText("Sprint 2026-14")).toBeTruthy();
@@ -272,8 +315,8 @@ describe("BrowseJiraPage", () => {
 		fireEvent.click(screen.getByText("picker:none"));
 
 		fireEvent.click(screen.getByRole("button", { name: "Group by sprint" }));
-		expect(screen.queryByText("Sprint 2026-14")).toBeNull(); // no section headers
-		expect(screen.getByText("DEMO-1")).toBeTruthy(); // rows still render flat
+		expect(screen.queryByText("Sprint 2026-14")).toBeNull();
+		expect(screen.getByText("DEMO-1")).toBeTruthy();
 		expect(JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!).groupBySprint).toBe(false);
 	});
 
@@ -285,13 +328,9 @@ describe("BrowseJiraPage", () => {
 		fireEvent.change(screen.getByLabelText("Filter by assignee"), { target: { value: "Sam" } });
 		expect(screen.getByText("DEMO-4")).toBeTruthy();
 		expect(screen.getByText("DEMO-2")).toBeTruthy();
-		expect(screen.queryByText("DEMO-1")).toBeNull(); // Alex's
-		expect(screen.queryByText("DEMO-3")).toBeNull(); // unassigned
-		// The display name is persisted (human-readable, back-compat)…
+		expect(screen.queryByText("DEMO-1")).toBeNull();
+		expect(screen.queryByText("DEMO-3")).toBeNull();
 		expect(JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!).assignee).toBe("Sam");
-		// …but the query carries Sam's opaque accountId, so the filter runs in the
-		// JQL and returns all of Sam's issues rather than a client-pared page (the
-		// under-fetch this fix addresses).
 		const sawSamAccountId = searchMock.mock.calls.some(
 			(call: unknown[]) => (call[3] as { assignee?: string } | undefined)?.assignee === "acc-sam",
 		);
@@ -304,10 +343,9 @@ describe("BrowseJiraPage", () => {
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 
-		// Grouping off (no headers) and Alex's filter applied.
 		expect(screen.queryByText("Sprint 2026-14")).toBeNull();
 		expect(screen.getByText("DEMO-1")).toBeTruthy();
-		expect(screen.queryByText("DEMO-4")).toBeNull(); // Sam's, filtered out
+		expect(screen.queryByText("DEMO-4")).toBeNull();
 	});
 
 	it("pushes hide-done + active-sprint toggles into the server-side query and remembers them", () => {
@@ -337,7 +375,6 @@ describe("BrowseJiraPage", () => {
 		fireEvent.click(screen.getByText("picker:none"));
 
 		fireEvent.click(screen.getByRole("button", { name: "Advanced JQL" }));
-		// Structured filters gone; the JQL box appears.
 		expect(screen.queryByRole("button", { name: "Bug" })).toBeNull();
 		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
 		fireEvent.change(screen.getByLabelText("Advanced JQL query"), {
@@ -349,51 +386,157 @@ describe("BrowseJiraPage", () => {
 		);
 		expect(sawJql).toBe(true);
 
-		// A clear way back to structured mode.
 		fireEvent.click(screen.getByRole("button", { name: /Back to filters/ }));
 		expect(screen.getByLabelText("Filter by assignee")).toBeTruthy();
 	});
 
-	it("under an assignee filter, pulls in the parent of a matched subtask as dimmed context", () => {
-		// Sam owns a subtask whose parent story is Alex's. Filtering to Sam must still
-		// show the parent (for hierarchy), fetched via the key-in context query.
-		const hierData: Row[] = [
+	// ── Fix 2: subtask descent + tree nesting + collapse ──────────────────────────
+
+	it("nests a matched card's own (unmatched) subtasks in the list, dimmed as context", () => {
+		// Only the parent Story matches the type filter; its subtask is pulled in via
+		// the tree-context descent and shown nested + dimmed.
+		const data: Row[] = [
+			{ key: "DEMO-1", type: "Story", title: "Parent story", status: "To Do", statusCategory: "new", assignee: "Alex" },
 			{
-				key: "DEMO-101",
-				type: "Story",
-				title: "Parent story",
-				status: "To Do",
-				statusCategory: "new",
-				assignee: "Alex",
-				assigneeAccountId: "acc-alex",
-			},
-			{
-				key: "DEMO-102",
+				key: "DEMO-2",
 				type: "Sub-task",
-				title: "Sam's subtask",
+				title: "Child task",
 				status: "To Do",
 				statusCategory: "new",
 				assignee: "Sam",
-				assigneeAccountId: "acc-sam",
-				parent: { key: "DEMO-101", title: "Parent story" },
+				parent: { key: "DEMO-1", title: "Parent story" },
 			},
 		];
-		setSearch({ data: hierData });
+		setSearch({ data: [data[0]] }); // results = only the Story
+		treeMock.mockImplementation((roots: Row[], opts?: { enabled?: boolean }) => ({
+			data: opts?.enabled ? computeTreeContext(roots, data) : [],
+			isFetching: false,
+			isError: false,
+			error: null,
+		}));
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 
-		fireEvent.change(screen.getByLabelText("Filter by assignee"), { target: { value: "Sam" } });
+		expect(screen.getByText("DEMO-1")).toBeTruthy();
+		// The subtask, though it didn't match, is fetched + shown as context.
+		expect(screen.getByText("DEMO-2")).toBeTruthy();
+		expect(screen.getByText("context")).toBeTruthy();
+	});
 
-		// The matched subtask AND its (context) parent both render…
-		expect(screen.getByText("DEMO-102")).toBeTruthy();
-		expect(screen.getByText("DEMO-101")).toBeTruthy();
-		// …with the parent marked as context, not a direct match.
-		expect(screen.getByText(/parent · context/i)).toBeTruthy();
-		// The context parent was fetched via a `key in (...)` query.
-		const sawKeyIn = searchMock.mock.calls.some((c: unknown[]) =>
-			(c[3] as { jql?: string } | undefined)?.jql?.includes("key in (DEMO-101)"),
-		);
-		expect(sawKeyIn).toBe(true);
+	it("collapses a node's subtree via its chevron and persists it", () => {
+		const data: Row[] = [
+			{ key: "DEMO-1", type: "Story", title: "Parent story", status: "To Do", statusCategory: "new", assignee: "Alex" },
+			{
+				key: "DEMO-2",
+				type: "Sub-task",
+				title: "Child task",
+				status: "To Do",
+				statusCategory: "new",
+				assignee: "Sam",
+				parent: { key: "DEMO-1", title: "Parent story" },
+			},
+		];
+		setSearch({ data });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		expect(screen.getByText("DEMO-2")).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "Collapse DEMO-1" }));
+		expect(screen.queryByText("DEMO-2")).toBeNull(); // subtree hidden
+		// Persisted so it stays collapsed next visit.
+		expect(JSON.parse(window.localStorage.getItem("ao.jira.browseCollapsed")!)).toContain("DEMO-1");
+	});
+
+	it("renders an Epic as a context-only group header — no status pill / + / send", () => {
+		const data: Row[] = [
+			{
+				key: "DEMO-100",
+				type: "Epic",
+				title: "Big epic",
+				status: "In Progress",
+				statusCategory: "indeterminate",
+				assignee: "",
+			},
+			{
+				key: "DEMO-1",
+				type: "Story",
+				title: "A story",
+				status: "To Do",
+				statusCategory: "new",
+				assignee: "Alex",
+				parent: { key: "DEMO-100", title: "Big epic" },
+			},
+		];
+		setSearch({ data });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+		// Flatten grouping so the epic heads the tree.
+		fireEvent.click(screen.getByRole("button", { name: "Group by sprint" }));
+
+		expect(screen.getByText("EPIC")).toBeTruthy();
+		// The epic has no start actions of its own…
+		expect(screen.queryByRole("button", { name: "Create a session for DEMO-100" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Send DEMO-100 to the Orchestrator" })).toBeNull();
+		// …but its child story does.
+		expect(screen.getByRole("button", { name: "Create a session for DEMO-1" })).toBeTruthy();
+	});
+
+	// ── Fix 3: highlight assignee == me ───────────────────────────────────────────
+
+	it("highlights the viewer's own rows with a You chip", () => {
+		myselfMock.mockReturnValue({ data: { accountId: "acc-alex" } });
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		// DEMO-1 is Alex's (== me) → You chip; Sam's rows keep the name.
+		expect(screen.getByText("You")).toBeTruthy();
+		expect(screen.getAllByText("Sam").length).toBeGreaterThan(0);
+	});
+
+	// ── Fix 4: Send to Orchestrator + multi-select ────────────────────────────────
+
+	it("sends a single issue to the project's orchestrator", async () => {
+		orchMock.mockReturnValue({ id: "proj-1-orchestrator" });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Send DEMO-101 to the Orchestrator" }));
+		await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+		const [path, opts] = sendMock.mock.calls[0];
+		expect(path).toBe("/api/v1/sessions/{sessionId}/send");
+		expect(opts.params.path.sessionId).toBe("proj-1-orchestrator");
+		expect(opts.body.message).toContain("DEMO-101");
+	});
+
+	it("batch-sends the selected issues in one message", async () => {
+		orchMock.mockReturnValue({ id: "proj-1-orchestrator" });
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /Select DEMO-1 / }));
+		fireEvent.click(screen.getByRole("checkbox", { name: /Select DEMO-4 / }));
+		expect(screen.getByText("2 selected")).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "Send to Orchestrator" }));
+
+		await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+		const message = sendMock.mock.calls[0][1].body.message as string;
+		expect(message).toContain("DEMO-1");
+		expect(message).toContain("DEMO-4");
+	});
+
+	it("disables Send and warns when the project has no orchestrator", () => {
+		orchMock.mockReturnValue(undefined);
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		const send = screen.getByRole("button", { name: "Send DEMO-101 to the Orchestrator" }) as HTMLButtonElement;
+		expect(send.disabled).toBe(true);
+		// Selecting a row surfaces the warning in the batch bar.
+		fireEvent.click(screen.getByRole("checkbox", { name: /Select DEMO-101 / }));
+		expect(within(screen.getByRole("group", { name: "Batch actions" })).getByText(/Orchestrator first/i)).toBeTruthy();
+		expect(sendMock).not.toHaveBeenCalled();
 	});
 
 	it("restores advanced JQL mode + text on return (no project needed)", () => {
