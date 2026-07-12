@@ -53,6 +53,46 @@ func TestSearchIssues_ParsesRows(t *testing.T) {
 	}
 }
 
+func TestSearchIssues_DecodesSprintPerRow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A sprint custom-field (id varies per instance) alongside the known fields;
+		// detectSprint should pick the active sprint. The second row has none.
+		_, _ = io.WriteString(w, `{"issues":[
+			{"key":"DEMO-101","fields":{"summary":"Has a sprint","issuetype":{"name":"Story"},
+				"status":{"name":"To Do","statusCategory":{"key":"new"}},
+				"assignee":{"displayName":"Alex Rivera"},
+				"customfield_10020":[{"name":"Sprint 2026-14","state":"active","boardId":5,"startDate":"2026-06-29T00:00:00Z","endDate":"2026-07-10T00:00:00Z"}]}},
+			{"key":"DEMO-88","fields":{"summary":"No sprint","issuetype":{"name":"Bug"},
+				"status":{"name":"Backlog","statusCategory":{"key":"new"}},
+				"assignee":{"displayName":"Sam Chen"}}}
+		]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	out, err := c.SearchIssues(context.Background(), `project = "DEMO"`, 25)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("rows = %+v", out)
+	}
+	if out[0].Sprint == nil {
+		t.Fatalf("row[0] should carry a sprint")
+	}
+	if out[0].Sprint.Name != "Sprint 2026-14" || out[0].Sprint.State != "active" {
+		t.Errorf("row[0].Sprint = %+v", out[0].Sprint)
+	}
+	// The known fields still decode correctly under the map-based path.
+	if out[0].Title != "Has a sprint" || out[0].Type != "Story" || out[0].Status != "To Do" ||
+		out[0].Assignee != "Alex Rivera" {
+		t.Errorf("row[0] = %+v", out[0])
+	}
+	if out[1].Sprint != nil {
+		t.Errorf("row[1] has no sprint, got %+v", out[1].Sprint)
+	}
+}
+
 func TestSearchIssues_FallsBackToClassicEndpoint(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

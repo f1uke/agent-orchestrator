@@ -25,7 +25,7 @@ export function JiraProjectPicker({
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const [debounced, setDebounced] = useState("");
-	const [starred, setStarred] = useState<Set<string>>(() => readStarredProjects());
+	const [starred, setStarred] = useState<JiraProject[]>(() => readStarredProjects());
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	// Debounce the filter so we don't fan out a request per keystroke.
@@ -47,6 +47,7 @@ export function JiraProjectPicker({
 	// Only fetch while the dropdown is open.
 	const { data, isFetching, isError, error } = useJiraProjects(debounced, open);
 	const projects = data ?? [];
+	const starredKeys = new Set(starred.map((project) => project.key));
 
 	const pick = (project: JiraProject) => {
 		onSelect(project);
@@ -55,23 +56,31 @@ export function JiraProjectPicker({
 	};
 
 	// Toggle a project's star; starring re-partitions the list so it jumps to the
-	// pinned "Starred" group immediately, and the set persists to localStorage.
-	const toggleStar = (key: string) => {
-		const next = new Set(starred);
-		if (next.has(key)) next.delete(key);
-		else next.add(key);
+	// pinned "Starred" group immediately, and the favorites persist to localStorage
+	// (with the name, so the group can render it later even off the fetched page).
+	const toggleStar = (project: JiraProject) => {
+		const next = starredKeys.has(project.key)
+			? starred.filter((entry) => entry.key !== project.key)
+			: [...starred, { key: project.key, name: project.name }];
 		writeStarredProjects(next);
 		setStarred(next);
 	};
 
-	// Starred projects pin to the top (in their own group), keeping the fetched
-	// order within each partition.
-	const starredList = projects.filter((project) => starred.has(project.key));
-	const otherList = projects.filter((project) => !starred.has(project.key));
+	// The Starred group is sourced from the PERSISTED favorites — not the fetched
+	// page — so a favorite always pins to the top even when its project isn't in the
+	// current fetch (the list is capped at 100 by key order). Each is resolved to
+	// the freshest fetched project (for an up-to-date name) when present, and the
+	// group is narrowed by the active query just like the fetched list.
+	const projectsByKey = new Map(projects.map((project) => [project.key, project]));
+	const q = debounced.trim().toLowerCase();
+	const matchesQuery = (project: JiraProject) =>
+		!q || project.key.toLowerCase().includes(q) || (project.name ?? "").toLowerCase().includes(q);
+	const starredList = starred.map((project) => projectsByKey.get(project.key) ?? project).filter(matchesQuery);
+	const otherList = projects.filter((project) => !starredKeys.has(project.key));
 
 	const renderOption = (project: JiraProject) => {
 		const selected = value?.key === project.key;
-		const isStarred = starred.has(project.key);
+		const isStarred = starredKeys.has(project.key);
 		return (
 			<div key={project.key} className={cn("jira-proj-picker__item", selected && "is-selected")}>
 				<button
@@ -80,7 +89,7 @@ export function JiraProjectPicker({
 					aria-pressed={isStarred}
 					aria-label={isStarred ? `Unstar ${project.key}` : `Star ${project.key}`}
 					title={isStarred ? "Unstar — remove from favorites" : "Star — pin to top"}
-					onClick={() => toggleStar(project.key)}
+					onClick={() => toggleStar(project)}
 				>
 					<Star className="size-3.5" aria-hidden="true" />
 				</button>
@@ -147,9 +156,9 @@ export function JiraProjectPicker({
 							<p className="jira-proj-picker__note jira-proj-picker__note--err">
 								{error instanceof Error ? error.message : "Couldn't load projects."}
 							</p>
-						) : isFetching && projects.length === 0 ? (
+						) : isFetching && starredList.length === 0 && otherList.length === 0 ? (
 							<p className="jira-proj-picker__note">Loading projects…</p>
-						) : projects.length === 0 ? (
+						) : starredList.length === 0 && otherList.length === 0 ? (
 							<p className="jira-proj-picker__note">No matching projects.</p>
 						) : (
 							<>

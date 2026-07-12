@@ -241,7 +241,9 @@ func (s *Service) Search(ctx context.Context, project, text string) ([]jiraadapt
 	if s.searcher == nil {
 		return nil, fmt.Errorf("%w: Jira search is not configured", jiraadapter.ErrUnavailable)
 	}
-	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, project, text), 25)
+	// 50 (the adapter's max window) rather than 25: Browse Jira groups results by
+	// sprint, so a wider set gives each sprint section more of its issues.
+	return s.searcher.SearchIssues(ctx, s.buildJQL(ctx, project, text), 50)
 }
 
 // Projects lists the user's Jira projects (optionally filtered) for the project

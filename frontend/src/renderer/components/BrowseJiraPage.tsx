@@ -1,11 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Loader2, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { useJiraSearch, type JiraIssueSummary, type JiraProject } from "../hooks/useSessionJiraContext";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { filterByAssignee, groupBySprint, hasUnassigned, UNASSIGNED, uniqueAssignees } from "../lib/jira-browse";
+import { readBrowsePrefs, writeBrowsePrefs } from "../lib/jira-browse-prefs";
 import { readLastJiraProject, writeLastJiraProject } from "../lib/jira-last-project";
 import { cn } from "../lib/utils";
 
@@ -37,6 +39,12 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 	const [debounced, setDebounced] = useState("");
 	const [filter, setFilter] = useState(0);
 	const [createIssue, setCreateIssue] = useState<JiraIssueSummary | null>(null);
+	// View prefs remembered across visits (grouping + assignee); last-project is
+	// remembered separately (jira-last-project).
+	const initialPrefs = readBrowsePrefs();
+	const [groupSprints, setGroupSprints] = useState(initialPrefs.groupBySprint);
+	const [assignee, setAssignee] = useState(initialPrefs.assignee);
+	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
 	// Debounce the free-text search so typing doesn't fan out a request per keystroke.
 	useEffect(() => {
@@ -44,12 +52,38 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		return () => clearTimeout(t);
 	}, [query]);
 
+	// Persist grouping + assignee so the view returns as the user left it.
+	useEffect(() => {
+		writeBrowsePrefs({ groupBySprint: groupSprints, assignee });
+	}, [groupSprints, assignee]);
+
 	const projectKey = project?.key ?? "";
 	// With a project scoped, the search fires even with no text (lists recent issues
 	// in that project); typing narrows it. See useJiraSearch's enable rule.
 	const { data, isFetching, isError, error } = useJiraSearch(debounced, projectKey, Boolean(projectKey));
 	const allResults = data ?? [];
-	const results = allResults.filter((issue) => TYPE_FILTERS[filter].match((issue.type ?? "").toLowerCase()));
+
+	// Assignee options come from the full loaded set (stable across type/grouping
+	// changes). A remembered assignee that isn't present in this project falls back
+	// to "all" without hiding everything — but stays in state so returning to a
+	// project that has them re-applies the filter.
+	const assignees = uniqueAssignees(allResults);
+	const unassignedPresent = hasUnassigned(allResults);
+	const assigneeValid = assignee === "" || (assignee === UNASSIGNED ? unassignedPresent : assignees.includes(assignee));
+	const effectiveAssignee = assigneeValid ? assignee : "";
+
+	const typeFiltered = allResults.filter((issue) => TYPE_FILTERS[filter].match((issue.type ?? "").toLowerCase()));
+	const results = filterByAssignee(typeFiltered, effectiveAssignee);
+	const groups = groupSprints ? groupBySprint(results) : [];
+
+	const toggleCollapsed = (name: string) => {
+		setCollapsed((prev) => {
+			const next = new Set(prev);
+			if (next.has(name)) next.delete(name);
+			else next.add(name);
+			return next;
+		});
+	};
 
 	const selectProject = (next: JiraProject) => {
 		setProject(next);
@@ -66,6 +100,23 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 		await queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 		void navigate({ to: "/projects/$projectId", params: { projectId } });
 	};
+
+	const renderRow = (issue: JiraIssueSummary) => (
+		<div key={issue.key} className="jira-browse__row">
+			<span className={cn("jira-browse__sq", issueSquareClass(issue.type))} aria-hidden="true" />
+			<span className="jira-browse__k">{issue.key}</span>
+			<span className="jira-browse__t">{issue.title}</span>
+			{issue.assignee ? <span className="jira-browse__assignee">{issue.assignee}</span> : null}
+			{issue.status ? (
+				<span className="jira-browse__st" style={browseStatusStyle(issue.statusCategory)}>
+					{issue.status}
+				</span>
+			) : null}
+			<button type="button" className="jira-browse__create" onClick={() => setCreateIssue(issue)}>
+				Create session ▷
+			</button>
+		</div>
+	);
 
 	return (
 		<div className="jira-browse">
@@ -100,7 +151,7 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 					</div>
 				</div>
 
-				<div className="jira-browse__filters" role="group" aria-label="Filter by type">
+				<div className="jira-browse__filters" role="group" aria-label="Filter and group issues">
 					{TYPE_FILTERS.map((entry, index) => (
 						<button
 							key={entry.label}
@@ -112,6 +163,33 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							{entry.label}
 						</button>
 					))}
+					<span className="jira-browse__filters-gap" aria-hidden="true" />
+					<label className="jira-browse__assignee-filter">
+						<span className="jira-browse__assignee-label">Assignee</span>
+						<select
+							value={effectiveAssignee}
+							aria-label="Filter by assignee"
+							onChange={(event) => setAssignee(event.target.value)}
+							disabled={!projectKey}
+						>
+							<option value="">All assignees</option>
+							{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
+							{assignees.map((name) => (
+								<option key={name} value={name}>
+									{name}
+								</option>
+							))}
+						</select>
+					</label>
+					<button
+						type="button"
+						aria-pressed={groupSprints}
+						className={cn("jira-browse__chip jira-browse__group-toggle", groupSprints && "is-active")}
+						onClick={() => setGroupSprints((on) => !on)}
+						title="Group issues into sprint sections like the Jira board"
+					>
+						Group by sprint
+					</button>
 				</div>
 
 				{!projectKey ? (
@@ -133,23 +211,36 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							<p className="jira-browse__note">Searching…</p>
 						) : results.length === 0 ? (
 							<p className="jira-browse__note">No issues match.</p>
+						) : groupSprints ? (
+							groups.map((group) => {
+								const isCollapsed = collapsed.has(group.name);
+								return (
+									<div key={group.name} className="jira-browse__sprint">
+										<button
+											type="button"
+											className="jira-browse__sprint-head"
+											aria-expanded={!isCollapsed}
+											onClick={() => toggleCollapsed(group.name)}
+										>
+											{isCollapsed ? (
+												<ChevronRight className="size-3.5" aria-hidden="true" />
+											) : (
+												<ChevronDown className="size-3.5" aria-hidden="true" />
+											)}
+											<span className="jira-browse__sprint-name">{group.name}</span>
+											{group.state === "active" && !group.isBacklog ? (
+												<span className="jira-browse__sprint-active">active</span>
+											) : null}
+											<span className="jira-browse__sprint-count">
+												· {group.issues.length} {group.issues.length === 1 ? "work item" : "work items"}
+											</span>
+										</button>
+										{isCollapsed ? null : group.issues.map(renderRow)}
+									</div>
+								);
+							})
 						) : (
-							results.map((issue) => (
-								<div key={issue.key} className="jira-browse__row">
-									<span className={cn("jira-browse__sq", issueSquareClass(issue.type))} aria-hidden="true" />
-									<span className="jira-browse__k">{issue.key}</span>
-									<span className="jira-browse__t">{issue.title}</span>
-									{issue.assignee ? <span className="jira-browse__assignee">{issue.assignee}</span> : null}
-									{issue.status ? (
-										<span className="jira-browse__st" style={browseStatusStyle(issue.statusCategory)}>
-											{issue.status}
-										</span>
-									) : null}
-									<button type="button" className="jira-browse__create" onClick={() => setCreateIssue(issue)}>
-										Create session ▷
-									</button>
-								</div>
-							))
+							results.map(renderRow)
 						)}
 					</div>
 				)}

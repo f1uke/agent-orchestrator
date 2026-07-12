@@ -69,13 +69,14 @@ describe("JiraProjectPicker", () => {
 		const demo = screen.getByText("Demo Project");
 		expect(acme.compareDocumentPosition(demo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-		// …and persists to localStorage.
-		expect([...readStarredProjects()]).toContain("ACME");
+		// …and persists to localStorage (as {key, name}).
+		expect(readStarredProjects().map((project) => project.key)).toContain("ACME");
 		// The row's star now reads as pressed (its label flips to Unstar).
 		expect(screen.getByRole("button", { name: "Unstar ACME" })).toBeTruthy();
 	});
 
-	it("restores starred projects from localStorage and unstars on toggle", () => {
+	it("restores starred projects from localStorage (incl. the legacy keys-only form) and unstars on toggle", () => {
+		// Legacy persisted form was a bare key array; it must still restore.
 		localStorage.setItem("ao.jira.starredProjects", JSON.stringify(["ACME"]));
 		render(<JiraProjectPicker value={null} onSelect={vi.fn()} />);
 		fireEvent.click(screen.getByRole("button", { name: /select a project/i }));
@@ -86,7 +87,31 @@ describe("JiraProjectPicker", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Unstar ACME" }));
 		expect(screen.queryByText("Starred")).toBeNull();
-		expect([...readStarredProjects()]).not.toContain("ACME");
+		expect(readStarredProjects().map((project) => project.key)).not.toContain("ACME");
+	});
+
+	it("shows ALL starred favorites without a search — even ones off the fetched page (the reported bug)", () => {
+		// Two favorites: ACME is in the fetched page, ZULU is NOT (its key sorts
+		// past the 100-project cap, so the old code — which filtered the fetched
+		// list — dropped it and showed only one).
+		localStorage.setItem(
+			"ao.jira.starredProjects",
+			JSON.stringify([
+				{ key: "ACME", name: "Acme Platform" },
+				{ key: "ZULU", name: "Zulu Platform" },
+			]),
+		);
+		render(<JiraProjectPicker value={null} onSelect={vi.fn()} />);
+		fireEvent.click(screen.getByRole("button", { name: /select a project/i }));
+
+		// Both favorites appear in the Starred group, sourced from storage.
+		expect(screen.getByText("Starred")).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Unstar ACME" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Unstar ZULU" })).toBeTruthy();
+		expect(screen.getByText("Zulu Platform")).toBeTruthy(); // rendered from the stored name, not the fetch
+		// The fetched non-starred project still lists under "All projects".
+		expect(screen.getByText("All projects")).toBeTruthy();
+		expect(screen.getByText("Demo Project")).toBeTruthy();
 	});
 
 	it("surfaces a load failure (e.g. a missing token)", () => {

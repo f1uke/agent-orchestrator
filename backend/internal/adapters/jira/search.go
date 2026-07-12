@@ -38,7 +38,8 @@ type IssueSummary struct {
 	StatusCategory string // Jira category key: new|indeterminate|done
 	StatusColor    string
 	Assignee       string
-	URL            string // human browse URL, derived from the site base
+	Sprint         *Sprint // current/most-relevant sprint, for Browse Jira grouping (nil = none)
+	URL            string  // human browse URL, derived from the site base
 }
 
 // ProjectRef is one Jira project for the project picker (Browse Jira, Slice 5;
@@ -48,7 +49,12 @@ type ProjectRef struct {
 	Name string
 }
 
-const searchFields = "summary,issuetype,status,assignee"
+// Ask for every field (like the single-issue display path) so the Agile sprint
+// custom-field — whose id varies per instance, and which some instances do NOT
+// expose under *navigable — is reliably present for detectSprint to find, letting
+// Browse Jira group rows by sprint. The list is capped (≤50) so the heavier
+// payload is acceptable for a manual, user-initiated browse.
+const searchFields = "*all"
 
 // SearchIssues runs a JQL query and returns matching issues (capped). The JQL is
 // built by the service — this adapter is a dumb executor so the query semantics
@@ -96,15 +102,13 @@ func (c *Client) searchOnce(ctx context.Context, cfg restConfig, path, jql strin
 	if err := searchStatusError(resp); err != nil {
 		return nil, resp.StatusCode, err
 	}
+	// Decode fields as a raw map (like the display path) so the sprint custom-field
+	// — whose id varies per instance — can be located by detectSprint alongside the
+	// known summary/type/status/assignee fields.
 	var payload struct {
 		Issues []struct {
-			Key    string `json:"key"`
-			Fields struct {
-				Summary   string    `json:"summary"`
-				IssueType namedRef  `json:"issuetype"`
-				Status    statusRef `json:"status"`
-				Assignee  namedRef  `json:"assignee"`
-			} `json:"fields"`
+			Key    string                     `json:"key"`
+			Fields map[string]json.RawMessage `json:"fields"`
 		} `json:"issues"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -112,16 +116,21 @@ func (c *Client) searchOnce(ctx context.Context, cfg restConfig, path, jql strin
 	}
 	out := make([]IssueSummary, 0, len(payload.Issues))
 	for _, it := range payload.Issues {
-		out = append(out, IssueSummary{
-			Key:            it.Key,
-			Type:           it.Fields.IssueType.Name,
-			Title:          it.Fields.Summary,
-			Status:         it.Fields.Status.Name,
-			StatusCategory: it.Fields.Status.StatusCategory.Key,
-			StatusColor:    it.Fields.Status.StatusCategory.ColorName,
-			Assignee:       it.Fields.Assignee.DisplayName,
-			URL:            cfg.baseURL + "/browse/" + it.Key,
-		})
+		f := it.Fields
+		sum := IssueSummary{
+			Key:      it.Key,
+			Type:     decodeNamed(f["issuetype"]).Name,
+			Title:    decodeString(f["summary"]),
+			Assignee: decodeNamed(f["assignee"]).DisplayName,
+			Sprint:   c.detectSprint(f),
+			URL:      cfg.baseURL + "/browse/" + it.Key,
+		}
+		if st := decodeStatus(f["status"]); st != nil {
+			sum.Status = st.Name
+			sum.StatusCategory = st.StatusCategory.Key
+			sum.StatusColor = st.StatusCategory.ColorName
+		}
+		out = append(out, sum)
 	}
 	return out, resp.StatusCode, nil
 }
