@@ -59,6 +59,18 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   QA/review must treat these board + sidebar lane colours as **sanctioned, not
   drift**, and must **not** flag them as divergence from agent-orchestrator. Full
   spec in _Color → Board lane colour system_ below.
+- **Approved deviation (2026-07-12):** the **Settings redesign (Direction A)** — a
+  unified two-pane `/settings` shell shared by both scopes (Project · Global) with a
+  **scope switcher**, a left **section sub-nav** + search field, and **one sticky
+  "Unsaved changes" save bar per scope**. Every editable setting (fields, selects,
+  toggles) routes through that one save bar; true actions (Refresh agents, Send test
+  notification, Check for updates, Run migration) stay instant and visually separate.
+  Large prompt/message editors open in a **slide-over drawer** (`components/ui/sheet`);
+  Identity/Workspace-repos become a distinct read-only panel. The three net-new
+  surfaces (**section sub-nav**, **sticky save bar**, **scope switcher**) have no
+  agent-orchestrator analogue and are **user-approved** (settings-redesign proposal
+  §9, decisions 2026-07-12); everything else is stock `components/ui/*`. QA/review:
+  treat these three as **sanctioned, not drift**; still flag any _further_ divergence.
 
 ## Product Context
 

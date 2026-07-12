@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +24,14 @@ vi.mock("../lib/api-client", () => ({
 	},
 }));
 
+// The unified shell's scope switcher calls useNavigate, which needs a router
+// context these unit renders don't provide. Preserve every other export and stub
+// navigation to a no-op.
+vi.mock("@tanstack/react-router", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@tanstack/react-router")>();
+	return { ...actual, useNavigate: () => vi.fn() };
+});
+
 import { ProjectSettingsForm } from "./ProjectSettingsForm";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import type { WorkspaceSummary } from "../types/workspace";
@@ -44,6 +52,14 @@ function renderSettings(projectId = "proj-1", workspaces?: WorkspaceSummary[]) {
 		</QueryClientProvider>,
 	);
 	return queryClient;
+}
+
+// The two-pane shell shows one section at a time; navigate to a section's nav
+// button before interacting with its fields. The draft lives above the sections
+// so edits survive navigation and one save bar commits the whole config.
+async function goToSection(name: "General" | "Agents" | "Prompts" | "Automation") {
+	// findByRole waits for the shell (and its nav) to mount after the project loads.
+	await userEvent.click(await screen.findByRole("button", { name }));
 }
 
 async function chooseOption(trigger: HTMLElement, optionName: string) {
@@ -132,25 +148,28 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
+		// General is the default section.
 		expect(await screen.findByText("git@github.com:acme/project-one.git")).toBeInTheDocument();
 		expect(screen.getByLabelText("Default branch")).toHaveValue("develop");
 		expect(screen.getByLabelText("Session prefix")).toHaveValue("po");
-		expect(screen.getByLabelText("Model override")).toHaveValue("claude-opus-4-5");
-		expect(screen.queryByLabelText("Minimum approvals")).not.toBeInTheDocument();
-
-		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
-		const orchestratorAgent = screen.getByRole("combobox", { name: "Default orchestrator agent" });
-		const permissionMode = screen.getByRole("combobox", { name: "Permission mode" });
-		const reviewerAgent = screen.getByRole("combobox", { name: "Default reviewer agent" });
-		expect(workerAgent).toHaveTextContent("codex");
-		expect(orchestratorAgent).toHaveTextContent("claude-code");
-		expect(permissionMode).toHaveTextContent("Auto");
-		expect(reviewerAgent).toHaveTextContent("claude-code");
 
 		await userEvent.clear(screen.getByLabelText("Default branch"));
 		await userEvent.type(screen.getByLabelText("Default branch"), "release");
 		await userEvent.clear(screen.getByLabelText("Session prefix"));
 		await userEvent.type(screen.getByLabelText("Session prefix"), "rel");
+
+		await goToSection("Agents");
+		expect(screen.getByLabelText("Model override")).toHaveValue("claude-opus-4-5");
+		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
+		const orchestratorAgent = screen.getByRole("combobox", { name: "Default orchestrator agent" });
+		const permissionMode = screen.getByRole("combobox", { name: "Permission mode" });
+		const reviewerAgent = screen.getByRole("combobox", { name: "Default reviewer agent" });
+		// Once the agent catalog resolves the combobox shows the catalog label.
+		await waitFor(() => expect(workerAgent).toHaveTextContent("Codex"));
+		expect(orchestratorAgent).toHaveTextContent("Claude Code");
+		expect(permissionMode).toHaveTextContent("Auto");
+		expect(reviewerAgent).toHaveTextContent("claude-code");
+
 		await userEvent.clear(screen.getByLabelText("Model override"));
 		await userEvent.type(screen.getByLabelText("Model override"), "gpt-5-codex");
 		await chooseOption(workerAgent, "OpenCode");
@@ -189,7 +208,7 @@ describe("ProjectSettingsForm", () => {
 		expect(await screen.findByText("Saved.")).toBeInTheDocument();
 	}, 20_000);
 
-	it("edits per-kind additional prompts and saves them without dropping hidden config", async () => {
+	it("edits per-kind additional prompts in the drawer and saves them without dropping hidden config", async () => {
 		mockProject({
 			id: "proj-1",
 			name: "P",
@@ -205,10 +224,17 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		const worker = (await screen.findByLabelText(/worker additional prompt/i)) as HTMLTextAreaElement;
+		await goToSection("Prompts");
+
+		// The overridden Worker row reads Customized; open its drawer to edit.
+		await userEvent.click(await screen.findByRole("button", { name: "Edit Worker additional prompt" }));
+		const drawer = await screen.findByRole("dialog");
+		const worker = within(drawer).getByRole("textbox") as HTMLTextAreaElement;
 		await waitFor(() => expect(worker.value).toBe("existing worker note"));
 		await userEvent.clear(worker);
 		await userEvent.type(worker, "new worker note");
+		await userEvent.click(screen.getByRole("button", { name: "Done" }));
+
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0][1].body.config;
@@ -235,13 +261,15 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await screen.findByText("git@gitlab.com:acme/project-one.git");
+		await goToSection("Automation");
 
 		// Off by default: the toggle is present and unchecked, the threshold hidden.
 		const toggle = await screen.findByLabelText("Require approvals before Ready to merge");
 		expect(toggle).not.toBeChecked();
 		expect(screen.queryByLabelText("Required approvals")).not.toBeInTheDocument();
 
-		// Enabling reveals the threshold input.
+		// Enabling reveals the threshold input and dirties the save bar.
 		await userEvent.click(toggle);
 		const threshold = await screen.findByLabelText("Required approvals");
 		expect(threshold).toHaveValue(null);
@@ -270,7 +298,8 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
-		await screen.findByLabelText("Require approvals before Ready to merge");
+		// A benign edit reveals the save bar; the approval rule stays off/omitted.
+		await userEvent.type(await screen.findByLabelText("Session prefix"), "x");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
@@ -293,8 +322,8 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-
-		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
+		await screen.findByText("git@github.com:acme/project-one.git");
+		await goToSection("Automation");
 		expect(screen.queryByLabelText("Require approvals before Ready to merge")).not.toBeInTheDocument();
 	});
 
@@ -318,7 +347,8 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
-		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await userEvent.type(await screen.findByLabelText("Default branch"), "x");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		expect(await screen.findByText("invalid permissions")).toBeInTheDocument();
 		expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
@@ -337,6 +367,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Agents");
 
 		expect(await screen.findByText("Worker and orchestrator agents are required.")).toBeInTheDocument();
 		expect(screen.getByRole("combobox", { name: "Default worker agent" })).toHaveTextContent("Select worker agent");
@@ -344,6 +375,9 @@ describe("ProjectSettingsForm", () => {
 			"Select orchestrator agent",
 		);
 
+		// Pick only the worker agent → the bar appears but the guard still blocks
+		// save because the orchestrator agent is still empty.
+		await chooseOption(screen.getByRole("combobox", { name: "Default worker agent" }), "Codex");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		expect(await screen.findAllByText("Worker and orchestrator agents are required.")).toHaveLength(2);
@@ -365,8 +399,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-
-		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
+		await goToSection("Agents");
 		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
 		await userEvent.click(workerAgent);
 		const options = await screen.findAllByRole("option");
@@ -381,31 +414,25 @@ describe("ProjectSettingsForm", () => {
 	});
 
 	it("saves GitHub tracker intake settings, deriving the repo from the project's git origin", async () => {
-		getMock.mockResolvedValue({
-			data: {
-				status: "ok",
-				project: {
-					id: "proj-1",
-					name: "Project One",
-					kind: "single_repo",
-					path: "/repo/project-one",
-					repo: "git@github.com:acme/project-one.git",
-					defaultBranch: "main",
-					config: {
-						worker: { agent: "codex" },
-						orchestrator: { agent: "claude-code" },
-					},
-				},
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
 			},
-			error: undefined,
 		});
 
 		renderSettings();
-
+		await goToSection("Automation");
 		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
 
-		// Repository is display-only, derived from the project's own git origin — no input to
-		// fill. Assignee is the only eligibility rule in v1.
+		// Repository is display-only, derived from the project's own git origin — no
+		// input to fill. Assignee is the only eligibility rule in v1.
 		expect(screen.getByRole("link", { name: "acme/project-one" })).toHaveAttribute(
 			"href",
 			"https://github.com/acme/project-one",
@@ -438,11 +465,11 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-
+		await goToSection("Automation");
 		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
 
-		// Nested GitLab group path is preserved (not truncated to two segments) and the
-		// preview links to the self-hosted host, not github.com.
+		// Nested GitLab group path is preserved (not truncated to two segments) and
+		// the preview links to the self-hosted host, not github.com.
 		expect(screen.getByRole("link", { name: "group/sub/project-one" })).toHaveAttribute(
 			"href",
 			"https://gitlab.finnomena.com/group/sub/project-one",
@@ -461,27 +488,21 @@ describe("ProjectSettingsForm", () => {
 	});
 
 	it("blocks save when intake is enabled with no assignee", async () => {
-		getMock.mockResolvedValue({
-			data: {
-				status: "ok",
-				project: {
-					id: "proj-1",
-					name: "Project One",
-					kind: "single_repo",
-					path: "/repo/project-one",
-					repo: "git@github.com:acme/project-one.git",
-					defaultBranch: "main",
-					config: {
-						worker: { agent: "codex" },
-						orchestrator: { agent: "claude-code" },
-					},
-				},
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
 			},
-			error: undefined,
 		});
 
 		renderSettings();
-
+		await goToSection("Automation");
 		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -537,10 +558,11 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
-		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
 		// None selected by default → no prefix input.
+		await screen.findByLabelText("Branch workflow");
 		expect(screen.queryByLabelText("Branch prefix")).not.toBeInTheDocument();
 
+		await userEvent.type(screen.getByLabelText("Session prefix"), "x");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
@@ -569,6 +591,35 @@ describe("ProjectSettingsForm", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		expect(await screen.findByText("A custom git workflow requires a branch prefix.")).toBeInTheDocument();
+		expect(putMock).not.toHaveBeenCalled();
+	});
+
+	it("Discard reverts every edited field and hides the Save button", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				defaultBranch: "develop",
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		const branch = await screen.findByLabelText("Default branch");
+		await userEvent.clear(branch);
+		await userEvent.type(branch, "release");
+		expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+		expect(screen.getByLabelText("Default branch")).toHaveValue("develop");
+		expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
 		expect(putMock).not.toHaveBeenCalled();
 	});
 
@@ -616,9 +667,9 @@ describe("ProjectSettingsForm", () => {
 			},
 		]);
 
-		const orchestratorAgent = await screen.findByRole("combobox", { name: "Default orchestrator agent" });
-		expect(orchestratorAgent).toHaveTextContent("goose");
-
+		// A benign edit reveals the save bar; saving restarts because the running
+		// orchestrator's provider differs from the saved orchestrator agent.
+		await userEvent.type(await screen.findByLabelText("Default branch"), "x");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
@@ -629,23 +680,17 @@ describe("ProjectSettingsForm", () => {
 	});
 
 	it("keeps the config save successful when orchestrator replacement fails", async () => {
-		getMock.mockResolvedValue({
-			data: {
-				status: "ok",
-				project: {
-					id: "proj-1",
-					name: "Project One",
-					kind: "single_repo",
-					path: "/repo/project-one",
-					repo: "",
-					defaultBranch: "main",
-					config: {
-						worker: { agent: "codex" },
-						orchestrator: { agent: "claude-code" },
-					},
-				},
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
 			},
-			error: undefined,
 		});
 		postMock.mockResolvedValue({
 			data: undefined,
@@ -656,8 +701,9 @@ describe("ProjectSettingsForm", () => {
 		const queryClient = renderSettings();
 		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
+		await goToSection("Agents");
 		const orchestratorAgent = await screen.findByRole("combobox", { name: "Default orchestrator agent" });
-		await chooseOption(orchestratorAgent, "goose");
+		await chooseOption(orchestratorAgent, "Goose");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));

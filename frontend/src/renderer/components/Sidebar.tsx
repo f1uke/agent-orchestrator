@@ -7,6 +7,7 @@ import {
 	Folder,
 	FolderPlus,
 	GitPullRequest,
+	Globe,
 	LayoutDashboard,
 	Moon,
 	MoreVertical,
@@ -45,6 +46,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuLabel,
 	DropdownMenuSeparator,
 	DropdownMenuShortcut,
 	DropdownMenuTrigger,
@@ -143,6 +145,12 @@ function useSelection() {
 		goPrs: () => void navigate({ to: "/prs" }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
+		// Search opens the settings two-pane (where the in-settings search field
+		// lives), staying in the active project's scope when there is one.
+		goSearch: () =>
+			void (params.projectId
+				? navigate({ to: "/projects/$projectId/settings", params: { projectId: params.projectId } })
+				: navigate({ to: "/settings" })),
 		goProject: (projectId: string) => void navigate({ to: "/projects/$projectId", params: { projectId } }),
 		goSession: (projectId: string, sessionId: string) =>
 			void navigate({ to: "/projects/$projectId/sessions/$sessionId", params: { projectId, sessionId } }),
@@ -352,30 +360,34 @@ export function Sidebar({
 							className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-0"
 							side="top"
 						>
+							<DropdownMenuLabel>Appearance</DropdownMenuLabel>
 							<DropdownMenuItem onSelect={toggleTheme}>
 								{theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
 								{theme === "dark" ? "Light mode" : "Dark mode"}
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
+							<DropdownMenuLabel>Go to</DropdownMenuLabel>
 							<DropdownMenuItem onSelect={selection.goPrs}>
 								<GitPullRequest aria-hidden="true" />
 								Pull requests
 							</DropdownMenuItem>
-							<DropdownMenuItem disabled>
+							<DropdownMenuItem onSelect={selection.goSearch}>
 								<Search aria-hidden="true" />
 								Search
 								<DropdownMenuShortcut>⌘K</DropdownMenuShortcut>
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
+							<DropdownMenuLabel>Settings</DropdownMenuLabel>
 							{selection.activeProjectId && (
 								<DropdownMenuItem onSelect={() => selection.goSettings(selection.activeProjectId!)}>
-									<Settings aria-hidden="true" />
+									<Folder aria-hidden="true" />
 									Project settings
 								</DropdownMenuItem>
 							)}
 							<DropdownMenuItem onSelect={selection.goGlobalSettings}>
-								<Settings aria-hidden="true" />
+								<Globe aria-hidden="true" />
 								Global settings
+								<DropdownMenuShortcut>⌘,</DropdownMenuShortcut>
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -412,30 +424,34 @@ export function Sidebar({
 							<TooltipContent side="right">Settings</TooltipContent>
 						</Tooltip>
 						<DropdownMenuContent align="start" className="min-w-0" side="top">
+							<DropdownMenuLabel>Appearance</DropdownMenuLabel>
 							<DropdownMenuItem onSelect={toggleTheme}>
 								{theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
 								{theme === "dark" ? "Light mode" : "Dark mode"}
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
+							<DropdownMenuLabel>Go to</DropdownMenuLabel>
 							<DropdownMenuItem onSelect={selection.goPrs}>
 								<GitPullRequest aria-hidden="true" />
 								Pull requests
 							</DropdownMenuItem>
-							<DropdownMenuItem disabled>
+							<DropdownMenuItem onSelect={selection.goSearch}>
 								<Search aria-hidden="true" />
 								Search
 								<DropdownMenuShortcut>⌘K</DropdownMenuShortcut>
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
+							<DropdownMenuLabel>Settings</DropdownMenuLabel>
 							{selection.activeProjectId && (
 								<DropdownMenuItem onSelect={() => selection.goSettings(selection.activeProjectId!)}>
-									<Settings aria-hidden="true" />
+									<Folder aria-hidden="true" />
 									Project settings
 								</DropdownMenuItem>
 							)}
 							<DropdownMenuItem onSelect={selection.goGlobalSettings}>
-								<Settings aria-hidden="true" />
+								<Globe aria-hidden="true" />
 								Global settings
+								<DropdownMenuShortcut>⌘,</DropdownMenuShortcut>
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
