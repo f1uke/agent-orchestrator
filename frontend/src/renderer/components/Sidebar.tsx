@@ -793,6 +793,15 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					>
 						{session.title}
 					</span>
+					{/* Display-only Jira chip (KEY · status) for a Jira-linked session,
+					decoupled from the board lane. Sits on line 2 directly under the work
+					name, its front edge flush with the name column (enhancement #4).
+					Shows nothing for unlinked sessions. */}
+					{jiraKey && (
+						<span className="block">
+							<JiraKeyBadge sessionId={session.id} issueKey={jiraKey} variant="row" />
+						</span>
+					)}
 					{/* Canonical session reference (@<project>-<num>): a de-emphasised,
 					muted PLAIN subordinate line — NOT a link. The whole row is already
 					the click target, so the id drops the #58 refined-blue/link look
@@ -802,13 +811,6 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
 						{sessionRef}
 					</span>
-					{/* Display-only Jira chip (KEY · status) for a Jira-linked session,
-					decoupled from the board lane. Shows nothing for unlinked sessions. */}
-					{jiraKey && (
-						<span className="block">
-							<JiraKeyBadge sessionId={session.id} issueKey={jiraKey} variant="row" />
-						</span>
-					)}
 				</span>
 				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
 				(most rows show nothing). Sits left of the pr-7 rename zone so the

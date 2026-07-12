@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, hasTrustedApiBaseUrl } from "../lib/api-client";
 import { mockWorkspaces } from "../lib/mock-data";
+import { displaySessionName } from "../lib/session-title";
 import {
 	type PRState,
 	type PullRequestFacts,
@@ -54,7 +55,9 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				terminalHandleId: session.terminalHandleId,
 				workspaceId: project.id,
 				workspaceName: project.name,
-				title: session.displayName ?? session.issueId ?? session.id,
+				// Display NAME is the human summary, never the Jira card number — the
+				// key rides the branch + its own badge (enhancement #5).
+				title: displaySessionName(session),
 				issueId: session.issueId,
 				provider: toAgentProvider(session.harness),
 				kind: session.kind === "orchestrator" ? "orchestrator" : session.kind === "worker" ? "worker" : undefined,
