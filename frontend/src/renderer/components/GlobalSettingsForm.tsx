@@ -1,34 +1,61 @@
-import { AutoNudgeSection } from "./AutoNudgeSection";
-import { AutoReclaimSection } from "./AutoReclaimSection";
-import { DashboardSubhead } from "./DashboardSubhead";
-import { MessageTemplatesSection } from "./MessageTemplatesSection";
-import { MigrationSection } from "./MigrationSection";
-import { NotificationsSection } from "./NotificationsSection";
-import { SpawnConfirmSection } from "./SpawnConfirmSection";
-import { SystemPromptsSection } from "./SystemPromptsSection";
-import { UpdatesSection } from "./UpdatesSection";
+import { useState } from "react";
+import { GlobalSettingsContent } from "./settings/GlobalSettingsContent";
+import { GLOBAL_SECTIONS } from "./settings/settings-sections";
+import { SettingsSaveBar } from "./settings/SettingsSaveBar";
+import { SettingsShell } from "./settings/SettingsShell";
+import { useGlobalSettingsForm } from "./settings/useGlobalSettingsForm";
 
-// App-wide settings, shown from the sidebar when no project is selected. Each
-// section is a self-contained card: System prompts (editable global bases per
-// session kind), Message templates (editable runtime nudge messages),
-// Auto-reclaim (daemon-backed teardown grace period), Updates (auto-update
-// channel, #2207), and Migration (re-run the legacy-AO import, #2205).
+// GlobalSettingsForm is the Global-scope container: the unified two-pane
+// SettingsShell (scope=global) with the four global sections — Prompts, Messages,
+// Automation, System — and one sticky save bar. Every editable setting (system
+// prompts, message templates, confirm-before-spawn, auto-send, auto-reclaim,
+// update channel) routes through useGlobalSettingsForm's single dirty/save model
+// (locked decision 3); its save FANS OUT across the several daemon + bridge
+// endpoints. True actions (Send test, Check for updates, Run migration) live in
+// the System section and fire instantly, separate from Save.
 export function GlobalSettingsForm() {
+	const form = useGlobalSettingsForm();
+	const [activeSection, setActiveSection] = useState<string>("prompts");
+	const [search, setSearch] = useState("");
+	const { dirty, mutation, savedAt, save, discard } = form;
+
+	const status = (
+		<>
+			{mutation.isError && (
+				<span className="text-[12px] text-error">
+					{mutation.error instanceof Error ? mutation.error.message : "Save failed"}
+				</span>
+			)}
+			{savedAt && !mutation.isPending && !mutation.isError && <span className="text-[12px] text-success">Saved.</span>}
+		</>
+	);
+
 	return (
-		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-			<DashboardSubhead title="Global settings" subtitle="Settings that apply across all projects" />
-			<div className="min-h-0 flex-1 overflow-y-auto p-[18px]">
-				<div className="mx-auto flex max-w-2xl flex-col gap-4">
-					<SystemPromptsSection />
-					<MessageTemplatesSection />
-					<SpawnConfirmSection />
-					<AutoNudgeSection />
-					<AutoReclaimSection />
-					<NotificationsSection />
-					<UpdatesSection />
-					<MigrationSection />
-				</div>
-			</div>
-		</div>
+		<SettingsShell
+			scope="global"
+			title="Global settings"
+			subtitle="Settings that apply across all projects"
+			sections={GLOBAL_SECTIONS}
+			activeSection={activeSection}
+			onSelectSection={setActiveSection}
+			search={search}
+			onSearch={setSearch}
+			saveBar={
+				<SettingsSaveBar
+					dirty={dirty}
+					saving={mutation.isPending}
+					idleNote={
+						activeSection === "system"
+							? "Send test, Check for updates & Run migration run immediately — they aren't part of Save"
+							: undefined
+					}
+					status={status}
+					onDiscard={discard}
+					onSave={save}
+				/>
+			}
+		>
+			<GlobalSettingsContent form={form} activeSection={activeSection} />
+		</SettingsShell>
 	);
 }
