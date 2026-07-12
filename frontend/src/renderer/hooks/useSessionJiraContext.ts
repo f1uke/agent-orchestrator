@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { collectTreeContext } from "../lib/jira-browse";
 import { workspaceQueryKey } from "./useWorkspaceQuery";
 import {
 	mockJiraIssue,
+	mockJiraMyself,
 	mockJiraProjects,
 	mockJiraSearch,
+	mockJiraTreeContext,
 	mockSessionJiraContexts,
 	mockSessionJiraTransitions,
 } from "../lib/mock-data";
@@ -195,6 +198,58 @@ export function useJiraSearch(query: string, project: string, enabled: boolean, 
 		enabled: enabled && (q.length >= 2 || scoped || advanced),
 		queryFn: () =>
 			usePreviewData ? Promise.resolve(mockJiraSearch(project, q, filters)) : fetchJiraSearch(project, q, filters),
+		staleTime: 15_000,
+	});
+}
+
+export const jiraMyselfQueryKey = () => ["jira-myself"] as const;
+
+/** The authenticated Jira account (accountId + display name). */
+export type JiraMyself = { accountId: string; displayName: string };
+
+async function fetchJiraMyself(): Promise<JiraMyself> {
+	const { data, error } = await apiClient.GET("/api/v1/jira/myself");
+	if (error) throw new Error(apiErrorMessage(error, "Couldn't resolve your Jira account"));
+	return { accountId: data?.accountId ?? "", displayName: data?.displayName ?? "" };
+}
+
+/**
+ * Resolves the authenticated Jira account (accountId) so Browse Jira can highlight
+ * the viewer's own rows. The id is stable, so it is cached hard and not retried — an
+ * unconfigured token simply means no "You" highlight (never a hard failure for the list).
+ */
+export function useJiraMyself(enabled: boolean) {
+	return useQuery({
+		queryKey: jiraMyselfQueryKey(),
+		enabled,
+		queryFn: () => (usePreviewData ? Promise.resolve(mockJiraMyself()) : fetchJiraMyself()),
+		staleTime: 10 * 60_000,
+		retry: 0,
+	});
+}
+
+export const jiraTreeContextQueryKey = (rootKeys: string[], hideDone?: boolean, activeSprint?: boolean) =>
+	["jira-tree-context", rootKeys.join(","), hideDone ? "1" : "", activeSprint ? "1" : ""] as const;
+
+/**
+ * Fetches the ancestors + descendants of the matched issues — the Epic→Story→Sub-task
+ * tree #92 left out — via batched JQL (see collectTreeContext), so Browse Jira can
+ * nest a card's own (unmatched) subtasks. Enable only in STRUCTURED mode (advanced JQL
+ * is authoritative). Returns just the CONTEXT issues (dimmed); the caller unions them
+ * with its direct matches. Keyed on the sorted root keys + the descent toggles.
+ */
+export function useJiraTreeContext(
+	roots: JiraIssueSummary[],
+	opts: { hideDone?: boolean; activeSprint?: boolean; enabled: boolean },
+) {
+	const rootKeys = [...new Set(roots.map((r) => r.key))].sort();
+	return useQuery({
+		queryKey: jiraTreeContextQueryKey(rootKeys, opts.hideDone, opts.activeSprint),
+		enabled: opts.enabled && rootKeys.length > 0,
+		queryFn: () =>
+			usePreviewData
+				? Promise.resolve(mockJiraTreeContext(roots, opts))
+				: collectTreeContext(roots, opts, (jql) => fetchJiraSearch("", "", { jql })),
 		staleTime: 15_000,
 	});
 }

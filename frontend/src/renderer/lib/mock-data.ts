@@ -643,6 +643,18 @@ const activeSprint = {
 
 const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 	{
+		// An Epic heading the tree — a context-only group header (Fix 5): no status
+		// pill / start / send actions. Its children (Stories) nest beneath it.
+		key: "DEMO-100",
+		type: "Epic",
+		title: "E-Coupon 3.0",
+		status: "In Progress",
+		statusCategory: "indeterminate",
+		assignee: "",
+		url: "https://example.atlassian.net/browse/DEMO-100",
+		sprint: activeSprint,
+	},
+	{
 		key: "DEMO-101",
 		type: "Story",
 		title: "Participating funds eligibility UI",
@@ -650,6 +662,7 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 		statusCategory: "new",
 		assignee: "Alex Rivera",
 		url: "https://example.atlassian.net/browse/DEMO-101",
+		parent: { key: "DEMO-100", title: "E-Coupon 3.0" },
 		sprint: activeSprint,
 	},
 	{
@@ -660,6 +673,7 @@ const mockJiraIssuePool: components["schemas"]["JiraIssueSummary"][] = [
 		statusCategory: "indeterminate",
 		assignee: "Sam Chen",
 		url: "https://example.atlassian.net/browse/DEMO-140",
+		parent: { key: "DEMO-100", title: "E-Coupon 3.0" },
 		sprint: activeSprint,
 	},
 	{
@@ -743,6 +757,65 @@ export function mockJiraSearch(
 			if (filters.activeSprint && it.sprint?.state !== "active") return false;
 			return true;
 		});
+}
+
+// A pool row with its derived accountId filled in (what the live search returns).
+function poolRowWithAccount(it: components["schemas"]["JiraIssueSummary"]) {
+	return { ...it, assigneeAccountId: it.assigneeAccountId ?? mockAccountId(it.assignee ?? "") };
+}
+
+/** Preview-mode current user: a fixed account matching a pool assignee so the "You"
+ *  highlight (Fix 3) is demoable without a daemon. */
+export function mockJiraMyself(): { accountId: string; displayName: string } {
+	return { accountId: mockAccountId("Alex Rivera"), displayName: "Alex Rivera" };
+}
+
+/**
+ * Preview-mode tree-context (Fix 2): walk the pool's parent links to return the
+ * ancestors + descendants of `roots` (excluding the roots), so the 3-level tree nests
+ * end-to-end without a daemon. Descendants respect hide-done/active-sprint; ancestors
+ * do not — mirroring collectTreeContext.
+ */
+export function mockJiraTreeContext(
+	roots: { key: string }[],
+	opts: { hideDone?: boolean; activeSprint?: boolean } = {},
+): components["schemas"]["JiraIssueSummary"][] {
+	const rootKeys = new Set(roots.map((r) => r.key));
+	const seen = new Set(rootKeys);
+	const out: components["schemas"]["JiraIssueSummary"][] = [];
+	const rows = mockJiraIssuePool.map(poolRowWithAccount);
+	const passesDescent = (it: components["schemas"]["JiraIssueSummary"]) =>
+		!(opts.hideDone && (it.statusCategory ?? "") === "done") && !(opts.activeSprint && it.sprint?.state !== "active");
+
+	// DESCENT: rows whose parent chain reaches a root (BFS), respecting the toggles.
+	let frontier = new Set(rootKeys);
+	for (let step = 0; step < 2 && frontier.size > 0; step += 1) {
+		const next = new Set<string>();
+		for (const it of rows) {
+			const pk = it.parent?.key;
+			if (pk && frontier.has(pk) && !seen.has(it.key ?? "") && passesDescent(it)) {
+				seen.add(it.key ?? "");
+				out.push(it);
+				next.add(it.key ?? "");
+			}
+		}
+		frontier = next;
+	}
+	// ASCENT: parent chain up from the roots (+ descendants), no toggle filter.
+	let pending = [...roots.map((r) => rows.find((it) => it.key === r.key)).filter(Boolean), ...out] as typeof rows;
+	for (let step = 0; step < 2; step += 1) {
+		const wanted = new Set<string>();
+		for (const it of pending) {
+			const pk = it.parent?.key;
+			if (pk && !seen.has(pk)) wanted.add(pk);
+		}
+		if (wanted.size === 0) break;
+		const found = rows.filter((it) => wanted.has(it.key ?? "") && !seen.has(it.key ?? ""));
+		found.forEach((it) => seen.add(it.key ?? ""));
+		out.push(...found);
+		pending = found;
+	}
+	return out;
 }
 
 /** Preview-mode detail read: build a full issue projection from the pool summary,

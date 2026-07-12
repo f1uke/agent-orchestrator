@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { JiraIssueSummary } from "../hooks/useSessionJiraContext";
 import {
 	BACKLOG_LABEL,
-	buildHierarchy,
+	buildTree,
+	collectTreeContext,
+	countTreeNodes,
 	groupBySprint,
-	groupRowsBySprint,
+	groupTreeBySprint,
 	hasUnassigned,
-	missingParentKeys,
+	isEpicIssue,
 	uniqueAssignees,
 } from "./jira-browse";
 
@@ -72,60 +74,138 @@ describe("groupBySprint", () => {
 	});
 });
 
-describe("buildHierarchy", () => {
-	const parent = issue({ key: "DEMO-101", type: "Story", title: "Parent story" });
-	const child1 = issue({ key: "DEMO-102", type: "Sub-task", parent: { key: "DEMO-101" } });
-	const child2 = issue({ key: "DEMO-103", type: "Sub-task", parent: { key: "DEMO-101" } });
-	const orphan = issue({ key: "DEMO-200", type: "Sub-task", parent: { key: "DEMO-999", title: "off-page" } });
-	const standalone = issue({ key: "DEMO-3", type: "Bug" });
-
-	it("nests subtasks under a present parent and preserves order", () => {
-		const rows = buildHierarchy([parent, child1, child2, standalone]);
-		expect(rows.map((r) => r.issue.key)).toEqual(["DEMO-101", "DEMO-3"]); // children are nested, not top-level
-		expect(rows[0].children.map((c) => c.key)).toEqual(["DEMO-102", "DEMO-103"]);
-		expect(rows[1].children).toEqual([]);
-	});
-
-	it("keeps a subtask whose parent is absent as a top-level orphan", () => {
-		const rows = buildHierarchy([orphan, standalone]);
-		expect(rows.map((r) => r.issue.key)).toEqual(["DEMO-200", "DEMO-3"]);
-		expect(rows[0].children).toEqual([]); // orphan has no nested children of its own
-	});
-
-	it("marks context parents from the provided key set", () => {
-		const rows = buildHierarchy([parent, child1], new Set(["DEMO-101"]));
-		expect(rows[0].issue.key).toBe("DEMO-101");
-		expect(rows[0].isContext).toBe(true);
-		expect(rows[0].children.map((c) => c.key)).toEqual(["DEMO-102"]);
+describe("isEpicIssue", () => {
+	it("detects Epics by type, case-insensitively", () => {
+		expect(isEpicIssue(issue({ key: "E-1", type: "Epic" }))).toBe(true);
+		expect(isEpicIssue(issue({ key: "E-2", type: "epic" }))).toBe(true);
+		expect(isEpicIssue(issue({ key: "S-1", type: "Story" }))).toBe(false);
+		expect(isEpicIssue(issue({ key: "X-1", type: undefined }))).toBe(false);
 	});
 });
 
-describe("missingParentKeys", () => {
-	it("returns sorted parent keys referenced but not present (dedup)", () => {
-		const rows = [
-			issue({ key: "DEMO-102", parent: { key: "DEMO-101" } }),
-			issue({ key: "DEMO-103", parent: { key: "DEMO-101" } }), // dup parent
-			issue({ key: "DEMO-104", parent: { key: "DEMO-050" } }),
-			issue({ key: "DEMO-101" }), // this parent IS present → not missing
-		];
-		expect(missingParentKeys(rows)).toEqual(["DEMO-050"]);
+describe("buildTree", () => {
+	const epic = issue({ key: "E-1", type: "Epic", title: "Epic" });
+	const story = issue({ key: "S-1", type: "Story", parent: { key: "E-1" } });
+	const sub = issue({ key: "T-1", type: "Sub-task", parent: { key: "S-1" } });
+	const standalone = issue({ key: "B-1", type: "Bug" });
+
+	it("nests the 3-level Epic → Story → Sub-task chain with correct depths", () => {
+		const tree = buildTree([epic, story, sub], new Set(["E-1", "S-1", "T-1"]));
+		expect(tree.map((n) => n.issue.key)).toEqual(["E-1"]); // only the epic is a root
+		expect(tree[0].depth).toBe(0);
+		expect(tree[0].children.map((c) => c.issue.key)).toEqual(["S-1"]);
+		expect(tree[0].children[0].depth).toBe(1);
+		expect(tree[0].children[0].children.map((c) => c.issue.key)).toEqual(["T-1"]);
+		expect(tree[0].children[0].children[0].depth).toBe(2);
 	});
 
-	it("is empty when every parent is present or there are no parents", () => {
-		expect(missingParentKeys([issue({ key: "DEMO-1" }), issue({ key: "DEMO-2" })])).toEqual([]);
+	it("caps depth at 3 levels — a 4th-level descendant is not nested", () => {
+		const deep = issue({ key: "D-1", type: "Sub-task", parent: { key: "T-1" } }); // child of the sub-task
+		const tree = buildTree([epic, story, sub, deep], new Set(["E-1", "S-1", "T-1", "D-1"]));
+		const subNode = tree[0].children[0].children[0];
+		expect(subNode.issue.key).toBe("T-1");
+		expect(subNode.children).toEqual([]); // D-1 dropped at the depth cap
+	});
+
+	it("marks non-matched nodes as context (dimmed) and matched as not", () => {
+		// Only the sub-task matched; its ancestors are context.
+		const tree = buildTree([epic, story, sub], new Set(["T-1"]));
+		expect(tree[0].isContext).toBe(true); // epic
+		expect(tree[0].children[0].isContext).toBe(true); // story
+		expect(tree[0].children[0].children[0].isContext).toBe(false); // the match
+	});
+
+	it("keeps an issue whose parent is absent as a root, and preserves order", () => {
+		const orphanSub = issue({ key: "T-9", type: "Sub-task", parent: { key: "S-999" } });
+		const tree = buildTree([orphanSub, standalone], new Set(["T-9", "B-1"]));
+		expect(tree.map((n) => n.issue.key)).toEqual(["T-9", "B-1"]);
+		expect(tree[0].children).toEqual([]);
+	});
+
+	it("guards against a cyclic parent chain (terminates, no duplication)", () => {
+		const a = issue({ key: "A", parent: { key: "B" } });
+		const b = issue({ key: "B", parent: { key: "A" } });
+		// A pure cycle has no root (both parents are present), so the subtree is
+		// dropped — the point is it TERMINATES and never duplicates a node.
+		const tree = buildTree([a, b], new Set(["A", "B"]));
+		expect(countTreeNodes(tree)).toBe(0);
 	});
 });
 
-describe("groupRowsBySprint", () => {
-	it("groups hierarchy rows by the top-level issue's sprint; children ride along", () => {
-		const rows = buildHierarchy([
-			issue({ key: "DEMO-101", sprint: { name: "Sprint 2026-14", state: "active" } }),
-			issue({ key: "DEMO-102", parent: { key: "DEMO-101" } }), // no sprint of its own, rides parent
-			issue({ key: "DEMO-9", sprint: { name: "Sprint 2026-15", state: "future" } }),
-		]);
-		const groups = groupRowsBySprint(rows);
+describe("countTreeNodes / groupTreeBySprint", () => {
+	it("counts a node plus all its descendants", () => {
+		const tree = buildTree(
+			[
+				issue({ key: "E-1", type: "Epic" }),
+				issue({ key: "S-1", type: "Story", parent: { key: "E-1" } }),
+				issue({ key: "T-1", type: "Sub-task", parent: { key: "S-1" } }),
+			],
+			new Set(["E-1", "S-1", "T-1"]),
+		);
+		expect(countTreeNodes(tree)).toBe(3);
+	});
+
+	it("groups top-level tree nodes by their sprint; children ride along", () => {
+		const tree = buildTree(
+			[
+				issue({ key: "DEMO-101", sprint: { name: "Sprint 2026-14", state: "active" } }),
+				issue({ key: "DEMO-102", parent: { key: "DEMO-101" } }), // rides parent's sprint
+				issue({ key: "DEMO-9", sprint: { name: "Sprint 2026-15", state: "future" } }),
+			],
+			new Set(["DEMO-101", "DEMO-102", "DEMO-9"]),
+		);
+		const groups = groupTreeBySprint(tree);
 		expect(groups.map((g) => g.name)).toEqual(["Sprint 2026-14", "Sprint 2026-15"]);
-		expect(groups[0].rows[0].issue.key).toBe("DEMO-101");
-		expect(groups[0].rows[0].children.map((c) => c.key)).toEqual(["DEMO-102"]);
+		expect(groups[0].nodes[0].issue.key).toBe("DEMO-101");
+		expect(groups[0].nodes[0].children.map((c) => c.issue.key)).toEqual(["DEMO-102"]);
+	});
+});
+
+describe("collectTreeContext", () => {
+	// A fixture graph: Epic E-1 → Story S-1 → Sub-task T-1 (+ a done sub-task T-2).
+	const graph: Record<string, JiraIssueSummary> = {
+		"E-1": issue({ key: "E-1", type: "Epic" }),
+		"S-1": issue({ key: "S-1", type: "Story", parent: { key: "E-1" } }),
+		"T-1": issue({ key: "T-1", type: "Sub-task", parent: { key: "S-1" }, statusCategory: "new" }),
+		"T-2": issue({ key: "T-2", type: "Sub-task", parent: { key: "S-1" }, statusCategory: "done" }),
+	};
+
+	// A fake fetcher that resolves `parent in (...)` (descent) and `key in (...)`
+	// (ascent) against the graph, honoring a `statusCategory != Done` clause.
+	function fakeFetch(jqls: string[]): (jql: string) => Promise<JiraIssueSummary[]> {
+		return async (jql: string) => {
+			jqls.push(jql);
+			const hideDone = jql.includes("statusCategory != Done");
+			const inList = (clause: string) => {
+				const m = jql.match(new RegExp(`${clause} \\(([^)]*)\\)`));
+				return m ? new Set(m[1].split(",").map((k) => k.trim())) : null;
+			};
+			const parents = inList("parent in");
+			const keys = inList("key in");
+			return Object.values(graph).filter((it) => {
+				if (hideDone && it.statusCategory === "done") return false;
+				if (parents) return Boolean(it.parent?.key && parents.has(it.parent.key));
+				if (keys) return keys.has(it.key);
+				return false;
+			});
+		};
+	}
+
+	it("descends to a matched card's subtasks and ascends to its epic", async () => {
+		const jqls: string[] = [];
+		const context = await collectTreeContext([graph["S-1"]], {}, fakeFetch(jqls));
+		const keys = context.map((c) => c.key).sort();
+		expect(keys).toEqual(["E-1", "T-1", "T-2"]); // subtasks (down) + epic (up); not S-1 itself
+		// Batched, not N+1: one descent query + one ascent query.
+		expect(jqls.some((q) => q.includes("parent in (S-1)"))).toBe(true);
+		expect(jqls.some((q) => q.includes("key in (E-1)"))).toBe(true);
+	});
+
+	it("respects hide-done on descendants (a done subtask is not fetched)", async () => {
+		const jqls: string[] = [];
+		const context = await collectTreeContext([graph["S-1"]], { hideDone: true }, fakeFetch(jqls));
+		expect(context.map((c) => c.key)).toContain("T-1");
+		expect(context.map((c) => c.key)).not.toContain("T-2"); // done → excluded
+		expect(jqls.some((q) => q.includes("parent in (S-1) AND statusCategory != Done"))).toBe(true);
 	});
 });

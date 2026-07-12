@@ -96,64 +96,183 @@ export function groupBySprint(issues: JiraIssueSummary[]): SprintGroup[] {
 	}));
 }
 
-/** One list row: a top-level issue plus the subtasks (of it) present in the set,
- *  nested beneath it — like the Jira backlog. */
-export type HierarchyRow = {
+// ── 3-level tree (Epic → Story/Task → Sub-task) ────────────────────────────────
+// #92 nested only filter-matched issues, so a card's own (unmatched) subtasks were
+// invisible in the list. The tree below nests the FULL Epic→Story→Sub-task chain
+// (fetched level-by-level, see useJiraTreeContext), capped at 3 levels like the Jira
+// backlog. Issues pulled in for context (outside the active filter) are marked so the
+// UI can dim them; matched issues stay emphasized.
+
+/** Max rendered tree depth: Epic (0) → Story/Task (1) → Sub-task (2). */
+export const MAX_TREE_DEPTH = 3;
+
+/** A node in the Browse Jira issue tree. */
+export type TreeNode = {
 	issue: JiraIssueSummary;
-	children: JiraIssueSummary[];
-	/** True when this row's issue is a parent pulled in only for CONTEXT (its own
-	 *  assignee may differ from an active filter) — rendered dimmed, not a match. */
+	children: TreeNode[];
+	/** 0-based depth (0 = top level). Never exceeds MAX_TREE_DEPTH - 1. */
+	depth: number;
+	/** True when the issue was pulled in only for CONTEXT — an ancestor/descendant
+	 *  outside the active filter — so the UI dims it (it is not a direct match). */
 	isContext: boolean;
 };
 
+/** True when the issue is an Epic (a container/group header, per Fix 5 — no status
+ *  pill, no start/create actions). */
+export function isEpicIssue(issue: JiraIssueSummary): boolean {
+	return (issue.type ?? "").trim().toLowerCase() === "epic";
+}
+
 /**
- * Nest subtasks under their parent (Image #37, not a flat list). A subtask whose
- * parent is present in the set nests beneath it; a subtask whose parent is absent
- * stays top-level (an orphan, rendered with a subtask marker). `contextKeys` marks
- * parents pulled in only for context. Top-level order and child order are preserved.
+ * Build the Epic→Story→Sub-task tree from a flat issue set (the matched results plus
+ * the ancestors/descendants fetched for context). Nodes nest by the `parent` chain;
+ * a node whose parent is absent from the set is a root. `matchedKeys` are the direct
+ * search matches — every other node is context (dimmed). Depth is capped at
+ * MAX_TREE_DEPTH so we never render deeper than the 3 Jira hierarchy levels. Root and
+ * child order follow input order; a cycle guard keeps a malformed parent chain safe.
  */
-export function buildHierarchy(issues: JiraIssueSummary[], contextKeys?: ReadonlySet<string>): HierarchyRow[] {
-	const present = new Set(issues.map((i) => i.key));
+export function buildTree(issues: JiraIssueSummary[], matchedKeys: ReadonlySet<string>): TreeNode[] {
+	const byKey = new Map<string, JiraIssueSummary>();
+	for (const issue of issues) if (!byKey.has(issue.key)) byKey.set(issue.key, issue);
+
 	const childrenOf = new Map<string, JiraIssueSummary[]>();
-	const topLevel: JiraIssueSummary[] = [];
-	for (const issue of issues) {
+	const roots: JiraIssueSummary[] = [];
+	for (const issue of byKey.values()) {
 		const parentKey = issue.parent?.key;
-		if (parentKey && parentKey !== issue.key && present.has(parentKey)) {
+		if (parentKey && parentKey !== issue.key && byKey.has(parentKey)) {
 			const arr = childrenOf.get(parentKey);
 			if (arr) arr.push(issue);
 			else childrenOf.set(parentKey, [issue]);
 		} else {
-			topLevel.push(issue);
+			roots.push(issue);
 		}
 	}
-	return topLevel.map((issue) => ({
-		issue,
-		children: childrenOf.get(issue.key) ?? [],
-		isContext: contextKeys?.has(issue.key) ?? false,
-	}));
+
+	const build = (issue: JiraIssueSummary, depth: number, seen: Set<string>): TreeNode => {
+		seen.add(issue.key);
+		// Stop at the depth cap, and guard against a cyclic parent chain.
+		const kids = depth + 1 < MAX_TREE_DEPTH ? (childrenOf.get(issue.key) ?? []).filter((c) => !seen.has(c.key)) : [];
+		return {
+			issue,
+			depth,
+			isContext: !matchedKeys.has(issue.key),
+			children: kids.map((c) => build(c, depth + 1, seen)),
+		};
+	};
+	return roots.map((r) => build(r, 0, new Set()));
 }
 
-/** Parent keys referenced by the set's rows but not present in it — the parents to
- *  fetch for context so the hierarchy stays intact under an assignee filter. */
-export function missingParentKeys(issues: JiraIssueSummary[]): string[] {
-	const present = new Set(issues.map((i) => i.key));
-	const missing = new Set<string>();
-	for (const issue of issues) {
-		const pk = issue.parent?.key;
-		if (pk && !present.has(pk)) missing.add(pk);
-	}
-	return [...missing].sort();
+/** Count a tree node plus all its descendants (for the sprint-section work-item count). */
+export function countTreeNodes(nodes: TreeNode[]): number {
+	return nodes.reduce((n, node) => n + 1 + countTreeNodes(node.children), 0);
 }
 
-export type SprintRowGroup = { name: string; state?: string; isBacklog: boolean; rows: HierarchyRow[] };
+export type SprintTreeGroup = { name: string; state?: string; isBacklog: boolean; nodes: TreeNode[] };
 
-/** Group hierarchy rows by their top-level issue's sprint — children ride with their
- *  parent even across sprints — using the same ordering as groupBySprint. */
-export function groupRowsBySprint(rows: HierarchyRow[]): SprintRowGroup[] {
-	return groupSprint(rows, (r) => r.issue.sprint).map((b) => ({
+/** Group top-level tree nodes by their sprint (children ride with their root), using
+ *  the same ordering as groupBySprint. */
+export function groupTreeBySprint(nodes: TreeNode[]): SprintTreeGroup[] {
+	return groupSprint(nodes, (n) => n.issue.sprint).map((b) => ({
 		name: b.name,
 		state: b.state,
 		isBacklog: b.isBacklog,
-		rows: b.items,
+		nodes: b.items,
 	}));
+}
+
+// ── Batch tree-context fetch (descendants + ancestors) ─────────────────────────
+// #92 only nested filter-MATCHED issues, so a card's unmatched subtasks were
+// invisible. collectTreeContext fetches the surrounding Epic→Story→Sub-task tree:
+// DESCENDANTS (children then grandchildren, ≤2 steps for the 3-level cap) and
+// ANCESTORS (parent then grandparent up to the Epic). Each step is ONE batched JQL
+// (`parent in (…)` / `key in (…)`, chunked to bound the query length) — not N+1.
+// Descendants respect hide-done / active-sprint (a hidden-done child stays hidden);
+// ancestors do NOT (an Epic may be done / in another sprint but still heads the tree).
+// A seen-set dedups and guards cycles.
+
+/** Split keys into chunks so a single `parent in (…)`/`key in (…)` clause never
+ *  grows past Jira's JQL length budget on a wide level. */
+function chunk<T>(items: T[], size: number): T[][] {
+	const out: T[][] = [];
+	for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+	return out;
+}
+
+const TREE_JQL_BATCH = 50;
+
+/** Parent keys referenced by the issues that aren't already seen — the next ascent
+ *  level to fetch. */
+function unseenParentKeys(issues: JiraIssueSummary[], seen: ReadonlySet<string>): string[] {
+	const out = new Set<string>();
+	for (const issue of issues) {
+		const pk = issue.parent?.key;
+		if (pk && !seen.has(pk)) out.add(pk);
+	}
+	return [...out].sort();
+}
+
+async function fetchByKeysInBatches(
+	keys: string[],
+	clause: (keyList: string) => string,
+	order: string,
+	fetchByJql: (jql: string) => Promise<JiraIssueSummary[]>,
+): Promise<JiraIssueSummary[]> {
+	const batches = await Promise.all(
+		chunk(keys, TREE_JQL_BATCH).map((batch) => fetchByJql(`${clause(batch.join(", "))} ${order}`)),
+	);
+	return batches.flat();
+}
+
+/**
+ * Fetch the issues surrounding `roots` in the Epic→Story→Sub-task tree — the
+ * ancestors + descendants #92 left out — using batched JQL. `fetchByJql` runs one
+ * raw-JQL search (injected so this stays unit-testable). Returns only the CONTEXT
+ * issues (never the roots). Descent applies the hide-done/active-sprint clauses;
+ * ascent does not. Bounded to MAX_TREE_DEPTH-1 steps each way.
+ */
+export async function collectTreeContext(
+	roots: JiraIssueSummary[],
+	opts: { hideDone?: boolean; activeSprint?: boolean },
+	fetchByJql: (jql: string) => Promise<JiraIssueSummary[]>,
+): Promise<JiraIssueSummary[]> {
+	const seen = new Set(roots.map((r) => r.key));
+	const context: JiraIssueSummary[] = [];
+	const descentFilter =
+		(opts.hideDone ? " AND statusCategory != Done" : "") + (opts.activeSprint ? " AND sprint in openSprints()" : "");
+
+	// DESCENT: children, then grandchildren (respect the toggles).
+	let frontier = roots.map((r) => r.key);
+	for (let step = 0; step < MAX_TREE_DEPTH - 1 && frontier.length > 0; step += 1) {
+		const rows = await fetchByKeysInBatches(
+			frontier,
+			(keyList) => `parent in (${keyList})${descentFilter}`,
+			"ORDER BY created ASC",
+			fetchByJql,
+		);
+		const fresh = rows.filter((r) => !seen.has(r.key));
+		if (fresh.length === 0) break;
+		fresh.forEach((r) => seen.add(r.key));
+		context.push(...fresh);
+		frontier = fresh.map((r) => r.key);
+	}
+
+	// ASCENT: parents up to the Epic (no toggle filter — a context ancestor always shows).
+	let pending: JiraIssueSummary[] = [...roots, ...context];
+	for (let step = 0; step < MAX_TREE_DEPTH - 1; step += 1) {
+		const missing = unseenParentKeys(pending, seen);
+		if (missing.length === 0) break;
+		const rows = await fetchByKeysInBatches(
+			missing,
+			(keyList) => `key in (${keyList})`,
+			"ORDER BY updated DESC",
+			fetchByJql,
+		);
+		const fresh = rows.filter((r) => !seen.has(r.key));
+		if (fresh.length === 0) break;
+		fresh.forEach((r) => seen.add(r.key));
+		context.push(...fresh);
+		pending = fresh;
+	}
+
+	return context;
 }
