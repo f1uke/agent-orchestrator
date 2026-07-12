@@ -159,7 +159,9 @@ export function SessionInspector({
 				{view === "reviews" ? (
 					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
 				) : null}
-				{view === "tests" ? <SmokeTestView sessionId={session.id} worker={session.title} /> : null}
+				{view === "tests" ? (
+					<SmokeTestView sessionId={session.id} worker={session.title} issueId={session.issueId} />
+				) : null}
 				{view === "browser" ? (
 					<BrowserView
 						browserPoppedOut={browserPoppedOut}

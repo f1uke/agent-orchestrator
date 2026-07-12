@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
@@ -70,6 +71,15 @@ type ReportSmokeResponse struct {
 	Summary   string `json:"summary" description:"The composed results summary."`
 }
 
+// PostSmokeToJiraResponse is the body of POST .../smoke-checks/jira.
+type PostSmokeToJiraResponse struct {
+	Key                 string `json:"key" description:"The Jira issue key the results were posted to."`
+	CommentURL          string `json:"commentUrl" description:"Deep link to the created comment (empty if Jira returned no self link)."`
+	AttachmentsUploaded int    `json:"attachmentsUploaded" description:"Number of evidence files uploaded as Jira attachments."`
+	RowsPosted          int    `json:"rowsPosted" description:"Number of run rows (verdict set) posted in the table."`
+	EmbeddedMedia       bool   `json:"embeddedMedia" description:"Whether image evidence embedded inline (false = attachment-link fallback)."`
+}
+
 // SmokeController owns the session-scoped /smoke-checks routes. A nil Svc
 // returns 501, mirroring ReviewsController.
 type SmokeController struct {
@@ -81,6 +91,7 @@ func (c *SmokeController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/smoke-checks", c.list)
 	r.Put("/sessions/{sessionId}/smoke-checks", c.author)
 	r.Post("/sessions/{sessionId}/smoke-checks/report", c.report)
+	r.Post("/sessions/{sessionId}/smoke-checks/jira", c.postJira)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/verdict", c.verdict)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/reset", c.reset)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/evidence", c.uploadEvidence)
@@ -213,6 +224,25 @@ func (c *SmokeController) report(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, ReportSmokeResponse{Delivered: outcome.Delivered, Target: outcome.Target, Summary: outcome.Summary})
 }
 
+func (c *SmokeController) postJira(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/smoke-checks/jira")
+		return
+	}
+	out, err := c.Svc.PostToJira(r.Context(), sessionID(r))
+	if err != nil {
+		writeSmokeJiraError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, PostSmokeToJiraResponse{
+		Key:                 out.Key,
+		CommentURL:          out.CommentURL,
+		AttachmentsUploaded: out.AttachmentsUploaded,
+		RowsPosted:          out.RowsPosted,
+		EmbeddedMedia:       out.EmbeddedMedia,
+	})
+}
+
 // readEvidenceUpload accepts either multipart/form-data (a "file" field, the
 // frontend path) or a raw body with X-Filename/Content-Type headers. cleanup
 // releases any spooled multipart temp files after the handler returns.
@@ -280,4 +310,43 @@ func writeSmokeError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SMOKE_OPERATION_FAILED", "Smoke operation failed", nil)
 	}
+}
+
+// writeSmokeJiraError maps the Post-to-Jira failures. ErrNotLinked gets a distinct
+// code the Tests tab uses to steer the user to link an issue first; the Jira
+// adapter sentinels surface their (actionable) message so a missing/write-scoped
+// token, bad key, or Jira hiccup shows inline rather than crashing the view. It
+// falls back to the shared smoke mapper for ErrInvalid/ErrNotFound.
+func writeSmokeJiraError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, smokesvc.ErrNotLinked):
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_JIRA_NOT_LINKED",
+			"This session isn't linked to a Jira issue. Link one on the Summary tab first, then post results.", nil)
+	case errors.Is(err, jiraadapter.ErrNotFound):
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SMOKE_JIRA_ISSUE_NOT_FOUND",
+			"The linked Jira issue wasn't found or isn't visible to your account.", nil)
+	case errors.Is(err, jiraadapter.ErrBadKey):
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_JIRA_BAD_KEY",
+			"The linked Jira key is invalid.", nil)
+	case errors.Is(err, jiraadapter.ErrBadRequest):
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_JIRA_BAD_REQUEST",
+			smokeJiraMessage(err, "Jira rejected the comment."), nil)
+	case errors.Is(err, jiraadapter.ErrAuthFailed):
+		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SMOKE_JIRA_AUTH_FAILED",
+			smokeJiraMessage(err, "Jira authentication failed — set a write-scoped JIRA_API_TOKEN (or AO_JIRA_TOKEN)."), nil)
+	case errors.Is(err, jiraadapter.ErrUnavailable):
+		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SMOKE_JIRA_UNAVAILABLE",
+			smokeJiraMessage(err, "Couldn't reach Jira."), nil)
+	default:
+		writeSmokeError(w, r, err)
+	}
+}
+
+// smokeJiraMessage surfaces the sentinel-wrapped detail (e.g. Jira's error text)
+// when present, falling back to a generic message.
+func smokeJiraMessage(err error, fallback string) string {
+	if msg := strings.TrimSpace(err.Error()); msg != "" {
+		return msg
+	}
+	return fallback
 }

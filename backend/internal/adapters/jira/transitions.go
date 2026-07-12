@@ -174,8 +174,15 @@ func newJiraRequest(ctx context.Context, cfg restConfig, method, rawURL string, 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cfg.email+":"+cfg.token)))
+	req.Header.Set("Authorization", basicAuth(cfg))
 	return req, nil
+}
+
+// basicAuth is the HTTP Basic Authorization header value for the resolved config
+// (base64 of "email:token"). Shared by the JSON request builder and the
+// attachment upload, which builds its own multipart request.
+func basicAuth(cfg restConfig) string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(cfg.email+":"+cfg.token))
 }
 
 // statusError maps a REST response status onto a sentinel. 2xx → nil. It reads a

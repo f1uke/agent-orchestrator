@@ -258,6 +258,7 @@ var schemaNames = map[string]string{
 	"ControllersSetSmokeVerdictInput":    "SetSmokeVerdictInput",
 	"ControllersSmokeEvidenceResponse":   "SmokeEvidenceResponse",
 	"ControllersReportSmokeResponse":     "ReportSmokeResponse",
+	"ControllersPostSmokeToJiraResponse": "PostSmokeToJiraResponse",
 	// domain smoke entities
 	"DomainSmokeCheck":    "SmokeCheck",
 	"DomainSmokeEvidence": "SmokeEvidence",
@@ -702,6 +703,18 @@ func smokeOperations() []operation {
 				{http.StatusOK, controllers.ReportSmokeResponse{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/jira", id: "postSmokeToJira", tag: "smoke",
+			summary:    "Post a session's smoke-test results to its linked Jira issue as a table comment with evidence attachments",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.PostSmokeToJiraResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
