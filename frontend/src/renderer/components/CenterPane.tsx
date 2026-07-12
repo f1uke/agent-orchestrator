@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type WheelEvent } from "react
 import type { Theme } from "../stores/ui-store";
 import type { TerminalTarget } from "../types/terminal";
 import { isOrchestratorSession, sessionIsActive, type WorkspaceSession } from "../types/workspace";
+import { KillSessionButton } from "./KillSessionButton";
 import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
 import { TerminalPane } from "./TerminalPane";
@@ -161,6 +162,13 @@ export function CenterPane({
 					    (which has its own Restore control). */}
 					{session && target.kind !== "reviewer" && sessionIsActive(session) ? (
 						<RestartSessionButton session={session} />
+					) : null}
+					{/* Kill the worker in place — moved here from the session header as an
+					    icon-only destructive control beside Restart. Worker-only (the
+					    orchestrator has no toolbar Kill) and never on the reviewer terminal
+					    or a terminated session. */}
+					{session && target.kind !== "reviewer" && !isOrchestratorSession(session) && sessionIsActive(session) ? (
+						<KillSessionButton session={session} />
 					) : null}
 				</div>
 			</div>

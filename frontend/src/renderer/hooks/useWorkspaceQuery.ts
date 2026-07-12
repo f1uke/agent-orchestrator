@@ -74,6 +74,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				previewRevision: session.previewRevision,
 				prs: (session.prs ?? []).map(toPullRequestFacts),
 				isTodo: session.isTodo,
+				isTerminated: session.isTerminated,
 				isSuspended: session.isSuspended,
 				keepWarmOnMerge: session.keepWarmOnMerge,
 				idleCloseAt: session.idleCloseAt ?? undefined,

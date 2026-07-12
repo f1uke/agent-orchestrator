@@ -1,10 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
-import { TerminalPane, providerScrollsByKeyboard } from "./TerminalPane";
+import { TerminalEndedStrip, TerminalPane, providerScrollsByKeyboard, terminalEndedMessage } from "./TerminalPane";
 
-const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
+const { navigateMock, terminalStateMock } = vi.hoisted(() => ({
+	navigateMock: vi.fn(),
+	// Mutable so a test can drive the terminal into its "exited" state (which
+	// surfaces the ended-terminal strip) without re-mocking the module.
+	terminalStateMock: { value: "idle" as string },
+}));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@tanstack/react-router")>();
@@ -18,10 +23,14 @@ vi.mock("./XtermTerminal", () => ({
 vi.mock("../hooks/useTerminalSession", () => ({
 	useTerminalSession: () => ({
 		attach: vi.fn(),
-		state: "idle",
+		state: terminalStateMock.value,
 		error: undefined,
 	}),
 }));
+
+beforeEach(() => {
+	terminalStateMock.value = "idle";
+});
 
 const worker = {
 	id: "sess-1",
@@ -118,5 +127,97 @@ describe("providerScrollsByKeyboard", () => {
 
 	it("is false when the provider is unknown", () => {
 		expect(providerScrollsByKeyboard(undefined)).toBe(false);
+	});
+});
+
+const RESTORE_COPY = "Restore the session to attach a live terminal and continue writing.";
+const MERGED_COPY = "This session is done (PR merged). Restore it to attach a live terminal and continue.";
+const NOT_TERMINATED_COPY = "This terminal process ended, but the session is not marked terminated yet.";
+const REVIEWER_COPY =
+	"This reviewer terminal has ended. Re-run review from the summary panel, or switch back to the agent terminal.";
+
+describe("terminalEndedMessage", () => {
+	it("offers a plain restore for a terminated (non-merged) session", () => {
+		expect(terminalEndedMessage({ canRestore: true, status: "terminated", variant: "session" })).toBe(RESTORE_COPY);
+	});
+
+	it("offers Done-specific copy when the session's PR merged", () => {
+		expect(terminalEndedMessage({ canRestore: true, status: "merged", variant: "session" })).toBe(MERGED_COPY);
+	});
+
+	it("shows the not-yet-terminated dead-end only when restore is unavailable", () => {
+		expect(terminalEndedMessage({ canRestore: false, status: "working", variant: "session" })).toBe(
+			NOT_TERMINATED_COPY,
+		);
+	});
+
+	it("always shows the reviewer message on the reviewer terminal", () => {
+		expect(terminalEndedMessage({ canRestore: false, status: "idle", variant: "reviewer" })).toBe(REVIEWER_COPY);
+	});
+});
+
+describe("TerminalEndedStrip", () => {
+	it("shows a Restore button + Done copy for a merged/done session", () => {
+		render(
+			<TerminalEndedStrip canRestore isRestoring={false} onRestore={() => {}} status="merged" variant="session" />,
+		);
+		expect(screen.getByRole("button", { name: "Restore session" })).toBeInTheDocument();
+		expect(screen.getByText(MERGED_COPY)).toBeInTheDocument();
+	});
+
+	it("hides the Restore button and shows the dead-end when restore is unavailable", () => {
+		render(<TerminalEndedStrip canRestore={false} isRestoring={false} onRestore={() => {}} variant="session" />);
+		expect(screen.queryByRole("button", { name: "Restore session" })).not.toBeInTheDocument();
+		expect(screen.getByText(NOT_TERMINATED_COPY)).toBeInTheDocument();
+	});
+});
+
+// The bug: a Done/merged session is `isTerminated` in the store but derives the
+// display status "merged" (not "terminated"), so gating the Restore affordance on
+// status alone hid it. Gating on `isTerminated` restores it for BOTH cases.
+describe("TerminalPane ended-terminal restore gate", () => {
+	function renderExited(session: WorkspaceSession) {
+		terminalStateMock.value = "exited";
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const previousAO = window.ao;
+		window.ao = {} as typeof window.ao;
+		render(
+			<QueryClientProvider client={queryClient}>
+				<TerminalPane daemonReady fontSize={12} session={session} theme="dark" />
+			</QueryClientProvider>,
+		);
+		return () => {
+			window.ao = previousAO;
+		};
+	}
+
+	it("offers Restore on a Done/merged session (status merged, isTerminated true)", () => {
+		const restore = renderExited({ ...worker, status: "merged", isTerminated: true, prs: [] });
+		try {
+			expect(screen.getByRole("button", { name: "Restore session" })).toBeInTheDocument();
+			expect(screen.getByText(MERGED_COPY)).toBeInTheDocument();
+		} finally {
+			restore();
+		}
+	});
+
+	it("offers Restore on a terminated (non-merged) session", () => {
+		const restore = renderExited({ ...worker, status: "terminated", isTerminated: true });
+		try {
+			expect(screen.getByRole("button", { name: "Restore session" })).toBeInTheDocument();
+			expect(screen.getByText(RESTORE_COPY)).toBeInTheDocument();
+		} finally {
+			restore();
+		}
+	});
+
+	it("does not offer Restore when the process exited but the session is not terminated", () => {
+		const restore = renderExited({ ...worker, status: "working", isTerminated: false });
+		try {
+			expect(screen.queryByRole("button", { name: "Restore session" })).not.toBeInTheDocument();
+			expect(screen.getByText(NOT_TERMINATED_COPY)).toBeInTheDocument();
+		} finally {
+			restore();
+		}
 	});
 });

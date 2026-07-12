@@ -293,6 +293,15 @@ export type WorkspaceSession = {
 	/** True for a prepared-but-not-started TODO (status === "todo"). */
 	isTodo?: boolean;
 	/**
+	 * The durable "this session has been terminated" fact from the daemon
+	 * (`is_terminated`), independent of the DERIVED {@link status}. A Done session
+	 * whose PR merged reads status `"merged"` yet is still terminated, so this — not
+	 * the display status — is the correct gate for the "Restore session" affordance
+	 * (it mirrors the backend `Restore` precondition and excludes suspended/keep-warm
+	 * sessions, which are resumed by wake-on-open instead).
+	 */
+	isTerminated?: boolean;
+	/**
 	 * True when the idle sweep tore this session's tmux down to free resources
 	 * while KEEPING it on the board in its current lane (worktree kept on disk).
 	 * Orthogonal to {@link status} — the card stays in its real lane and this only
