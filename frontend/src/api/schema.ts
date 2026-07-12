@@ -1278,6 +1278,7 @@ export interface components {
         JiraIssueSummary: {
             assignee?: string;
             key: string;
+            sprint?: components["schemas"]["JiraSprint"];
             status?: string;
             statusCategory?: string;
             statusColor?: string;

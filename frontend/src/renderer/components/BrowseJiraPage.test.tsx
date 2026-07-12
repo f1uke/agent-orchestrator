@@ -44,6 +44,39 @@ function setSearch(over: Record<string, unknown> = {}) {
 	});
 }
 
+// A richer set spanning two sprints + a no-sprint issue, for the grouping /
+// assignee tests.
+const richData = [
+	{
+		key: "DEMO-1",
+		type: "Story",
+		title: "S one",
+		status: "To Do",
+		statusCategory: "new",
+		assignee: "Alex",
+		sprint: { name: "Sprint 2026-14", state: "active" },
+	},
+	{
+		key: "DEMO-4",
+		type: "Story",
+		title: "S four",
+		status: "To Do",
+		statusCategory: "new",
+		assignee: "Sam",
+		sprint: { name: "Sprint 2026-14", state: "active" },
+	},
+	{
+		key: "DEMO-2",
+		type: "Story",
+		title: "S two",
+		status: "To Do",
+		statusCategory: "new",
+		assignee: "Sam",
+		sprint: { name: "Sprint 2026-15", state: "future" },
+	},
+	{ key: "DEMO-3", type: "Bug", title: "B three", status: "To Do", statusCategory: "new", assignee: "" },
+];
+
 function renderPage() {
 	render(
 		<QueryClientProvider client={new QueryClient()}>
@@ -98,5 +131,58 @@ describe("BrowseJiraPage", () => {
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 		expect(screen.getByText(/set JIRA_API_TOKEN/i)).toBeTruthy();
+	});
+
+	it("groups issues into collapsible sprint sections by default, with counts", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		expect(screen.getByText("Sprint 2026-14")).toBeTruthy();
+		expect(screen.getByText("Sprint 2026-15")).toBeTruthy();
+		expect(screen.getByText("No sprint")).toBeTruthy();
+		expect(screen.getByText(/2 work items/)).toBeTruthy(); // Sprint 2026-14 has two
+		expect(screen.getByText("active")).toBeTruthy(); // active-sprint badge
+
+		// Collapsing a sprint hides its rows but keeps the header.
+		fireEvent.click(screen.getByRole("button", { name: /Sprint 2026-14/ }));
+		expect(screen.queryByText("DEMO-1")).toBeNull();
+		expect(screen.getByText("Sprint 2026-14")).toBeTruthy();
+	});
+
+	it("toggles grouping off to a flat list and remembers it", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.click(screen.getByRole("button", { name: "Group by sprint" }));
+		expect(screen.queryByText("Sprint 2026-14")).toBeNull(); // no section headers
+		expect(screen.getByText("DEMO-1")).toBeTruthy(); // rows still render flat
+		expect(JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!).groupBySprint).toBe(false);
+	});
+
+	it("filters the list by assignee", () => {
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		fireEvent.change(screen.getByLabelText("Filter by assignee"), { target: { value: "Sam" } });
+		expect(screen.getByText("DEMO-4")).toBeTruthy();
+		expect(screen.getByText("DEMO-2")).toBeTruthy();
+		expect(screen.queryByText("DEMO-1")).toBeNull(); // Alex's
+		expect(screen.queryByText("DEMO-3")).toBeNull(); // unassigned
+		expect(JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!).assignee).toBe("Sam");
+	});
+
+	it("restores remembered grouping + assignee on return", () => {
+		window.localStorage.setItem("ao.jira.browsePrefs", JSON.stringify({ groupBySprint: false, assignee: "Alex" }));
+		setSearch({ data: richData });
+		renderPage();
+		fireEvent.click(screen.getByText("picker:none"));
+
+		// Grouping off (no headers) and Alex's filter applied.
+		expect(screen.queryByText("Sprint 2026-14")).toBeNull();
+		expect(screen.getByText("DEMO-1")).toBeTruthy();
+		expect(screen.queryByText("DEMO-4")).toBeNull(); // Sam's, filtered out
 	});
 });

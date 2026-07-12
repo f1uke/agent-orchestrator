@@ -585,7 +585,10 @@ type JiraIssueSummary struct {
 	StatusCategory string `json:"statusCategory,omitempty"`
 	StatusColor    string `json:"statusColor,omitempty"`
 	Assignee       string `json:"assignee,omitempty"`
-	URL            string `json:"url,omitempty"`
+	// Sprint is the row's current/most-relevant sprint, so Browse Jira can group
+	// results by sprint like the Jira board. nil when the issue is in no sprint.
+	Sprint *JiraSprint `json:"sprint,omitempty"`
+	URL    string      `json:"url,omitempty"`
 }
 
 // JiraSearchResponse is the body of GET /jira/search — matching issues for a
