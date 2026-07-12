@@ -17,7 +17,7 @@ const getSession = `-- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
 FROM sessions WHERE id = ?
 `
 
@@ -53,6 +53,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.PRTarget,
 		&i.CreatedBy,
 		&i.IsSuspended,
+		&i.LastOpenedAt,
 	)
 	return i, err
 }
@@ -63,8 +64,8 @@ INSERT INTO sessions (
     activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -94,6 +95,7 @@ type InsertSessionParams struct {
 	PRTarget          string
 	CreatedBy         string
 	IsSuspended       bool
+	LastOpenedAt      sql.NullTime
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -126,6 +128,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.PRTarget,
 		arg.CreatedBy,
 		arg.IsSuspended,
+		arg.LastOpenedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -136,7 +139,7 @@ const listAllSessions = `-- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
 FROM sessions ORDER BY project_id, num
 `
 
@@ -178,6 +181,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.PRTarget,
 			&i.CreatedBy,
 			&i.IsSuspended,
+			&i.LastOpenedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +200,7 @@ const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -238,6 +242,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.PRTarget,
 			&i.CreatedBy,
 			&i.IsSuspended,
+			&i.LastOpenedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -377,7 +382,7 @@ UPDATE sessions SET
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
     preview_url = ?, preview_revision = ?, auto_nudge_comments = ?,
-    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, updated_at = ?
+    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, updated_at = ?
 WHERE id = ?
 `
 
@@ -405,6 +410,7 @@ type UpdateSessionParams struct {
 	PRTarget          string
 	CreatedBy         string
 	IsSuspended       bool
+	LastOpenedAt      sql.NullTime
 	UpdatedAt         time.Time
 	ID                domain.SessionID
 }
@@ -434,6 +440,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.PRTarget,
 		arg.CreatedBy,
 		arg.IsSuspended,
+		arg.LastOpenedAt,
 		arg.UpdatedAt,
 		arg.ID,
 	)

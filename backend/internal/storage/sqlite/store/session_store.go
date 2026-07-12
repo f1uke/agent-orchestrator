@@ -275,6 +275,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		AutoNudgeComments: nullInt64ToBoolPtr(row.AutoNudgeComments),
 		IsTodo:            row.IsTodo,
 		IsSuspended:       row.IsSuspended,
+		LastOpenedAt:      nullTimeToTime(row.LastOpenedAt),
 		BaseBranch:        row.BaseBranch,
 		AutoNameBranch:    row.AutoNameBranch,
 		PRTarget:          row.PRTarget,
@@ -322,6 +323,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		PRTarget:          rec.PRTarget,
 		CreatedBy:         string(rec.CreatedBy),
 		IsSuspended:       rec.IsSuspended,
+		LastOpenedAt:      timeToNullTime(rec.LastOpenedAt),
 		CreatedAt:         rec.CreatedAt,
 		UpdatedAt:         rec.UpdatedAt,
 	}
@@ -354,6 +356,7 @@ func recordToUpdate(rec domain.SessionRecord) gen.UpdateSessionParams {
 		PRTarget:          rec.PRTarget,
 		CreatedBy:         string(rec.CreatedBy),
 		IsSuspended:       rec.IsSuspended,
+		LastOpenedAt:      timeToNullTime(rec.LastOpenedAt),
 		UpdatedAt:         rec.UpdatedAt,
 	}
 }

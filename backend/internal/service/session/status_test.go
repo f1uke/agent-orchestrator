@@ -431,6 +431,34 @@ func TestIdleCloseAt(t *testing.T) {
 		}
 	})
 
+	t.Run("opened after last activity -> LastOpenedAt + TTL", func(t *testing.T) {
+		// Opening a session (POST /wake → TouchIdleClose) stamps LastOpenedAt
+		// without touching LastActivityAt. The idle-close countdown pushes forward
+		// to the later timestamp so a session you are actively viewing is not
+		// suspended out from under you — while the derived status (aged off
+		// LastActivityAt) is left untouched.
+		opened := statusNow.Add(-5 * time.Minute) // later than `last` (-1h)
+		rec := live
+		rec.LastOpenedAt = opened
+		s := &Service{idleCloseTTL: ttl}
+		at := s.idleCloseAt(rec)
+		if at == nil || !at.Equal(opened.Add(ttl)) {
+			t.Fatalf("idleCloseAt = %v, want %v (max of LastActivityAt and LastOpenedAt)", at, opened.Add(ttl))
+		}
+	})
+
+	t.Run("opened before last activity -> LastActivityAt + TTL (max)", func(t *testing.T) {
+		// A stale open never pulls the deadline in: idleReference is the max, so
+		// genuine recent activity still governs.
+		rec := live
+		rec.LastOpenedAt = last.Add(-30 * time.Minute) // older than `last`
+		s := &Service{idleCloseTTL: ttl}
+		at := s.idleCloseAt(rec)
+		if at == nil || !at.Equal(last.Add(ttl)) {
+			t.Fatalf("idleCloseAt = %v, want %v (activity wins when it is newer)", at, last.Add(ttl))
+		}
+	})
+
 	t.Run("no signal yet -> CreatedAt + TTL", func(t *testing.T) {
 		s := &Service{idleCloseTTL: ttl}
 		created := statusNow.Add(-10 * time.Minute)

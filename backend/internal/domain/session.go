@@ -84,6 +84,15 @@ type SessionRecord struct {
 	// session resumes it in place (recreate tmux, clear this flag). Durable fact,
 	// surfaced in the API read model for the paused affordance + countdown.
 	IsSuspended bool `json:"isSuspended,omitempty"`
+	// LastOpenedAt is when the user last OPENED/selected this session in the UI
+	// (the /wake signal). It feeds ONLY the idle-suspend keepalive — idleReference
+	// takes the later of Activity.LastActivityAt and this — so viewing a session
+	// refreshes its 72h idle-suspend TTL WITHOUT bumping Activity.LastActivityAt,
+	// which status derivation ages needs_input/working off. Decoupling the two is
+	// what keeps a mere open from flipping a "Needs you" session back to working
+	// with a restarted countdown. Zero = never opened. Internal durable fact, not
+	// in the API read model — its effect rides the derived IdleCloseAt.
+	LastOpenedAt time.Time `json:"-"`
 	// BaseBranch, AutoNameBranch, PRTarget and CreatedBy are the deferred spec
 	// captured at TODO create-time and replayed verbatim on Start. BaseBranch is
 	// the branch the worktree is created from; AutoNameBranch asks for an AI
