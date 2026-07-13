@@ -268,6 +268,11 @@ func (w *Workspace) Destroy(ctx context.Context, info ports.WorkspaceInfo) error
 	if err != nil {
 		return err
 	}
+	// A `git worktree lock` on this managed path makes remove refuse and prune
+	// skip it, which would surface as a non-dirty "still registered" error and
+	// wedge Kill/Restart. Clear it first so a clean worktree tears down; a dirty
+	// one is still caught by the non-force remove below (ErrWorkspaceDirty).
+	w.unlockWorktreeIfLocked(ctx, repo, path)
 	_, removeErr := w.run(ctx, w.binary, worktreeRemoveArgs(repo, path)...)
 	if _, err := w.run(ctx, w.binary, worktreePruneArgs(repo)...); err != nil {
 		return fmt.Errorf("gitworktree: worktree prune: %w", err)
@@ -320,6 +325,11 @@ func (w *Workspace) ForceDestroy(ctx context.Context, info ports.WorkspaceInfo) 
 	if err != nil {
 		return err
 	}
+	// A `git worktree lock` blocks even --force removal and is skipped by prune,
+	// so the registration would survive teardown (leaving a "missing but locked"
+	// worktree that a later restore cannot re-add). Unlock first so the force
+	// remove and prune below can fully deregister it.
+	w.unlockWorktreeIfLocked(ctx, repo, path)
 	// --force bypasses git's dirty check; errors here are advisory (the path may
 	// already be gone). We proceed to prune regardless.
 	_, _ = w.run(ctx, w.binary, worktreeForceRemoveArgs(repo, path)...)
@@ -827,6 +837,27 @@ func (w *Workspace) listRecords(ctx context.Context, repo string) ([]worktreeRec
 		return nil, fmt.Errorf("gitworktree: parse worktree list: %w", err)
 	}
 	return records, nil
+}
+
+// unlockWorktreeIfLocked clears a `git worktree lock` on a managed worktree so
+// teardown (Destroy/ForceDestroy) can remove and prune it. It only acts when
+// the porcelain listing reports the target as locked, keeping the common
+// unlocked path unchanged, and is best-effort: a listing or unlock failure is
+// left for the removal step to surface. The path is already validated as a
+// managed worktree by the caller, so clearing a stale (e.g. externally-set)
+// lock stays within AO's own worktree domain.
+func (w *Workspace) unlockWorktreeIfLocked(ctx context.Context, repo, path string) {
+	records, err := w.listRecords(ctx, repo)
+	if err != nil {
+		return
+	}
+	rec, ok := findWorktree(records, path)
+	if !ok || !rec.Locked {
+		return
+	}
+	// Best-effort: if unlock fails the subsequent remove/prune still surfaces the
+	// "still registered" error, so there is nothing to swallow silently here.
+	_, _ = w.run(ctx, w.binary, worktreeUnlockArgs(repo, path)...)
 }
 
 func (w *Workspace) repoPath(project domain.ProjectID) (string, error) {

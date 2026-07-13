@@ -39,6 +39,16 @@ func worktreePruneArgs(repo string) []string {
 	return []string{"-C", repo, "worktree", "prune"}
 }
 
+// worktreeUnlockArgs clears a `git worktree lock` so removal/prune can proceed.
+// A locked worktree makes `git worktree remove` refuse ("cannot remove a locked
+// working tree") and `git worktree prune` skip it, so AO teardown must unlock a
+// worktree it owns before tearing it down. External tooling occasionally leaves
+// such a lock on a managed worktree (e.g. the canonical orchestrator worktree),
+// which otherwise wedges every restart.
+func worktreeUnlockArgs(repo, path string) []string {
+	return []string{"-C", repo, "worktree", "unlock", path}
+}
+
 // statusPorcelainArgs probes the worktree at path for uncommitted changes or
 // untracked files — the condition `git worktree remove` (without --force)
 // refuses on — so Destroy can classify a refusal as ports.ErrWorkspaceDirty.
