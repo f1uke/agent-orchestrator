@@ -41,6 +41,11 @@ type Provider interface {
 	RepoPRListGuard(ctx context.Context, repo ports.SCMRepo, etag string) (ports.SCMGuardResult, error)
 	ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([]ports.SCMPRObservation, error)
 	CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, headSHA, etag string) (ports.SCMGuardResult, error)
+	// BaseBranchGuard reports whether a PR base branch's head has advanced since
+	// the caller's ETag. It lets the observer detect a mergeable->conflicting
+	// transition caused by the base moving (a sibling PR merging into the shared
+	// base) even though the affected PR's own head SHA is unchanged.
+	BaseBranchGuard(ctx context.Context, repo ports.SCMRepo, branch, etag string) (ports.SCMGuardResult, error)
 	FetchPullRequests(ctx context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error)
 	FetchFailedCheckLogTail(ctx context.Context, repo ports.SCMRepo, check ports.SCMCheckObservation) (string, error)
 	FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (ports.SCMReviewObservation, error)
@@ -95,6 +100,10 @@ type ObserverCache struct {
 	RepoPRListETag map[string]string
 	// CommitChecksETag maps repo+commit keys to the last check-runs ETag.
 	CommitChecksETag map[string]string
+	// BaseBranchETag maps repo+base-branch keys to the last base-branch-head ETag.
+	// It gates re-observing a PR whose base branch advanced (a sibling merged into
+	// the shared base) so a mergeable->conflicting recompute is not missed.
+	BaseBranchETag map[string]string
 	// LastReviewPollAt maps PR keys to the last review-thread fetch timestamp.
 	LastReviewPollAt map[string]time.Time
 	// ReviewRefreshFailed marks PRs whose review-thread refresh failed; the
@@ -104,6 +113,8 @@ type ObserverCache struct {
 	repoOrder []string
 	// commitOrder tracks FIFO eviction order for CommitChecksETag.
 	commitOrder []string
+	// baseBranchOrder tracks FIFO eviction order for BaseBranchETag.
+	baseBranchOrder []string
 	// lastReviewPollOrder tracks FIFO eviction order for LastReviewPollAt.
 	lastReviewPollOrder []string
 	// reviewFailedOrder tracks FIFO eviction order for ReviewRefreshFailed.
@@ -119,6 +130,7 @@ func newCache(maxEntries int) ObserverCache {
 	return ObserverCache{
 		RepoPRListETag:      map[string]string{},
 		CommitChecksETag:    map[string]string{},
+		BaseBranchETag:      map[string]string{},
 		LastReviewPollAt:    map[string]time.Time{},
 		ReviewRefreshFailed: map[string]bool{},
 		max:                 maxEntries,
@@ -286,7 +298,8 @@ func (o *Observer) Poll(ctx context.Context) error {
 		return err
 	}
 
-	selection := o.selectRefreshCandidates(ctx, subjects, repoGuards, markRepoRefreshFailed)
+	baseGuards := o.guardBaseBranches(ctx, subjects)
+	selection := o.selectRefreshCandidates(ctx, subjects, repoGuards, baseGuards, markRepoRefreshFailed)
 	observations := map[string]ports.SCMObservation{}
 	prRefreshOK := map[string]bool{}
 	for key := range selection.candidateKeys {
@@ -426,6 +439,39 @@ func (o *Observer) Poll(ctx context.Context) error {
 		}
 		if etag := repoGuards[key].result.ETag; etag != "" {
 			o.cacheSetString(o.Cache.RepoPRListETag, &o.Cache.repoOrder, key, etag)
+		}
+	}
+	// Advance each base-branch guard ETag only when EVERY open PR on that base
+	// refreshed OK this round. A base move forces all its PRs to be re-read; if any
+	// of those reads failed, keep presenting the stale base ETag so the guard fires
+	// again next poll and retries — otherwise a failed base-moved re-read would
+	// silently freeze the PR back at "mergeable" (the very bug this fixes), since the
+	// conflicting mergeability was never stored for #100's conflicting trigger to
+	// take over. Mirrors the repo-list ETag discipline.
+	baseRefreshOK := map[string]bool{}
+	for key, subj := range selection.subjectsByPR {
+		branch := strings.TrimSpace(subj.known.TargetBranch)
+		if branch == "" {
+			continue
+		}
+		bkey := baseBranchKey(subj.repo, branch)
+		if _, tracked := baseGuards[bkey]; !tracked {
+			continue
+		}
+		if _, seen := baseRefreshOK[bkey]; !seen {
+			baseRefreshOK[bkey] = true
+		}
+		if !prRefreshOK[key] {
+			baseRefreshOK[bkey] = false
+		}
+	}
+	for bkey, ok := range baseRefreshOK {
+		if !ok {
+			continue
+		}
+		g := baseGuards[bkey]
+		if g.err == nil && g.result.ETag != "" {
+			o.cacheSetString(o.Cache.BaseBranchETag, &o.Cache.baseBranchOrder, bkey, g.result.ETag)
 		}
 	}
 	return nil
@@ -701,6 +747,41 @@ func (o *Observer) guardRepos(ctx context.Context, sessionRepos []sessionRepo) m
 	return out
 }
 
+// guardBaseBranches probes the head of every distinct base branch the open
+// tracked PRs target, via the cheap per-branch ETag guard. A change means some PR
+// on that base may have flipped mergeable->conflicting (a sibling merged into the
+// shared base) even though its own head SHA is unchanged; selectRefreshCandidates
+// uses these results to force those PRs to be re-read. Keyed by baseBranchKey.
+func (o *Observer) guardBaseBranches(ctx context.Context, subjects map[string]*subject) map[string]repoGuardState {
+	type repoBranch struct {
+		repo   ports.SCMRepo
+		branch string
+	}
+	bases := map[string]repoBranch{}
+	for _, s := range subjects {
+		if !s.hasPR || s.known.Number <= 0 {
+			continue
+		}
+		branch := strings.TrimSpace(s.known.TargetBranch)
+		if branch == "" {
+			continue
+		}
+		bases[baseBranchKey(s.repo, branch)] = repoBranch{repo: s.repo, branch: branch}
+	}
+	out := map[string]repoGuardState{}
+	for bkey, b := range bases {
+		prev, had := o.Cache.BaseBranchETag[bkey]
+		res, err := o.provider.BaseBranchGuard(ctx, b.repo, b.branch, prev)
+		if err != nil {
+			o.logger.Error("scm observer: base-branch guard failed", "repo", repoFullName(b.repo), "branch", b.branch, "err", err)
+			out[bkey] = repoGuardState{hadETag: had, err: err}
+			continue
+		}
+		out[bkey] = repoGuardState{result: res, hadETag: had}
+	}
+	return out
+}
+
 func pendingRepoRefreshes(guards map[string]repoGuardState) map[string]bool {
 	out := map[string]bool{}
 	for key, g := range guards {
@@ -852,7 +933,7 @@ func sessionBranchPrefixes(branch string) []string {
 	return prefixes
 }
 
-func (o *Observer) selectRefreshCandidates(ctx context.Context, subjects map[string]*subject, guards map[string]repoGuardState, markRepoFailed func(ports.SCMRepo)) refreshSelection {
+func (o *Observer) selectRefreshCandidates(ctx context.Context, subjects map[string]*subject, guards, baseGuards map[string]repoGuardState, markRepoFailed func(ports.SCMRepo)) refreshSelection {
 	selection := refreshSelection{
 		subjectsByPR:  map[string]*subject{},
 		commitETags:   map[string]pendingCacheString{},
@@ -910,6 +991,22 @@ func (o *Observer) selectRefreshCandidates(ctx context.Context, subjects map[str
 		// only for the (rare) conflicting MRs, then quiesces to the ETag fast-path the
 		// moment mergeability settles to a terminal state (mergeable/blocked).
 		if s.known.Mergeability == domain.MergeConflicting {
+			candidate = true
+		}
+		// Base-moved fix (board: "pr mergeable recheck on base move"): the MIRROR of
+		// the conflicting case above. A sibling PR merging into the shared base branch
+		// makes the provider recompute THIS PR mergeable->conflicting, but the PR's own
+		// head SHA is unchanged, so RepoPRListGuard and CommitChecksGuard both 304, CI
+		// is terminal, and stored mergeability is still "mergeable" — nothing above
+		// forces a re-read, so the fresh conflicting mergeability is never observed and
+		// the merge-conflict rebase nudge never fires. When the base branch head has
+		// advanced (the per-branch guard reports a new ETag) re-read the PR so the
+		// recomputed mergeability reaches lifecycle. Self-limiting: it forces one detail
+		// fetch on the tick the base moves, then quiesces to the ETag fast-path (the base
+		// guard 304s; if the read turned up a conflict, the conflicting trigger above
+		// takes over). Requiring a non-empty ETag keeps providers without branch-head
+		// ETag support on the existing fast-path rather than polling every PR forever.
+		if bg, ok := baseGuards[baseBranchKey(s.repo, strings.TrimSpace(s.known.TargetBranch))]; ok && bg.err == nil && bg.result.ETag != "" && !bg.result.NotModified {
 			candidate = true
 		}
 		if candidate {
@@ -1437,6 +1534,12 @@ func prKey(repo ports.SCMRepo, number int) string {
 }
 
 func commitKey(repo ports.SCMRepo, sha string) string { return prKey(repo, 0) + "@" + sha }
+
+// baseBranchKey identifies a repo's base branch for the base-branch-head ETag
+// cache. The "\x00base\x00" separator cannot collide with a branch name.
+func baseBranchKey(repo ports.SCMRepo, branch string) string {
+	return prKey(repo, 0) + "\x00base\x00" + branch
+}
 
 func repoFullName(repo ports.SCMRepo) string {
 	if repo.Repo != "" {

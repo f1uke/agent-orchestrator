@@ -87,6 +87,15 @@ func (p *Provider) CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, he
 	return child.CommitChecksGuard(ctx, repo, headSHA, etag)
 }
 
+// BaseBranchGuard routes to the child provider named by repo.Provider.
+func (p *Provider) BaseBranchGuard(ctx context.Context, repo ports.SCMRepo, branch, etag string) (ports.SCMGuardResult, error) {
+	child, err := p.lookup(repo.Provider)
+	if err != nil {
+		return ports.SCMGuardResult{}, err
+	}
+	return child.BaseBranchGuard(ctx, repo, branch, etag)
+}
+
 // FetchPullRequests splits the batch by ref.Repo.Provider and fetches each
 // provider's group separately. The observer's batches are built by ranging a
 // map of all tracked PRs across every project (github and gitlab interleaved,
