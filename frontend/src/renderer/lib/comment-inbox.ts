@@ -77,11 +77,54 @@ export const TOKEN_COLORS = {
 
 // Go/Swift/TS keyword set the highlighter recognizes — verbatim from the design.
 const CODE_KEYWORDS = new Set([
-	"func", "return", "if", "else", "switch", "case", "default", "struct", "let", "var", "some", "for",
-	"range", "nil", "true", "false", "bool", "string", "int", "int64", "uint", "byte", "error", "defer",
-	"package", "import", "type", "map", "interface", "chan", "go", "const", "self", "guard", "while", "in",
-	"enum", "protocol", "extension", "class", "static", "private", "public", "override", "throws", "try",
-	"async", "await",
+	"func",
+	"return",
+	"if",
+	"else",
+	"switch",
+	"case",
+	"default",
+	"struct",
+	"let",
+	"var",
+	"some",
+	"for",
+	"range",
+	"nil",
+	"true",
+	"false",
+	"bool",
+	"string",
+	"int",
+	"int64",
+	"uint",
+	"byte",
+	"error",
+	"defer",
+	"package",
+	"import",
+	"type",
+	"map",
+	"interface",
+	"chan",
+	"go",
+	"const",
+	"self",
+	"guard",
+	"while",
+	"in",
+	"enum",
+	"protocol",
+	"extension",
+	"class",
+	"static",
+	"private",
+	"public",
+	"override",
+	"throws",
+	"try",
+	"async",
+	"await",
 ]);
 
 export type CodeToken = { text: string; color: string };
@@ -192,6 +235,30 @@ export function genPrompt(path: string, line: number, body: string): string {
 	return `A reviewer left this unresolved comment on ${path}:${line}\n\n> ${body}\n\nPlease address it: make the change, keep it minimal and consistent with the surrounding code, then reply on the thread summarizing what you did.`;
 }
 
+/** One unresolved review comment fed into {@link batchPrompt}. */
+export interface BatchPromptItem {
+	path: string;
+	line: number;
+	body: string;
+}
+
+/**
+ * The worker prompt for "one task, all comments". A single comment reuses the
+ * natural singular phrasing of {@link genPrompt}; multiple comments state the
+ * shared instruction ONCE, then list each comment compactly by `path:line` with
+ * its quoted body so the worker can locate and reply on the right thread - no
+ * per-comment boilerplate repetition.
+ */
+export function batchPrompt(items: BatchPromptItem[]): string {
+	if (items.length === 1) {
+		const it = items[0];
+		return genPrompt(it.path, it.line, it.body);
+	}
+	const lead = `There are ${items.length} unresolved review comments to address. For each: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did.`;
+	const list = items.map((it, i) => `${i + 1}. ${it.path}:${it.line}\n   > ${it.body}`).join("\n");
+	return `${lead}\n\n${list}`;
+}
+
 /** Avatar initials: first letters of the first two word-parts, else first two chars. */
 export function initialsFor(name: string): string {
 	const n = (name ?? "").trim();
@@ -257,5 +324,5 @@ export function relativeTime(iso: string, now: number): string {
 /** Last path segment (filename) — used in "Sent to worker · {file}" toasts. */
 export function baseName(path: string): string {
 	const parts = (path ?? "").split("/").filter(Boolean);
-	return parts.length ? parts[parts.length - 1] : path ?? "";
+	return parts.length ? parts[parts.length - 1] : (path ?? "");
 }

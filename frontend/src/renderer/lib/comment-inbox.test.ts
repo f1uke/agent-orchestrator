@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	baseName,
+	batchPrompt,
 	genPrompt,
 	hueFor,
 	initialsFor,
@@ -69,6 +70,32 @@ describe("genPrompt", () => {
 		expect(p).toContain("A reviewer left this unresolved comment on a/b.go:42");
 		expect(p).toContain("> fix this");
 		expect(p).toContain("reply on the thread summarizing what you did.");
+	});
+});
+
+describe("batchPrompt", () => {
+	it("states the shared instruction once and lists each comment compactly", () => {
+		const p = batchPrompt([
+			{ path: "a/b.go", line: 55, body: "comment one" },
+			{ path: "a/b.go", line: 68, body: "comment two" },
+			{ path: "c/d.ts", line: 72, body: "comment three" },
+		]);
+		// the "make the change … reply on that thread" instruction appears exactly once
+		expect(p.match(/make the change/g)).toHaveLength(1);
+		expect(p.match(/reply on that thread/g)).toHaveLength(1);
+		expect(p).toContain("There are 3 unresolved review comments to address.");
+		// each comment carries its file:line and quoted body
+		expect(p).toContain("1. a/b.go:55\n   > comment one");
+		expect(p).toContain("2. a/b.go:68\n   > comment two");
+		expect(p).toContain("3. c/d.ts:72\n   > comment three");
+	});
+
+	it("keeps the natural singular phrasing for a single comment", () => {
+		const single = batchPrompt([{ path: "a/b.go", line: 42, body: "fix this" }]);
+		expect(single).toBe(genPrompt("a/b.go", 42, "fix this"));
+		// no numbered list forced onto one comment
+		expect(single).not.toContain("1.");
+		expect(single).not.toContain("There are 1 unresolved");
 	});
 });
 
