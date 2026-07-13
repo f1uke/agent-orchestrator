@@ -572,7 +572,7 @@ func TestPRObservation_AutoNudgeOverrideOnNudgesOnUnresolvedComment(t *testing.T
 	rec.AutoNudgeComments = &on
 	st.sessions["mer-1"] = rec
 
-	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}}}
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{{ID: "1", Author: "alice", File: "handler.go", Line: 75, Body: "fix this"}}}
 	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
 		t.Fatal(err)
 	}
@@ -581,6 +581,11 @@ func TestPRObservation_AutoNudgeOverrideOnNudgesOnUnresolvedComment(t *testing.T
 	}
 	if !strings.Contains(msg.msgs[0], "fix this") {
 		t.Fatalf("nudge missing comment body: %q", msg.msgs[0])
+	}
+	// The auto-send nudge must tell the worker WHICH file:line to fix - the bug
+	// this closes for the auto-send path.
+	if !strings.Contains(msg.msgs[0], "handler.go:75") {
+		t.Fatalf("nudge missing file:line: %q", msg.msgs[0])
 	}
 }
 
