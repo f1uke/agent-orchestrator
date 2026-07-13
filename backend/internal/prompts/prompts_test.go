@@ -98,6 +98,26 @@ func TestOrchestratorDefault_DocumentsTodoFlag(t *testing.T) {
 	}
 }
 
+// TestOrchestratorDefault_CuratesIndexWithPruneOnAdd: the orchestrator base must
+// teach the dispatcher to keep the knowledge INDEX.md a small HOT map of one-line
+// entries and prune merged+installed entries to ARCHIVE-INDEX.md whenever it adds
+// one (prune-on-add), pointing at the retention protocol in the INDEX.md header
+// rather than restating it. Without this the index re-bloats every session.
+func TestOrchestratorDefault_CuratesIndexWithPruneOnAdd(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"small HOT map",          // keep the index lean
+		"prune-on-add",           // the retention discipline is named
+		"`ARCHIVE-INDEX.md`",     // where pruned entries go
+		"retention protocol",     // point at the protocol rather than restate it
+		"`INDEX.md`" + " header", // the protocol's home is the INDEX header
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing INDEX-retention guidance %q:\n%s", want, base)
+		}
+	}
+}
+
 // TestOrchestratorDefault_RefersToWorkByBoardName: the orchestrator base must
 // tell the dispatcher to name worker sessions and their PRs by the human-readable
 // board label when talking to the human, keeping the internal session id / PR
