@@ -1653,6 +1653,8 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 		"`ao spawn --help`",
 		"Add `--todo` to stage the worker as a TODO", // deferred-TODO staging is documented
 		"queue, stage, or hold a task",               // and its trigger
+		"small HOT map",                              // INDEX retention: keep the index lean
+		"prune-on-add",                               // INDEX retention: prune merged+installed entries
 		"`ao send`",
 		"`ao --help`",
 		"avoid doing implementation yourself unless it is necessary",
