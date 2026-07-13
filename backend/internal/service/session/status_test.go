@@ -206,6 +206,60 @@ func TestApprovalRuleGatesReadyToMerge(t *testing.T) {
 	}
 }
 
+// TestEnabledApprovalRuleGatesApprovedWhenGitLabHasNoRuleOfItsOwn is the
+// approval-rule-aware derivation for the nter-ios-app !3028 shape (board: "gl
+// mergeable stale and false nudge", defect 3). GitLab's own approval state has
+// ZERO rules (approvals_required=0, approved_by=[]) so its raw `approved` flag is
+// trivially true — but the project's AO approval rule is ENABLED with threshold 2.
+// The rule applies precisely because GitLab has no rule of its own
+// (ApprovalRuleConfigured=false), so 0 approvals < 2 must NOT surface as Approved
+// or Ready to merge. This is the single source of truth every approval surface
+// (board, Summary, readiness strip) derives from; it must never promote to
+// StatusApproved/StatusMergeable until real approvals reach the threshold.
+func TestEnabledApprovalRuleGatesApprovedWhenGitLabHasNoRuleOfItsOwn(t *testing.T) {
+	rec := statusRec(domain.ActivityIdle, false)
+	rule := domain.ApprovalRule{Enabled: true, Threshold: 2}
+	tests := []struct {
+		name string
+		pr   domain.PRFacts
+		want domain.SessionStatus
+	}{
+		{
+			// The exact !3028 state once mergeability un-freezes: mergeable, no SCM
+			// rule, zero approvals, AO rule 2. Not approved, not ready.
+			"no-scm-rule-zero-approvals-mergeable-not-ready",
+			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: false, ApprovalsCount: 0, Review: domain.ReviewNone},
+			domain.StatusPROpen,
+		},
+		{
+			// One approval is still short of the threshold: still not approved.
+			"no-scm-rule-one-approval-below-threshold-not-ready",
+			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: false, ApprovalsCount: 1, Review: domain.ReviewNone},
+			domain.StatusPROpen,
+		},
+		{
+			// Threshold met by real approvals: promoted to Ready to merge.
+			"no-scm-rule-threshold-met-ready",
+			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: false, ApprovalsCount: 2, Review: domain.ReviewNone},
+			domain.StatusMergeable,
+		},
+		{
+			// Threshold met but not yet mergeable: surfaced as Approved (the count
+			// gate), still honest that it is not mergeable yet.
+			"no-scm-rule-threshold-met-not-mergeable-approved",
+			domain.PRFacts{Mergeability: domain.MergeUnknown, ApprovalRuleConfigured: false, ApprovalsCount: 2, Review: domain.ReviewNone},
+			domain.StatusApproved,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deriveStatus(rec, statusPR(tt.pr), statusNow, true, rule); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A session brought back from a terminal state via Reopen (restore) is marked
 // reactivated. It must return to the board — surfaced as needs_input (the "Needs
 // you" zone) — instead of staying pinned to Done by a previously-merged PR, until

@@ -229,7 +229,13 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		}
 		nudges = append(nudges, pendingNudge{key: "review:" + o.URL, sig: sig, msg: msg, maxAttempts: reviewMaxNudge})
 	}
-	if o.Mergeability == domain.MergeConflicting {
+	// Suppress the merge-conflict nudge when the mergeability is stale — preserved
+	// from the local DB row on a review-only refresh or a failed metadata fetch —
+	// rather than a fresh provider read. A frozen "conflicting" value may already be
+	// resolved server-side; nudging the worker to rebase an already-clean branch
+	// drags it into needless, potentially destructive re-rebasing. A REAL current
+	// conflict is always freshly fetched (MergeabilityStale=false) and still nudges.
+	if o.Mergeability == domain.MergeConflicting && !o.MergeabilityStale {
 		// Only the bottom of a stack is eligible for the rebase nudge. A PR
 		// stacked on an open parent is expected to report conflicts against its
 		// parent branch until the parent merges and it retargets, so nudging the
@@ -454,18 +460,19 @@ func hasUnresolvedSCMComments(threads []ports.SCMReviewThreadObservation) bool {
 
 func scmToPRObservation(o ports.SCMObservation) ports.PRObservation {
 	pr := ports.PRObservation{
-		Fetched:      o.Fetched,
-		URL:          firstSCMNonEmpty(o.PR.URL, o.PR.HTMLURL),
-		Number:       o.PR.Number,
-		Title:        o.PR.Title,
-		SourceBranch: o.PR.SourceBranch,
-		TargetBranch: o.PR.TargetBranch,
-		Draft:        o.PR.Draft,
-		Merged:       o.PR.Merged,
-		Closed:       o.PR.Closed,
-		CI:           domain.CIState(o.CI.Summary),
-		Review:       domain.ReviewDecision(o.Review.Decision),
-		Mergeability: domain.Mergeability(o.Mergeability.State),
+		Fetched:           o.Fetched,
+		URL:               firstSCMNonEmpty(o.PR.URL, o.PR.HTMLURL),
+		Number:            o.PR.Number,
+		Title:             o.PR.Title,
+		SourceBranch:      o.PR.SourceBranch,
+		TargetBranch:      o.PR.TargetBranch,
+		Draft:             o.PR.Draft,
+		Merged:            o.PR.Merged,
+		Closed:            o.PR.Closed,
+		CI:                domain.CIState(o.CI.Summary),
+		Review:            domain.ReviewDecision(o.Review.Decision),
+		Mergeability:      domain.Mergeability(o.Mergeability.State),
+		MergeabilityStale: o.MetadataStale,
 	}
 	if pr.CI == "" {
 		pr.CI = domain.CIUnknown

@@ -33,8 +33,15 @@ type PRObservation struct {
 	CI           domain.CIState
 	Review       domain.ReviewDecision
 	Mergeability domain.Mergeability
-	Checks       []PRCheckObservation
-	Comments     []PRCommentObservation
+	// MergeabilityStale is true when Mergeability was preserved from the local DB
+	// row rather than freshly fetched from the provider this cycle (a review-only
+	// refresh, or a metadata fetch that failed). Lifecycle must not raise a
+	// merge-conflict nudge from a stale mergeability value: the stored conflict may
+	// already be resolved server-side, and nudging a worker to rebase an
+	// already-clean branch drags it into needless, potentially destructive work.
+	MergeabilityStale bool
+	Checks            []PRCheckObservation
+	Comments          []PRCommentObservation
 }
 
 // PRCheckObservation is one SCM check result on the observed PR.

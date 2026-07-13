@@ -787,6 +787,24 @@ func TestPRObservation_MergeConflictNudgesAgent(t *testing.T) {
 	}
 }
 
+// A merge-conflict nudge must never fire from a STALE mergeability value. When
+// the observer re-delivers a preserved-local observation (a review-only refresh,
+// or a metadata fetch failure) it carries MergeabilityStale=true; the stored
+// "conflicting" may already be resolved server-side. Nudging the worker to
+// rebase an already-clean branch drags it into needless, potentially
+// destructive re-rebasing, so a stale conflicting observation is suppressed.
+func TestPRObservation_StaleMergeConflictDoesNotNudge(t *testing.T) {
+	m, st, msg := newManager()
+	st.sessions["mer-1"] = working("mer-1")
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeConflicting, MergeabilityStale: true}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("stale merge-conflict observation must not nudge, got %v", msg.msgs)
+	}
+}
+
 func TestPRObservation_NudgeIncludesPRIdentity(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
