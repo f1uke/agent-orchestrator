@@ -117,6 +117,7 @@ beforeEach(() => {
 					session: {
 						id: "s1",
 						autoNudgeComments: null,
+						autoResolveOnReply: null,
 						prs: [
 							{
 								url: PR_URL,
@@ -197,6 +198,18 @@ describe("ReviewsView (merged reviews + comments)", () => {
 		const [path, opts] = putMock.mock.calls[0];
 		expect(path).toBe("/api/v1/sessions/{sessionId}/auto-nudge");
 		expect(opts.body).toEqual({ override: true });
+	});
+
+	it("shows the auto-resolve switch (default off) and toggles it via PUT", async () => {
+		renderView();
+		const sw = await screen.findByRole("switch", { name: /auto-resolve threads when we reply/i });
+		expect(sw).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(sw);
+		await waitFor(() =>
+			expect(putMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/auto-resolve")).toBe(true),
+		);
+		const call = putMock.mock.calls.find(([p]) => p === "/api/v1/sessions/{sessionId}/auto-resolve");
+		expect(call?.[1].body).toEqual({ override: true });
 	});
 
 	it("resolve posts comment-resolve for the thread", async () => {

@@ -70,6 +70,13 @@ type SessionRecord struct {
 	// global default (autonudge settings); non-nil = explicit on/off. Exposed in
 	// the API read model so the Comments-tab switch can show/set it.
 	AutoNudgeComments *bool `json:"autoNudgeComments"`
+	// AutoResolveOnReply gates, per session, whether the SCM observer auto-resolves
+	// a review thread once OUR side (the PR author / token user) posts a new reply
+	// on it while it is still unresolved. nil/false = OFF (the default: resolving is
+	// left to the reviewer); true = ON. Exposed in the API read model so the
+	// Reviews-tab switch can show/set it. Unlike AutoNudgeComments there is no global
+	// default store — nil is simply OFF.
+	AutoResolveOnReply *bool `json:"autoResolveOnReply"`
 	// IsTodo marks a session PREPARED BUT NOT STARTED: the board's TODO lane.
 	// No branch/worktree/tmux exists yet — only the spec below is persisted.
 	// Start materializes the row in place (clearing this flag in MarkSpawned),

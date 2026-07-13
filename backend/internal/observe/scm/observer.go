@@ -60,6 +60,10 @@ type Store interface {
 	ListWorkspaceRepos(ctx context.Context, projectID string) ([]domain.WorkspaceRepoRecord, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
 	ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error)
+	// ListPRComments returns the PR's previously persisted review comments. The
+	// auto-resolve pass reads them to tell a fresh self reply (a comment id not yet
+	// stored) apart from one already seen on an earlier poll.
+	ListPRComments(ctx context.Context, prURL string) ([]domain.PullRequestComment, error)
 	WriteSCMObservation(ctx context.Context, pr domain.PullRequest, checks []domain.PullRequestCheck, reviews []domain.PullRequestReview, threads []domain.PullRequestReviewThread, comments []domain.PullRequestComment, reviewMode ports.ReviewWriteMode) error
 }
 
@@ -1119,6 +1123,10 @@ func (o *Observer) refreshReviews(ctx context.Context, subjects map[string]*subj
 			}
 			continue
 		}
+		// Auto-resolve threads our side just replied to, when the session opted in.
+		// Runs off the freshly fetched threads, before persistence; a no-op (zero
+		// extra work) when the per-session gate is off. Never blocks/aborts the poll.
+		o.autoResolveRepliedThreads(ctx, s, review.Threads)
 		if !hasObs {
 			checks, err := o.store.ListChecks(ctx, s.known.URL)
 			if err != nil {

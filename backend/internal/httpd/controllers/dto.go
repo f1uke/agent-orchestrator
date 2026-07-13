@@ -301,6 +301,14 @@ type SetAutoNudgeRequest struct {
 	Override *bool `json:"override"`
 }
 
+// SetAutoResolveRequest is the body of PUT
+// /api/v1/sessions/{sessionId}/auto-resolve. Override is a tri-state: true/false
+// set the per-session gate explicitly; null clears it (OFF — there is no global
+// auto-resolve default to inherit).
+type SetAutoResolveRequest struct {
+	Override *bool `json:"override"`
+}
+
 // SetSessionKeepWarmRequest is the body of PUT
 // /api/v1/sessions/{sessionId}/keep-warm: enable/disable
 // suspend-in-place-on-merge for a worker.

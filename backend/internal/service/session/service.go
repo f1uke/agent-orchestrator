@@ -30,6 +30,7 @@ type Store interface {
 	RenameSession(ctx context.Context, id domain.SessionID, displayName string, updatedAt time.Time) (bool, error)
 	SetSessionPreviewURL(ctx context.Context, id domain.SessionID, previewURL string, updatedAt time.Time) (bool, error)
 	SetSessionAutoNudge(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
+	SetSessionAutoResolve(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
 	SetSessionKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error)
 	SetSessionIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
@@ -603,6 +604,20 @@ func (s *Service) SetAutoNudge(ctx context.Context, id domain.SessionID, overrid
 	updated, err := s.store.SetSessionAutoNudge(ctx, id, override, time.Now().UTC())
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("set auto-nudge %s: %w", id, err)
+	}
+	if !updated {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	return s.Get(ctx, id)
+}
+
+// SetAutoResolve sets (or clears, when override is nil) the per-session gate for
+// auto-resolving a review thread once our side replies on it, then returns the
+// refreshed read model. A nil override means OFF (there is no global default).
+func (s *Service) SetAutoResolve(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error) {
+	updated, err := s.store.SetSessionAutoResolve(ctx, id, override, time.Now().UTC())
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("set auto-resolve %s: %w", id, err)
 	}
 	if !updated {
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
