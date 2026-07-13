@@ -27,6 +27,8 @@ export const PALETTE = {
 	borderMenu: "#2a2a30",
 	divider: "#141417",
 	dividerCard: "#151518",
+	// vertical thread line linking consecutive comment avatars within a thread
+	connector: "#26262c",
 	borderBatch: "#24242a",
 	borderToast: "#33333a",
 	// text
