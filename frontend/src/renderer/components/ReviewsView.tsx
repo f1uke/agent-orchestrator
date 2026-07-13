@@ -16,7 +16,7 @@ import {
 	accentMix,
 	avatarBg,
 	baseName,
-	genPrompt,
+	batchPrompt,
 	initialsFor,
 	originOf,
 	providerBadge,
@@ -236,14 +236,11 @@ export function ReviewsView({
 		showToast(`Fanned out ${selectedIds.length} worker tasks`);
 	};
 	const batchOneTask = () => {
-		const message = selectedIds
-			.map((id) => {
-				const t = byId.get(id)?.thread;
-				const first = t?.comments[0];
-				return t ? genPrompt(t.path, t.line, first?.body ?? "") : "";
-			})
-			.filter(Boolean)
-			.join("\n\n---\n\n");
+		const items = selectedIds
+			.map((id) => byId.get(id)?.thread)
+			.filter((t): t is Thread => Boolean(t))
+			.map((t) => ({ path: t.path, line: t.line, body: t.comments[0]?.body ?? "" }));
+		const message = items.length ? batchPrompt(items) : "";
 		if (message) send.mutate(message);
 		showToast(`${selectedIds.length} comments → 1 worker task`);
 	};
