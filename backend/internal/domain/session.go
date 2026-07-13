@@ -113,8 +113,19 @@ type SessionRecord struct {
 	PRTarget       string          `json:"prTarget,omitempty"`
 	CreatedBy      SessionID       `json:"createdBy,omitempty"`
 	Metadata       SessionMetadata `json:"-"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
+	// TokenUsage holds the per-session token totals summed from the harness
+	// transcript (claude-code only; all-zero for agents without a parseable
+	// transcript). Durable measured facts; the raw + cost-weighted totals and the
+	// runaway flag are DERIVED at read time (see the wire mapping), never stored.
+	// json:"-" — exposed via the curated tokenUsage wire object, not raw on the
+	// embedded record. Written only by the dedicated token-usage setter, so the
+	// full-row update path never clobbers it.
+	TokenUsage TokenUsage `json:"-"`
+	// TokensUpdatedAt is when TokenUsage was last (re)parsed from the transcript.
+	// Zero = never parsed (no telemetry available → no chip). Internal durable fact.
+	TokensUpdatedAt time.Time `json:"-"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord

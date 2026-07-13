@@ -17,7 +17,8 @@ const getSession = `-- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at
 FROM sessions WHERE id = ?
 `
 
@@ -55,6 +56,12 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.IsSuspended,
 		&i.LastOpenedAt,
 		&i.KeepWarmOnMerge,
+		&i.TokenInput,
+		&i.TokenCacheCreation,
+		&i.TokenCacheRead,
+		&i.TokenOutput,
+		&i.TokenTurns,
+		&i.TokensUpdatedAt,
 	)
 	return i, err
 }
@@ -142,7 +149,8 @@ const listAllSessions = `-- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at
 FROM sessions ORDER BY project_id, num
 `
 
@@ -186,6 +194,12 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.IsSuspended,
 			&i.LastOpenedAt,
 			&i.KeepWarmOnMerge,
+			&i.TokenInput,
+			&i.TokenCacheCreation,
+			&i.TokenCacheRead,
+			&i.TokenOutput,
+			&i.TokenTurns,
+			&i.TokensUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -204,7 +218,8 @@ const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -248,6 +263,12 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.IsSuspended,
 			&i.LastOpenedAt,
 			&i.KeepWarmOnMerge,
+			&i.TokenInput,
+			&i.TokenCacheCreation,
+			&i.TokenCacheRead,
+			&i.TokenOutput,
+			&i.TokenTurns,
+			&i.TokensUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -396,6 +417,40 @@ type SetSessionPreviewURLParams struct {
 // trigger and the desktop browser panel re-navigates / refreshes.
 func (q *Queries) SetSessionPreviewURL(ctx context.Context, arg SetSessionPreviewURLParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionPreviewURL, arg.PreviewURL, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setSessionTokenUsage = `-- name: SetSessionTokenUsage :execrows
+UPDATE sessions SET token_input = ?, token_cache_creation = ?, token_cache_read = ?, token_output = ?, token_turns = ?, tokens_updated_at = ? WHERE id = ?
+`
+
+type SetSessionTokenUsageParams struct {
+	TokenInput         int64
+	TokenCacheCreation int64
+	TokenCacheRead     int64
+	TokenOutput        int64
+	TokenTurns         int64
+	TokensUpdatedAt    sql.NullTime
+	ID                 domain.SessionID
+}
+
+// Sole writer of the token_* / tokens_updated_at columns (absent from Insert/Update
+// so the full-row lifecycle write can never clobber a fresh parse). Does NOT bump
+// updated_at: a telemetry refresh is not a session state change, so it must not
+// re-sort the Done bar (ordered by updated_at) or trip sessions_cdc_update.
+func (q *Queries) SetSessionTokenUsage(ctx context.Context, arg SetSessionTokenUsageParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionTokenUsage,
+		arg.TokenInput,
+		arg.TokenCacheCreation,
+		arg.TokenCacheRead,
+		arg.TokenOutput,
+		arg.TokenTurns,
+		arg.TokensUpdatedAt,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

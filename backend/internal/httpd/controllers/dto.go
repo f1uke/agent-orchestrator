@@ -182,6 +182,30 @@ type SessionView struct {
 	// show/edit it; omitted for live sessions to keep the sessions list lean.
 	Prompt string           `json:"prompt,omitempty"`
 	PRs    []SessionPRFacts `json:"prs"`
+	// TokenUsage is the per-session token telemetry summed from the harness
+	// transcript. Present only for a claude-code session AO has parsed at least
+	// once; omitted entirely for agents without a readable transcript or a session
+	// not yet parsed, which the UI renders as "no chip / n/a".
+	TokenUsage *SessionTokenUsage `json:"tokenUsage,omitempty"`
+}
+
+// SessionTokenUsage is the per-session token telemetry surfaced on the board. The
+// four raw buckets (input/cacheCreation/cacheRead/output) and the turn count are
+// measured facts summed from the harness transcript's per-assistant-message usage.
+// rawTotal, costWeighted, and runaway are DERIVED server-side — the cost multipliers
+// (cache-write ×1.25, cache-read ×0.1, output ×5) and the runaway threshold live in
+// the daemon so the UI never re-implements them. runaway flags a session whose raw
+// total is far into the measured outlier tail (a stuck/looping session).
+type SessionTokenUsage struct {
+	Input         int64     `json:"input"`
+	CacheCreation int64     `json:"cacheCreation"`
+	CacheRead     int64     `json:"cacheRead"`
+	Output        int64     `json:"output"`
+	Turns         int64     `json:"turns"`
+	RawTotal      int64     `json:"rawTotal"`
+	CostWeighted  int64     `json:"costWeighted"`
+	Runaway       bool      `json:"runaway"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // ListSessionsResponse is the body of GET /api/v1/sessions.

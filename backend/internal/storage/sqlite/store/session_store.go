@@ -110,6 +110,30 @@ func (s *Store) SetSessionKeepWarmOnMerge(ctx context.Context, id domain.Session
 	return rows > 0, nil
 }
 
+// SetSessionTokenUsage persists the per-session token totals parsed from the harness
+// transcript. It writes only the token_* columns + tokens_updated_at (never
+// updated_at), so it cannot re-sort the Done bar or trip the CDC trigger, and it is
+// the only writer of those columns so the full-row update path never clobbers a
+// fresh parse. Returns false when the session id no longer exists (a raced-away
+// row), which the caller treats as a benign skip.
+func (s *Store) SetSessionTokenUsage(ctx context.Context, id domain.SessionID, usage domain.TokenUsage, parsedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionTokenUsage(ctx, gen.SetSessionTokenUsageParams{
+		ID:                 id,
+		TokenInput:         usage.Input,
+		TokenCacheCreation: usage.CacheCreation,
+		TokenCacheRead:     usage.CacheRead,
+		TokenOutput:        usage.Output,
+		TokenTurns:         usage.Turns,
+		TokensUpdatedAt:    timeToNullTime(parsedAt),
+	})
+	if err != nil {
+		return false, fmt.Errorf("set token usage for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionIssueBinding sets a session's issue_id and display_name together —
 // the after-the-fact Jira link/unlink path. issue_id becomes "jira:<KEY>" (with
 // display_name = the issue title) on link, or a plain title on unlink. Returns
@@ -309,8 +333,19 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 			PreviewURL:      row.PreviewURL,
 			PreviewRevision: row.PreviewRevision,
 		},
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
+		// Token telemetry is read-only on this path; it is written solely by
+		// SetSessionTokenUsage. tokens_updated_at NULL (never parsed) maps to the
+		// zero time, which the wire layer reads as "no telemetry / no chip".
+		TokenUsage: domain.TokenUsage{
+			Input:         row.TokenInput,
+			CacheCreation: row.TokenCacheCreation,
+			CacheRead:     row.TokenCacheRead,
+			Output:        row.TokenOutput,
+			Turns:         row.TokenTurns,
+		},
+		TokensUpdatedAt: nullTimeToTime(row.TokensUpdatedAt),
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
 	}
 }
 

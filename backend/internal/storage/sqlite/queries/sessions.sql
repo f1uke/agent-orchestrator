@@ -23,26 +23,36 @@ WHERE id = ?;
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at
 FROM sessions WHERE id = ?;
 
 -- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at
 FROM sessions WHERE project_id = ? ORDER BY num;
 
 -- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at
 FROM sessions ORDER BY project_id, num;
 
 
 -- name: RenameSession :execrows
 UPDATE sessions SET display_name = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetSessionTokenUsage :execrows
+-- Sole writer of the token_* / tokens_updated_at columns (absent from Insert/Update
+-- so the full-row lifecycle write can never clobber a fresh parse). Does NOT bump
+-- updated_at: a telemetry refresh is not a session state change, so it must not
+-- re-sort the Done bar (ordered by updated_at) or trip sessions_cdc_update.
+UPDATE sessions SET token_input = ?, token_cache_creation = ?, token_cache_read = ?, token_output = ?, token_turns = ?, tokens_updated_at = ? WHERE id = ?;
 
 -- name: SetSessionPreviewURL :execrows
 -- preview_revision is bumped on every call (even when preview_url is unchanged)

@@ -41,6 +41,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { TodoDetailDialog } from "./TodoDetailDialog";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { MergeSuspendChip } from "./MergeSuspendChip";
+import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
@@ -896,22 +897,25 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 				)}
 			</div>
 			<div
-				className="px-[13px] py-2 font-mono text-[10.5px] text-passive"
+				className="flex items-start justify-between gap-2 px-[13px] py-2"
 				style={{
 					borderTop: "1px solid var(--kanban-card-divider)",
 					background: `color-mix(in srgb, ${col.hueVar} 3%, transparent)`,
 				}}
 				onClick={(event) => event.stopPropagation()}
 			>
-				{prSummaries.length === 0 ? (
-					"no PR yet"
-				) : (
-					<div className="flex flex-col gap-1">
-						{groupPRsByLifecycle(prSummaries).map((group) => (
-							<BoardPRGroup group={group} key={group.status.label} />
-						))}
-					</div>
-				)}
+				<div className="min-w-0 flex-1 font-mono text-[10.5px] text-passive">
+					{prSummaries.length === 0 ? (
+						"no PR yet"
+					) : (
+						<div className="flex flex-col gap-1">
+							{groupPRsByLifecycle(prSummaries).map((group) => (
+								<BoardPRGroup group={group} key={group.status.label} />
+							))}
+						</div>
+					)}
+				</div>
+				<TokenUsageChip usage={session.tokenUsage} />
 			</div>
 		</div>
 	);

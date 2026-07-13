@@ -211,6 +211,10 @@ func Run() error {
 	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, log)
 
 	previewDone := preview.NewPoller(store, sessionSvc, "http://"+cfg.Addr(), preview.PollerConfig{Logger: log}).Start(ctx)
+	// Per-session token telemetry: a background poll that reads claude-code session
+	// transcripts and persists token/cost totals on the session row (additive; never
+	// blocks lifecycle). Non-claude sessions are skipped (no chip).
+	tokenUsageDone := startTokenUsageObserver(ctx, store, log)
 	agentSvc := agentsvc.New()
 	go func() {
 		if _, err := agentSvc.Refresh(ctx); err != nil {
@@ -243,6 +247,7 @@ func Run() error {
 		stop()
 		<-previewDone
 		<-reclaimerDone
+		<-tokenUsageDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -321,6 +326,7 @@ func Run() error {
 	<-previewDone
 	<-idleSweepDone
 	<-reclaimerDone
+	<-tokenUsageDone
 	lcStack.Stop()
 	if err := cdcPipe.Stop(); err != nil {
 		log.Error("cdc pipeline shutdown", "err", err)

@@ -330,6 +330,32 @@ export type WorkspaceSession = {
 	autoNameBranch?: boolean;
 	createdBy?: string;
 	prompt?: string;
+	/**
+	 * Per-session token telemetry the daemon summed from the harness transcript
+	 * (claude-code only). Absent for agents without a readable transcript or a
+	 * session not yet parsed — the card then shows no token chip.
+	 */
+	tokenUsage?: TokenUsage;
+};
+
+/**
+ * Per-session token totals surfaced on the board. The four raw buckets + turn count
+ * are measured facts; {@link TokenUsage.rawTotal}, {@link TokenUsage.costWeighted}
+ * and {@link TokenUsage.runaway} are derived by the daemon (the cost multipliers and
+ * runaway threshold live server-side so the UI never re-implements them).
+ */
+export type TokenUsage = {
+	input: number;
+	cacheCreation: number;
+	cacheRead: number;
+	output: number;
+	turns: number;
+	rawTotal: number;
+	costWeighted: number;
+	/** True when rawTotal crossed the daemon's runaway threshold (a stuck/looping session). */
+	runaway: boolean;
+	/** ISO timestamp of the last transcript parse. */
+	updatedAt: string;
 };
 
 // Tracker providers whose ids sessions are stamped with, in "<provider>:<native>"
