@@ -2003,6 +2003,8 @@ export interface components {
             projectId: string;
             prompt?: string;
             startImmediately?: null | boolean;
+            /** @enum {string} */
+            taskSize?: "mechanical" | "standard" | "deep";
         };
         SubmitReviewInput: {
             /** @description Review body recorded by AO. Required for changes_requested. */

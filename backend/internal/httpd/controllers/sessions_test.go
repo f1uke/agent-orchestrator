@@ -943,6 +943,45 @@ func TestSessionsAPI_SpawnDecodesAutoNameBranch(t *testing.T) {
 	}
 }
 
+// TestSessionsAPI_SpawnDecodesTaskSize asserts a spawn request's taskSize field
+// reaches the session service's SpawnConfig unchanged.
+func TestSessionsAPI_SpawnDecodesTaskSize(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","taskSize":"mechanical"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST session = %d, want 201; body=%s", status, body)
+	}
+	if svc.lastSpawnCfg.TaskSize != domain.TaskSizeMechanical {
+		t.Fatalf("SpawnConfig.TaskSize = %q, want mechanical", svc.lastSpawnCfg.TaskSize)
+	}
+}
+
+// TestSessionsAPI_SpawnDefaultsTaskSizeToStandard asserts an omitted taskSize
+// resolves to standard (full ceremony) in the SpawnConfig, not the empty string.
+func TestSessionsAPI_SpawnDefaultsTaskSizeToStandard(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST session = %d, want 201; body=%s", status, body)
+	}
+	if svc.lastSpawnCfg.TaskSize != domain.TaskSizeStandard {
+		t.Fatalf("SpawnConfig.TaskSize = %q, want standard", svc.lastSpawnCfg.TaskSize)
+	}
+}
+
+// TestSessionsAPI_SpawnRejectsInvalidTaskSize asserts a present-but-unknown
+// taskSize is rejected with a typed 400 rather than silently defaulting.
+func TestSessionsAPI_SpawnRejectsInvalidTaskSize(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","taskSize":"mechnical"}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "TASK_SIZE_INVALID")
+}
+
 // TestSessionsAPI_SpawnRejectsOverlongDisplayName asserts the spawn endpoint
 // caps displayName at 20 characters even though the field itself is optional
 // (the desktop new-task dialog omits it). `ao spawn` enforces the same limit

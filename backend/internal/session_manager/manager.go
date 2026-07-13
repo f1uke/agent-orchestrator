@@ -548,6 +548,10 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 		DisplayName:    row.DisplayName,
 		PRTarget:       row.PRTarget,
 		CreatedBy:      row.CreatedBy,
+		// TaskSize must be replayed from the persisted TODO so a task staged with
+		// `ao spawn --todo --task-size mechanical` builds the mechanical worker
+		// prompt when it is Started (the system prompt is derived from cfg below).
+		TaskSize: row.TaskSize,
 	}
 	cfg.Harness = effectiveHarness(cfg.Harness, cfg.Kind, project.Config)
 	if cfg.Harness == "" {
@@ -1080,7 +1084,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	}
 	// The system prompt is derived, not persisted: recompute it so a restored
 	// session keeps its standing instructions across the relaunch.
-	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID)
+	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.TaskSize)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
 	}
@@ -2114,6 +2118,7 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		DisplayName:     cfg.DisplayName,
 		Activity:        domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
+		TaskSize:        cfg.TaskSize.WithDefault(),
 	}
 }
 
@@ -2138,6 +2143,7 @@ func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		PRTarget:        cfg.PRTarget,
 		CreatedBy:       cfg.CreatedBy,
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
+		TaskSize:        cfg.TaskSize.WithDefault(),
 		Metadata:        domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }
@@ -2172,7 +2178,7 @@ func buildPrompt(cfg ports.SpawnConfig) string {
 // empty input box rather than receiving an auto-generated kickoff turn.
 func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig) (prompt, systemPrompt string, err error) {
 	prompt = buildPrompt(cfg)
-	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID)
+	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID, cfg.TaskSize)
 	if err != nil {
 		return "", "", err
 	}
@@ -2183,7 +2189,7 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig) (p
 // given kind from current store state. Restore recomputes them through here
 // rather than persisting them, so a restored worker points at the orchestrator
 // that is active now, not the one from its original spawn.
-func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID) (string, error) {
+func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, taskSize domain.TaskSize) (string, error) {
 	// Resolve the project's convention so the orchestrator/worker prompts carry the
 	// branch prefix and base branch. A missing project yields a zero config, which
 	// resolves to no convention (prompts unchanged from the pre-convention default).
@@ -2234,6 +2240,11 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	// base, same as the reference convention.
 	if kind == domain.KindWorker {
 		base += prompts.SmokeChecklistProtocol()
+		// The task-size directive right-sizes ceremony: a mechanical worker is
+		// authorized to skip the process skills. Only mechanical renders anything;
+		// standard/deep add nothing. Injected here (not the editable base) so it
+		// survives a cleared/overridden base, like the smoke + reference blocks.
+		base += prompts.TaskSizeDirective(string(taskSize.WithDefault()))
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {

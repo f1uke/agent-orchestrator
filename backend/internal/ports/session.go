@@ -43,6 +43,11 @@ type SpawnConfig struct {
 	// (feature/merge-suspend-in-place). Default false — an ordinary single-PR
 	// worker still auto-archives on merge. Set by `ao spawn --keep-warm`.
 	KeepWarmOnMerge bool
+	// TaskSize is the ceremony level for a worker task (`ao spawn --task-size`):
+	// mechanical / standard / deep. It drives only the worker system prompt (a
+	// mechanical task is authorized to skip the process skills) and is persisted on
+	// the session. Empty resolves to standard (full ceremony) via WithDefault.
+	TaskSize domain.TaskSize
 }
 
 // TodoSpecPatch carries the editable fields of a prepared TODO. A nil pointer

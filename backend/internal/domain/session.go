@@ -108,11 +108,17 @@ type SessionRecord struct {
 	// branch name when Branch is empty; PRTarget is the intended PR merge target
 	// (informational, convention-derived); CreatedBy is the orchestrator session
 	// that queued the task (for report-back). Empty for normal spawns.
-	BaseBranch     string          `json:"baseBranch,omitempty"`
-	AutoNameBranch bool            `json:"autoNameBranch,omitempty"`
-	PRTarget       string          `json:"prTarget,omitempty"`
-	CreatedBy      SessionID       `json:"createdBy,omitempty"`
-	Metadata       SessionMetadata `json:"-"`
+	BaseBranch     string    `json:"baseBranch,omitempty"`
+	AutoNameBranch bool      `json:"autoNameBranch,omitempty"`
+	PRTarget       string    `json:"prTarget,omitempty"`
+	CreatedBy      SessionID `json:"createdBy,omitempty"`
+	// TaskSize is the ceremony level captured at spawn (`ao spawn --task-size`):
+	// mechanical / standard / deep. It drives only the worker system prompt (a
+	// mechanical task is authorized to skip the heavyweight process skills) and is
+	// persisted so a restore or a TODO Start rebuilds the prompt at the right level.
+	// Empty on old rows / normal spawns; WithDefault resolves that to standard (full
+	// ceremony). Internal durable fact, not part of the API read model.
+	TaskSize TaskSize `json:"-"`
 	// TokenUsage holds the per-session token totals summed from the harness
 	// transcript (claude-code only; all-zero for agents without a parseable
 	// transcript). Durable measured facts; the raw + cost-weighted totals and the
@@ -123,9 +129,10 @@ type SessionRecord struct {
 	TokenUsage TokenUsage `json:"-"`
 	// TokensUpdatedAt is when TokenUsage was last (re)parsed from the transcript.
 	// Zero = never parsed (no telemetry available → no chip). Internal durable fact.
-	TokensUpdatedAt time.Time `json:"-"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	TokensUpdatedAt time.Time       `json:"-"`
+	Metadata        SessionMetadata `json:"-"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	UpdatedAt       time.Time       `json:"updatedAt"`
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord

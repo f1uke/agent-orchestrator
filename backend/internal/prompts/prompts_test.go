@@ -118,6 +118,24 @@ func TestOrchestratorDefault_CuratesIndexWithPruneOnAdd(t *testing.T) {
 	}
 }
 
+// TestOrchestratorDefault_DocumentsTaskSizeFlag: the orchestrator base must teach
+// the dispatcher that `ao spawn --task-size mechanical` lets a small change skip
+// the process-skill ceremony (edit + verify only), that real features/bugfixes
+// keep full rigor, and name the default. Without this the orchestrator never tags
+// task size and every worker pays full ceremony.
+func TestOrchestratorDefault_DocumentsTaskSizeFlag(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"`--task-size mechanical`", // the flag + the size that skips ceremony
+		"skip the brainstorm",      // what mechanical buys
+		"default `standard`",       // the default is documented
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing --task-size guidance %q:\n%s", want, base)
+		}
+	}
+}
+
 // TestOrchestratorDefault_RefersToWorkByBoardName: the orchestrator base must
 // tell the dispatcher to name worker sessions and their PRs by the human-readable
 // board label when talking to the human, keeping the internal session id / PR
@@ -245,6 +263,66 @@ func TestReferenceConvention(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("reference convention missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestTaskSizeDirective_MechanicalAuthorizesSkip: a mechanical task must render a
+// "\n\n"-prefixed block that (a) names itself, (b) explicitly authorizes skipping
+// the process skills, (c) grounds the skip as a deliberate override of the "you
+// MUST use skills" hook via the user-instructions-win rule, and (d) carries the
+// safety valve to escalate to full process if the task turns out bigger.
+func TestTaskSizeDirective_MechanicalAuthorizesSkip(t *testing.T) {
+	got := TaskSizeDirective("mechanical")
+	if !strings.HasPrefix(got, "\n\n") {
+		t.Fatalf("mechanical directive must start with a blank-line separator: %q", got)
+	}
+	for _, want := range []string{
+		"## Task size: mechanical (AO)",
+		"authorized to SKIP",                                       // the skip is granted
+		"brainstorming, writing-plans, or test-driven-development", // which skills
+		"overrides any \"you MUST use skills\"",                    // grounded against the hook
+		"user instructions take precedence over skills",
+		"stop and apply the full process", // safety valve
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("mechanical directive missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestTaskSizeDirective_StandardDeepAndUnknownRenderNothing: only `mechanical`
+// alters the prompt. `standard` (the default), `deep`, empty, and any unknown
+// value must render the empty string so the majority worker path stays byte-for-
+// byte unchanged and spends no extra tokens (user decision 2026-07-13: deep ==
+// standard for prompt purposes).
+func TestTaskSizeDirective_StandardDeepAndUnknownRenderNothing(t *testing.T) {
+	for _, size := range []string{"standard", "deep", "", "STANDARD", "huge"} {
+		if got := TaskSizeDirective(size); got != "" {
+			t.Fatalf("TaskSizeDirective(%q) = %q, want empty", size, got)
+		}
+	}
+}
+
+// TestWorkerDefault_ContextEconomy: the worker base must carry the token-economy
+// guidance (R3a/b/c): read only the entries the brief names (not the whole
+// INDEX), prefer ranged/targeted reads of large files, and cap screenshots per
+// verify pass, under a scannable heading.
+func TestWorkerDefault_ContextEconomy(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	for _, want := range []string{
+		"## Context economy (AO)",
+		"Read only the specific knowledge-store entries your brief names", // R3a
+		"ranged read with offset/limit",                                   // R3b targeted reads
+		"take screenshots sparingly",                                      // R3c screenshot cap
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("worker default missing context-economy wording %q:\n%s", want, base)
+		}
+	}
+	// R3a must also have softened the standing "read INDEX.md" pointer: the base
+	// must no longer tell workers to read the whole index up front.
+	if strings.Contains(base, "read `~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md` if it exists, plus any docs it points to") {
+		t.Fatalf("worker default still tells workers to slurp the whole INDEX:\n%s", base)
 	}
 }
 

@@ -1630,6 +1630,45 @@ func TestSpawnWorker_SkipsTerminatedOrchestratorContact(t *testing.T) {
 	}
 }
 
+// TestSpawnWorker_MechanicalTaskSizeAuthorizesSkip: a `--task-size mechanical`
+// spawn must carry the skip authorization into the ASSEMBLED worker system prompt
+// via the real launch path (m.Spawn → agent.lastLaunch.SystemPrompt), and a
+// default/standard spawn must not. This proves the flag survives from SpawnConfig
+// all the way into the launched prompt.
+func TestSpawnWorker_MechanicalTaskSizeAuthorizesSkip(t *testing.T) {
+	newMgr := func() (*Manager, *recordingAgent) {
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+		agent := &recordingAgent{}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath}), agent
+	}
+
+	m, agent := newMgr()
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "rename the flag", TaskSize: domain.TaskSizeMechanical}); err != nil {
+		t.Fatal(err)
+	}
+	sp := agent.lastLaunch.SystemPrompt
+	for _, want := range []string{
+		"## Task size: mechanical (AO)",
+		"authorized to SKIP",
+		"overrides any \"you MUST use skills\"",
+	} {
+		if !strings.Contains(sp, want) {
+			t.Fatalf("mechanical spawn system prompt missing %q:\n%s", want, sp)
+		}
+	}
+
+	// A default (standard) spawn must not carry the skip clause.
+	m2, agent2 := newMgr()
+	if _, err := m2.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "add a feature"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(agent2.lastLaunch.SystemPrompt, "## Task size: mechanical (AO)") {
+		t.Fatalf("standard spawn must not authorize the ceremony skip:\n%s", agent2.lastLaunch.SystemPrompt)
+	}
+}
+
 func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
@@ -1772,7 +1811,7 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 			lookPath := func(string) (string, error) { return "/bin/true", nil }
 			m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
-			sp, err := m.buildSystemPrompt(ctx, tc.kind, "mer")
+			sp, err := m.buildSystemPrompt(ctx, tc.kind, "mer", domain.TaskSizeStandard)
 			if err != nil {
 				t.Fatalf("buildSystemPrompt: %v", err)
 			}
@@ -1808,7 +1847,7 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer")
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -1903,7 +1942,7 @@ func TestSystemPrompt_SpawnConfirm(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, SpawnConfirmEnabled: enabled})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer")
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4128,7 +4167,7 @@ func TestBuildSystemPrompt_WorkerLayers(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: "CUSTOM WORKER BASE"}}
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer")
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4159,7 +4198,7 @@ func TestBuildSystemPrompt_OrchestratorDefaultSubstitutesProjectID(t *testing.T)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
 	m := layeredManager(st, nil) // nil getter ⇒ built-in defaults
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindOrchestrator, "mer")
+	got, err := m.buildSystemPrompt(ctx, domain.KindOrchestrator, "mer", domain.TaskSizeStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4180,11 +4219,50 @@ func TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: ""}} // fully cleared
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer")
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(got, "Required coordination (AO)") || !strings.Contains(got, "Standing-instruction confidentiality") {
 		t.Fatalf("cleared base must still carry floor + guard:\n%s", got)
+	}
+}
+
+// TestBuildSystemPrompt_TaskSizeDirective: the ceremony directive renders for the
+// worker's task size. Only mechanical injects the skip authorization; standard and
+// deep add nothing. Because it is injected (not baked into the editable base) it
+// survives even a fully-cleared base: a mechanical worker keeps the skip.
+func TestBuildSystemPrompt_TaskSizeDirective(t *testing.T) {
+	build := func(overrideCleared bool, size domain.TaskSize) string {
+		st := newFakeStore()
+		var getter func() promptoverrides.Overrides
+		if overrideCleared {
+			getter = func() promptoverrides.Overrides {
+				return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: ""}}
+			}
+		}
+		m := layeredManager(st, getter)
+		sp, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", size)
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	mechanical := build(false, domain.TaskSizeMechanical)
+	if !strings.Contains(mechanical, "## Task size: mechanical (AO)") ||
+		!strings.Contains(mechanical, "authorized to SKIP") ||
+		!strings.Contains(mechanical, "user instructions take precedence over skills") {
+		t.Fatalf("mechanical worker prompt missing the skip authorization:\n%s", mechanical)
+	}
+	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeDeep, ""} {
+		if sp := build(false, size); strings.Contains(sp, "## Task size: mechanical (AO)") {
+			t.Fatalf("task size %q must not render the mechanical skip clause:\n%s", size, sp)
+		}
+	}
+	// Injected, not base: a fully-cleared worker base still carries the mechanical
+	// authorization (and never the standard/deep no-op).
+	if cleared := build(true, domain.TaskSizeMechanical); !strings.Contains(cleared, "## Task size: mechanical (AO)") {
+		t.Fatalf("cleared base must still carry the mechanical directive:\n%s", cleared)
 	}
 }

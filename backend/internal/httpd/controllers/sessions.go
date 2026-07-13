@@ -170,7 +170,14 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 	if in.Kind == "" {
 		in.Kind = domain.KindWorker
 	}
-	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge}
+	// task_size is optional; empty resolves to standard. Reject a present-but-
+	// unknown value so a typo (`--task-size mechnical`) fails loudly here rather
+	// than silently falling back to full ceremony.
+	if in.TaskSize != "" && !in.TaskSize.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "TASK_SIZE_INVALID", "taskSize must be one of mechanical, standard, deep", nil)
+		return
+	}
+	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge, TaskSize: in.TaskSize.WithDefault()}
 	// startImmediately absent/null/true keeps the current spawn-now behavior;
 	// false stages the worker as a prepared TODO on the board.
 	deferred := in.StartImmediately != nil && !*in.StartImmediately

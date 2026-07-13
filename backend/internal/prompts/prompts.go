@@ -84,7 +84,7 @@ You are the human-facing coordinator for project ` + ProjectIDPlaceholder + `. C
 
 Spawn worker sessions for implementation with:
 ` + "`ao spawn --project " + ProjectIDPlaceholder + " --from <base-branch> --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`" + `
---project, --from, and --name are required. --from is the existing branch the worker's worktree starts from (e.g. main). Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it.
+--project, --from, and --name are required. --from is the existing branch the worker's worktree starts from (e.g. main). Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it. Add ` + "`--task-size mechanical`" + ` when the task is a small, well-scoped change (a rename, a copy tweak, a config bump, a one-line fix) so the worker may skip the brainstorm→plan→TDD ceremony and go straight to edit + verify; leave it off for real features and bug fixes, which keep full rigor (default ` + "`standard`" + `; ` + "`--task-size deep`" + ` also keeps full rigor and flags a high-stakes task).
 
 In the common case each worker session owns one branch and one pull request. When the project sets a branch convention (prefix + PR target, injected separately), spawn the worker on a branch that follows it (e.g. ` + "`feature/<topic>`" + `) and have it open the PR against the configured base/PR-target — one worker, one on-convention branch, one PR. For a task of a different type (e.g. a ` + "`bugfix/`" + ` alongside a ` + "`feature/`" + ` worker), spawn a separate worker session rather than adding a second branch to an existing one. The convention and AO's namespace tracking are complementary, not competing.
 
@@ -119,11 +119,18 @@ The project's branch convention (prefix + PR base/target) and this namespace rul
 
 AO keeps this project's private knowledge OUTSIDE the repo at ` + "`~/.ao/knowledge/$AO_PROJECT_ID/`" + ` (` + "`$AO_PROJECT_ID`" + ` is set in your environment). It is shared across the project's AO sessions but is NEVER committed or pushed — the repo may be team-shared, so nothing here may leak into tracked files.
 
-At the start of your task, read ` + "`~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md`" + ` if it exists, plus any docs it points to, for prior plans, proposals, and diagnoses relevant to your work.
+At the start of your task, read the specific knowledge-store entries your brief names (under ` + "`~/.ao/knowledge/$AO_PROJECT_ID/plans/`" + `) for prior plans, proposals, and diagnoses; read those directly rather than the whole ` + "`~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md`" + `, which is large and orchestrator-curated. If the brief names none, a quick scan of ` + "`INDEX.md`" + ` for entries relevant to your task is fine.
 
 Save durable artifacts — writing-plans, brainstorming, and diagnosis output such as plans, proposals, and design docs — DIRECTLY to ` + "`~/.ao/knowledge/$AO_PROJECT_ID/plans/<branch>--<topic>.md`" + ` (that absolute path, outside the worktree), and write them there AS YOU GO so nothing is lost when this worktree is deleted. Do NOT put AO working docs in the repo: ` + "`docs/`" + `, ` + "`CLAUDE.md`" + `, and ` + "`AGENTS.md`" + ` are team-shared and must never carry AO planning artifacts.
 
-In your final report, list the knowledge-store path(s) you wrote. Do NOT edit ` + "`INDEX.md`" + ` — the orchestrator curates it.`
+In your final report, list the knowledge-store path(s) you wrote. Do NOT edit ` + "`INDEX.md`" + ` — the orchestrator curates it.
+
+## Context economy (AO)
+
+Every token you pull into context is re-read on each later turn, so keep it lean:
+- Read only the specific knowledge-store entries your brief names; do not read the whole INDEX.
+- For a large file (a big plan/record/HTML doc, a large source file), locate the region first (grep, then a ranged read with offset/limit) instead of reading the whole file into context.
+- When verifying in the real app, assert on state and read specific elements; take screenshots sparingly (a couple per verify pass at most, not one after every step).`
 
 const reviewerDefault = `## Code reviewer role
 
@@ -162,6 +169,27 @@ func ReferenceConvention() string { return referenceConvention }
 // an agent override (user decision 2026-07-11: trigger is always-on, prompt-
 // driven; no `ao spawn` flag). Leading "\n\n" so it appends cleanly.
 func SmokeChecklistProtocol() string { return smokeChecklistProtocol }
+
+// TaskSizeDirective returns the worker ceremony directive for a session's task
+// size (`ao spawn --task-size`). Only "mechanical" renders anything: it grants an
+// explicit, hook-overriding authorization to skip the heavyweight process skills
+// for a small change. "standard" (the default), "deep", and any unset/unknown
+// value render "" so the majority worker path stays byte-for-byte unchanged and
+// spends no extra tokens (user decision 2026-07-13: deep keeps full ceremony,
+// same as standard). Injected in buildSystemPrompt for KindWorker only, alongside
+// the smoke + reference-convention blocks, so it survives an edited/cleared base.
+// Leading "\n\n" so it appends cleanly. Takes a plain string to keep the prompts
+// package free of a domain dependency; the caller passes the normalized size.
+func TaskSizeDirective(size string) string {
+	if size == "mechanical" {
+		return taskSizeMechanical
+	}
+	return ""
+}
+
+const taskSizeMechanical = "\n\n" + `## Task size: mechanical (AO)
+
+This task is tagged mechanical - a small, well-scoped change (a rename, a copy tweak, a config bump, a one-line fix). You are explicitly authorized to SKIP the heavyweight process skills (do not run brainstorming, writing-plans, or test-driven-development) and go straight to the edit, then verify (build/lint/test, and exercise the change if it has a runtime surface). This AO instruction deliberately overrides any "you MUST use skills" SessionStart hook: user instructions take precedence over skills. If the change turns out larger or riskier than mechanical once you see the code, stop and apply the full process (or ask the orchestrator to re-tag it).`
 
 const smokeChecklistProtocol = "\n\n" + `## Smoke-test checklist (AO)
 

@@ -38,6 +38,7 @@ type spawnOptions struct {
 	skipAgentCheck bool
 	todo           bool
 	keepWarm       bool
+	taskSize       string
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -65,6 +66,10 @@ type spawnRequest struct {
 	// on the board, resumable) instead of terminating it to Done when its PR
 	// merges — for a worker expected to open more PRs (feature/merge-suspend-in-place).
 	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
+	// TaskSize is the worker ceremony level: mechanical / standard / deep. Empty
+	// (the default) means standard. A mechanical task is authorized in the worker
+	// prompt to skip the process skills (`ao spawn --task-size`).
+	TaskSize string `json:"taskSize,omitempty"`
 }
 
 type spawnResult struct {
@@ -101,6 +106,13 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			}
 			if explicitName := strings.TrimSpace(opts.name); utf8.RuneCountInString(explicitName) > maxDisplayNameLen {
 				return usageError{fmt.Errorf("--name must be %d characters or fewer", maxDisplayNameLen)}
+			}
+			// --task-size is optional; normalize and reject an unknown value here so a
+			// typo fails fast (exit 2) rather than reaching the daemon. Empty is left
+			// as-is and the daemon resolves it to standard.
+			opts.taskSize = strings.ToLower(strings.TrimSpace(opts.taskSize))
+			if opts.taskSize != "" && !validTaskSize(opts.taskSize) {
+				return usageError{fmt.Errorf("--task-size must be one of mechanical, standard, deep")}
 			}
 			// --from is required and names the branch the worktree is created from
 			// (the UI "Start from" field). Reject a missing base fast, before any
@@ -161,6 +173,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				Prompt:          opts.prompt,
 				DisplayName:     name,
 				KeepWarmOnMerge: opts.keepWarm,
+				TaskSize:        opts.taskSize,
 			}
 			if opts.todo {
 				// --todo stages a prepared TODO (no branch/worktree/tmux until
@@ -225,7 +238,19 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs")
+	f.StringVar(&opts.taskSize, "task-size", "", "Worker ceremony level: mechanical | standard | deep (default standard). `mechanical` authorizes the worker to skip the brainstorm/plan/TDD process skills and go straight to edit + verify; use only for small, well-scoped changes")
 	return cmd
+}
+
+// validTaskSize reports whether s is one of the accepted `--task-size` values.
+// Kept in sync with domain.TaskSize.Valid() across the CLI's hand-mirrored
+// boundary (the CLI does not import the daemon's DTOs).
+func validTaskSize(s string) bool {
+	switch s {
+	case "mechanical", "standard", "deep":
+		return true
+	}
+	return false
 }
 
 // spawnAttachHint returns a copy-pasteable attach hint for the selected runtime.
