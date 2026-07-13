@@ -34,6 +34,8 @@ type fakeStore struct {
 	workspaceRepos map[string][]domain.WorkspaceRepoRecord
 	prs            map[domain.SessionID][]domain.PullRequest
 	checks         map[string][]domain.PullRequestCheck
+	comments       map[string][]domain.PullRequestComment
+	commentsErr    error
 	writeErr       error
 
 	writes []fakeWrite
@@ -105,6 +107,15 @@ func (s *fakeStore) ListChecks(_ context.Context, prURL string) ([]domain.PullRe
 	return append([]domain.PullRequestCheck(nil), s.checks[prURL]...), nil
 }
 
+func (s *fakeStore) ListPRComments(_ context.Context, prURL string) ([]domain.PullRequestComment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commentsErr != nil {
+		return nil, s.commentsErr
+	}
+	return append([]domain.PullRequestComment(nil), s.comments[prURL]...), nil
+}
+
 func (s *fakeStore) WriteSCMObservation(_ context.Context, pr domain.PullRequest, checks []domain.PullRequestCheck, reviews []domain.PullRequestReview, threads []domain.PullRequestReviewThread, comments []domain.PullRequestComment, reviewMode ports.ReviewWriteMode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,6 +149,32 @@ type fakeProvider struct {
 	fetchBatches     [][]ports.SCMPRRef
 	logCalls         int
 	reviewCalls      int
+
+	resolveErr      error
+	resolvedThreads []resolvedThread
+}
+
+type resolvedThread struct {
+	ref      ports.SCMPRRef
+	threadID string
+}
+
+// fakeProvider satisfies ReviewThreadWriter so the observer's auto-resolve pass can
+// type-assert it, mirroring the composite provider in production.
+var _ ReviewThreadWriter = (*fakeProvider)(nil)
+
+func (p *fakeProvider) ReplyToThread(_ context.Context, _ ports.SCMPRRef, _, _ string) (ports.SCMReviewCommentObservation, error) {
+	return ports.SCMReviewCommentObservation{}, nil
+}
+
+func (p *fakeProvider) ResolveThread(_ context.Context, ref ports.SCMPRRef, threadID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.resolveErr != nil {
+		return p.resolveErr
+	}
+	p.resolvedThreads = append(p.resolvedThreads, resolvedThread{ref: ref, threadID: threadID})
+	return nil
 }
 
 func (p *fakeProvider) SCMCredentialsAvailable(context.Context) (bool, error) {
@@ -244,6 +281,7 @@ func testStoreWithSession() *fakeStore {
 		projects: map[string]domain.ProjectRecord{"p": {ID: "p", RepoOriginURL: "https://github.com/o/r.git"}},
 		prs:      map[domain.SessionID][]domain.PullRequest{},
 		checks:   map[string][]domain.PullRequestCheck{},
+		comments: map[string][]domain.PullRequestComment{},
 	}
 }
 

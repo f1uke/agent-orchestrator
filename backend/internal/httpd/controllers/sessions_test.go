@@ -182,6 +182,16 @@ func (f *fakeSessionService) SetAutoNudge(_ context.Context, id domain.SessionID
 	return s, nil
 }
 
+func (f *fakeSessionService) SetAutoResolve(_ context.Context, id domain.SessionID, override *bool) (domain.Session, error) {
+	s, ok := f.sessions[id]
+	if !ok {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	s.AutoResolveOnReply = override
+	f.sessions[id] = s
+	return s, nil
+}
+
 func (f *fakeSessionService) SetKeepWarmOnMerge(_ context.Context, id domain.SessionID, enabled bool) (domain.Session, error) {
 	s, ok := f.sessions[id]
 	if !ok {
@@ -901,6 +911,35 @@ func TestSessionsAPI_SetAutoNudgeNotFound(t *testing.T) {
 	srv := newSessionTestServer(t, newFakeSessionService())
 
 	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/missing-1/auto-nudge", `{"override":true}`)
+	assertErrorCode(t, body, status, http.StatusNotFound, "SESSION_NOT_FOUND")
+}
+
+func TestSessionsAPI_SetAutoResolveGatePersists(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/auto-resolve", `{"override":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("set auto-resolve = %d, want 200; body=%s", status, body)
+	}
+	var resp struct {
+		Session struct {
+			AutoResolveOnReply *bool `json:"autoResolveOnReply"`
+		} `json:"session"`
+	}
+	mustJSON(t, body, &resp)
+	if resp.Session.AutoResolveOnReply == nil || *resp.Session.AutoResolveOnReply != true {
+		t.Fatalf("response session.autoResolveOnReply = %v, want true", resp.Session.AutoResolveOnReply)
+	}
+	if got := svc.sessions["ao-1"].AutoResolveOnReply; got == nil || *got != true {
+		t.Fatalf("persisted autoResolveOnReply = %v, want true", got)
+	}
+}
+
+func TestSessionsAPI_SetAutoResolveNotFound(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/missing-1/auto-resolve", `{"override":true}`)
 	assertErrorCode(t, body, status, http.StatusNotFound, "SESSION_NOT_FOUND")
 }
 

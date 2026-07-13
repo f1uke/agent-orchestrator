@@ -60,6 +60,7 @@ type SessionService interface {
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
 	SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
+	SetAutoResolve(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
@@ -98,6 +99,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/preview", c.setPreview)
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
 	r.Put("/sessions/{sessionId}/auto-nudge", c.setAutoNudge)
+	r.Put("/sessions/{sessionId}/auto-resolve", c.setAutoResolve)
 	r.Put("/sessions/{sessionId}/keep-warm", c.setKeepWarm)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
@@ -401,6 +403,26 @@ func (c *SessionsController) setAutoNudge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	updated, err := c.Svc.SetAutoNudge(r.Context(), sessionID(r), in.Override)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
+}
+
+// setAutoResolve sets (or clears) the per-session gate for auto-resolving a review
+// thread once our side replies on it. A null `override` clears it (OFF).
+func (c *SessionsController) setAutoResolve(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/auto-resolve")
+		return
+	}
+	var in SetAutoResolveRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	updated, err := c.Svc.SetAutoResolve(r.Context(), sessionID(r), in.Override)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

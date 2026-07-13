@@ -153,6 +153,7 @@ var schemaNames = map[string]string{
 	"ControllersSessionPreviewResponse":           "SessionPreviewResponse",
 	"ControllersSetSessionPreviewRequest":         "SetSessionPreviewRequest",
 	"ControllersSetAutoNudgeRequest":              "SetAutoNudgeRequest",
+	"ControllersSetAutoResolveRequest":            "SetAutoResolveRequest",
 	"ControllersSetSessionKeepWarmRequest":        "SetSessionKeepWarmRequest",
 	"ControllersRenameSessionRequest":             "RenameSessionRequest",
 	"ControllersUpdateTodoSpecRequest":            "UpdateTodoSpecRequest",
@@ -927,6 +928,19 @@ func sessionOperations() []operation {
 			summary:    "Set (or clear) the per-session auto-nudge-on-comments override",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.SetAutoNudgeRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SessionResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/auto-resolve", id: "setSessionAutoResolve", tag: "sessions",
+			summary:    "Set (or clear) the per-session auto-resolve-on-reply gate",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetAutoResolveRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SessionResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},

@@ -149,3 +149,67 @@ func TestSetSessionAutoNudgeRoundTrip(t *testing.T) {
 		t.Fatal("set on missing session ok=true, want false")
 	}
 }
+
+// TestSetSessionAutoResolveRoundTrip covers the per-session nullable gate for
+// "auto-resolve a review thread when our side replies": a freshly inserted session
+// is OFF (nil), SetSessionAutoResolve can force it on or off, setting nil clears it
+// back to OFF, and an unknown session id is a no-op (ok=false).
+func TestSetSessionAutoResolveRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+	r, err := s.CreateSession(ctx, sampleRecord("mer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh session: OFF (nil).
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok {
+		t.Fatalf("get: ok=%v err=%v", ok, err)
+	}
+	if got.AutoResolveOnReply != nil {
+		t.Fatalf("fresh session auto-resolve gate = %v, want nil", got.AutoResolveOnReply)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Force on.
+	ok, err = s.SetSessionAutoResolve(ctx, r.ID, boolPtr(true), now)
+	if err != nil || !ok {
+		t.Fatalf("set true: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, r.ID)
+	if got.AutoResolveOnReply == nil || *got.AutoResolveOnReply != true {
+		t.Fatalf("auto-resolve gate = %v, want true", got.AutoResolveOnReply)
+	}
+
+	// Force off (explicit false, distinct from nil).
+	ok, err = s.SetSessionAutoResolve(ctx, r.ID, boolPtr(false), now)
+	if err != nil || !ok {
+		t.Fatalf("set false: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, r.ID)
+	if got.AutoResolveOnReply == nil || *got.AutoResolveOnReply != false {
+		t.Fatalf("auto-resolve gate = %v, want false", got.AutoResolveOnReply)
+	}
+
+	// Clear back to nil.
+	ok, err = s.SetSessionAutoResolve(ctx, r.ID, nil, now)
+	if err != nil || !ok {
+		t.Fatalf("set nil: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, r.ID)
+	if got.AutoResolveOnReply != nil {
+		t.Fatalf("auto-resolve gate = %v, want nil after clearing", got.AutoResolveOnReply)
+	}
+
+	// Unknown session id: not found.
+	ok, err = s.SetSessionAutoResolve(ctx, "mer-missing", boolPtr(true), now)
+	if err != nil {
+		t.Fatalf("set on missing session: %v", err)
+	}
+	if ok {
+		t.Fatal("set on missing session ok=true, want false")
+	}
+}

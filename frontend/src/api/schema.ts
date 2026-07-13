@@ -470,6 +470,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/auto-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set (or clear) the per-session auto-resolve-on-reply gate */
+        put: operations["setSessionAutoResolve"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/comment-dispatch": {
         parameters: {
             query?: never;
@@ -1257,6 +1274,7 @@ export interface components {
             activity: components["schemas"]["DomainActivity"];
             autoNameBranch?: boolean;
             autoNudgeComments: null | boolean;
+            autoResolveOnReply: null | boolean;
             baseBranch?: string;
             branch?: string;
             /** Format: date-time */
@@ -1888,6 +1906,9 @@ export interface components {
         };
         SetAutoNudgeSettingsRequest: {
             enabled: boolean;
+        };
+        SetAutoResolveRequest: {
+            override: null | boolean;
         };
         SetMessageTemplateRequest: {
             template: string;
@@ -3686,6 +3707,69 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SetAutoNudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSessionAutoResolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetAutoResolveRequest"];
             };
         };
         responses: {

@@ -107,6 +107,17 @@ func (f *fakeStore) SetSessionAutoNudge(_ context.Context, id domain.SessionID, 
 	return true, nil
 }
 
+func (f *fakeStore) SetSessionAutoResolve(_ context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error) {
+	r, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	r.AutoResolveOnReply = override
+	r.UpdatedAt = updatedAt
+	f.sessions[id] = r
+	return true, nil
+}
+
 func (f *fakeStore) SetSessionKeepWarmOnMerge(_ context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error) {
 	r, ok := f.sessions[id]
 	if !ok {
@@ -266,6 +277,31 @@ func TestSessionSetAutoNudgeUnknownSession(t *testing.T) {
 	st := newFakeStore()
 	override := true
 	if _, err := (&Service{store: st}).SetAutoNudge(context.Background(), "ghost-1", &override); err == nil {
+		t.Fatal("want error for unknown session")
+	}
+}
+
+func TestSessionSetAutoResolvePersistsOverride(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+
+	override := true
+	sess, err := (&Service{store: st, clock: time.Now}).SetAutoResolve(context.Background(), "mer-1", &override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.AutoResolveOnReply == nil || *sess.AutoResolveOnReply != true {
+		t.Fatalf("returned auto-resolve gate = %v, want true", sess.AutoResolveOnReply)
+	}
+	if got := st.sessions["mer-1"].AutoResolveOnReply; got == nil || *got != true {
+		t.Fatalf("persisted auto-resolve gate = %v, want true", got)
+	}
+}
+
+func TestSessionSetAutoResolveUnknownSession(t *testing.T) {
+	st := newFakeStore()
+	override := true
+	if _, err := (&Service{store: st}).SetAutoResolve(context.Background(), "ghost-1", &override); err == nil {
 		t.Fatal("want error for unknown session")
 	}
 }

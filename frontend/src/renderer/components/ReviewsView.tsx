@@ -187,6 +187,19 @@ export function ReviewsView({
 		onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["session", sessionId, "autoNudge"] }),
 	});
 
+	// --- auto-resolve gate (per-session; nil = OFF, no global default) --------
+	const autoResolveOn = sessionQuery.data?.autoResolveOnReply ?? false;
+	const setAutoResolve = useMutation({
+		mutationFn: async (next: boolean) => {
+			const { error } = await apiClient.PUT("/api/v1/sessions/{sessionId}/auto-resolve", {
+				params: { path: { sessionId } },
+				body: { override: next },
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+		},
+		onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["session", sessionId, "autoNudge"] }),
+	});
+
 	// --- select / batch ------------------------------------------------------
 	const [selectMode, setSelectMode] = useState(false);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -296,12 +309,27 @@ export function ReviewsView({
 			)}
 
 			{hasPr && (
-				<AutoSendStrip
+				<ReviewToggleRow
+					icon="⚡"
+					label="Auto-send unresolved comments to worker"
 					on={autoOn}
 					busy={settingsQuery.isLoading || sessionQuery.isLoading || setOverride.isPending}
 					onToggle={(next) => {
 						setOverride.mutate(next);
 						showToast(next ? "Auto-send on · new comments dispatch automatically" : "Auto-send off");
+					}}
+				/>
+			)}
+
+			{hasPr && (
+				<ReviewToggleRow
+					icon="✓"
+					label="Auto-resolve threads when we reply"
+					on={autoResolveOn}
+					busy={sessionQuery.isLoading || setAutoResolve.isPending}
+					onToggle={(next) => {
+						setAutoResolve.mutate(next);
+						showToast(next ? "Auto-resolve on · threads resolve when we reply" : "Auto-resolve off");
 					}}
 				/>
 			)}
@@ -611,7 +639,22 @@ function ReviewerStrip({
 	);
 }
 
-function AutoSendStrip({ on, busy, onToggle }: { on: boolean; busy: boolean; onToggle: (next: boolean) => void }) {
+// ReviewToggleRow is the shared control-strip switch used by both the auto-send
+// and auto-resolve rows. icon/label parametrize it so the two rows stay pixel
+// identical while carrying their own copy and state.
+function ReviewToggleRow({
+	icon,
+	label,
+	on,
+	busy,
+	onToggle,
+}: {
+	icon: string;
+	label: string;
+	on: boolean;
+	busy: boolean;
+	onToggle: (next: boolean) => void;
+}) {
 	return (
 		<div
 			style={{
@@ -627,16 +670,16 @@ function AutoSendStrip({ on, busy, onToggle }: { on: boolean; busy: boolean; onT
 			<div style={{ flex: 1, minWidth: 0 }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 7 }}>
 					<span style={{ flex: "none", width: 16, textAlign: "center", fontSize: 12, color: on ? ACCENT : P.muted2 }}>
-						⚡
+						{icon}
 					</span>
-					<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>Auto-send unresolved comments to worker</span>
+					<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>{label}</span>
 				</div>
 			</div>
 			<button
 				type="button"
 				role="switch"
 				aria-checked={on}
-				aria-label="Auto-send unresolved comments to worker"
+				aria-label={label}
 				disabled={busy}
 				onClick={() => onToggle(!on)}
 				style={{

@@ -18,7 +18,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
-    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply
 FROM sessions WHERE id = ?
 `
 
@@ -63,6 +63,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.TokenTurns,
 		&i.TokensUpdatedAt,
 		&i.TaskSize,
+		&i.AutoResolveOnReply,
 	)
 	return i, err
 }
@@ -72,43 +73,44 @@ INSERT INTO sessions (
     id, project_id, num, issue_id, kind, harness, display_name,
     activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
-    preview_url, preview_revision, auto_nudge_comments,
+    preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
-	ID                domain.SessionID
-	ProjectID         domain.ProjectID
-	Num               int64
-	IssueID           domain.IssueID
-	Kind              domain.SessionKind
-	Harness           domain.AgentHarness
-	DisplayName       string
-	ActivityState     domain.ActivityState
-	ActivityLastAt    time.Time
-	FirstSignalAt     sql.NullTime
-	IsTerminated      bool
-	Reactivated       bool
-	Branch            string
-	WorkspacePath     string
-	RuntimeHandleID   string
-	AgentSessionID    string
-	Prompt            string
-	PreviewURL        string
-	PreviewRevision   int64
-	AutoNudgeComments sql.NullInt64
-	IsTodo            bool
-	BaseBranch        string
-	AutoNameBranch    bool
-	PRTarget          string
-	CreatedBy         string
-	IsSuspended       bool
-	LastOpenedAt      sql.NullTime
-	KeepWarmOnMerge   bool
-	TaskSize          string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                 domain.SessionID
+	ProjectID          domain.ProjectID
+	Num                int64
+	IssueID            domain.IssueID
+	Kind               domain.SessionKind
+	Harness            domain.AgentHarness
+	DisplayName        string
+	ActivityState      domain.ActivityState
+	ActivityLastAt     time.Time
+	FirstSignalAt      sql.NullTime
+	IsTerminated       bool
+	Reactivated        bool
+	Branch             string
+	WorkspacePath      string
+	RuntimeHandleID    string
+	AgentSessionID     string
+	Prompt             string
+	PreviewURL         string
+	PreviewRevision    int64
+	AutoNudgeComments  sql.NullInt64
+	AutoResolveOnReply sql.NullInt64
+	IsTodo             bool
+	BaseBranch         string
+	AutoNameBranch     bool
+	PRTarget           string
+	CreatedBy          string
+	IsSuspended        bool
+	LastOpenedAt       sql.NullTime
+	KeepWarmOnMerge    bool
+	TaskSize           string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -133,6 +135,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.PreviewURL,
 		arg.PreviewRevision,
 		arg.AutoNudgeComments,
+		arg.AutoResolveOnReply,
 		arg.IsTodo,
 		arg.BaseBranch,
 		arg.AutoNameBranch,
@@ -153,7 +156,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
-    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply
 FROM sessions ORDER BY project_id, num
 `
 
@@ -204,6 +207,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.TokenTurns,
 			&i.TokensUpdatedAt,
 			&i.TaskSize,
+			&i.AutoResolveOnReply,
 		); err != nil {
 			return nil, err
 		}
@@ -223,7 +227,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
-    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -274,6 +278,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.TokenTurns,
 			&i.TokensUpdatedAt,
 			&i.TaskSize,
+			&i.AutoResolveOnReply,
 		); err != nil {
 			return nil, err
 		}
@@ -353,6 +358,27 @@ type SetSessionAutoNudgeParams struct {
 
 func (q *Queries) SetSessionAutoNudge(ctx context.Context, arg SetSessionAutoNudgeParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionAutoNudge, arg.AutoNudgeComments, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setSessionAutoResolve = `-- name: SetSessionAutoResolve :execrows
+UPDATE sessions SET auto_resolve_on_reply = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionAutoResolveParams struct {
+	AutoResolveOnReply sql.NullInt64
+	UpdatedAt          time.Time
+	ID                 domain.SessionID
+}
+
+// Set (or clear) the per-session auto-resolve-on-reply gate. NULL = OFF (there is
+// no global default to inherit). Bumps updated_at so the sessions_cdc_update
+// trigger refreshes the Reviews tab switch.
+func (q *Queries) SetSessionAutoResolve(ctx context.Context, arg SetSessionAutoResolveParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionAutoResolve, arg.AutoResolveOnReply, arg.UpdatedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -467,40 +493,41 @@ UPDATE sessions SET
     issue_id = ?, kind = ?, harness = ?, display_name = ?,
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
-    preview_url = ?, preview_revision = ?, auto_nudge_comments = ?,
+    preview_url = ?, preview_revision = ?, auto_nudge_comments = ?, auto_resolve_on_reply = ?,
     is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, keep_warm_on_merge = ?, task_size = ?, updated_at = ?
 WHERE id = ?
 `
 
 type UpdateSessionParams struct {
-	IssueID           domain.IssueID
-	Kind              domain.SessionKind
-	Harness           domain.AgentHarness
-	DisplayName       string
-	ActivityState     domain.ActivityState
-	ActivityLastAt    time.Time
-	FirstSignalAt     sql.NullTime
-	IsTerminated      bool
-	Reactivated       bool
-	Branch            string
-	WorkspacePath     string
-	RuntimeHandleID   string
-	AgentSessionID    string
-	Prompt            string
-	PreviewURL        string
-	PreviewRevision   int64
-	AutoNudgeComments sql.NullInt64
-	IsTodo            bool
-	BaseBranch        string
-	AutoNameBranch    bool
-	PRTarget          string
-	CreatedBy         string
-	IsSuspended       bool
-	LastOpenedAt      sql.NullTime
-	KeepWarmOnMerge   bool
-	TaskSize          string
-	UpdatedAt         time.Time
-	ID                domain.SessionID
+	IssueID            domain.IssueID
+	Kind               domain.SessionKind
+	Harness            domain.AgentHarness
+	DisplayName        string
+	ActivityState      domain.ActivityState
+	ActivityLastAt     time.Time
+	FirstSignalAt      sql.NullTime
+	IsTerminated       bool
+	Reactivated        bool
+	Branch             string
+	WorkspacePath      string
+	RuntimeHandleID    string
+	AgentSessionID     string
+	Prompt             string
+	PreviewURL         string
+	PreviewRevision    int64
+	AutoNudgeComments  sql.NullInt64
+	AutoResolveOnReply sql.NullInt64
+	IsTodo             bool
+	BaseBranch         string
+	AutoNameBranch     bool
+	PRTarget           string
+	CreatedBy          string
+	IsSuspended        bool
+	LastOpenedAt       sql.NullTime
+	KeepWarmOnMerge    bool
+	TaskSize           string
+	UpdatedAt          time.Time
+	ID                 domain.SessionID
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) error {
@@ -522,6 +549,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.PreviewURL,
 		arg.PreviewRevision,
 		arg.AutoNudgeComments,
+		arg.AutoResolveOnReply,
 		arg.IsTodo,
 		arg.BaseBranch,
 		arg.AutoNameBranch,
