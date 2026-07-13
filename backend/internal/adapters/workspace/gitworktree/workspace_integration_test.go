@@ -62,7 +62,14 @@ func TestWorkspaceIntegrationCreateRestoreDestroy(t *testing.T) {
 	}
 }
 
-func TestWorkspaceIntegrationDestroyRefusesLockedWorktree(t *testing.T) {
+// TestWorkspaceIntegrationDestroyUnlocksLockedWorktree pins the fix for the
+// orchestrator-restart-500 bug: a `git worktree lock` on a managed worktree used
+// to wedge Destroy (git refuses to remove it and prune skips it, so Destroy
+// returned a non-dirty "still registered" error, which Kill/Restart surfaced as
+// a 500). AO owns worktrees under managedRoot, so Destroy now unlocks a stale
+// lock and tears a clean worktree down. The dirty-worktree guard is unaffected
+// (TestDestroyLockedDirtyStillRefused).
+func TestWorkspaceIntegrationDestroyUnlocksLockedWorktree(t *testing.T) {
 	git := requireGit(t)
 	tmp := t.TempDir()
 	repo := setupOriginClone(t, git, tmp)
@@ -78,17 +85,18 @@ func TestWorkspaceIntegrationDestroyRefusesLockedWorktree(t *testing.T) {
 	}
 	runGit(t, git, repo, "worktree", "lock", info.Path)
 
-	err = ws.Destroy(ctx, info)
-	if err == nil || !strings.Contains(err.Error(), "still registered") {
-		t.Fatalf("destroy locked error = %v, want still registered refusal", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(info.Path, "README.md")); statErr != nil {
-		t.Fatalf("locked worktree was not preserved: %v", statErr)
-	}
-
-	runGit(t, git, repo, "worktree", "unlock", info.Path)
 	if err := ws.Destroy(ctx, info); err != nil {
-		t.Fatalf("destroy after unlock: %v", err)
+		t.Fatalf("destroy locked worktree: %v", err)
+	}
+	if _, statErr := os.Stat(info.Path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("path after destroy stat err = %v, want not exist", statErr)
+	}
+	records, err := ws.listRecords(ctx, repo)
+	if err != nil {
+		t.Fatalf("listRecords: %v", err)
+	}
+	if _, ok := findWorktree(records, info.Path); ok {
+		t.Fatalf("worktree %q still registered after Destroy", info.Path)
 	}
 }
 
