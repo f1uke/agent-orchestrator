@@ -222,8 +222,13 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		effective = *rec.AutoNudgeComments
 	}
 	if effective && (o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments)) {
-		comments, sig := reviewContent(o.Comments)
-		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL), Comments: comments})
+		items, sig := reviewContent(o.Comments)
+		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{
+			PRIdentity: ident,
+			PRURL:      domain.SanitizeControlChars(o.URL),
+			Count:      len(items),
+			Comments:   items,
+		})
 		if sig == "" {
 			sig = string(o.Review)
 		}
@@ -649,21 +654,28 @@ func hasUnresolvedComments(comments []ports.PRCommentObservation) bool {
 	return false
 }
 
-func reviewContent(comments []ports.PRCommentObservation) (string, string) {
-	bodies := make([]string, 0, len(comments))
+// reviewContent turns the unresolved review comments into the template's
+// per-comment items (file:line + quoted body, so the worker knows where to make
+// each change and reply) and the dedup signature. File and Body are
+// attacker-influenced (anyone who can comment on the PR) and get pasted into the
+// agent's live pane, so both are stripped of control/escape chars; the signature
+// is built from comment IDs, not bodies, so dedup is unaffected.
+func reviewContent(comments []ports.PRCommentObservation) ([]messagetemplates.ReviewCommentItem, string) {
+	items := make([]messagetemplates.ReviewCommentItem, 0, len(comments))
 	ids := make([]string, 0, len(comments))
 	for _, c := range comments {
 		if c.Resolved {
 			continue
 		}
-		// Comment bodies are attacker-influenced (anyone who can comment on the
-		// PR) and get pasted into the agent's live pane; strip control/escape
-		// chars. The signature is built from comment IDs, not bodies, so dedup is
-		// unaffected.
-		bodies = append(bodies, domain.SanitizeControlChars(c.Body))
+		items = append(items, messagetemplates.ReviewCommentItem{
+			Index: len(items) + 1,
+			File:  domain.SanitizeControlChars(c.File),
+			Line:  c.Line,
+			Body:  domain.SanitizeControlChars(c.Body),
+		})
 		ids = append(ids, c.ID)
 	}
-	return strings.Join(bodies, "\n\n"), strings.Join(ids, ",")
+	return items, strings.Join(ids, ",")
 }
 
 // renderNudge renders a nudge template, logging (but tolerating) a failed

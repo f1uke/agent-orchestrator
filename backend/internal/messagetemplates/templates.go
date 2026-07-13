@@ -49,11 +49,27 @@ func (n Name) Valid() bool {
 // ReviewCommentData is the render context for NameReviewCommentDispatch.
 // PRIdentity/PRURL identify which PR the feedback is on (a session may own
 // several); PRIdentity is empty only for the zero value, where the default
-// template falls back to "your PR".
+// template falls back to "your PR". Comments carries one entry per unresolved
+// review comment so the worker is told each comment's file:line and quoted
+// body - the location it needs to make the change and reply on the right
+// thread. Count == len(Comments) and drives the singular/plural phrasing; it is
+// 0 for a bare changes-requested decision that carries no inline threads.
 type ReviewCommentData struct {
 	PRIdentity string
 	PRURL      string
-	Comments   string
+	Count      int
+	Comments   []ReviewCommentItem
+}
+
+// ReviewCommentItem is one unresolved review comment inside a
+// NameReviewCommentDispatch render. Index is 1-based for the numbered
+// multi-comment list; File/Line locate the comment in the diff; Body is the
+// quoted comment text.
+type ReviewCommentItem struct {
+	Index int
+	File  string
+	Line  int
+	Body  string
 }
 
 // CIFailingData is the render context for NameCIFailing.
@@ -101,7 +117,7 @@ type AOReviewerSingleData struct {
 func Placeholders(n Name) []string {
 	switch n {
 	case NameReviewCommentDispatch:
-		return []string{"{{.PRIdentity}}", "{{.PRURL}}", "{{.Comments}}"}
+		return []string{"{{.PRIdentity}}", "{{.PRURL}}", "{{.Count}}", "{{range .Comments}}", "{{.Index}}", "{{.File}}", "{{.Line}}", "{{.Body}}", "{{end}}"}
 	case NameTrackerBotComment:
 		return []string{"{{.Comments}}"}
 	case NameCIFailing:
@@ -151,7 +167,29 @@ func Execute(tmplText string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-const reviewCommentDefault = "A reviewer left feedback on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address it and push.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}{{if .Comments}}\n\n{{.Comments}}{{end}}"
+// reviewCommentDefault tells the worker WHICH file:line each unresolved review
+// comment is on plus the quoted body, so it can make the change and reply on the
+// right thread without guessing the location. It mirrors the frontend
+// genPrompt/batchPrompt format (comment-inbox.ts) so the worker sees a
+// consistent message whether the comment arrives via the manual "Send to worker"
+// button or the auto-send toggle. Three branches on Count: a single comment reads
+// naturally without a number; multiple comments state the shared instruction once
+// then a numbered file:line list; zero comments (a bare changes-requested
+// decision with no inline threads) omits the list. file:line is the thread
+// reference the worker replies on - the same locator the frontend uses.
+const reviewCommentDefault = "" +
+	"{{if eq .Count 1}}" +
+	"A reviewer left an unresolved comment on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address it: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+	"{{if .PRURL}}\nPR: {{.PRURL}}{{end}}" +
+	"{{range .Comments}}\n\n{{.File}}:{{.Line}}\n> {{.Body}}{{end}}" +
+	"{{else if .Comments}}" +
+	"There are {{.Count}} unresolved review comments on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}} to address. For each: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+	"{{if .PRURL}}\nPR: {{.PRURL}}{{end}}" +
+	"{{range .Comments}}\n\n{{.Index}}. {{.File}}:{{.Line}}\n   > {{.Body}}{{end}}" +
+	"{{else}}" +
+	"A reviewer requested changes on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address the feedback, then reply on the review threads summarizing what you did." +
+	"{{if .PRURL}}\nPR: {{.PRURL}}{{end}}" +
+	"{{end}}"
 
 const ciFailingDefault = "CI is failing on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Review the output below and push a fix.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}{{if .LogTail}}\n\nFailing output:\n{{.LogTail}}{{end}}"
 

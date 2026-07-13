@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,9 +10,9 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 )
 
-// stubRenderer echoes the ReviewCommentData.Comments alongside a fixed prefix
-// so tests can assert both sanitization and content propagation without
-// depending on the real template text.
+// stubRenderer echoes each ReviewCommentData item as "file:line body" alongside a
+// fixed prefix so tests can assert both sanitization and that file:line + body
+// reach the worker, without depending on the real template text.
 type stubRenderer struct {
 	out string
 	err error
@@ -22,7 +23,11 @@ func (s stubRenderer) Render(_ messagetemplates.Name, data any) (string, error) 
 		return "", s.err
 	}
 	if d, ok := data.(messagetemplates.ReviewCommentData); ok {
-		return s.out + "\n" + d.Comments, nil
+		out := s.out
+		for _, c := range d.Comments {
+			out += fmt.Sprintf("\n%s:%d %s", c.File, c.Line, c.Body)
+		}
+		return out, nil
 	}
 	return s.out, nil
 }
@@ -32,7 +37,7 @@ func TestDispatchCommentToWorker_RendersSanitizesAndSends(t *testing.T) {
 	fake.sessions["s1"] = domain.SessionRecord{ID: "s1", ProjectID: "p", Kind: domain.KindWorker}
 	stList := &multiPRFakeStore{fakeStore: fake, prs: []domain.PullRequest{{URL: "pr1"}}}
 	stList.comments["pr1"] = []domain.PullRequestComment{
-		{ThreadID: "T1", ID: "c1", Body: "please\x1b]0;pwned\afix"},
+		{ThreadID: "T1", ID: "c1", File: "svc.go", Line: 42, Body: "please\x1b]0;pwned\afix"},
 	}
 	fc := &fakeCommander{}
 	svc := &Service{store: stList, manager: fc, renderer: stubRenderer{out: "PROMPT:"}}
@@ -53,6 +58,41 @@ func TestDispatchCommentToWorker_RendersSanitizesAndSends(t *testing.T) {
 	}
 	if !strings.Contains(got, "please") || !strings.Contains(got, "fix") {
 		t.Fatalf("comment body missing: %q", got)
+	}
+	// The worker must be told WHICH file:line to fix - the bug this closes.
+	if !strings.Contains(got, "svc.go:42") {
+		t.Fatalf("dispatched message missing file:line: %q", got)
+	}
+}
+
+// End-to-end through the REAL default template (no stub): the manual "Send to
+// worker" path must render each comment's file:line + body and the PR URL, so the
+// worker knows exactly where to fix - the bug this closes for the manual path.
+func TestDispatchCommentToWorker_RealTemplateCarriesFileLine(t *testing.T) {
+	fake := newFakeStore()
+	fake.sessions["s1"] = domain.SessionRecord{ID: "s1", ProjectID: "p", Kind: domain.KindWorker}
+	stList := &multiPRFakeStore{fakeStore: fake, prs: []domain.PullRequest{{URL: "https://x/pr/9"}}}
+	stList.comments["https://x/pr/9"] = []domain.PullRequestComment{
+		{ThreadID: "T1", ID: "c1", File: "coupon.swift", Line: 75, Body: "knock out getTotalCount()"},
+	}
+	fc := &fakeCommander{}
+	svc := &Service{store: stList, manager: fc, renderer: messagetemplates.NewRenderer(nil)}
+
+	if err := svc.DispatchCommentToWorker(context.Background(), "s1", "https://x/pr/9", "T1", ""); err != nil {
+		t.Fatal(err)
+	}
+	got := fc.lastMessage
+	if !strings.Contains(got, "coupon.swift:75") {
+		t.Fatalf("dispatched message missing file:line: %q", got)
+	}
+	if !strings.Contains(got, "knock out getTotalCount()") {
+		t.Fatalf("dispatched message missing comment body: %q", got)
+	}
+	if !strings.Contains(got, "PR: https://x/pr/9") {
+		t.Fatalf("dispatched message missing PR url: %q", got)
+	}
+	if !strings.Contains(got, "reply on that thread") {
+		t.Fatalf("dispatched message missing the reply instruction: %q", got)
 	}
 }
 

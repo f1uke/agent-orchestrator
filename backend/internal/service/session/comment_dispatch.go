@@ -37,19 +37,30 @@ func (s *Service) DispatchCommentToWorker(ctx context.Context, id domain.Session
 	if err != nil {
 		return err
 	}
-	bodies := make([]string, 0, len(comments))
+	items := make([]messagetemplates.ReviewCommentItem, 0, len(comments))
 	for _, c := range comments {
 		if c.ThreadID == threadID {
-			bodies = append(bodies, domain.SanitizeControlChars(c.Body))
+			// File and Body are provider-controlled and reach the worker PTY;
+			// sanitize both (Line is an int and safe).
+			items = append(items, messagetemplates.ReviewCommentItem{
+				Index: len(items) + 1,
+				File:  domain.SanitizeControlChars(c.File),
+				Line:  c.Line,
+				Body:  domain.SanitizeControlChars(c.Body),
+			})
 		}
 	}
-	if len(bodies) == 0 {
+	if len(items) == 0 {
 		return apierr.Invalid("NO_COMMENTS", "Thread has no comments to dispatch", nil)
 	}
 	if s.renderer == nil {
 		return apierr.Invalid("DISPATCH_UNAVAILABLE", "Comment dispatch is not configured", nil)
 	}
-	msg, err := s.renderer.Render(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{Comments: strings.Join(bodies, "\n\n")})
+	msg, err := s.renderer.Render(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{
+		PRURL:    domain.SanitizeControlChars(prURL),
+		Count:    len(items),
+		Comments: items,
+	})
 	if err != nil {
 		return err
 	}

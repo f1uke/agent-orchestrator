@@ -6,7 +6,7 @@ import (
 )
 
 func TestExecuteRendersData(t *testing.T) {
-	out, err := Execute("hi {{.Comments}}", ReviewCommentData{Comments: "there"})
+	out, err := Execute("hi {{.PRURL}}", ReviewCommentData{PRURL: "there"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -57,21 +57,60 @@ func TestDefaultsRenderWithZeroData(t *testing.T) {
 	}
 }
 
-func TestReviewCommentDefaultOmitsBlankComments(t *testing.T) {
+// The single-comment dispatch must tell the worker the comment's file:line and
+// quoted body (the bug this fix closes) plus one clear instruction - mirroring
+// the frontend genPrompt phrasing. No numbered list for a lone comment.
+func TestReviewCommentDefaultSingleGolden(t *testing.T) {
+	out, err := Execute(Default(NameReviewCommentDispatch), ReviewCommentData{
+		PRIdentity: "PR #7",
+		PRURL:      "https://x/pr/7",
+		Count:      1,
+		Comments:   []ReviewCommentItem{{Index: 1, File: "a.go", Line: 75, Body: "tidy this"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "A reviewer left an unresolved comment on PR #7. Address it: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+		"\nPR: https://x/pr/7" +
+		"\n\na.go:75\n> tidy this"
+	if out != want {
+		t.Fatalf("single golden mismatch:\n got %q\nwant %q", out, want)
+	}
+}
+
+// The multi-comment dispatch states the shared instruction once, then a numbered
+// file:line list with each quoted body - mirroring the frontend batchPrompt. PR
+// identity falls back to "your PR" when absent.
+func TestReviewCommentDefaultMultiGolden(t *testing.T) {
+	out, err := Execute(Default(NameReviewCommentDispatch), ReviewCommentData{
+		Count: 2,
+		Comments: []ReviewCommentItem{
+			{Index: 1, File: "a.go", Line: 75, Body: "first"},
+			{Index: 2, File: "b.go", Line: 12, Body: "second"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "There are 2 unresolved review comments on your PR to address. For each: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+		"\n\n1. a.go:75\n   > first" +
+		"\n\n2. b.go:12\n   > second"
+	if out != want {
+		t.Fatalf("multi golden mismatch:\n got %q\nwant %q", out, want)
+	}
+}
+
+// A bare changes-requested decision carries no inline threads (Count 0): omit the
+// list and just point the worker at the review feedback. Also the zero-value
+// worst case, so it must render without error.
+func TestReviewCommentDefaultNoCommentsGolden(t *testing.T) {
 	out, err := Execute(Default(NameReviewCommentDispatch), ReviewCommentData{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "A reviewer left feedback on your PR. Address it and push." {
-		t.Fatalf("blank-comment render = %q", out)
-	}
-	out, err = Execute(Default(NameReviewCommentDispatch), ReviewCommentData{Comments: "remove this"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "A reviewer left feedback on your PR. Address it and push.\n\nremove this"
+	want := "A reviewer requested changes on your PR. Address the feedback, then reply on the review threads summarizing what you did."
 	if out != want {
-		t.Fatalf("with-comment render = %q, want %q", out, want)
+		t.Fatalf("no-comment render = %q, want %q", out, want)
 	}
 }
 
