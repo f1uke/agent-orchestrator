@@ -1009,7 +1009,30 @@ func sessionView(s domain.Session) SessionView {
 	if s.IsTodo {
 		prompt = s.Metadata.Prompt
 	}
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs)}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s)}
+}
+
+// sessionTokenUsage builds the curated token-telemetry wire object, deriving the raw
+// + cost-weighted totals and the runaway flag from the stored buckets. It returns nil
+// (so the field is omitted) when the session has never been parsed — a fresh session
+// or a non-claude-code agent whose transcript AO cannot read — which the UI reads as
+// "no chip / n/a".
+func sessionTokenUsage(s domain.Session) *SessionTokenUsage {
+	if s.TokensUpdatedAt.IsZero() {
+		return nil
+	}
+	u := s.TokenUsage
+	return &SessionTokenUsage{
+		Input:         u.Input,
+		CacheCreation: u.CacheCreation,
+		CacheRead:     u.CacheRead,
+		Output:        u.Output,
+		Turns:         u.Turns,
+		RawTotal:      u.RawTotal(),
+		CostWeighted:  u.CostWeighted(),
+		Runaway:       u.IsRunaway(),
+		UpdatedAt:     s.TokensUpdatedAt,
+	}
 }
 
 func sessionViews(sessions []domain.Session) []SessionView {

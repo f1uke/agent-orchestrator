@@ -164,36 +164,42 @@ type ReviewRun struct {
 }
 
 type Session struct {
-	ID                domain.SessionID
-	ProjectID         domain.ProjectID
-	Num               int64
-	IssueID           domain.IssueID
-	Kind              domain.SessionKind
-	Harness           domain.AgentHarness
-	ActivityState     domain.ActivityState
-	ActivityLastAt    time.Time
-	IsTerminated      bool
-	Branch            string
-	WorkspacePath     string
-	RuntimeHandleID   string
-	AgentSessionID    string
-	Prompt            string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	DisplayName       string
-	FirstSignalAt     sql.NullTime
-	PreviewURL        string
-	PreviewRevision   int64
-	Reactivated       bool
-	AutoNudgeComments sql.NullInt64
-	IsTodo            bool
-	BaseBranch        string
-	AutoNameBranch    bool
-	PRTarget          string
-	CreatedBy         string
-	IsSuspended       bool
-	LastOpenedAt      sql.NullTime
-	KeepWarmOnMerge   bool
+	ID                 domain.SessionID
+	ProjectID          domain.ProjectID
+	Num                int64
+	IssueID            domain.IssueID
+	Kind               domain.SessionKind
+	Harness            domain.AgentHarness
+	ActivityState      domain.ActivityState
+	ActivityLastAt     time.Time
+	IsTerminated       bool
+	Branch             string
+	WorkspacePath      string
+	RuntimeHandleID    string
+	AgentSessionID     string
+	Prompt             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DisplayName        string
+	FirstSignalAt      sql.NullTime
+	PreviewURL         string
+	PreviewRevision    int64
+	Reactivated        bool
+	AutoNudgeComments  sql.NullInt64
+	IsTodo             bool
+	BaseBranch         string
+	AutoNameBranch     bool
+	PRTarget           string
+	CreatedBy          string
+	IsSuspended        bool
+	LastOpenedAt       sql.NullTime
+	KeepWarmOnMerge    bool
+	TokenInput         int64
+	TokenCacheCreation int64
+	TokenCacheRead     int64
+	TokenOutput        int64
+	TokenTurns         int64
+	TokensUpdatedAt    sql.NullTime
 }
 
 type SessionWorktree struct {

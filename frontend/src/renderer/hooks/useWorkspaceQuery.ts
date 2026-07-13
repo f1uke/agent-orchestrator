@@ -83,6 +83,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				autoNameBranch: session.autoNameBranch,
 				createdBy: session.createdBy,
 				prompt: session.prompt,
+				tokenUsage: session.tokenUsage,
 			})),
 	}));
 }

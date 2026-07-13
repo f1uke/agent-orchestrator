@@ -1289,6 +1289,7 @@ export interface components {
             /** @enum {string} */
             statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged";
             terminalHandleId?: string;
+            tokenUsage?: components["schemas"]["SessionTokenUsage"];
             /** Format: date-time */
             updatedAt: string;
             workspacePath?: string;
@@ -1850,6 +1851,25 @@ export interface components {
         };
         SessionResponse: {
             session: components["schemas"]["ControllersSessionView"];
+        };
+        SessionTokenUsage: {
+            /** Format: int64 */
+            cacheCreation: number;
+            /** Format: int64 */
+            cacheRead: number;
+            /** Format: int64 */
+            costWeighted: number;
+            /** Format: int64 */
+            input: number;
+            /** Format: int64 */
+            output: number;
+            /** Format: int64 */
+            rawTotal: number;
+            runaway: boolean;
+            /** Format: int64 */
+            turns: number;
+            /** Format: date-time */
+            updatedAt: string;
         };
         SetActivityRequest: {
             /**
