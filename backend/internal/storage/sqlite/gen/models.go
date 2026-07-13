@@ -200,6 +200,7 @@ type Session struct {
 	TokenOutput        int64
 	TokenTurns         int64
 	TokensUpdatedAt    sql.NullTime
+	TaskSize           string
 }
 
 type SessionWorktree struct {

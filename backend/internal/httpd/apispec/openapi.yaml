@@ -5545,6 +5545,12 @@ components:
           type:
           - "null"
           - boolean
+        taskSize:
+          enum:
+          - mechanical
+          - standard
+          - deep
+          type: string
       required:
       - projectId
       type: object

@@ -324,6 +324,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		AutoNameBranch:    row.AutoNameBranch,
 		PRTarget:          row.PRTarget,
 		CreatedBy:         domain.SessionID(row.CreatedBy),
+		TaskSize:          domain.TaskSize(row.TaskSize),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -380,6 +381,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		IsSuspended:       rec.IsSuspended,
 		LastOpenedAt:      timeToNullTime(rec.LastOpenedAt),
 		KeepWarmOnMerge:   rec.KeepWarmOnMerge,
+		TaskSize:          string(rec.TaskSize.WithDefault()),
 		CreatedAt:         rec.CreatedAt,
 		UpdatedAt:         rec.UpdatedAt,
 	}
@@ -414,6 +416,7 @@ func recordToUpdate(rec domain.SessionRecord) gen.UpdateSessionParams {
 		IsSuspended:       rec.IsSuspended,
 		LastOpenedAt:      timeToNullTime(rec.LastOpenedAt),
 		KeepWarmOnMerge:   rec.KeepWarmOnMerge,
+		TaskSize:          string(rec.TaskSize.WithDefault()),
 		UpdatedAt:         rec.UpdatedAt,
 	}
 }

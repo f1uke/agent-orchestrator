@@ -2,6 +2,7 @@ package sessionmanager
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -96,6 +97,37 @@ func TestStartTodo_MaterializesInPlace(t *testing.T) {
 	}
 	if st.sessions[prepared.ID].IsTodo {
 		t.Fatal("stored row still IsTodo after Start")
+	}
+}
+
+// A TODO staged with `--task-size mechanical` must persist the size and, when
+// Started, launch the worker with the mechanical skip authorization in its system
+// prompt — proving TaskSize survives PrepareTodo -> StartTodo (the prompt is
+// derived from the replayed spec, not the empty spawn cfg).
+func TestStartTodo_ReplaysMechanicalTaskSizeIntoPrompt(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	agent := &recordingAgent{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+	prepared, err := m.PrepareTodo(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		Branch: "feature/x", BaseBranch: "main-fluke", Prompt: "rename it",
+		TaskSize: domain.TaskSizeMechanical,
+	})
+	if err != nil {
+		t.Fatalf("PrepareTodo: %v", err)
+	}
+	if got := st.sessions[prepared.ID].TaskSize; got != domain.TaskSizeMechanical {
+		t.Fatalf("stored TODO TaskSize = %q, want mechanical", got)
+	}
+
+	if _, err := m.StartTodo(ctx, prepared.ID); err != nil {
+		t.Fatalf("StartTodo: %v", err)
+	}
+	if !strings.Contains(agent.lastLaunch.SystemPrompt, "## Task size: mechanical (AO)") {
+		t.Fatalf("started TODO lost the mechanical directive:\n%s", agent.lastLaunch.SystemPrompt)
 	}
 }
 

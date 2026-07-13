@@ -249,6 +249,11 @@ type SpawnSessionRequest struct {
 	// terminating to Done (feature/merge-suspend-in-place). Default false — an
 	// ordinary single-PR worker still auto-archives on merge.
 	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
+	// TaskSize is the ceremony level for the worker (`ao spawn --task-size`):
+	// mechanical / standard / deep. Absent/empty means standard (full ceremony). A
+	// mechanical task is authorized in the worker prompt to skip the process
+	// skills. Persisted on the session; not surfaced on the read model.
+	TaskSize domain.TaskSize `json:"taskSize,omitempty" enum:"mechanical,standard,deep"`
 }
 
 // UpdateTodoSpecRequest is the body of PATCH /api/v1/sessions/{sessionId}/spec:
