@@ -119,6 +119,7 @@ type fakeProvider struct {
 	mu           sync.Mutex
 	repoGuards   map[string]ports.SCMGuardResult
 	checkGuards  map[string]ports.SCMGuardResult
+	baseGuards   map[string]ports.SCMGuardResult
 	openPRs      map[string][]ports.SCMPRObservation
 	listErr      error
 	observations map[string]ports.SCMObservation
@@ -132,6 +133,7 @@ type fakeProvider struct {
 	credentialErr    error
 	credentialChecks int
 	repoGuardCalls   int
+	baseGuardCalls   int
 	listCalls        int
 	fetchBatches     [][]ports.SCMPRRef
 	logCalls         int
@@ -179,6 +181,12 @@ func (p *fakeProvider) ListOpenPRsByRepo(_ context.Context, repo ports.SCMRepo) 
 }
 func (p *fakeProvider) CommitChecksGuard(_ context.Context, repo ports.SCMRepo, sha, _ string) (ports.SCMGuardResult, error) {
 	return p.checkGuards[commitKey(repo, sha)], nil
+}
+func (p *fakeProvider) BaseBranchGuard(_ context.Context, repo ports.SCMRepo, branch, _ string) (ports.SCMGuardResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.baseGuardCalls++
+	return p.baseGuards[baseBranchKey(repo, branch)], nil
 }
 func (p *fakeProvider) FetchPullRequests(_ context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error) {
 	p.mu.Lock()
@@ -1101,6 +1109,116 @@ func TestPoll_MergeabilityStuckConflictingWhenGuardsQuiet(t *testing.T) {
 	// nudge is not (re-)raised from a stale conflicting value.
 	if len(lc.observed) == 0 || domain.Mergeability(lc.observed[len(lc.observed)-1].Mergeability.State) != domain.MergeMergeable {
 		t.Fatalf("BUG (gl-mergeable-stale): lifecycle did not receive the cleared mergeable observation: %#v", lc.observed)
+	}
+}
+
+// TestPoll_MergeabilityRecheckedWhenBaseBranchMoves reproduces the mirror/sibling
+// of the gl-mergeable-stale bug (board: "pr mergeable recheck on base move").
+//
+// A PR is MERGEABLE. Then a sibling PR merges into the shared base branch, so the
+// provider recomputes THIS PR to CONFLICTING — but the PR's own head SHA is
+// unchanged, so both the open-PR-list ETag (RepoPRListGuard) and the per-commit
+// checks ETag (CommitChecksGuard) stay 304, CI is terminal, and stored
+// mergeability is "mergeable" (so #100's conflicting force-candidate can't fire).
+// The PR is never a refresh candidate and its mergeability freezes at "mergeable"
+// even though the provider now reports conflicting, so the merge-conflict rebase
+// nudge is never delivered.
+//
+// This asserts the CORRECT behavior: when the base branch head advances, the
+// observer must re-read the PR, persist the recomputed conflicting mergeability,
+// and deliver a FRESH (MetadataStale=false) conflicting observation to lifecycle
+// so #100's merge-conflict nudge gate fires. It FAILS (red) until the base-branch
+// force-candidate trigger lands: with the base guard unused, nothing re-fetches.
+func TestPoll_MergeabilityRecheckedWhenBaseBranchMoves(t *testing.T) {
+	key := prKey(testRepo, 1)
+	ck := commitKey(testRepo, "sha1")
+	bk := baseBranchKey(testRepo, "main") // testObs sets TargetBranch "main"
+
+	store := testStoreWithSession()
+	store.prs["p-1"] = []domain.PullRequest{knownPR(1)} // mergeable baseline, all local state set
+
+	provider := &fakeProvider{
+		// Quiet open-PR-list guard: a sibling merging does not reliably move the
+		// single per_page=1 top row, and a background mergeability recompute does
+		// not bump this PR's updated_at.
+		repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo", NotModified: true}},
+		// CI terminal + head unchanged: the per-commit checks ETag is stable too.
+		checkGuards: map[string]ports.SCMGuardResult{ck: {ETag: "ci1", NotModified: true}},
+		// The base branch head advanced (a sibling merged into it): the guard reports
+		// a NEW ETag, not modified=false.
+		baseGuards: map[string]ports.SCMGuardResult{bk: {ETag: "base2", NotModified: false}},
+		// If the observer DOES re-read the PR, the provider now reports it conflicting.
+		observations: map[string]ports.SCMObservation{key: conflictingObs(1)},
+	}
+
+	lc := &fakeLifecycle{}
+	obs := newTestObserver(store, provider, lc, time.Unix(2, 0).UTC())
+	obs.Cache.RepoPRListETag[prKey(testRepo, 0)] = "repo"
+	obs.Cache.CommitChecksETag[ck] = "ci1"
+	obs.Cache.BaseBranchETag[bk] = "base1"                  // stale: base has since advanced to base2
+	obs.Cache.LastReviewPollAt[key] = time.Unix(2, 0).UTC() // isolate: suppress review re-poll noise
+
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(provider.fetchBatches) == 0 {
+		t.Fatalf("BUG (pr-mergeable-recheck-on-base-move): observer never re-fetched the PR after its " +
+			"base branch advanced; its mergeability is frozen at mergeable because the PR's own head SHA " +
+			"is unchanged so both ETag guards stayed 304")
+	}
+	last := lastWriteForPR(store, 1)
+	if last == nil {
+		t.Fatalf("BUG (pr-mergeable-recheck-on-base-move): no write persisted the PR's recomputed mergeability; it is stuck at mergeable")
+	}
+	if last.Mergeability != domain.MergeConflicting {
+		t.Fatalf("BUG (pr-mergeable-recheck-on-base-move): mergeability stuck at %q; the base moved and the provider reports conflicting but the observer never re-read it", last.Mergeability)
+	}
+	// A FRESH conflicting observation (MetadataStale=false) must reach lifecycle so
+	// the merge-conflict nudge gate (o.Mergeability==conflicting && !MergeabilityStale) fires.
+	if len(lc.observed) == 0 {
+		t.Fatalf("BUG (pr-mergeable-recheck-on-base-move): lifecycle received no observation for the base-moved PR")
+	}
+	got := lc.observed[len(lc.observed)-1]
+	if domain.Mergeability(got.Mergeability.State) != domain.MergeConflicting {
+		t.Fatalf("BUG (pr-mergeable-recheck-on-base-move): lifecycle observation mergeability = %q, want conflicting: %#v", got.Mergeability.State, got)
+	}
+	if got.MetadataStale {
+		t.Fatalf("BUG (pr-mergeable-recheck-on-base-move): base-moved re-read delivered a STALE observation; the merge-conflict nudge would be suppressed")
+	}
+}
+
+// TestPoll_MergeableNotRefetchedWhenBaseBranchQuiet is the control for the
+// base-branch force-candidate trigger: a settled mergeable PR whose base branch
+// head has NOT moved (base guard 304) and whose own head/CI guards are quiet must
+// NOT be re-fetched. This proves the trigger is scoped to genuine base moves and
+// does not defeat the ETag fast-path for the idle-PR population.
+func TestPoll_MergeableNotRefetchedWhenBaseBranchQuiet(t *testing.T) {
+	key := prKey(testRepo, 1)
+	ck := commitKey(testRepo, "sha1")
+	bk := baseBranchKey(testRepo, "main")
+
+	store := testStoreWithSession()
+	store.prs["p-1"] = []domain.PullRequest{knownPR(1)}
+
+	provider := &fakeProvider{
+		repoGuards:   map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo", NotModified: true}},
+		checkGuards:  map[string]ports.SCMGuardResult{ck: {ETag: "ci1", NotModified: true}},
+		baseGuards:   map[string]ports.SCMGuardResult{bk: {ETag: "base1", NotModified: true}},
+		observations: map[string]ports.SCMObservation{key: testObs(1)},
+	}
+
+	obs := newTestObserver(store, provider, &fakeLifecycle{}, time.Unix(2, 0).UTC())
+	obs.Cache.RepoPRListETag[prKey(testRepo, 0)] = "repo"
+	obs.Cache.CommitChecksETag[ck] = "ci1"
+	obs.Cache.BaseBranchETag[bk] = "base1"
+	obs.Cache.LastReviewPollAt[key] = time.Unix(2, 0).UTC()
+
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.fetchBatches) != 0 {
+		t.Fatalf("over-fetch: a settled mergeable PR whose base branch is quiet must not be re-fetched, but %d batch(es) ran", len(provider.fetchBatches))
 	}
 }
 

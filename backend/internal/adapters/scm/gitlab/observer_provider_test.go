@@ -128,6 +128,53 @@ func TestListOpenPRsByRepoCarriesHeadRepo(t *testing.T) {
 	}
 }
 
+// TestBaseBranchGuardETag304 verifies the base-branch guard hits the
+// repository-branches endpoint, surfaces the branch ETag, sends If-None-Match on
+// the next call, and reports NotModified on a 304 — the signal the observer uses
+// to re-read an MR whose target branch advanced (a sibling merged into the base).
+func TestBaseBranchGuardETag304(t *testing.T) {
+	var hits int
+	var lastPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		lastPath = r.URL.EscapedPath()
+		if r.Header.Get("If-None-Match") == `"base1"` {
+			w.Header().Set("ETag", `"base1"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"base1"`)
+		_, _ = w.Write([]byte(`{"name":"main","commit":{"id":"abc123"}}`))
+	}))
+	defer srv.Close()
+	p := newTestProvider(t, srv.URL)
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+
+	first, err := p.BaseBranchGuard(context.Background(), repo, "main", "")
+	if err != nil {
+		t.Fatalf("first BaseBranchGuard: %v", err)
+	}
+	if first.NotModified || first.ETag != `"base1"` {
+		t.Fatalf("first guard = %+v, want ETag \"base1\" NotModified=false", first)
+	}
+	if !strings.Contains(lastPath, "repository/branches") {
+		t.Fatalf("guard hit %q, want the repository-branches endpoint", lastPath)
+	}
+	second, err := p.BaseBranchGuard(context.Background(), repo, "main", first.ETag)
+	if err != nil {
+		t.Fatalf("second BaseBranchGuard: %v", err)
+	}
+	if !second.NotModified {
+		t.Fatalf("second guard NotModified=false; want true (branch head unchanged)")
+	}
+	if hits != 2 {
+		t.Fatalf("branch endpoint hits = %d, want 2", hits)
+	}
+	if _, err := p.BaseBranchGuard(context.Background(), repo, "  ", ""); err == nil {
+		t.Fatalf("BaseBranchGuard with an empty branch must error, got nil")
+	}
+}
+
 // TestCIObservationNormalizesJobStatus locks in that every emitted check status
 // is one of AO's normalized domain.PRCheckStatus values. The pr_checks.status
 // column CHECK-constrains writes to that vocabulary, so emitting GitLab's raw job

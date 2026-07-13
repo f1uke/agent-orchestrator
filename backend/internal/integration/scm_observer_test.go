@@ -115,6 +115,12 @@ func (p *cannedSCMProvider) CommitChecksGuard(_ context.Context, _ ports.SCMRepo
 	return ports.SCMGuardResult{ETag: "commit-etag"}, nil
 }
 
+func (p *cannedSCMProvider) BaseBranchGuard(_ context.Context, _ ports.SCMRepo, _, _ string) (ports.SCMGuardResult, error) {
+	// Base branch quiet: this fixture drives re-observation through the repo/commit
+	// guards above; the base-moved trigger is exercised by the observer unit tests.
+	return ports.SCMGuardResult{ETag: "base-etag", NotModified: true}, nil
+}
+
 func (p *cannedSCMProvider) FetchPullRequests(_ context.Context, refs []ports.SCMPRRef) ([]ports.SCMObservation, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

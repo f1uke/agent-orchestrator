@@ -856,6 +856,68 @@ func TestObserve_ETag304Cached(t *testing.T) {
 	}
 }
 
+func TestBaseBranchGuard_ETag304(t *testing.T) {
+	// The base-branch guard must hit /repos/{o}/{r}/branches/{branch}, surface the
+	// branch-head ETag, send If-None-Match on the next call, and report NotModified
+	// on a 304 — the signal selectRefreshCandidates uses to detect a base move.
+	f := newFakeGH(t)
+	repo := ports.SCMRepo{Provider: "github", Host: "github.com", Owner: "octocat", Name: "hello", Repo: "octocat/hello"}
+	branchPath := "/repos/octocat/hello/branches/main"
+	var hits int
+	f.on(http.MethodGet, branchPath, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.Header.Get("If-None-Match") == `W/"base1"` {
+			w.Header().Set("ETag", `W/"base1"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `W/"base1"`)
+		_ = json.NewEncoder(w).Encode(map[string]any{"name": "main", "commit": map[string]any{"sha": "abc123"}})
+	})
+	p := newProviderForTest(t, f)
+
+	first, err := p.BaseBranchGuard(ctx(), repo, "main", "")
+	if err != nil {
+		t.Fatalf("first BaseBranchGuard: %v", err)
+	}
+	if first.NotModified {
+		t.Fatalf("first guard reported NotModified with no prior ETag")
+	}
+	if first.ETag != `W/"base1"` {
+		t.Fatalf("first guard ETag = %q, want W/\"base1\"", first.ETag)
+	}
+
+	second, err := p.BaseBranchGuard(ctx(), repo, "main", first.ETag)
+	if err != nil {
+		t.Fatalf("second BaseBranchGuard: %v", err)
+	}
+	if !second.NotModified {
+		t.Fatalf("second guard NotModified = false; want true (branch head unchanged)")
+	}
+	if hits != 2 {
+		t.Fatalf("branch endpoint hits = %d, want 2 (one fresh, one conditional)", hits)
+	}
+	sentConditional := false
+	for _, r := range f.calls() {
+		if r.Method == http.MethodGet && r.Path == branchPath && r.Header.Get("If-None-Match") != "" {
+			sentConditional = true
+		}
+	}
+	if !sentConditional {
+		t.Fatalf("second call did not send If-None-Match; base-branch ETag plumbing is broken")
+	}
+}
+
+func TestBaseBranchGuard_EmptyBranch(t *testing.T) {
+	f := newFakeGH(t)
+	p := newProviderForTest(t, f)
+	repo := ports.SCMRepo{Provider: "github", Host: "github.com", Owner: "octocat", Name: "hello", Repo: "octocat/hello"}
+	if _, err := p.BaseBranchGuard(ctx(), repo, "  ", ""); err == nil {
+		t.Fatalf("BaseBranchGuard with an empty branch must error, got nil")
+	}
+}
+
 func TestObserve_PrimaryRateLimit(t *testing.T) {
 	f := newFakeGH(t)
 	fx := basePRFixture()

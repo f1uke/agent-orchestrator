@@ -91,6 +91,20 @@ func (p *Provider) ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([
 	}
 }
 
+// BaseBranchGuard checks GitHub's per-branch ETag guard so the observer can tell
+// when a PR's base branch head advanced (a sibling PR merged into the shared
+// base) without changing the PR's own head SHA.
+func (p *Provider) BaseBranchGuard(ctx context.Context, repo ports.SCMRepo, branch, etag string) (ports.SCMGuardResult, error) {
+	if strings.TrimSpace(branch) == "" {
+		return ports.SCMGuardResult{}, fmt.Errorf("%w: empty base branch", ErrNotFound)
+	}
+	resp, err := p.client.doRESTWithETag(ctx, repoPath(repo.Owner, repo.Name, "branches", branch), nil, etag)
+	if err != nil {
+		return ports.SCMGuardResult{}, err
+	}
+	return ports.SCMGuardResult{ETag: firstNonEmptyHeader(resp.ETag, etag), NotModified: resp.NotModified}, nil
+}
+
 // CommitChecksGuard checks GitHub's per-commit check-runs ETag guard.
 func (p *Provider) CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, headSHA, etag string) (ports.SCMGuardResult, error) {
 	if strings.TrimSpace(headSHA) == "" {

@@ -133,6 +133,21 @@ func (p *Provider) RepoPRListGuard(ctx context.Context, repo ports.SCMRepo, etag
 	return ports.SCMGuardResult{ETag: firstNonEmptyHeader(resp.ETag, etag), NotModified: resp.NotModified}, nil
 }
 
+// BaseBranchGuard checks GitLab's per-branch ETag guard so the observer can tell
+// when an MR's target branch head advanced (a sibling MR merged into the shared
+// base) without changing the MR's own source head SHA.
+func (p *Provider) BaseBranchGuard(ctx context.Context, repo ports.SCMRepo, branch, etag string) (ports.SCMGuardResult, error) {
+	if strings.TrimSpace(branch) == "" {
+		return ports.SCMGuardResult{}, fmt.Errorf("gitlab scm: empty base branch")
+	}
+	path := "projects/" + projectID(repo) + "/repository/branches/" + url.PathEscape(branch)
+	resp, err := p.client.doRESTWithETag(ctx, path, nil, etag)
+	if err != nil {
+		return ports.SCMGuardResult{}, err
+	}
+	return ports.SCMGuardResult{ETag: firstNonEmptyHeader(resp.ETag, etag), NotModified: resp.NotModified}, nil
+}
+
 // CommitChecksGuard checks GitLab's per-commit pipelines ETag guard.
 func (p *Provider) CommitChecksGuard(ctx context.Context, repo ports.SCMRepo, headSHA, etag string) (ports.SCMGuardResult, error) {
 	if strings.TrimSpace(headSHA) == "" {
