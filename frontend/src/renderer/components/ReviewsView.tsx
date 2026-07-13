@@ -29,6 +29,7 @@ import { CommentActions, MenuItemBody, Toast, menuBox, menuItemStyle, outlineBtn
 
 type Group = PRCommentGroup;
 type Thread = Group["threads"][number];
+type Comment = Thread["comments"][number];
 type PRReviewState = components["schemas"]["PRReviewState"];
 type ReviewsResponse = components["schemas"]["ListReviewsResponse"];
 type ProjectConfig = components["schemas"]["ProjectConfig"];
@@ -838,6 +839,127 @@ function PRBlock({
 	);
 }
 
+// Per-comment avatar rail geometry. Each comment in a thread carries its own
+// avatar so "who said what" reads at a glance; a continuous thread line links
+// consecutive avatars into one legible conversation.
+const AVATAR = 26;
+const RAIL_GAP = 10; // gap between the avatar rail and the comment body
+const COMMENT_GAP = 16; // vertical breathing room between comments
+
+/**
+ * One comment within a thread: an avatar rail (deterministic hue = identity) on
+ * the left, name · time header and body on the right. Consecutive avatars are
+ * joined by a faint vertical thread line so a multi-comment thread reads as a
+ * conversation rather than one undifferentiated block. A system note (e.g.
+ * GitLab's "changed this line in version N of the diff") shows a small hollow
+ * dot node instead of an avatar and stays author-less and de-emphasized.
+ */
+function ThreadComment({
+	comment,
+	prUrl,
+	first,
+	last,
+}: {
+	comment: Comment;
+	prUrl: string;
+	first: boolean;
+	last: boolean;
+}) {
+	const sep = first ? undefined : { marginTop: COMMENT_GAP };
+	// Continuous thread line from this avatar's bottom down to the next avatar's
+	// top (the next row's marginTop is exactly COMMENT_GAP, so bottom bridges it).
+	const connector = last ? null : (
+		<div
+			aria-hidden
+			style={{
+				position: "absolute",
+				left: AVATAR / 2 - 0.5,
+				top: AVATAR,
+				bottom: -COMMENT_GAP,
+				width: 1,
+				background: P.connector,
+			}}
+		/>
+	);
+
+	if (comment.system) {
+		return (
+			<div style={{ display: "flex", gap: RAIL_GAP, ...sep }}>
+				<div style={{ flex: "none", width: AVATAR, display: "flex", justifyContent: "center", position: "relative" }}>
+					<div
+						aria-hidden
+						style={{
+							width: 7,
+							height: 7,
+							marginTop: 5,
+							borderRadius: "50%",
+							background: P.borderMenu,
+							border: "1px solid #3a3a42",
+						}}
+					/>
+					{connector}
+				</div>
+				<div style={{ flex: 1, minWidth: 0 }}>
+					<SystemNoteLine body={comment.body} prUrl={prUrl} first />
+				</div>
+			</div>
+		);
+	}
+
+	const author = comment.author || "unknown";
+	return (
+		<div style={{ display: "flex", gap: RAIL_GAP, ...sep }}>
+			<div style={{ flex: "none", width: AVATAR, position: "relative" }}>
+				<div
+					style={{
+						width: AVATAR,
+						height: AVATAR,
+						borderRadius: "50%",
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						fontSize: 10,
+						fontWeight: 700,
+						color: "#fff",
+						background: avatarBg(author),
+					}}
+				>
+					{initialsFor(author)}
+				</div>
+				{connector}
+			</div>
+			<div style={{ flex: 1, minWidth: 0 }}>
+				<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+					<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>{author}</span>
+					<span style={{ fontSize: 11, color: P.muted2 }}>{relativeTime(comment.createdAt, Date.now())}</span>
+				</div>
+				<div style={{ fontSize: 13, lineHeight: 1.55, color: P.body, wordBreak: "break-word" }}>
+					{splitBodyRuns(comment.body).map((run, j) =>
+						run.code ? (
+							<code
+								key={j}
+								style={{
+									fontFamily: MONO,
+									fontSize: 11.5,
+									color: P.code,
+									background: P.pillBg,
+									border: `1px solid ${P.borderPill}`,
+									borderRadius: 4,
+									padding: "0 4px",
+								}}
+							>
+								{run.text}
+							</code>
+						) : (
+							<span key={j}>{run.text}</span>
+						),
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function ThreadCard({
 	sessionId,
 	prUrl,
@@ -953,83 +1075,43 @@ function ThreadCard({
 								{selected ? "✓" : ""}
 							</button>
 						)}
-						<div
-							style={{
-								flex: "none",
-								width: 26,
-								height: 26,
-								borderRadius: "50%",
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "center",
-								fontSize: 10,
-								fontWeight: 700,
-								color: "#fff",
-								background: avatarBg(author),
-							}}
-						>
-							{initialsFor(author)}
-						</div>
-
 						<div style={{ flex: 1, minWidth: 0 }}>
-							{thread.comments.map((c, i) =>
-								c.system ? (
-									<SystemNoteLine key={c.id} body={c.body} prUrl={prUrl} first={i === 0} />
-								) : (
-									<div key={c.id} style={{ marginTop: i === 0 ? 0 : 10 }}>
-										<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-											<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>{c.author || "unknown"}</span>
-											<span style={{ fontSize: 11, color: P.muted2 }}>{relativeTime(c.createdAt, Date.now())}</span>
-										</div>
-										<div style={{ fontSize: 13, lineHeight: 1.55, color: P.body, wordBreak: "break-word" }}>
-											{splitBodyRuns(c.body).map((run, j) =>
-												run.code ? (
-													<code
-														key={j}
-														style={{
-															fontFamily: MONO,
-															fontSize: 11.5,
-															color: P.code,
-															background: P.pillBg,
-															border: `1px solid ${P.borderPill}`,
-															borderRadius: 4,
-															padding: "0 4px",
-														}}
-													>
-														{run.text}
-													</code>
-												) : (
-													<span key={j}>{run.text}</span>
-												),
-											)}
-										</div>
-									</div>
-								),
-							)}
-
-							{thread.path && thread.line > 0 && (
-								<InboxDiff
-									sessionId={sessionId}
+							{thread.comments.map((c, i) => (
+								<ThreadComment
+									key={c.id}
+									comment={c}
 									prUrl={prUrl}
+									first={i === 0}
+									last={i === thread.comments.length - 1}
+								/>
+							))}
+
+							{/* Diff + actions stay aligned under the comment bodies (past the avatar rail). */}
+							<div style={{ paddingLeft: AVATAR + RAIL_GAP }}>
+								{thread.path && thread.line > 0 && (
+									<InboxDiff
+										sessionId={sessionId}
+										prUrl={prUrl}
+										path={thread.path}
+										line={thread.line}
+										onOpenFile={onOpenFile}
+									/>
+								)}
+
+								<CommentActions
+									prUrl={prUrl}
+									threadId={thread.threadId}
 									path={thread.path}
 									line={thread.line}
-									onOpenFile={onOpenFile}
+									author={author}
+									seedBody={first?.body ?? ""}
+									busy={busy}
+									onResolve={onResolve}
+									onReply={onReply}
+									onSendQuick={onSendQuick}
+									onSendPrompt={onSendPrompt}
 								/>
-							)}
-
-							<CommentActions
-								prUrl={prUrl}
-								threadId={thread.threadId}
-								path={thread.path}
-								line={thread.line}
-								author={author}
-								seedBody={first?.body ?? ""}
-								busy={busy}
-								onResolve={onResolve}
-								onReply={onReply}
-								onSendQuick={onSendQuick}
-								onSendPrompt={onSendPrompt}
-							/>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -1448,7 +1530,7 @@ function mockReviewTitle(prNumber: number): string {
 function mockPRComments(session: WorkspaceSession): Group[] {
 	const prs = sortedPRs(session);
 	if (prs.length === 0) return [];
-	const c = (id: string, author: string, body: string, resolved = false, system = false) => ({
+	const c = (id: string, author: string, body: string, resolved = false, system = false, minsAgo = 42) => ({
 		id,
 		author,
 		body,
@@ -1456,7 +1538,7 @@ function mockPRComments(session: WorkspaceSession): Group[] {
 		resolved,
 		isBot: false,
 		system,
-		createdAt: new Date(Date.now() - 42 * 60 * 1000).toISOString(),
+		createdAt: new Date(Date.now() - minsAgo * 60 * 1000).toISOString(),
 	});
 	const groups: Group[] = [];
 	const gh = prs[0];
@@ -1478,7 +1560,19 @@ function mockPRComments(session: WorkspaceSession): Group[] {
 						`${gh.number}-c1`,
 						"priya",
 						"This effect re-runs on every render — wrap the handler in `useCallback` so the panel doesn't tear down mid-preview.",
+						false,
+						false,
+						42,
 					),
+					c(
+						`${gh.number}-c1b`,
+						"fluke.s",
+						"Good catch. Wrapped it and pinned the deps. Pushed in `a3f9c2`.",
+						false,
+						false,
+						12,
+					),
+					c(`${gh.number}-c1c`, "priya", "Perfect, thanks.", false, false, 3),
 				],
 			},
 			{
