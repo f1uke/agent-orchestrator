@@ -897,6 +897,21 @@ func (o *Observer) selectRefreshCandidates(ctx context.Context, subjects map[str
 		if s.known.CI == domain.CIPending {
 			candidate = true
 		}
+		// Mergeability-stuck fix (board: "gl mergeable stale and false nudge"): the
+		// same guard-decoupling class as the CI-stuck case above, but for
+		// mergeability. A conflicting MR resolves when the worker rebases, but the
+		// provider recomputes mergeability lazily and that conflict->mergeable
+		// transition changes neither the open-MR-list ETag (RepoPRListGuard) nor the
+		// per-commit pipelines/check-runs ETag (CommitChecksGuard) — both guards keep
+		// returning 304, so the MR is never a candidate and its mergeability freezes
+		// at "conflicting" forever even though the provider now reports it mergeable.
+		// While local mergeability is still conflicting, keep re-reading regardless of
+		// those 304s. Self-limiting: it forces at most one extra detail fetch/tick and
+		// only for the (rare) conflicting MRs, then quiesces to the ETag fast-path the
+		// moment mergeability settles to a terminal state (mergeable/blocked).
+		if s.known.Mergeability == domain.MergeConflicting {
+			candidate = true
+		}
 		if candidate {
 			selection.refs = append(selection.refs, ports.SCMPRRef{Repo: s.repo, Number: s.known.Number, URL: s.known.URL})
 			selection.candidateKeys[key] = true
@@ -1075,6 +1090,11 @@ func (o *Observer) prepareForPersistence(obs ports.SCMObservation, local domain.
 		CI:       ciHash != local.CIHash,
 		Review:   reviewHash != local.ReviewHash,
 	}
+	// When metadata is preserved from local (review-only refresh, or a failed
+	// metadata fetch), the mergeability this observation carries is the stored
+	// value, not a fresh provider read. Flag it so lifecycle does not nudge on a
+	// possibly-resolved conflict.
+	obs.MetadataStale = opts.preserveLocalMetadataHash
 	obs.PR.State = firstNonEmpty(obs.PR.State, normalizePRState(obs.PR.Draft, obs.PR.Merged, obs.PR.Closed))
 	obs.ObservedAt = firstTime(obs.ObservedAt, now)
 	return obs

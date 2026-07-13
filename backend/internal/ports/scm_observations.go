@@ -80,6 +80,15 @@ type SCMObservation struct {
 
 	// Changed marks which semantic buckets changed compared with the DB snapshot.
 	Changed SCMChanged
+
+	// MetadataStale is true when the PR metadata bucket (including Mergeability) in
+	// this observation was preserved from the local DB row rather than freshly
+	// fetched from the provider this cycle — e.g. a review-only refresh, or a
+	// metadata fetch that failed while the periodic review re-poll still ran.
+	// Lifecycle uses it to avoid raising a merge-conflict nudge from a stale
+	// mergeability value. It is a transient observation signal only; it is never
+	// persisted and is excluded from the semantic hashes.
+	MetadataStale bool
 }
 
 // SCMChanged marks which semantic state buckets changed in the successful poll.

@@ -1026,6 +1026,84 @@ func TestPoll_CIStuckPendingWhenRollupLagsBehindCheckRunsETag(t *testing.T) {
 	}
 }
 
+// conflictingObs models a PR whose provider mergeability reads "conflicting"
+// (a real conflict against a moved base branch), CI otherwise passing.
+func conflictingObs(num int) ports.SCMObservation {
+	o := testObs(num)
+	o.Mergeability = ports.SCMMergeabilityObservation{State: string(domain.MergeConflicting), Conflict: true, Blockers: []string{"conflicts"}}
+	return o
+}
+
+// knownConflictingPR is the local baseline persisted from an earlier observation
+// when the conflict was real (mergeability=conflicting), with every local-state
+// field set so missingLocalState is false — the precondition for the freeze.
+func knownConflictingPR(num int) domain.PullRequest {
+	pr, _, _, _, _ := domainFromObservation("p-1", conflictingObs(num), domain.PullRequest{}, persistenceOptions{}, time.Unix(1, 0).UTC())
+	return pr
+}
+
+// TestPoll_MergeabilityStuckConflictingWhenGuardsQuiet reproduces the stale
+// "Merge Conflict" bug (board: "gl mergeable stale and false nudge").
+//
+// A stacked GitLab MR briefly reports a real conflict after its base branch
+// moves; AO observes conflicting and persists it. The worker then rebases and
+// force-pushes, and GitLab recomputes the MR to mergeable. But that
+// conflict->mergeable transition changes neither the open-MR-list ETag
+// (RepoPRListGuard) nor the per-commit pipelines ETag (CommitChecksGuard) — the
+// same guard-decoupling class as the CI-stuck-pending bug — so both guards keep
+// returning 304, the MR is never a refresh candidate, and its mergeability
+// freezes at "conflicting" forever even though GitLab now reports it mergeable.
+//
+// This test asserts the CORRECT behavior: the observer must eventually re-read
+// the MR and persist the mergeable state. It currently FAILS (red): with the
+// guards quiet and CI already terminal, nothing forces a refetch.
+func TestPoll_MergeabilityStuckConflictingWhenGuardsQuiet(t *testing.T) {
+	key := prKey(testRepo, 1)
+	ck := commitKey(testRepo, "sha1")
+
+	store := testStoreWithSession()
+	store.prs["p-1"] = []domain.PullRequest{knownConflictingPR(1)}
+
+	provider := &fakeProvider{
+		// Quiet repo: the open-MR-list ETag never changes (our MR is not the
+		// newest-created, so a per_page=1 list guard cannot see its update).
+		repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo", NotModified: true}},
+		// CI is already terminal (passing), so the per-commit pipelines ETag is
+		// stable too — the guard returns 304.
+		checkGuards: map[string]ports.SCMGuardResult{ck: {ETag: "ci1", NotModified: true}},
+		// If the observer DOES re-read the MR, GitLab now reports it mergeable.
+		observations: map[string]ports.SCMObservation{key: testObs(1)},
+	}
+
+	lc := &fakeLifecycle{}
+	obs := newTestObserver(store, provider, lc, time.Unix(2, 0).UTC())
+	obs.Cache.RepoPRListETag[prKey(testRepo, 0)] = "repo"
+	obs.Cache.CommitChecksETag[ck] = "ci1"
+	obs.Cache.LastReviewPollAt[key] = time.Unix(2, 0).UTC() // isolate: suppress review re-poll noise
+
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(provider.fetchBatches) == 0 {
+		t.Fatalf("BUG (gl-mergeable-stale): observer never re-fetched the conflicting MR; " +
+			"its mergeability is frozen at conflicting because both ETag guards stayed 304 " +
+			"across the conflict->mergeable transition")
+	}
+	last := lastWriteForPR(store, 1)
+	if last == nil {
+		t.Fatalf("BUG (gl-mergeable-stale): no write persisted the MR's recomputed mergeability; it is stuck at conflicting")
+	}
+	if last.Mergeability != domain.MergeMergeable {
+		t.Fatalf("BUG (gl-mergeable-stale): mergeability stuck at %q; GitLab reports mergeable but the observer never re-read it", last.Mergeability)
+	}
+	// The fresh mergeable observation must reach lifecycle so the merge-conflict
+	// nudge is not (re-)raised from a stale conflicting value.
+	if len(lc.observed) == 0 || domain.Mergeability(lc.observed[len(lc.observed)-1].Mergeability.State) != domain.MergeMergeable {
+		t.Fatalf("BUG (gl-mergeable-stale): lifecycle did not receive the cleared mergeable observation: %#v", lc.observed)
+	}
+}
+
 func TestPoll_GraphQLBatchChunksAt25(t *testing.T) {
 	store := &fakeStore{projects: map[string]domain.ProjectRecord{"p": {ID: "p", RepoOriginURL: "https://github.com/o/r.git"}}, prs: map[domain.SessionID][]domain.PullRequest{}, checks: map[string][]domain.PullRequestCheck{}}
 	provider := &fakeProvider{repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "repo"}}, observations: map[string]ports.SCMObservation{}}
