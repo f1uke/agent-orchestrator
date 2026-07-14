@@ -92,6 +92,17 @@ describe("SmokeTestView", () => {
 		expect(call![1].body).toEqual({ verdict: "pass", note: "worked great" });
 	});
 
+	it("collapses the case immediately when a verdict is recorded", async () => {
+		renderView();
+		// Pending case is expanded — its note textarea is visible.
+		expect(await screen.findByLabelText(/Note for A fresh MR shows up/)).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: /Works — Pass/ }));
+		// The expanded body (note textarea) is gone the moment the verdict is set.
+		await waitFor(() => expect(screen.queryByLabelText(/Note for A fresh MR shows up/)).not.toBeInTheDocument());
+		// The case title stays visible in the collapsed header.
+		expect(screen.getByText("A fresh MR shows up")).toBeInTheDocument();
+	});
+
 	it("shows a Change control for a decided case and resets it", async () => {
 		checks = [check({ verdict: "fail", note: "broke", decidedAt: "2026-07-11T10:05:00Z" })];
 		renderView();

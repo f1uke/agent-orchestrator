@@ -1,11 +1,15 @@
 package smoke
 
 // Builds the Atlassian Document Format (ADF) comment posted to a linked Jira
-// issue: an intro line + a results table (Check · Status · Note · Evidence) over
-// the run rows, and — when includeMedia is set — one mediaSingle per image
-// attachment below the table. ADF nodes are plain map[string]any so the adapter
-// marshals them straight to Jira's JSON; keeping the shapes here (not a shared
-// builder) is deliberate — the table is smoke-specific.
+// issue. Rather than cram every case into one narrow four-column table, each run
+// row becomes its own readable section: a heading with the case title, a status
+// line, the worker-authored context (why it matters, the steps, the expected
+// result), the user's note, and the evidence — image evidence embedded inline as
+// media nodes (when includeMedia is set) so it previews directly on the issue,
+// with videos and any file that failed to upload rendered as a link or a short
+// note. ADF nodes are plain map[string]any so the adapter marshals them straight
+// to Jira's JSON; keeping the shapes here (not a shared builder) is deliberate —
+// the layout is smoke-specific.
 
 import (
 	"fmt"
@@ -14,22 +18,33 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+// Section labels. "Why this matters" replaces the app's "WHY YOU'RE CHECKING"
+// wording — it reads more naturally for a Jira reader skimming the comment
+// without opening Agent Orchestrator, and states the section's purpose directly.
+const (
+	labelStatus   = "Status"
+	labelWhy      = "Why this matters"
+	labelSteps    = "Steps"
+	labelExpected = "Expected result"
+	labelNote     = "Note"
+	labelEvidence = "Evidence"
+)
+
 // buildResultsADF renders the ADF document node for the comment. run is the
 // run-only checks in seq order; uploads maps a check id to its uploaded
-// attachments (referenced as links in the Evidence column). When includeMedia is
-// true, image attachments are also embedded inline via media nodes.
+// evidence. When includeMedia is true, image evidence is embedded inline via
+// media nodes; when false (the media-free fallback), every evidence file renders
+// as a link instead.
 func buildResultsADF(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) map[string]any {
-	content := []any{
-		adfParagraph(adfText(resultsIntro(run))),
-		buildResultsTable(run, uploads),
-	}
-	if includeMedia {
-		content = append(content, mediaSingles(run, uploads)...)
+	content := make([]any, 0, 1+len(run))
+	content = append(content, adfParagraph(adfText(resultsIntro(run))))
+	for _, c := range run {
+		content = append(content, caseSection(c, uploads[c.ID], includeMedia)...)
 	}
 	return map[string]any{"type": "doc", "version": 1, "content": content}
 }
 
-// resultsIntro is the summary line above the table.
+// resultsIntro is the summary line above the case sections.
 func resultsIntro(run []domain.SmokeCheck) string {
 	var pass, fail, skip int
 	for _, c := range run {
@@ -51,97 +66,84 @@ func resultsIntro(run []domain.SmokeCheck) string {
 	return b.String()
 }
 
-// buildResultsTable is the ADF table: a header row plus one row per run check.
-func buildResultsTable(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence) map[string]any {
-	rows := make([]any, 0, 1+len(run))
-	rows = append(rows, adfRow(
-		adfHeaderCell(adfParagraph(adfStrong("Check"))),
-		adfHeaderCell(adfParagraph(adfStrong("Status"))),
-		adfHeaderCell(adfParagraph(adfStrong("Note"))),
-		adfHeaderCell(adfParagraph(adfStrong("Evidence"))),
-	))
-	for _, c := range run {
-		rows = append(rows, adfRow(
-			adfCell(checkCellParagraph(c)),
-			adfCell(adfParagraph(adfText(statusText(c.Verdict)))),
-			adfCell(adfParagraph(adfText(orDash(c.Note)))),
-			adfCell(evidenceCellParagraph(uploads[c.ID])),
-		))
+// caseSection builds the block of nodes for one run row: a divider, the title
+// heading (title ONLY — the file/PR ref is intentionally omitted from the post),
+// the status + authored-context lines, the user's note, and the evidence.
+func caseSection(c domain.SmokeCheck, evs []uploadedEvidence, includeMedia bool) []any {
+	nodes := []any{
+		adfRule(),
+		adfHeading(3, adfText(c.Name)),
+		labeledParagraph(labelStatus, statusText(c.Verdict)),
 	}
-	return map[string]any{
-		"type":    "table",
-		"attrs":   map[string]any{"isNumberColumnEnabled": false, "layout": "default"},
-		"content": rows,
+	if why := strings.TrimSpace(c.Why); why != "" {
+		nodes = append(nodes, labeledParagraph(labelWhy, why))
 	}
+	if steps := nonEmptyLines(c.Steps); len(steps) > 0 {
+		nodes = append(nodes, adfParagraph(adfStrong(labelSteps)), adfOrderedList(steps))
+	}
+	if expected := strings.TrimSpace(c.Expected); expected != "" {
+		nodes = append(nodes, labeledParagraph(labelExpected, expected))
+	}
+	if note := strings.TrimSpace(c.Note); note != "" {
+		nodes = append(nodes, labeledParagraph(labelNote, note))
+	}
+	return append(nodes, evidenceNodes(evs, includeMedia)...)
 }
 
-// checkCellParagraph is the Check cell: the case name (bold), with a PR/file ref
-// on a second line when present.
-func checkCellParagraph(c domain.SmokeCheck) map[string]any {
-	nodes := []any{adfStrong(c.Name)}
-	if ref := checkRef(c); ref != "" {
-		nodes = append(nodes, adfHardBreak(), adfText(ref))
-	}
-	return map[string]any{"type": "paragraph", "content": nodes}
-}
-
-func checkRef(c domain.SmokeCheck) string {
-	parts := make([]string, 0, 2)
-	if c.PRNum > 0 {
-		parts = append(parts, fmt.Sprintf("PR #%d", c.PRNum))
-	}
-	if strings.TrimSpace(c.FileRef) != "" {
-		parts = append(parts, c.FileRef)
-	}
-	return strings.Join(parts, " · ")
-}
-
-// evidenceCellParagraph is the Evidence cell: each uploaded attachment as a link
-// to its content URL (one per line), or an em dash when the row has none.
-func evidenceCellParagraph(evs []uploadedEvidence) map[string]any {
+// evidenceNodes renders a row's evidence under an "Evidence" label: images as
+// inline media (when includeMedia), videos as links to the attachment, and any
+// file that failed to upload as a short note so the comment still records what
+// was captured. Returns nil when the row has no evidence.
+func evidenceNodes(evs []uploadedEvidence, includeMedia bool) []any {
 	if len(evs) == 0 {
-		return adfParagraph(adfText("—"))
+		return nil
 	}
-	nodes := make([]any, 0, len(evs)*2)
-	for i, e := range evs {
-		if i > 0 {
-			nodes = append(nodes, adfHardBreak())
-		}
-		label := e.att.Filename
-		if strings.TrimSpace(label) == "" {
-			label = "attachment"
-		}
-		if strings.TrimSpace(e.att.ContentURL) != "" {
-			nodes = append(nodes, adfLink(label, e.att.ContentURL))
-		} else {
-			nodes = append(nodes, adfText(label))
-		}
-	}
-	return map[string]any{"type": "paragraph", "content": nodes}
-}
-
-// mediaSingles builds one mediaSingle block per image attachment (in run order),
-// embedding it inline by attachment id. Videos and non-images are link-only.
-func mediaSingles(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence) []any {
-	var out []any
-	for _, c := range run {
-		for _, e := range uploads[c.ID] {
-			if !e.isImage || strings.TrimSpace(e.att.ID) == "" {
-				continue
-			}
-			out = append(out, map[string]any{
-				"type":  "mediaSingle",
-				"attrs": map[string]any{"layout": "center"},
-				"content": []any{
-					map[string]any{
-						"type":  "media",
-						"attrs": map[string]any{"type": "file", "id": e.att.ID},
-					},
-				},
-			})
+	out := []any{adfParagraph(adfStrong(labelEvidence))}
+	for _, e := range evs {
+		switch {
+		case e.failed:
+			out = append(out, adfParagraph(adfText("⚠ "+evidenceLabel(e)+" — attachment upload failed")))
+		case includeMedia && e.isImage && strings.TrimSpace(e.att.ID) != "":
+			out = append(out, mediaSingleNode(e.att.ID))
+		default:
+			out = append(out, adfParagraph(evidenceLinkNode(e)))
 		}
 	}
 	return out
+}
+
+// mediaSingleNode embeds one image attachment inline by its attachment id.
+func mediaSingleNode(id string) map[string]any {
+	return map[string]any{
+		"type":  "mediaSingle",
+		"attrs": map[string]any{"layout": "center"},
+		"content": []any{
+			map[string]any{"type": "media", "attrs": map[string]any{"type": "file", "id": id}},
+		},
+	}
+}
+
+// evidenceLinkNode renders one evidence file as a link to its attachment content
+// URL (the reliable fallback when inline media is off or unavailable), or as
+// plain text when no URL is known.
+func evidenceLinkNode(e uploadedEvidence) map[string]any {
+	label := evidenceLabel(e)
+	if strings.TrimSpace(e.att.ContentURL) != "" {
+		return adfLink(label, e.att.ContentURL)
+	}
+	return adfText(label)
+}
+
+// evidenceLabel is the display name for an evidence file: the uploaded
+// attachment's filename, else the name captured before upload, else a default.
+func evidenceLabel(e uploadedEvidence) string {
+	if n := strings.TrimSpace(e.att.Filename); n != "" {
+		return n
+	}
+	if n := strings.TrimSpace(e.name); n != "" {
+		return n
+	}
+	return "attachment"
 }
 
 func statusText(v domain.SmokeVerdict) string {
@@ -157,11 +159,16 @@ func statusText(v domain.SmokeVerdict) string {
 	}
 }
 
-func orDash(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "—"
+// nonEmptyLines drops blank entries so a stray empty step never renders an empty
+// list item.
+func nonEmptyLines(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, s := range items {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
 	}
-	return s
+	return out
 }
 
 // --- ADF node constructors -------------------------------------------------
@@ -182,10 +189,6 @@ func adfLink(s, href string) map[string]any {
 	}
 }
 
-func adfHardBreak() map[string]any {
-	return map[string]any{"type": "hardBreak"}
-}
-
 func adfParagraph(nodes ...map[string]any) map[string]any {
 	content := make([]any, 0, len(nodes))
 	for _, n := range nodes {
@@ -194,26 +197,31 @@ func adfParagraph(nodes ...map[string]any) map[string]any {
 	return map[string]any{"type": "paragraph", "content": content}
 }
 
-func adfCell(blocks ...map[string]any) map[string]any {
-	return tableCellNode("tableCell", blocks)
+// labeledParagraph is a "Label: value" line — the label bold, the value plain.
+func labeledParagraph(label, value string) map[string]any {
+	return adfParagraph(adfStrong(label+": "), adfText(value))
 }
 
-func adfHeaderCell(blocks ...map[string]any) map[string]any {
-	return tableCellNode("tableHeader", blocks)
-}
-
-func tableCellNode(kind string, blocks []map[string]any) map[string]any {
-	content := make([]any, 0, len(blocks))
-	for _, b := range blocks {
-		content = append(content, b)
+func adfHeading(level int, nodes ...map[string]any) map[string]any {
+	content := make([]any, 0, len(nodes))
+	for _, n := range nodes {
+		content = append(content, n)
 	}
-	return map[string]any{"type": kind, "content": content}
+	return map[string]any{"type": "heading", "attrs": map[string]any{"level": level}, "content": content}
 }
 
-func adfRow(cells ...map[string]any) map[string]any {
-	content := make([]any, 0, len(cells))
-	for _, c := range cells {
-		content = append(content, c)
+func adfRule() map[string]any {
+	return map[string]any{"type": "rule"}
+}
+
+// adfOrderedList renders steps as a numbered list, one paragraph per item.
+func adfOrderedList(items []string) map[string]any {
+	li := make([]any, 0, len(items))
+	for _, s := range items {
+		li = append(li, map[string]any{
+			"type":    "listItem",
+			"content": []any{adfParagraph(adfText(s))},
+		})
 	}
-	return map[string]any{"type": "tableRow", "content": content}
+	return map[string]any{"type": "orderedList", "attrs": map[string]any{"order": 1}, "content": li}
 }

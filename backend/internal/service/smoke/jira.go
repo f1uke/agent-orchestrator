@@ -1,17 +1,17 @@
 package smoke
 
-// Post a session's smoke-test results to its linked Jira issue as an ADF table
-// comment, with each evidence screenshot/clip uploaded as a Jira attachment and
-// referenced inline. This is an explicit, user-triggered action (the "Post to
-// Jira" button on the Tests tab) — the SECOND sanctioned Jira write after the
-// status move, never automatic.
+// Post a session's smoke-test results to its linked Jira issue as an ADF
+// comment — one readable section per run row (title, status, the authored
+// context, the note, and evidence) — with each evidence screenshot/clip uploaded
+// as a Jira attachment and referenced inline. This is an explicit, user-triggered
+// action (the "Post to Jira" button on the Tests tab) — the SECOND sanctioned
+// Jira write after the status move, never automatic.
 //
-// Design: the comment ALWAYS references each attachment as a link (the
-// attachment `content` URL) in the table's Evidence column — reliable and
-// clickable. It ADDITIONALLY attempts to embed image evidence inline via ADF
-// media nodes; because a media node the instance can't resolve can 400 the whole
-// comment, a 400 falls back to re-posting the same comment without the media
-// nodes (links only). The outcome reports whether the media survived.
+// Design: image evidence is embedded inline via ADF media nodes so it previews
+// directly on the issue. Because a media node the instance can't resolve can 400
+// the whole comment, a 400 falls back to re-posting the same comment without the
+// media nodes — each evidence file then renders as a link to its attachment
+// `content` URL instead. The outcome reports whether the inline media survived.
 
 import (
 	"context"
@@ -55,10 +55,14 @@ type JiraPostOutcome struct {
 }
 
 // uploadedEvidence pairs an uploaded attachment with whether it is an image (only
-// images are embedded inline as media; videos stay link-only).
+// images are embedded inline as media; videos stay link-only). failed marks a
+// file whose upload was skipped after a non-fatal error — the comment renders a
+// short note for it (name preserved) instead of a link or media.
 type uploadedEvidence struct {
 	att     jiraadapter.Attachment
 	isImage bool
+	failed  bool
+	name    string
 }
 
 // PostToJira resolves the session's linked Jira key, uploads the evidence on the
@@ -90,15 +94,23 @@ func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (J
 		return JiraPostOutcome{}, fmt.Errorf("%w: no checked cases to post — mark at least one case Pass/Fail/Skip first", ErrInvalid)
 	}
 
-	// Upload each run row's evidence, keyed by check id, before building the table
-	// so the Evidence cells can link to the uploaded attachments.
+	// Upload each run row's evidence, keyed by check id, before building the
+	// comment so each case section can embed/link its attachments. A systemic
+	// failure (bad or unscoped token, Jira unavailable) hits every upload, so it
+	// aborts with a clear error; a one-off file problem must not sink the whole
+	// gated post — it is recorded as a failed marker the comment notes and the
+	// upload loop keeps going.
 	uploads := make(map[string][]uploadedEvidence, len(run))
 	total := 0
 	for _, c := range run {
 		for _, ev := range c.Evidence {
 			att, err := s.uploadEvidence(ctx, key, sessionID, c.ID, ev)
 			if err != nil {
-				return JiraPostOutcome{}, err
+				if errors.Is(err, jiraadapter.ErrAuthFailed) || errors.Is(err, jiraadapter.ErrUnavailable) {
+					return JiraPostOutcome{}, err
+				}
+				uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{failed: true, isImage: ev.Kind == "image", name: evidenceDisplayName(ev)})
+				continue
 			}
 			uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{att: att, isImage: ev.Kind == "image"})
 			total++
@@ -126,7 +138,7 @@ func (s *Service) postResultsComment(ctx context.Context, key string, run []doma
 	hasImageMedia := false
 	for _, evs := range uploads {
 		for _, e := range evs {
-			if e.isImage {
+			if e.isImage && !e.failed && strings.TrimSpace(e.att.ID) != "" {
 				hasImageMedia = true
 			}
 		}
@@ -191,6 +203,15 @@ func jiraKeyFromIssueID(issueID string) (string, bool) {
 		return "", false
 	}
 	return key, true
+}
+
+// evidenceDisplayName is the human name for an evidence file used when its
+// upload fails: the recorded filename, else the on-disk fallback name.
+func evidenceDisplayName(ev domain.SmokeEvidence) string {
+	if n := strings.TrimSpace(ev.Filename); n != "" {
+		return n
+	}
+	return evidenceFallbackName(ev)
 }
 
 func evidenceFallbackName(ev domain.SmokeEvidence) string {

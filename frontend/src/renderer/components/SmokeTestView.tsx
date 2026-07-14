@@ -435,7 +435,12 @@ function CaseCard({
 						decided={decided}
 						check={check}
 						busy={busy}
-						onDecide={(verdict) => onDecide(verdict, note)}
+						onDecide={(verdict) => {
+							onDecide(verdict, note);
+							// Collapse the case the moment a verdict is recorded so the
+							// list stays scannable; re-open from the header to change it.
+							setOpen(false);
+						}}
 						onChange={onChange}
 					/>
 				</div>
