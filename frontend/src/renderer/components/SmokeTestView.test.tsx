@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getMock, postMock, deleteMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
@@ -288,5 +288,148 @@ describe("SmokeTestView", () => {
 		// The link dialog opens; nothing is posted to the Jira endpoint.
 		expect(await screen.findByText(/Link a Jira issue/)).toBeInTheDocument();
 		expect(postMock.mock.calls.some(([p]) => p === "/api/v1/sessions/{sessionId}/smoke-checks/jira")).toBe(false);
+	});
+
+	describe("evidence lightbox", () => {
+		function ev(id: string, over: Record<string, unknown> = {}) {
+			return {
+				id,
+				checkId: "c1",
+				sessionId: "s1",
+				kind: "image",
+				filename: `${id}.png`,
+				mime: "image/png",
+				sizeBytes: 3,
+				createdAt: "2026-07-11T10:00:00Z",
+				...over,
+			};
+		}
+
+		let realCreate: typeof URL.createObjectURL;
+		let realRevoke: typeof URL.revokeObjectURL;
+
+		beforeEach(() => {
+			realCreate = URL.createObjectURL;
+			realRevoke = URL.revokeObjectURL;
+			URL.createObjectURL = vi.fn(() => "blob:mock");
+			URL.revokeObjectURL = vi.fn();
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["x"], { type: "image/png" }) }),
+			);
+			// jsdom has no media playback; the video's muted-autoplay would otherwise warn.
+			HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
+		});
+
+		afterEach(() => {
+			URL.createObjectURL = realCreate;
+			URL.revokeObjectURL = realRevoke;
+			vi.unstubAllGlobals();
+		});
+
+		async function openViewer(evidence: ReturnType<typeof ev>[], name: string) {
+			checks = [check({ evidence })];
+			renderView();
+			const thumb = await screen.findByRole("button", { name });
+			await userEvent.click(thumb);
+			const dialog = await screen.findByRole("dialog");
+			return { thumb, dialog };
+		}
+
+		it("opens a centered modal showing the item large when a thumbnail is clicked", async () => {
+			const { dialog } = await openViewer([ev("ev1"), ev("ev2")], "View ev1.png");
+			expect(dialog).toHaveAttribute("aria-label", expect.stringContaining("ev1.png"));
+			await waitFor(() => expect(within(dialog).getAllByRole("img").length).toBeGreaterThan(0));
+			expect(within(dialog).getByText("1 / 2")).toBeInTheDocument();
+		});
+
+		it("pages with next/prev buttons and Left/Right keys, wrapping at both ends", async () => {
+			const { dialog } = await openViewer([ev("ev1"), ev("ev2")], "View ev1.png");
+			expect(within(dialog).getByText("1 / 2")).toBeInTheDocument();
+			await userEvent.click(within(dialog).getByRole("button", { name: "Next evidence" }));
+			expect(within(dialog).getByText("2 / 2")).toBeInTheDocument();
+			// wrap forward: last → first
+			await userEvent.click(within(dialog).getByRole("button", { name: "Next evidence" }));
+			expect(within(dialog).getByText("1 / 2")).toBeInTheDocument();
+			// arrow keys: wrap backward first → last, then forward again
+			fireEvent.keyDown(dialog, { key: "ArrowLeft" });
+			expect(within(dialog).getByText("2 / 2")).toBeInTheDocument();
+			fireEvent.keyDown(dialog, { key: "ArrowRight" });
+			expect(within(dialog).getByText("1 / 2")).toBeInTheDocument();
+		});
+
+		it("navigates across mixed image and video items", async () => {
+			const { dialog } = await openViewer(
+				[ev("ev1"), ev("vid1", { kind: "video", mime: "video/mp4", filename: "clip.mp4" })],
+				"View ev1.png",
+			);
+			// image item shows zoom controls
+			expect(within(dialog).getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+			await userEvent.click(within(dialog).getByRole("button", { name: "Next evidence" }));
+			// video item plays inline with no zoom controls
+			await waitFor(() => expect(dialog.querySelector("video")).not.toBeNull());
+			expect(within(dialog).queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+		});
+
+		it("zooms an image in and resets zoom when switching items", async () => {
+			const { dialog } = await openViewer([ev("ev1"), ev("ev2")], "View ev1.png");
+			expect(within(dialog).getByText("100%")).toBeInTheDocument();
+			await userEvent.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+			expect(within(dialog).getByText("150%")).toBeInTheDocument();
+			// switching items resets the zoom
+			await userEvent.click(within(dialog).getByRole("button", { name: "Next evidence" }));
+			expect(within(dialog).getByText("100%")).toBeInTheDocument();
+		});
+
+		it("resets zoom when the viewer is closed and reopened", async () => {
+			const { dialog } = await openViewer([ev("ev1")], "View ev1.png");
+			await userEvent.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+			expect(within(dialog).getByText("150%")).toBeInTheDocument();
+			await userEvent.click(within(dialog).getByRole("button", { name: "Close viewer" }));
+			await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+			await userEvent.click(screen.getByRole("button", { name: "View ev1.png" }));
+			const reopened = await screen.findByRole("dialog");
+			expect(within(reopened).getByText("100%")).toBeInTheDocument();
+		});
+
+		it("closes via the X button, Esc, and a backdrop click", async () => {
+			// X button
+			let dialog = (await openViewer([ev("ev1")], "View ev1.png")).dialog;
+			await userEvent.click(within(dialog).getByRole("button", { name: "Close viewer" }));
+			await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+			// Esc
+			await userEvent.click(screen.getByRole("button", { name: "View ev1.png" }));
+			dialog = await screen.findByRole("dialog");
+			await userEvent.keyboard("{Escape}");
+			await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+			// backdrop click (the padding around the media = the dialog element itself)
+			await userEvent.click(screen.getByRole("button", { name: "View ev1.png" }));
+			dialog = await screen.findByRole("dialog");
+			fireEvent.click(dialog);
+			await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		});
+
+		it("does not close when the media itself is clicked", async () => {
+			const { dialog } = await openViewer([ev("ev1")], "View ev1.png");
+			const img = await within(dialog).findByRole("img");
+			await userEvent.click(img);
+			expect(screen.getByRole("dialog")).toBeInTheDocument();
+		});
+
+		it("restores focus to the triggering thumbnail on close", async () => {
+			const { thumb, dialog } = await openViewer([ev("ev1")], "View ev1.png");
+			await userEvent.click(within(dialog).getByRole("button", { name: "Close viewer" }));
+			await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+			await waitFor(() => expect(thumb).toHaveFocus());
+		});
+
+		it("deleting an evidence item via the × does not open the lightbox", async () => {
+			checks = [check({ evidence: [ev("ev1")] })];
+			renderView();
+			const removeBtn = await screen.findByRole("button", { name: "Remove ev1.png" });
+			fireEvent.click(removeBtn);
+			await waitFor(() => expect(deleteMock).toHaveBeenCalled());
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		});
 	});
 });
