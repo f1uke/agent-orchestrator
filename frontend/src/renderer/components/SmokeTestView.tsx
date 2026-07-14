@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ChevronLeft, ChevronRight, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage, getApiBaseUrl } from "../lib/api-client";
+import { aoBridge } from "../lib/bridge";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { sessionSmokeQueryKey, useSessionSmokeChecks, type SmokeChecksResponse } from "../hooks/useSessionSmokeChecks";
 import {
@@ -215,6 +216,30 @@ export function SmokeTestView({
 		[sessionId, invalidate, showToast],
 	);
 
+	// Reveal-in-Finder / Open for a stored evidence item. The on-disk blob is
+	// extensionless, so the daemon materializes a correctly-named, correctly-typed
+	// copy and returns its path; the desktop shell then reveals or opens THAT.
+	const revealEvidence = useCallback(
+		async (checkId: string, evidenceId: string, mode: "reveal" | "open") => {
+			if (usePreviewData) return;
+			const { data, error } = await apiClient.POST(
+				"/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export",
+				{ params: { path: { sessionId, checkId, evidenceId } } },
+			);
+			if (error || !data?.path) {
+				showToast(apiErrorMessage(error, "Couldn't open that file"));
+				return;
+			}
+			try {
+				if (mode === "open") await aoBridge.shell.openPath(data.path);
+				else await aoBridge.shell.showItemInFolder(data.path);
+			} catch {
+				showToast(mode === "open" ? "Couldn't open that file" : "Couldn't reveal that file");
+			}
+		},
+		[sessionId, showToast],
+	);
+
 	// Optimistically drop the thumbnail, then reconcile with the server's
 	// authoritative case (the DELETE returns the updated check). On failure the
 	// prior cache is restored and a toast explains. No blocking confirm (dialog
@@ -297,6 +322,7 @@ export function SmokeTestView({
 							onChange={() => resetCheck.mutate(check.id)}
 							onUpload={(file) => uploadEvidence(check.id, file)}
 							onDeleteEvidence={(evidenceId) => deleteEvidence.mutate({ checkId: check.id, evidenceId })}
+							onRevealEvidence={(evidenceId, mode) => revealEvidence(check.id, evidenceId, mode)}
 						/>
 					))}
 			</div>
@@ -413,6 +439,7 @@ function CaseCard({
 	onChange,
 	onUpload,
 	onDeleteEvidence,
+	onRevealEvidence,
 }: {
 	sessionId: string;
 	check: SmokeCheck;
@@ -421,6 +448,7 @@ function CaseCard({
 	onChange: () => void;
 	onUpload: (file: File) => void;
 	onDeleteEvidence: (evidenceId: string) => void;
+	onRevealEvidence: (evidenceId: string, mode: "reveal" | "open") => void;
 }) {
 	const [open, setOpen] = useState(check.verdict === "pending");
 	const [note, setNote] = useState(check.note ?? "");
@@ -493,7 +521,13 @@ function CaseCard({
 					<WhyBox check={check} />
 					{check.steps.length > 0 && <Steps steps={check.steps} />}
 					{check.expected && <Expected expected={check.expected} />}
-					<EvidenceSection sessionId={sessionId} check={check} onUpload={onUpload} onDelete={onDeleteEvidence} />
+					<EvidenceSection
+						sessionId={sessionId}
+						check={check}
+						onUpload={onUpload}
+						onDelete={onDeleteEvidence}
+						onReveal={onRevealEvidence}
+					/>
 
 					<textarea
 						value={note}
@@ -658,11 +692,13 @@ function EvidenceSection({
 	check,
 	onUpload,
 	onDelete,
+	onReveal,
 }: {
 	sessionId: string;
 	check: SmokeCheck;
 	onUpload: (file: File) => void;
 	onDelete: (evidenceId: string) => void;
+	onReveal: (evidenceId: string, mode: "reveal" | "open") => void;
 }) {
 	const [dragOver, setDragOver] = useState(false);
 	const inputRef = useRef<HTMLInputElement | null>(null);
@@ -703,6 +739,8 @@ function EvidenceSection({
 								setLightboxIndex(i);
 							}}
 							onDelete={() => onDelete(ev.id)}
+							onReveal={() => onReveal(ev.id, "reveal")}
+							onOpenFile={() => onReveal(ev.id, "open")}
 						/>
 					))}
 				</div>
@@ -791,12 +829,16 @@ function EvidenceThumb({
 	evidence,
 	onOpen,
 	onDelete,
+	onReveal,
+	onOpenFile,
 }: {
 	sessionId: string;
 	checkId: string;
 	evidence: SmokeEvidence;
 	onOpen?: (trigger: HTMLElement) => void;
 	onDelete?: () => void;
+	onReveal?: () => void;
+	onOpenFile?: () => void;
 }) {
 	// Load the bytes through the CORS-gated fetch and render from a blob: URL — a
 	// direct http://127.0.0.1 <img>/<video> is CSP-blocked on the app:// scheme
@@ -851,14 +893,29 @@ function EvidenceThumb({
 		<img src={resolved} alt={evidence.filename || "evidence"} style={style} />
 	);
 
+	const label = evidence.filename || "evidence";
+	const actionBtn: CSSProperties = {
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		width: 26,
+		height: 20,
+		borderRadius: 6,
+		border: "1px solid rgba(255,255,255,.22)",
+		background: "rgba(20,20,24,.86)",
+		color: "#fff",
+		padding: 0,
+		cursor: "pointer",
+	};
+
 	return (
 		<div
 			style={{ position: "relative", width: THUMB_W, height: THUMB_H }}
 			onMouseEnter={() => setHover(true)}
 			onMouseLeave={() => setHover(false)}
 		>
-			{/* The media area opens the lightbox; the × (a sibling, not nested) deletes
-			    and stops propagation, so removing never opens the viewer. */}
+			{/* The media area opens the in-app lightbox; the × (a sibling, not nested)
+			    deletes and stops propagation, so removing never opens the viewer. */}
 			<div
 				role={openable ? "button" : undefined}
 				tabIndex={openable ? 0 : undefined}
@@ -878,6 +935,59 @@ function EvidenceThumb({
 			>
 				{media}
 			</div>
+			{/* Hover action bar: Reveal the real file in Finder / Open it in the OS
+			    default app (distinct from the in-app lightbox above). The stored blob is
+			    extensionless, so the daemon exports a correctly-named copy first (see
+			    revealEvidence). stopPropagation keeps a button click off the lightbox. */}
+			{(onReveal || onOpenFile) && !failed && (
+				<div
+					style={{
+						position: "absolute",
+						left: 0,
+						right: 0,
+						bottom: 0,
+						display: "flex",
+						gap: 5,
+						padding: 5,
+						justifyContent: "center",
+						background: "linear-gradient(to top, rgba(8,8,10,.9), rgba(8,8,10,0))",
+						borderBottomLeftRadius: 8,
+						borderBottomRightRadius: 8,
+						opacity: hover ? 1 : 0,
+						transition: "opacity .12s ease",
+						pointerEvents: hover ? "auto" : "none",
+					}}
+				>
+					{onOpenFile && (
+						<button
+							type="button"
+							aria-label={`Open ${label}`}
+							title="Open"
+							onClick={(e) => {
+								e.stopPropagation();
+								onOpenFile();
+							}}
+							style={actionBtn}
+						>
+							<ExternalLink size={12} strokeWidth={2.2} aria-hidden="true" />
+						</button>
+					)}
+					{onReveal && (
+						<button
+							type="button"
+							aria-label={`Reveal ${label} in Finder`}
+							title="Reveal in Finder"
+							onClick={(e) => {
+								e.stopPropagation();
+								onReveal();
+							}}
+							style={actionBtn}
+						>
+							<FolderOpen size={12} strokeWidth={2.2} aria-hidden="true" />
+						</button>
+					)}
+				</div>
+			)}
 			{onDelete && (
 				<button
 					type="button"

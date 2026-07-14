@@ -56,10 +56,12 @@ type Manager interface {
 	Reset(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error)
 	AttachEvidence(ctx context.Context, sessionID domain.SessionID, checkID string, upload EvidenceUpload) (domain.SmokeEvidence, error)
 	OpenEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (EvidenceBlob, error)
+	ExportEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (string, error)
 	RemoveEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (domain.SmokeCheck, error)
 	Report(ctx context.Context, sessionID domain.SessionID) (ReportOutcome, error)
 	PostToJira(ctx context.Context, sessionID domain.SessionID) (JiraPostOutcome, error)
 	PurgeSessionEvidence(ctx context.Context, sessionID domain.SessionID) error
+	PurgeEvidenceOlderThan(ctx context.Context, cutoff time.Time) (EvidencePurgeResult, error)
 }
 
 // Store is the persistence surface the service owns. The concrete
@@ -75,6 +77,7 @@ type Store interface {
 	InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence) error
 	GetSmokeEvidence(ctx context.Context, id string) (domain.SmokeEvidence, bool, error)
 	DeleteSmokeEvidence(ctx context.Context, id string) (bool, error)
+	ListSmokeEvidenceCreatedBefore(ctx context.Context, before time.Time) ([]domain.SmokeEvidence, error)
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 	ListSessions(ctx context.Context, projectID domain.ProjectID) ([]domain.SessionRecord, error)
 }
@@ -107,6 +110,13 @@ type EvidenceBlob struct {
 	Path     string
 	Mime     string
 	Filename string
+}
+
+// EvidencePurgeResult summarizes one age-based retention sweep: how many
+// evidence items were removed and how many bytes that freed.
+type EvidencePurgeResult struct {
+	Purged     int   `json:"purged"`
+	FreedBytes int64 `json:"freedBytes"`
 }
 
 // ReportOutcome describes where a report-back landed.
@@ -309,6 +319,31 @@ func (s *Service) OpenEvidence(ctx context.Context, sessionID domain.SessionID, 
 	return EvidenceBlob{Path: path, Mime: ev.Mime, Filename: ev.Filename}, nil
 }
 
+// ExportEvidence materializes a human-named, correctly-extensioned copy of a
+// stored evidence blob so the desktop app can Reveal-in-Finder / Open it by
+// content type. The on-disk blob is an opaque, extensionless ev_<uuid> keyed by
+// id (a deliberate storage choice), which Finder cannot open on double-click; the
+// export copy — named "<case>-<file>.<ext>" from the record's authoritative MIME
+// — lives in an _open/ subdir of the case's evidence dir. That subdir is a
+// regenerable cache: existing session-purge / reset / re-author cleanup already
+// removes it, and the retention sweep + RemoveEvidence drop each record's copy.
+// Returns the copy's absolute path. Idempotent: an up-to-date same-size copy is
+// reused rather than rewritten (cheap for repeated reveals of a large clip).
+func (s *Service) ExportEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (string, error) {
+	blob, err := s.OpenEvidence(ctx, sessionID, checkID, evidenceID)
+	if err != nil {
+		return "", err
+	}
+	dst, ok := s.openExportPath(sessionID, checkID, evidenceID, blob.Filename, blob.Mime)
+	if !ok {
+		return "", fmt.Errorf("%w: evidence %q", ErrNotFound, evidenceID)
+	}
+	if err := copyFileIfStale(blob.Path, dst); err != nil {
+		return "", fmt.Errorf("export evidence: %w", err)
+	}
+	return dst, nil
+}
+
 // RemoveEvidence deletes one stored evidence item (DB row + on-disk blob) after
 // verifying it belongs to the session + case, and returns the case with its
 // remaining evidence so the UI reconciles to authoritative state. The user can
@@ -333,7 +368,48 @@ func (s *Service) RemoveEvidence(ctx context.Context, sessionID domain.SessionID
 	if path, ok := preview.ConfinedPath(s.evidenceRoot, rel); ok {
 		_ = os.Remove(path)
 	}
+	if dst, ok := s.openExportPath(sessionID, checkID, evidenceID, ev.Filename, ev.Mime); ok {
+		_ = os.Remove(dst)
+	}
 	return s.getCheck(ctx, checkID)
+}
+
+// PurgeEvidenceOlderThan deletes every evidence item (DB row + on-disk blob +
+// any exported copy) whose created_at predates cutoff, across all sessions. Age
+// comes from the DB record's created_at, never the file's mtime, so a touched or
+// re-copied file is not spared. It is idempotent and safe to run repeatedly: a
+// missing row/file is tolerated, and every blob path is derived from its OWN
+// record's session/check, so a sweep can never delete evidence for the wrong
+// session or case. Callers pass a cutoff already clamped by the retention policy
+// (see evidenceretention.Settings.Cutoff) so a misconfigured tiny TTL cannot nuke
+// recent evidence here.
+func (s *Service) PurgeEvidenceOlderThan(ctx context.Context, cutoff time.Time) (EvidencePurgeResult, error) {
+	var res EvidencePurgeResult
+	rows, err := s.store.ListSmokeEvidenceCreatedBefore(ctx, cutoff)
+	if err != nil {
+		return res, err
+	}
+	for _, ev := range rows {
+		deleted, err := s.store.DeleteSmokeEvidence(ctx, ev.ID)
+		if err != nil {
+			return res, err
+		}
+		// Remove the blob + export copy best-effort regardless of whether the row
+		// was still present (a concurrent delete may have raced us); only count a
+		// row we actually removed so FreedBytes stays honest.
+		rel := filepath.Join(string(ev.SessionID), ev.CheckID, ev.ID)
+		if path, ok := preview.ConfinedPath(s.evidenceRoot, rel); ok {
+			_ = os.Remove(path)
+		}
+		if dst, ok := s.openExportPath(ev.SessionID, ev.CheckID, ev.ID, ev.Filename, ev.Mime); ok {
+			_ = os.Remove(dst)
+		}
+		if deleted {
+			res.Purged++
+			res.FreedBytes += ev.SizeBytes
+		}
+	}
+	return res, nil
 }
 
 // Report composes a deterministic results summary and delivers it back to the
@@ -417,6 +493,120 @@ func (s *Service) sessionDir(sessionID domain.SessionID) string {
 
 func (s *Service) checkDir(sessionID domain.SessionID, checkID string) string {
 	return filepath.Join(s.evidenceRoot, string(sessionID), checkID)
+}
+
+// openExportSubdir holds the human-named, extensioned copies materialized for
+// Reveal/Open. Kept inside the case's evidence dir so os.RemoveAll on
+// session-purge / reset / re-author sweeps it away with the rest.
+const openExportSubdir = "_open"
+
+// openExportPath is the confined absolute path of an evidence item's export copy
+// (<check>/_open/<case>-<file>.<ext>). ok=false when the derived path would
+// escape the evidence root.
+func (s *Service) openExportPath(sessionID domain.SessionID, checkID, evidenceID, filename, mimeType string) (string, bool) {
+	rel := filepath.Join(string(sessionID), checkID, openExportSubdir, exportBaseName(checkID, evidenceID, filename, mimeType))
+	return preview.ConfinedPath(s.evidenceRoot, rel)
+}
+
+// mimeExtensions maps each accepted evidence MIME (see evidenceKinds) to the
+// extension that makes the exported copy open by content type. The MIME is the
+// authority — the stored display filename may be wrong or absent.
+var mimeExtensions = map[string]string{
+	"image/png":       ".png",
+	"image/jpeg":      ".jpg",
+	"image/gif":       ".gif",
+	"image/webp":      ".webp",
+	"video/mp4":       ".mp4",
+	"video/webm":      ".webm",
+	"video/quicktime": ".mov",
+}
+
+// extensionForMime returns the file extension (with dot) for an evidence MIME,
+// falling back to the stdlib map then ".bin" for anything unexpected.
+func extensionForMime(mimeType string) string {
+	if ext, ok := mimeExtensions[normalizeMime(mimeType)]; ok {
+		return ext
+	}
+	if exts, err := mime.ExtensionsByType(mimeType); err == nil && len(exts) > 0 {
+		return exts[0]
+	}
+	return ".bin"
+}
+
+// exportBaseName builds a human-readable, filesystem-safe basename for an export
+// copy: "<case>-<file-stem-or-id><ext>", the extension derived from the MIME.
+func exportBaseName(checkID, evidenceID, filename, mimeType string) string {
+	ext := extensionForMime(mimeType)
+	stem := ""
+	if filename != "" {
+		stem = strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	}
+	if stem == "" {
+		stem = evidenceID
+	}
+	return sanitizeExportName(checkID + "-" + stem + ext)
+}
+
+// sanitizeExportName reduces a name to a single safe path component: no
+// separators or control chars, no leading dots, length-capped while keeping the
+// extension.
+func sanitizeExportName(name string) string {
+	name = filepath.Base(filepath.FromSlash(name))
+	name = strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == filepath.Separator || r < 0x20 {
+			return '_'
+		}
+		return r
+	}, name)
+	name = strings.TrimLeft(name, ".")
+	if name == "" || name == string(filepath.Separator) {
+		return "evidence"
+	}
+	if len(name) > 200 {
+		ext := filepath.Ext(name)
+		if len(ext) < 200 {
+			name = name[:200-len(ext)] + ext
+		} else {
+			name = name[:200]
+		}
+	}
+	return name
+}
+
+// copyFileIfStale writes src to dst unless an up-to-date same-size copy already
+// exists, via a temp file + rename so a concurrent reveal never sees a partial
+// file. Parent dirs are created as needed.
+func copyFileIfStale(src, dst string) error {
+	sfi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if dfi, err := os.Stat(dst); err == nil && dfi.Size() == sfi.Size() && !dfi.ModTime().Before(sfi.ModTime()) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	tmp := dst + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
 
 // requireCheck verifies a case exists and belongs to the session.

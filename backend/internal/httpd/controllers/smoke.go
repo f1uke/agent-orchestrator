@@ -64,6 +64,13 @@ type SmokeEvidenceResponse struct {
 	Evidence domain.SmokeEvidence `json:"evidence"`
 }
 
+// EvidenceExportResponse is the body of POST .../evidence/{evidenceId}/export:
+// the absolute path of a human-named, correctly-extensioned copy the desktop app
+// hands to Reveal-in-Finder / Open (the stored blob is extensionless).
+type EvidenceExportResponse struct {
+	Path string `json:"path" description:"Absolute path of the exported, openable copy on the local machine."`
+}
+
 // ReportSmokeResponse is the body of POST .../smoke-checks/report.
 type ReportSmokeResponse struct {
 	Delivered bool   `json:"delivered" description:"Whether the summary was delivered to a live session."`
@@ -97,6 +104,7 @@ func (c *SmokeController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/evidence", c.uploadEvidence)
 	r.Get("/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", c.serveEvidence)
 	r.Delete("/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", c.deleteEvidence)
+	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export", c.exportEvidence)
 }
 
 func (c *SmokeController) list(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +231,19 @@ func (c *SmokeController) deleteEvidence(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SmokeCheckResponse{Check: check})
+}
+
+func (c *SmokeController) exportEvidence(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export")
+		return
+	}
+	path, err := c.Svc.ExportEvidence(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), chi.URLParam(r, "evidenceId"))
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, EvidenceExportResponse{Path: path})
 }
 
 func (c *SmokeController) report(w http.ResponseWriter, r *http.Request) {

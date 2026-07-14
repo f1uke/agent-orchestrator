@@ -1062,6 +1062,27 @@ type SetReclaimSettingsRequest struct {
 	GraceMinutes int  `json:"graceMinutes"`
 }
 
+// EvidenceRetentionSettingsResponse mirrors evidenceretention.Settings on the
+// wire. It is the body of GET/PUT /api/v1/settings/evidence-retention.
+type EvidenceRetentionSettingsResponse struct {
+	Enabled    bool `json:"enabled" description:"Whether the age-based evidence retention sweep runs at all."`
+	MaxAgeDays int  `json:"maxAgeDays" description:"Purge evidence older than this many days (from its created_at). 0/disabled = keep forever."`
+}
+
+// SetEvidenceRetentionSettingsRequest is the body of PUT
+// /api/v1/settings/evidence-retention.
+type SetEvidenceRetentionSettingsRequest struct {
+	Enabled    bool `json:"enabled"`
+	MaxAgeDays int  `json:"maxAgeDays"`
+}
+
+// EvidenceRetentionSweepResponse is the body of POST
+// /api/v1/settings/evidence-retention/sweep (the manual trigger).
+type EvidenceRetentionSweepResponse struct {
+	Purged     int   `json:"purged" description:"Number of evidence items removed."`
+	FreedBytes int64 `json:"freedBytes" description:"On-disk bytes freed by the sweep."`
+}
+
 // SpawnConfirmSettingsResponse mirrors spawnconfirm.Settings on the wire. It is
 // the body of GET/PUT /api/v1/settings/spawn-confirm.
 type SpawnConfirmSettingsResponse struct {

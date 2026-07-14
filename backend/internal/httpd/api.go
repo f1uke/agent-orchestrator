@@ -34,6 +34,8 @@ type APIDeps struct {
 	Settings           controllers.SettingsService
 	SpawnConfirm       controllers.SpawnConfirmService
 	AutoNudge          controllers.AutoNudgeService
+	EvidenceRetention  controllers.EvidenceRetentionService
+	EvidenceSweeper    controllers.EvidenceSweeper
 	SystemPrompts      controllers.SystemPromptsService
 	MessageTemplates   controllers.MessageTemplatesService
 	CDC                cdc.Source
@@ -80,7 +82,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }

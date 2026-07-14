@@ -257,6 +257,26 @@ function windowStateDir(): string | null {
 	return runFile ? path.dirname(runFile) : null;
 }
 
+// evidenceDir resolves the daemon's smoke-evidence root (<dataDir>/evidence) the
+// same way the backend does: AO_DATA_DIR wins, else ~/.ao/data (or the dev
+// subdir). Used to confine Reveal/Open to real evidence exports.
+function evidenceDir(): string {
+	const dataDir =
+		process.env.AO_DATA_DIR ||
+		(isDev ? path.join(os.homedir(), ".ao", DEV_STATE_SUBDIR, "data") : path.join(os.homedir(), ".ao", "data"));
+	return path.join(dataDir, "evidence");
+}
+
+// isEvidenceExportPath returns true only for an existing absolute path confined
+// under the evidence root — the guard for the Reveal/Open IPC handlers.
+function isEvidenceExportPath(target: string): boolean {
+	if (!target) return false;
+	const root = path.resolve(evidenceDir());
+	const resolved = path.resolve(target);
+	if (resolved !== root && !resolved.startsWith(root + path.sep)) return false;
+	return existsSync(resolved);
+}
+
 // The bounds to open the window at: the saved state clamped/validated against
 // the current displays, or the screen-clamped default on first run. `screen` may
 // only be read after app 'ready', which always holds here — createWindow runs
@@ -1186,6 +1206,20 @@ ipcMain.handle("clipboard:readText", () => clipboard.readText());
 ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 	if (!isAllowedTerminalLink(url)) return;
 	await shell.openExternal(url);
+});
+
+// Reveal-in-Finder / Open for smoke-test evidence. The renderer passes an
+// absolute path returned by the daemon's evidence-export endpoint; we confine it
+// under <dataDir>/evidence (mirroring the backend's ConfinedPath) so a stray path
+// can never reveal or launch an arbitrary file, and require it to exist.
+ipcMain.handle("shell:showItemInFolder", (_event, target: string) => {
+	if (!isEvidenceExportPath(target)) return;
+	shell.showItemInFolder(target);
+});
+ipcMain.handle("shell:openPath", async (_event, target: string) => {
+	if (!isEvidenceExportPath(target)) return;
+	const error = await shell.openPath(target);
+	if (error) throw new Error(error);
 });
 
 // "Open in…" terminal-toolbar menu (macOS only). Detection is best-effort and

@@ -74,6 +74,8 @@ if (typeof window !== "undefined") {
 		},
 		shell: {
 			openExternal: async () => undefined,
+			showItemInFolder: async () => undefined,
+			openPath: async () => undefined,
 		},
 		daemon: {
 			getStatus: async () => ({ state: "stopped" }),

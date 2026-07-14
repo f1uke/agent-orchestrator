@@ -243,6 +243,46 @@ func (q *Queries) ListSmokeEvidenceByCheck(ctx context.Context, checkID string) 
 	return items, nil
 }
 
+const listSmokeEvidenceCreatedBefore = `-- name: ListSmokeEvidenceCreatedBefore :many
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at
+FROM smoke_evidence WHERE created_at < ? ORDER BY created_at
+`
+
+// Age-based retention sweep: every evidence row whose created_at predates the
+// TTL cutoff, across all sessions. Ordered oldest-first so a batch purge is
+// deterministic.
+func (q *Queries) ListSmokeEvidenceCreatedBefore(ctx context.Context, createdAt time.Time) ([]SmokeEvidence, error) {
+	rows, err := q.db.QueryContext(ctx, listSmokeEvidenceCreatedBefore, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SmokeEvidence{}
+	for rows.Next() {
+		var i SmokeEvidence
+		if err := rows.Scan(
+			&i.ID,
+			&i.CheckID,
+			&i.SessionID,
+			&i.Kind,
+			&i.Filename,
+			&i.Mime,
+			&i.SizeBytes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markSmokeReported = `-- name: MarkSmokeReported :execrows
 UPDATE smoke_check SET reported_at = ?, updated_at = ? WHERE session_id = ?
 `

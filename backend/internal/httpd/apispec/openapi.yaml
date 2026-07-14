@@ -2794,6 +2794,54 @@ paths:
       summary: Serve a stored smoke-test evidence blob
       tags:
       - smoke
+  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export:
+    post:
+      operationId: exportSmokeEvidence
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Smoke-check case identifier.
+        in: path
+        name: checkId
+        required: true
+        schema:
+          description: Smoke-check case identifier.
+          type: string
+      - description: Evidence blob identifier.
+        in: path
+        name: evidenceId
+        required: true
+        schema:
+          description: Evidence blob identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceExportResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Materialize a human-named, correctly-extensioned copy of an evidence
+        blob for Reveal/Open
+      tags:
+      - smoke
   /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset:
     post:
       operationId: resetSmokeCheck
@@ -3206,6 +3254,74 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Internal Server Error
       summary: Replace the auto-nudge-on-comments gate setting
+      tags:
+      - settings
+  /api/v1/settings/evidence-retention:
+    get:
+      operationId: getEvidenceRetentionSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceRetentionSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the smoke-test evidence retention settings
+      tags:
+      - settings
+    put:
+      operationId: setEvidenceRetentionSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetEvidenceRetentionSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceRetentionSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the smoke-test evidence retention settings
+      tags:
+      - settings
+  /api/v1/settings/evidence-retention/sweep:
+    post:
+      operationId: sweepEvidenceRetention
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceRetentionSweepResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Run the evidence retention sweep now (manual trigger)
       tags:
       - settings
   /api/v1/settings/message-templates:
@@ -3965,6 +4081,40 @@ components:
           type: string
         worker:
           type: string
+      type: object
+    EvidenceExportResponse:
+      properties:
+        path:
+          description: Absolute path of the exported, openable copy on the local machine.
+          type: string
+      required:
+      - path
+      type: object
+    EvidenceRetentionSettingsResponse:
+      properties:
+        enabled:
+          description: Whether the age-based evidence retention sweep runs at all.
+          type: boolean
+        maxAgeDays:
+          description: Purge evidence older than this many days (from its created_at).
+            0/disabled = keep forever.
+          type: integer
+      required:
+      - enabled
+      - maxAgeDays
+      type: object
+    EvidenceRetentionSweepResponse:
+      properties:
+        freedBytes:
+          description: On-disk bytes freed by the sweep.
+          format: int64
+          type: integer
+        purged:
+          description: Number of evidence items removed.
+          type: integer
+      required:
+      - purged
+      - freedBytes
       type: object
     GitConventionConfig:
       properties:
@@ -5368,6 +5518,16 @@ components:
           - boolean
       required:
       - override
+      type: object
+    SetEvidenceRetentionSettingsRequest:
+      properties:
+        enabled:
+          type: boolean
+        maxAgeDays:
+          type: integer
+      required:
+      - enabled
+      - maxAgeDays
       type: object
     SetMessageTemplateRequest:
       properties:

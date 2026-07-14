@@ -245,6 +245,21 @@ func (s *Store) listSmokeEvidence(ctx context.Context, q *gen.Queries, checkID s
 	return out, nil
 }
 
+// ListSmokeEvidenceCreatedBefore returns every evidence row whose created_at
+// predates the cutoff, across all sessions — the age-based retention sweep's
+// read side. Ordered oldest-first.
+func (s *Store) ListSmokeEvidenceCreatedBefore(ctx context.Context, before time.Time) ([]domain.SmokeEvidence, error) {
+	rows, err := s.qr.ListSmokeEvidenceCreatedBefore(ctx, before)
+	if err != nil {
+		return nil, fmt.Errorf("list smoke evidence before %s: %w", before.Format(time.RFC3339), err)
+	}
+	out := make([]domain.SmokeEvidence, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, smokeEvidenceFromRow(row))
+	}
+	return out, nil
+}
+
 func smokeCheckFromRow(r gen.SmokeCheck) (domain.SmokeCheck, error) {
 	steps := []string{}
 	if r.Steps != "" {

@@ -41,6 +41,13 @@ FROM smoke_evidence WHERE id = ?;
 SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at
 FROM smoke_evidence WHERE check_id = ? ORDER BY created_at;
 
+-- name: ListSmokeEvidenceCreatedBefore :many
+-- Age-based retention sweep: every evidence row whose created_at predates the
+-- TTL cutoff, across all sessions. Ordered oldest-first so a batch purge is
+-- deterministic.
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at
+FROM smoke_evidence WHERE created_at < ? ORDER BY created_at;
+
 -- name: DeleteSmokeEvidenceByCheck :exec
 DELETE FROM smoke_evidence WHERE check_id = ?;
 

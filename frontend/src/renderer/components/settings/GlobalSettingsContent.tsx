@@ -1,5 +1,9 @@
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { Bot, MessageSquare } from "lucide-react";
 import type { UpdateChannel } from "../../../main/update-settings";
+import { apiClient, apiErrorMessage } from "../../lib/api-client";
+import { Button } from "../ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingsGroup } from "./SettingsGroup";
@@ -188,8 +192,86 @@ function AutomationSection({ form }: { form: GlobalForm }) {
 					/>
 				</SettingsField>
 			</SettingsGroup>
+
+			<SettingsGroup title="Smoke-test evidence retention">
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					Screenshots and clips you attach in the Tests tab are stored on disk under <code>~/.ao</code>. AO
+					automatically deletes evidence older than the age below, measured from when it was captured. Set Retention to
+					Disabled to keep evidence forever.
+				</p>
+				<SettingsField
+					label="Retention"
+					htmlFor="evidenceRetentionEnabled"
+					modified={isFieldDirty("evidenceRetentionEnabled")}
+				>
+					<OnOffSelect
+						id="evidenceRetentionEnabled"
+						value={draft.evidenceRetentionEnabled}
+						onChange={(v) => setField("evidenceRetentionEnabled", v)}
+					/>
+				</SettingsField>
+				<SettingsField
+					label="Delete evidence older than (days)"
+					htmlFor="evidenceRetentionDays"
+					modified={isFieldDirty("evidenceRetentionDays")}
+				>
+					<input
+						id="evidenceRetentionDays"
+						type="number"
+						min={1}
+						max={3650}
+						className={INPUT_CLASS}
+						value={draft.evidenceRetentionDays}
+						onChange={(e) =>
+							setField("evidenceRetentionDays", Math.max(1, Math.min(3650, Number(e.target.value) || 1)))
+						}
+					/>
+				</SettingsField>
+				<EvidenceRetentionPurgeButton />
+			</SettingsGroup>
 		</>
 	);
+}
+
+// EvidenceRetentionPurgeButton is an instant action (outside the save bar) that
+// runs the age-based sweep now with the CURRENTLY-SAVED TTL and reports what it
+// removed. Save any TTL change first for it to take effect.
+function EvidenceRetentionPurgeButton() {
+	const [status, setStatus] = useState<string | null>(null);
+	const purge = useMutation({
+		mutationFn: async () => {
+			const { data, error } = await apiClient.POST("/api/v1/settings/evidence-retention/sweep", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as { purged: number; freedBytes: number };
+		},
+		onSuccess: (r) =>
+			setStatus(
+				r.purged > 0
+					? `Purged ${r.purged} item${r.purged === 1 ? "" : "s"} · freed ${formatBytes(r.freedBytes)}.`
+					: "Nothing to purge — no evidence is past the retention age.",
+			),
+		onError: (e) => setStatus(apiErrorMessage(e, "Sweep failed.")),
+	});
+	return (
+		<div className="mt-1 flex items-center gap-3">
+			<Button type="button" variant="outline" onClick={() => purge.mutate()} disabled={purge.isPending}>
+				{purge.isPending ? "Purging…" : "Purge now"}
+			</Button>
+			{status && <span className="text-[12px] text-muted-foreground">{status}</span>}
+		</div>
+	);
+}
+
+function formatBytes(n: number): string {
+	if (n < 1024) return `${n} B`;
+	const units = ["KB", "MB", "GB", "TB"];
+	let v = n / 1024;
+	let i = 0;
+	while (v >= 1024 && i < units.length - 1) {
+		v /= 1024;
+		i++;
+	}
+	return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function SystemSection({ form }: { form: GlobalForm }) {

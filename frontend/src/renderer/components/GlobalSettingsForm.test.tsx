@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -133,6 +133,8 @@ function mockGet(importPayload: unknown, promptOverrides: Record<string, string>
 				return { data: { enabled: false }, error: undefined };
 			case "/api/v1/settings/reclaim":
 				return { data: { enabled: true, graceMinutes: 15 }, error: undefined };
+			case "/api/v1/settings/evidence-retention":
+				return { data: { enabled: true, maxAgeDays: 30 }, error: undefined };
 			case "/api/v1/import":
 				return importPayload;
 			default:
@@ -219,6 +221,34 @@ describe("GlobalSettingsForm", () => {
 		await waitFor(() =>
 			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/auto-nudge", { body: { enabled: true } }),
 		);
+	});
+
+	it("routes the evidence-retention TTL through the save bar (PUT evidence-retention)", async () => {
+		renderForm();
+		await goToSection("Automation");
+		const days = await screen.findByLabelText("Delete evidence older than (days)");
+		expect(days).toHaveValue(30);
+		fireEvent.change(days, { target: { value: "7" } });
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/evidence-retention", {
+				body: { enabled: true, maxAgeDays: 7 },
+			}),
+		);
+	});
+
+	it("runs the manual evidence purge (POST sweep) and reports the result", async () => {
+		postMock.mockReset().mockImplementation(async (path: string) => {
+			if (String(path).includes("evidence-retention/sweep")) {
+				return { data: { purged: 2, freedBytes: 2048 }, error: undefined };
+			}
+			return { data: {}, error: undefined };
+		});
+		renderForm();
+		await goToSection("Automation");
+		await userEvent.click(await screen.findByRole("button", { name: "Purge now" }));
+		await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/settings/evidence-retention/sweep", {}));
+		expect(await screen.findByText(/Purged 2 items · freed 2 KB\./)).toBeInTheDocument();
 	});
 
 	it("changes the update channel and saves it through the bar", async () => {
