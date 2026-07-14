@@ -178,10 +178,13 @@ func TestPostToJira_OnlyRunRowsAndUploadsEvidence(t *testing.T) {
 	if len(poster.resolved) != 2 {
 		t.Errorf("ResolveMediaID calls = %d, want 2", len(poster.resolved))
 	}
-	// Status text present for each verdict.
-	for _, want := range []string{"Pass", "Fail", "Skip"} {
+	// Status renders as Jira's native status lozenge (colored pill), one per row.
+	if got := strings.Count(doc, `"type":"status"`); got != 3 {
+		t.Errorf("status node count = %d, want 3", got)
+	}
+	for _, want := range []string{`"text":"PASS"`, `"color":"green"`, `"text":"FAIL"`, `"color":"red"`, `"text":"SKIP"`, `"color":"neutral"`} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("doc missing status %q", want)
+			t.Errorf("doc missing status lozenge attr %q", want)
 		}
 	}
 	// Attachments carried the right key + bytes (upload invoked within the post).

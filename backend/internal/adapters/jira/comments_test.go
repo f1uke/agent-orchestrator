@@ -90,8 +90,9 @@ func TestResolveMediaID_ParsesMediaUUID(t *testing.T) {
 		if gotMethod != http.MethodGet || gotPath != "/rest/api/3/attachment/content/10101" {
 			t.Errorf("method/path = %q %q", gotMethod, gotPath)
 		}
-		if gotQuery != "redirect=false" {
-			t.Errorf("query = %q, want redirect=false", gotQuery)
+		// Must NOT pass redirect=false — that returns the raw bytes, not the URL.
+		if gotQuery != "" {
+			t.Errorf("query = %q, want empty (no redirect=false)", gotQuery)
 		}
 	})
 

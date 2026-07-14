@@ -113,11 +113,12 @@ var mediaFileIDPattern = regexp.MustCompile(`/file/([0-9a-fA-F]{8}-[0-9a-fA-F]{4
 // render an attachment inline (an image preview or a video player). This is NOT
 // the attachment id: Jira does not resolve an attachment id inside a comment's
 // media node, so referencing it renders only a link. The media id is exposed
-// indirectly — GET /rest/api/3/attachment/content/{id} redirects to
+// indirectly — GET /rest/api/3/attachment/content/{id} answers 303 to
 // `https://api.media.atlassian.com/file/<UUID>/binary?token=…`, and <UUID> is the
-// media id. `redirect=false` asks Jira to hand back that URL without following;
-// we parse the UUID from the Location header, the final request URL (in case the
-// redirect was followed), or the response body — whichever carries it.
+// media id. We read it from the Location header (redirect not followed) or from
+// the final request URL (redirect followed), preferring not to download the file:
+// a Range header caps the transfer, and the body is only inspected as a last
+// resort. (Do NOT pass redirect=false — that returns the raw bytes, not the URL.)
 func (c *Client) ResolveMediaID(ctx context.Context, attachmentID string) (string, error) {
 	attachmentID = strings.TrimSpace(attachmentID)
 	if attachmentID == "" {
@@ -127,11 +128,14 @@ func (c *Client) ResolveMediaID(ctx context.Context, attachmentID string) (strin
 	if err != nil {
 		return "", err
 	}
-	url := cfg.baseURL + "/rest/api/3/attachment/content/" + attachmentID + "?redirect=false"
+	url := cfg.baseURL + "/rest/api/3/attachment/content/" + attachmentID
 	req, err := newJiraRequest(ctx, cfg, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
+	// We only need the redirect target, not the file — cap the body if a client
+	// follows the redirect all the way to the media binary.
+	req.Header.Set("Range", "bytes=0-0")
 	resp, err := c.httpDo(req)
 	if err != nil {
 		return "", fmt.Errorf("%w: resolve media id %s: %w", ErrUnavailable, attachmentID, err)
@@ -140,15 +144,17 @@ func (c *Client) ResolveMediaID(ctx context.Context, attachmentID string) (strin
 	if resp.StatusCode >= 400 {
 		return "", writeStatusError(resp, attachmentID)
 	}
-	candidates := []string{resp.Header.Get("Location")}
+	// Prefer the header / final URL so we never read the (possibly large) body.
+	if m := mediaFileIDPattern.FindStringSubmatch(resp.Header.Get("Location")); m != nil {
+		return m[1], nil
+	}
 	if resp.Request != nil && resp.Request.URL != nil {
-		candidates = append(candidates, resp.Request.URL.String())
+		if m := mediaFileIDPattern.FindStringSubmatch(resp.Request.URL.String()); m != nil {
+			return m[1], nil
+		}
 	}
 	if body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16)); err == nil {
-		candidates = append(candidates, string(body))
-	}
-	for _, s := range candidates {
-		if m := mediaFileIDPattern.FindStringSubmatch(s); m != nil {
+		if m := mediaFileIDPattern.FindStringSubmatch(string(body)); m != nil {
 			return m[1], nil
 		}
 	}

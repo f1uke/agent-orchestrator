@@ -61,16 +61,18 @@ func columnsFor(run []domain.SmokeCheck) columnFlags {
 	return f
 }
 
-// buildResultsADF renders the ADF document node for the comment: an intro line,
-// the per-case results table, then an evidence section whose screenshots/clips
-// preview inline. run is the run-only checks in seq order; uploads maps a check
-// id to its uploaded evidence. When includeMedia is true, evidence with a
-// resolved media id embeds inline via media nodes; when false (the media-free
-// 400 fallback), every evidence file renders as a link instead.
+// buildResultsADF renders the ADF document node for the comment: an intro line
+// followed by the per-case results table. Each case is one row; its evidence
+// lives in an Evidence column, where screenshots/clips with a resolved media id
+// embed inline (a media node Jira previews as an image / video player). run is
+// the run-only checks in seq order; uploads maps a check id to its uploaded
+// evidence. When includeMedia is false (the media-free 400 fallback), evidence
+// renders as a link instead.
 func buildResultsADF(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) map[string]any {
-	content := make([]any, 0, 2+len(run))
-	content = append(content, adfParagraph(adfText(resultsIntro(run))), resultsTable(run))
-	content = append(content, evidenceSection(run, uploads, includeMedia)...)
+	content := []any{
+		adfParagraph(adfText(resultsIntro(run))),
+		resultsTable(run, uploads, includeMedia),
+	}
 	return map[string]any{"type": "doc", "version": 1, "content": content}
 }
 
@@ -97,9 +99,18 @@ func resultsIntro(run []domain.SmokeCheck) string {
 }
 
 // resultsTable renders the per-case table: a header row plus one row per run
-// row. Optional columns present only when at least one case populates them.
-func resultsTable(run []domain.SmokeCheck) map[string]any {
+// row. Optional context columns appear only when at least one case populates
+// them; an Evidence column appears when any case has uploaded evidence and holds
+// each screenshot/clip inline.
+func resultsTable(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) map[string]any {
 	cols := columnsFor(run)
+	hasEvidence := false
+	for _, c := range run {
+		if len(uploads[c.ID]) > 0 {
+			hasEvidence = true
+			break
+		}
+	}
 
 	headers := []any{tableHeader(adfParagraph(adfStrong(colCase))), tableHeader(adfParagraph(adfStrong(colStatus)))}
 	if cols.why {
@@ -114,13 +125,16 @@ func resultsTable(run []domain.SmokeCheck) map[string]any {
 	if cols.note {
 		headers = append(headers, tableHeader(adfParagraph(adfStrong(labelNote))))
 	}
+	if hasEvidence {
+		headers = append(headers, tableHeader(adfParagraph(adfStrong(labelEvidence))))
+	}
 
 	rows := make([]any, 0, 1+len(run))
 	rows = append(rows, map[string]any{"type": "tableRow", "content": headers})
 	for _, c := range run {
 		cells := []any{
 			tableCell(adfParagraph(adfStrong(strings.TrimSpace(c.Name)))),
-			tableCell(adfParagraph(adfText(statusText(c.Verdict)))),
+			tableCell(adfParagraph(statusNode(c))),
 		}
 		if cols.why {
 			cells = append(cells, tableCell(textOrDash(c.Why)))
@@ -138,6 +152,9 @@ func resultsTable(run []domain.SmokeCheck) map[string]any {
 		if cols.note {
 			cells = append(cells, tableCell(textOrDash(c.Note)))
 		}
+		if hasEvidence {
+			cells = append(cells, tableCell(evidenceCellNodes(uploads[c.ID], includeMedia)...))
+		}
 		rows = append(rows, map[string]any{"type": "tableRow", "content": cells})
 	}
 
@@ -148,44 +165,38 @@ func resultsTable(run []domain.SmokeCheck) map[string]any {
 	}
 }
 
-// evidenceSection renders every run row's evidence below the table, grouped by
-// case so each preview is attributable. Screenshots/clips with a resolved media
-// id embed inline (when includeMedia) so Jira previews them; a failed upload
-// becomes a short note, and anything without a media id (or when media is off)
-// renders as a link. Returns nil when no run row has evidence.
-func evidenceSection(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) []any {
-	var body []any
-	for _, c := range run {
-		evs := uploads[c.ID]
-		if len(evs) == 0 {
-			continue
-		}
-		body = append(body, adfParagraph(adfStrong(strings.TrimSpace(c.Name))))
-		for _, e := range evs {
-			switch {
-			case e.failed:
-				body = append(body, adfParagraph(adfText("⚠ "+evidenceLabel(e)+" — attachment upload failed")))
-			case includeMedia && strings.TrimSpace(e.mediaID) != "":
-				body = append(body, mediaSingleNode(e.mediaID))
-			default:
-				body = append(body, adfParagraph(evidenceLinkNode(e)))
-			}
+// evidenceCellNodes builds the block content for a case's Evidence cell. Each
+// screenshot/clip with a resolved media id embeds inline (when includeMedia) so
+// Jira previews it; a failed upload becomes a short note, and anything without a
+// media id (or when media is off) renders as a link. An empty cell renders a
+// dash so the row is never visually blank.
+func evidenceCellNodes(evs []uploadedEvidence, includeMedia bool) []map[string]any {
+	if len(evs) == 0 {
+		return []map[string]any{adfParagraph(adfText("—"))}
+	}
+	out := make([]map[string]any, 0, len(evs))
+	for _, e := range evs {
+		switch {
+		case e.failed:
+			out = append(out, adfParagraph(adfText("⚠ "+evidenceLabel(e)+" — attachment upload failed")))
+		case includeMedia && strings.TrimSpace(e.mediaID) != "":
+			out = append(out, mediaSingleNode(e.mediaID))
+		default:
+			out = append(out, adfParagraph(evidenceLinkNode(e)))
 		}
 	}
-	if len(body) == 0 {
-		return nil
-	}
-	return append([]any{adfHeading(3, adfText(labelEvidence))}, body...)
+	return out
 }
 
 // mediaSingleNode embeds one attachment (image or video) inline by its
 // media-services file id. All three attrs (type, id, collection) are mandatory
 // for Jira to resolve and preview the media; collection is intentionally the
-// empty string (the file's default collection).
+// empty string (the file's default collection). Left-aligned so it sits neatly
+// inside the Evidence table cell.
 func mediaSingleNode(mediaID string) map[string]any {
 	return map[string]any{
 		"type":  "mediaSingle",
-		"attrs": map[string]any{"layout": "center"},
+		"attrs": map[string]any{"layout": "align-start"},
 		"content": []any{
 			map[string]any{
 				"type":  "media",
@@ -218,16 +229,27 @@ func evidenceLabel(e uploadedEvidence) string {
 	return "attachment"
 }
 
-func statusText(v domain.SmokeVerdict) string {
-	switch v {
+// statusNode renders the verdict as Jira's native status lozenge (the inline
+// node the `/status` editor command inserts) so it shows as a colored pill, not
+// plain text: Pass → green, Fail → red, Skip → neutral. localId is derived from
+// the case id so the node is stable across re-posts.
+func statusNode(c domain.SmokeCheck) map[string]any {
+	text, colorName := "PENDING", "neutral"
+	switch c.Verdict {
 	case domain.SmokePass:
-		return "✓ Pass"
+		text, colorName = "PASS", "green"
 	case domain.SmokeFail:
-		return "✗ Fail"
+		text, colorName = "FAIL", "red"
 	case domain.SmokeSkip:
-		return "⊘ Skip"
-	default:
-		return "○ Pending"
+		text, colorName = "SKIP", "neutral"
+	}
+	return map[string]any{
+		"type": "status",
+		"attrs": map[string]any{
+			"localId": "smoke-status-" + c.ID,
+			"text":    text,
+			"color":   colorName,
+		},
 	}
 }
 
@@ -276,14 +298,6 @@ func textOrDash(s string) map[string]any {
 		return adfParagraph(adfText(t))
 	}
 	return adfParagraph(adfText("—"))
-}
-
-func adfHeading(level int, nodes ...map[string]any) map[string]any {
-	content := make([]any, 0, len(nodes))
-	for _, n := range nodes {
-		content = append(content, n)
-	}
-	return map[string]any{"type": "heading", "attrs": map[string]any{"level": level}, "content": content}
 }
 
 // tableHeader / tableCell wrap block content in a table cell node. ADF cells

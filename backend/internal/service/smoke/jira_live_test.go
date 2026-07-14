@@ -7,6 +7,8 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,9 +41,22 @@ func TestLive_PostToJiraInlineMedia(t *testing.T) {
 	defer cancel()
 	client := jiraadapter.NewClient()
 
-	// A visibly-colored PNG so the preview is unmistakable when it renders.
-	pngBytes := makePNG(t, 240, 120, color.RGBA{R: 0x3b, G: 0x82, B: 0xf6, A: 0xff})
-	att, err := client.AddAttachment(ctx, key, "smoke-evidence.png", "image/png", bytes.NewReader(pngBytes))
+	// A real screenshot when AO_JIRA_LIVE_IMAGE points at one, else a visibly
+	// colored PNG so the preview is unmistakable when it renders.
+	imgName, imgMime := "smoke-evidence.png", "image/png"
+	var pngBytes []byte
+	if imgPath := os.Getenv("AO_JIRA_LIVE_IMAGE"); imgPath != "" {
+		b, err := os.ReadFile(imgPath)
+		if err != nil {
+			t.Fatalf("read image %s: %v", imgPath, err)
+		}
+		pngBytes = b
+		imgName = filepath.Base(imgPath)
+		imgMime = mimeByExt(imgPath)
+	} else {
+		pngBytes = makePNG(t, 240, 120, color.RGBA{R: 0x3b, G: 0x82, B: 0xf6, A: 0xff})
+	}
+	att, err := client.AddAttachment(ctx, key, imgName, imgMime, bytes.NewReader(pngBytes))
 	if err != nil {
 		t.Fatalf("AddAttachment: %v", err)
 	}
@@ -66,7 +81,7 @@ func TestLive_PostToJiraInlineMedia(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read video %s: %v", videoPath, err)
 		}
-		vatt, err := client.AddAttachment(ctx, key, "smoke-clip.mp4", "video/mp4", bytes.NewReader(vb))
+		vatt, err := client.AddAttachment(ctx, key, filepath.Base(videoPath), mimeByExt(videoPath), bytes.NewReader(vb))
 		if err != nil {
 			t.Fatalf("AddAttachment(video): %v", err)
 		}
@@ -89,6 +104,25 @@ func TestLive_PostToJiraInlineMedia(t *testing.T) {
 	}
 	t.Logf("POSTED comment on %s -> %s", key, comment.URL)
 	t.Log("Now open the issue and confirm the image (and video, if attached) preview INLINE, not as links.")
+}
+
+func mimeByExt(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
+	default:
+		return "image/png"
+	}
 }
 
 func makePNG(t *testing.T, w, h int, c color.Color) []byte {
