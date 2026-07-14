@@ -7,11 +7,12 @@ package smoke
 // action (the "Post to Jira" button on the Tests tab) — the SECOND sanctioned
 // Jira write after the status move, never automatic.
 //
-// Design: image evidence is embedded inline via ADF media nodes so it previews
-// directly on the issue. Because a media node the instance can't resolve can 400
-// the whole comment, a 400 falls back to re-posting the same comment without the
-// media nodes — each evidence file then renders as a link to its attachment
-// `content` URL instead. The outcome reports whether the inline media survived.
+// Design: each screenshot/clip is embedded inline via an ADF media node so it
+// previews directly on the issue (an image preview or a video player). Because a
+// media node the instance can't resolve can 400 the whole comment, a 400 falls
+// back to re-posting the same comment without the media nodes — each evidence
+// file then renders as a link to its attachment `content` URL instead. The
+// outcome reports whether the inline media survived.
 
 import (
 	"context"
@@ -44,8 +45,8 @@ type JiraPoster interface {
 
 // JiraPostOutcome describes a completed Post-to-Jira: the issue it landed on, a
 // deep link to the created comment, how many evidence files were attached, how
-// many result rows the table carried, and whether the inline image media
-// survived (false = the media-free fallback was used).
+// many result rows the comment carried, and whether the inline media survived
+// (false = the media-free fallback was used).
 type JiraPostOutcome struct {
 	Key                 string `json:"key"`
 	CommentURL          string `json:"commentUrl"`
@@ -54,19 +55,19 @@ type JiraPostOutcome struct {
 	EmbeddedMedia       bool   `json:"embeddedMedia"`
 }
 
-// uploadedEvidence pairs an uploaded attachment with whether it is an image (only
-// images are embedded inline as media; videos stay link-only). failed marks a
-// file whose upload was skipped after a non-fatal error — the comment renders a
-// short note for it (name preserved) instead of a link or media.
+// uploadedEvidence is one evidence file as Jira recorded it. Both images and
+// videos embed inline as media nodes (Jira renders a screenshot preview or a
+// video player from the attachment). failed marks a file whose upload was
+// skipped after a non-fatal error — the comment renders a short note for it (name
+// preserved) instead of media.
 type uploadedEvidence struct {
-	att     jiraadapter.Attachment
-	isImage bool
-	failed  bool
-	name    string
+	att    jiraadapter.Attachment
+	failed bool
+	name   string
 }
 
 // PostToJira resolves the session's linked Jira key, uploads the evidence on the
-// run rows (verdict set), builds the results table, and posts it as a comment.
+// run rows (verdict set), builds the per-case comment, and posts it.
 func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (JiraPostOutcome, error) {
 	if sessionID == "" {
 		return JiraPostOutcome{}, fmt.Errorf("%w: session id is required", ErrInvalid)
@@ -109,15 +110,15 @@ func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (J
 				if errors.Is(err, jiraadapter.ErrAuthFailed) || errors.Is(err, jiraadapter.ErrUnavailable) {
 					return JiraPostOutcome{}, err
 				}
-				uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{failed: true, isImage: ev.Kind == "image", name: evidenceDisplayName(ev)})
+				uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{failed: true, name: evidenceDisplayName(ev)})
 				continue
 			}
-			uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{att: att, isImage: ev.Kind == "image"})
+			uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{att: att})
 			total++
 		}
 	}
 
-	// Attempt the rich comment (image media embedded); on a 400 (likely an
+	// Attempt the rich comment (evidence media embedded); on a 400 (likely an
 	// unresolved media node) retry once with a media-free doc.
 	comment, embedded, err := s.postResultsComment(ctx, key, run, uploads)
 	if err != nil {
@@ -132,18 +133,18 @@ func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (J
 	}, nil
 }
 
-// postResultsComment posts the results table, embedding image media first and
+// postResultsComment posts the comment, embedding evidence media first and
 // falling back to a links-only comment if Jira rejects the media (400).
 func (s *Service) postResultsComment(ctx context.Context, key string, run []domain.SmokeCheck, uploads map[string][]uploadedEvidence) (jiraadapter.Comment, bool, error) {
-	hasImageMedia := false
+	hasMedia := false
 	for _, evs := range uploads {
 		for _, e := range evs {
-			if e.isImage && !e.failed && strings.TrimSpace(e.att.ID) != "" {
-				hasImageMedia = true
+			if !e.failed && strings.TrimSpace(e.att.ID) != "" {
+				hasMedia = true
 			}
 		}
 	}
-	if hasImageMedia {
+	if hasMedia {
 		comment, err := s.jira.AddComment(ctx, key, buildResultsADF(run, uploads, true))
 		if err == nil {
 			return comment, true, nil

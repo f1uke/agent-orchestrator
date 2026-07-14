@@ -4,12 +4,12 @@ package smoke
 // issue. Rather than cram every case into one narrow four-column table, each run
 // row becomes its own readable section: a heading with the case title, a status
 // line, the worker-authored context (why it matters, the steps, the expected
-// result), the user's note, and the evidence — image evidence embedded inline as
-// media nodes (when includeMedia is set) so it previews directly on the issue,
-// with videos and any file that failed to upload rendered as a link or a short
-// note. ADF nodes are plain map[string]any so the adapter marshals them straight
-// to Jira's JSON; keeping the shapes here (not a shared builder) is deliberate —
-// the layout is smoke-specific.
+// result), the user's note, and the evidence — each screenshot or clip embedded
+// inline as a media node (when includeMedia is set) so it previews directly on
+// the issue (an image preview or a video player), with any file that failed to
+// upload rendered as a short note. ADF nodes are plain map[string]any so the
+// adapter marshals them straight to Jira's JSON; keeping the shapes here (not a
+// shared builder) is deliberate — the layout is smoke-specific.
 
 import (
 	"fmt"
@@ -90,10 +90,12 @@ func caseSection(c domain.SmokeCheck, evs []uploadedEvidence, includeMedia bool)
 	return append(nodes, evidenceNodes(evs, includeMedia)...)
 }
 
-// evidenceNodes renders a row's evidence under an "Evidence" label: images as
-// inline media (when includeMedia), videos as links to the attachment, and any
-// file that failed to upload as a short note so the comment still records what
-// was captured. Returns nil when the row has no evidence.
+// evidenceNodes renders a row's evidence under an "Evidence" label: each
+// screenshot or clip as inline media (when includeMedia) so it previews directly
+// on the issue — Jira renders an image preview or a video player from the
+// attachment. Any file that failed to upload becomes a short note, and when
+// media is off (the 400 fallback) each file renders as a link instead. Returns
+// nil when the row has no evidence.
 func evidenceNodes(evs []uploadedEvidence, includeMedia bool) []any {
 	if len(evs) == 0 {
 		return nil
@@ -103,7 +105,7 @@ func evidenceNodes(evs []uploadedEvidence, includeMedia bool) []any {
 		switch {
 		case e.failed:
 			out = append(out, adfParagraph(adfText("⚠ "+evidenceLabel(e)+" — attachment upload failed")))
-		case includeMedia && e.isImage && strings.TrimSpace(e.att.ID) != "":
+		case includeMedia && strings.TrimSpace(e.att.ID) != "":
 			out = append(out, mediaSingleNode(e.att.ID))
 		default:
 			out = append(out, adfParagraph(evidenceLinkNode(e)))
@@ -112,7 +114,8 @@ func evidenceNodes(evs []uploadedEvidence, includeMedia bool) []any {
 	return out
 }
 
-// mediaSingleNode embeds one image attachment inline by its attachment id.
+// mediaSingleNode embeds one attachment (image or video) inline by its
+// attachment id.
 func mediaSingleNode(id string) map[string]any {
 	return map[string]any{
 		"type":  "mediaSingle",

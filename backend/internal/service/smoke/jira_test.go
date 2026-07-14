@@ -137,16 +137,17 @@ func TestPostToJira_OnlyRunRowsAndUploadsEvidence(t *testing.T) {
 			t.Errorf("doc missing authored-context content %q", want)
 		}
 	}
-	// The image is embedded inline as media; the video is link-only.
-	if got := strings.Count(doc, `"mediaSingle"`); got != 1 {
-		t.Errorf("mediaSingle count = %d, want 1 (image only)", got)
+	// Both the image AND the video embed inline as media (Jira renders a preview
+	// or a video player from the attachment).
+	if got := strings.Count(doc, `"mediaSingle"`); got != 2 {
+		t.Errorf("mediaSingle count = %d, want 2 (image + video)", got)
 	}
-	if !strings.Contains(doc, `"media"`) || !strings.Contains(doc, `"att-1"`) {
-		t.Errorf("doc missing media node referencing the image attachment id: %s", doc)
+	if !strings.Contains(doc, `"att-1"`) || !strings.Contains(doc, `"att-2"`) {
+		t.Errorf("doc missing media node for an evidence attachment id: %s", doc)
 	}
-	// The video renders as a link to its attachment (not inline media).
-	if !strings.Contains(doc, "/secure/attachment/2/c2-shot") {
-		t.Errorf("doc missing link to the c2 video evidence: %s", doc)
+	// The rich comment embeds media, so the bare attachment link is not used here.
+	if strings.Contains(doc, "/secure/attachment/") {
+		t.Errorf("rich comment should embed media, not link attachments: %s", doc)
 	}
 	// Status text present for each verdict.
 	for _, want := range []string{"Pass", "Fail", "Skip"} {
