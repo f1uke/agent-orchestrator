@@ -8,6 +8,7 @@ import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { DEFAULT_POSTHOG_HOST } from "./src/shared/posthog-config";
+import { buildContentSecurityPolicy } from "./src/shared/renderer-csp";
 
 const POSTHOG_ORIGIN = (() => {
 	const configured = process.env.VITE_AO_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST;
@@ -19,21 +20,11 @@ const POSTHOG_ORIGIN = (() => {
 	}
 })();
 
-// CSP for the built renderer. The daemon is loopback-only, so network access is
-// pinned to 127.0.0.1 (REST + SSE over http, terminal mux over ws). Injected at
-// build time rather than written into index.html because the dev server needs
-// inline scripts (react-refresh preamble) that a static meta tag would block.
-const CONTENT_SECURITY_POLICY = [
-	"default-src 'self'",
-	"script-src 'self'",
-	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' data:",
-	"font-src 'self' data:",
-	["connect-src", "'self'", "http://127.0.0.1:*", "ws://127.0.0.1:*", POSTHOG_ORIGIN].filter(Boolean).join(" "),
-	"object-src 'none'",
-	"base-uri 'self'",
-	"frame-src 'none'",
-].join("; ");
+// CSP for the built renderer (see src/shared/renderer-csp.ts for the policy and
+// the rationale). Injected at build time rather than written into index.html
+// because the dev server needs inline scripts (react-refresh preamble) that a
+// static meta tag would block.
+const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy(POSTHOG_ORIGIN);
 
 const injectCspMeta: Plugin = {
 	name: "inject-csp-meta",

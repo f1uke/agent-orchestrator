@@ -43,3 +43,6 @@ FROM smoke_evidence WHERE check_id = ? ORDER BY created_at;
 
 -- name: DeleteSmokeEvidenceByCheck :exec
 DELETE FROM smoke_evidence WHERE check_id = ?;
+
+-- name: DeleteSmokeEvidence :execrows
+DELETE FROM smoke_evidence WHERE id = ?;

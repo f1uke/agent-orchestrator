@@ -209,6 +209,18 @@ func (s *Store) InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence
 	})
 }
 
+// DeleteSmokeEvidence removes one evidence row by id, returning ok=false when no
+// row matched (already gone). The on-disk blob is removed by the service.
+func (s *Store) DeleteSmokeEvidence(ctx context.Context, id string) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.DeleteSmokeEvidence(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("delete smoke evidence %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
 // GetSmokeEvidence returns one evidence row, ok=false if absent.
 func (s *Store) GetSmokeEvidence(ctx context.Context, id string) (domain.SmokeEvidence, bool, error) {
 	row, err := s.qr.GetSmokeEvidence(ctx, id)

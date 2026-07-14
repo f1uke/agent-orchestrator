@@ -68,6 +68,91 @@ func TestAddAttachment_BadKeyNeverCallsHTTP(t *testing.T) {
 	}
 }
 
+func TestResolveMediaID_ParsesMediaUUID(t *testing.T) {
+	const uuid = "12345678-1234-1234-1234-123456789abc"
+
+	t.Run("location header (redirect=false)", func(t *testing.T) {
+		var gotPath, gotQuery, gotMethod string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath, gotQuery, gotMethod = r.URL.Path, r.URL.RawQuery, r.Method
+			w.Header().Set("Location", "https://api.media.atlassian.com/file/"+uuid+"/binary?token=abc")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+		c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+		got, err := c.ResolveMediaID(context.Background(), "10101")
+		if err != nil {
+			t.Fatalf("ResolveMediaID: %v", err)
+		}
+		if got != uuid {
+			t.Errorf("media id = %q, want %q", got, uuid)
+		}
+		if gotMethod != http.MethodGet || gotPath != "/rest/api/3/attachment/content/10101" {
+			t.Errorf("method/path = %q %q", gotMethod, gotPath)
+		}
+		// Must NOT pass redirect=false — that returns the raw bytes, not the URL.
+		if gotQuery != "" {
+			t.Errorf("query = %q, want empty (no redirect=false)", gotQuery)
+		}
+	})
+
+	t.Run("followed redirect (final URL)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/file/") {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			http.Redirect(w, r, "/file/"+uuid+"/binary?token=abc", http.StatusFound)
+		}))
+		defer srv.Close()
+		c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+		got, err := c.ResolveMediaID(context.Background(), "10101")
+		if err != nil {
+			t.Fatalf("ResolveMediaID: %v", err)
+		}
+		if got != uuid {
+			t.Errorf("media id = %q, want %q", got, uuid)
+		}
+	})
+
+	t.Run("body carries the url", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"url":"https://api.media.atlassian.com/file/`+uuid+`/binary?token=abc"}`)
+		}))
+		defer srv.Close()
+		c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+		got, err := c.ResolveMediaID(context.Background(), "10101")
+		if err != nil {
+			t.Fatalf("ResolveMediaID: %v", err)
+		}
+		if got != uuid {
+			t.Errorf("media id = %q, want %q", got, uuid)
+		}
+	})
+
+	t.Run("not found maps to sentinel", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+		c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+		if _, err := c.ResolveMediaID(context.Background(), "10101"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("no id in response is unavailable", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"nothing":"useful"}`)
+		}))
+		defer srv.Close()
+		c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+		if _, err := c.ResolveMediaID(context.Background(), "10101"); !errors.Is(err, ErrUnavailable) {
+			t.Errorf("err = %v, want ErrUnavailable", err)
+		}
+	})
+}
+
 func TestAddComment_PostsADFBody(t *testing.T) {
 	var gotMethod, gotPath, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

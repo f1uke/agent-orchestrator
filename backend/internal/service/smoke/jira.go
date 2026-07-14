@@ -40,6 +40,7 @@ const jiraIssueIDPrefix = string(domain.TrackerProviderJira) + ":"
 // smoke service depends on the Jira adapter's types only, not its service.
 type JiraPoster interface {
 	AddAttachment(ctx context.Context, key, filename, mimeType string, r io.Reader) (jiraadapter.Attachment, error)
+	ResolveMediaID(ctx context.Context, attachmentID string) (string, error)
 	AddComment(ctx context.Context, key string, body any) (jiraadapter.Comment, error)
 }
 
@@ -57,13 +58,17 @@ type JiraPostOutcome struct {
 
 // uploadedEvidence is one evidence file as Jira recorded it. Both images and
 // videos embed inline as media nodes (Jira renders a screenshot preview or a
-// video player from the attachment). failed marks a file whose upload was
-// skipped after a non-fatal error — the comment renders a short note for it (name
-// preserved) instead of media.
+// video player). mediaID is the media-services file id the ADF media node needs
+// to actually PREVIEW the file inline — the attachment id alone renders only a
+// link (Jira does not resolve an attachment id inside a comment's media node).
+// An empty mediaID (resolution failed) means the file renders as a link instead.
+// failed marks a file whose upload was skipped after a non-fatal error — the
+// comment renders a short note for it (name preserved) instead of media.
 type uploadedEvidence struct {
-	att    jiraadapter.Attachment
-	failed bool
-	name   string
+	att     jiraadapter.Attachment
+	mediaID string
+	failed  bool
+	name    string
 }
 
 // PostToJira resolves the session's linked Jira key, uploads the evidence on the
@@ -113,7 +118,14 @@ func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (J
 				uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{failed: true, name: evidenceDisplayName(ev)})
 				continue
 			}
-			uploads[c.ID] = append(uploads[c.ID], uploadedEvidence{att: att})
+			// Resolve the media-services id so the file previews inline (not just a
+			// link). A resolution failure is non-fatal — the file still renders as a
+			// link to its attachment content URL.
+			ue := uploadedEvidence{att: att}
+			if mediaID, mErr := s.jira.ResolveMediaID(ctx, att.ID); mErr == nil {
+				ue.mediaID = mediaID
+			}
+			uploads[c.ID] = append(uploads[c.ID], ue)
 			total++
 		}
 	}
@@ -139,7 +151,7 @@ func (s *Service) postResultsComment(ctx context.Context, key string, run []doma
 	hasMedia := false
 	for _, evs := range uploads {
 		for _, e := range evs {
-			if !e.failed && strings.TrimSpace(e.att.ID) != "" {
+			if !e.failed && strings.TrimSpace(e.mediaID) != "" {
 				hasMedia = true
 			}
 		}

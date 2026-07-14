@@ -91,6 +91,14 @@ func (f *fakeStore) GetSmokeEvidence(_ context.Context, id string) (domain.Smoke
 	return ev, ok, nil
 }
 
+func (f *fakeStore) DeleteSmokeEvidence(_ context.Context, id string) (bool, error) {
+	if _, ok := f.evidence[id]; !ok {
+		return false, nil
+	}
+	delete(f.evidence, id)
+	return true, nil
+}
+
 func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
 	rec, ok := f.sessions[id]
 	return rec, ok, nil
@@ -215,6 +223,48 @@ func TestAttachEvidenceRejectsForeignCheck(t *testing.T) {
 	svc := newTestService(t, store, nil)
 	if _, err := svc.AttachEvidence(context.Background(), "w1", "c1", EvidenceUpload{Mime: "image/png", Reader: strings.NewReader("x")}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign check err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRemoveEvidence(t *testing.T) {
+	store := newFakeStore()
+	store.checks["c1"] = domain.SmokeCheck{ID: "c1", SessionID: "w1"}
+	svc := newTestService(t, store, nil)
+	ctx := context.Background()
+
+	ev, err := svc.AttachEvidence(ctx, "w1", "c1", EvidenceUpload{Filename: "shot.png", Mime: "image/png", Reader: strings.NewReader("PNGDATA")})
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	blob, err := svc.OpenEvidence(ctx, "w1", "c1", ev.ID)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	// Foreign session → ErrNotFound (requireCheck rejects), row + blob untouched.
+	if _, err := svc.RemoveEvidence(ctx, "other", "c1", ev.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign session err = %v, want ErrNotFound", err)
+	}
+	// Unknown evidence id under a valid case → ErrNotFound.
+	if _, err := svc.RemoveEvidence(ctx, "w1", "c1", "ev_missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown id err = %v, want ErrNotFound", err)
+	}
+	if len(store.evidence) != 1 {
+		t.Fatalf("evidence row removed prematurely: have %d, want 1", len(store.evidence))
+	}
+	if _, err := os.Stat(blob.Path); err != nil {
+		t.Fatalf("blob removed prematurely: %v", err)
+	}
+
+	// Valid removal → DB row gone and on-disk blob deleted.
+	if _, err := svc.RemoveEvidence(ctx, "w1", "c1", ev.ID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if len(store.evidence) != 0 {
+		t.Fatalf("evidence row not removed: have %d", len(store.evidence))
+	}
+	if _, err := os.Stat(blob.Path); !os.IsNotExist(err) {
+		t.Fatalf("blob still on disk after remove: err = %v", err)
 	}
 }
 

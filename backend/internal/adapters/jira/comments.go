@@ -18,6 +18,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"regexp"
 	"strings"
 )
 
@@ -102,6 +103,62 @@ func (c *Client) AddAttachment(ctx context.Context, key, filename, mimeType stri
 	}
 	a := payload[0]
 	return Attachment{ID: a.ID, Filename: a.Filename, MimeType: a.MimeType, ContentURL: a.Content}, nil
+}
+
+// mediaFileIDPattern extracts the media-services file UUID from the attachment
+// content download URL: .../file/<UUID>/binary?token=…
+var mediaFileIDPattern = regexp.MustCompile(`/file/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
+
+// ResolveMediaID returns the media-services file id an ADF media node needs to
+// render an attachment inline (an image preview or a video player). This is NOT
+// the attachment id: Jira does not resolve an attachment id inside a comment's
+// media node, so referencing it renders only a link. The media id is exposed
+// indirectly — GET /rest/api/3/attachment/content/{id} answers 303 to
+// `https://api.media.atlassian.com/file/<UUID>/binary?token=…`, and <UUID> is the
+// media id. We read it from the Location header (redirect not followed) or from
+// the final request URL (redirect followed), preferring not to download the file:
+// a Range header caps the transfer, and the body is only inspected as a last
+// resort. (Do NOT pass redirect=false — that returns the raw bytes, not the URL.)
+func (c *Client) ResolveMediaID(ctx context.Context, attachmentID string) (string, error) {
+	attachmentID = strings.TrimSpace(attachmentID)
+	if attachmentID == "" {
+		return "", fmt.Errorf("%w: empty attachment id", ErrBadRequest)
+	}
+	cfg, err := c.config()
+	if err != nil {
+		return "", err
+	}
+	url := cfg.baseURL + "/rest/api/3/attachment/content/" + attachmentID
+	req, err := newJiraRequest(ctx, cfg, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	// We only need the redirect target, not the file — cap the body if a client
+	// follows the redirect all the way to the media binary.
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := c.httpDo(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve media id %s: %w", ErrUnavailable, attachmentID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		return "", writeStatusError(resp, attachmentID)
+	}
+	// Prefer the header / final URL so we never read the (possibly large) body.
+	if m := mediaFileIDPattern.FindStringSubmatch(resp.Header.Get("Location")); m != nil {
+		return m[1], nil
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		if m := mediaFileIDPattern.FindStringSubmatch(resp.Request.URL.String()); m != nil {
+			return m[1], nil
+		}
+	}
+	if body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16)); err == nil {
+		if m := mediaFileIDPattern.FindStringSubmatch(string(body)); m != nil {
+			return m[1], nil
+		}
+	}
+	return "", fmt.Errorf("%w: no media id for attachment %s", ErrUnavailable, attachmentID)
 }
 
 // AddComment posts an ADF comment to the issue via

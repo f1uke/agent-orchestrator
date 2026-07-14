@@ -762,6 +762,16 @@ func smokeOperations() []operation {
 			resps:        []respUnit{{http.StatusOK, ""}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
 			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
 		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", id: "deleteSmokeEvidence", tag: "smoke",
+			summary:    "Remove one evidence blob from a smoke-test case",
+			pathParams: []any{controllers.SmokeEvidenceParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SmokeCheckResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 

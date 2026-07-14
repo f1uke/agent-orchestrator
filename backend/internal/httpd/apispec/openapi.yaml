@@ -2702,6 +2702,52 @@ paths:
       tags:
       - smoke
   /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}:
+    delete:
+      operationId: deleteSmokeEvidence
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Smoke-check case identifier.
+        in: path
+        name: checkId
+        required: true
+        schema:
+          description: Smoke-check case identifier.
+          type: string
+      - description: Evidence blob identifier.
+        in: path
+        name: evidenceId
+        required: true
+        schema:
+          description: Evidence blob identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmokeCheckResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Remove one evidence blob from a smoke-test case
+      tags:
+      - smoke
     get:
       operationId: serveSmokeEvidence
       parameters:
