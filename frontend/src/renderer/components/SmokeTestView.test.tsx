@@ -92,6 +92,17 @@ describe("SmokeTestView", () => {
 		expect(call![1].body).toEqual({ verdict: "pass", note: "worked great" });
 	});
 
+	it("collapses the case immediately when a verdict is recorded", async () => {
+		renderView();
+		// Pending case is expanded — its note textarea is visible.
+		expect(await screen.findByLabelText(/Note for A fresh MR shows up/)).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: /Works — Pass/ }));
+		// The expanded body (note textarea) is gone the moment the verdict is set.
+		await waitFor(() => expect(screen.queryByLabelText(/Note for A fresh MR shows up/)).not.toBeInTheDocument());
+		// The case title stays visible in the collapsed header.
+		expect(screen.getByText("A fresh MR shows up")).toBeInTheDocument();
+	});
+
 	it("shows a Change control for a decided case and resets it", async () => {
 		checks = [check({ verdict: "fail", note: "broke", decidedAt: "2026-07-11T10:05:00Z" })];
 		renderView();
@@ -119,6 +130,45 @@ describe("SmokeTestView", () => {
 		expect(opts.body).toBeInstanceOf(FormData);
 		expect((opts.body as FormData).get("file")).toBe(file);
 		vi.unstubAllGlobals();
+	});
+
+	it("renders an evidence thumbnail via a fetched blob URL and drops the capture buttons", async () => {
+		const realCreate = URL.createObjectURL;
+		const realRevoke = URL.revokeObjectURL;
+		URL.createObjectURL = vi.fn(() => "blob:mock");
+		URL.revokeObjectURL = vi.fn();
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["x"], { type: "image/png" }) });
+		vi.stubGlobal("fetch", fetchMock);
+		checks = [
+			check({
+				evidence: [
+					{
+						id: "ev1",
+						checkId: "c1",
+						sessionId: "s1",
+						kind: "image",
+						filename: "shot.png",
+						mime: "image/png",
+						sizeBytes: 3,
+						createdAt: "2026-07-11T10:00:00Z",
+					},
+				],
+			}),
+		];
+		try {
+			renderView();
+			// The thumbnail loads through fetch (not a direct <img> to the daemon).
+			await waitFor(() =>
+				expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/smoke-checks/c1/evidence/ev1")),
+			);
+			// The disabled "coming soon" capture buttons are gone.
+			expect(screen.queryByRole("button", { name: /Record screen/ })).not.toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: /Grab screenshot/ })).not.toBeInTheDocument();
+		} finally {
+			URL.createObjectURL = realCreate;
+			URL.revokeObjectURL = realRevoke;
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it("shows the report bar once a case is decided and reports results", async () => {
