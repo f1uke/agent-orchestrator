@@ -2110,7 +2110,7 @@ func (m *Manager) cleanupRecords(ctx context.Context, project domain.ProjectID) 
 func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 	return domain.SessionRecord{
 		ProjectID:       cfg.ProjectID,
-		IssueID:         cfg.IssueID,
+		IssueID:         effectiveIssueID(cfg),
 		Kind:            cfg.Kind,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -2130,7 +2130,7 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 	return domain.SessionRecord{
 		ProjectID:       cfg.ProjectID,
-		IssueID:         cfg.IssueID,
+		IssueID:         effectiveIssueID(cfg),
 		Kind:            cfg.Kind,
 		CreatedAt:       now,
 		UpdatedAt:       now,

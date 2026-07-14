@@ -4266,3 +4266,51 @@ func TestBuildSystemPrompt_TaskSizeDirective(t *testing.T) {
 		t.Fatalf("cleared base must still carry the mechanical directive:\n%s", cleared)
 	}
 }
+
+// TestSpawn_AutoLinksJiraIssueFromPrompt reproduces the Send-to-Orchestrator bug:
+// a worker spawned from a Jira issue carries the Jira key in its prompt (and gets
+// it into the branch name) but historically no --issue, so the session had no
+// Jira link and the Summary panel showed "No Jira issue linked". The link record
+// is sessions.issue_id in canonical "jira:<KEY>" form (the same field the manual
+// "+ Link a Jira issue" button writes), so spawning with the key in the prompt
+// must bind it.
+func TestSpawn_AutoLinksJiraIssueFromPrompt(t *testing.T) {
+	m, _, _, _ := newManager()
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer",
+		Kind:      domain.KindWorker,
+		Prompt:    "Please start work on STAR-2394 (noti hub defects). Each is a jira:STAR-2394 task.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(rec.IssueID), "jira:STAR-2394"; got != want {
+		t.Fatalf("issue_id = %q, want %q (Send-to-Orchestrator must auto-link the Jira issue)", got, want)
+	}
+}
+
+// TestEffectiveIssueID covers the spawn-time Jira auto-link resolution: an
+// explicit issue id always wins; otherwise a Jira key detected in the branch or
+// prompt is bound as "jira:<KEY>"; a spawn with no Jira signal stays unbound.
+func TestEffectiveIssueID(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  ports.SpawnConfig
+		want domain.IssueID
+	}{
+		{"explicit issue wins over prompt key", ports.SpawnConfig{IssueID: "jira:DEMO-1", Prompt: "about STAR-9"}, "jira:DEMO-1"},
+		{"key from prompt", ports.SpawnConfig{Prompt: "Please start work on STAR-2394 (noti hub)"}, "jira:STAR-2394"},
+		{"key from branch", ports.SpawnConfig{Branch: "bugfix/STAR-2394-noti-hub"}, "jira:STAR-2394"},
+		{"branch preferred, still same canonical form", ports.SpawnConfig{Branch: "feature/PROJ-12-x", Prompt: "also mentions OTHER-3"}, "jira:PROJ-12"},
+		{"no jira signal stays unbound", ports.SpawnConfig{Prompt: "just refactor the parser", Branch: "chore/cleanup"}, ""},
+		{"non-jira issue id preserved verbatim", ports.SpawnConfig{IssueID: "github:owner/repo#7"}, "github:owner/repo#7"},
+		{"orchestrator is never auto-linked", ports.SpawnConfig{Kind: domain.KindOrchestrator, Prompt: "dispatch STAR-2394 work"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := effectiveIssueID(c.cfg); got != c.want {
+				t.Fatalf("effectiveIssueID = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

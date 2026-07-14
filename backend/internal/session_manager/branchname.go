@@ -36,6 +36,32 @@ func extractJiraKey(texts ...string) string {
 	return ""
 }
 
+// effectiveIssueID resolves the Jira link a session is seeded with. An explicit
+// IssueID (from `ao spawn --issue`, or the manual link path) always wins and is
+// preserved verbatim. Otherwise, when the spawn carries a Jira key in its branch
+// or prompt (as a Send-to-Orchestrator worker does: the orchestrator threads the
+// key into the prompt, and thus the auto-named branch, but not necessarily
+// --issue) the key is bound as the canonical "jira:<KEY>" id. This derives the
+// link from the same extractJiraKey signal that names the branch, so a session
+// whose branch reads "bugfix/STAR-2394-x" is linked to STAR-2394 and the Summary
+// panel shows it without a manual "+ Link a Jira issue" step. It writes ONLY the
+// internal session-to-issue association; it performs no Jira write.
+func effectiveIssueID(cfg ports.SpawnConfig) domain.IssueID {
+	if cfg.IssueID != "" {
+		return cfg.IssueID
+	}
+	// Auto-derive only for task sessions. An orchestrator is a standing dispatcher,
+	// never "working" one issue, so it is excluded here just as it is from Jira-keyed
+	// branch naming above.
+	if cfg.Kind == domain.KindOrchestrator {
+		return ""
+	}
+	if key := extractJiraKey(cfg.Branch, cfg.Prompt); key != "" {
+		return domain.IssueID(string(domain.TrackerProviderJira) + ":" + key)
+	}
+	return ""
+}
+
 // buildNamingPrompt asks an agent to emit ONLY a gitflow branch name.
 func buildNamingPrompt(title, brief, jiraKeyHint string) string {
 	keyLine := "No Jira key detected — omit the key segment."
