@@ -589,6 +589,8 @@ function EvidenceSection({
 		[onUpload],
 	);
 
+	const hasEvidence = check.evidence.length > 0;
+
 	return (
 		<div style={{ marginTop: 12 }}>
 			<div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.secondary }}>
@@ -596,7 +598,7 @@ function EvidenceSection({
 				<span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}>· screenshot or recording frame</span>
 			</div>
 
-			{check.evidence.length > 0 && (
+			{hasEvidence && (
 				<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
 					{check.evidence.map((ev) => (
 						<EvidenceThumb key={ev.id} sessionId={sessionId} checkId={check.id} evidence={ev} />
@@ -625,25 +627,35 @@ function EvidenceSection({
 				}}
 				style={{
 					marginTop: 8,
-					height: 172,
+					// Once evidence exists the dropzone is a compact "add another" strip;
+					// the tall first-run affordance would just waste vertical space.
+					height: hasEvidence ? 60 : 172,
 					borderRadius: 10,
 					border: `1.5px dashed ${dragOver ? ACCENT : P.borderPill}`,
 					background: dragOver ? accentMix(7) : P.cardBg,
 					display: "flex",
-					flexDirection: "column",
+					flexDirection: hasEvidence ? "row" : "column",
 					alignItems: "center",
 					justifyContent: "center",
-					gap: 6,
+					gap: hasEvidence ? 8 : 6,
 					cursor: "pointer",
 					color: P.muted,
 					textAlign: "center",
 				}}
 			>
-				<span aria-hidden="true" style={{ fontSize: 22, opacity: 0.7 }}>
+				<span aria-hidden="true" style={{ fontSize: hasEvidence ? 15 : 22, opacity: 0.7 }}>
 					⬒
 				</span>
-				<span style={{ fontSize: 12.5, color: P.secondary2 }}>Drop a screenshot or recording frame</span>
-				<span style={{ fontSize: 11, color: P.muted2 }}>or click to choose · paste also works</span>
+				{hasEvidence ? (
+					<span style={{ fontSize: 12, color: P.secondary2 }}>
+						Add another <span style={{ color: P.muted2 }}>· drop, click, or paste</span>
+					</span>
+				) : (
+					<>
+						<span style={{ fontSize: 12.5, color: P.secondary2 }}>Drop a screenshot or recording frame</span>
+						<span style={{ fontSize: 11, color: P.muted2 }}>or click to choose · paste also works</span>
+					</>
+				)}
 				<input
 					ref={inputRef}
 					type="file"
@@ -655,37 +667,7 @@ function EvidenceSection({
 					}}
 				/>
 			</div>
-
-			<div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-				<CaptureButton label="⎙ Record screen" />
-				<CaptureButton label="▣ Grab screenshot" />
-			</div>
 		</div>
-	);
-}
-
-// Phase 2 — native capture. Present but disabled with a "coming soon" hint.
-function CaptureButton({ label }: { label: string }) {
-	return (
-		<button
-			type="button"
-			disabled
-			title="Coming soon"
-			style={{
-				flex: 1,
-				fontSize: 11.5,
-				fontWeight: 600,
-				color: P.muted2,
-				background: "transparent",
-				border: `1px solid ${P.borderPill}`,
-				borderRadius: 7,
-				padding: "7px 10px",
-				cursor: "not-allowed",
-				opacity: 0.55,
-			}}
-		>
-			{label}
-		</button>
 	);
 }
 
@@ -699,6 +681,32 @@ function EvidenceThumb({
 	evidence: SmokeEvidence;
 }) {
 	const src = `${getApiBaseUrl()}/api/v1/sessions/${encodeURIComponent(sessionId)}/smoke-checks/${encodeURIComponent(checkId)}/evidence/${encodeURIComponent(evidence.id)}`;
+	// The renderer runs on the secure `app://` scheme; a direct <img>/<video>
+	// pointing at the loopback `http://` daemon fails to load there (it renders a
+	// broken-image icon), even though the same request succeeds via fetch (which
+	// the daemon's CORS/PNA allowlist covers). So fetch the bytes and render them
+	// from a blob: URL, which always resolves. On any fetch failure fall back to
+	// the direct URL so behavior never regresses.
+	const [resolved, setResolved] = useState<string | null>(null);
+	useEffect(() => {
+		let alive = true;
+		let objectUrl: string | null = null;
+		fetch(src)
+			.then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`evidence ${r.status}`))))
+			.then((blob) => {
+				if (!alive) return;
+				objectUrl = URL.createObjectURL(blob);
+				setResolved(objectUrl);
+			})
+			.catch(() => {
+				if (alive) setResolved(src);
+			});
+		return () => {
+			alive = false;
+			if (objectUrl) URL.revokeObjectURL(objectUrl);
+		};
+	}, [src]);
+
 	const style = {
 		width: 96,
 		height: 68,
@@ -707,10 +715,14 @@ function EvidenceThumb({
 		objectFit: "cover" as const,
 		background: "#000",
 	};
+	if (!resolved) {
+		// Loading the bytes — a framed placeholder avoids a broken-image flash.
+		return <div style={style} aria-label={evidence.filename || "evidence"} />;
+	}
 	if (isVideoMime(evidence.mime)) {
 		return (
 			<video
-				src={src}
+				src={resolved}
 				style={style}
 				muted
 				controls={false}
@@ -719,7 +731,7 @@ function EvidenceThumb({
 			/>
 		);
 	}
-	return <img src={src} alt={evidence.filename || "evidence"} style={style} />;
+	return <img src={resolved} alt={evidence.filename || "evidence"} style={style} />;
 }
 
 function VerdictControls({

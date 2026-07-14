@@ -132,6 +132,45 @@ describe("SmokeTestView", () => {
 		vi.unstubAllGlobals();
 	});
 
+	it("renders an evidence thumbnail via a fetched blob URL and drops the capture buttons", async () => {
+		const realCreate = URL.createObjectURL;
+		const realRevoke = URL.revokeObjectURL;
+		URL.createObjectURL = vi.fn(() => "blob:mock");
+		URL.revokeObjectURL = vi.fn();
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["x"], { type: "image/png" }) });
+		vi.stubGlobal("fetch", fetchMock);
+		checks = [
+			check({
+				evidence: [
+					{
+						id: "ev1",
+						checkId: "c1",
+						sessionId: "s1",
+						kind: "image",
+						filename: "shot.png",
+						mime: "image/png",
+						sizeBytes: 3,
+						createdAt: "2026-07-11T10:00:00Z",
+					},
+				],
+			}),
+		];
+		try {
+			renderView();
+			// The thumbnail loads through fetch (not a direct <img> to the daemon).
+			await waitFor(() =>
+				expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/smoke-checks/c1/evidence/ev1")),
+			);
+			// The disabled "coming soon" capture buttons are gone.
+			expect(screen.queryByRole("button", { name: /Record screen/ })).not.toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: /Grab screenshot/ })).not.toBeInTheDocument();
+		} finally {
+			URL.createObjectURL = realCreate;
+			URL.revokeObjectURL = realRevoke;
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it("shows the report bar once a case is decided and reports results", async () => {
 		checks = [check({ verdict: "pass", decidedAt: "2026-07-11T10:05:00Z" })];
 		renderView();
