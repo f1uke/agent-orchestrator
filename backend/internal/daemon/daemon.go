@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
@@ -210,6 +211,27 @@ func Run() error {
 	}
 	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, log)
 
+	// Evidence retention: a settings-backed store + sweeper that purges smoke-test
+	// evidence blobs older than the configured TTL (default 30 days, from each
+	// row's created_at). Constructed here so a settings-store failure is cleaned up
+	// the same way as above. The sweeper is shared by the manual-trigger endpoint
+	// and the periodic background sweep started below.
+	evidenceRetentionSettings, err := evidenceretention.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("evidence retention settings: %w", err)
+	}
+	evidenceSweep := &evidenceSweeper{
+		settings: evidenceRetentionSettings,
+		purge:    smokeSvc.PurgeEvidenceOlderThan,
+		clock:    func() time.Time { return time.Now().UTC() },
+		log:      log,
+	}
+
 	previewDone := preview.NewPoller(store, sessionSvc, "http://"+cfg.Addr(), preview.PollerConfig{Logger: log}).Start(ctx)
 	// Per-session token telemetry: a background poll that reads claude-code session
 	// transcripts and persists token/cost totals on the session row (additive; never
@@ -240,6 +262,8 @@ func Run() error {
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
 		AutoNudge:          autoNudge,
+		EvidenceRetention:  evidenceRetentionSettings,
+		EvidenceSweeper:    evidenceSweep,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
 	})
@@ -310,6 +334,14 @@ func Run() error {
 	}
 	idleSweepDone := startIdleSweep(ctx, sweepInterval, sessMgr.CloseIdleSessions, log)
 
+	// Age-based evidence retention: periodic sweep (plus an immediate first run)
+	// that purges evidence past the configured TTL. Self-disables via settings, so
+	// it always starts; a disabled policy just makes each tick a no-op.
+	evidenceSweepDone := startEvidenceRetentionSweep(ctx, evidenceSweepIntervalDefault, func(ctx context.Context) error {
+		_, _, err := evidenceSweep.SweepEvidenceNow(ctx)
+		return err
+	}, log)
+
 	runErr := srv.Run(ctx)
 
 	// Both graceful shutdown paths (SIGTERM and POST /shutdown) funnel through
@@ -325,6 +357,7 @@ func Run() error {
 	stop()
 	<-previewDone
 	<-idleSweepDone
+	<-evidenceSweepDone
 	<-reclaimerDone
 	<-tokenUsageDone
 	lcStack.Stop()

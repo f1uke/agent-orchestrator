@@ -219,6 +219,58 @@ describe("SmokeTestView", () => {
 		}
 	});
 
+	it("reveals + opens evidence via the export endpoint and the shell bridge", async () => {
+		const realCreate = URL.createObjectURL;
+		const realRevoke = URL.revokeObjectURL;
+		URL.createObjectURL = vi.fn(() => "blob:mock");
+		URL.revokeObjectURL = vi.fn();
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["x"], { type: "image/png" }) });
+		vi.stubGlobal("fetch", fetchMock);
+		const exportPath = "/Users/x/.ao/data/evidence/s1/c1/_open/c1-shot.png";
+		postMock.mockReset().mockResolvedValue({ data: { path: exportPath }, error: undefined });
+		const reveal = vi.fn().mockResolvedValue(undefined);
+		const open = vi.fn().mockResolvedValue(undefined);
+		const realReveal = window.ao!.shell.showItemInFolder;
+		const realOpen = window.ao!.shell.openPath;
+		window.ao!.shell.showItemInFolder = reveal;
+		window.ao!.shell.openPath = open;
+		checks = [
+			check({
+				evidence: [
+					{
+						id: "ev1",
+						checkId: "c1",
+						sessionId: "s1",
+						kind: "image",
+						filename: "shot.png",
+						mime: "image/png",
+						sizeBytes: 3,
+						createdAt: "2026-07-11T10:00:00Z",
+					},
+				],
+			}),
+		];
+		try {
+			renderView();
+			// Reveal → POST to the export endpoint, then shell.showItemInFolder(path).
+			fireEvent.click(await screen.findByRole("button", { name: "Reveal shot.png in Finder" }));
+			await waitFor(() => expect(reveal).toHaveBeenCalledWith(exportPath));
+			const exportCall = postMock.mock.calls.find((c) => String(c[0]).includes("/export"));
+			expect(exportCall?.[1].params.path).toEqual({ sessionId: "s1", checkId: "c1", evidenceId: "ev1" });
+			expect(open).not.toHaveBeenCalled();
+
+			// Open → same export, but shell.openPath(path).
+			fireEvent.click(screen.getByRole("button", { name: "Open shot.png" }));
+			await waitFor(() => expect(open).toHaveBeenCalledWith(exportPath));
+		} finally {
+			window.ao!.shell.showItemInFolder = realReveal;
+			window.ao!.shell.openPath = realOpen;
+			URL.createObjectURL = realCreate;
+			URL.revokeObjectURL = realRevoke;
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it("shows a framed placeholder (never a broken direct <img>) when the evidence fetch fails", async () => {
 		const fetchMock = vi.fn().mockRejectedValue(new Error("blocked"));
 		vi.stubGlobal("fetch", fetchMock);

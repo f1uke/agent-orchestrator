@@ -99,6 +99,16 @@ func (f *fakeStore) DeleteSmokeEvidence(_ context.Context, id string) (bool, err
 	return true, nil
 }
 
+func (f *fakeStore) ListSmokeEvidenceCreatedBefore(_ context.Context, before time.Time) ([]domain.SmokeEvidence, error) {
+	var out []domain.SmokeEvidence
+	for _, ev := range f.evidence {
+		if ev.CreatedAt.Before(before) {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
 	rec, ok := f.sessions[id]
 	return rec, ok, nil
@@ -256,7 +266,16 @@ func TestRemoveEvidence(t *testing.T) {
 		t.Fatalf("blob removed prematurely: %v", err)
 	}
 
-	// Valid removal → DB row gone and on-disk blob deleted.
+	// Materialize an export copy so we can prove RemoveEvidence drops it too.
+	exportPath, err := svc.ExportEvidence(ctx, "w1", "c1", ev.ID)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("export copy missing: %v", err)
+	}
+
+	// Valid removal → DB row gone and on-disk blob + export copy deleted.
 	if _, err := svc.RemoveEvidence(ctx, "w1", "c1", ev.ID); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
@@ -265,6 +284,127 @@ func TestRemoveEvidence(t *testing.T) {
 	}
 	if _, err := os.Stat(blob.Path); !os.IsNotExist(err) {
 		t.Fatalf("blob still on disk after remove: err = %v", err)
+	}
+	if _, err := os.Stat(exportPath); !os.IsNotExist(err) {
+		t.Fatalf("export copy still on disk after remove: err = %v", err)
+	}
+}
+
+func TestExportEvidenceNamesAndExtension(t *testing.T) {
+	store := newFakeStore()
+	store.checks["login-check"] = domain.SmokeCheck{ID: "login-check", SessionID: "w1"}
+	svc := newTestService(t, store, nil)
+	ctx := context.Background()
+
+	// Image with a display filename → "<case>-<stem>.png", opens by content type.
+	img, err := svc.AttachEvidence(ctx, "w1", "login-check", EvidenceUpload{Filename: "Screen Shot.png", Mime: "image/png", Reader: strings.NewReader("PNGDATA")})
+	if err != nil {
+		t.Fatalf("attach image: %v", err)
+	}
+	path, err := svc.ExportEvidence(ctx, "w1", "login-check", img.ID)
+	if err != nil {
+		t.Fatalf("export image: %v", err)
+	}
+	base := filepath.Base(path)
+	if filepath.Ext(base) != ".png" {
+		t.Fatalf("export ext = %q, want .png (path %s)", filepath.Ext(base), path)
+	}
+	if !strings.HasPrefix(base, "login-check-") {
+		t.Fatalf("export base %q missing case prefix", base)
+	}
+	if !strings.Contains(path, string(filepath.Separator)+openExportSubdir+string(filepath.Separator)) {
+		t.Fatalf("export path %q not under _open/", path)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "PNGDATA" {
+		t.Fatalf("export content = %q, want PNGDATA", got)
+	}
+
+	// quicktime MIME → .mov even though the stored filename is empty (stem falls
+	// back to the evidence id); the MIME, not the filename, drives the extension.
+	vid, err := svc.AttachEvidence(ctx, "w1", "login-check", EvidenceUpload{Mime: "video/quicktime", Reader: strings.NewReader("MOVDATA")})
+	if err != nil {
+		t.Fatalf("attach video: %v", err)
+	}
+	vpath, err := svc.ExportEvidence(ctx, "w1", "login-check", vid.ID)
+	if err != nil {
+		t.Fatalf("export video: %v", err)
+	}
+	if filepath.Ext(vpath) != ".mov" {
+		t.Fatalf("video export ext = %q, want .mov", filepath.Ext(vpath))
+	}
+	if !strings.Contains(filepath.Base(vpath), vid.ID) {
+		t.Fatalf("empty-filename export %q should fall back to the evidence id", filepath.Base(vpath))
+	}
+
+	// Idempotent: a repeat export returns the same path and the file still exists.
+	again, err := svc.ExportEvidence(ctx, "w1", "login-check", img.ID)
+	if err != nil || again != path {
+		t.Fatalf("repeat export = (%q, %v), want (%q, nil)", again, err, path)
+	}
+
+	// Foreign session is rejected before any copy is made.
+	if _, err := svc.ExportEvidence(ctx, "other", "login-check", img.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign export err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPurgeEvidenceOlderThan(t *testing.T) {
+	store := newFakeStore()
+	store.checks["c1"] = domain.SmokeCheck{ID: "c1", SessionID: "w1"}
+	store.checks["c2"] = domain.SmokeCheck{ID: "c2", SessionID: "w2"}
+	base := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	now := base
+	svc := New(store, t.TempDir(), nil, WithClock(func() time.Time { return now }))
+	ctx := context.Background()
+
+	now = base.Add(-40 * 24 * time.Hour) // 40 days old → should expire
+	old, err := svc.AttachEvidence(ctx, "w1", "c1", EvidenceUpload{Filename: "old.png", Mime: "image/png", Reader: strings.NewReader("OLDDATA")})
+	if err != nil {
+		t.Fatalf("attach old: %v", err)
+	}
+	oldBlob, _ := svc.OpenEvidence(ctx, "w1", "c1", old.ID)
+	oldExport, err := svc.ExportEvidence(ctx, "w1", "c1", old.ID)
+	if err != nil {
+		t.Fatalf("export old: %v", err)
+	}
+
+	now = base.Add(-5 * 24 * time.Hour) // 5 days old, different session → kept
+	recent, err := svc.AttachEvidence(ctx, "w2", "c2", EvidenceUpload{Filename: "recent.mov", Mime: "video/quicktime", Reader: strings.NewReader("MOVDATA")})
+	if err != nil {
+		t.Fatalf("attach recent: %v", err)
+	}
+	recentBlob, _ := svc.OpenEvidence(ctx, "w2", "c2", recent.ID)
+
+	cutoff := base.Add(-30 * 24 * time.Hour) // 30-day TTL
+	res, err := svc.PurgeEvidenceOlderThan(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if res.Purged != 1 || res.FreedBytes != int64(len("OLDDATA")) {
+		t.Fatalf("purge result = %+v, want {1, %d}", res, len("OLDDATA"))
+	}
+	// Old item: row + blob + export copy all gone.
+	if _, ok := store.evidence[old.ID]; ok {
+		t.Fatal("old evidence row not purged")
+	}
+	if _, err := os.Stat(oldBlob.Path); !os.IsNotExist(err) {
+		t.Fatalf("old blob still on disk: %v", err)
+	}
+	if _, err := os.Stat(oldExport); !os.IsNotExist(err) {
+		t.Fatalf("old export copy still on disk: %v", err)
+	}
+	// Recent item in the OTHER session: fully intact — the sweep never touched it.
+	if _, ok := store.evidence[recent.ID]; !ok {
+		t.Fatal("recent evidence row wrongly purged")
+	}
+	if _, err := os.Stat(recentBlob.Path); err != nil {
+		t.Fatalf("recent blob wrongly removed: %v", err)
+	}
+
+	// Idempotent: re-running purges nothing new.
+	res2, err := svc.PurgeEvidenceOlderThan(ctx, cutoff)
+	if err != nil || res2.Purged != 0 {
+		t.Fatalf("second purge = (%+v, %v), want ({0,0}, nil)", res2, err)
 	}
 }
 

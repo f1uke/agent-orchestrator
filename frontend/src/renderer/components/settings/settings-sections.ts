@@ -68,7 +68,8 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		label: "Automation",
 		Icon: Workflow,
 		hint: "orchestrator & daemon automatic behaviour",
-		keywords: "confirm spawning workers auto-send unresolved pr comments auto-reclaim grace period",
+		keywords:
+			"confirm spawning workers auto-send unresolved pr comments auto-reclaim grace period evidence retention ttl purge smoke test screenshots delete age",
 	},
 	{
 		key: "system",

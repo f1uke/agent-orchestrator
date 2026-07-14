@@ -1,6 +1,7 @@
 package controllers_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
@@ -105,6 +107,124 @@ func TestSettingsController_PutServiceRejectsInvalidSettings(t *testing.T) {
 type reclaimSettingsBody struct {
 	Enabled      bool `json:"enabled"`
 	GraceMinutes int  `json:"graceMinutes"`
+}
+
+// --- evidence retention settings + manual sweep ----------------------------
+
+type fakeEvidenceRetentionSvc struct {
+	cur   evidenceretention.Settings
+	saved evidenceretention.Settings
+	err   error
+}
+
+func (f *fakeEvidenceRetentionSvc) Get() evidenceretention.Settings { return f.cur }
+
+func (f *fakeEvidenceRetentionSvc) Set(s evidenceretention.Settings) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = s
+	f.cur = s
+	return nil
+}
+
+type fakeEvidenceSweeper struct {
+	purged int
+	freed  int64
+	called bool
+}
+
+func (f *fakeEvidenceSweeper) SweepEvidenceNow(context.Context) (int, int64, error) {
+	f.called = true
+	return f.purged, f.freed, nil
+}
+
+type evidenceRetentionBody struct {
+	Enabled    bool `json:"enabled"`
+	MaxAgeDays int  `json:"maxAgeDays"`
+}
+
+func TestEvidenceRetentionRoutes_DefaultToStubsWithoutService(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/settings/evidence-retention", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/settings/evidence-retention/sweep", "")
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+func TestEvidenceRetentionController_GetReturnsCurrent(t *testing.T) {
+	svc := &fakeEvidenceRetentionSvc{cur: evidenceretention.Settings{Enabled: true, MaxAgeDays: 30}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{EvidenceRetention: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/evidence-retention", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got evidenceRetentionBody
+	mustJSON(t, body, &got)
+	if !got.Enabled || got.MaxAgeDays != 30 {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestEvidenceRetentionController_PutSaves(t *testing.T) {
+	svc := &fakeEvidenceRetentionSvc{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{EvidenceRetention: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/evidence-retention", `{"enabled":false,"maxAgeDays":7}`)
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got evidenceRetentionBody
+	mustJSON(t, body, &got)
+	if got.Enabled || got.MaxAgeDays != 7 {
+		t.Fatalf("response = %#v", got)
+	}
+	if svc.saved.MaxAgeDays != 7 || svc.saved.Enabled {
+		t.Fatalf("saved=%+v", svc.saved)
+	}
+}
+
+func TestEvidenceRetentionController_PutRejectsInvalid(t *testing.T) {
+	svc := &fakeEvidenceRetentionSvc{err: errors.New("evidenceretention: maxAgeDays must be >= 0, got -1")}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{EvidenceRetention: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/evidence-retention", `{"enabled":true,"maxAgeDays":-1}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_SETTINGS")
+}
+
+func TestEvidenceRetentionController_SweepReturnsSummary(t *testing.T) {
+	sweeper := &fakeEvidenceSweeper{purged: 3, freed: 4096}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{EvidenceSweeper: sweeper}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/settings/evidence-retention/sweep", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got struct {
+		Purged     int   `json:"purged"`
+		FreedBytes int64 `json:"freedBytes"`
+	}
+	mustJSON(t, body, &got)
+	if got.Purged != 3 || got.FreedBytes != 4096 {
+		t.Fatalf("sweep response = %#v", got)
+	}
+	if !sweeper.called {
+		t.Fatal("sweeper was not invoked")
+	}
 }
 
 type fakeSpawnConfirmSvc struct {

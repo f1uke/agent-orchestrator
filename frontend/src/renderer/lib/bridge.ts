@@ -26,6 +26,8 @@ export const aoBridge: AoBridge =
 		},
 		shell: {
 			openExternal: async () => undefined,
+			showItemInFolder: async () => undefined,
+			openPath: async () => undefined,
 		},
 		daemon: {
 			getStatus: async () => ({

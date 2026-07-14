@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -33,6 +34,12 @@ type fakeSmokeService struct {
 
 	removedEvidenceID string
 	removeErr         error
+
+	exportPath       string
+	exportErr        error
+	exportedEvidence string
+	purgeResult      smokesvc.EvidencePurgeResult
+	purgeCutoff      time.Time
 }
 
 func (f *fakeSmokeService) List(context.Context, domain.SessionID) (smokesvc.SessionSmoke, error) {
@@ -84,7 +91,20 @@ func (f *fakeSmokeService) PostToJira(context.Context, domain.SessionID) (smokes
 	return f.jiraOutcome, nil
 }
 
+func (f *fakeSmokeService) ExportEvidence(_ context.Context, _ domain.SessionID, _, evidenceID string) (string, error) {
+	if f.exportErr != nil {
+		return "", f.exportErr
+	}
+	f.exportedEvidence = evidenceID
+	return f.exportPath, nil
+}
+
 func (f *fakeSmokeService) PurgeSessionEvidence(context.Context, domain.SessionID) error { return nil }
+
+func (f *fakeSmokeService) PurgeEvidenceOlderThan(_ context.Context, cutoff time.Time) (smokesvc.EvidencePurgeResult, error) {
+	f.purgeCutoff = cutoff
+	return f.purgeResult, nil
+}
 
 func newSmokeTestServer(t *testing.T, svc smokesvc.Manager) *httptest.Server {
 	t.Helper()
@@ -236,6 +256,35 @@ func TestSmokeEvidenceDeleteMapsNotFound(t *testing.T) {
 	srv := newSmokeTestServer(t, svc)
 
 	_, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/w1/smoke-checks/a/evidence/ev1", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", status)
+	}
+}
+
+func TestSmokeEvidenceExportReturnsPath(t *testing.T) {
+	svc := &fakeSmokeService{exportPath: "/Users/x/.ao/data/evidence/w1/a/_open/a-shot.png"}
+	srv := newSmokeTestServer(t, svc)
+
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/evidence/ev1/export", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	if ct := headers.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if svc.exportedEvidence != "ev1" {
+		t.Fatalf("exported evidence id = %q, want ev1", svc.exportedEvidence)
+	}
+	if !strings.Contains(string(body), `_open/a-shot.png`) {
+		t.Fatalf("response missing exported path: %s", body)
+	}
+}
+
+func TestSmokeEvidenceExportMapsNotFound(t *testing.T) {
+	svc := &fakeSmokeService{exportErr: fmt.Errorf("%w: evidence %q", smokesvc.ErrNotFound, "ev1")}
+	srv := newSmokeTestServer(t, svc)
+
+	_, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/evidence/ev1/export", "")
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", status)
 	}

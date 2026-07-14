@@ -259,6 +259,7 @@ var schemaNames = map[string]string{
 	"ControllersSmokeCheckResponse":      "SmokeCheckResponse",
 	"ControllersSetSmokeVerdictInput":    "SetSmokeVerdictInput",
 	"ControllersSmokeEvidenceResponse":   "SmokeEvidenceResponse",
+	"ControllersEvidenceExportResponse":  "EvidenceExportResponse",
 	"ControllersReportSmokeResponse":     "ReportSmokeResponse",
 	"ControllersPostSmokeToJiraResponse": "PostSmokeToJiraResponse",
 	// domain smoke entities
@@ -268,18 +269,21 @@ var schemaNames = map[string]string{
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
 	// httpd/controllers: settings wire envelopes
-	"ControllersReclaimSettingsResponse":        "ReclaimSettingsResponse",
-	"ControllersSetReclaimSettingsRequest":      "SetReclaimSettingsRequest",
-	"ControllersSpawnConfirmSettingsResponse":   "SpawnConfirmSettingsResponse",
-	"ControllersSetSpawnConfirmSettingsRequest": "SetSpawnConfirmSettingsRequest",
-	"ControllersAutoNudgeSettingsResponse":      "AutoNudgeSettingsResponse",
-	"ControllersSetAutoNudgeSettingsRequest":    "SetAutoNudgeSettingsRequest",
-	"ControllersSystemPromptItem":               "SystemPromptItem",
-	"ControllersSystemPromptsResponse":          "SystemPromptsResponse",
-	"ControllersSetSystemPromptRequest":         "SetSystemPromptRequest",
-	"ControllersMessageTemplateItem":            "MessageTemplateItem",
-	"ControllersMessageTemplatesResponse":       "MessageTemplatesResponse",
-	"ControllersSetMessageTemplateRequest":      "SetMessageTemplateRequest",
+	"ControllersReclaimSettingsResponse":             "ReclaimSettingsResponse",
+	"ControllersSetReclaimSettingsRequest":           "SetReclaimSettingsRequest",
+	"ControllersEvidenceRetentionSettingsResponse":   "EvidenceRetentionSettingsResponse",
+	"ControllersSetEvidenceRetentionSettingsRequest": "SetEvidenceRetentionSettingsRequest",
+	"ControllersEvidenceRetentionSweepResponse":      "EvidenceRetentionSweepResponse",
+	"ControllersSpawnConfirmSettingsResponse":        "SpawnConfirmSettingsResponse",
+	"ControllersSetSpawnConfirmSettingsRequest":      "SetSpawnConfirmSettingsRequest",
+	"ControllersAutoNudgeSettingsResponse":           "AutoNudgeSettingsResponse",
+	"ControllersSetAutoNudgeSettingsRequest":         "SetAutoNudgeSettingsRequest",
+	"ControllersSystemPromptItem":                    "SystemPromptItem",
+	"ControllersSystemPromptsResponse":               "SystemPromptsResponse",
+	"ControllersSetSystemPromptRequest":              "SetSystemPromptRequest",
+	"ControllersMessageTemplateItem":                 "MessageTemplateItem",
+	"ControllersMessageTemplatesResponse":            "MessageTemplatesResponse",
+	"ControllersSetMessageTemplateRequest":           "SetMessageTemplateRequest",
 	// legacyimport report
 	"LegacyimportReport": "ImportReport",
 	// service/project entities + DTOs
@@ -768,6 +772,16 @@ func smokeOperations() []operation {
 			pathParams: []any{controllers.SmokeEvidenceParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SmokeCheckResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export", id: "exportSmokeEvidence", tag: "smoke",
+			summary:    "Materialize a human-named, correctly-extensioned copy of an evidence blob for Reveal/Open",
+			pathParams: []any{controllers.SmokeEvidenceParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.EvidenceExportResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
@@ -1306,6 +1320,32 @@ func settingsOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.AutoNudgeSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/evidence-retention", id: "getEvidenceRetentionSettings", tag: "settings",
+			summary: "Fetch the smoke-test evidence retention settings",
+			resps: []respUnit{
+				{http.StatusOK, controllers.EvidenceRetentionSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/evidence-retention", id: "setEvidenceRetentionSettings", tag: "settings",
+			summary: "Replace the smoke-test evidence retention settings",
+			reqBody: controllers.SetEvidenceRetentionSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.EvidenceRetentionSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/settings/evidence-retention/sweep", id: "sweepEvidenceRetention", tag: "settings",
+			summary: "Run the evidence retention sweep now (manual trigger)",
+			resps: []respUnit{
+				{http.StatusOK, controllers.EvidenceRetentionSweepResponse{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
 		},

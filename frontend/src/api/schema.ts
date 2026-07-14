@@ -918,6 +918,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize a human-named, correctly-extensioned copy of an evidence blob for Reveal/Open */
+        post: operations["exportSmokeEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset": {
         parameters: {
             query?: never;
@@ -1066,6 +1083,41 @@ export interface paths {
         /** Replace the auto-nudge-on-comments gate setting */
         put: operations["setAutoNudgeSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/evidence-retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the smoke-test evidence retention settings */
+        get: operations["getEvidenceRetentionSettings"];
+        /** Replace the smoke-test evidence retention settings */
+        put: operations["setEvidenceRetentionSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/evidence-retention/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run the evidence retention sweep now (manual trigger) */
+        post: operations["sweepEvidenceRetention"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1358,6 +1410,25 @@ export interface components {
             orchestrator?: string;
             reviewer?: string;
             worker?: string;
+        };
+        EvidenceExportResponse: {
+            /** @description Absolute path of the exported, openable copy on the local machine. */
+            path: string;
+        };
+        EvidenceRetentionSettingsResponse: {
+            /** @description Whether the age-based evidence retention sweep runs at all. */
+            enabled: boolean;
+            /** @description Purge evidence older than this many days (from its created_at). 0/disabled = keep forever. */
+            maxAgeDays: number;
+        };
+        EvidenceRetentionSweepResponse: {
+            /**
+             * Format: int64
+             * @description On-disk bytes freed by the sweep.
+             */
+            freedBytes: number;
+            /** @description Number of evidence items removed. */
+            purged: number;
         };
         GitConventionConfig: {
             branchPrefix?: string;
@@ -1910,6 +1981,10 @@ export interface components {
         };
         SetAutoResolveRequest: {
             override: null | boolean;
+        };
+        SetEvidenceRetentionSettingsRequest: {
+            enabled: boolean;
+            maxAgeDays: number;
         };
         SetMessageTemplateRequest: {
             template: string;
@@ -5536,6 +5611,51 @@ export interface operations {
             };
         };
     };
+    exportSmokeEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+                /** @description Evidence blob identifier. */
+                evidenceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceExportResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     resetSmokeCheck: {
         parameters: {
             query?: never;
@@ -6042,6 +6162,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getEvidenceRetentionSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceRetentionSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setEvidenceRetentionSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetEvidenceRetentionSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceRetentionSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    sweepEvidenceRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceRetentionSweepResponse"];
                 };
             };
             /** @description Internal Server Error */
