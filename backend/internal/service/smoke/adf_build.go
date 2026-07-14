@@ -1,15 +1,16 @@
 package smoke
 
 // Builds the Atlassian Document Format (ADF) comment posted to a linked Jira
-// issue. Rather than cram every case into one narrow four-column table, each run
-// row becomes its own readable section: a heading with the case title, a status
-// line, the worker-authored context (why it matters, the steps, the expected
-// result), the user's note, and the evidence — each screenshot or clip embedded
-// inline as a media node (when includeMedia is set) so it previews directly on
-// the issue (an image preview or a video player), with any file that failed to
-// upload rendered as a short note. ADF nodes are plain map[string]any so the
-// adapter marshals them straight to Jira's JSON; keeping the shapes here (not a
-// shared builder) is deliberate — the layout is smoke-specific.
+// issue. The results are laid out as a per-case TABLE (one row per run row:
+// Case / Status / the worker-authored context) so a reader scans the outcome at
+// a glance. Evidence is NOT put in a table cell — Jira does not reliably render
+// media nodes inside table cells — so each screenshot/clip previews inline in an
+// "Evidence" section BELOW the table, embedded via a media node that references
+// the file's media-services id (which Jira resolves to an image preview or a
+// video player). Any file that failed to upload, or whose media id could not be
+// resolved, renders as a link/note instead. ADF nodes are plain map[string]any
+// so the adapter marshals them straight to Jira's JSON; keeping the shapes here
+// (not a shared builder) is deliberate — the layout is smoke-specific.
 
 import (
 	"fmt"
@@ -18,11 +19,12 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-// Section labels. "Why this matters" replaces the app's "WHY YOU'RE CHECKING"
-// wording — it reads more naturally for a Jira reader skimming the comment
-// without opening Agent Orchestrator, and states the section's purpose directly.
+// Column / section labels. "Why this matters" replaces the app's "WHY YOU'RE
+// CHECKING" wording — it reads more naturally for a Jira reader skimming the
+// comment without opening Agent Orchestrator, and states the purpose directly.
 const (
-	labelStatus   = "Status"
+	colCase       = "Case"
+	colStatus     = "Status"
 	labelWhy      = "Why this matters"
 	labelSteps    = "Steps"
 	labelExpected = "Expected result"
@@ -30,21 +32,49 @@ const (
 	labelEvidence = "Evidence"
 )
 
-// buildResultsADF renders the ADF document node for the comment. run is the
-// run-only checks in seq order; uploads maps a check id to its uploaded
-// evidence. When includeMedia is true, image evidence is embedded inline via
-// media nodes; when false (the media-free fallback), every evidence file renders
-// as a link instead.
-func buildResultsADF(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) map[string]any {
-	content := make([]any, 0, 1+len(run))
-	content = append(content, adfParagraph(adfText(resultsIntro(run))))
+// columnFlags records which optional columns any run row populates, so an
+// all-empty column (e.g. no case has a note) is dropped rather than rendering a
+// column of dashes.
+type columnFlags struct {
+	why      bool
+	steps    bool
+	expected bool
+	note     bool
+}
+
+func columnsFor(run []domain.SmokeCheck) columnFlags {
+	var f columnFlags
 	for _, c := range run {
-		content = append(content, caseSection(c, uploads[c.ID], includeMedia)...)
+		if strings.TrimSpace(c.Why) != "" {
+			f.why = true
+		}
+		if len(nonEmptyLines(c.Steps)) > 0 {
+			f.steps = true
+		}
+		if strings.TrimSpace(c.Expected) != "" {
+			f.expected = true
+		}
+		if strings.TrimSpace(c.Note) != "" {
+			f.note = true
+		}
 	}
+	return f
+}
+
+// buildResultsADF renders the ADF document node for the comment: an intro line,
+// the per-case results table, then an evidence section whose screenshots/clips
+// preview inline. run is the run-only checks in seq order; uploads maps a check
+// id to its uploaded evidence. When includeMedia is true, evidence with a
+// resolved media id embeds inline via media nodes; when false (the media-free
+// 400 fallback), every evidence file renders as a link instead.
+func buildResultsADF(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) map[string]any {
+	content := make([]any, 0, 2+len(run))
+	content = append(content, adfParagraph(adfText(resultsIntro(run))), resultsTable(run))
+	content = append(content, evidenceSection(run, uploads, includeMedia)...)
 	return map[string]any{"type": "doc", "version": 1, "content": content}
 }
 
-// resultsIntro is the summary line above the case sections.
+// resultsIntro is the summary line above the results table.
 func resultsIntro(run []domain.SmokeCheck) string {
 	var pass, fail, skip int
 	for _, c := range run {
@@ -66,62 +96,101 @@ func resultsIntro(run []domain.SmokeCheck) string {
 	return b.String()
 }
 
-// caseSection builds the block of nodes for one run row: a divider, the title
-// heading (title ONLY — the file/PR ref is intentionally omitted from the post),
-// the status + authored-context lines, the user's note, and the evidence.
-func caseSection(c domain.SmokeCheck, evs []uploadedEvidence, includeMedia bool) []any {
-	nodes := []any{
-		adfRule(),
-		adfHeading(3, adfText(c.Name)),
-		labeledParagraph(labelStatus, statusText(c.Verdict)),
+// resultsTable renders the per-case table: a header row plus one row per run
+// row. Optional columns present only when at least one case populates them.
+func resultsTable(run []domain.SmokeCheck) map[string]any {
+	cols := columnsFor(run)
+
+	headers := []any{tableHeader(adfParagraph(adfStrong(colCase))), tableHeader(adfParagraph(adfStrong(colStatus)))}
+	if cols.why {
+		headers = append(headers, tableHeader(adfParagraph(adfStrong(labelWhy))))
 	}
-	if why := strings.TrimSpace(c.Why); why != "" {
-		nodes = append(nodes, labeledParagraph(labelWhy, why))
+	if cols.steps {
+		headers = append(headers, tableHeader(adfParagraph(adfStrong(labelSteps))))
 	}
-	if steps := nonEmptyLines(c.Steps); len(steps) > 0 {
-		nodes = append(nodes, adfParagraph(adfStrong(labelSteps)), adfOrderedList(steps))
+	if cols.expected {
+		headers = append(headers, tableHeader(adfParagraph(adfStrong(labelExpected))))
 	}
-	if expected := strings.TrimSpace(c.Expected); expected != "" {
-		nodes = append(nodes, labeledParagraph(labelExpected, expected))
+	if cols.note {
+		headers = append(headers, tableHeader(adfParagraph(adfStrong(labelNote))))
 	}
-	if note := strings.TrimSpace(c.Note); note != "" {
-		nodes = append(nodes, labeledParagraph(labelNote, note))
+
+	rows := make([]any, 0, 1+len(run))
+	rows = append(rows, map[string]any{"type": "tableRow", "content": headers})
+	for _, c := range run {
+		cells := []any{
+			tableCell(adfParagraph(adfStrong(strings.TrimSpace(c.Name)))),
+			tableCell(adfParagraph(adfText(statusText(c.Verdict)))),
+		}
+		if cols.why {
+			cells = append(cells, tableCell(textOrDash(c.Why)))
+		}
+		if cols.steps {
+			if steps := nonEmptyLines(c.Steps); len(steps) > 0 {
+				cells = append(cells, tableCell(adfOrderedList(steps)))
+			} else {
+				cells = append(cells, tableCell(adfParagraph(adfText("—"))))
+			}
+		}
+		if cols.expected {
+			cells = append(cells, tableCell(textOrDash(c.Expected)))
+		}
+		if cols.note {
+			cells = append(cells, tableCell(textOrDash(c.Note)))
+		}
+		rows = append(rows, map[string]any{"type": "tableRow", "content": cells})
 	}
-	return append(nodes, evidenceNodes(evs, includeMedia)...)
+
+	return map[string]any{
+		"type":    "table",
+		"attrs":   map[string]any{"isNumberColumnEnabled": false, "layout": "default"},
+		"content": rows,
+	}
 }
 
-// evidenceNodes renders a row's evidence under an "Evidence" label: each
-// screenshot or clip as inline media (when includeMedia) so it previews directly
-// on the issue — Jira renders an image preview or a video player from the
-// attachment. Any file that failed to upload becomes a short note, and when
-// media is off (the 400 fallback) each file renders as a link instead. Returns
-// nil when the row has no evidence.
-func evidenceNodes(evs []uploadedEvidence, includeMedia bool) []any {
-	if len(evs) == 0 {
-		return nil
-	}
-	out := []any{adfParagraph(adfStrong(labelEvidence))}
-	for _, e := range evs {
-		switch {
-		case e.failed:
-			out = append(out, adfParagraph(adfText("⚠ "+evidenceLabel(e)+" — attachment upload failed")))
-		case includeMedia && strings.TrimSpace(e.att.ID) != "":
-			out = append(out, mediaSingleNode(e.att.ID))
-		default:
-			out = append(out, adfParagraph(evidenceLinkNode(e)))
+// evidenceSection renders every run row's evidence below the table, grouped by
+// case so each preview is attributable. Screenshots/clips with a resolved media
+// id embed inline (when includeMedia) so Jira previews them; a failed upload
+// becomes a short note, and anything without a media id (or when media is off)
+// renders as a link. Returns nil when no run row has evidence.
+func evidenceSection(run []domain.SmokeCheck, uploads map[string][]uploadedEvidence, includeMedia bool) []any {
+	var body []any
+	for _, c := range run {
+		evs := uploads[c.ID]
+		if len(evs) == 0 {
+			continue
+		}
+		body = append(body, adfParagraph(adfStrong(strings.TrimSpace(c.Name))))
+		for _, e := range evs {
+			switch {
+			case e.failed:
+				body = append(body, adfParagraph(adfText("⚠ "+evidenceLabel(e)+" — attachment upload failed")))
+			case includeMedia && strings.TrimSpace(e.mediaID) != "":
+				body = append(body, mediaSingleNode(e.mediaID))
+			default:
+				body = append(body, adfParagraph(evidenceLinkNode(e)))
+			}
 		}
 	}
-	return out
+	if len(body) == 0 {
+		return nil
+	}
+	return append([]any{adfHeading(3, adfText(labelEvidence))}, body...)
 }
 
 // mediaSingleNode embeds one attachment (image or video) inline by its
-// attachment id.
-func mediaSingleNode(id string) map[string]any {
+// media-services file id. All three attrs (type, id, collection) are mandatory
+// for Jira to resolve and preview the media; collection is intentionally the
+// empty string (the file's default collection).
+func mediaSingleNode(mediaID string) map[string]any {
 	return map[string]any{
 		"type":  "mediaSingle",
 		"attrs": map[string]any{"layout": "center"},
 		"content": []any{
-			map[string]any{"type": "media", "attrs": map[string]any{"type": "file", "id": id}},
+			map[string]any{
+				"type":  "media",
+				"attrs": map[string]any{"type": "file", "id": mediaID, "collection": ""},
+			},
 		},
 	}
 }
@@ -200,9 +269,13 @@ func adfParagraph(nodes ...map[string]any) map[string]any {
 	return map[string]any{"type": "paragraph", "content": content}
 }
 
-// labeledParagraph is a "Label: value" line — the label bold, the value plain.
-func labeledParagraph(label, value string) map[string]any {
-	return adfParagraph(adfStrong(label+": "), adfText(value))
+// textOrDash is a paragraph with trimmed text, or an em dash when empty — so a
+// table cell is never visually blank.
+func textOrDash(s string) map[string]any {
+	if t := strings.TrimSpace(s); t != "" {
+		return adfParagraph(adfText(t))
+	}
+	return adfParagraph(adfText("—"))
 }
 
 func adfHeading(level int, nodes ...map[string]any) map[string]any {
@@ -213,8 +286,22 @@ func adfHeading(level int, nodes ...map[string]any) map[string]any {
 	return map[string]any{"type": "heading", "attrs": map[string]any{"level": level}, "content": content}
 }
 
-func adfRule() map[string]any {
-	return map[string]any{"type": "rule"}
+// tableHeader / tableCell wrap block content in a table cell node. ADF cells
+// require block-level children (paragraphs, lists), never bare text.
+func tableHeader(nodes ...map[string]any) map[string]any {
+	return map[string]any{"type": "tableHeader", "attrs": map[string]any{}, "content": blockContent(nodes)}
+}
+
+func tableCell(nodes ...map[string]any) map[string]any {
+	return map[string]any{"type": "tableCell", "attrs": map[string]any{}, "content": blockContent(nodes)}
+}
+
+func blockContent(nodes []map[string]any) []any {
+	content := make([]any, 0, len(nodes))
+	for _, n := range nodes {
+		content = append(content, n)
+	}
+	return content
 }
 
 // adfOrderedList renders steps as a numbered list, one paragraph per item.

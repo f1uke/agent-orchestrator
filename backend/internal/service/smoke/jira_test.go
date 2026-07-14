@@ -20,9 +20,22 @@ type attachCall struct {
 
 type fakePoster struct {
 	attachErr   error
+	resolveErr  error   // when set, ResolveMediaID fails (→ link fallback)
 	commentErr  []error // per-call error, indexed by AddComment call count
 	attachments []attachCall
 	comments    []map[string]any
+	resolved    []string // attachment ids ResolveMediaID was called with
+}
+
+// ResolveMediaID mimics the real media-id lookup: a distinct id derived from the
+// attachment id, so tests can assert the media node carries the RESOLVED id, not
+// the attachment id (the whole point — the attachment id never previews).
+func (p *fakePoster) ResolveMediaID(_ context.Context, attachmentID string) (string, error) {
+	p.resolved = append(p.resolved, attachmentID)
+	if p.resolveErr != nil {
+		return "", p.resolveErr
+	}
+	return "media-" + attachmentID, nil
 }
 
 func (p *fakePoster) AddAttachment(_ context.Context, key, filename, mime string, r io.Reader) (jiraadapter.Attachment, error) {
@@ -111,12 +124,13 @@ func TestPostToJira_OnlyRunRowsAndUploadsEvidence(t *testing.T) {
 		t.Fatalf("AddComment calls = %d, want 1", len(poster.comments))
 	}
 	doc := mustJSON(t, poster.comments[0])
-	// The dense table is gone — the layout is per-case sections (one heading each).
-	if strings.Contains(doc, `"table"`) || strings.Contains(doc, `"tableRow"`) {
-		t.Errorf("doc must not contain a table anymore: %s", doc)
+	// The results are laid out as a per-case table: one header row + one row per
+	// run row (3), so 4 table rows in total.
+	if !strings.Contains(doc, `"table"`) {
+		t.Errorf("doc must contain a results table: %s", doc)
 	}
-	if got := strings.Count(doc, `"heading"`); got != 3 {
-		t.Errorf("heading count = %d, want 3 (one per run row)", got)
+	if got := strings.Count(doc, `"tableRow"`); got != 4 {
+		t.Errorf("tableRow count = %d, want 4 (header + 3 run rows)", got)
 	}
 	// Each case title is present; the pending row is not.
 	for _, name := range []string{"Check c1", "Check c2", "Check c3"} {
@@ -131,23 +145,38 @@ func TestPostToJira_OnlyRunRowsAndUploadsEvidence(t *testing.T) {
 	if strings.Contains(doc, "path/to/") || strings.Contains(doc, ".swift:42") || strings.Contains(doc, "PR #7") {
 		t.Errorf("doc must not contain the file/PR reference: %s", doc)
 	}
-	// Authored context sections are present.
+	// Authored-context columns + their cell content are present.
 	for _, want := range []string{"Why this matters", "why-c1", "Steps", "first c1", "Expected result", "expected-c1"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("doc missing authored-context content %q", want)
 		}
 	}
-	// Both the image AND the video embed inline as media (Jira renders a preview
-	// or a video player from the attachment).
+	// Both the image AND the video embed inline as media, below the table, in an
+	// Evidence section (Jira renders a preview or a video player).
+	if !strings.Contains(doc, labelEvidence) {
+		t.Errorf("doc missing the Evidence section: %s", doc)
+	}
 	if got := strings.Count(doc, `"mediaSingle"`); got != 2 {
 		t.Errorf("mediaSingle count = %d, want 2 (image + video)", got)
 	}
-	if !strings.Contains(doc, `"att-1"`) || !strings.Contains(doc, `"att-2"`) {
-		t.Errorf("doc missing media node for an evidence attachment id: %s", doc)
+	// The media node references the RESOLVED media-services id, never the raw
+	// attachment id (the attachment id renders only a link, not a preview).
+	if !strings.Contains(doc, `"media-att-1"`) || !strings.Contains(doc, `"media-att-2"`) {
+		t.Errorf("doc missing resolved media id in a media node: %s", doc)
+	}
+	if strings.Contains(doc, `"id":"att-1"`) || strings.Contains(doc, `"id":"att-2"`) {
+		t.Errorf("media node must not use the raw attachment id: %s", doc)
+	}
+	if !strings.Contains(doc, `"collection":""`) {
+		t.Errorf("media node missing the required empty collection attr: %s", doc)
 	}
 	// The rich comment embeds media, so the bare attachment link is not used here.
 	if strings.Contains(doc, "/secure/attachment/") {
 		t.Errorf("rich comment should embed media, not link attachments: %s", doc)
+	}
+	// ResolveMediaID was called for each uploaded attachment.
+	if len(poster.resolved) != 2 {
+		t.Errorf("ResolveMediaID calls = %d, want 2", len(poster.resolved))
 	}
 	// Status text present for each verdict.
 	for _, want := range []string{"Pass", "Fail", "Skip"} {
@@ -189,6 +218,37 @@ func TestPostToJira_UploadFailureIsNonFatal(t *testing.T) {
 	}
 	if strings.Contains(doc, `"mediaSingle"`) {
 		t.Errorf("doc must not embed media for a failed upload")
+	}
+}
+
+func TestPostToJira_MediaIDResolutionFailureFallsBackToLink(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", IssueID: "jira:DEMO-101"}
+	// Upload succeeds but the media id can't be resolved — the file must still
+	// appear, as a link, and the comment must not claim embedded media.
+	poster := &fakePoster{resolveErr: fmt.Errorf("%w: no media id", jiraadapter.ErrUnavailable)}
+	svc := newJiraTestService(t, store, poster)
+	seedRunCheck(t, svc, store, "c1", 1, domain.SmokePass, "ok", "image/png", "PNG")
+
+	out, err := svc.PostToJira(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("PostToJira: %v", err)
+	}
+	if out.AttachmentsUploaded != 1 {
+		t.Errorf("AttachmentsUploaded = %d, want 1 (upload still succeeded)", out.AttachmentsUploaded)
+	}
+	if out.EmbeddedMedia {
+		t.Errorf("EmbeddedMedia = true, want false (no media id resolved)")
+	}
+	if len(poster.comments) != 1 {
+		t.Fatalf("AddComment calls = %d, want 1 (posted media-free directly)", len(poster.comments))
+	}
+	doc := mustJSON(t, poster.comments[0])
+	if strings.Contains(doc, `"mediaSingle"`) {
+		t.Errorf("doc must not embed media when no media id resolved: %s", doc)
+	}
+	if !strings.Contains(doc, "/secure/attachment/1/") {
+		t.Errorf("doc must link the attachment as a fallback: %s", doc)
 	}
 }
 
