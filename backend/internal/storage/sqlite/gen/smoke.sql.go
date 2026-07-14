@@ -22,6 +22,18 @@ func (q *Queries) DeleteSmokeCheck(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteSmokeEvidence = `-- name: DeleteSmokeEvidence :execrows
+DELETE FROM smoke_evidence WHERE id = ?
+`
+
+func (q *Queries) DeleteSmokeEvidence(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSmokeEvidence, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSmokeEvidenceByCheck = `-- name: DeleteSmokeEvidenceByCheck :exec
 DELETE FROM smoke_evidence WHERE check_id = ?
 `

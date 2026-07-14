@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -29,6 +30,9 @@ type fakeSmokeService struct {
 	reported    smokesvc.ReportOutcome
 	jiraOutcome smokesvc.JiraPostOutcome
 	jiraErr     error
+
+	removedEvidenceID string
+	removeErr         error
 }
 
 func (f *fakeSmokeService) List(context.Context, domain.SessionID) (smokesvc.SessionSmoke, error) {
@@ -59,6 +63,14 @@ func (f *fakeSmokeService) AttachEvidence(_ context.Context, _ domain.SessionID,
 
 func (f *fakeSmokeService) OpenEvidence(context.Context, domain.SessionID, string, string) (smokesvc.EvidenceBlob, error) {
 	return f.blob, nil
+}
+
+func (f *fakeSmokeService) RemoveEvidence(_ context.Context, _ domain.SessionID, checkID, evidenceID string) (domain.SmokeCheck, error) {
+	if f.removeErr != nil {
+		return domain.SmokeCheck{}, f.removeErr
+	}
+	f.removedEvidenceID = evidenceID
+	return domain.SmokeCheck{ID: checkID, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}}, nil
 }
 
 func (f *fakeSmokeService) Report(context.Context, domain.SessionID) (smokesvc.ReportOutcome, error) {
@@ -197,6 +209,35 @@ func TestSmokeEvidenceServeSetsContentType(t *testing.T) {
 	}
 	if string(body) != "PNGBYTES" {
 		t.Fatalf("served bytes = %q", body)
+	}
+}
+
+func TestSmokeEvidenceDeleteReturnsCheck(t *testing.T) {
+	svc := &fakeSmokeService{}
+	srv := newSmokeTestServer(t, svc)
+
+	body, status, headers := doRequest(t, srv, "DELETE", "/api/v1/sessions/w1/smoke-checks/a/evidence/ev1", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if ct := headers.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if svc.removedEvidenceID != "ev1" {
+		t.Fatalf("removed evidence id = %q, want ev1", svc.removedEvidenceID)
+	}
+	if !strings.Contains(string(body), `"check"`) {
+		t.Fatalf("response missing check: %s", body)
+	}
+}
+
+func TestSmokeEvidenceDeleteMapsNotFound(t *testing.T) {
+	svc := &fakeSmokeService{removeErr: fmt.Errorf("%w: evidence %q", smokesvc.ErrNotFound, "ev1")}
+	srv := newSmokeTestServer(t, svc)
+
+	_, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/w1/smoke-checks/a/evidence/ev1", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", status)
 	}
 }
 

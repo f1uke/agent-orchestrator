@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage, getApiBaseUrl } from "../lib/api-client";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { sessionSmokeQueryKey, useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
+import { sessionSmokeQueryKey, useSessionSmokeChecks, type SmokeChecksResponse } from "../hooks/useSessionSmokeChecks";
 import {
 	ACCENT,
 	MONO,
@@ -167,6 +167,41 @@ export function SmokeTestView({
 		[sessionId, invalidate, showToast],
 	);
 
+	// Optimistically drop the thumbnail, then reconcile with the server's
+	// authoritative case (the DELETE returns the updated check). On failure the
+	// prior cache is restored and a toast explains. No blocking confirm (dialog
+	// policy) — the small hover-revealed × plus instant feedback is the guard.
+	const deleteEvidence = useMutation({
+		mutationFn: async (vars: { checkId: string; evidenceId: string }) => {
+			if (usePreviewData) return;
+			const { error } = await apiClient.DELETE(
+				"/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}",
+				{ params: { path: { sessionId, checkId: vars.checkId, evidenceId: vars.evidenceId } } },
+			);
+			if (error) throw new Error(apiErrorMessage(error, "Unable to remove evidence"));
+		},
+		onMutate: async (vars) => {
+			await queryClient.cancelQueries({ queryKey: sessionSmokeQueryKey(sessionId) });
+			const prev = queryClient.getQueryData<SmokeChecksResponse>(sessionSmokeQueryKey(sessionId));
+			queryClient.setQueryData<SmokeChecksResponse>(sessionSmokeQueryKey(sessionId), (old) =>
+				old
+					? {
+							...old,
+							checks: old.checks.map((c) =>
+								c.id === vars.checkId ? { ...c, evidence: c.evidence.filter((e) => e.id !== vars.evidenceId) } : c,
+							),
+						}
+					: old,
+			);
+			return { prev };
+		},
+		onError: (err, _vars, ctx) => {
+			if (ctx?.prev) queryClient.setQueryData(sessionSmokeQueryKey(sessionId), ctx.prev);
+			showToast(apiErrorMessage(err, "Couldn't remove that evidence"));
+		},
+		onSettled: () => invalidate(),
+	});
+
 	const data = query.data;
 	const checks = data?.checks ?? [];
 	const progress = progressFor(checks);
@@ -213,6 +248,7 @@ export function SmokeTestView({
 							onDecide={(verdict, note) => decide(check, verdict, note)}
 							onChange={() => resetCheck.mutate(check.id)}
 							onUpload={(file) => uploadEvidence(check.id, file)}
+							onDeleteEvidence={(evidenceId) => deleteEvidence.mutate({ checkId: check.id, evidenceId })}
 						/>
 					))}
 			</div>
@@ -328,6 +364,7 @@ function CaseCard({
 	onDecide,
 	onChange,
 	onUpload,
+	onDeleteEvidence,
 }: {
 	sessionId: string;
 	check: SmokeCheck;
@@ -335,6 +372,7 @@ function CaseCard({
 	onDecide: (verdict: "pass" | "fail" | "skip", note: string) => void;
 	onChange: () => void;
 	onUpload: (file: File) => void;
+	onDeleteEvidence: (evidenceId: string) => void;
 }) {
 	const [open, setOpen] = useState(check.verdict === "pending");
 	const [note, setNote] = useState(check.note ?? "");
@@ -407,7 +445,7 @@ function CaseCard({
 					<WhyBox check={check} />
 					{check.steps.length > 0 && <Steps steps={check.steps} />}
 					{check.expected && <Expected expected={check.expected} />}
-					<EvidenceSection sessionId={sessionId} check={check} onUpload={onUpload} />
+					<EvidenceSection sessionId={sessionId} check={check} onUpload={onUpload} onDelete={onDeleteEvidence} />
 
 					<textarea
 						value={note}
@@ -571,10 +609,12 @@ function EvidenceSection({
 	sessionId,
 	check,
 	onUpload,
+	onDelete,
 }: {
 	sessionId: string;
 	check: SmokeCheck;
 	onUpload: (file: File) => void;
+	onDelete: (evidenceId: string) => void;
 }) {
 	const [dragOver, setDragOver] = useState(false);
 	const inputRef = useRef<HTMLInputElement | null>(null);
@@ -601,7 +641,13 @@ function EvidenceSection({
 			{hasEvidence && (
 				<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
 					{check.evidence.map((ev) => (
-						<EvidenceThumb key={ev.id} sessionId={sessionId} checkId={check.id} evidence={ev} />
+						<EvidenceThumb
+							key={ev.id}
+							sessionId={sessionId}
+							checkId={check.id}
+							evidence={ev}
+							onDelete={() => onDelete(ev.id)}
+						/>
 					))}
 				</div>
 			)}
@@ -675,22 +721,29 @@ function EvidenceThumb({
 	sessionId,
 	checkId,
 	evidence,
+	onDelete,
 }: {
 	sessionId: string;
 	checkId: string;
 	evidence: SmokeEvidence;
+	onDelete?: () => void;
 }) {
 	const src = `${getApiBaseUrl()}/api/v1/sessions/${encodeURIComponent(sessionId)}/smoke-checks/${encodeURIComponent(checkId)}/evidence/${encodeURIComponent(evidence.id)}`;
-	// The renderer runs on the secure `app://` scheme; a direct <img>/<video>
-	// pointing at the loopback `http://` daemon fails to load there (it renders a
-	// broken-image icon), even though the same request succeeds via fetch (which
-	// the daemon's CORS/PNA allowlist covers). So fetch the bytes and render them
-	// from a blob: URL, which always resolves. On any fetch failure fall back to
-	// the direct URL so behavior never regresses.
+	// The renderer runs on the secure `app://` scheme, where a direct
+	// <img>/<video src=http://127.0.0.1…> subresource is CSP-blocked — loopback
+	// http lives only in connect-src, not img-src/media-src — and renders a broken
+	// thumbnail. So fetch the bytes (connect-src) and render them from a blob:
+	// object URL, which img-src/media-src allow (see src/shared/renderer-csp.ts).
+	// A fetch failure shows a framed placeholder, never the CSP-blocked direct URL
+	// (which would just render broken too).
 	const [resolved, setResolved] = useState<string | null>(null);
+	const [failed, setFailed] = useState(false);
+	const [hover, setHover] = useState(false);
 	useEffect(() => {
 		let alive = true;
 		let objectUrl: string | null = null;
+		setResolved(null);
+		setFailed(false);
 		fetch(src)
 			.then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`evidence ${r.status}`))))
 			.then((blob) => {
@@ -699,7 +752,7 @@ function EvidenceThumb({
 				setResolved(objectUrl);
 			})
 			.catch(() => {
-				if (alive) setResolved(src);
+				if (alive) setFailed(true);
 			});
 		return () => {
 			alive = false;
@@ -714,24 +767,88 @@ function EvidenceThumb({
 		border: `1px solid ${P.borderPill}`,
 		objectFit: "cover" as const,
 		background: "#000",
+		display: "block",
 	};
-	if (!resolved) {
+
+	const media = failed ? (
+		<div
+			style={{
+				...style,
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "center",
+				padding: 4,
+				fontSize: 10,
+				lineHeight: 1.3,
+				textAlign: "center",
+				color: P.muted2,
+				overflow: "hidden",
+			}}
+			aria-label={evidence.filename || "evidence"}
+		>
+			{evidence.filename || "couldn't load"}
+		</div>
+	) : !resolved ? (
 		// Loading the bytes — a framed placeholder avoids a broken-image flash.
-		return <div style={style} aria-label={evidence.filename || "evidence"} />;
-	}
-	if (isVideoMime(evidence.mime)) {
-		return (
-			<video
-				src={resolved}
-				style={style}
-				muted
-				controls={false}
-				playsInline
-				aria-label={evidence.filename || "evidence clip"}
-			/>
-		);
-	}
-	return <img src={resolved} alt={evidence.filename || "evidence"} style={style} />;
+		<div style={style} aria-label={evidence.filename || "evidence"} />
+	) : isVideoMime(evidence.mime) ? (
+		<video
+			src={resolved}
+			style={style}
+			muted
+			controls={false}
+			playsInline
+			aria-label={evidence.filename || "evidence clip"}
+		/>
+	) : (
+		<img src={resolved} alt={evidence.filename || "evidence"} style={style} />
+	);
+
+	return (
+		<div
+			style={{ position: "relative", width: 96, height: 68 }}
+			onMouseEnter={() => setHover(true)}
+			onMouseLeave={() => setHover(false)}
+		>
+			{media}
+			{onDelete && (
+				<button
+					type="button"
+					aria-label={`Remove ${evidence.filename || "evidence"}`}
+					title="Remove evidence"
+					onClick={(e) => {
+						e.stopPropagation();
+						onDelete();
+					}}
+					style={{
+						position: "absolute",
+						top: -7,
+						right: -7,
+						width: 19,
+						height: 19,
+						borderRadius: "50%",
+						border: "1px solid rgba(255,255,255,.4)",
+						background: "rgba(15,15,18,.9)",
+						color: "#fff",
+						fontSize: 12,
+						lineHeight: 1,
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						padding: 0,
+						cursor: "pointer",
+						// Subtle when idle, solid on hover — a guard against accidental
+						// clicks without a blocking confirm dialog (app dialog policy).
+						opacity: hover ? 1 : 0.55,
+						transition: "opacity .12s ease",
+						boxShadow: "0 1px 3px rgba(0,0,0,.5)",
+					}}
+				>
+					×
+				</button>
+			)}
+		</div>
+	);
 }
 
 function VerdictControls({

@@ -56,6 +56,7 @@ type Manager interface {
 	Reset(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error)
 	AttachEvidence(ctx context.Context, sessionID domain.SessionID, checkID string, upload EvidenceUpload) (domain.SmokeEvidence, error)
 	OpenEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (EvidenceBlob, error)
+	RemoveEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (domain.SmokeCheck, error)
 	Report(ctx context.Context, sessionID domain.SessionID) (ReportOutcome, error)
 	PostToJira(ctx context.Context, sessionID domain.SessionID) (JiraPostOutcome, error)
 	PurgeSessionEvidence(ctx context.Context, sessionID domain.SessionID) error
@@ -73,6 +74,7 @@ type Store interface {
 	MarkSmokeReported(ctx context.Context, id domain.SessionID, reportedAt, now time.Time) (int64, error)
 	InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence) error
 	GetSmokeEvidence(ctx context.Context, id string) (domain.SmokeEvidence, bool, error)
+	DeleteSmokeEvidence(ctx context.Context, id string) (bool, error)
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 	ListSessions(ctx context.Context, projectID domain.ProjectID) ([]domain.SessionRecord, error)
 }
@@ -305,6 +307,33 @@ func (s *Service) OpenEvidence(ctx context.Context, sessionID domain.SessionID, 
 		return EvidenceBlob{}, fmt.Errorf("%w: evidence %q blob missing", ErrNotFound, evidenceID)
 	}
 	return EvidenceBlob{Path: path, Mime: ev.Mime, Filename: ev.Filename}, nil
+}
+
+// RemoveEvidence deletes one stored evidence item (DB row + on-disk blob) after
+// verifying it belongs to the session + case, and returns the case with its
+// remaining evidence so the UI reconciles to authoritative state. The user can
+// drop a wrong or duplicate screenshot/clip from the case's evidence strip. A
+// mismatched or unknown id is ErrNotFound; the blob is removed best-effort after
+// the row so a stray file never blocks the delete.
+func (s *Service) RemoveEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (domain.SmokeCheck, error) {
+	if err := s.requireCheck(ctx, sessionID, checkID); err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	ev, ok, err := s.store.GetSmokeEvidence(ctx, evidenceID)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	if !ok || ev.SessionID != sessionID || ev.CheckID != checkID {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: evidence %q", ErrNotFound, evidenceID)
+	}
+	if _, err := s.store.DeleteSmokeEvidence(ctx, evidenceID); err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	rel := filepath.Join(string(sessionID), checkID, evidenceID)
+	if path, ok := preview.ConfinedPath(s.evidenceRoot, rel); ok {
+		_ = os.Remove(path)
+	}
+	return s.getCheck(ctx, checkID)
 }
 
 // Report composes a deterministic results summary and delivers it back to the

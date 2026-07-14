@@ -96,6 +96,7 @@ func (c *SmokeController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/reset", c.reset)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/evidence", c.uploadEvidence)
 	r.Get("/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", c.serveEvidence)
+	r.Delete("/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", c.deleteEvidence)
 }
 
 func (c *SmokeController) list(w http.ResponseWriter, r *http.Request) {
@@ -209,6 +210,19 @@ func (c *SmokeController) serveEvidence(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeHeaderFilename(blob.Filename)+"\"")
 	}
 	http.ServeFile(w, r, blob.Path)
+}
+
+func (c *SmokeController) deleteEvidence(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}")
+		return
+	}
+	check, err := c.Svc.RemoveEvidence(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), chi.URLParam(r, "evidenceId"))
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SmokeCheckResponse{Check: check})
 }
 
 func (c *SmokeController) report(w http.ResponseWriter, r *http.Request) {

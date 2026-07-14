@@ -3,12 +3,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getMock, postMock } = vi.hoisted(() => ({
+const { getMock, postMock, deleteMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	postMock: vi.fn(),
+	deleteMock: vi.fn(),
 }));
 vi.mock("../lib/api-client", () => ({
-	apiClient: { GET: getMock, POST: postMock },
+	apiClient: { GET: getMock, POST: postMock, DELETE: deleteMock },
 	apiErrorMessage: (e: unknown, fb = "Request failed") => (e instanceof Error ? e.message : fb),
 	getApiBaseUrl: () => "",
 }));
@@ -44,6 +45,12 @@ beforeEach(() => {
 	postMock
 		.mockReset()
 		.mockResolvedValue({ data: { delivered: true, target: "worker", summary: "1 pass" }, error: undefined });
+	// Deleting server-side clears the case's evidence, so the reconciling refetch
+	// returns it empty (matching the optimistic drop).
+	deleteMock.mockReset().mockImplementation(async () => {
+		checks = checks.map((c) => ({ ...c, evidence: [] }));
+		return { data: { check: checks[0] }, error: undefined };
+	});
 });
 
 function renderView(sessionId = "s1", issueId?: string) {
@@ -167,6 +174,77 @@ describe("SmokeTestView", () => {
 		} finally {
 			URL.createObjectURL = realCreate;
 			URL.revokeObjectURL = realRevoke;
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("removes an evidence item via the hover × button (DELETE + optimistic drop)", async () => {
+		const realCreate = URL.createObjectURL;
+		const realRevoke = URL.revokeObjectURL;
+		URL.createObjectURL = vi.fn(() => "blob:mock");
+		URL.revokeObjectURL = vi.fn();
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["x"], { type: "image/png" }) });
+		vi.stubGlobal("fetch", fetchMock);
+		checks = [
+			check({
+				evidence: [
+					{
+						id: "ev1",
+						checkId: "c1",
+						sessionId: "s1",
+						kind: "image",
+						filename: "shot.png",
+						mime: "image/png",
+						sizeBytes: 3,
+						createdAt: "2026-07-11T10:00:00Z",
+					},
+				],
+			}),
+		];
+		try {
+			renderView();
+			const removeBtn = await screen.findByRole("button", { name: "Remove shot.png" });
+			fireEvent.click(removeBtn);
+			// DELETE hits the per-evidence endpoint with the right path params.
+			await waitFor(() => expect(deleteMock).toHaveBeenCalled());
+			const [path, opts] = deleteMock.mock.calls[0];
+			expect(path).toBe("/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}");
+			expect(opts.params.path).toEqual({ sessionId: "s1", checkId: "c1", evidenceId: "ev1" });
+			// Optimistically dropped — the thumbnail's remove button is gone.
+			await waitFor(() => expect(screen.queryByRole("button", { name: "Remove shot.png" })).not.toBeInTheDocument());
+		} finally {
+			URL.createObjectURL = realCreate;
+			URL.revokeObjectURL = realRevoke;
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("shows a framed placeholder (never a broken direct <img>) when the evidence fetch fails", async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new Error("blocked"));
+		vi.stubGlobal("fetch", fetchMock);
+		checks = [
+			check({
+				evidence: [
+					{
+						id: "ev1",
+						checkId: "c1",
+						sessionId: "s1",
+						kind: "image",
+						filename: "shot.png",
+						mime: "image/png",
+						sizeBytes: 3,
+						createdAt: "2026-07-11T10:00:00Z",
+					},
+				],
+			}),
+		];
+		try {
+			renderView();
+			// The placeholder surfaces the filename; no <img> is rendered (a direct
+			// http:// src would be CSP-blocked and show a broken icon).
+			await waitFor(() => expect(screen.getAllByText("shot.png").length).toBeGreaterThan(0));
+			expect(document.querySelector("img")).toBeNull();
+		} finally {
 			vi.unstubAllGlobals();
 		}
 	});
