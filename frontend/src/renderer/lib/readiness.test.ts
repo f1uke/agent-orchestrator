@@ -191,6 +191,42 @@ describe("deriveReadiness — verdict", () => {
 	});
 });
 
+describe("deriveReadiness — pipeline order (smoke-before-PR)", () => {
+	it("gates render Work → Smoke → PR → CI → Review → Merge", () => {
+		const r = deriveReadiness({}, [pr()], smoke());
+		expect(r.gates.map((g) => g.key)).toEqual(["work", "smoke", "pr", "ci", "review", "merge"]);
+	});
+
+	it("Smoke sits before PR in the strip", () => {
+		const r = deriveReadiness({}, [pr()], smoke());
+		const keys = r.gates.map((g) => g.key);
+		expect(keys.indexOf("smoke")).toBeLessThan(keys.indexOf("pr"));
+	});
+
+	it("authored-but-pending smoke with no PR lights Smoke, not PR (current advances to the live gate)", () => {
+		// Smoke is authored before the PR is opened. A pre-PR session that has an
+		// in-flight smoke check should ring Smoke — the earliest live gate — while
+		// PR/CI/Review/Merge sit idle downstream.
+		const r = deriveReadiness(
+			{ activity: { state: "idle" } },
+			[],
+			smoke({ total: 2, pass: 0, pending: 2, checked: 0 }),
+		);
+		expect(r.currentKey).toBe("smoke");
+		expect(tones(r).smoke).toBe("wait");
+		expect(tones(r).pr).toBe("idle");
+		expect(stateOf(r, "smoke")).toBe("running");
+	});
+
+	it("passed smoke with no PR leaves no gate ringed (no false PR/CI highlight)", () => {
+		const r = deriveReadiness({ activity: { state: "idle" } }, [], smoke({ total: 2, pass: 2, checked: 2 }));
+		expect(tones(r).smoke).toBe("pass");
+		// Work + Smoke are green; PR/CI/Review/Merge are idle (no PR yet) — nothing
+		// is blocking or waiting, so no gate is current.
+		expect(r.currentKey).toBeUndefined();
+	});
+});
+
 describe("deriveReadiness — priority + gate independence", () => {
 	it("Changes Requested outranks a CI failure in the headline, but BOTH gates stay red", () => {
 		const r = deriveReadiness(

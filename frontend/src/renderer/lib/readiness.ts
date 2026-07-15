@@ -6,8 +6,8 @@ import type { SessionActivityState, SessionStatus } from "../types/workspace";
 /**
  * The Summary-tab "readiness / gating" strip derivation.
  *
- * A session's work travels the AO merge pipeline — Work → PR → CI → Review →
- * Smoke → Merge — and the strip answers "how far along, and is it ready?" at a
+ * A session's work travels the AO merge pipeline — Work → Smoke → PR → CI →
+ * Review → Merge — and the strip answers "how far along, and is it ready?" at a
  * glance. Everything here is a PURE function of data already on the wire (PR
  * summaries + the smoke rollup + session activity); it invents no new backend
  * facts. The verdict and the gate row are derived from the SAME inputs so the
@@ -24,7 +24,7 @@ export type ReadinessTone = "pass" | "wait" | "block" | "idle";
 /** Verdict hue → the sanctioned board lane palette. */
 export type ReadinessHue = "working" | "review" | "needs" | "merge" | "todo";
 
-export type ReadinessGateKey = "work" | "pr" | "ci" | "review" | "smoke" | "merge";
+export type ReadinessGateKey = "work" | "smoke" | "pr" | "ci" | "review" | "merge";
 
 export type ReadinessGate = {
 	key: ReadinessGateKey;
@@ -216,12 +216,17 @@ export function deriveReadiness(session: SessionFacts, prs: SessionPRSummary[], 
 	const hasPR = pr?.state === "open" || pr?.state === "draft" || pr?.state === "merged";
 	const merged = pr?.state === "merged";
 
+	// Order mirrors the real flow: Work → Smoke → PR → CI → Review → Merge. Smoke
+	// is authored before the PR is opened, so it sits right after Work. This array
+	// order is also what currentGate() walks to pick the ring (first block, else
+	// first wait), so a pre-PR session with an authored-but-pending smoke check
+	// lights Smoke — the earliest live gate — rather than an idle downstream one.
 	const list: ReadinessGate[] = [
 		workGate(session, hasPR, merged),
+		smokeGate(smoke),
 		prGate(pr),
 		ciGate(pr),
 		reviewGate(pr),
-		smokeGate(smoke),
 		mergeGate(pr),
 	];
 	const byKey = Object.fromEntries(list.map((g) => [g.key, g])) as Record<ReadinessGateKey, ReadinessGate>;

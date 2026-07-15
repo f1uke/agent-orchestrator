@@ -266,6 +266,39 @@ func TestReferenceConvention(t *testing.T) {
 	}
 }
 
+// TestSmokeChecklistProtocol_AuthorsBeforePR: the smoke protocol must trigger the
+// checklist once the change is complete and local checks pass, BEFORE the PR/MR is
+// opened — NOT gated on CI being green (CI can't have run yet since the PR isn't
+// open). It must also keep the conditional scope, the JSON-on-stdin mechanism, the
+// full case schema, and the "play in the Tests tab" contract intact.
+func TestSmokeChecklistProtocol_AuthorsBeforePR(t *testing.T) {
+	got := SmokeChecklistProtocol()
+	if !strings.HasPrefix(got, "\n\n") {
+		t.Fatalf("smoke protocol must start with a blank-line separator: %q", got)
+	}
+	// The old timing must be gone: no "after CI is green", no "wrap-up" trigger.
+	for _, forbidden := range []string{"after CI is green", "wrap-up"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("smoke protocol still carries stale ordering %q:\n%s", forbidden, got)
+		}
+	}
+	for _, want := range []string{
+		"## Smoke-test checklist (AO)",
+		"BEFORE you open the PR/MR",                                       // new timing: author before the PR exists
+		"local checks (build, tests, lint) pass",                          // gated on local checks, not CI
+		"UI flows, live SCM/CI polling, native-app behavior, timing/race", // conditional scope kept
+		"Skip this for pure-logic changes already covered by tests",       // skip clause kept
+		"leave `prNum` at 0",                                              // prNum note for pre-PR authoring
+		"cat <<'JSON' | ao smoke set \"$AO_SESSION_ID\" --from-file -",    // JSON-on-stdin mechanism
+		"\"name\"", "\"why\"", "\"steps\"", "\"expected\"", "\"prNum\"", "\"fileRef\"", // case schema
+		"plays each case live in the Tests tab, attaches evidence, and reports results back to you", // contract
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("smoke protocol missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestTaskSizeDirective_MechanicalAuthorizesSkip: a mechanical task must render a
 // "\n\n"-prefixed block that (a) names itself, (b) explicitly authorizes skipping
 // the process skills, (c) grounds the skip as a deliberate override of the "you
