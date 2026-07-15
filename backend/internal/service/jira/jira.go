@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 
@@ -55,6 +56,9 @@ type IssueSearcher interface {
 // *adapters/jira.Client.
 type IssueReader interface {
 	Get(ctx context.Context, key string) (jiraadapter.Issue, error)
+	// DownloadAttachment streams one attachment's bytes (+ Content-Type) for the
+	// Summary tab's inline media previews. Caller closes the reader.
+	DownloadAttachment(ctx context.Context, attachmentID string) (io.ReadCloser, string, error)
 }
 
 // TransitionMover lists an issue's available status transitions and applies one
@@ -130,6 +134,24 @@ func (s *Service) Context(ctx context.Context, id domain.SessionID) (Result, err
 		return Result{Linked: true, FetchError: fetchMessage(err)}, nil
 	}
 	return Result{Linked: true, Issue: &iss}, nil
+}
+
+// DownloadAttachment streams one attachment's bytes for the Summary tab's inline
+// media previews. It is session-scoped so it can require a live Jira binding and
+// configured access (the attachment id itself is instance-global). Read-only
+// (display) — it never writes to Jira. The caller closes the returned reader.
+func (s *Service) DownloadAttachment(ctx context.Context, id domain.SessionID, attachmentID string) (io.ReadCloser, string, error) {
+	sess, err := s.sessions.Get(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if _, ok := jiraKey(string(sess.IssueID)); !ok {
+		return nil, "", fmt.Errorf("%w: session is not linked to a Jira issue", jiraadapter.ErrBadRequest)
+	}
+	if s.issues == nil {
+		return nil, "", fmt.Errorf("%w: Jira access is not configured", jiraadapter.ErrUnavailable)
+	}
+	return s.issues.DownloadAttachment(ctx, attachmentID)
 }
 
 // Transitions lists the available status transitions for the session's issue, or
