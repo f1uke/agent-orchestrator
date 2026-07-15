@@ -42,6 +42,7 @@ export type ProjectSettingsFormState = {
 	orchestratorPrompt: string;
 	workerPrompt: string;
 	reviewerPrompt: string;
+	responseLanguage: string;
 };
 
 export type ProjectSettingsFieldKey = keyof ProjectSettingsFormState;
@@ -70,6 +71,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		orchestratorPrompt: config.systemPromptAdditions?.orchestrator ?? "",
 		workerPrompt: config.systemPromptAdditions?.worker ?? "",
 		reviewerPrompt: config.systemPromptAdditions?.reviewer ?? "",
+		responseLanguage: config.responseLanguage ?? "",
 	};
 }
 
@@ -193,6 +195,9 @@ export function useProjectSettingsForm({
 					worker: form.workerPrompt || undefined,
 					reviewer: form.reviewerPrompt || undefined,
 				}),
+				// Empty means "inherit the global default" - omit the field so an
+				// otherwise-unset config still persists as unset.
+				responseLanguage: form.responseLanguage || undefined,
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
 				params: { path: { id: projectId } },

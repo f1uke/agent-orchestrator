@@ -74,6 +74,11 @@ type Deps struct {
 	// defaults to the built-in reviewer base — the safe default for a bare Engine.
 	PromptOverrides func() promptoverrides.Overrides
 
+	// ResponseLanguage returns the global default human-facing response language,
+	// read at trigger time so an edit takes effect on the next reviewer (re)launch.
+	// Nil defaults to English (no directive injected).
+	ResponseLanguage func() string
+
 	// Clock and NewID are injectable for deterministic tests.
 	Clock func() time.Time
 	NewID func() string
@@ -81,14 +86,15 @@ type Deps struct {
 
 // Engine is the core code-review engine.
 type Engine struct {
-	store           Store
-	sessions        Sessions
-	prs             PRs
-	projects        Projects
-	launcher        Launcher
-	promptOverrides func() promptoverrides.Overrides
-	clock           func() time.Time
-	newID           func() string
+	store            Store
+	sessions         Sessions
+	prs              PRs
+	projects         Projects
+	launcher         Launcher
+	promptOverrides  func() promptoverrides.Overrides
+	responseLanguage func() string
+	clock            func() time.Time
+	newID            func() string
 
 	// triggerMu guards triggerLocks; triggerLocks holds one mutex per worker
 	// session so concurrent Trigger calls for the same worker serialise (see
@@ -108,15 +114,16 @@ func New(d Deps) *Engine {
 		newID = uuid.NewString
 	}
 	return &Engine{
-		store:           d.Store,
-		sessions:        d.Sessions,
-		prs:             d.PRs,
-		projects:        d.Projects,
-		launcher:        d.Launcher,
-		promptOverrides: d.PromptOverrides,
-		clock:           clock,
-		newID:           newID,
-		triggerLocks:    make(map[domain.SessionID]*sync.Mutex),
+		store:            d.Store,
+		sessions:         d.Sessions,
+		prs:              d.PRs,
+		projects:         d.Projects,
+		launcher:         d.Launcher,
+		promptOverrides:  d.PromptOverrides,
+		responseLanguage: d.ResponseLanguage,
+		clock:            clock,
+		newID:            newID,
+		triggerLocks:     make(map[domain.SessionID]*sync.Mutex),
 	}
 }
 
@@ -315,6 +322,11 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 	spec := reviewLaunchSpec(worker, harness, created[0], queue, 0)
 	spec.ReviewerBase = e.reviewerBase()
 	spec.ReviewerAddition = projCfg.SystemPromptAdditions.Reviewer
+	// The reviewer's human-facing output (its PR/MR review comments) follows the
+	// same language directive as the orchestrator/worker: the project's override
+	// when set, otherwise the global default. reviewTexts injects it just before
+	// the confidentiality guard.
+	spec.ResponseLanguage = prompts.ResolveResponseLanguage(projCfg.ResponseLanguage, e.globalResponseLanguage())
 	// A fresh per-launch native session id keyed on this batch's first run, so a
 	// relaunched reviewer never reuses a prior pass's `claude --session-id` and
 	// collides with its transcript. Only consumed on the Spawn (relaunch) path;
@@ -539,6 +551,16 @@ func (e *Engine) reviewerBase() string {
 		}
 	}
 	return base
+}
+
+// globalResponseLanguage returns the global default human-facing response
+// language. A nil getter (bare Engine or wiring that omits the store) defaults to
+// English so no directive is injected — the safe default.
+func (e *Engine) globalResponseLanguage() string {
+	if e.responseLanguage == nil {
+		return prompts.DefaultResponseLanguage
+	}
+	return e.responseLanguage()
 }
 
 func (e *Engine) upsertReview(ctx stdctx.Context, worker domain.SessionRecord, harness domain.ReviewerHarness, handleID string, now time.Time) (domain.Review, error) {

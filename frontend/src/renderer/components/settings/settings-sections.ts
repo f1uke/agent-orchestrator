@@ -37,7 +37,8 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		label: "Prompts",
 		Icon: FileText,
 		hint: "additional system prompts appended for this project",
-		keywords: "orchestrator worker reviewer additional system prompt",
+		keywords:
+			"orchestrator worker reviewer additional system prompt response language thai english localization override",
 	},
 	{
 		key: "automation",
@@ -54,7 +55,7 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		label: "Prompts",
 		Icon: FileText,
 		hint: "the global base each session kind starts from",
-		keywords: "orchestrator worker reviewer system prompt base",
+		keywords: "orchestrator worker reviewer system prompt base response language thai english localization default",
 	},
 	{
 		key: "messages",

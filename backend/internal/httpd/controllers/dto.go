@@ -1105,6 +1105,19 @@ type SetAutoNudgeSettingsRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// ResponseLanguageSettingsResponse mirrors responselang.Settings on the wire. It
+// is the body of GET/PUT /api/v1/settings/response-language. Language is the
+// global default human-facing response language (e.g. "English", "Thai").
+type ResponseLanguageSettingsResponse struct {
+	Language string `json:"language"`
+}
+
+// SetResponseLanguageSettingsRequest is the body of PUT
+// /api/v1/settings/response-language.
+type SetResponseLanguageSettingsRequest struct {
+	Language string `json:"language"`
+}
+
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default
 // (for the editor + Reset) and the current override (null when using the default).
 type SystemPromptItem struct {

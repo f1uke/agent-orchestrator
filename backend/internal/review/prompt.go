@@ -30,9 +30,13 @@ func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 	if strings.TrimSpace(base) == "" {
 		base = prompts.DefaultBase(prompts.KindReviewer)
 	}
+	// The response-language directive is injected LAST (just before the
+	// confidentiality guard) so it wins over the English base + review task above
+	// it. Empty/English renders nothing, so the default reviewer path is unchanged.
 	systemPrompt = base +
 		prompts.Section(spec.ReviewerAddition) +
 		prompts.CoordinationFloor(prompts.KindReviewer) +
+		prompts.ResponseLanguageDirective(spec.ResponseLanguage) +
 		prompts.ConfidentialityGuard
 
 	var b strings.Builder

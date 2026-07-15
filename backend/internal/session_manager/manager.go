@@ -168,6 +168,10 @@ type Manager struct {
 	// means "no overrides" (built-in defaults) — the safe default for a bare
 	// Manager in tests or wiring that omits the store.
 	promptOverrides func() promptoverrides.Overrides
+	// responseLanguage returns the global default human-facing response language.
+	// Nil (bare Manager/omitting wiring) means English (no directive) — the safe
+	// default that leaves every prompt byte-for-byte unchanged.
+	responseLanguage func() string
 	// reviewerReaper closes a worker's reviewer pane when the worker is torn
 	// down, so the reviewer (a child of the worker, keyed on the worker id) does
 	// not linger. Injected by the daemon after the review service is built to
@@ -218,6 +222,10 @@ type Deps struct {
 	// spawn/restore so an edit takes effect on the next (re)launch. Nil defaults
 	// to built-in defaults.
 	PromptOverrides func() promptoverrides.Overrides
+	// ResponseLanguage returns the global default human-facing response language,
+	// read at spawn/restore so an edit takes effect on the next (re)launch. Nil
+	// defaults to English (no directive injected).
+	ResponseLanguage func() string
 }
 
 // New builds a Session Manager from its dependencies, defaulting the clock to
@@ -239,6 +247,7 @@ func New(d Deps) *Manager {
 		logger:              d.Logger,
 		spawnConfirmEnabled: d.SpawnConfirmEnabled,
 		promptOverrides:     d.PromptOverrides,
+		responseLanguage:    d.ResponseLanguage,
 	}
 	if m.clock == nil {
 		// UTC so spawn-stamped CreatedAt/UpdatedAt match every other session
@@ -2253,7 +2262,23 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	if workspacePrompt != "" {
 		base += "\n\n" + workspacePrompt
 	}
-	return base + m.aoSkillPointer() + prompts.ConfidentialityGuard, nil
+	// The human-facing response-language directive is injected LAST (just before the
+	// confidentiality guard) so this short, recent directive reliably wins over the
+	// voluminous English base + brief above it. The resolved value is the project's
+	// override when set, otherwise the global default; English/empty renders nothing
+	// so the default path is byte-for-byte unchanged.
+	lang := prompts.ResolveResponseLanguage(cfg.ResponseLanguage, m.globalResponseLanguage())
+	return base + m.aoSkillPointer() + prompts.ResponseLanguageDirective(lang) + prompts.ConfidentialityGuard, nil
+}
+
+// globalResponseLanguage returns the global default human-facing response
+// language. A nil getter (bare Manager in tests, or wiring that omits the store)
+// defaults to English so no directive is injected and prompts stay unchanged.
+func (m *Manager) globalResponseLanguage() string {
+	if m.responseLanguage == nil {
+		return prompts.DefaultResponseLanguage
+	}
+	return m.responseLanguage()
 }
 
 // effectiveBase returns the assembled, project-rendered global base for a kind:

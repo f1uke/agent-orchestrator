@@ -20,6 +20,7 @@ const systemPromptsQueryKey = ["settings", "systemPrompts"] as const;
 const messageTemplatesQueryKey = ["settings", "messageTemplates"] as const;
 const spawnConfirmQueryKey = ["settings", "spawnConfirm"] as const;
 const autoNudgeQueryKey = ["settings", "autoNudge"] as const;
+const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
 const reclaimSettingsQueryKey = ["settings", "reclaim"] as const;
 export const evidenceRetentionQueryKey = ["settings", "evidenceRetention"] as const;
 
@@ -30,6 +31,7 @@ export type GlobalDraft = {
 	templates: Record<string, string>;
 	spawnConfirm: boolean;
 	autoNudge: boolean;
+	responseLanguage: string;
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
 	evidenceRetentionEnabled: boolean;
@@ -41,6 +43,7 @@ export type GlobalDraft = {
 export type GlobalScalarField =
 	| "spawnConfirm"
 	| "autoNudge"
+	| "responseLanguage"
 	| "reclaimEnabled"
 	| "reclaimGrace"
 	| "evidenceRetentionEnabled"
@@ -53,6 +56,7 @@ const EMPTY_DRAFT: GlobalDraft = {
 	templates: {},
 	spawnConfirm: true,
 	autoNudge: false,
+	responseLanguage: "English",
 	reclaimEnabled: true,
 	reclaimGrace: 15,
 	evidenceRetentionEnabled: true,
@@ -108,6 +112,14 @@ export function useGlobalSettingsForm() {
 			const { data, error } = await apiClient.GET("/api/v1/settings/auto-nudge", {});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data as { enabled: boolean };
+		},
+	});
+	const responseLanguageQuery = useQuery({
+		queryKey: responseLanguageQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/response-language", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as { language: string };
 		},
 	});
 	const reclaimQuery = useQuery({
@@ -171,6 +183,15 @@ export function useGlobalSettingsForm() {
 	}, [autoNudgeQuery.data]);
 
 	useEffect(() => {
+		if (!responseLanguageQuery.data || seeded.current.has("responseLanguage")) return;
+		seeded.current.add("responseLanguage");
+		// Empty from the daemon means the shipped English default; show it as English.
+		const v = responseLanguageQuery.data.language || "English";
+		setDraft((d) => ({ ...d, responseLanguage: v }));
+		setBaseline((b) => ({ ...b, responseLanguage: v }));
+	}, [responseLanguageQuery.data]);
+
+	useEffect(() => {
 		if (!reclaimQuery.data || seeded.current.has("reclaim")) return;
 		seeded.current.add("reclaim");
 		const { enabled, graceMinutes } = reclaimQuery.data;
@@ -208,6 +229,7 @@ export function useGlobalSettingsForm() {
 		!recordEqual(draft.templates, baseline.templates) ||
 		draft.spawnConfirm !== baseline.spawnConfirm ||
 		draft.autoNudge !== baseline.autoNudge ||
+		draft.responseLanguage !== baseline.responseLanguage ||
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
 		draft.evidenceRetentionEnabled !== baseline.evidenceRetentionEnabled ||
@@ -294,6 +316,16 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
+			if (draft.responseLanguage !== baseline.responseLanguage) {
+				ops.push(
+					(async () => {
+						const { error } = await apiClient.PUT("/api/v1/settings/response-language", {
+							body: { language: draft.responseLanguage },
+						});
+						if (error) throw new Error(apiErrorMessage(error));
+					})(),
+				);
+			}
 			if (draft.reclaimEnabled !== baseline.reclaimEnabled || draft.reclaimGrace !== baseline.reclaimGrace) {
 				ops.push(
 					(async () => {
@@ -336,6 +368,7 @@ export function useGlobalSettingsForm() {
 			void queryClient.invalidateQueries({ queryKey: messageTemplatesQueryKey });
 			void queryClient.invalidateQueries({ queryKey: spawnConfirmQueryKey });
 			void queryClient.invalidateQueries({ queryKey: autoNudgeQueryKey });
+			void queryClient.invalidateQueries({ queryKey: responseLanguageQueryKey });
 			void queryClient.invalidateQueries({ queryKey: reclaimSettingsQueryKey });
 			void queryClient.invalidateQueries({ queryKey: evidenceRetentionQueryKey });
 			void queryClient.invalidateQueries({ queryKey: updateSettingsQueryKey });

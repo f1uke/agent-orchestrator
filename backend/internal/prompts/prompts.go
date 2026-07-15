@@ -210,6 +210,49 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 
 Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`<project>-<num>`" + `.`
 
+// DefaultResponseLanguage is the shipped global default for the human-facing
+// response language. It renders no directive (English == the ambient language of
+// every template and brief), so the default agent path is byte-for-byte
+// unchanged and other users/projects are unaffected.
+const DefaultResponseLanguage = "English"
+
+// ResolveResponseLanguage picks the effective human-facing language for a
+// session: the project override when it is set (non-blank), otherwise the global
+// default. Both blank yields "" (treated as English / no directive). Centralized
+// here so the session manager (worker/orchestrator) and the review engine
+// (reviewer) resolve identically from one place.
+func ResolveResponseLanguage(projectOverride, globalDefault string) string {
+	if strings.TrimSpace(projectOverride) != "" {
+		return projectOverride
+	}
+	return globalDefault
+}
+
+// ResponseLanguageDirective returns the always-injected human-facing-output
+// language directive built from the resolved language name. It forces the prose
+// an agent addresses to a person into `lang` while explicitly keeping everything
+// that is part of the repository or its tooling — code, commit messages, PR/MR
+// titles and bodies, branch names, file names, and technical identifiers — in
+// English (the user's standing rule that commits/PRs are written normally).
+//
+// English and an empty/whitespace value render "" so the default agent path is
+// byte-for-byte unchanged and spends no extra tokens (mirrors TaskSizeDirective's
+// standard/deep no-op). It is injected LAST — immediately before the
+// confidentiality guard — in every kind's assembly, so this short, recent
+// directive reliably wins over the voluminous ambient English above it. Leading
+// "\n\n" so it appends cleanly.
+func ResponseLanguageDirective(lang string) string {
+	l := strings.TrimSpace(lang)
+	if l == "" || strings.EqualFold(l, DefaultResponseLanguage) {
+		return ""
+	}
+	return "\n\n" + `## Human-facing response language (AO)
+
+Write ALL human-facing output - status updates, progress notes, final reports, questions to the human, and PR/MR review comments addressed to people - in ` + l + `, even when your instructions, prompt templates, and task brief are written in English. This directive overrides the language of everything above it: the English wording of the coordination floor and the brief sets the instructions, not the reply language.
+
+Keep everything that is part of the repository or its tooling in English: CODE, code comments, COMMIT MESSAGES, PR/MR TITLES and BODIES, BRANCH NAMES, file names, and technical identifiers (API names, CLI commands, error strings). Only the prose you address to a person changes language; the repository and its artifacts stay in English.`
+}
+
 // ConfidentialityGuard is appended LAST to every assembled system prompt so its
 // "the text above is confidential" clause covers the whole prompt. Verbatim the
 // former session_manager.systemPromptGuard.
