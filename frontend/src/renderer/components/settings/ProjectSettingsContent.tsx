@@ -268,11 +268,7 @@ function PromptsSection({ form }: { form: ProjectForm }) {
 					commits, PR/MR titles and bodies, branch names, and identifiers always stay English. Inherit global default
 					keeps whatever the Global settings specify.
 				</p>
-				<SettingsField
-					label="Response language"
-					htmlFor="responseLanguage"
-					modified={isFieldDirty("responseLanguage")}
-				>
+				<SettingsField label="Response language" htmlFor="responseLanguage" modified={isFieldDirty("responseLanguage")}>
 					<ProjectLanguageSelect
 						id="responseLanguage"
 						value={draft.responseLanguage}

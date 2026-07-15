@@ -37,7 +37,8 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		label: "Prompts",
 		Icon: FileText,
 		hint: "additional system prompts appended for this project",
-		keywords: "orchestrator worker reviewer additional system prompt response language thai english localization override",
+		keywords:
+			"orchestrator worker reviewer additional system prompt response language thai english localization override",
 	},
 	{
 		key: "automation",
