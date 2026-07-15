@@ -163,8 +163,11 @@ Non-negotiable: review only — do not push commits, edit files, or modify the b
 func ReferenceConvention() string { return referenceConvention }
 
 // SmokeChecklistProtocol is the always-injected worker instruction to author a
-// manual smoke-test checklist during wrap-up when a change's runtime behavior
-// unit tests can't fully cover. Injected in buildSystemPrompt for KindWorker
+// manual smoke-test checklist once a change is complete and local checks pass,
+// BEFORE the PR/MR is opened, when the change's runtime behavior unit tests
+// can't fully cover (user decision 2026-07-15: smoke-before-PR — the checklist
+// exists before CI can run, so it is no longer gated on CI being green).
+// Injected in buildSystemPrompt for KindWorker
 // only, alongside ReferenceConvention, so it survives an edited/cleared base or
 // an agent override (user decision 2026-07-11: trigger is always-on, prompt-
 // driven; no `ao spawn` flag). Leading "\n\n" so it appends cleanly.
@@ -193,7 +196,7 @@ This task is tagged mechanical - a small, well-scoped change (a rename, a copy t
 
 const smokeChecklistProtocol = "\n\n" + `## Smoke-test checklist (AO)
 
-When you finish a change whose runtime behavior unit tests can't fully cover — UI flows, live SCM/CI polling, native-app behavior, timing/race windows — author a short manual smoke-test checklist (3–6 cases) as part of your wrap-up, after CI is green. Each case is: a one-line ` + "`name`" + ` (what to verify), ` + "`why`" + ` it matters, ordered ` + "`steps`" + `, the ` + "`expected`" + ` result, and the ` + "`prNum`" + ` / ` + "`fileRef`" + ` (file:line) it covers. Author the whole checklist in one call, JSON on stdin so nothing lands in your checkout:
+When you finish a change whose runtime behavior unit tests can't fully cover — UI flows, live SCM/CI polling, native-app behavior, timing/race windows — author a short manual smoke-test checklist (3–6 cases) once the change is complete and your local checks (build, tests, lint) pass, BEFORE you open the PR/MR. Each case is: a one-line ` + "`name`" + ` (what to verify), ` + "`why`" + ` it matters, ordered ` + "`steps`" + `, the ` + "`expected`" + ` result, and the ` + "`prNum`" + ` / ` + "`fileRef`" + ` (file:line) it covers. The PR isn't open yet, so leave ` + "`prNum`" + ` at 0 (you MAY backfill it after opening the PR, but that's optional, not required). Author the whole checklist in one call, JSON on stdin so nothing lands in your checkout:
 
 ` + "```bash\n" + `cat <<'JSON' | ao smoke set "$AO_SESSION_ID" --from-file -
 { "cases": [ { "name": "…", "why": "…", "steps": ["…","…"], "expected": "…", "prNum": 0, "fileRef": "file.go:1" } ] }
