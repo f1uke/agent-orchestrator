@@ -56,10 +56,72 @@ type stubJira struct {
 
 	me    jiraadapter.CurrentUser
 	meErr error
+
+	dlBody  string
+	dlCtype string
+	dlErr   error
+	gotDlID string
 }
 
 func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, error) {
 	return s.res, s.err
+}
+
+func (s *stubJira) DownloadAttachment(_ context.Context, _ domain.SessionID, attachmentID string) (io.ReadCloser, string, error) {
+	s.gotDlID = attachmentID
+	if s.dlErr != nil {
+		return nil, "", s.dlErr
+	}
+	return io.NopCloser(strings.NewReader(s.dlBody)), s.dlCtype, nil
+}
+
+func TestServeJiraAttachment_StreamsBytes(t *testing.T) {
+	svc := &stubJira{dlBody: "PNGBYTES", dlCtype: "image/png"}
+	rec := serveJiraReq(t, svc, http.MethodGet, "/sessions/proj-1/jira/attachments/173517", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "PNGBYTES" {
+		t.Errorf("body = %q", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("content-type = %q", ct)
+	}
+	if svc.gotDlID != "173517" {
+		t.Errorf("attachment id = %q", svc.gotDlID)
+	}
+}
+
+func TestServeJiraAttachment_NotImplementedWhenNoService(t *testing.T) {
+	rec := serveJiraReq(t, nil, http.MethodGet, "/sessions/proj-1/jira/attachments/1", nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+func TestServeJiraAttachment_ErrorMapsToStatus(t *testing.T) {
+	svc := &stubJira{dlErr: jiraadapter.ErrNotFound}
+	rec := serveJiraReq(t, svc, http.MethodGet, "/sessions/proj-1/jira/attachments/999", nil)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("status = %d, want a non-200 error", rec.Code)
+	}
+}
+
+func TestJiraIssueDTOMapsAttachments(t *testing.T) {
+	iss := jiraadapter.Issue{Key: "DEMO-1", Attachments: []jiraadapter.Attachment{
+		{ID: "173517", Filename: "a.png", MimeType: "image/png"},
+		{ID: "173520", Filename: "clip.mp4", MimeType: "video/mp4"},
+	}}
+	dto := jiraIssueDTO(iss)
+	if len(dto.Attachments) != 2 {
+		t.Fatalf("attachments = %d, want 2", len(dto.Attachments))
+	}
+	if dto.Attachments[0].ID != "173517" || dto.Attachments[0].Filename != "a.png" || dto.Attachments[0].MimeType != "image/png" {
+		t.Errorf("attachment[0] = %+v", dto.Attachments[0])
+	}
+	if dto.Attachments[1].MimeType != "video/mp4" {
+		t.Errorf("attachment[1] mime = %q", dto.Attachments[1].MimeType)
+	}
 }
 
 func (s *stubJira) Transitions(_ context.Context, _ domain.SessionID, key string) ([]jiraadapter.Transition, error) {

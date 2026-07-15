@@ -3,6 +3,7 @@ import { ArrowUpRight, ChevronDown, Plus } from "lucide-react";
 import { useSessionJiraContext, useUnlinkJira, type JiraIssue, type JiraSubtask } from "../hooks/useSessionJiraContext";
 import { formatSprintDates, priorityTone, statusPillStyle } from "../lib/jira-format";
 import { JiraAdf } from "./JiraAdf";
+import { JiraMediaProvider } from "./JiraMedia";
 import { JiraLinkDialog } from "./JiraLinkDialog";
 import { JiraMoveStatusDialog } from "./JiraMoveStatusDialog";
 
@@ -52,7 +53,13 @@ export function JiraIssueSection({ sessionId, linked }: { sessionId: string; lin
 			{data.issue.description && data.issue.description.length > 0 ? (
 				<div className="jira-card">
 					<p className="jira-sect-label">Description</p>
-					<JiraAdf nodes={data.issue.description} />
+					<JiraMediaProvider
+						sessionId={sessionId}
+						description={data.issue.description}
+						attachments={data.issue.attachments}
+					>
+						<JiraAdf nodes={data.issue.description} />
+					</JiraMediaProvider>
 				</div>
 			) : null}
 			{data.issue.subtasks && data.issue.subtasks.length > 0 ? (

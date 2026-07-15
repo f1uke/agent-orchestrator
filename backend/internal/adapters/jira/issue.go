@@ -23,6 +23,10 @@ type Issue struct {
 	Sprint      *Sprint
 	Description []adf.Node
 	Subtasks    []Subtask
+	// Attachments are the issue's uploaded files (id/filename/mimeType). The
+	// Summary tab matches a description media node to one of these by filename to
+	// render an inline preview and stream its bytes via the download proxy.
+	Attachments []Attachment
 }
 
 // Sprint is the issue's current/most-relevant sprint.

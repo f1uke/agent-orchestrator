@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -44,11 +45,55 @@ type fakeIssues struct {
 	iss jiraadapter.Issue
 	err error
 	got string
+
+	dlBody  string
+	dlCtype string
+	dlErr   error
+	gotDlID string
 }
 
 func (f *fakeIssues) Get(_ context.Context, key string) (jiraadapter.Issue, error) {
 	f.got = key
 	return f.iss, f.err
+}
+
+func (f *fakeIssues) DownloadAttachment(_ context.Context, attachmentID string) (io.ReadCloser, string, error) {
+	f.gotDlID = attachmentID
+	if f.dlErr != nil {
+		return nil, "", f.dlErr
+	}
+	return io.NopCloser(strings.NewReader(f.dlBody)), f.dlCtype, nil
+}
+
+func TestDownloadAttachment_StreamsForLinkedSession(t *testing.T) {
+	issues := &fakeIssues{dlBody: "BYTES", dlCtype: "image/png"}
+	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-1")}, issues, nil, nil)
+	rc, ctype, err := svc.DownloadAttachment(context.Background(), "s1", "173517")
+	if err != nil {
+		t.Fatalf("DownloadAttachment: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+	b, _ := io.ReadAll(rc)
+	if string(b) != "BYTES" || ctype != "image/png" {
+		t.Fatalf("got %q %q", b, ctype)
+	}
+	if issues.gotDlID != "173517" {
+		t.Errorf("attachment id = %q", issues.gotDlID)
+	}
+}
+
+func TestDownloadAttachment_UnlinkedSessionErrors(t *testing.T) {
+	svc := New(fakeSessions{sess: sessionWith("")}, &fakeIssues{}, nil, nil)
+	if _, _, err := svc.DownloadAttachment(context.Background(), "s1", "1"); err == nil {
+		t.Fatal("want error for unlinked session")
+	}
+}
+
+func TestDownloadAttachment_UnconfiguredErrors(t *testing.T) {
+	svc := New(fakeSessions{sess: sessionWith("jira:DEMO-1")}, nil, nil, nil)
+	if _, _, err := svc.DownloadAttachment(context.Background(), "s1", "1"); !errors.Is(err, jiraadapter.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
 }
 
 type fakeMover struct {

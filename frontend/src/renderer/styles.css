@@ -1627,6 +1627,24 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	margin: 0;
 }
 
+/* Inline media preview (image/video thumbnail) rendered in place of the
+   attachment chip. Kept inline-block so it flows inside ADF paragraphs and table
+   cells without breaking their layout. */
+.jira-adf__media-thumb {
+	display: inline-block;
+	vertical-align: top;
+	margin: 2px 6px 9px 0;
+	line-height: 0;
+}
+
+.jira-adf__media-thumb > * {
+	transition: opacity 0.12s ease;
+}
+
+.jira-adf__media-thumb > *:hover {
+	opacity: 0.9;
+}
+
 .jira-adf__panel {
 	border-radius: 8px;
 	padding: 10px 12px;

@@ -193,6 +193,8 @@ var schemaNames = map[string]string{
 	"ControllersJiraSprint":                       "JiraSprint",
 	"ControllersJiraParentRef":                    "JiraParentRef",
 	"ControllersJiraSubtask":                      "JiraSubtask",
+	"ControllersJiraAttachment":                   "JiraAttachment",
+	"ControllersJiraAttachmentParam":              "JiraAttachmentParam",
 	"ControllersJiraTransition":                   "JiraTransition",
 	"ControllersJiraTransitionsResponse":          "JiraTransitionsResponse",
 	"ControllersJiraMoveRequest":                  "JiraMoveRequest",
@@ -570,6 +572,13 @@ func jiraOperations() []operation {
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/jira/attachments/{attachmentId}", id: "serveJiraAttachment", tag: "jira",
+			summary:      "Stream one Jira attachment's bytes for inline media previews (display-only)",
+			pathParams:   []any{controllers.JiraAttachmentParam{}},
+			resps:        []respUnit{{http.StatusOK, ""}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
 		},
 		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/jira", id: "linkSessionJira", tag: "jira",
