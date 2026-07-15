@@ -356,13 +356,9 @@ func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) 
 
 	var jobs []restJob
 	if pipeline.ID != 0 {
-		jobsPath := "projects/" + projectID(ref.Repo) + "/pipelines/" + strconv.Itoa(pipeline.ID) + "/jobs"
-		resp, err = p.client.doREST(ctx, jobsPath, nil)
+		jobs, err = p.fetchAllPipelineJobs(ctx, ref.Repo, pipeline.ID)
 		if err != nil {
 			return ports.SCMObservation{}, err
-		}
-		if err := json.Unmarshal(resp.Body, &jobs); err != nil {
-			return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode pipeline jobs: %w", err)
 		}
 	}
 
@@ -648,6 +644,43 @@ func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (
 // against a server that never signals a final page. 100 pages × 100 per page =
 // 10k discussions, far beyond any real MR.
 const maxDiscussionPages = 100
+
+// maxPipelineJobPages bounds the pipeline-jobs pagination loop. 20 pages × 100
+// per page = 2k jobs, far beyond any real pipeline.
+const maxPipelineJobPages = 20
+
+// fetchAllPipelineJobs pages through a pipeline's jobs endpoint and returns every
+// job. GitLab paginates /pipelines/:id/jobs (default 20, max 100 per page) and
+// orders jobs newest-id-first, so a large pipeline's EARLY-stage jobs (e.g. a
+// lint gate) land on later pages. Reading only the first page silently dropped
+// them: a pipeline could report status=failed while every job AO saw was
+// skipped, leaving CI.FailedChecks empty — so the CI-fail nudge (which needs a
+// failed check row) never fired even though ci_state was failing. Same class of
+// bug as the discussions page-1-only truncation (fix/reviews-gitlab-resolved-
+// refresh). Offset pagination guarantees a short page (< perPage) is the last.
+func (p *Provider) fetchAllPipelineJobs(ctx context.Context, repo ports.SCMRepo, pipelineID int) ([]restJob, error) {
+	const perPage = 100
+	jobsPath := "projects/" + projectID(repo) + "/pipelines/" + strconv.Itoa(pipelineID) + "/jobs"
+	var all []restJob
+	for page := 1; page <= maxPipelineJobPages; page++ {
+		q := url.Values{}
+		q.Set("per_page", strconv.Itoa(perPage))
+		q.Set("page", strconv.Itoa(page))
+		resp, err := p.client.doREST(ctx, jobsPath, q)
+		if err != nil {
+			return nil, err
+		}
+		var batch []restJob
+		if err := json.Unmarshal(resp.Body, &batch); err != nil {
+			return nil, fmt.Errorf("gitlab scm: decode pipeline jobs page %d: %w", page, err)
+		}
+		all = append(all, batch...)
+		if len(batch) < perPage {
+			break
+		}
+	}
+	return all, nil
+}
 
 // fetchAllDiscussions pages through GitLab's MR discussions endpoint and returns
 // every discussion. GitLab paginates discussions (default 20, max 100 per page)
