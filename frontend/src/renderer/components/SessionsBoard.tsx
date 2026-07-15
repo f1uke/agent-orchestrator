@@ -45,7 +45,15 @@ import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
-import { prBrowserUrl, prKindLabel, prRef, providerFromPRURL, sessionPRDisplaySummaries } from "../lib/pr-display";
+import {
+	approvalProgress,
+	prBrowserUrl,
+	prKindLabel,
+	prRef,
+	providerFromPRURL,
+	sessionPRDisplaySummaries,
+} from "../lib/pr-display";
+import { ApprovalMeter } from "./ApprovalMeter";
 import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
 import { LANE_ORDER, LANES, type LaneConfig } from "../lib/lane-indicator";
 import { cn } from "../lib/utils";
@@ -928,6 +936,9 @@ function BoardPRGroup({ group }: { group: BoardPRGroup }) {
 	// A group is one lifecycle status within one session, so its PRs share a
 	// provider in practice; label the kind from the first PR ("PR" / "MR").
 	const kind = group.prs.length > 0 ? prKindLabel(group.prs[0].provider) : "PR";
+	// Approval progress is a per-PR fact; surface it only for a single-PR group
+	// with a known threshold, where it fits the compact footer unambiguously.
+	const progress = group.prs.length === 1 ? approvalProgress(group.prs[0].review) : null;
 	return (
 		<span
 			aria-label={`${group.prs.map((pr) => prRef(pr.provider, pr.number)).join(", ")} ${group.status.label}`}
@@ -948,6 +959,14 @@ function BoardPRGroup({ group }: { group: BoardPRGroup }) {
 				</span>
 			))}
 			<span className={cn("font-medium", group.status.className)}>{group.status.label}</span>
+			{progress?.required != null ? (
+				<span className="inline-flex items-center gap-1">
+					<ApprovalMeter progress={progress} />
+					<span className={cn("font-medium", progress.met ? "text-success" : "text-passive")}>
+						{progress.approved}/{progress.required}
+					</span>
+				</span>
+			) : null}
 		</span>
 	);
 }

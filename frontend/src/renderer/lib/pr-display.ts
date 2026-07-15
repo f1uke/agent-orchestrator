@@ -1,6 +1,55 @@
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { sortedPRs, type PRState, type PullRequestFacts, type WorkspaceSession } from "../types/workspace";
 
+type SessionPRReview = SessionPRSummary["review"];
+
+/**
+ * ApprovalProgress is the shared model the four approval-progress surfaces read.
+ * `required` is null when a rule applies but the threshold is unknown (an SCM
+ * rule that exposes no numeric count) — the count-only "N approved" degrade.
+ */
+export type ApprovalProgress = {
+	approved: number;
+	required: number | null;
+	remaining: number;
+	met: boolean;
+	source: "ao" | "scm";
+};
+
+/**
+ * approvalProgress derives the approval-progress model from a PR review summary,
+ * or null when no rule applies — null preserves each surface's pre-approval
+ * behavior. The count-only case (SCM rule, no numeric threshold) returns a model
+ * with `required: null` so surfaces can show "N approved" without a fraction.
+ */
+export function approvalProgress(review: SessionPRReview): ApprovalProgress | null {
+	const source = review.approvalRuleSource;
+	if (source !== "ao" && source !== "scm") {
+		return null;
+	}
+	const approved = review.approvalsCount ?? 0;
+	const required = review.requiredApprovals != null && review.requiredApprovals > 0 ? review.requiredApprovals : null;
+	const met = required != null && approved >= required;
+	const remaining = required != null ? Math.max(0, required - approved) : 0;
+	return { approved, required, remaining, met, source };
+}
+
+/**
+ * approvalLabel renders the canonical approval-progress text, identical across
+ * surfaces: `A/T approved` (with an optional `· N more needed` shortfall while
+ * short), or count-only `N approved` when the threshold is unknown.
+ */
+export function approvalLabel(progress: ApprovalProgress, opts: { remaining?: boolean } = {}): string {
+	if (progress.required == null) {
+		return `${progress.approved} approved`;
+	}
+	const base = `${progress.approved}/${progress.required} approved`;
+	if (opts.remaining && !progress.met && progress.remaining > 0) {
+		return `${base} · ${progress.remaining} more needed`;
+	}
+	return base;
+}
+
 const prStateRank: Record<PRState, number> = { open: 0, draft: 1, merged: 2, closed: 3 };
 const ciStates = new Set<SessionPRSummary["ci"]["state"]>(["unknown", "pending", "passing", "failing"]);
 const reviewDecisions = new Set<SessionPRSummary["review"]["decision"]>([
@@ -45,6 +94,8 @@ export type PRSummaryPart = {
 	overflowLabel?: string;
 	overflowNoun?: string;
 	tone: PRDisplayTone;
+	/** Present on the review part when an approval rule applies — drives the meter. */
+	approval?: ApprovalProgress | null;
 };
 
 export function comparePRDisplaySummaries(a: SessionPRSummary, b: SessionPRSummary): number {
@@ -183,21 +234,43 @@ export function prSummaryParts(pr: SessionPRSummary): PRSummaryPart[] {
 			overflowNoun: mergeOverflowNoun(pr),
 			tone: mergeabilityTone(pr.mergeability.state),
 		},
-		{
-			key: "review",
-			label: "Review",
-			status: reviewLabel(pr.review.decision),
-			summary: reviewSummary(pr),
-			links: reviewLinks(pr),
-			linkTotal: reviewLinkTotal(pr),
-			overflowLabel:
-				pr.state === "draft" || pr.review.decision === "review_required"
-					? undefined
-					: overflowLabel(pr.review.unresolvedBy.length, 3, "reviewer"),
-			overflowNoun: "reviewer",
-			tone: reviewTone(pr.review.decision, pr.review.hasUnresolvedHumanComments),
-		},
+		reviewPart(pr),
 	];
+}
+
+/** The Review part: an approval rule overlays A/T progress + the meter and flips
+ * to success at the threshold; changes-requested and merged/closed keep today's
+ * decision label. */
+function reviewPart(pr: SessionPRSummary): PRSummaryPart {
+	const base: PRSummaryPart = {
+		key: "review",
+		label: "Review",
+		status: reviewLabel(pr.review.decision),
+		summary: reviewSummary(pr),
+		links: reviewLinks(pr),
+		linkTotal: reviewLinkTotal(pr),
+		overflowLabel:
+			pr.state === "draft" || pr.review.decision === "review_required"
+				? undefined
+				: overflowLabel(pr.review.unresolvedBy.length, 3, "reviewer"),
+		overflowNoun: "reviewer",
+		tone: reviewTone(pr.review.decision, pr.review.hasUnresolvedHumanComments),
+	};
+	if (pr.state === "merged" || pr.state === "closed" || pr.review.decision === "changes_requested") {
+		return base;
+	}
+	const progress = approvalProgress(pr.review);
+	if (!progress) {
+		return base;
+	}
+	const short = progress.required != null && !progress.met && progress.remaining > 0;
+	return {
+		...base,
+		status: approvalLabel(progress),
+		summary: short ? `${progress.remaining} more needed` : undefined,
+		tone: progress.met ? "success" : "neutral",
+		approval: progress,
+	};
 }
 
 export function prDiffSummary(pr: SessionPRSummary): string | undefined {

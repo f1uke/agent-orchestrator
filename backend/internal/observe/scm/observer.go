@@ -1142,6 +1142,7 @@ func (o *Observer) refreshReviews(ctx context.Context, subjects map[string]*subj
 		obs.Review.Threads = review.Threads
 		obs.Review.Partial = review.Partial
 		obs.Review.ApprovalsCount = review.ApprovalsCount
+		obs.Review.ApprovalsRequired = review.ApprovalsRequired
 		obs.Review.ApprovalRuleConfigured = review.ApprovalRuleConfigured
 		obs.ObservedAt = now
 		observations[pkey] = obs
@@ -1237,9 +1238,11 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 		reviewObservedAt = obs.ObservedAt
 	}
 	approvalsCount := local.ApprovalsCount
+	approvalsRequired := local.ApprovalsRequired
 	approvalRuleConfigured := local.ApprovalRuleConfigured
 	if opts.reviewFetched && !opts.preserveLocalReviewDecision {
 		approvalsCount = obs.Review.ApprovalsCount
+		approvalsRequired = obs.Review.ApprovalsRequired
 		approvalRuleConfigured = obs.Review.ApprovalRuleConfigured
 	}
 	pr := domain.PullRequest{
@@ -1252,6 +1255,7 @@ func domainFromObservation(sessionID domain.SessionID, obs ports.SCMObservation,
 		CI:                       domain.CIState(firstNonEmpty(obs.CI.Summary, string(domain.CIUnknown))),
 		Review:                   reviewDecision,
 		ApprovalsCount:           approvalsCount,
+		ApprovalsRequired:        approvalsRequired,
 		ApprovalRuleConfigured:   approvalRuleConfigured,
 		Mergeability:             domain.Mergeability(firstNonEmpty(obs.Mergeability.State, string(domain.MergeUnknown))),
 		UpdatedAt:                now,
@@ -1324,6 +1328,7 @@ func observationFromLocal(repo ports.SCMRepo, pr domain.PullRequest, checks []do
 		Review: ports.SCMReviewObservation{
 			Decision:               string(pr.Review),
 			ApprovalsCount:         pr.ApprovalsCount,
+			ApprovalsRequired:      pr.ApprovalsRequired,
 			ApprovalRuleConfigured: pr.ApprovalRuleConfigured,
 		},
 		Mergeability: mergeabilityObservationFromLocal(pr),
@@ -1498,6 +1503,7 @@ func reviewSemanticHash(review ports.SCMReviewObservation) string {
 	type reviewHashPayload struct {
 		Decision               string
 		ApprovalsCount         int
+		ApprovalsRequired      int `json:",omitempty"`
 		ApprovalRuleConfigured bool
 		Reviews                []ports.SCMReviewSummaryObservation
 		Threads                []ports.SCMReviewThreadObservation
@@ -1506,6 +1512,7 @@ func reviewSemanticHash(review ports.SCMReviewObservation) string {
 	return stableHash(reviewHashPayload{
 		Decision:               review.Decision,
 		ApprovalsCount:         review.ApprovalsCount,
+		ApprovalsRequired:      review.ApprovalsRequired,
 		ApprovalRuleConfigured: review.ApprovalRuleConfigured,
 		Reviews:                review.Reviews,
 		Threads:                review.Threads,

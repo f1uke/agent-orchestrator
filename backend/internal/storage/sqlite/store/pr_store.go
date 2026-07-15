@@ -363,6 +363,7 @@ func genPRParams(r domain.PullRequest) gen.UpsertPRParams {
 		ReviewObservedAt:         nullTime(r.ReviewObservedAt),
 		ApprovalsCount:           int64(r.ApprovalsCount),
 		ApprovalRuleConfigured:   boolInt(r.ApprovalRuleConfigured),
+		ApprovalsRequired:        int64(r.ApprovalsRequired),
 	}
 }
 
@@ -444,6 +445,7 @@ func prRowFromGen(p gen.PR) domain.PullRequest {
 		ReviewObservedAt:         timeFromNull(p.ReviewObservedAt),
 		ApprovalsCount:           int(p.ApprovalsCount),
 		ApprovalRuleConfigured:   p.ApprovalRuleConfigured != 0,
+		ApprovalsRequired:        int(p.ApprovalsRequired),
 	}
 }
 

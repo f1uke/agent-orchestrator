@@ -75,6 +75,7 @@ type PR struct {
 	LastNudgeSignature       string
 	ApprovalsCount           int64
 	ApprovalRuleConfigured   int64
+	ApprovalsRequired        int64
 }
 
 type PRCheck struct {

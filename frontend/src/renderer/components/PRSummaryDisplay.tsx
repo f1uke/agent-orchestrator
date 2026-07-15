@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from "react";
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { prSummaryParts, type PRDisplayTone, type PRSummaryLink } from "../lib/pr-display";
 import { cn } from "../lib/utils";
+import { ApprovalMeter } from "./ApprovalMeter";
 
 const toneClass: Record<PRDisplayTone, string> = {
 	neutral: "text-muted-foreground",
@@ -105,6 +106,7 @@ export function PRSummaryParts({
 					<div key={part.key} className={cn("min-w-0", stacked ? "flex flex-col" : "inline-flex flex-wrap gap-x-1")}>
 						<div className="min-w-0 truncate">
 							<span className="text-passive">{part.label}</span>{" "}
+							{part.approval ? <ApprovalMeter className="mr-1" progress={part.approval} /> : null}
 							<span className={cn("font-medium", toneClass[part.tone])}>{part.status}</span>
 							{part.summary ? <span className="text-passive"> · {part.summary}</span> : null}
 						</div>

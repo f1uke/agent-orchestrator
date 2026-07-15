@@ -57,6 +57,36 @@ func TestFetchReviewThreads(t *testing.T) {
 	}
 }
 
+// TestFetchReviewThreads_ApprovalsRequired proves the adapter surfaces the SCM's
+// own required-approval count so the display can render A/T progress for a
+// GitLab-native rule (not just AO's additive one).
+func TestFetchReviewThreads_ApprovalsRequired(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Fproj/merge_requests/7/discussions", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Fproj/merge_requests/7/approvals", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"username":"lead"}}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := newTestProvider(t, srv.URL)
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj"}, Number: 7}
+	rev, err := p.FetchReviewThreads(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("FetchReviewThreads: %v", err)
+	}
+	if !rev.ApprovalRuleConfigured {
+		t.Fatalf("ApprovalRuleConfigured=false want true (approvals_required>0)")
+	}
+	if rev.ApprovalsRequired != 2 {
+		t.Fatalf("ApprovalsRequired=%d want 2", rev.ApprovalsRequired)
+	}
+	if rev.ApprovalsCount != 1 {
+		t.Fatalf("ApprovalsCount=%d want 1", rev.ApprovalsCount)
+	}
+}
+
 // TestFetchReviewThreads_PaginatesDiscussions proves the adapter pages through
 // GitLab's /discussions endpoint instead of reading only the first page. GitLab
 // paginates discussions (default 20, max 100 per page) and system notes count

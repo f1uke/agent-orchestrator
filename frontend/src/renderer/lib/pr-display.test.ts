@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import {
+	type ApprovalProgress,
+	approvalLabel,
+	approvalProgress,
 	isArchivedPRState,
 	prBrowserUrl,
 	prDiffSummary,
@@ -386,5 +389,129 @@ describe("isArchivedPRState", () => {
 		expect(isArchivedPRState("closed")).toBe(true);
 		expect(isArchivedPRState("open")).toBe(false);
 		expect(isArchivedPRState("draft")).toBe(false);
+	});
+});
+
+describe("approvalProgress", () => {
+	const review = (
+		over: Partial<SessionPRSummary["review"]> = {},
+	): SessionPRSummary["review"] => ({
+		decision: "none",
+		hasUnresolvedHumanComments: false,
+		unresolvedBy: [],
+		...over,
+	});
+
+	it("returns null when no rule applies (source none / absent)", () => {
+		expect(approvalProgress(review({ approvalRuleSource: "none", approvalsCount: 1 }))).toBeNull();
+		expect(approvalProgress(review())).toBeNull();
+	});
+
+	it("reports a shortfall while under the AO threshold", () => {
+		expect(approvalProgress(review({ approvalRuleSource: "ao", approvalsCount: 1, requiredApprovals: 2 }))).toEqual({
+			approved: 1,
+			required: 2,
+			remaining: 1,
+			met: false,
+			source: "ao",
+		});
+	});
+
+	it("marks met at the threshold with no remaining", () => {
+		const got = approvalProgress(review({ approvalRuleSource: "ao", approvalsCount: 2, requiredApprovals: 2 }));
+		expect(got).toMatchObject({ approved: 2, required: 2, remaining: 0, met: true });
+	});
+
+	it("keeps the honest count when over the threshold", () => {
+		const got = approvalProgress(review({ approvalRuleSource: "scm", approvalsCount: 3, requiredApprovals: 2 }));
+		expect(got).toMatchObject({ approved: 3, required: 2, remaining: 0, met: true, source: "scm" });
+	});
+
+	it("degrades to count-only when an SCM rule exposes no numeric threshold", () => {
+		const got = approvalProgress(review({ approvalRuleSource: "scm", approvalsCount: 3 }));
+		expect(got).toMatchObject({ approved: 3, required: null, remaining: 0, met: false, source: "scm" });
+	});
+
+	it("defaults an absent count to zero", () => {
+		const got = approvalProgress(review({ approvalRuleSource: "ao", requiredApprovals: 2 }));
+		expect(got).toMatchObject({ approved: 0, required: 2, remaining: 2, met: false });
+	});
+});
+
+describe("prSummaryParts — approval progress (Review row)", () => {
+	const glReview = (review: Partial<SessionPRSummary["review"]>) =>
+		prSummaryParts(
+			summary({
+				provider: "gitlab",
+				url: "https://gitlab.com/acme/repo/-/merge_requests/3",
+				htmlUrl: "https://gitlab.com/acme/repo/-/merge_requests/3",
+				review: { decision: "none", hasUnresolvedHumanComments: false, unresolvedBy: [], ...review },
+			}),
+		).find((part) => part.key === "review");
+
+	it("shows the meter, fraction, and shortfall while short", () => {
+		expect(glReview({ approvalRuleSource: "ao", approvalsCount: 1, requiredApprovals: 2 })).toMatchObject({
+			status: "1/2 approved",
+			summary: "1 more needed",
+			tone: "neutral",
+			approval: { approved: 1, required: 2, met: false },
+		});
+	});
+
+	it("turns success with no shortfall once met", () => {
+		expect(glReview({ approvalRuleSource: "ao", approvalsCount: 2, requiredApprovals: 2 })).toMatchObject({
+			status: "2/2 approved",
+			tone: "success",
+			approval: { met: true },
+		});
+		expect(glReview({ approvalRuleSource: "ao", approvalsCount: 2, requiredApprovals: 2 })?.summary).toBeUndefined();
+	});
+
+	it("lets changes-requested keep its own label over progress", () => {
+		expect(
+			glReview({ decision: "changes_requested", approvalRuleSource: "ao", approvalsCount: 1, requiredApprovals: 2 }),
+		).toMatchObject({ status: "Changes requested", tone: "warning" });
+	});
+
+	it("keeps today's decision label when no rule applies", () => {
+		const part = prSummaryParts(summary({ review: { decision: "approved", hasUnresolvedHumanComments: false, unresolvedBy: [] } })).find(
+			(p) => p.key === "review",
+		);
+		expect(part).toMatchObject({ status: "Approved" });
+		expect(part?.approval).toBeFalsy();
+	});
+});
+
+describe("approvalLabel", () => {
+	const p = (over: Partial<ApprovalProgress>): ApprovalProgress => ({
+		approved: 1,
+		required: 2,
+		remaining: 1,
+		met: false,
+		source: "ao",
+		...over,
+	});
+
+	it("shows the fraction plus a plain-language shortfall", () => {
+		expect(approvalLabel(p({}), { remaining: true })).toBe("1/2 approved · 1 more needed");
+		expect(approvalLabel(p({ approved: 0, remaining: 2 }), { remaining: true })).toBe(
+			"0/2 approved · 2 more needed",
+		);
+	});
+
+	it("omits the shortfall when not requested", () => {
+		expect(approvalLabel(p({}))).toBe("1/2 approved");
+	});
+
+	it("drops the shortfall once met", () => {
+		expect(approvalLabel(p({ approved: 2, remaining: 0, met: true }), { remaining: true })).toBe("2/2 approved");
+	});
+
+	it("keeps the honest count when over threshold", () => {
+		expect(approvalLabel(p({ approved: 3, remaining: 0, met: true }), { remaining: true })).toBe("3/2 approved");
+	});
+
+	it("renders count-only when the threshold is unknown", () => {
+		expect(approvalLabel(p({ approved: 3, required: null, source: "scm" }), { remaining: true })).toBe("3 approved");
 	});
 });
