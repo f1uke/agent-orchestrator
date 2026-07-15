@@ -1748,6 +1748,46 @@ paths:
       summary: Bind an existing session to a Jira issue (validated) after the fact
       tags:
       - jira
+  /api/v1/sessions/{sessionId}/jira/attachments/{attachmentId}:
+    get:
+      operationId: serveJiraAttachment
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Jira attachment id (numeric).
+        in: path
+        name: attachmentId
+        required: true
+        schema:
+          description: Jira attachment id (numeric).
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stream one Jira attachment's bytes for inline media previews (display-only)
+      tags:
+      - jira
   /api/v1/sessions/{sessionId}/jira/move:
     post:
       operationId: moveSessionJiraStatus

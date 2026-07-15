@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -33,6 +34,9 @@ type JiraService interface {
 	GetIssue(ctx context.Context, key string) (jiraadapter.Issue, error)
 	IssueTransitions(ctx context.Context, key string) ([]jiraadapter.Transition, error)
 	MoveIssue(ctx context.Context, key, transitionID string) (jirasvc.MoveResult, error)
+	// DownloadAttachment streams one attachment's bytes for the Summary tab's
+	// inline media previews. Caller closes the reader.
+	DownloadAttachment(ctx context.Context, id domain.SessionID, attachmentID string) (io.ReadCloser, string, error)
 }
 
 // JiraController serves the session-scoped, display-only Jira context route.
@@ -55,6 +59,32 @@ func (c *JiraController) Register(r chi.Router) {
 	r.Delete("/sessions/{sessionId}/jira", c.unlink)
 	r.Get("/sessions/{sessionId}/jira/transitions", c.transitions)
 	r.Post("/sessions/{sessionId}/jira/move", c.move)
+	r.Get("/sessions/{sessionId}/jira/attachments/{attachmentId}", c.attachment)
+}
+
+// attachment streams one Jira attachment's bytes for the Summary tab's inline
+// media previews (image thumbnail / video player) and the shared lightbox. A
+// READ proxy over the adapter's DownloadAttachment; honours the display-only rule
+// (never writes to Jira). Bytes flow daemon → renderer, which renders them from a
+// blob: URL (a direct loopback-http subresource is CSP-blocked on app://).
+func (c *JiraController) attachment(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/jira/attachments/{attachmentId}")
+		return
+	}
+	rc, ctype, err := c.Svc.DownloadAttachment(r.Context(), sessionID(r), strings.TrimSpace(chi.URLParam(r, "attachmentId")))
+	if err != nil {
+		writeJiraError(w, r, err)
+		return
+	}
+	defer func() { _ = rc.Close() }()
+	if ctype != "" {
+		w.Header().Set("Content-Type", ctype)
+	}
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, rc)
 }
 
 // search resolves the pre-session issue picker query (New task + link-existing)
