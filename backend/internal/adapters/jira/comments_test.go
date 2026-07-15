@@ -153,6 +153,69 @@ func TestResolveMediaID_ParsesMediaUUID(t *testing.T) {
 	})
 }
 
+func TestDownloadAttachment_FollowsRedirectAndStreams(t *testing.T) {
+	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("PNGBYTES"))
+	}))
+	defer media.Close()
+
+	var gotPath string
+	jira := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.URL.Path != "/rest/api/3/attachment/content/173517" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Redirect(w, r, media.URL+"/file/uuid/binary?token=abc", http.StatusSeeOther)
+	}))
+	defer jira.Close()
+
+	c := NewClient(WithHTTPDoer(jira.Client().Do), WithConfigSource(staticConfig(jira.URL)))
+	rc, ctype, err := c.DownloadAttachment(context.Background(), "173517")
+	if err != nil {
+		t.Fatalf("DownloadAttachment: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+	body, _ := io.ReadAll(rc)
+	if string(body) != "PNGBYTES" {
+		t.Errorf("body = %q, want PNGBYTES", body)
+	}
+	if ctype != "image/png" {
+		t.Errorf("content-type = %q, want image/png", ctype)
+	}
+	if gotPath != "/rest/api/3/attachment/content/173517" {
+		t.Errorf("path = %q", gotPath)
+	}
+}
+
+func TestDownloadAttachment_EmptyIDRejectedBeforeHTTP(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	if _, _, err := c.DownloadAttachment(context.Background(), "  "); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("err = %v, want ErrBadRequest", err)
+	}
+	if called {
+		t.Error("HTTP called for empty id")
+	}
+}
+
+func TestDownloadAttachment_StatusErrorMapsToSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"errorMessages":["gone"]}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewClient(WithHTTPDoer(srv.Client().Do), WithConfigSource(staticConfig(srv.URL)))
+	if _, _, err := c.DownloadAttachment(context.Background(), "999"); err == nil {
+		t.Fatal("want error for 404")
+	}
+}
+
 func TestAddComment_PostsADFBody(t *testing.T) {
 	var gotMethod, gotPath, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

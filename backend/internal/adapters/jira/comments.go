@@ -161,6 +161,39 @@ func (c *Client) ResolveMediaID(ctx context.Context, attachmentID string) (strin
 	return "", fmt.Errorf("%w: no media id for attachment %s", ErrUnavailable, attachmentID)
 }
 
+// DownloadAttachment streams an attachment's bytes for inline display in the
+// Summary tab (an image thumbnail / video player) and the shared lightbox. It
+// GETs GET /rest/api/3/attachment/content/{id}, which 303-redirects to the media
+// binary; the HTTP client follows the redirect and we hand back the body stream
+// plus its Content-Type. This is the READ sibling of ResolveMediaID over the
+// SAME auth seam (no new fetch path invented) — the difference is we let the
+// redirect run to the bytes instead of capping it to read the media UUID. The
+// caller MUST close the returned reader.
+func (c *Client) DownloadAttachment(ctx context.Context, attachmentID string) (io.ReadCloser, string, error) {
+	attachmentID = strings.TrimSpace(attachmentID)
+	if attachmentID == "" {
+		return nil, "", fmt.Errorf("%w: empty attachment id", ErrBadRequest)
+	}
+	cfg, err := c.config()
+	if err != nil {
+		return nil, "", err
+	}
+	url := cfg.baseURL + "/rest/api/3/attachment/content/" + attachmentID
+	req, err := newJiraRequest(ctx, cfg, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := c.httpDo(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: download attachment %s: %w", ErrUnavailable, attachmentID, err)
+	}
+	if resp.StatusCode >= 400 {
+		defer func() { _ = resp.Body.Close() }()
+		return nil, "", writeStatusError(resp, attachmentID)
+	}
+	return resp.Body, resp.Header.Get("Content-Type"), nil
+}
+
 // AddComment posts an ADF comment to the issue via
 // POST /rest/api/3/issue/{key}/comment. body is the ADF document node, marshaled
 // under "body". Returns the created comment plus a deep link to it.
