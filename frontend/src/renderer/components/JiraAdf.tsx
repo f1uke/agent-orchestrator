@@ -1,6 +1,7 @@
 import { createElement, Fragment, type ReactNode } from "react";
 import { ArrowUpRight, Check, Paperclip } from "lucide-react";
 import type { AdfNode } from "../hooks/useSessionJiraContext";
+import { JiraMediaNode } from "./JiraMedia";
 
 /**
  * Renders a Jira description (normalized ADF node tree) as safe React elements.
@@ -75,12 +76,9 @@ function AdfBlock({ node }: { node: AdfNode }): ReactNode {
 			return <div className="jira-adf__media-wrap">{children()}</div>;
 		case "media":
 		case "mediaInline":
-			return (
-				<span className="jira-adf__att">
-					<Paperclip className="jira-adf__att-icon" aria-hidden="true" />
-					{node.attrs?.filename || "attachment"}
-				</span>
-			);
+			// Inline preview when a matching attachment resolves (Summary tab),
+			// else the filename chip (via AttachmentChip). See JiraMedia.
+			return <JiraMediaNode node={node} />;
 		case "inlineCard":
 		case "blockCard":
 			return <SmartLink url={node.attrs?.url} />;
@@ -149,6 +147,17 @@ function renderText(node: AdfNode): ReactNode {
 		}
 	}
 	return <>{el}</>;
+}
+
+/** The gray attachment chip (Paperclip + filename) — the fallback for a media node
+ * with no matching attachment, and the render outside a JiraMediaProvider. */
+export function AttachmentChip({ filename }: { filename?: string }) {
+	return (
+		<span className="jira-adf__att">
+			<Paperclip className="jira-adf__att-icon" aria-hidden="true" />
+			{filename || "attachment"}
+		</span>
+	);
 }
 
 function SmartLink({ url }: { url?: string }) {

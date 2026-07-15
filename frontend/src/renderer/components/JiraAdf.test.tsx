@@ -1,7 +1,8 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { AdfNode } from "../hooks/useSessionJiraContext";
 import { JiraAdf } from "./JiraAdf";
+import { JiraMediaProvider } from "./JiraMedia";
 
 function renderAdf(nodes: AdfNode[]) {
 	return render(<JiraAdf nodes={nodes} />).container;
@@ -128,5 +129,48 @@ describe("JiraAdf", () => {
 			} as AdfNode,
 		]);
 		expect(c.textContent).toContain("kept");
+	});
+});
+
+describe("JiraAdf inline media (with JiraMediaProvider)", () => {
+	beforeEach(() => {
+		global.URL.createObjectURL = vi.fn(() => "blob:mock");
+		global.URL.revokeObjectURL = vi.fn();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ({ ok: true, blob: async () => new Blob(["x"]) })) as unknown as typeof fetch,
+		);
+	});
+
+	const mediaNodes: AdfNode[] = [
+		{ type: "mediaSingle", content: [{ type: "media", attrs: { filename: "shot.png" } }] } as AdfNode,
+	];
+
+	function renderWithProvider(attachments: { id: string; filename?: string; mimeType?: string }[]) {
+		return render(
+			<JiraMediaProvider sessionId="proj-1" description={mediaNodes} attachments={attachments}>
+				<JiraAdf nodes={mediaNodes} />
+			</JiraMediaProvider>,
+		);
+	}
+
+	it("renders an inline preview (openable) for a media node matched by filename", async () => {
+		const { container } = renderWithProvider([{ id: "173517", filename: "shot.png", mimeType: "image/png" }]);
+		expect(await screen.findByRole("button", { name: /View shot\.png/i })).toBeInTheDocument();
+		// The plain filename chip is NOT rendered when a preview resolves.
+		expect(container.querySelector(".jira-adf__att")).toBeNull();
+		expect(container.querySelector(".jira-adf__media-thumb")).not.toBeNull();
+	});
+
+	it("opens the shared lightbox on click", async () => {
+		renderWithProvider([{ id: "173517", filename: "shot.png", mimeType: "image/png" }]);
+		fireEvent.click(await screen.findByRole("button", { name: /View shot\.png/i }));
+		expect(await screen.findByLabelText(/Evidence viewer/i)).toBeInTheDocument();
+	});
+
+	it("falls back to the filename chip when no attachment matches", () => {
+		const { container } = renderWithProvider([{ id: "999", filename: "other.png", mimeType: "image/png" }]);
+		expect(container.querySelector(".jira-adf__att")?.textContent).toContain("shot.png");
+		expect(container.querySelector(".jira-adf__media-thumb")).toBeNull();
 	});
 });
