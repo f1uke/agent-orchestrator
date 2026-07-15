@@ -37,8 +37,18 @@ const { workspaces, panels } = vi.hoisted(() => {
 		kind: "orchestrator",
 		title: "orchestrate",
 	} satisfies WorkspaceSession;
+	const todo = {
+		...worker,
+		id: "sess-todo",
+		title: "queued-task",
+		status: "todo",
+		isTodo: true,
+		baseBranch: "main-fluke",
+		prTarget: "main-fluke",
+		prompt: "do the queued thing",
+	} satisfies WorkspaceSession;
 	const workspaces: WorkspaceSummary[] = [
-		{ id: "proj-1", name: "my-app", path: "/p", type: "main", sessions: [worker, orchestrator] },
+		{ id: "proj-1", name: "my-app", path: "/p", type: "main", sessions: [worker, orchestrator, todo] },
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
 });
@@ -46,6 +56,9 @@ const { workspaces, panels } = vi.hoisted(() => {
 // The terminal and inspector body pull in xterm/SSE machinery irrelevant to
 // the split under test. (The topbar is shell-owned — see ShellTopbar.)
 vi.mock("./CenterPane", () => ({ CenterPane: () => <div>terminal center</div> }));
+vi.mock("./TodoSessionPane", () => ({
+	TodoSessionPane: ({ session }: { session: { id: string } }) => <div>todo editor for {session.id}</div>,
+}));
 vi.mock("./BrowserPanel", () => ({
 	BrowserPanelView: ({
 		poppedOut,
@@ -411,5 +424,24 @@ describe("SessionView", () => {
 		});
 		expect(wakeMock).toHaveBeenCalled();
 		expect(invalidateMock).not.toHaveBeenCalled();
+	});
+
+	// A not-started TODO has no worktree/tmux, so the terminal would sit forever
+	// on "Preparing the worker terminal". The center pane must show the editable
+	// spec instead — while keeping the inspector rail sensible for a TODO.
+	it("renders the editable TODO spec instead of the terminal for a not-started TODO", () => {
+		render(<SessionView sessionId="sess-todo" />);
+
+		expect(screen.getByText("todo editor for sess-todo")).toBeInTheDocument();
+		expect(screen.queryByText("terminal center")).not.toBeInTheDocument();
+		// The Summary/inspector rail still renders for a TODO session.
+		expect(screen.getByTestId("panel-inspector")).toBeInTheDocument();
+	});
+
+	it("renders the terminal, not the TODO editor, for a started session", () => {
+		render(<SessionView sessionId="sess-1" />);
+
+		expect(screen.getByText("terminal center")).toBeInTheDocument();
+		expect(screen.queryByText(/todo editor/)).not.toBeInTheDocument();
 	});
 });
