@@ -94,7 +94,7 @@ func resultsIntro(run []domain.SmokeCheck) string {
 	if skip > 0 {
 		fmt.Fprintf(b, ", %d skipped", skip)
 	}
-	fmt.Fprintf(b, " of %d checks run. Posted from Agent Orchestrator.", len(run))
+	fmt.Fprintf(b, " of %d checks run.", len(run))
 	return b.String()
 }
 
