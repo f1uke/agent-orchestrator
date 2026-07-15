@@ -10,6 +10,7 @@ import { SettingsGroup } from "./SettingsGroup";
 import { SettingsField } from "./SettingsField";
 import { SettingEditorRow } from "./SettingEditorRow";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
+import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import type { PromptKind } from "./useGlobalSettingsForm";
 import type { useGlobalSettingsForm } from "./useGlobalSettingsForm";
 
@@ -63,10 +64,32 @@ function SectionTitle({ title, hint }: { title: string; hint: string }) {
 }
 
 function PromptsSection({ form }: { form: GlobalForm }) {
+	const { draft, setField, isFieldDirty } = form;
 	return (
 		<>
 			<SectionTitle title="Prompts" hint="the global base each session kind starts from" />
-			<p className="mb-4 text-[12px] leading-relaxed text-passive">
+
+			<SettingsGroup title="Human-facing response language">
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					The language every agent (orchestrator, worker, reviewer) writes its human-facing output in - status updates,
+					reports, questions, and PR/MR review comments. Code, commit messages, PR/MR titles and bodies, branch names,
+					and identifiers always stay English. English (the default) injects no directive. A project can override this
+					from its own Settings.
+				</p>
+				<SettingsField
+					label="Default response language"
+					htmlFor="responseLanguage"
+					modified={isFieldDirty("responseLanguage")}
+				>
+					<LanguageSelect
+						id="responseLanguage"
+						value={draft.responseLanguage}
+						onChange={(v) => setField("responseLanguage", v)}
+					/>
+				</SettingsField>
+			</SettingsGroup>
+
+			<p className="mb-4 mt-6 text-[12px] leading-relaxed text-passive">
 				Edit the global base each session kind starts from. AO always appends a protected coordination floor, the
 				confidentiality guard, and dynamic context (git convention, spawn-confirm, session and project ids) — those are
 				not shown here. Use <code>{"{{.ProjectID}}"}</code> in the orchestrator base to insert the project id.
@@ -334,6 +357,28 @@ function SystemSection({ form }: { form: GlobalForm }) {
 				<MigrationControls />
 			</SettingsGroup>
 		</>
+	);
+}
+
+function LanguageSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
+	// An unknown stored value (a free-form language set via API/CLI) is still shown
+	// so the user never silently loses it: append it as an extra option.
+	const options = RESPONSE_LANGUAGE_OPTIONS.includes(value as (typeof RESPONSE_LANGUAGE_OPTIONS)[number])
+		? RESPONSE_LANGUAGE_OPTIONS
+		: [value, ...RESPONSE_LANGUAGE_OPTIONS];
+	return (
+		<Select value={value || "English"} onValueChange={onChange}>
+			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				{options.map((lang) => (
+					<SelectItem key={lang} value={lang}>
+						{lang}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
 	);
 }
 

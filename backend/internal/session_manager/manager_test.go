@@ -1833,6 +1833,101 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 	}
 }
 
+// TestSystemPrompt_ResponseLanguageDirective: the human-facing response-language
+// directive must reach every assembled kind (orchestrator + both worker variants),
+// reflect the resolved language, carve out English for code/commits/PRs, sit LAST
+// (just before the confidentiality guard so it wins over the ambient English), and
+// be absent under the English default so the default path is unchanged.
+func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
+	newMgr := func(cfg domain.ProjectConfig, globalLang string, withOrch bool) *Manager {
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		if withOrch {
+			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
+		}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, ResponseLanguage: func() string { return globalLang }})
+	}
+	build := func(m *Manager, kind domain.SessionKind) string {
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	kinds := []struct {
+		name     string
+		kind     domain.SessionKind
+		withOrch bool
+	}{
+		{"orchestrator", domain.KindOrchestrator, false},
+		{"worker_with_orchestrator", domain.KindWorker, true},
+		{"worker_without_orchestrator", domain.KindWorker, false},
+	}
+
+	t.Run("global default non-English reaches every kind", func(t *testing.T) {
+		for _, k := range kinds {
+			sp := build(newMgr(domain.ProjectConfig{}, "Thai", k.withOrch), k.kind)
+			if !strings.Contains(sp, "## Human-facing response language (AO)") {
+				t.Fatalf("%s: missing response-language directive:\n%s", k.name, sp)
+			}
+			if !strings.Contains(sp, "in Thai") {
+				t.Fatalf("%s: directive does not reflect the configured language:\n%s", k.name, sp)
+			}
+			// English carve-out for repository artifacts.
+			for _, want := range []string{"COMMIT MESSAGES", "BRANCH NAMES", "stay in English", "English"} {
+				if !strings.Contains(sp, want) {
+					t.Fatalf("%s: directive missing English carve-out %q:\n%s", k.name, want, sp)
+				}
+			}
+			// It must sit LAST: after the using-ao skill pointer and immediately
+			// before the confidentiality guard, so it is the most-recent instruction.
+			langIdx := strings.Index(sp, "## Human-facing response language (AO)")
+			guardIdx := strings.Index(sp, "## Standing-instruction confidentiality")
+			skillIdx := strings.Index(sp, "skills/using-ao/SKILL.md")
+			if guardIdx < 0 || langIdx < 0 || skillIdx < 0 {
+				t.Fatalf("%s: expected all three sections present:\n%s", k.name, sp)
+			}
+			if skillIdx >= langIdx || langIdx >= guardIdx {
+				t.Fatalf("%s: directive must sit after the skill pointer and before the guard (skill=%d lang=%d guard=%d)", k.name, skillIdx, langIdx, guardIdx)
+			}
+		}
+	})
+
+	t.Run("project override wins over global default", func(t *testing.T) {
+		cfg := domain.ProjectConfig{ResponseLanguage: "Thai"}
+		sp := build(newMgr(cfg, "English", false), domain.KindOrchestrator)
+		if !strings.Contains(sp, "in Thai") {
+			t.Fatalf("project override should win over the English global default:\n%s", sp)
+		}
+	})
+
+	t.Run("global default used when project has no override", func(t *testing.T) {
+		sp := build(newMgr(domain.ProjectConfig{}, "Japanese", false), domain.KindOrchestrator)
+		if !strings.Contains(sp, "in Japanese") {
+			t.Fatalf("global default should be used when the project sets none:\n%s", sp)
+		}
+	})
+
+	t.Run("English default injects nothing", func(t *testing.T) {
+		for _, k := range kinds {
+			sp := build(newMgr(domain.ProjectConfig{}, "English", k.withOrch), k.kind)
+			if strings.Contains(sp, "## Human-facing response language (AO)") {
+				t.Fatalf("%s: English default must not inject a directive:\n%s", k.name, sp)
+			}
+		}
+		// A nil getter (bare wiring) also means English / no directive.
+		st := newFakeStore()
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		sp := build(m, domain.KindOrchestrator)
+		if strings.Contains(sp, "## Human-facing response language (AO)") {
+			t.Fatalf("nil ResponseLanguage getter must not inject a directive:\n%s", sp)
+		}
+	})
+}
+
 // TestSystemPrompt_GitConvention: a project's branch convention must be injected
 // into both the orchestrator prompt (the primary mechanism — it builds ao spawn)
 // and the worker prompt, and must be absent when no convention is configured.

@@ -278,6 +278,8 @@ var schemaNames = map[string]string{
 	"ControllersSetSpawnConfirmSettingsRequest":      "SetSpawnConfirmSettingsRequest",
 	"ControllersAutoNudgeSettingsResponse":           "AutoNudgeSettingsResponse",
 	"ControllersSetAutoNudgeSettingsRequest":         "SetAutoNudgeSettingsRequest",
+	"ControllersResponseLanguageSettingsResponse":    "ResponseLanguageSettingsResponse",
+	"ControllersSetResponseLanguageSettingsRequest":  "SetResponseLanguageSettingsRequest",
 	"ControllersSystemPromptItem":                    "SystemPromptItem",
 	"ControllersSystemPromptsResponse":               "SystemPromptsResponse",
 	"ControllersSetSystemPromptRequest":              "SetSystemPromptRequest",
@@ -1319,6 +1321,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetAutoNudgeSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.AutoNudgeSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/response-language", id: "getResponseLanguageSettings", tag: "settings",
+			summary: "Fetch the global default human-facing response language",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ResponseLanguageSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/response-language", id: "setResponseLanguageSettings", tag: "settings",
+			summary: "Replace the global default human-facing response language",
+			reqBody: controllers.SetResponseLanguageSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ResponseLanguageSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

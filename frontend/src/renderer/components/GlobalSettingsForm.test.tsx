@@ -131,6 +131,8 @@ function mockGet(importPayload: unknown, promptOverrides: Record<string, string>
 				return { data: { enabled: true }, error: undefined };
 			case "/api/v1/settings/auto-nudge":
 				return { data: { enabled: false }, error: undefined };
+			case "/api/v1/settings/response-language":
+				return { data: { language: "English" }, error: undefined };
 			case "/api/v1/settings/reclaim":
 				return { data: { enabled: true, graceMinutes: 15 }, error: undefined };
 			case "/api/v1/settings/evidence-retention":
@@ -207,6 +209,18 @@ describe("GlobalSettingsForm", () => {
 			expect(deleteMock).toHaveBeenCalledWith("/api/v1/settings/prompts/{kind}", {
 				params: { path: { kind: "orchestrator" } },
 			}),
+		);
+	});
+
+	it("routes the response-language default through the save bar (PUT response-language)", async () => {
+		renderForm();
+		// Prompts is the default section; the language select lives at its top.
+		const language = await screen.findByRole("combobox", { name: "Default response language" });
+		expect(language).toHaveTextContent("English");
+		await chooseOption(language, "Thai");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/response-language", { body: { language: "Thai" } }),
 		);
 	});
 

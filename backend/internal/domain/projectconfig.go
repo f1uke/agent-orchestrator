@@ -55,6 +55,14 @@ type ProjectConfig struct {
 	// for this project's sessions. Empty fields append nothing.
 	SystemPromptAdditions SystemPromptAdditions `json:"systemPromptAdditions,omitempty"`
 
+	// ResponseLanguage is this project's human-facing response-language override.
+	// When non-empty it wins over the global default for every agent kind this
+	// project spawns (orchestrator, worker, reviewer); empty inherits the global
+	// default. It is a free-form language name (e.g. "Thai") and sets only the
+	// language of prose addressed to a person - code, commits, PR/MR titles and
+	// bodies, branch names, and identifiers stay English.
+	ResponseLanguage string `json:"responseLanguage,omitempty"`
+
 	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
 	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
 	// condition onto the existing ready-to-merge conditions. Approvals are only

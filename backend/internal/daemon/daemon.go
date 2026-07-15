@@ -27,6 +27,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
@@ -155,6 +156,19 @@ func Run() error {
 		return fmt.Errorf("auto-nudge settings: %w", err)
 	}
 
+	// The global default human-facing response language is read at spawn/restore
+	// and review-trigger time to inject the always-on language directive into every
+	// agent kind's prompt (resolving a per-project override over this default). A
+	// missing/corrupt file degrades to English (no directive).
+	responseLangSettings, err := responselang.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("response-language settings: %w", err)
+	}
+
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
@@ -185,7 +199,7 @@ func Run() error {
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, jiraClient, log)
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -262,6 +276,7 @@ func Run() error {
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
 		AutoNudge:          autoNudge,
+		ResponseLanguage:   responseLangSettings,
 		EvidenceRetention:  evidenceRetentionSettings,
 		EvidenceSweeper:    evidenceSweep,
 		SystemPrompts:      promptOverrides,

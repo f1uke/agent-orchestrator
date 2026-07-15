@@ -20,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -90,7 +91,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, jiraPoster smokesvc.JiraPoster, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -129,6 +130,10 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// (re)launch, so an edit through the settings API takes effect on the next
 		// spawn/restore without a daemon restart.
 		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },
+		// The global default response language is read at (re)launch and resolved
+		// against the per-project override, so a settings edit takes effect on the
+		// next spawn/restore.
+		ResponseLanguage: func() string { return responseLang.Language() },
 	})
 	// When a worker's PR merges, the lifecycle reducer suspends it in place (card
 	// stays on the board) and calls back here to tear its tmux down, mirroring the
@@ -179,6 +184,9 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// The reviewer base is assembled from the same global overrides at launch,
 		// so an edit through the settings API takes effect on the next review run.
 		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },
+		// The reviewer's review comments follow the same language directive; resolve
+		// the global default here (the per-project override is applied in Trigger).
+		ResponseLanguage: func() string { return responseLang.Language() },
 	})
 	reviewSvc := reviewsvc.New(reviewEngine, store, reviewsvc.WithLifecycleReducer(lcm))
 	// Tie the reviewer pane's lifetime to its worker: when the session manager

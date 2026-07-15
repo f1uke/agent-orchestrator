@@ -42,6 +42,9 @@ type LaunchSpec struct {
 	ReviewerBase string
 	// ReviewerAddition is the project's per-project reviewer addition (may be "").
 	ReviewerAddition string
+	// ResponseLanguage is the resolved human-facing response language (project
+	// override else global default). Empty/English injects no directive.
+	ResponseLanguage string
 	// AgentSessionID is the unique-per-launch native agent session id (see
 	// ports.ReviewInvocation.AgentSessionID). Empty falls back to the handle id.
 	AgentSessionID string

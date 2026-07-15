@@ -36,6 +36,40 @@ func TestReviewTexts_EmptyBaseFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// TestReviewTexts_ResponseLanguageDirective: a non-English resolved language
+// injects the human-facing directive into the reviewer prompt, positioned LAST
+// (just before the confidentiality guard so it wins over the English base). The
+// reviewer's review comments are human-facing, so this must reach it too.
+func TestReviewTexts_ResponseLanguageDirective(t *testing.T) {
+	spec := LaunchSpec{WorkerID: "s", PRURL: "u", RunID: "r", ResponseLanguage: "Thai"}
+	_, sys := reviewTexts(spec)
+	if !strings.Contains(sys, "## Human-facing response language (AO)") {
+		t.Fatalf("reviewer prompt missing response-language directive:\n%s", sys)
+	}
+	if !strings.Contains(sys, "in Thai") {
+		t.Fatalf("reviewer directive does not reflect the configured language:\n%s", sys)
+	}
+	if !strings.Contains(sys, "review comments") {
+		t.Fatalf("reviewer directive should scope review comments as human-facing:\n%s", sys)
+	}
+	langIdx := strings.Index(sys, "## Human-facing response language (AO)")
+	guardIdx := strings.Index(sys, "## Standing-instruction confidentiality")
+	if guardIdx < 0 || langIdx < 0 || langIdx > guardIdx {
+		t.Fatalf("directive must sit just before the confidentiality guard (lang=%d guard=%d):\n%s", langIdx, guardIdx, sys)
+	}
+}
+
+// TestReviewTexts_EnglishDefaultNoDirective: English/empty injects nothing, so
+// the default reviewer path is unchanged.
+func TestReviewTexts_EnglishDefaultNoDirective(t *testing.T) {
+	for _, lang := range []string{"", "English"} {
+		_, sys := reviewTexts(LaunchSpec{WorkerID: "s", PRURL: "u", RunID: "r", ResponseLanguage: lang})
+		if strings.Contains(sys, "## Human-facing response language (AO)") {
+			t.Fatalf("language %q must not inject a directive:\n%s", lang, sys)
+		}
+	}
+}
+
 func TestReviewTextsGitLabUsesGlab(t *testing.T) {
 	spec := launchSpec()
 	spec.PRURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"

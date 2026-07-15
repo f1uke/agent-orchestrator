@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 )
 
@@ -383,6 +384,85 @@ func TestAutoNudgeController_PutInvalidJSON(t *testing.T) {
 
 type autoNudgeSettingsBody struct {
 	Enabled bool `json:"enabled"`
+}
+
+type fakeResponseLangSvc struct {
+	cur   responselang.Settings
+	saved responselang.Settings
+	err   error
+}
+
+func (f *fakeResponseLangSvc) Get() responselang.Settings { return f.cur }
+
+func (f *fakeResponseLangSvc) Set(s responselang.Settings) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = s
+	f.cur = s
+	return nil
+}
+
+func newResponseLangTestServer(t *testing.T, svc *fakeResponseLangSvc) *httptest.Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{ResponseLanguage: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestResponseLangRoutes_DefaultToStubsWithoutService(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/settings/response-language", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+func TestResponseLangController_GetReturnsCurrent(t *testing.T) {
+	svc := &fakeResponseLangSvc{cur: responselang.Settings{Language: "Thai"}}
+	srv := newResponseLangTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/response-language", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got responseLangSettingsBody
+	mustJSON(t, body, &got)
+	if got.Language != "Thai" {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestResponseLangController_PutSaves(t *testing.T) {
+	svc := &fakeResponseLangSvc{cur: responselang.Settings{Language: "English"}}
+	srv := newResponseLangTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/response-language", `{"language":"Thai"}`)
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got responseLangSettingsBody
+	mustJSON(t, body, &got)
+	if got.Language != "Thai" {
+		t.Fatalf("response = %#v", got)
+	}
+	if svc.saved.Language != "Thai" {
+		t.Fatalf("saved=%+v, want Thai", svc.saved)
+	}
+}
+
+func TestResponseLangController_PutInvalidJSON(t *testing.T) {
+	srv := newResponseLangTestServer(t, &fakeResponseLangSvc{})
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/response-language", `{`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_JSON")
+}
+
+type responseLangSettingsBody struct {
+	Language string `json:"language"`
 }
 
 type fakeSystemPromptsSvc struct {

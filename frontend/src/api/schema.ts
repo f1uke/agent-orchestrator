@@ -1212,6 +1212,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/response-language": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the global default human-facing response language */
+        get: operations["getResponseLanguageSettings"];
+        /** Replace the global default human-facing response language */
+        put: operations["setResponseLanguageSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/spawn-confirm": {
         parameters: {
             query?: never;
@@ -1702,6 +1720,7 @@ export interface components {
             gitConvention?: components["schemas"]["GitConventionConfig"];
             orchestrator?: components["schemas"]["RoleOverride"];
             postCreate?: string[];
+            responseLanguage?: string;
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
             symlinks?: string[];
@@ -1772,6 +1791,9 @@ export interface components {
             ok: boolean;
             resolved: boolean;
             sessionId: string;
+        };
+        ResponseLanguageSettingsResponse: {
+            language: string;
         };
         RestartSessionResponse: {
             ok: boolean;
@@ -1995,6 +2017,9 @@ export interface components {
         SetReclaimSettingsRequest: {
             enabled: boolean;
             graceMinutes: number;
+        };
+        SetResponseLanguageSettingsRequest: {
+            language: string;
         };
         SetSessionKeepWarmRequest: {
             enabled: boolean;
@@ -6554,6 +6579,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReclaimSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getResponseLanguageSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseLanguageSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setResponseLanguageSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetResponseLanguageSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseLanguageSettingsResponse"];
                 };
             };
             /** @description Bad Request */

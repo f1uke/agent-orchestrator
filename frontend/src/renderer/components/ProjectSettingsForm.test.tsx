@@ -246,6 +246,62 @@ describe("ProjectSettingsForm", () => {
 		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
 	});
 
+	it("loads and saves the per-project response-language override without dropping hidden config", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				env: { FOO: "bar" },
+				responseLanguage: "Thai",
+			},
+		});
+		renderSettings();
+		await goToSection("Prompts");
+
+		// The stored override shows on the select; changing it dirties the bar.
+		const language = await screen.findByRole("combobox", { name: "Response language" });
+		expect(language).toHaveTextContent("Thai");
+		await chooseOption(language, "Japanese");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.responseLanguage).toBe("Japanese");
+		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
+	});
+
+	it("omits responseLanguage when the project inherits the global default", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				responseLanguage: "Thai",
+			},
+		});
+		renderSettings();
+		await goToSection("Prompts");
+
+		const language = await screen.findByRole("combobox", { name: "Response language" });
+		await chooseOption(language, "Inherit global default");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.responseLanguage).toBeUndefined();
+	});
+
 	it("shows the approval-rule toggle for GitLab projects only, and saves the enabled rule with a threshold", async () => {
 		mockProject({
 			id: "proj-1",

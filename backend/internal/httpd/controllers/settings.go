@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 )
 
@@ -37,6 +38,13 @@ type SpawnConfirmService interface {
 type AutoNudgeService interface {
 	Get() autonudge.Settings
 	Set(autonudge.Settings) error
+}
+
+// ResponseLanguageService is the response-language settings store surface the
+// controller needs. *responselang.Store satisfies this directly.
+type ResponseLanguageService interface {
+	Get() responselang.Settings
+	Set(responselang.Settings) error
 }
 
 // EvidenceRetentionService is the evidence-retention settings store surface the
@@ -78,6 +86,7 @@ type SettingsController struct {
 	Svc               SettingsService
 	SpawnConfirm      SpawnConfirmService
 	AutoNudge         AutoNudgeService
+	ResponseLanguage  ResponseLanguageService
 	EvidenceRetention EvidenceRetentionService
 	EvidenceSweeper   EvidenceSweeper
 	SystemPrompts     SystemPromptsService
@@ -92,6 +101,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/spawn-confirm", c.setSpawnConfirm)
 	r.Get("/settings/auto-nudge", c.getAutoNudge)
 	r.Put("/settings/auto-nudge", c.setAutoNudge)
+	r.Get("/settings/response-language", c.getResponseLanguage)
+	r.Put("/settings/response-language", c.setResponseLanguage)
 	r.Get("/settings/evidence-retention", c.getEvidenceRetention)
 	r.Put("/settings/evidence-retention", c.setEvidenceRetention)
 	r.Post("/settings/evidence-retention/sweep", c.sweepEvidenceRetention)
@@ -182,6 +193,33 @@ func (c *SettingsController) setAutoNudge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, AutoNudgeSettingsResponse{Enabled: next.Enabled})
+}
+
+func (c *SettingsController) getResponseLanguage(w http.ResponseWriter, r *http.Request) {
+	if c.ResponseLanguage == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/response-language")
+		return
+	}
+	s := c.ResponseLanguage.Get()
+	envelope.WriteJSON(w, http.StatusOK, ResponseLanguageSettingsResponse{Language: s.Language})
+}
+
+func (c *SettingsController) setResponseLanguage(w http.ResponseWriter, r *http.Request) {
+	if c.ResponseLanguage == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/response-language")
+		return
+	}
+	var in SetResponseLanguageSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	next := responselang.Settings{Language: in.Language}
+	if err := c.ResponseLanguage.Set(next); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ResponseLanguageSettingsResponse{Language: c.ResponseLanguage.Get().Language})
 }
 
 func (c *SettingsController) getEvidenceRetention(w http.ResponseWriter, r *http.Request) {

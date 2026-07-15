@@ -7,6 +7,7 @@ import { SettingsGroup } from "./SettingsGroup";
 import { SettingsField } from "./SettingsField";
 import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
 import { SettingEditorRow } from "./SettingEditorRow";
+import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import type { useProjectSettingsForm } from "./useProjectSettingsForm";
 
 type Project = components["schemas"]["Project"];
@@ -259,7 +260,28 @@ function PromptsSection({ form }: { form: ProjectForm }) {
 	return (
 		<>
 			<SectionTitle title="Prompts" hint="additional system prompts appended for this project" />
-			<p className="mb-4 text-[12px] leading-relaxed text-passive">
+
+			<SettingsGroup title="Human-facing response language">
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					Overrides the global default for this project's agents (orchestrator, worker, reviewer). They write their
+					human-facing output - status updates, reports, questions, PR/MR review comments - in this language; code,
+					commits, PR/MR titles and bodies, branch names, and identifiers always stay English. Inherit global default
+					keeps whatever the Global settings specify.
+				</p>
+				<SettingsField
+					label="Response language"
+					htmlFor="responseLanguage"
+					modified={isFieldDirty("responseLanguage")}
+				>
+					<ProjectLanguageSelect
+						id="responseLanguage"
+						value={draft.responseLanguage}
+						onChange={(v) => setField("responseLanguage", v)}
+					/>
+				</SettingsField>
+			</SettingsGroup>
+
+			<p className="mb-4 mt-6 text-[12px] leading-relaxed text-passive">
 				Extra text appended on top of the global base for this project. Leave blank to append nothing.
 			</p>
 			<SettingEditorRow
@@ -381,6 +403,37 @@ function GitWorkflowSelect({ id, value, onChange }: { id: string; value: string;
 				{GIT_WORKFLOW_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
 						{opt.label}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+}
+
+function ProjectLanguageSelect({
+	id,
+	value,
+	onChange,
+}: {
+	id: string;
+	value: string;
+	onChange: (value: string) => void;
+}) {
+	// Empty (unset) maps to the "inherit" option; selecting it clears the override.
+	// An unknown stored value (set via API/CLI) is preserved as an extra option so
+	// the user never silently loses it.
+	const known = RESPONSE_LANGUAGE_OPTIONS.includes(value as (typeof RESPONSE_LANGUAGE_OPTIONS)[number]);
+	const extra = value && !known ? [value] : [];
+	return (
+		<Select value={value || "__inherit__"} onValueChange={(v) => onChange(v === "__inherit__" ? "" : v)}>
+			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				<SelectItem value="__inherit__">Inherit global default</SelectItem>
+				{[...extra, ...RESPONSE_LANGUAGE_OPTIONS].map((lang) => (
+					<SelectItem key={lang} value={lang}>
+						{lang}
 					</SelectItem>
 				))}
 			</SelectContent>
