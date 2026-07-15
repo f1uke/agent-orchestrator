@@ -1929,8 +1929,12 @@ export interface components {
         };
         SessionPRReviewSummary: {
             /** @enum {string} */
+            approvalRuleSource?: "none" | "ao" | "scm";
+            approvalsCount?: number;
+            /** @enum {string} */
             decision: "none" | "approved" | "changes_requested" | "review_required";
             hasUnresolvedHumanComments: boolean;
+            requiredApprovals?: null | number;
             unresolvedBy: components["schemas"]["SessionPRUnresolvedReviewer"][];
         };
         SessionPRSummary: {

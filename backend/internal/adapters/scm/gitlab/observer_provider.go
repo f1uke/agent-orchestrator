@@ -634,6 +634,7 @@ func (p *Provider) FetchReviewThreads(ctx context.Context, ref ports.SCMPRRef) (
 	return ports.SCMReviewObservation{
 		Decision:               approvalDecision(approvals),
 		ApprovalsCount:         len(approvals.ApprovedBy),
+		ApprovalsRequired:      approvals.ApprovalsRequired,
 		ApprovalRuleConfigured: approvalRuleConfigured(approvals),
 		Threads:                threads,
 		Partial:                false,

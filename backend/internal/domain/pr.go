@@ -21,6 +21,7 @@ type PRFacts struct {
 	UpdatedAt      time.Time
 
 	ApprovalsCount         int
+	ApprovalsRequired      int
 	ApprovalRuleConfigured bool
 }
 
@@ -41,6 +42,11 @@ type PullRequest struct {
 
 	// ApprovalsCount is the number of distinct approvers the SCM reports.
 	ApprovalsCount int
+	// ApprovalsRequired is the approval count the SCM's own rule requires, when
+	// it enforces one (GitLab: approvals_required). 0 when the SCM exposes no
+	// numeric threshold (e.g. GitHub) or enforces no rule of its own. Only
+	// meaningful alongside ApprovalRuleConfigured.
+	ApprovalsRequired int
 	// ApprovalRuleConfigured is true when the SCM enforces an approval rule of
 	// its own. When false, the project's ApprovalRule (if enabled) decides
 	// readiness from ApprovalsCount.

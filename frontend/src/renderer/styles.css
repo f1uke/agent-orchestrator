@@ -3335,6 +3335,30 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	}
 }
 
+/* Approval-progress meter: a row of pips (approved filled, rest hollow), neutral
+   while short and green once met. `--pip-on` is set per-instance by the
+   component so filled pips take the met/short hue. */
+.approval-meter {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	vertical-align: middle;
+}
+
+.approval-meter__pip {
+	width: 7px;
+	height: 7px;
+	flex: none;
+	border-radius: 50%;
+	border: 1.4px solid var(--fg-passive);
+	background: transparent;
+}
+
+.approval-meter__pip[data-on="true"] {
+	background: var(--pip-on);
+	border-color: var(--pip-on);
+}
+
 .inspector-timeline {
 	position: relative;
 	padding-left: 20px;

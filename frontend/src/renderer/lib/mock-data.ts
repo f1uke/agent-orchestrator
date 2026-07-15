@@ -524,6 +524,49 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 			},
 		}),
 	],
+	// Real in-review sessions carry approval-progress facts so the preview
+	// (VITE_NO_ELECTRON=1) exercises the meter across surfaces and states.
+	// demo-ready: threshold met (green). demo-in-review: short (neutral + "more
+	// needed"). demo-review-stack: an SCM-native rule met.
+	"demo-ready": [
+		prSummary("demo-ready", 323, {
+			provider: "gitlab",
+			review: {
+				decision: "none",
+				hasUnresolvedHumanComments: false,
+				unresolvedBy: [],
+				approvalRuleSource: "ao",
+				approvalsCount: 2,
+				requiredApprovals: 2,
+			},
+		}),
+	],
+	"demo-in-review": [
+		prSummary("demo-in-review", 322, {
+			provider: "gitlab",
+			review: {
+				decision: "none",
+				hasUnresolvedHumanComments: false,
+				unresolvedBy: [],
+				approvalRuleSource: "ao",
+				approvalsCount: 1,
+				requiredApprovals: 2,
+			},
+		}),
+	],
+	"demo-review-stack": [
+		prSummary("demo-review-stack", 319, {
+			provider: "gitlab",
+			review: {
+				decision: "approved",
+				hasUnresolvedHumanComments: false,
+				unresolvedBy: [],
+				approvalRuleSource: "scm",
+				approvalsCount: 2,
+				requiredApprovals: 2,
+			},
+		}),
+	],
 };
 
 // Mock Jira context for the standalone (VITE_NO_ELECTRON) preview, so the

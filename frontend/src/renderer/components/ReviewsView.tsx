@@ -7,8 +7,10 @@ import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPR
 import { useInboxActions } from "../hooks/useInboxActions";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { prRef, providerFromPRURL } from "../lib/pr-display";
+import { approvalLabel, approvalProgress, prRef, providerFromPRURL, type ApprovalProgress } from "../lib/pr-display";
+import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
 import { sortedPRs, type PullRequestFacts, type WorkspaceSession } from "../types/workspace";
+import { ApprovalMeter } from "./ApprovalMeter";
 import {
 	ACCENT,
 	MONO,
@@ -218,6 +220,15 @@ export function ReviewsView({
 	const { resolve, dispatch, send, busy, toast, showToast, doResolve, doReply, doSendQuick, doSendPrompt } =
 		useInboxActions(sessionId);
 
+	// Approval-progress facts live on the SCM summary (the /pr read model), keyed
+	// by PR number so each block can show its human-approval pill.
+	const scmSummaries = useSessionScmSummary(sessionId).data ?? [];
+	const approvalByNumber = useMemo(() => {
+		const m = new Map<number, ApprovalProgress | null>();
+		for (const s of scmSummaries) m.set(s.number, approvalProgress(s.review));
+		return m;
+	}, [scmSummaries]);
+
 	// --- merge PRs (facts) + reviews + comment groups into per-PR blocks ------
 	const blocks = useMemo(() => mergeBlocks(prs, reviewStates, groups), [prs, reviewStates, groups]);
 	const totalUnresolved = blocks.reduce((n, b) => n + b.unresolved.length, 0);
@@ -347,6 +358,7 @@ export function ReviewsView({
 						<PRBlock
 							key={block.number}
 							block={block}
+							approval={approvalByNumber.get(block.number) ?? null}
 							sessionId={sessionId}
 							selectMode={selectMode}
 							selected={selected}
@@ -742,6 +754,34 @@ function StatusPill({ color, label, dot = false }: { color: string; label: strin
 	);
 }
 
+// ApprovalPill is the human-approval-progress chip, deliberately distinct from
+// the AO-reviewer verdict pill: green once the threshold is met, neutral while
+// short. Embeds the pip meter (when the threshold is known) beside the fraction.
+function ApprovalPill({ progress }: { progress: ApprovalProgress }) {
+	const color = progress.met ? P.green : P.secondary;
+	return (
+		<span
+			style={{
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 5,
+				fontSize: 10.5,
+				fontWeight: 600,
+				color,
+				background: `color-mix(in srgb, ${color} 13%, transparent)`,
+				border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
+				padding: "2px 8px",
+				borderRadius: 999,
+				whiteSpace: "nowrap",
+				lineHeight: 1.4,
+			}}
+		>
+			<ApprovalMeter progress={progress} />
+			{approvalLabel(progress, { remaining: true })}
+		</span>
+	);
+}
+
 function ciPill(ci?: string): { color: string; label: string } | null {
 	switch (ci) {
 		case "passing":
@@ -757,6 +797,7 @@ function ciPill(ci?: string): { color: string; label: string } | null {
 
 function PRBlock({
 	block,
+	approval,
 	sessionId,
 	selectMode,
 	selected,
@@ -769,6 +810,7 @@ function PRBlock({
 	onOpenFile,
 }: {
 	block: PRBlockData;
+	approval: ApprovalProgress | null;
 	sessionId: string;
 	selectMode: boolean;
 	selected: Set<string>;
@@ -835,10 +877,11 @@ function PRBlock({
 						</span>
 					)}
 				</div>
-				{(ci || rv || conflict || threads.length > 0) && (
+				{(ci || rv || approval || conflict || threads.length > 0) && (
 					<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
 						{ci && <StatusPill color={ci.color} label={ci.label} dot />}
 						{rv && <StatusPill color={TONE_COLOR[rv.tone]} label={rv.label} />}
+						{approval && <ApprovalPill progress={approval} />}
 						{conflict && <StatusPill color={P.red} label="Conflict" />}
 						{threads.length > 0 && <span style={pill(11, P.secondary, "1px 7px")}>{threads.length}</span>}
 					</div>

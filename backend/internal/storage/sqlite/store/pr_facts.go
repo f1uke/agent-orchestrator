@@ -48,6 +48,7 @@ func (s *Store) ListPRFactsForSession(ctx context.Context, id domain.SessionID) 
 			TargetBranch:           r.TargetBranch,
 			UpdatedAt:              r.UpdatedAt,
 			ApprovalsCount:         int(r.ApprovalsCount),
+			ApprovalsRequired:      int(r.ApprovalsRequired),
 			ApprovalRuleConfigured: r.ApprovalRuleConfigured != 0,
 		})
 	}
@@ -68,6 +69,7 @@ func prFactsFromGen(r gen.GetDisplayPRFactsBySessionRow) domain.PRFacts {
 		ReviewComments:         r.ReviewComments,
 		UpdatedAt:              r.UpdatedAt,
 		ApprovalsCount:         int(r.ApprovalsCount),
+		ApprovalsRequired:      int(r.ApprovalsRequired),
 		ApprovalRuleConfigured: r.ApprovalRuleConfigured != 0,
 	}
 }

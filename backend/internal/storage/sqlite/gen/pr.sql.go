@@ -57,6 +57,7 @@ SELECT
     pr.mergeability,
     pr.approvals_count,
     pr.approval_rule_configured,
+    pr.approvals_required,
     pr.updated_at,
     EXISTS (
         SELECT 1
@@ -82,6 +83,7 @@ type GetDisplayPRFactsBySessionRow struct {
 	Mergeability           domain.Mergeability
 	ApprovalsCount         int64
 	ApprovalRuleConfigured int64
+	ApprovalsRequired      int64
 	UpdatedAt              time.Time
 	ReviewComments         bool
 }
@@ -98,6 +100,7 @@ func (q *Queries) GetDisplayPRFactsBySession(ctx context.Context, sessionID doma
 		&i.Mergeability,
 		&i.ApprovalsCount,
 		&i.ApprovalRuleConfigured,
+		&i.ApprovalsRequired,
 		&i.UpdatedAt,
 		&i.ReviewComments,
 	)
@@ -105,7 +108,7 @@ func (q *Queries) GetDisplayPRFactsBySession(ctx context.Context, sessionID doma
 }
 
 const getPR = `-- name: GetPR :one
-SELECT url, session_id, number, pr_state, review_decision, ci_state, mergeability, updated_at, provider, host, repo, source_branch, target_branch, head_sha, title, additions, deletions, changed_files, author, base_sha, merge_commit_sha, is_draft, is_merged, is_closed, provider_state, provider_mergeable, provider_merge_state_status, html_url, created_at_provider, updated_at_provider, merged_at_provider, closed_at_provider, metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at, last_nudge_signature, approvals_count, approval_rule_configured FROM pr WHERE url = ?
+SELECT url, session_id, number, pr_state, review_decision, ci_state, mergeability, updated_at, provider, host, repo, source_branch, target_branch, head_sha, title, additions, deletions, changed_files, author, base_sha, merge_commit_sha, is_draft, is_merged, is_closed, provider_state, provider_mergeable, provider_merge_state_status, html_url, created_at_provider, updated_at_provider, merged_at_provider, closed_at_provider, metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at, last_nudge_signature, approvals_count, approval_rule_configured, approvals_required FROM pr WHERE url = ?
 `
 
 func (q *Queries) GetPR(ctx context.Context, url string) (PR, error) {
@@ -153,6 +156,7 @@ func (q *Queries) GetPR(ctx context.Context, url string) (PR, error) {
 		&i.LastNudgeSignature,
 		&i.ApprovalsCount,
 		&i.ApprovalRuleConfigured,
+		&i.ApprovalsRequired,
 	)
 	return i, err
 }
@@ -199,6 +203,7 @@ SELECT
     pr.mergeability,
     pr.approvals_count,
     pr.approval_rule_configured,
+    pr.approvals_required,
     pr.source_branch,
     pr.target_branch,
     pr.updated_at,
@@ -223,6 +228,7 @@ type ListPRFactsBySessionRow struct {
 	Mergeability           domain.Mergeability
 	ApprovalsCount         int64
 	ApprovalRuleConfigured int64
+	ApprovalsRequired      int64
 	SourceBranch           string
 	TargetBranch           string
 	UpdatedAt              time.Time
@@ -250,6 +256,7 @@ func (q *Queries) ListPRFactsBySession(ctx context.Context, sessionID domain.Ses
 			&i.Mergeability,
 			&i.ApprovalsCount,
 			&i.ApprovalRuleConfigured,
+			&i.ApprovalsRequired,
 			&i.SourceBranch,
 			&i.TargetBranch,
 			&i.UpdatedAt,
@@ -269,7 +276,7 @@ func (q *Queries) ListPRFactsBySession(ctx context.Context, sessionID domain.Ses
 }
 
 const listPRsBySession = `-- name: ListPRsBySession :many
-SELECT url, session_id, number, pr_state, review_decision, ci_state, mergeability, updated_at, provider, host, repo, source_branch, target_branch, head_sha, title, additions, deletions, changed_files, author, base_sha, merge_commit_sha, is_draft, is_merged, is_closed, provider_state, provider_mergeable, provider_merge_state_status, html_url, created_at_provider, updated_at_provider, merged_at_provider, closed_at_provider, metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at, last_nudge_signature, approvals_count, approval_rule_configured FROM pr
+SELECT url, session_id, number, pr_state, review_decision, ci_state, mergeability, updated_at, provider, host, repo, source_branch, target_branch, head_sha, title, additions, deletions, changed_files, author, base_sha, merge_commit_sha, is_draft, is_merged, is_closed, provider_state, provider_mergeable, provider_merge_state_status, html_url, created_at_provider, updated_at_provider, merged_at_provider, closed_at_provider, metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at, last_nudge_signature, approvals_count, approval_rule_configured, approvals_required FROM pr
 WHERE session_id = ?
 ORDER BY updated_at DESC
 `
@@ -325,6 +332,7 @@ func (q *Queries) ListPRsBySession(ctx context.Context, sessionID domain.Session
 			&i.LastNudgeSignature,
 			&i.ApprovalsCount,
 			&i.ApprovalRuleConfigured,
+			&i.ApprovalsRequired,
 		); err != nil {
 			return nil, err
 		}
@@ -411,9 +419,9 @@ INSERT INTO pr (
     provider_state, provider_mergeable, provider_merge_state_status, html_url,
     created_at_provider, updated_at_provider, merged_at_provider, closed_at_provider,
     metadata_hash, ci_hash, review_hash, observed_at, ci_observed_at, review_observed_at,
-    approvals_count, approval_rule_configured
+    approvals_count, approval_rule_configured, approvals_required
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (url) DO UPDATE SET
     number = excluded.number,
     pr_state = excluded.pr_state,
@@ -452,7 +460,8 @@ ON CONFLICT (url) DO UPDATE SET
     ci_observed_at = excluded.ci_observed_at,
     review_observed_at = excluded.review_observed_at,
     approvals_count = excluded.approvals_count,
-    approval_rule_configured = excluded.approval_rule_configured
+    approval_rule_configured = excluded.approval_rule_configured,
+    approvals_required = excluded.approvals_required
 `
 
 type UpsertPRParams struct {
@@ -496,6 +505,7 @@ type UpsertPRParams struct {
 	ReviewObservedAt         sql.NullTime
 	ApprovalsCount           int64
 	ApprovalRuleConfigured   int64
+	ApprovalsRequired        int64
 }
 
 func (q *Queries) UpsertPR(ctx context.Context, arg UpsertPRParams) error {
@@ -540,6 +550,7 @@ func (q *Queries) UpsertPR(ctx context.Context, arg UpsertPRParams) error {
 		arg.ReviewObservedAt,
 		arg.ApprovalsCount,
 		arg.ApprovalRuleConfigured,
+		arg.ApprovalsRequired,
 	)
 	return err
 }

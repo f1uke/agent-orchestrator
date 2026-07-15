@@ -257,3 +257,102 @@ describe("deriveReadiness — priority + gate independence", () => {
 		expect(r.contextLabel).toBe("PR #8 · open");
 	});
 });
+
+describe("deriveReadiness — Review gate approval progress", () => {
+	const live = { activity: { state: "idle" as const }, status: "review_pending" as const };
+
+	it("shows the fraction and stays amber (wait) while short of the threshold", () => {
+		const r = deriveReadiness(
+			live,
+			[
+				gl({
+					review: {
+						decision: "none",
+						hasUnresolvedHumanComments: false,
+						unresolvedBy: [],
+						approvalRuleSource: "ao",
+						approvalsCount: 1,
+						requiredApprovals: 2,
+					},
+				}),
+			],
+			smoke(),
+		);
+		expect(tones(r).review).toBe("wait");
+		expect(stateOf(r, "review")).toBe("1/2 approved");
+		expect(r.verdict.word).toBe("In Review");
+	});
+
+	it("turns green (pass) once the threshold is met", () => {
+		const r = deriveReadiness(
+			live,
+			[
+				gl({
+					review: {
+						decision: "none",
+						hasUnresolvedHumanComments: false,
+						unresolvedBy: [],
+						approvalRuleSource: "ao",
+						approvalsCount: 2,
+						requiredApprovals: 2,
+					},
+				}),
+			],
+			smoke(),
+		);
+		expect(tones(r).review).toBe("pass");
+		expect(stateOf(r, "review")).toBe("2/2 approved");
+	});
+
+	it("keeps the honest count when over the threshold", () => {
+		const r = deriveReadiness(
+			live,
+			[
+				gl({
+					review: {
+						decision: "approved",
+						hasUnresolvedHumanComments: false,
+						unresolvedBy: [],
+						approvalRuleSource: "scm",
+						approvalsCount: 3,
+						requiredApprovals: 2,
+					},
+				}),
+			],
+			smoke(),
+		);
+		expect(tones(r).review).toBe("pass");
+		expect(stateOf(r, "review")).toBe("3/2 approved");
+	});
+
+	it("lets changes-requested win over approval progress", () => {
+		const r = deriveReadiness(
+			live,
+			[
+				gl({
+					review: {
+						decision: "changes_requested",
+						hasUnresolvedHumanComments: true,
+						unresolvedBy: [],
+						approvalRuleSource: "ao",
+						approvalsCount: 1,
+						requiredApprovals: 2,
+					},
+				}),
+			],
+			smoke(),
+		);
+		expect(tones(r).review).toBe("block");
+		expect(stateOf(r, "review")).toBe("changes");
+	});
+
+	it("falls back to the decision label when no rule applies", () => {
+		const r = deriveReadiness(
+			live,
+			[pr({ review: { decision: "approved", hasUnresolvedHumanComments: false, unresolvedBy: [] } })],
+			smoke(),
+		);
+		expect(tones(r).review).toBe("pass");
+		expect(stateOf(r, "review")).toBe("approved");
+	});
+});

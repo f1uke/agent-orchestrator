@@ -5384,6 +5384,14 @@ components:
       type: object
     SessionPRReviewSummary:
       properties:
+        approvalRuleSource:
+          enum:
+          - none
+          - ao
+          - scm
+          type: string
+        approvalsCount:
+          type: integer
         decision:
           enum:
           - none
@@ -5393,6 +5401,10 @@ components:
           type: string
         hasUnresolvedHumanComments:
           type: boolean
+        requiredApprovals:
+          type:
+          - "null"
+          - integer
         unresolvedBy:
           items:
             $ref: '#/components/schemas/SessionPRUnresolvedReviewer'

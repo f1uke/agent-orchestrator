@@ -199,6 +199,10 @@ type SCMReviewObservation struct {
 	Decision string
 	// ApprovalsCount is the number of distinct approvers the SCM reports.
 	ApprovalsCount int
+	// ApprovalsRequired is the approval count the SCM's own rule requires, when it
+	// enforces one (GitLab: approvals_required). 0 when the SCM exposes no numeric
+	// threshold or enforces no rule. Only meaningful with ApprovalRuleConfigured.
+	ApprovalsRequired int
 	// ApprovalRuleConfigured is true when the SCM enforces an approval rule.
 	ApprovalRuleConfigured bool
 	// Reviews contains submitted review summaries fetched on the slower review cadence.

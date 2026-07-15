@@ -493,6 +493,15 @@ type SessionPRReviewSummary struct {
 	Decision                   domain.ReviewDecision         `json:"decision" enum:"none,approved,changes_requested,review_required"`
 	HasUnresolvedHumanComments bool                          `json:"hasUnresolvedHumanComments"`
 	UnresolvedBy               []SessionPRUnresolvedReviewer `json:"unresolvedBy"`
+	// ApprovalsCount is the number of distinct human approvers observed. Omitted
+	// when zero; the renderer treats an absent count as 0.
+	ApprovalsCount int `json:"approvalsCount,omitempty"`
+	// RequiredApprovals is the effective approval threshold, omitted when no rule
+	// applies or the SCM exposes no numeric threshold. Absent ⇒ the surfaces keep
+	// their pre-approval-progress behavior.
+	RequiredApprovals *int `json:"requiredApprovals,omitempty"`
+	// ApprovalRuleSource is which rule set the threshold: "scm", "ao", or "none".
+	ApprovalRuleSource string `json:"approvalRuleSource,omitempty" enum:"none,ao,scm"`
 }
 
 // SessionPRUnresolvedReviewer groups unresolved human comments by reviewer.
@@ -798,7 +807,14 @@ func newSessionPRReviewSummary(in sessionsvc.PRReviewSummary) SessionPRReviewSum
 		}
 		reviewers = append(reviewers, SessionPRUnresolvedReviewer{ReviewerID: reviewer.ReviewerID, Count: reviewer.Count, Links: links, ReviewURL: reviewer.ReviewURL, IsBot: reviewer.IsBot})
 	}
-	return SessionPRReviewSummary{Decision: in.Decision, HasUnresolvedHumanComments: in.HasUnresolvedHumanComments, UnresolvedBy: reviewers}
+	return SessionPRReviewSummary{
+		Decision:                   in.Decision,
+		HasUnresolvedHumanComments: in.HasUnresolvedHumanComments,
+		UnresolvedBy:               reviewers,
+		ApprovalsCount:             in.ApprovalsCount,
+		RequiredApprovals:          in.RequiredApprovals,
+		ApprovalRuleSource:         in.ApprovalRuleSource,
+	}
 }
 
 func newSessionPRMergeabilitySummary(in sessionsvc.PRMergeabilitySummary) SessionPRMergeabilitySummary {

@@ -50,11 +50,23 @@ type PRFailingCheck struct {
 	URL        string
 }
 
-// PRReviewSummary describes the latest review decision and unresolved comments.
+// PRReviewSummary describes the latest review decision and unresolved comments,
+// plus approval-progress facts (how many approved, of how many required, and
+// which rule set the threshold) so the display surfaces can show A/T progress.
 type PRReviewSummary struct {
 	Decision                   domain.ReviewDecision
 	HasUnresolvedHumanComments bool
 	UnresolvedBy               []PRUnresolvedReviewer
+	// ApprovalsCount is the number of distinct human approvers observed.
+	ApprovalsCount int
+	// RequiredApprovals is the effective approval threshold, or nil when no rule
+	// applies or the SCM exposes no numeric threshold — nil ⇒ the surfaces keep
+	// their pre-approval-progress behavior.
+	RequiredApprovals *int
+	// ApprovalRuleSource is which rule set the threshold: "scm" (the SCM's own
+	// rule), "ao" (the project's additive rule), or "none". Empty for
+	// merged/closed PRs, which carry no progress.
+	ApprovalRuleSource string
 }
 
 // PRUnresolvedReviewer groups unresolved human comments by reviewer.
@@ -90,10 +102,18 @@ type PRConflictFile struct {
 // ListPRSummaries returns all PRs owned by a session with concise SCM details
 // assembled from persisted PR/check/review facts.
 func (s *Service) ListPRSummaries(ctx context.Context, id domain.SessionID) ([]PRSummary, error) {
-	if _, ok, err := s.store.GetSession(ctx, id); err != nil {
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil {
 		return nil, fmt.Errorf("get %s: %w", id, err)
 	} else if !ok {
 		return nil, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	// The project's approval rule sets the effective threshold for the
+	// approval-progress facts. A missing/failed project lookup leaves the
+	// zero-value (disabled) rule, so the summary degrades to no-progress.
+	var approvalRule domain.ApprovalRule
+	if project, ok, perr := s.store.GetProject(ctx, string(rec.ProjectID)); perr == nil && ok {
+		approvalRule = project.Config.ApprovalRule
 	}
 	prs, err := s.store.ListPRsBySession(ctx, id)
 	if err != nil {
@@ -117,7 +137,7 @@ func (s *Service) ListPRSummaries(ctx context.Context, id domain.SessionID) ([]P
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, summarizePR(pr, checks, reviews, threads, comments))
+		out = append(out, summarizePR(pr, checks, reviews, threads, comments, approvalRule))
 	}
 	sortPRSummaries(out)
 	return out, nil
@@ -137,7 +157,7 @@ func providerForPRSummary(pr domain.PullRequest) string {
 	return "github"
 }
 
-func summarizePR(pr domain.PullRequest, checks []domain.PullRequestCheck, reviews []domain.PullRequestReview, threads []domain.PullRequestReviewThread, comments []domain.PullRequestComment) PRSummary {
+func summarizePR(pr domain.PullRequest, checks []domain.PullRequestCheck, reviews []domain.PullRequestReview, threads []domain.PullRequestReviewThread, comments []domain.PullRequestComment, rule domain.ApprovalRule) PRSummary {
 	return PRSummary{
 		URL:              pr.URL,
 		HTMLURL:          firstNonEmpty(pr.HTMLURL, pr.URL),
@@ -154,7 +174,7 @@ func summarizePR(pr domain.PullRequest, checks []domain.PullRequestCheck, review
 		Deletions:        pr.Deletions,
 		ChangedFiles:     pr.ChangedFiles,
 		CI:               summarizeCI(pr, checks),
-		Review:           summarizeReview(pr, comments, reviews),
+		Review:           summarizeReview(pr, comments, reviews, rule),
 		Mergeability:     summarizeMergeability(pr, threads),
 		UpdatedAt:        pr.UpdatedAt,
 		ObservedAt:       pr.ObservedAt,
@@ -186,11 +206,47 @@ func summarizeCI(pr domain.PullRequest, checks []domain.PullRequestCheck) PRCISu
 	return out
 }
 
-func summarizeReview(pr domain.PullRequest, comments []domain.PullRequestComment, reviews []domain.PullRequestReview) PRReviewSummary {
+// resolveApprovalProgress derives the approval-progress facts for a live PR:
+// the approved count, the effective required threshold (nil when unknown), and
+// which rule set it. The SCM's own rule wins (guardrail: AO never imposes its
+// threshold when the SCM enforces one); otherwise the project's additive rule
+// applies; otherwise no threshold is known.
+func resolveApprovalProgress(pr domain.PullRequest, rule domain.ApprovalRule) (count int, required *int, source string) {
+	count = pr.ApprovalsCount
+	switch {
+	case pr.ApprovalRuleConfigured:
+		// SCM enforces its own rule. Surface its required count when it exposes a
+		// number (GitLab); otherwise degrade to count-only (e.g. GitHub).
+		if pr.ApprovalsRequired > 0 {
+			n := pr.ApprovalsRequired
+			required = &n
+		}
+		return count, required, "scm"
+	case rule.Enabled && providerReportsApprovals(pr):
+		// AO's additive rule sets the threshold, but only where the provider
+		// actually reports approval counts. On a provider that does not (GitHub),
+		// the count is always 0 and a meter would show a misleading 0/T that
+		// contradicts the provider's own approved decision — so degrade to none.
+		n := rule.ResolveThreshold()
+		return count, &n, "ao"
+	default:
+		return count, nil, "none"
+	}
+}
+
+// providerReportsApprovals reports whether the PR's provider populates approval
+// counts. Only GitLab does today; other adapters leave ApprovalsCount at zero,
+// so an AO count-based rule cannot be surfaced as progress for them.
+func providerReportsApprovals(pr domain.PullRequest) bool {
+	return providerForPRSummary(pr) == "gitlab"
+}
+
+func summarizeReview(pr domain.PullRequest, comments []domain.PullRequestComment, reviews []domain.PullRequestReview, rule domain.ApprovalRule) PRReviewSummary {
 	out := PRReviewSummary{Decision: reviewOrNone(pr.Review)}
 	if pr.Merged || pr.Closed {
 		return out
 	}
+	out.ApprovalsCount, out.RequiredApprovals, out.ApprovalRuleSource = resolveApprovalProgress(pr, rule)
 	byReviewer := map[string]int{}
 	order := []string{}
 	links := map[string][]PRReviewCommentLink{}

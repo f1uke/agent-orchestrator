@@ -1,6 +1,6 @@
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { SmokeProgress } from "./smoke-test";
-import { prTitleLabel } from "./pr-display";
+import { approvalLabel, approvalProgress, prTitleLabel } from "./pr-display";
 import type { SessionActivityState, SessionStatus } from "../types/workspace";
 
 /**
@@ -105,20 +105,35 @@ function ciGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	}
 }
 
-/** Review = approvals + changes-requested collapsed into one gate. Approvals are
- * decision-derived (no numeric count is on the wire); unresolved human comment
- * threads soften an otherwise-quiet review to "comments". */
+/** Review = approvals + changes-requested collapsed into one gate. When a project
+ * or SCM approval rule applies, the node shows A/T progress and flips green at the
+ * threshold (amber while short — the live gate you're waiting on). Changes
+ * requested always wins. Absent a rule, it falls back to the decision label;
+ * unresolved human comment threads soften an otherwise-quiet review to
+ * "comments". */
 function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	if (!pr) return gate("review", "Review", "idle", "—");
 	if (pr.state === "merged" || pr.state === "closed") return gate("review", "Review", "pass", "done");
+	// Changes requested is the priority signal; approval progress rides underneath
+	// it and never turns a blocked review neutral.
+	if (pr.review.decision === "changes_requested") return gate("review", "Review", "block", "changes");
+
+	const progress = approvalProgress(pr.review);
+	if (progress?.required != null) {
+		// A known threshold makes the meter authoritative: green when met, amber
+		// (the live gate) while short.
+		return gate("review", "Review", progress.met ? "pass" : "wait", approvalLabel(progress));
+	}
+	// Count-only (SCM rule, unknown threshold) or no rule: keep the decision label,
+	// but surface the observed count when we have one.
+	const count = progress ? approvalLabel(progress) : null;
 	switch (pr.review.decision) {
 		case "approved":
-			return gate("review", "Review", "pass", "approved");
-		case "changes_requested":
-			return gate("review", "Review", "block", "changes");
+			return gate("review", "Review", "pass", count ?? "approved");
 		case "review_required":
-			return gate("review", "Review", "wait", "required");
+			return gate("review", "Review", "wait", count ?? "required");
 		default:
+			if (count) return gate("review", "Review", "wait", count);
 			return pr.review.hasUnresolvedHumanComments
 				? gate("review", "Review", "wait", "comments")
 				: gate("review", "Review", "idle", "awaiting");
