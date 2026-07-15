@@ -113,6 +113,46 @@ func TestGet_BugNoSprint(t *testing.T) {
 	}
 }
 
+func TestGet_DecodesAttachments(t *testing.T) {
+	const body = `{"key":"DEMO-1","self":"https://example.atlassian.net/rest/api/3/issue/10001","fields":{
+		"summary":"With media",
+		"attachment":[
+			{"id":"173517","filename":"image-20260708-040128.png","mimeType":"image/png","content":"https://x/rest/api/3/attachment/content/173517"},
+			{"id":"173520","filename":"clip.mp4","mimeType":"video/mp4"},
+			{"id":"","filename":"skip-me.png","mimeType":"image/png"}
+		]}}`
+	c := restClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
+	iss, err := c.Get(context.Background(), "DEMO-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(iss.Attachments) != 2 {
+		t.Fatalf("attachments = %d, want 2 (blank-id row dropped)", len(iss.Attachments))
+	}
+	if iss.Attachments[0].ID != "173517" || iss.Attachments[0].Filename != "image-20260708-040128.png" || iss.Attachments[0].MimeType != "image/png" {
+		t.Errorf("attachment[0] = %+v", iss.Attachments[0])
+	}
+	if iss.Attachments[1].MimeType != "video/mp4" {
+		t.Errorf("attachment[1] mime = %q, want video/mp4", iss.Attachments[1].MimeType)
+	}
+}
+
+func TestGet_NoAttachmentsIsNil(t *testing.T) {
+	c := restClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"key":"DEMO-2","self":"https://example.atlassian.net/rest/api/3/issue/2","fields":{"summary":"none"}}`))
+	})
+	iss, err := c.Get(context.Background(), "DEMO-2")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if iss.Attachments != nil {
+		t.Errorf("attachments = %+v, want nil", iss.Attachments)
+	}
+}
+
 // The display Get() hits the REST v3 issue endpoint with a basic-auth header and a
 // fields param — the same seam search/transitions use.
 func TestGet_RequestsIssueEndpointWithAuth(t *testing.T) {

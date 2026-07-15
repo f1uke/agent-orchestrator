@@ -208,6 +208,7 @@ func (c *Client) mapIssue(raw rawIssue) Issue {
 	iss.Parent = decodeParent(f["parent"])
 	iss.Sprint = c.detectSprint(f)
 	iss.Subtasks = decodeSubtasks(f["subtasks"])
+	iss.Attachments = decodeAttachments(f["attachment"])
 	return iss
 }
 
@@ -273,6 +274,36 @@ func decodeSubtasks(raw json.RawMessage) []Subtask {
 			StatusCategory: r.Fields.Status.StatusCategory.Key,
 			StatusColor:    r.Fields.Status.StatusCategory.ColorName,
 		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// decodeAttachments maps the issue's `attachment` field into the display
+// projection. Only id/filename/mimeType are needed: the Summary tab matches a
+// description media node by filename and streams bytes through the download
+// proxy (ContentURL is Jira's own authenticated link, kept for completeness).
+func decodeAttachments(raw json.RawMessage) []Attachment {
+	if len(raw) == 0 {
+		return nil
+	}
+	var rows []struct {
+		ID       string `json:"id"`
+		Filename string `json:"filename"`
+		MimeType string `json:"mimeType"`
+		Content  string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil
+	}
+	out := make([]Attachment, 0, len(rows))
+	for _, a := range rows {
+		if strings.TrimSpace(a.ID) == "" {
+			continue
+		}
+		out = append(out, Attachment{ID: a.ID, Filename: a.Filename, MimeType: a.MimeType, ContentURL: a.Content})
 	}
 	if len(out) == 0 {
 		return nil
