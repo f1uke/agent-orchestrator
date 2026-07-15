@@ -4209,6 +4209,17 @@ components:
       - available
       - legacyRoot
       type: object
+    JiraAttachment:
+      properties:
+        filename:
+          type: string
+        id:
+          type: string
+        mimeType:
+          type: string
+      required:
+      - id
+      type: object
     JiraContextResponse:
       properties:
         fetchError:
@@ -4227,6 +4238,10 @@ components:
       properties:
         assignee:
           type: string
+        attachments:
+          items:
+            $ref: '#/components/schemas/JiraAttachment'
+          type: array
         description:
           items:
             $ref: '#/components/schemas/AdfNode'

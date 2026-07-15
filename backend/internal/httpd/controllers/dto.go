@@ -568,6 +568,24 @@ type JiraIssue struct {
 	Sprint      *JiraSprint    `json:"sprint,omitempty"`
 	Description []adf.Node     `json:"description,omitempty"`
 	Subtasks    []JiraSubtask  `json:"subtasks,omitempty"`
+	// Attachments the description's media nodes resolve against (matched by
+	// filename) to render inline previews; bytes stream via the session
+	// attachment download proxy.
+	Attachments []JiraAttachment `json:"attachments,omitempty"`
+}
+
+// JiraAttachment is one uploaded file on an issue: enough for the Summary tab to
+// match a description media node by filename and stream its bytes for preview.
+type JiraAttachment struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+}
+
+// JiraAttachmentParam addresses one attachment's bytes for the download proxy.
+type JiraAttachmentParam struct {
+	SessionID    string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	AttachmentID string `path:"attachmentId" description:"Jira attachment id (numeric)."`
 }
 
 // JiraSprint is the issue's current/most-relevant sprint.

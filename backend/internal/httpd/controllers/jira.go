@@ -451,5 +451,8 @@ func jiraIssueDTO(iss jiraadapter.Issue) *JiraIssue {
 			StatusColor:    s.StatusColor,
 		})
 	}
+	for _, a := range iss.Attachments {
+		dto.Attachments = append(dto.Attachments, JiraAttachment{ID: a.ID, Filename: a.Filename, MimeType: a.MimeType})
+	}
 	return dto
 }

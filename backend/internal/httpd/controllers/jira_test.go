@@ -62,6 +62,23 @@ func (s *stubJira) Context(context.Context, domain.SessionID) (jirasvc.Result, e
 	return s.res, s.err
 }
 
+func TestJiraIssueDTOMapsAttachments(t *testing.T) {
+	iss := jiraadapter.Issue{Key: "DEMO-1", Attachments: []jiraadapter.Attachment{
+		{ID: "173517", Filename: "a.png", MimeType: "image/png"},
+		{ID: "173520", Filename: "clip.mp4", MimeType: "video/mp4"},
+	}}
+	dto := jiraIssueDTO(iss)
+	if len(dto.Attachments) != 2 {
+		t.Fatalf("attachments = %d, want 2", len(dto.Attachments))
+	}
+	if dto.Attachments[0].ID != "173517" || dto.Attachments[0].Filename != "a.png" || dto.Attachments[0].MimeType != "image/png" {
+		t.Errorf("attachment[0] = %+v", dto.Attachments[0])
+	}
+	if dto.Attachments[1].MimeType != "video/mp4" {
+		t.Errorf("attachment[1] mime = %q", dto.Attachments[1].MimeType)
+	}
+}
+
 func (s *stubJira) Transitions(_ context.Context, _ domain.SessionID, key string) ([]jiraadapter.Transition, error) {
 	s.gotTransKey = key
 	return s.transitions, s.transErr

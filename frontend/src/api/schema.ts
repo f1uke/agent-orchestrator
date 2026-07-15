@@ -1466,6 +1466,11 @@ export interface components {
             available: boolean;
             legacyRoot: string;
         };
+        JiraAttachment: {
+            filename?: string;
+            id: string;
+            mimeType?: string;
+        };
         JiraContextResponse: {
             fetchError?: string;
             issue?: components["schemas"]["JiraIssue"];
@@ -1474,6 +1479,7 @@ export interface components {
         };
         JiraIssue: {
             assignee?: string;
+            attachments?: components["schemas"]["JiraAttachment"][];
             description?: components["schemas"]["AdfNode"][];
             key: string;
             parent?: components["schemas"]["JiraParentRef"];

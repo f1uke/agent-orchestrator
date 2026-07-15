@@ -193,6 +193,7 @@ var schemaNames = map[string]string{
 	"ControllersJiraSprint":                       "JiraSprint",
 	"ControllersJiraParentRef":                    "JiraParentRef",
 	"ControllersJiraSubtask":                      "JiraSubtask",
+	"ControllersJiraAttachment":                   "JiraAttachment",
 	"ControllersJiraTransition":                   "JiraTransition",
 	"ControllersJiraTransitionsResponse":          "JiraTransitionsResponse",
 	"ControllersJiraMoveRequest":                  "JiraMoveRequest",
