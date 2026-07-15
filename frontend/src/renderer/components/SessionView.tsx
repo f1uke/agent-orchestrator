@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
+import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
@@ -236,6 +237,12 @@ export function SessionView({ sessionId }: SessionViewProps) {
 				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
 					{fileView ? (
 						<FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />
+					) : session?.isTodo ? (
+						// A not-started TODO has no worktree/tmux/agent, so the terminal
+						// would sit forever on "Preparing the worker terminal". Show the
+						// editable WORKER SPEC instead; Start materializes in place and the
+						// refetch flips isTodo off, swapping in the terminal below.
+						<TodoSessionPane session={session} />
 					) : (
 						<CenterPane
 							daemonReady={daemonStatus.state === "ready"}
