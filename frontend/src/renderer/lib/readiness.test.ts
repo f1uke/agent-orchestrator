@@ -264,7 +264,18 @@ describe("deriveReadiness — Review gate approval progress", () => {
 	it("shows the fraction and stays amber (wait) while short of the threshold", () => {
 		const r = deriveReadiness(
 			live,
-			[gl({ review: { decision: "none", hasUnresolvedHumanComments: false, unresolvedBy: [], approvalRuleSource: "ao", approvalsCount: 1, requiredApprovals: 2 } })],
+			[
+				gl({
+					review: {
+						decision: "none",
+						hasUnresolvedHumanComments: false,
+						unresolvedBy: [],
+						approvalRuleSource: "ao",
+						approvalsCount: 1,
+						requiredApprovals: 2,
+					},
+				}),
+			],
 			smoke(),
 		);
 		expect(tones(r).review).toBe("wait");
@@ -275,7 +286,18 @@ describe("deriveReadiness — Review gate approval progress", () => {
 	it("turns green (pass) once the threshold is met", () => {
 		const r = deriveReadiness(
 			live,
-			[gl({ review: { decision: "none", hasUnresolvedHumanComments: false, unresolvedBy: [], approvalRuleSource: "ao", approvalsCount: 2, requiredApprovals: 2 } })],
+			[
+				gl({
+					review: {
+						decision: "none",
+						hasUnresolvedHumanComments: false,
+						unresolvedBy: [],
+						approvalRuleSource: "ao",
+						approvalsCount: 2,
+						requiredApprovals: 2,
+					},
+				}),
+			],
 			smoke(),
 		);
 		expect(tones(r).review).toBe("pass");
@@ -285,7 +307,18 @@ describe("deriveReadiness — Review gate approval progress", () => {
 	it("keeps the honest count when over the threshold", () => {
 		const r = deriveReadiness(
 			live,
-			[gl({ review: { decision: "approved", hasUnresolvedHumanComments: false, unresolvedBy: [], approvalRuleSource: "scm", approvalsCount: 3, requiredApprovals: 2 } })],
+			[
+				gl({
+					review: {
+						decision: "approved",
+						hasUnresolvedHumanComments: false,
+						unresolvedBy: [],
+						approvalRuleSource: "scm",
+						approvalsCount: 3,
+						requiredApprovals: 2,
+					},
+				}),
+			],
 			smoke(),
 		);
 		expect(tones(r).review).toBe("pass");
@@ -295,7 +328,18 @@ describe("deriveReadiness — Review gate approval progress", () => {
 	it("lets changes-requested win over approval progress", () => {
 		const r = deriveReadiness(
 			live,
-			[gl({ review: { decision: "changes_requested", hasUnresolvedHumanComments: true, unresolvedBy: [], approvalRuleSource: "ao", approvalsCount: 1, requiredApprovals: 2 } })],
+			[
+				gl({
+					review: {
+						decision: "changes_requested",
+						hasUnresolvedHumanComments: true,
+						unresolvedBy: [],
+						approvalRuleSource: "ao",
+						approvalsCount: 1,
+						requiredApprovals: 2,
+					},
+				}),
+			],
 			smoke(),
 		);
 		expect(tones(r).review).toBe("block");

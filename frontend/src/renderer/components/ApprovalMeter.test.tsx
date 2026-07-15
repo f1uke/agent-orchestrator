@@ -47,9 +47,7 @@ describe("ApprovalMeter", () => {
 	});
 
 	it("renders no pips when the threshold exceeds the pip ceiling", () => {
-		const { container } = render(
-			<ApprovalMeter progress={progress({ approved: 2, required: 6, remaining: 4 })} />,
-		);
+		const { container } = render(<ApprovalMeter progress={progress({ approved: 2, required: 6, remaining: 4 })} />);
 		expect(pips(container)).toHaveLength(0);
 	});
 });

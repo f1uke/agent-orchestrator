@@ -393,9 +393,7 @@ describe("isArchivedPRState", () => {
 });
 
 describe("approvalProgress", () => {
-	const review = (
-		over: Partial<SessionPRSummary["review"]> = {},
-	): SessionPRSummary["review"] => ({
+	const review = (over: Partial<SessionPRSummary["review"]> = {}): SessionPRSummary["review"] => ({
 		decision: "none",
 		hasUnresolvedHumanComments: false,
 		unresolvedBy: [],
@@ -474,9 +472,9 @@ describe("prSummaryParts — approval progress (Review row)", () => {
 	});
 
 	it("keeps today's decision label when no rule applies", () => {
-		const part = prSummaryParts(summary({ review: { decision: "approved", hasUnresolvedHumanComments: false, unresolvedBy: [] } })).find(
-			(p) => p.key === "review",
-		);
+		const part = prSummaryParts(
+			summary({ review: { decision: "approved", hasUnresolvedHumanComments: false, unresolvedBy: [] } }),
+		).find((p) => p.key === "review");
 		expect(part).toMatchObject({ status: "Approved" });
 		expect(part?.approval).toBeFalsy();
 	});
@@ -494,9 +492,7 @@ describe("approvalLabel", () => {
 
 	it("shows the fraction plus a plain-language shortfall", () => {
 		expect(approvalLabel(p({}), { remaining: true })).toBe("1/2 approved · 1 more needed");
-		expect(approvalLabel(p({ approved: 0, remaining: 2 }), { remaining: true })).toBe(
-			"0/2 approved · 2 more needed",
-		);
+		expect(approvalLabel(p({ approved: 0, remaining: 2 }), { remaining: true })).toBe("0/2 approved · 2 more needed");
 	});
 
 	it("omits the shortfall when not requested", () => {
