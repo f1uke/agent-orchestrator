@@ -1,4 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+	createContext,
+	useCallback,
+	useContext,
+	useMemo,
+	useRef,
+	useState,
+	type CSSProperties,
+	type ReactNode,
+} from "react";
 import { getApiBaseUrl } from "../lib/api-client";
 import type { AdfNode, JiraIssue } from "../hooks/useSessionJiraContext";
 import { AttachmentChip } from "./JiraAdf";
@@ -50,7 +59,11 @@ function indexByFilename(attachments: JiraAttachment[]): Map<string, JiraAttachm
 
 /** Collect description media nodes matched to an attachment (by filename), in
  * document order and deduped by attachment id — the lightbox's prev/next set. */
-function collectMedia(nodes: AdfNode[] | undefined, byName: Map<string, JiraAttachment>, sessionId: string): MediaItem[] {
+function collectMedia(
+	nodes: AdfNode[] | undefined,
+	byName: Map<string, JiraAttachment>,
+	sessionId: string,
+): MediaItem[] {
 	if (!nodes) return [];
 	const seen = new Set<string>();
 	const items: MediaItem[] = [];

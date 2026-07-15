@@ -319,7 +319,13 @@ export function MediaLightbox({
 				>
 					<Dialog.Title style={SR_ONLY}>Evidence viewer</Dialog.Title>
 
-					<button type="button" aria-label="Close viewer" title="Close (Esc)" onClick={onClose} style={cornerBtn("top")}>
+					<button
+						type="button"
+						aria-label="Close viewer"
+						title="Close (Esc)"
+						onClick={onClose}
+						style={cornerBtn("top")}
+					>
 						<X size={18} aria-hidden="true" />
 					</button>
 

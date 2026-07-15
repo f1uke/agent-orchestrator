@@ -20,7 +20,13 @@ const items: MediaItem[] = [
 it("pages next with the arrow control (wraps)", () => {
 	const onIndexChange = vi.fn();
 	render(
-		<MediaLightbox items={items} index={0} onIndexChange={onIndexChange} onClose={() => {}} triggerRef={{ current: null }} />,
+		<MediaLightbox
+			items={items}
+			index={0}
+			onIndexChange={onIndexChange}
+			onClose={() => {}}
+			triggerRef={{ current: null }}
+		/>,
 	);
 	fireEvent.click(screen.getByLabelText("Next evidence"));
 	expect(onIndexChange).toHaveBeenCalledWith(1);
@@ -28,7 +34,13 @@ it("pages next with the arrow control (wraps)", () => {
 
 it("shows the counter only when there is more than one item", () => {
 	const { rerender } = render(
-		<MediaLightbox items={items} index={0} onIndexChange={() => {}} onClose={() => {}} triggerRef={{ current: null }} />,
+		<MediaLightbox
+			items={items}
+			index={0}
+			onIndexChange={() => {}}
+			onClose={() => {}}
+			triggerRef={{ current: null }}
+		/>,
 	);
 	expect(screen.getByText("1 / 2")).toBeInTheDocument();
 	rerender(
