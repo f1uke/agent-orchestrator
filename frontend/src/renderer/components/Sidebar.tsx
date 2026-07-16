@@ -408,7 +408,9 @@ export function Sidebar({
 										<span
 											className={cn(
 												"h-1.5 w-1.5 rounded-full",
-												daemonStatus.state === "ready" && eventsConnection !== "disconnected" ? "bg-success" : "bg-amber",
+												daemonStatus.state === "ready" && eventsConnection !== "disconnected"
+													? "bg-success"
+													: "bg-amber",
 											)}
 										/>
 									</button>

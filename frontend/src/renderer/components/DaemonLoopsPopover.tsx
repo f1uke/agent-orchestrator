@@ -67,7 +67,11 @@ function LoopRow({ loop, nowMs }: { loop: DaemonLoop; nowMs: number }) {
 		const effectiveNext = effectiveNextRunAt(nextMs, loop.intervalMs, nowMs);
 		fraction = computeFraction(nextMs, loop.intervalMs, nowMs);
 		const remaining = effectiveNext - nowMs;
-		const absTime = new Date(effectiveNext).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+		const absTime = new Date(effectiveNext).toLocaleTimeString([], {
+			hour: "2-digit",
+			minute: "2-digit",
+			second: "2-digit",
+		});
 		secondary = `next in ${formatNextIn(remaining)} · ${formatInterval(loop.intervalMs)} · ${absTime}`;
 	}
 
