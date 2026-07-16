@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/daemon/loops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the daemon's fixed-interval background loops with timing */
+        get: operations["listDaemonLoops"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events": {
         parameters: {
             query?: never;
@@ -1351,6 +1368,21 @@ export interface components {
             reason: string;
             sessionId: string;
         };
+        ControllersDaemonLoop: {
+            description: string;
+            displayName: string;
+            /** Format: int64 */
+            intervalMs: number;
+            /** Format: date-time */
+            lastRunAt?: null | string;
+            name: string;
+            /** Format: date-time */
+            nextRunAt?: null | string;
+            running: boolean;
+        };
+        ControllersListDaemonLoopsResponse: {
+            loops: components["schemas"]["ControllersDaemonLoop"][];
+        };
         ControllersResetReviewResponse: {
             /**
              * Format: int64
@@ -2329,6 +2361,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListAgentsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listDaemonLoops: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListDaemonLoopsResponse"];
                 };
             };
             /** @description Internal Server Error */
