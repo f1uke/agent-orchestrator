@@ -368,6 +368,7 @@ func reviewLaunchSpec(worker domain.SessionRecord, harness domain.ReviewerHarnes
 		TargetSHA:     run.TargetSHA,
 		ReviewQueue:   queue,
 		ReviewIndex:   index,
+		ProjectID:     worker.ProjectID,
 	}
 }
 

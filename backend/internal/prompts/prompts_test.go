@@ -18,15 +18,35 @@ func TestDefaultBase_OrchestratorCarriesPlaceholder(t *testing.T) {
 	}
 }
 
-func TestDefaultBase_WorkerAndReviewerNonEmptyNoPlaceholder(t *testing.T) {
-	for _, k := range []Kind{KindWorker, KindReviewer} {
-		base := DefaultBase(k)
-		if strings.TrimSpace(base) == "" {
-			t.Fatalf("%s default base is empty", k)
-		}
-		if strings.Contains(base, ProjectIDPlaceholder) {
-			t.Fatalf("%s default base should not carry the project placeholder", k)
-		}
+// TestDefaultBase_WorkerCarriesPlaceholder: the worker default now addresses the
+// private knowledge store through the shared {{.ProjectID}} template action, the
+// same as the orchestrator base, so RenderBase substitutes the concrete project
+// id consistently across both kinds (replacing the older $AO_PROJECT_ID env var).
+func TestDefaultBase_WorkerCarriesPlaceholder(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	if strings.TrimSpace(base) == "" {
+		t.Fatal("worker default base is empty")
+	}
+	if !strings.Contains(base, ProjectIDPlaceholder) {
+		t.Fatalf("worker default base must carry %q so it renders like the orchestrator base", ProjectIDPlaceholder)
+	}
+	if strings.HasPrefix(base, "\n") {
+		t.Fatal("worker default base must not start with a newline")
+	}
+}
+
+// TestDefaultBase_ReviewerNonEmptyNoPlaceholder: the reviewer default is a short
+// review-only role prompt with no knowledge-store need, so it ships without the
+// {{.ProjectID}} action. Rendering is still wired for the reviewer kind (see the
+// review package's reviewTexts) so an author CAN use the placeholder in a reviewer
+// override and get the same substitution.
+func TestDefaultBase_ReviewerNonEmptyNoPlaceholder(t *testing.T) {
+	base := DefaultBase(KindReviewer)
+	if strings.TrimSpace(base) == "" {
+		t.Fatal("reviewer default base is empty")
+	}
+	if strings.Contains(base, ProjectIDPlaceholder) {
+		t.Fatalf("reviewer default base ships without the placeholder (no store need):\n%s", base)
 	}
 }
 
@@ -157,16 +177,17 @@ func TestOrchestratorDefault_RefersToWorkByBoardName(t *testing.T) {
 // private, out-of-repo knowledge store, tell them to read INDEX.md at task
 // start, save durable plans/proposals to the store (never the team-shared repo)
 // as they go, report the paths, and leave INDEX.md to the orchestrator. It must
-// address the store via the $AO_PROJECT_ID env var, NOT the render placeholder
-// (a worker base carries no placeholder — see the placeholder test above).
+// address the store via the {{.ProjectID}} render placeholder — the same
+// mechanism as the orchestrator base — so RenderBase substitutes the concrete
+// project id (replacing the older $AO_PROJECT_ID env var).
 func TestWorkerDefault_KnowledgeStore(t *testing.T) {
 	base := DefaultBase(KindWorker)
 	for _, want := range []string{
-		"~/.ao/knowledge/$AO_PROJECT_ID/",                        // out-of-repo store, env-var addressed
-		"~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md",                // read the index at task start
-		"~/.ao/knowledge/$AO_PROJECT_ID/plans/<branch>--<topic>", // where to save artifacts
-		"NEVER committed or pushed",                              // must not leak into the shared repo
-		"team-shared and must never carry AO planning artifacts", // docs/CLAUDE.md/AGENTS.md are off-limits
+		"~/.ao/knowledge/" + ProjectIDPlaceholder + "/",                        // out-of-repo store, placeholder-addressed
+		"~/.ao/knowledge/" + ProjectIDPlaceholder + "/INDEX.md",                // read the index at task start
+		"~/.ao/knowledge/" + ProjectIDPlaceholder + "/plans/<branch>--<topic>", // where to save artifacts
+		"NEVER committed or pushed",                                            // must not leak into the shared repo
+		"team-shared and must never carry AO planning artifacts",               // docs/CLAUDE.md/AGENTS.md are off-limits
 		"AS YOU GO", // write incrementally so nothing is lost
 		"list the knowledge-store path(s) you wrote", // report what was written
 		"Do NOT edit `INDEX.md`",                     // orchestrator curates the index
@@ -175,8 +196,13 @@ func TestWorkerDefault_KnowledgeStore(t *testing.T) {
 			t.Fatalf("worker default missing knowledge-store wording %q:\n%s", want, base)
 		}
 	}
-	if strings.Contains(base, ProjectIDPlaceholder) {
-		t.Fatalf("worker default must address the store via $AO_PROJECT_ID, not the %q placeholder", ProjectIDPlaceholder)
+	// The placeholder must resolve to a concrete per-project path at render time.
+	rendered := RenderBase(base, "nter-ios-app")
+	if !strings.Contains(rendered, "~/.ao/knowledge/nter-ios-app/") {
+		t.Fatalf("rendered worker base must carry the concrete project path:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "$AO_PROJECT_ID") {
+		t.Fatalf("worker default must address the store via %q, not the $AO_PROJECT_ID env var", ProjectIDPlaceholder)
 	}
 }
 
@@ -208,6 +234,56 @@ func TestRenderBase_SubstitutesProjectID(t *testing.T) {
 	got := RenderBase("coordinator for "+ProjectIDPlaceholder+" now", "proj-1")
 	if got != "coordinator for proj-1 now" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// TestRenderBase_WorkerDefaultExpandsProjectID: the worker default base must now
+// carry the {{.ProjectID}} template action and expand it to the concrete project
+// id under RenderBase — the same mechanism as the orchestrator base, replacing
+// the older $AO_PROJECT_ID env-var addressing so every session kind renders
+// consistently.
+func TestRenderBase_WorkerDefaultExpandsProjectID(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	if !strings.Contains(base, ProjectIDPlaceholder) {
+		t.Fatalf("worker default base must carry %q so it renders like the orchestrator base:\n%s", ProjectIDPlaceholder, base)
+	}
+	rendered := RenderBase(base, "nter-ios-app")
+	if strings.Contains(rendered, ProjectIDPlaceholder) {
+		t.Fatalf("worker base still carries an unexpanded placeholder after render:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "~/.ao/knowledge/nter-ios-app/") {
+		t.Fatalf("rendered worker base must carry the concrete project path:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "$AO_PROJECT_ID") {
+		t.Fatalf("worker base must no longer address the store via the $AO_PROJECT_ID env var:\n%s", rendered)
+	}
+}
+
+// TestRenderBase_TemplateSemantics: RenderBase is a Go text/template render, so a
+// base with no actions is byte-for-byte unchanged, and a malformed / unknown-field
+// base must not crash prompt assembly — it falls back to the RAW base whole (never
+// a partial render, never empty). A bad hand-authored override degrades to literal
+// text on the critical spawn path instead of a missing system prompt.
+func TestRenderBase_TemplateSemantics(t *testing.T) {
+	// No actions: byte-for-byte unchanged. An older override that still documents
+	// the store via $AO_PROJECT_ID keeps working (the worker resolves that env var
+	// at runtime), so backward compatibility holds with no per-user migration.
+	plain := "store at ~/.ao/knowledge/$AO_PROJECT_ID/ stays literal"
+	if got := RenderBase(plain, "p"); got != plain {
+		t.Fatalf("plain text must render unchanged, got %q", got)
+	}
+	// Malformed or unknown-field templates fall back to the RAW base whole, not a
+	// partial substitution: a valid {{.ProjectID}} sitting next to an invalid
+	// action is left literal rather than half-rendered, so the failure is total and
+	// obvious rather than a silently corrupted prompt.
+	for _, bad := range []string{
+		"unterminated {{ action",
+		"stray close }} brace",
+		"valid " + ProjectIDPlaceholder + " but unknown {{.Nope}} field",
+	} {
+		if got := RenderBase(bad, "p"); got != bad {
+			t.Fatalf("malformed base must fall back to the raw base, got %q for input %q", got, bad)
+		}
 	}
 }
 
@@ -354,7 +430,7 @@ func TestWorkerDefault_ContextEconomy(t *testing.T) {
 	}
 	// R3a must also have softened the standing "read INDEX.md" pointer: the base
 	// must no longer tell workers to read the whole index up front.
-	if strings.Contains(base, "read `~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md` if it exists, plus any docs it points to") {
+	if strings.Contains(base, "read `~/.ao/knowledge/"+ProjectIDPlaceholder+"/INDEX.md` if it exists, plus any docs it points to") {
 		t.Fatalf("worker default still tells workers to slurp the whole INDEX:\n%s", base)
 	}
 }

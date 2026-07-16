@@ -37,6 +37,10 @@ type LaunchSpec struct {
 	TargetSHA     string
 	ReviewQueue   []ports.ReviewTask
 	ReviewIndex   int
+	// ProjectID is the worker's project, used to render the reviewer base's
+	// {{.ProjectID}} template action to a concrete project id — the reviewer
+	// analogue of the orchestrator/worker project-id substitution.
+	ProjectID domain.ProjectID
 	// ReviewerBase is the effective global reviewer base (override else default),
 	// resolved by the Engine. Empty falls back to prompts.DefaultBase(reviewer).
 	ReviewerBase string

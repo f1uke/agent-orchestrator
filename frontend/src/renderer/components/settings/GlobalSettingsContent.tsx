@@ -92,7 +92,7 @@ function PromptsSection({ form }: { form: GlobalForm }) {
 			<p className="mb-4 mt-6 text-[12px] leading-relaxed text-passive">
 				Edit the global base each session kind starts from. AO always appends a protected coordination floor, the
 				confidentiality guard, and dynamic context (git convention, spawn-confirm, session and project ids) — those are
-				not shown here. Use <code>{"{{.ProjectID}}"}</code> in the orchestrator base to insert the project id.
+				not shown here. Use <code>{"{{.ProjectID}}"}</code> in any base to insert the project id.
 			</p>
 			{form.prompts.map((p) => (
 				<SettingEditorRow
