@@ -7,6 +7,8 @@ import { CenterPane } from "./CenterPane";
 import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
+import { WorkspaceFileView } from "./WorkspaceFileView";
+import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable";
 import { useUiStore } from "../stores/ui-store";
@@ -58,6 +60,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// A review comment "expanded to full file" takes over the center pane (in
 	// place of the terminal) until dismissed; cleared on session switch below.
 	const [fileView, setFileView] = useState<FileDiffTarget | null>(null);
+	// A file opened from a clicked terminal reference takes over the same center
+	// slot (priority over fileView); cleared on session switch below.
+	const [workspaceFile, setWorkspaceFile] = useState<WorkspaceFileOpen | null>(null);
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
 	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
@@ -88,6 +93,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setBrowserPoppedOut(false);
 		setInspectorView("summary");
 		setFileView(null);
+		setWorkspaceFile(null);
 	}, [sessionId]);
 
 	// Opening/selecting a session counts as activity: POST /wake so the daemon
@@ -235,7 +241,14 @@ export function SessionView({ sessionId }: SessionViewProps) {
 				{/* react-resizable-panels v4: bare numbers are PIXELS; percentages must
             be strings. Numeric sizes here once clamped the inspector to 45px. */}
 				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
-					{fileView ? (
+					{workspaceFile ? (
+						<WorkspaceFileView
+							sessionId={sessionId}
+							path={workspaceFile.path}
+							line={workspaceFile.line}
+							onClose={() => setWorkspaceFile(null)}
+						/>
+					) : fileView ? (
 						<FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />
 					) : session?.isTodo ? (
 						// A not-started TODO has no worktree/tmux/agent, so the terminal
@@ -248,6 +261,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 							daemonReady={daemonStatus.state === "ready"}
 							directory={directory}
 							onSelectWorkerTerminal={() => setTerminalTarget({ kind: "worker" })}
+							onOpenWorkspaceFile={setWorkspaceFile}
 							session={session}
 							terminalTarget={terminalTarget}
 							theme={theme}

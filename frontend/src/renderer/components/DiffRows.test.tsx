@@ -25,4 +25,21 @@ describe("DiffRows", () => {
 		);
 		expect(screen.getByTestId("anchor")).toBeInTheDocument();
 	});
+
+	it("renders an Xcode-style gutter change bar for marked lines", () => {
+		const marks = new Map<number, "added" | "modified" | "removed">([
+			[0, "modified"],
+			[1, "added"],
+			[2, "removed"],
+		]);
+		render(<DiffRows lines={lines} size="wide" changeMarks={marks} />);
+		expect(screen.getByTestId("change-bar-0")).toHaveAttribute("data-change", "modified");
+		expect(screen.getByTestId("change-bar-1")).toHaveAttribute("data-change", "added");
+		expect(screen.getByTestId("change-bar-2")).toHaveAttribute("data-change", "removed");
+	});
+
+	it("renders no change bar when changeMarks is absent (Reviews path unchanged)", () => {
+		render(<DiffRows lines={lines} size="narrow" />);
+		expect(screen.queryByTestId("change-bar-0")).toBeNull();
+	});
 });

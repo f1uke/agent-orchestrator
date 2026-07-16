@@ -31,6 +31,7 @@ import type { AttachableTerminal, TerminalUserInputSource } from "../hooks/useTe
 import { aoBridge } from "../lib/bridge";
 import type { SessionLinkMatch } from "../lib/session-ref";
 import type { ExternalRefMatch } from "../lib/terminal-scm-links";
+import type { FileLinkMatch } from "../lib/terminal-file-links";
 import { registerTerminalFocus } from "../lib/terminal-focus";
 import { buildTerminalThemes } from "../lib/terminal-themes";
 import type { Theme } from "../stores/ui-store";
@@ -74,6 +75,17 @@ export type XtermTerminalProps = {
 	 * session ref. Absent → no PR/MR linkification.
 	 */
 	externalRefResolver?: (line: string) => ExternalRefMatch[];
+	/**
+	 * Resolve FILE reference tokens (absolute path, workspace-relative path, or a
+	 * bare filename with a code extension) on a line of terminal text to link
+	 * ranges. TerminalPane supplies this from terminal-file-links; a clicked token
+	 * fires {@link onFileLinkActivate}, which resolves it against the session's
+	 * workspace and opens it in the code viewer INTERNALLY (not the OS browser).
+	 * Absent → no file linkification.
+	 */
+	fileLinkResolver?: (line: string) => FileLinkMatch[];
+	/** Open a clicked file reference (resolve within the workspace, then view). */
+	onFileLinkActivate?: (match: FileLinkMatch) => void;
 	/** Terminal construction failed; the owner decides how to surface it. */
 	onError?: (error: unknown) => void;
 	/**
@@ -653,6 +665,45 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			},
 		});
 
+		// Linkify FILE reference tokens (a path or bare filename with a code
+		// extension) so a click opens the file in the workspace code viewer.
+		// Sibling to the two providers above; like session refs it activates
+		// INTERNALLY (onFileLinkActivate resolves the ref within the session's
+		// workspace and opens the viewer), NOT the OS browser. The resolver is
+		// conservative (terminal-file-links) so dotted symbols/URLs never match,
+		// and its token shapes carry a `.<ext>` that the digit-terminated session
+		// and #/! SCM tokens never do, so ranges don't contend.
+		const fileLinks = term.registerLinkProvider({
+			provideLinks(bufferLineNumber, callback) {
+				const resolver = callbacksRef.current.fileLinkResolver;
+				if (!resolver) {
+					callback(undefined);
+					return;
+				}
+				const line = term.buffer.active.getLine(bufferLineNumber - 1);
+				if (!line) {
+					callback(undefined);
+					return;
+				}
+				const text = line.translateToString(true);
+				const matches = resolver(text);
+				if (matches.length === 0) {
+					callback(undefined);
+					return;
+				}
+				callback(
+					matches.map((match) => ({
+						text: text.slice(match.startIndex, match.endIndex),
+						range: {
+							start: { x: match.startIndex + 1, y: bufferLineNumber },
+							end: { x: match.endIndex, y: bufferLineNumber },
+						},
+						activate: () => callbacksRef.current.onFileLinkActivate?.(match),
+					})),
+				);
+			},
+		});
+
 		// Translate wheel motion into SGR wheel reports for the pane (see
 		// sgrWheelReport), one report per scrolled line. WheelEvent.deltaMode
 		// varies by platform/device: trackpads and normalized wheels report
@@ -763,6 +814,7 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			mouseBinary.dispose();
 			sessionLinks.dispose();
 			externalRefLinks.dispose();
+			fileLinks.dispose();
 			userInputListeners.clear();
 			try {
 				term.dispose();

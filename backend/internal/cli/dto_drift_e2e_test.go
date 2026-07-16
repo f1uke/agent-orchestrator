@@ -167,6 +167,14 @@ func (f *fakeSessionService) DiffContext(context.Context, domain.SessionID, sess
 	return sessionsvc.DiffContextResult{}, nil
 }
 
+func (f *fakeSessionService) ResolveWorkspaceRef(context.Context, domain.SessionID, string) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeSessionService) ReadWorkspaceFile(context.Context, domain.SessionID, string) (sessionsvc.WorkspaceFileResult, error) {
+	return sessionsvc.WorkspaceFileResult{}, nil
+}
+
 type fakeAgentCatalog struct{}
 
 var _ controllers.AgentCatalog = (*fakeAgentCatalog)(nil)

@@ -7,6 +7,7 @@ import { KillSessionButton } from "./KillSessionButton";
 import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
 import { TerminalPane } from "./TerminalPane";
+import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 
 type CenterPaneProps = {
 	session?: WorkspaceSession;
@@ -20,6 +21,8 @@ type CenterPaneProps = {
 	 * menu. Shared by the orchestrator and worker terminals.
 	 */
 	directory?: string;
+	/** Open a workspace file clicked in the terminal (worker terminals only). */
+	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 };
 
 const terminalFontSizeStorageKey = "ao.terminal.fontSize";
@@ -48,6 +51,7 @@ export function CenterPane({
 	terminalTarget,
 	onSelectWorkerTerminal,
 	directory,
+	onOpenWorkspaceFile,
 }: CenterPaneProps) {
 	const paneRef = useRef<HTMLDivElement | null>(null);
 	const wheelZoomRemainderRef = useRef(0);
@@ -197,6 +201,7 @@ export function CenterPane({
 					session={session}
 					terminalTarget={target}
 					theme={theme}
+					onOpenWorkspaceFile={onOpenWorkspaceFile}
 				/>
 			</div>
 		</div>

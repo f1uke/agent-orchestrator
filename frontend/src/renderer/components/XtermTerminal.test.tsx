@@ -4,6 +4,7 @@ import { XtermTerminal } from "./XtermTerminal";
 import { focusTerminal } from "../lib/terminal-focus";
 import { findSessionLinks } from "../lib/session-ref";
 import { findExternalRefLinks } from "../lib/terminal-scm-links";
+import { findFileLinks } from "../lib/terminal-file-links";
 
 type FakeLink = {
 	text: string;
@@ -827,11 +828,12 @@ describe("XtermTerminal", () => {
 		const GL = "https://gitlab.example.com/team/webapp";
 		const resolver = (line: string) => findExternalRefLinks(line, { githubRepoBase: GH, gitlabProjectBase: GL });
 
-		// The SCM provider is registered second, so it is the last of linkProviders.
+		// Registration order is session (0), SCM #/! (1), file (2), so the SCM
+		// provider is index 1 — not the last, now that a file provider follows it.
 		function provideScmLinksFor(line: string, bufferLineNumber = 1): FakeLink[] | undefined {
 			const term = state.lastTerminal!;
 			term.lines = [line];
-			const provider = term.linkProviders[term.linkProviders.length - 1]!;
+			const provider = term.linkProviders[1]!;
 			let received: FakeLink[] | undefined;
 			provider.provideLinks(bufferLineNumber, (links) => {
 				received = links;
@@ -876,6 +878,48 @@ describe("XtermTerminal", () => {
 		it("returns undefined when no external resolver is supplied", () => {
 			render(<XtermTerminal theme="dark" />);
 			expect(provideScmLinksFor("opened #63 ok")).toBeUndefined();
+		});
+	});
+
+	describe("FILE reference link provider", () => {
+		// Registration order is session (0), SCM (1), file (2).
+		function provideFileLinksFor(line: string, bufferLineNumber = 1): FakeLink[] | undefined {
+			const term = state.lastTerminal!;
+			term.lines = [line];
+			const provider = term.linkProviders[2]!;
+			let received: FakeLink[] | undefined;
+			provider.provideLinks(bufferLineNumber, (links) => {
+				received = links;
+			});
+			return received;
+		}
+
+		it("linkifies a file reference with the correct 1-based buffer range", () => {
+			render(<XtermTerminal theme="dark" fileLinkResolver={findFileLinks} />);
+			const links = provideFileLinksFor("edit pkg/app.go now");
+			expect(links).toHaveLength(1);
+			expect(links![0].text).toBe("pkg/app.go");
+			// "edit " is 5 chars → token at 0-based index 5 → 1-based start.x 6; the
+			// token "pkg/app.go" is 10 chars → inclusive end.x 15.
+			expect(links![0].range).toEqual({ start: { x: 6, y: 1 }, end: { x: 15, y: 1 } });
+		});
+
+		it("activates by calling onFileLinkActivate with the matched ref", () => {
+			const onFileLinkActivate = vi.fn();
+			render(<XtermTerminal theme="dark" fileLinkResolver={findFileLinks} onFileLinkActivate={onFileLinkActivate} />);
+			const links = provideFileLinksFor("see main.py:12 there");
+			links![0].activate(new MouseEvent("click"), links![0].text);
+			expect(onFileLinkActivate).toHaveBeenCalledWith(expect.objectContaining({ ref: "main.py", line: 12 }));
+		});
+
+		it("does not linkify a dotted symbol reference", () => {
+			render(<XtermTerminal theme="dark" fileLinkResolver={findFileLinks} />);
+			expect(provideFileLinksFor("call Money.formatted here")).toBeUndefined();
+		});
+
+		it("returns undefined when no file resolver is supplied", () => {
+			render(<XtermTerminal theme="dark" />);
+			expect(provideFileLinksFor("edit pkg/app.go now")).toBeUndefined();
 		});
 	});
 });

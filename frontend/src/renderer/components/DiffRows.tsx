@@ -1,8 +1,19 @@
 import type { ReactNode } from "react";
 import type { components } from "../../api/schema";
-import { DIFF_ROW, MONO, PALETTE as P, tokenizeCode } from "../lib/comment-inbox";
+import { ACCENT, DIFF_ROW, MONO, PALETTE as P, tokenizeCode } from "../lib/comment-inbox";
 
 type DiffLine = components["schemas"]["DiffContextLineDTO"];
+
+/** An uncommitted-change gutter marker kind (Xcode-style bar). */
+export type ChangeMark = "added" | "modified" | "removed";
+
+// Gutter bar colour per change kind, from app design tokens (not raw Xcode
+// blue): added = success green, modified = accent blue, removed = error red.
+const CHANGE_BAR_COLOR: Record<ChangeMark, string> = {
+	added: DIFF_ROW.addSign,
+	modified: ACCENT,
+	removed: P.red,
+};
 
 // Two densities: the inline rail diff is cramped ("narrow"); the full-file
 // viewer in the center pane has room to breathe ("wide"). Verbatim metrics from
@@ -24,13 +35,22 @@ export function DiffRows({
 	size,
 	anchorIndex,
 	anchorNode,
+	changeMarks,
 }: {
 	lines: DiffLine[];
 	size: "narrow" | "wide";
 	anchorIndex?: number;
 	anchorNode?: ReactNode;
+	/**
+	 * Per-line uncommitted-change map, keyed by line index. When provided, a thin
+	 * Xcode-style bar is rendered in the far-left gutter for marked lines (and a
+	 * transparent spacer keeps unmarked lines aligned). Absent → the gutter is
+	 * unchanged, so the Reviews diff path renders exactly as before.
+	 */
+	changeMarks?: ReadonlyMap<number, ChangeMark>;
 }) {
 	const m = METRICS[size];
+	const showChangeGutter = changeMarks != null;
 	return (
 		<div
 			className="mono"
@@ -39,6 +59,7 @@ export function DiffRows({
 			{lines.map((line, i) => {
 				const add = line.kind === "add";
 				const del = line.kind === "del";
+				const mark = showChangeGutter ? changeMarks?.get(i) : undefined;
 				return (
 					<div key={i}>
 						<div
@@ -48,6 +69,19 @@ export function DiffRows({
 								padding: "1px 0",
 							}}
 						>
+							{showChangeGutter ? (
+								<span
+									aria-hidden="true"
+									data-testid={mark ? `change-bar-${i}` : undefined}
+									data-change={mark}
+									style={{
+										flex: "none",
+										width: 3,
+										alignSelf: "stretch",
+										background: mark ? CHANGE_BAR_COLOR[mark] : "transparent",
+									}}
+								/>
+							) : null}
 							<span
 								style={{ flex: "none", width: m.num, textAlign: "right", paddingRight: m.numPad, color: P.muted3, userSelect: "none" }}
 							>
