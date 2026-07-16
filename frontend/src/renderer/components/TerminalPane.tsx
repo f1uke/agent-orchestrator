@@ -31,7 +31,14 @@ type TerminalPaneProps = {
 	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 };
 
-export function TerminalPane({ session, theme, daemonReady, terminalTarget, fontSize, onOpenWorkspaceFile }: TerminalPaneProps) {
+export function TerminalPane({
+	session,
+	theme,
+	daemonReady,
+	terminalTarget,
+	fontSize,
+	onOpenWorkspaceFile,
+}: TerminalPaneProps) {
 	const terminalKey =
 		terminalTarget?.kind === "reviewer" ? terminalTarget.handleId : (session?.terminalHandleId ?? "empty");
 
@@ -150,7 +157,14 @@ function bannerText(state: TerminalSessionState, error?: string): string | undef
 	return undefined;
 }
 
-function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSize, onOpenWorkspaceFile }: TerminalPaneProps) {
+function AttachedTerminal({
+	session,
+	theme,
+	daemonReady,
+	terminalTarget,
+	fontSize,
+	onOpenWorkspaceFile,
+}: TerminalPaneProps) {
 	const attachSession =
 		session && terminalTarget?.kind === "reviewer"
 			? { ...session, terminalHandleId: terminalTarget.handleId }

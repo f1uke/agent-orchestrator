@@ -54,7 +54,12 @@ export function DiffRows({
 	return (
 		<div
 			className="mono"
-			style={{ fontFamily: MONO, fontSize: m.fontSize, lineHeight: m.lineHeight, padding: size === "wide" ? "6px 0" : 0 }}
+			style={{
+				fontFamily: MONO,
+				fontSize: m.fontSize,
+				lineHeight: m.lineHeight,
+				padding: size === "wide" ? "6px 0" : 0,
+			}}
 		>
 			{lines.map((line, i) => {
 				const add = line.kind === "add";
@@ -83,7 +88,14 @@ export function DiffRows({
 								/>
 							) : null}
 							<span
-								style={{ flex: "none", width: m.num, textAlign: "right", paddingRight: m.numPad, color: P.muted3, userSelect: "none" }}
+								style={{
+									flex: "none",
+									width: m.num,
+									textAlign: "right",
+									paddingRight: m.numPad,
+									color: P.muted3,
+									userSelect: "none",
+								}}
 							>
 								{line.newLine || line.oldLine || ""}
 							</span>

@@ -20,9 +20,7 @@ describe("DiffRows", () => {
 	});
 
 	it("pins an anchor node after the given line index", () => {
-		render(
-			<DiffRows lines={lines} size="wide" anchorIndex={2} anchorNode={<div data-testid="anchor">comment</div>} />,
-		);
+		render(<DiffRows lines={lines} size="wide" anchorIndex={2} anchorNode={<div data-testid="anchor">comment</div>} />);
 		expect(screen.getByTestId("anchor")).toBeInTheDocument();
 	});
 
