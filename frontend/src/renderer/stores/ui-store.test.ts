@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useUiStore } from "./ui-store";
 
 const STORAGE_KEY = "ao.projects.collapsed";
+const ORDER_STORAGE_KEY = "ao.projects.order";
 
 beforeEach(() => {
 	localStorage.clear();
-	useUiStore.setState({ collapsedProjectIds: new Set() });
+	useUiStore.setState({ collapsedProjectIds: new Set(), projectOrder: [] });
 });
 
 describe("ui-store per-project collapse", () => {
@@ -32,5 +33,17 @@ describe("ui-store per-project collapse", () => {
 
 		useUiStore.getState().toggleProjectCollapsed("proj-1");
 		expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual(["proj-2"]);
+	});
+});
+
+describe("ui-store project order", () => {
+	it("defaults to the daemon order (empty custom order)", () => {
+		expect(useUiStore.getState().projectOrder).toEqual([]);
+	});
+
+	it("setProjectOrder stores the order and persists it to localStorage", () => {
+		useUiStore.getState().setProjectOrder(["proj-2", "proj-1", "proj-3"]);
+		expect(useUiStore.getState().projectOrder).toEqual(["proj-2", "proj-1", "proj-3"]);
+		expect(JSON.parse(localStorage.getItem(ORDER_STORAGE_KEY)!)).toEqual(["proj-2", "proj-1", "proj-3"]);
 	});
 });

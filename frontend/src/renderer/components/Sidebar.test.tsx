@@ -1,6 +1,6 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
@@ -163,7 +163,7 @@ beforeEach(() => {
 	mockParams.projectId = undefined;
 	mockParams.sessionId = undefined;
 	localStorage.clear();
-	useUiStore.setState({ collapsedProjectIds: new Set() });
+	useUiStore.setState({ collapsedProjectIds: new Set(), projectOrder: [] });
 	vi.spyOn(window, "confirm").mockReturnValue(true);
 	vi.spyOn(window, "alert").mockImplementation(() => undefined);
 });
@@ -731,5 +731,60 @@ describe("Sidebar", () => {
 		expect(await screen.findByRole("menuitem", { name: "Project settings" })).toBeInTheDocument();
 		expect(heading).toHaveAttribute("aria-expanded", "true");
 		expect(screen.getByLabelText("Open Project One dashboard")).toBeInTheDocument();
+	});
+});
+
+describe("Sidebar project reorder (drag and drop)", () => {
+	const three: WorkspaceSummary[] = [
+		{ id: "proj-a", name: "Alpha", path: "/repo/a", sessions: [] },
+		{ id: "proj-b", name: "Beta", path: "/repo/b", sessions: [] },
+		{ id: "proj-c", name: "Gamma", path: "/repo/c", sessions: [] },
+	];
+
+	// jsdom has no drag pipeline and getBoundingClientRect is all-zeros, so a
+	// positive clientY lands past the (zero) midpoint → "bottom" edge.
+	function dataTransfer() {
+		return { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: vi.fn() };
+	}
+	function cardBox(name: string): HTMLElement {
+		const box = screen.getByText(name).closest("[draggable='true']");
+		if (!box) throw new Error(`draggable card for ${name} not found`);
+		return box as HTMLElement;
+	}
+	function dropZone(name: string): HTMLElement {
+		const li = screen.getByText(name).closest("li");
+		if (!li) throw new Error(`drop zone for ${name} not found`);
+		return li as HTMLElement;
+	}
+
+	it("commits and persists a new order when a card is dropped past another", () => {
+		renderSidebar({ workspaces: three });
+		const dt = dataTransfer();
+
+		fireEvent.dragStart(cardBox("Alpha"), { dataTransfer: dt });
+		fireEvent.dragOver(dropZone("Gamma"), { dataTransfer: dt, clientY: 500 });
+		fireEvent.drop(dropZone("Gamma"), { dataTransfer: dt });
+
+		// Alpha dropped below Gamma → [Beta, Gamma, Alpha], persisted to the store.
+		expect(useUiStore.getState().projectOrder).toEqual(["proj-b", "proj-c", "proj-a"]);
+		expect(JSON.parse(localStorage.getItem("ao.projects.order")!)).toEqual(["proj-b", "proj-c", "proj-a"]);
+	});
+
+	it("does not reorder when the drag starts from the overflow menu (data-no-drag)", () => {
+		renderSidebar({ workspaces: three });
+		const dt = dataTransfer();
+
+		// Dragging from the ⋮ control must be cancelled, so no order is committed.
+		fireEvent.dragStart(screen.getByLabelText("Project actions for Alpha"), { dataTransfer: dt });
+		fireEvent.dragOver(dropZone("Gamma"), { dataTransfer: dt, clientY: 500 });
+		fireEvent.drop(dropZone("Gamma"), { dataTransfer: dt });
+
+		expect(useUiStore.getState().projectOrder).toEqual([]);
+		expect(localStorage.getItem("ao.projects.order")).toBeNull();
+	});
+
+	it("does not make cards draggable when there is only one project", () => {
+		renderSidebar({ workspaces: [three[0]] });
+		expect(screen.getByText("Alpha").closest("[draggable='true']")).toBeNull();
 	});
 });
