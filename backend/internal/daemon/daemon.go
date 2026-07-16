@@ -22,6 +22,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
+	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -169,11 +170,17 @@ func Run() error {
 		return fmt.Errorf("response-language settings: %w", err)
 	}
 
+	// loopReg tracks each fixed-interval background loop's last-run time so the
+	// API can surface a live countdown to each loop's next run. In-memory only:
+	// rebuilt on boot, forgotten on shutdown. Created before any loop starts so
+	// every loop registers into the same registry.
+	loopReg := looptelemetry.New(func() time.Time { return time.Now().UTC() })
+
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
-	lcStack := startLifecycle(ctx, store, gatedRuntime, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, log)
-	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
+	lcStack := startLifecycle(ctx, store, gatedRuntime, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, loopReg, log)
+	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, loopReg, log)
 
 	// The spawn-confirm gate is a global setting the orchestrator prompt reads at
 	// spawn/restore time, so its store is built before the session manager and its
@@ -208,7 +215,7 @@ func Run() error {
 		}
 		return fmt.Errorf("wire session service: %w", err)
 	}
-	lcStack.trackerDone = startTrackerIntake(ctx, store, sessionSvc, log)
+	lcStack.trackerDone = startTrackerIntake(ctx, store, sessionSvc, loopReg, log)
 
 	// Auto-reclaim: a settings-backed poll loop that tears down finished worker
 	// sessions (tmux + worktree, branch kept) once they have sat past the
@@ -223,7 +230,7 @@ func Run() error {
 		}
 		return fmt.Errorf("reclaim settings: %w", err)
 	}
-	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, log)
+	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, loopReg, log)
 
 	// Evidence retention: a settings-backed store + sweeper that purges smoke-test
 	// evidence blobs older than the configured TTL (default 30 days, from each
@@ -250,7 +257,7 @@ func Run() error {
 	// Per-session token telemetry: a background poll that reads claude-code session
 	// transcripts and persists token/cost totals on the session row (additive; never
 	// blocks lifecycle). Non-claude sessions are skipped (no chip).
-	tokenUsageDone := startTokenUsageObserver(ctx, store, log)
+	tokenUsageDone := startTokenUsageObserver(ctx, store, loopReg, log)
 	agentSvc := agentsvc.New()
 	go func() {
 		if _, err := agentSvc.Refresh(ctx); err != nil {
@@ -281,6 +288,7 @@ func Run() error {
 		EvidenceSweeper:    evidenceSweep,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
+		LoopTelemetry:      loopReg,
 	})
 	if err != nil {
 		stop()
@@ -347,12 +355,28 @@ func Run() error {
 	if cfg.SessionIdleClose > 0 {
 		sweepInterval = idleSweepIntervalDefault
 	}
-	idleSweepDone := startIdleSweep(ctx, sweepInterval, sessMgr.CloseIdleSessions, log)
+	idleRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "idle-sweep",
+		Display:     "Auto-close idle",
+		Description: "Scans for idle sessions and closes them once past the idle TTL.",
+		Interval:    sweepInterval,
+	})
+	idleSweepDone := startIdleSweep(ctx, sweepInterval, func(ctx context.Context) error {
+		idleRec.Tick()
+		return sessMgr.CloseIdleSessions(ctx)
+	}, log)
 
 	// Age-based evidence retention: periodic sweep (plus an immediate first run)
 	// that purges evidence past the configured TTL. Self-disables via settings, so
 	// it always starts; a disabled policy just makes each tick a no-op.
+	evidenceRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "evidence-sweep",
+		Display:     "Evidence TTL purge",
+		Description: "Purges smoke-test evidence blobs older than the retention TTL.",
+		Interval:    evidenceSweepIntervalDefault,
+	})
 	evidenceSweepDone := startEvidenceRetentionSweep(ctx, evidenceSweepIntervalDefault, func(ctx context.Context) error {
+		evidenceRec.Tick()
 		_, _, err := evidenceSweep.SweepEvidenceNow(ctx)
 		return err
 	}, log)

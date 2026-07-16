@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -52,6 +54,30 @@ func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard
 
 func newReaper(lcm *fakeLCM, sessions fakeSessions, rt fakeRuntime) *Reaper {
 	return New(lcm, sessions, rt, Config{Logger: quietLogger()})
+}
+
+func TestStart_OnTickFiresEachCycle(t *testing.T) {
+	loopCtx, cancel := context.WithCancel(context.Background())
+	var ticks atomic.Int32
+	sessions := fakeSessions{rows: []domain.SessionRecord{probableSession("mer-1")}}
+	r := New(&fakeLCM{}, sessions, fakeRuntime{alive: true}, Config{
+		Tick:   5 * time.Millisecond,
+		Logger: quietLogger(),
+		OnTick: func() { ticks.Add(1) },
+	})
+	done := r.Start(loopCtx)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ticks.Load() >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if ticks.Load() < 2 {
+		t.Fatalf("want >=2 OnTick calls, got %d", ticks.Load())
+	}
 }
 
 func TestTick_ReportsAliveProbe(t *testing.T) {

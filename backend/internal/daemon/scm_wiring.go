@@ -15,6 +15,7 @@ import (
 	scmgithub "github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/github"
 	scmgitlab "github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/gitlab"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
+	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	scmobserve "github.com/aoagents/agent-orchestrator/backend/internal/observe/scm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
@@ -26,14 +27,20 @@ import (
 // startup; each provider performs a lazy credential check in the background
 // observer goroutine, logs one warning, and disables itself before any
 // provider API calls.
-func startSCMObserver(ctx context.Context, store *sqlite.Store, lcm *lifecycle.Manager, logger *slog.Logger) <-chan struct{} {
+func startSCMObserver(ctx context.Context, store *sqlite.Store, lcm *lifecycle.Manager, reg *looptelemetry.Registry, logger *slog.Logger) <-chan struct{} {
+	rec := reg.Register(looptelemetry.Spec{
+		Name:        "scm-observer",
+		Display:     "PR / CI polling",
+		Description: "Polls each session's pull/merge request for review, CI, and merge-state changes.",
+		Interval:    scmobserve.DefaultTickInterval,
+	})
 	entries, err := buildSCMEntries(logger)
 	if err != nil {
 		logSCMProviderDisabled(logger, err)
 		return closedDone()
 	}
 	provider := composite.New(entries...)
-	observer := scmobserve.New(provider, store, lcm, scmobserve.Config{Logger: logger})
+	observer := scmobserve.New(provider, store, lcm, scmobserve.Config{Logger: logger, OnTick: rec.Tick})
 	return observer.Start(ctx)
 }
 

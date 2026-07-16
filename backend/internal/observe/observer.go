@@ -23,13 +23,24 @@ import (
 //
 // poll errors other than context.Canceled are logged via logger with name as a
 // prefix, e.g. name="scm observer" -> "scm observer: initial poll failed".
-func StartPollLoop(ctx context.Context, tick time.Duration, poll func(context.Context) error, logger *slog.Logger, name string) <-chan struct{} {
+//
+// onTick, when non-nil, fires immediately before every poll invocation
+// (including the immediate first one). It is the timing seam the daemon uses to
+// record each loop's last-run time; observers stay provider-agnostic by taking a
+// plain func() rather than depending on the telemetry registry.
+func StartPollLoop(ctx context.Context, tick time.Duration, poll func(context.Context) error, logger *slog.Logger, name string, onTick func()) <-chan struct{} {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	fire := func() {
+		if onTick != nil {
+			onTick()
+		}
 	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		fire()
 		if err := poll(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error(name+": initial poll failed", "err", err)
 		}
@@ -40,6 +51,7 @@ func StartPollLoop(ctx context.Context, tick time.Duration, poll func(context.Co
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				fire()
 				if err := poll(ctx); err != nil && !errors.Is(err, context.Canceled) {
 					logger.Error(name+": poll failed", "err", err)
 				}

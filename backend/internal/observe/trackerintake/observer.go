@@ -94,6 +94,9 @@ type Config struct {
 	FailureBackoff time.Duration
 	Clock          func() time.Time
 	Logger         *slog.Logger
+	// OnTick, when non-nil, fires once before each poll cycle; the daemon's
+	// loop-timing seam (see internal/looptelemetry).
+	OnTick func()
 }
 
 // Observer polls configured projects and starts sessions for eligible issues.
@@ -105,12 +108,13 @@ type Observer struct {
 	failureBackoff time.Duration
 	clock          func() time.Time
 	logger         *slog.Logger
+	onTick         func()
 	backoffUntil   map[string]time.Time
 }
 
 // New constructs an Observer with safe defaults.
 func New(resolver TrackerResolver, store Store, spawner Spawner, cfg Config) *Observer {
-	o := &Observer{resolver: resolver, store: store, spawner: spawner, tick: cfg.Tick, failureBackoff: cfg.FailureBackoff, clock: cfg.Clock, logger: cfg.Logger, backoffUntil: map[string]time.Time{}}
+	o := &Observer{resolver: resolver, store: store, spawner: spawner, tick: cfg.Tick, failureBackoff: cfg.FailureBackoff, clock: cfg.Clock, logger: cfg.Logger, onTick: cfg.OnTick, backoffUntil: map[string]time.Time{}}
 	if o.tick <= 0 {
 		o.tick = DefaultTickInterval
 	}
@@ -129,7 +133,7 @@ func New(resolver TrackerResolver, store Store, spawner Spawner, cfg Config) *Ob
 // Start launches the observer loop. The first poll runs immediately inside the
 // goroutine, keeping daemon startup non-blocking.
 func (o *Observer) Start(ctx context.Context) <-chan struct{} {
-	return observe.StartPollLoop(ctx, o.tick, o.Poll, o.logger, "tracker intake")
+	return observe.StartPollLoop(ctx, o.tick, o.Poll, o.logger, "tracker intake", o.onTick)
 }
 
 // Poll runs one synchronous intake pass. Store discovery failures are returned

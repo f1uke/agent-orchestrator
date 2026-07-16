@@ -12,6 +12,7 @@ import (
 	"log/slog"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/claudecode"
+	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/tokenusage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
@@ -20,7 +21,13 @@ import (
 // that closes when its loop exits. claudecode.ReadSessionUsage is the transcript
 // reader; it reports "no telemetry" for non-claude-code agents, so the observer is
 // harness-agnostic and simply skips them (graceful n/a — no chip).
-func startTokenUsageObserver(ctx context.Context, store *sqlite.Store, logger *slog.Logger) <-chan struct{} {
-	observer := tokenusage.New(store, claudecode.ReadSessionUsage, tokenusage.Config{Logger: logger})
+func startTokenUsageObserver(ctx context.Context, store *sqlite.Store, reg *looptelemetry.Registry, logger *slog.Logger) <-chan struct{} {
+	rec := reg.Register(looptelemetry.Spec{
+		Name:        "token-usage",
+		Display:     "Session telemetry",
+		Description: "Reads each session's transcript and refreshes its token/cost totals.",
+		Interval:    tokenusage.DefaultTickInterval,
+	})
+	observer := tokenusage.New(store, claudecode.ReadSessionUsage, tokenusage.Config{Logger: logger, OnTick: rec.Tick})
 	return observer.Start(ctx)
 }

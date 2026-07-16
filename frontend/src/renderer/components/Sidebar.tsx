@@ -71,6 +71,8 @@ import {
 	useSidebar,
 } from "./ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { DaemonLoopsPopover } from "./DaemonLoopsPopover";
 import { OrchestratorIcon } from "./icons";
 import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
@@ -433,21 +435,36 @@ export function Sidebar({
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<span
-								aria-label={`Daemon ${daemonStatus.state}`}
-								className={cn(
-									"absolute right-1.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full",
-									daemonStatus.state === "ready" && eventsConnection !== "disconnected" ? "bg-success" : "bg-amber",
-								)}
-							/>
-						</TooltipTrigger>
-						<TooltipContent side="top">
-							daemon {daemonStatus.state}
-							{eventsConnection === "disconnected" && " · events offline"}
-						</TooltipContent>
-					</Tooltip>
+					<Popover>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<PopoverTrigger asChild>
+									<button
+										type="button"
+										aria-label={`Daemon ${daemonStatus.state}. Open background loop timers`}
+										aria-haspopup="dialog"
+										className="absolute right-0 top-1/2 grid size-6 -translate-y-1/2 cursor-pointer place-items-center rounded-md text-passive transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									>
+										<span
+											className={cn(
+												"h-1.5 w-1.5 rounded-full",
+												daemonStatus.state === "ready" && eventsConnection !== "disconnected"
+													? "bg-success"
+													: "bg-amber",
+											)}
+										/>
+									</button>
+								</PopoverTrigger>
+							</TooltipTrigger>
+							<TooltipContent side="top">
+								daemon {daemonStatus.state}
+								{eventsConnection === "disconnected" && " · events offline"}
+							</TooltipContent>
+						</Tooltip>
+						<PopoverContent side="top" align="end" className="w-72">
+							<DaemonLoopsPopover open />
+						</PopoverContent>
+					</Popover>
 				</div>
 				<div className="hidden flex-col items-center gap-1 pb-3.5 group-data-[collapsible=icon]:flex">
 					<DropdownMenu>

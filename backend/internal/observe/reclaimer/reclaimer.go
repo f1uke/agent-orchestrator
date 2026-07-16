@@ -31,6 +31,9 @@ type Config struct {
 	Tick   time.Duration
 	Clock  func() time.Time
 	Logger *slog.Logger
+	// OnTick, when non-nil, fires once before each poll cycle; the daemon's
+	// loop-timing seam (see internal/looptelemetry).
+	OnTick func()
 }
 
 // Reclaimer holds the grace clock: first-seen timestamps per candidate
@@ -46,6 +49,7 @@ type Reclaimer struct {
 	tick      time.Duration
 	clock     func() time.Time
 	logger    *slog.Logger
+	onTick    func()
 }
 
 // New constructs a Reclaimer.
@@ -58,6 +62,7 @@ func New(svc reclaimService, settings settingsReader, cfg Config) *Reclaimer {
 		tick:      cfg.Tick,
 		clock:     cfg.Clock,
 		logger:    cfg.Logger,
+		onTick:    cfg.OnTick,
 	}
 	if r.tick <= 0 {
 		r.tick = DefaultTickInterval
@@ -74,7 +79,7 @@ func New(svc reclaimService, settings settingsReader, cfg Config) *Reclaimer {
 // Start runs the loop until ctx is cancelled; the returned channel closes when
 // the loop exits. Mirrors the reaper's shutdown contract.
 func (r *Reclaimer) Start(ctx context.Context) <-chan struct{} {
-	return observe.StartPollLoop(ctx, r.tick, r.Tick, r.logger, "reclaimer")
+	return observe.StartPollLoop(ctx, r.tick, r.Tick, r.logger, "reclaimer", r.onTick)
 }
 
 // Tick runs one grace-clock pass. Disabled settings make it a no-op.

@@ -382,7 +382,24 @@ func operations() []operation {
 	ops = append(ops, smokeOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, importOperations()...)
+	ops = append(ops, daemonOperations()...)
 	return ops
+}
+
+// daemonOperations declares the /daemon inspection operations. Must stay 1:1
+// with the routes DaemonController.Register mounts (enforced by the parity test).
+func daemonOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/daemon/loops", id: "listDaemonLoops", tag: "daemon",
+			summary: "List the daemon's fixed-interval background loops with timing",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListDaemonLoopsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
 }
 
 func agentOperations() []operation {
