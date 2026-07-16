@@ -95,6 +95,9 @@ type Config struct {
 	// still has that PR auto-attributed, even though Metadata.Branch only ever
 	// holds the spawn-time branch snapshot.
 	WorktreeBranch func(path string) string
+	// OnTick, when non-nil, fires once before each poll cycle. It is the daemon's
+	// loop-timing seam (see internal/looptelemetry); nil in tests and standalone use.
+	OnTick func()
 }
 
 // ObserverCache stores provider ETags and review polling timestamps in memory.
@@ -167,12 +170,14 @@ type Observer struct {
 	// worktreeBranch resolves a session worktree's live current git branch so
 	// discovery can attribute PRs a session opened after switching branches.
 	worktreeBranch func(path string) string
+	// onTick fires once before each poll cycle; the daemon's loop-timing seam.
+	onTick func()
 }
 
 // New constructs an Observer with default cadence/cache settings for zero
 // values in cfg.
 func New(provider Provider, store Store, lifecycle Lifecycle, cfg Config) *Observer {
-	o := &Observer{provider: provider, store: store, lifecycle: lifecycle, tick: cfg.Tick, reviewInterval: cfg.ReviewInterval, clock: cfg.Clock, logger: cfg.Logger, worktreeBranch: cfg.WorktreeBranch, Cache: newCache(cfg.CacheMax)}
+	o := &Observer{provider: provider, store: store, lifecycle: lifecycle, tick: cfg.Tick, reviewInterval: cfg.ReviewInterval, clock: cfg.Clock, logger: cfg.Logger, worktreeBranch: cfg.WorktreeBranch, onTick: cfg.OnTick, Cache: newCache(cfg.CacheMax)}
 	if o.tick <= 0 {
 		o.tick = DefaultTickInterval
 	}
@@ -211,7 +216,7 @@ func (o *Observer) Start(ctx context.Context) <-chan struct{} {
 		})
 		return o.Poll(ctx)
 	}
-	return observe.StartPollLoop(ctx, o.tick, poll, o.logger, "scm observer")
+	return observe.StartPollLoop(ctx, o.tick, poll, o.logger, "scm observer", o.onTick)
 }
 
 type subject struct {

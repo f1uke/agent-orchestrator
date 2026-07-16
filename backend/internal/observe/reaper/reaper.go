@@ -33,6 +33,9 @@ type Config struct {
 	// because a single failed probe must not kill the loop. nil means
 	// slog.Default.
 	Logger *slog.Logger
+	// OnTick, when non-nil, fires once before each tick cycle; the daemon's
+	// loop-timing seam (see internal/looptelemetry).
+	OnTick func()
 }
 
 type sessionSource interface {
@@ -56,6 +59,7 @@ type Reaper struct {
 	tick     time.Duration
 	clock    func() time.Time
 	logger   *slog.Logger
+	onTick   func()
 }
 
 // New constructs a Reaper. sink is the lifecycle fact destination; sessions
@@ -68,6 +72,7 @@ func New(sink runtimeObservationSink, sessions sessionSource, runtime runtimePro
 		tick:     cfg.Tick,
 		clock:    cfg.Clock,
 		logger:   cfg.Logger,
+		onTick:   cfg.OnTick,
 	}
 	if r.tick <= 0 {
 		r.tick = DefaultTickInterval
@@ -100,6 +105,9 @@ func (r *Reaper) loop(ctx context.Context, done chan<- struct{}) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if r.onTick != nil {
+				r.onTick()
+			}
 			if err := r.Tick(ctx); err != nil {
 				r.logger.Error("reaper: tick failed", "err", err)
 			}

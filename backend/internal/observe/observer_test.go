@@ -178,7 +178,7 @@ func TestStartPollLoop_FirstPollImmediateThenTicks(t *testing.T) {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := StartPollLoop(ctx, 10*time.Millisecond, poll, quietLogger(), "test")
+	done := StartPollLoop(ctx, 10*time.Millisecond, poll, quietLogger(), "test", nil)
 	// Wait for at least 2 polls (initial + one tick).
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -203,6 +203,30 @@ func TestStartPollLoop_FirstPollImmediateThenTicks(t *testing.T) {
 	}
 }
 
+func TestStartPollLoop_OnTickFiresEachPoll(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var ticks, polls atomic.Int32
+	done := StartPollLoop(ctx, 5*time.Millisecond,
+		func(context.Context) error { polls.Add(1); return nil },
+		quietLogger(), "test",
+		func() { ticks.Add(1) })
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ticks.Load() >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if ticks.Load() != polls.Load() {
+		t.Fatalf("ticks(%d) must equal polls(%d)", ticks.Load(), polls.Load())
+	}
+	if ticks.Load() < 2 {
+		t.Fatalf("want >=2 ticks (immediate + at least one interval), got %d", ticks.Load())
+	}
+}
+
 func TestStartPollLoop_LogsPollErrorWithoutPanic(t *testing.T) {
 	var ran atomic.Int32
 	poll := func(context.Context) error {
@@ -210,7 +234,7 @@ func TestStartPollLoop_LogsPollErrorWithoutPanic(t *testing.T) {
 		return errors.New("boom")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := StartPollLoop(ctx, 10*time.Millisecond, poll, quietLogger(), "test")
+	done := StartPollLoop(ctx, 10*time.Millisecond, poll, quietLogger(), "test", nil)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if ran.Load() >= 2 {

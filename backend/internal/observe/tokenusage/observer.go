@@ -45,6 +45,9 @@ type Config struct {
 	Clock func() time.Time
 	// Logger receives parse/persist diagnostics. Nil uses slog.Default.
 	Logger *slog.Logger
+	// OnTick, when non-nil, fires once before each poll cycle; the daemon's
+	// loop-timing seam (see internal/looptelemetry).
+	OnTick func()
 }
 
 // Observer polls sessions and refreshes their token telemetry.
@@ -54,6 +57,7 @@ type Observer struct {
 	tick   time.Duration
 	clock  func() time.Time
 	logger *slog.Logger
+	onTick func()
 }
 
 // New constructs an Observer. read locates + sums a session's transcript usage.
@@ -64,6 +68,7 @@ func New(store Store, read UsageReader, cfg Config) *Observer {
 		tick:   cfg.Tick,
 		clock:  cfg.Clock,
 		logger: cfg.Logger,
+		onTick: cfg.OnTick,
 	}
 	if o.tick <= 0 {
 		o.tick = DefaultTickInterval
@@ -79,7 +84,7 @@ func New(store Store, read UsageReader, cfg Config) *Observer {
 
 // Start launches the poll loop and returns a channel that closes when it exits.
 func (o *Observer) Start(ctx context.Context) <-chan struct{} {
-	return observe.StartPollLoop(ctx, o.tick, o.poll, o.logger, "token-usage observer")
+	return observe.StartPollLoop(ctx, o.tick, o.poll, o.logger, "token-usage observer", o.onTick)
 }
 
 // poll refreshes token telemetry for every eligible session. It never returns on a
