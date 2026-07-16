@@ -175,6 +175,94 @@ func TestBaseBranchGuardETag304(t *testing.T) {
 	}
 }
 
+// TestRepoPRListGuardDetectsPushToExistingMR is the regression for the
+// "stale ci_failed on an idle session" bug. A worker's failing MR was fixed by
+// a NEW push (its head SHA advanced) and the new head's pipeline passed, but the
+// board stayed stuck at ci_failed for ~20h because the observer never re-fetched
+// the MR. The per-commit CommitChecksGuard is keyed on the now-stale stored head
+// SHA (so it 304s on the dead commit forever), leaving the coarse RepoPRListGuard
+// as the only way to notice the push. GitLab's default MR-list order is
+// created_at, under which a push to an existing (non-newest-created) MR leaves
+// the single per_page=1 top row unchanged, so the guard 304s and the push is
+// missed. Ordering the guard by updated_at (as the GitHub guard already does with
+// sort=updated) moves the just-pushed MR to the top of the window, so the guard
+// body/ETag changes and the observer re-fetches. This drives that exact sequence.
+func TestRepoPRListGuardDetectsPushToExistingMR(t *testing.T) {
+	type mr struct {
+		iid              int
+		created, updated string
+		sha              string
+	}
+	// #7 is the newest-CREATED and (initially) newest-UPDATED open MR; #8 is an
+	// older, already-tracked MR — the analogue of the frozen MR in the incident.
+	mrs := []mr{
+		{iid: 7, created: "2026-07-15T12:00:00Z", updated: "2026-07-15T12:00:00Z", sha: "aaa"},
+		{iid: 8, created: "2026-07-15T09:00:00Z", updated: "2026-07-15T10:00:00Z", sha: "bbb"},
+	}
+	// topMR returns the single row a per_page=1 list returns for the given
+	// order_by (sort=desc), mirroring how GitLab orders /merge_requests.
+	topMR := func(orderBy string) mr {
+		best := mrs[0]
+		key := func(m mr) string {
+			if orderBy == "updated_at" {
+				return m.updated
+			}
+			return m.created
+		}
+		for _, m := range mrs[1:] {
+			if key(m) > key(best) {
+				best = m
+			}
+		}
+		return best
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		orderBy := r.URL.Query().Get("order_by")
+		if orderBy == "" {
+			orderBy = "created_at" // GitLab's documented default
+		}
+		top := topMR(orderBy)
+		// A body-derived ETag, as Grape/Rack serve for REST list responses: it
+		// changes iff the returned row's identity/head changes.
+		etag := `"` + strconv.Itoa(top.iid) + ":" + top.sha + `"`
+		if r.Header.Get("If-None-Match") == etag {
+			w.Header().Set("ETag", etag)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		_, _ = w.Write([]byte(`[{"iid":` + strconv.Itoa(top.iid) + `,"sha":"` + top.sha + `"}]`))
+	}))
+	defer srv.Close()
+	p := newTestProvider(t, srv.URL)
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+
+	first, err := p.RepoPRListGuard(context.Background(), repo, "")
+	if err != nil {
+		t.Fatalf("first RepoPRListGuard: %v", err)
+	}
+	if first.NotModified {
+		t.Fatalf("first guard must fetch (no prior ETag), got NotModified")
+	}
+
+	// A new push lands on the already-tracked MR #8: its head SHA advances and its
+	// updated_at bumps to the newest, but its created_at does NOT move.
+	for i := range mrs {
+		if mrs[i].iid == 8 {
+			mrs[i].updated = "2026-07-15T13:00:00Z"
+			mrs[i].sha = "bbb2"
+		}
+	}
+
+	second, err := p.RepoPRListGuard(context.Background(), repo, first.ETag)
+	if err != nil {
+		t.Fatalf("second RepoPRListGuard: %v", err)
+	}
+	if second.NotModified {
+		t.Fatalf("guard 304'd after a push to an existing MR — the head advance was missed, so the observer never re-fetches and an idle session stays stuck at ci_failed; the MR-list guard must order by updated_at so a pushed MR moves to the top of the per_page=1 window")
+	}
+}
+
 // TestCIObservationNormalizesJobStatus locks in that every emitted check status
 // is one of AO's normalized domain.PRCheckStatus values. The pr_checks.status
 // column CHECK-constrains writes to that vocabulary, so emitting GitLab's raw job
