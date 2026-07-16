@@ -4,8 +4,41 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
+
+// TestReviewTexts_RendersProjectIDPlaceholder: the reviewer base goes through the
+// same {{.ProjectID}} template render as the orchestrator/worker bases, so an
+// author can address the private knowledge store in a reviewer base and have the
+// concrete project id substituted. The reviewer path previously never rendered
+// its base, so {{.ProjectID}} would have reached the reviewer verbatim.
+func TestReviewTexts_RendersProjectIDPlaceholder(t *testing.T) {
+	spec := LaunchSpec{
+		WorkerID:     "s",
+		PRURL:        "u",
+		RunID:        "r",
+		ProjectID:    "nter-ios-app",
+		ReviewerBase: "Reviewer context lives at ~/.ao/knowledge/{{.ProjectID}}/plans/.",
+	}
+	_, sys := reviewTexts(spec)
+	if !strings.Contains(sys, "~/.ao/knowledge/nter-ios-app/plans/") {
+		t.Fatalf("reviewer base {{.ProjectID}} was not rendered to the project id:\n%s", sys)
+	}
+	if strings.Contains(sys, "{{.ProjectID}}") {
+		t.Fatalf("reviewer base still carries an unexpanded placeholder:\n%s", sys)
+	}
+}
+
+// TestReviewLaunchSpec_CarriesProjectID: the launch spec must carry the worker's
+// project id so reviewTexts can render the reviewer base's {{.ProjectID}}.
+func TestReviewLaunchSpec_CarriesProjectID(t *testing.T) {
+	worker := domain.SessionRecord{ID: "mer-1", ProjectID: "nter-ios-app"}
+	spec := reviewLaunchSpec(worker, domain.ReviewerClaudeCode, domain.ReviewRun{}, nil, 0)
+	if spec.ProjectID != "nter-ios-app" {
+		t.Fatalf("reviewLaunchSpec must carry the worker's project id, got %q", spec.ProjectID)
+	}
+}
 
 func TestReviewTexts_UsesBaseOverrideAdditionFloorAndGuard(t *testing.T) {
 	spec := LaunchSpec{

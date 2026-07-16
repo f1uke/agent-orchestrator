@@ -30,6 +30,11 @@ func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 	if strings.TrimSpace(base) == "" {
 		base = prompts.DefaultBase(prompts.KindReviewer)
 	}
+	// Render the reviewer base through the same {{.ProjectID}} template as the
+	// orchestrator/worker bases (session_manager.effectiveBase), so an author can
+	// address the private knowledge store in a reviewer base and get the concrete
+	// project id. A base with no template actions renders unchanged.
+	base = prompts.RenderBase(base, string(spec.ProjectID))
 	// The response-language directive is injected LAST (just before the
 	// confidentiality guard) so it wins over the English base + review task above
 	// it. Empty/English renders nothing, so the default reviewer path is unchanged.

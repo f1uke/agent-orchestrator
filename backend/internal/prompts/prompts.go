@@ -5,7 +5,10 @@
 // read one source of truth for defaults + Reset-to-default.
 package prompts
 
-import "strings"
+import (
+	"strings"
+	"text/template"
+)
 
 // Kind enumerates the editable prompt kinds. Orchestrator and worker map to
 // domain.SessionKind; reviewer is launched by the review engine (not a session
@@ -31,15 +34,44 @@ func (k Kind) Valid() bool {
 	return false
 }
 
-// ProjectIDPlaceholder is substituted with the session's project id when the
-// orchestrator base is assembled. It is a documented editable token, not fmt
-// mechanics, so the id stays a dynamic value the user never authors.
+// ProjectIDPlaceholder is the Go text/template action an author writes in any
+// kind's base (orchestrator, worker, reviewer) to insert the session's project
+// id. RenderBase substitutes it so the id stays a dynamic value the user never
+// authors literally.
 const ProjectIDPlaceholder = "{{.ProjectID}}"
 
-// RenderBase substitutes the project-id placeholder. A base with no placeholder
-// (worker, reviewer, or a user who deleted it) is returned unchanged.
+// baseData is the render context available to a base prompt. Only the project id
+// is exposed to authors, as {{.ProjectID}}. It is a struct (not a map) so an
+// unknown field like {{.Nope}} is an execute error that RenderBase catches and
+// falls back on, rather than silently rendering "<no value>".
+type baseData struct {
+	ProjectID string
+}
+
+// RenderBase renders a base prompt as a Go text/template, exposing the session's
+// project id as {{.ProjectID}}. It is applied uniformly to every kind's base so
+// an author writes the placeholder the same way for the orchestrator, worker, and
+// reviewer.
+//
+// Backward compatibility is the priority on this critical spawn path:
+//   - A base with no template actions is itself a valid template that outputs its
+//     own text, so plain prose renders byte-for-byte unchanged. An older override
+//     that still documents the store via the $AO_PROJECT_ID env var keeps working
+//     (the worker resolves that variable at runtime) with no per-user migration.
+//   - A base that fails to parse or execute — a stray or malformed {{...}} left in
+//     a hand-authored override — falls back to the RAW base whole rather than
+//     aborting prompt assembly or emitting a partial render. A bad edit degrades
+//     to literal text instead of an empty or missing system prompt.
 func RenderBase(base, projectID string) string {
-	return strings.ReplaceAll(base, ProjectIDPlaceholder, projectID)
+	tmpl, err := template.New("base").Parse(base)
+	if err != nil {
+		return base
+	}
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, baseData{ProjectID: projectID}); err != nil {
+		return base
+	}
+	return buf.String()
 }
 
 // Section renders an optional appended block: "\n\n"+text when non-blank, else "".
@@ -117,11 +149,11 @@ The project's branch convention (prefix + PR base/target) and this namespace rul
 
 ## Project knowledge (AO private store)
 
-AO keeps this project's private knowledge OUTSIDE the repo at ` + "`~/.ao/knowledge/$AO_PROJECT_ID/`" + ` (` + "`$AO_PROJECT_ID`" + ` is set in your environment). It is shared across the project's AO sessions but is NEVER committed or pushed — the repo may be team-shared, so nothing here may leak into tracked files.
+AO keeps this project's private knowledge OUTSIDE the repo at ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/`" + `. It is shared across the project's AO sessions but is NEVER committed or pushed — the repo may be team-shared, so nothing here may leak into tracked files.
 
-At the start of your task, read the specific knowledge-store entries your brief names (under ` + "`~/.ao/knowledge/$AO_PROJECT_ID/plans/`" + `) for prior plans, proposals, and diagnoses; read those directly rather than the whole ` + "`~/.ao/knowledge/$AO_PROJECT_ID/INDEX.md`" + `, which is large and orchestrator-curated. If the brief names none, a quick scan of ` + "`INDEX.md`" + ` for entries relevant to your task is fine.
+At the start of your task, read the specific knowledge-store entries your brief names (under ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/plans/`" + `) for prior plans, proposals, and diagnoses; read those directly rather than the whole ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/INDEX.md`" + `, which is large and orchestrator-curated. If the brief names none, a quick scan of ` + "`INDEX.md`" + ` for entries relevant to your task is fine.
 
-Save durable artifacts — writing-plans, brainstorming, and diagnosis output such as plans, proposals, and design docs — DIRECTLY to ` + "`~/.ao/knowledge/$AO_PROJECT_ID/plans/<branch>--<topic>.md`" + ` (that absolute path, outside the worktree), and write them there AS YOU GO so nothing is lost when this worktree is deleted. Do NOT put AO working docs in the repo: ` + "`docs/`" + `, ` + "`CLAUDE.md`" + `, and ` + "`AGENTS.md`" + ` are team-shared and must never carry AO planning artifacts.
+Save durable artifacts — writing-plans, brainstorming, and diagnosis output such as plans, proposals, and design docs — DIRECTLY to ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/plans/<branch>--<topic>.md`" + ` (that absolute path, outside the worktree), and write them there AS YOU GO so nothing is lost when this worktree is deleted. Do NOT put AO working docs in the repo: ` + "`docs/`" + `, ` + "`CLAUDE.md`" + `, and ` + "`AGENTS.md`" + ` are team-shared and must never carry AO planning artifacts.
 
 In your final report, list the knowledge-store path(s) you wrote. Do NOT edit ` + "`INDEX.md`" + ` — the orchestrator curates it.
 
