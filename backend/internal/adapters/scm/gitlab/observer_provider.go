@@ -125,6 +125,18 @@ func (p *Provider) ListOpenPRsByRepo(ctx context.Context, repo ports.SCMRepo) ([
 // RepoPRListGuard checks GitLab's cheap open-MR-list ETag guard.
 func (p *Provider) RepoPRListGuard(ctx context.Context, repo ports.SCMRepo, etag string) (ports.SCMGuardResult, error) {
 	q := url.Values{}
+	// Order by updated_at (desc) so a push to ANY open MR — not just a brand-new
+	// MR — moves that MR to the top of this per_page=1 window and changes the
+	// guard body/ETag, making the observer re-fetch it. GitLab's default order is
+	// created_at, under which a push to an existing (non-newest-created) MR leaves
+	// the single top row unchanged: the guard 304s and, because the per-commit
+	// CommitChecksGuard is keyed on the now-stale stored head SHA (so it 304s on
+	// the dead commit too), nothing re-fetches the MR. Its head SHA and CI state
+	// then freeze at the pre-push commit — an idle session whose failing pipeline
+	// was later fixed by a new push stays stuck at ci_failed. This mirrors the
+	// GitHub RepoPRListGuard, which already sorts by updated for the same reason.
+	q.Set("order_by", "updated_at")
+	q.Set("sort", "desc")
 	q.Set("per_page", "1")
 	resp, err := p.client.doRESTWithETag(ctx, mrListPath(repo), q, etag)
 	if err != nil {
