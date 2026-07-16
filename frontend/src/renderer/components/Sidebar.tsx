@@ -420,7 +420,7 @@ export function Sidebar({
 							</TooltipContent>
 						</Tooltip>
 						<PopoverContent side="top" align="end" className="w-72">
-							<DaemonLoopsPopover open daemonReachable={daemonStatus.state === "ready"} />
+							<DaemonLoopsPopover open />
 						</PopoverContent>
 					</Popover>
 				</div>

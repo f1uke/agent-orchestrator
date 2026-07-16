@@ -7,18 +7,18 @@ import { computeFraction, effectiveNextRunAt, formatInterval, formatNextIn } fro
 interface DaemonLoopsPopoverProps {
 	/** Whether the popover is open; gates the query + the ticker. */
 	open: boolean;
-	/** False when the daemon isn't ready; short-circuits to the offline state. */
-	daemonReachable: boolean;
 }
 
 /**
  * Popover body listing every fixed-interval daemon background loop with a live
  * radial countdown to its next run. A single 1s ticker re-renders all rows; each
  * ring interpolates from the loop's nextRunAt and rolls over locally between
- * endpoint refetches.
+ * endpoint refetches. Reachability is derived from the endpoint itself (a failed
+ * request means the daemon is unreachable), so the panel behaves identically in
+ * the Electron app and in browser preview.
  */
-export function DaemonLoopsPopover({ open, daemonReachable }: DaemonLoopsPopoverProps) {
-	const { data: loops, isLoading, isError } = useDaemonLoops(open && daemonReachable);
+export function DaemonLoopsPopover({ open }: DaemonLoopsPopoverProps) {
+	const { data: loops, isLoading, isError } = useDaemonLoops(open);
 	const [nowMs, setNowMs] = useState(() => Date.now());
 
 	useEffect(() => {
@@ -30,7 +30,7 @@ export function DaemonLoopsPopover({ open, daemonReachable }: DaemonLoopsPopover
 	return (
 		<div className="flex flex-col">
 			<div className="px-2 pt-1.5 pb-1 text-xs font-medium text-passive">Background loops</div>
-			{!daemonReachable || isError ? (
+			{isError ? (
 				<EmptyRow label="Daemon offline" />
 			) : isLoading ? (
 				<EmptyRow label="Loading loops…" />

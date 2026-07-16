@@ -11,10 +11,10 @@ vi.mock("../hooks/useDaemonLoops", () => ({
 // Imported after the mock is registered.
 import { DaemonLoopsPopover } from "./DaemonLoopsPopover";
 
-function renderPopover(reachable = true) {
+function renderPopover() {
 	return render(
 		<TooltipProvider>
-			<DaemonLoopsPopover open daemonReachable={reachable} />
+			<DaemonLoopsPopover open />
 		</TooltipProvider>,
 	);
 }
@@ -47,9 +47,9 @@ describe("DaemonLoopsPopover", () => {
 		expect(screen.getByText(/waiting for first run/i)).toBeTruthy();
 	});
 
-	it("shows the offline state when the daemon is unreachable", () => {
-		useDaemonLoopsMock.mockReturnValue({ data: undefined, isLoading: false, isError: false });
-		renderPopover(false);
+	it("shows the offline state when the loops request fails", () => {
+		useDaemonLoopsMock.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+		renderPopover();
 		expect(screen.getByText("Daemon offline")).toBeTruthy();
 	});
 
