@@ -16,6 +16,12 @@ type UiState = {
 	restartingProjectIds: ReadonlySet<string>;
 	/** Projects whose sidebar section is collapsed (heading only). Absent = expanded. */
 	collapsedProjectIds: ReadonlySet<string>;
+	/**
+	 * User's custom sidebar project order (project ids). Empty = daemon default.
+	 * Projects absent from this list sort after the listed ones (see
+	 * `orderWorkspaces`). Set by drag-and-drop reorder in the sidebar.
+	 */
+	projectOrder: readonly string[];
 	orchestratorReplacementErrors: Record<string, string>;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
@@ -23,6 +29,7 @@ type UiState = {
 	toggleSidebar: () => void;
 	toggleInspector: () => void;
 	toggleProjectCollapsed: (projectId: string) => void;
+	setProjectOrder: (orderedProjectIds: readonly string[]) => void;
 	setProjectRestarting: (projectId: string, restarting: boolean) => void;
 	setOrchestratorReplacementError: (projectId: string, message: string | null) => void;
 };
@@ -31,6 +38,7 @@ const sidebarStorageKey = "ao.sidebar.open";
 const inspectorStorageKey = "ao.inspector.open";
 const themeStorageKey = "ao.theme";
 const collapsedProjectsStorageKey = "ao.projects.collapsed";
+const projectOrderStorageKey = "ao.projects.order";
 
 function getLocalStorage() {
 	if (typeof window === "undefined" || !window.localStorage) return null;
@@ -53,6 +61,17 @@ function initialCollapsedProjectIds(): Set<string> {
 		return Array.isArray(parsed) ? new Set(parsed.filter((id): id is string => typeof id === "string")) : new Set();
 	} catch {
 		return new Set();
+	}
+}
+
+function initialProjectOrder(): string[] {
+	const raw = getLocalStorage()?.getItem(projectOrderStorageKey);
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+	} catch {
+		return [];
 	}
 }
 
@@ -79,6 +98,7 @@ export const useUiStore = create<UiState>((set) => ({
 	theme: initialTheme(),
 	restartingProjectIds: new Set<string>(),
 	collapsedProjectIds: initialCollapsedProjectIds(),
+	projectOrder: initialProjectOrder(),
 	orchestratorReplacementErrors: {},
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setTheme: (theme) => {
@@ -114,6 +134,11 @@ export const useUiStore = create<UiState>((set) => ({
 			getLocalStorage()?.setItem(collapsedProjectsStorageKey, JSON.stringify([...collapsedProjectIds]));
 			return { collapsedProjectIds };
 		}),
+	setProjectOrder: (orderedProjectIds) => {
+		const projectOrder = [...orderedProjectIds];
+		getLocalStorage()?.setItem(projectOrderStorageKey, JSON.stringify(projectOrder));
+		set({ projectOrder });
+	},
 	setProjectRestarting: (projectId, restarting) =>
 		set((state) => {
 			const restartingProjectIds = new Set(state.restartingProjectIds);

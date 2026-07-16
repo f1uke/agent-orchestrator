@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, useCallback, useEffect, useRef } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef } from "react";
 import { ShellTopbar } from "../components/ShellTopbar";
 import { OrchestratorReplacementDialog } from "../components/OrchestratorReplacementDialog";
 import { Sidebar } from "../components/Sidebar";
@@ -16,6 +16,7 @@ import { ShellProvider } from "../lib/shell-context";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { captureOrchestratorReplacementFailure } from "../lib/orchestrator-replacement-telemetry";
+import { orderWorkspaces } from "../lib/project-order";
 import { readStoredTheme, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSummary } from "../types/workspace";
 import type { components } from "../../api/schema";
@@ -48,6 +49,11 @@ function ShellLayout() {
 	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
 	const workspaces = workspaceQuery.data ?? [];
+	const projectOrder = useUiStore((state) => state.projectOrder);
+	// The single source of visible project order: the user's persisted custom
+	// order applied to the daemon list. Both the sidebar list and the ⌘1-9
+	// project shortcut read this, so a reordered sidebar and its shortcuts agree.
+	const orderedWorkspaces = useMemo(() => orderWorkspaces(workspaces, projectOrder), [workspaces, projectOrder]);
 	const daemonStatus = useDaemonStatus(queryClient);
 	const agentCatalogPortRef = useRef<number | undefined>(undefined);
 	const { theme, setTheme, isSidebarOpen, toggleSidebar } = useUiStore();
@@ -204,7 +210,7 @@ function ShellLayout() {
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if ((event.metaKey || event.ctrlKey) && /^[1-9]$/.test(event.key)) {
-				const workspace = workspaces[Number(event.key) - 1];
+				const workspace = orderedWorkspaces[Number(event.key) - 1];
 				if (workspace) {
 					event.preventDefault();
 					void navigate({ to: "/projects/$projectId", params: { projectId: workspace.id } });
@@ -213,7 +219,7 @@ function ShellLayout() {
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [navigate, workspaces]);
+	}, [navigate, orderedWorkspaces]);
 
 	return (
 		<ShellProvider value={{ daemonStatus, createProject }}>
@@ -240,7 +246,7 @@ function ShellLayout() {
 						onCreateProject={createProject}
 						onRemoveProject={removeProject}
 						workspaceError={workspaceQuery.isError ? errorMessage(workspaceQuery.error) : undefined}
-						workspaces={workspaces}
+						workspaces={orderedWorkspaces}
 					/>
 					<main className="flex min-w-0 flex-1 flex-col">
 						<div className="min-h-0 flex-1">

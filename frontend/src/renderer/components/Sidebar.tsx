@@ -8,6 +8,7 @@ import {
 	FolderPlus,
 	GitPullRequest,
 	Globe,
+	GripVertical,
 	LayoutDashboard,
 	Moon,
 	MoreVertical,
@@ -36,6 +37,7 @@ import {
 } from "../types/workspace";
 import { aoBridge } from "../lib/bridge";
 import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
+import { moveProject } from "../lib/project-order";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
@@ -215,6 +217,29 @@ export function Sidebar({
 	// the ui-store (localStorage) so it survives reloads.
 	const collapsedProjectIds = useUiStore((s) => s.collapsedProjectIds);
 	const toggleProjectCollapsed = useUiStore((s) => s.toggleProjectCollapsed);
+	// Drag-to-reorder: the sidebar owns the transient drag state so the drop
+	// indicator can render on whichever card the pointer is over. The committed
+	// order is persisted in the ui-store (`ao.projects.order`); `workspaces`
+	// arrives already ordered (see `orderWorkspaces` in _shell), so the drop just
+	// splices the current visible id sequence. Disabled in the icon rail and when
+	// there is nothing to reorder (a single project).
+	const setProjectOrder = useUiStore((s) => s.setProjectOrder);
+	const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null);
+	const [dropTarget, setDropTarget] = useState<{ id: string; edge: DropEdge } | null>(null);
+	const canReorder = !isCollapsed && workspaces.length > 1;
+	const orderedProjectIds = workspaces.map((w) => w.id);
+
+	const endReorderDrag = () => {
+		setDraggingProjectId(null);
+		setDropTarget(null);
+	};
+
+	const commitReorderDrop = () => {
+		if (draggingProjectId && dropTarget && dropTarget.id !== draggingProjectId) {
+			setProjectOrder(moveProject(orderedProjectIds, draggingProjectId, dropTarget.id, dropTarget.edge));
+		}
+		endReorderDrag();
+	};
 	// Fetch the running app version to derive the build channel. Channel is
 	// identity: derived from the version string, not the update-channel setting
 	// (the setting can be changed mid-session; the binary cannot).
@@ -330,6 +355,21 @@ export function Sidebar({
 										selection={selection}
 										onToggle={() => toggleProjectCollapsed(workspace.id)}
 										onRemoveProject={onRemoveProject}
+										reorder={
+											canReorder
+												? {
+														isDragging: draggingProjectId === workspace.id,
+														dropEdge:
+															dropTarget?.id === workspace.id && draggingProjectId !== workspace.id
+																? dropTarget.edge
+																: null,
+														onDragStart: () => setDraggingProjectId(workspace.id),
+														onDragOverEdge: (edge) => setDropTarget({ id: workspace.id, edge }),
+														onDrop: commitReorderDrop,
+														onDragEnd: endReorderDrag,
+													}
+												: null
+										}
 									/>
 								))}
 								{isCollapsed && <CreateProjectListItem onCreateProject={onCreateProject} />}
@@ -480,18 +520,34 @@ export function Sidebar({
 
 type Selection = ReturnType<typeof useSelection>;
 
+type DropEdge = "top" | "bottom";
+
+// Per-project drag-to-reorder wiring, or null when reordering is unavailable
+// (icon rail / single project). Owned by the Sidebar; each card reports the
+// pointer's target edge and commits on drop.
+type ProjectReorder = {
+	isDragging: boolean;
+	dropEdge: DropEdge | null;
+	onDragStart: () => void;
+	onDragOverEdge: (edge: DropEdge) => void;
+	onDrop: () => void;
+	onDragEnd: () => void;
+};
+
 function ProjectItem({
 	workspace,
 	expanded,
 	selection,
 	onToggle,
 	onRemoveProject,
+	reorder,
 }: {
 	workspace: WorkspaceSummary;
 	expanded: boolean;
 	selection: Selection;
 	onToggle: () => void;
 	onRemoveProject: (projectId: string) => Promise<void>;
+	reorder: ProjectReorder | null;
 }) {
 	// When the whole sidebar is collapsed into the 48px icon rail there is no room
 	// for the section box or labeled buttons, so the heading becomes a letter tile
@@ -582,16 +638,74 @@ function ProjectItem({
 	};
 
 	return (
-		<SidebarMenuItem className="mb-2 group-data-[collapsible=icon]:mb-0">
+		<SidebarMenuItem
+			className="relative mb-2 group-data-[collapsible=icon]:mb-0"
+			// The whole card (heading + sessions) is the drop zone so there are no
+			// dead spots over a card's session list; the pointer's vertical half of
+			// the card decides whether the dragged card lands above or below it.
+			onDragOver={
+				reorder
+					? (e) => {
+							e.preventDefault();
+							e.dataTransfer.dropEffect = "move";
+							const rect = e.currentTarget.getBoundingClientRect();
+							reorder.onDragOverEdge(e.clientY < rect.top + rect.height / 2 ? "top" : "bottom");
+						}
+					: undefined
+			}
+			onDrop={
+				reorder
+					? (e) => {
+							e.preventDefault();
+							reorder.onDrop();
+						}
+					: undefined
+			}
+		>
+			{/* Drop indicator: a refined-blue insertion rail (rounded caps + soft
+			accent glow, the sidebar's SEG_ACTIVE glow vocabulary) that sits in the
+			gap where the dragged card will land — above or below this card per the
+			pointer half. pointer-events-none so it never interrupts the dragover. */}
+			{reorder?.dropEdge && (
+				<div
+					aria-hidden="true"
+					className={cn(
+						"pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-full bg-accent",
+						"shadow-[0_0_8px_0_color-mix(in_srgb,var(--accent)_60%,transparent)]",
+						reorder.dropEdge === "top" ? "-top-1" : "-bottom-1",
+					)}
+				/>
+			)}
 			{/* Project SECTION: heading + labeled buttons share one box. Expanded →
 			the box is highlighted (subtle surface + hairline); collapsed → it is
 			de-emphasised (transparent) and only the heading shows. The icon rail
-			drops the box chrome entirely, leaving a letter tile. */}
+			drops the box chrome entirely, leaving a letter tile. The box is the
+			drag source when reordering is available; a drag begun on an interactive
+			control ([data-no-drag] — the ⋮ menu or the Dashboard/Orchestrator
+			buttons) is cancelled so those keep working. */}
 			<div
+				draggable={reorder ? true : undefined}
+				onDragStart={
+					reorder
+						? (e) => {
+								if ((e.target as HTMLElement).closest("[data-no-drag]")) {
+									e.preventDefault();
+									return;
+								}
+								e.dataTransfer.effectAllowed = "move";
+								e.dataTransfer.setData("text/plain", workspace.id);
+								reorder.onDragStart();
+							}
+						: undefined
+				}
+				onDragEnd={reorder ? reorder.onDragEnd : undefined}
 				className={cn(
 					"rounded-[10px] border p-1 transition-colors",
 					expanded ? "border-border-strong bg-surface" : "border-transparent bg-transparent",
 					"group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0",
+					// Lifted state: the source card fades to a placeholder while its
+					// full-opacity drag image travels with the pointer.
+					reorder?.isDragging && "opacity-40",
 				)}
 			>
 				{/* Heading row is a pure collapse toggle; the overflow menu is pinned
@@ -602,8 +716,11 @@ function ProjectItem({
 						onClick={onHeadingClick}
 						tooltip={workspace.name}
 						className={cn(
-							"relative h-9 gap-[9px] rounded-lg py-0 pr-9 pl-1.5 font-medium transition-colors",
+							"group/heading relative h-9 gap-[9px] rounded-lg py-0 pr-9 pl-1.5 font-medium transition-colors",
 							"hover:bg-interactive-hover active:bg-interactive-hover",
+							// Grab affordance: the heading is the drag grip when reordering is
+							// available (grabbing while a drag is live).
+							reorder && "cursor-grab active:cursor-grabbing",
 							// Icon rail: the old 36px letter tile.
 							"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:pr-0! group-data-[collapsible=icon]:font-semibold",
 						)}
@@ -616,14 +733,26 @@ function ProjectItem({
 							strokeWidth={2.5}
 							aria-hidden="true"
 						/>
-						{/* Folder chip: neutral when collapsed, refined-blue tint when expanded. */}
+						{/* Folder chip: neutral when collapsed, refined-blue tint when expanded.
+						When reordering is available, hovering the heading cross-fades the
+						folder glyph to a grip (⋮⋮) — the Notion-style "grab here" hint —
+						without any layout shift. */}
 						<span
 							className={cn(
-								"grid size-[22px] shrink-0 place-items-center rounded-[6px] transition-colors group-data-[collapsible=icon]:hidden [&_svg]:size-[13px]",
+								"relative grid size-[22px] shrink-0 place-items-center rounded-[6px] transition-colors group-data-[collapsible=icon]:hidden [&_svg]:size-[13px]",
 								expanded ? "bg-accent-weak text-accent" : "bg-raised text-passive",
 							)}
 						>
-							<Folder aria-hidden="true" />
+							<Folder
+								aria-hidden="true"
+								className={cn("transition-opacity", reorder && "group-hover/heading:opacity-0")}
+							/>
+							{reorder && (
+								<GripVertical
+									aria-hidden="true"
+									className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/heading:opacity-100"
+								/>
+							)}
 						</span>
 						<span className="hidden group-data-[collapsible=icon]:block">{workspace.name.charAt(0).toUpperCase()}</span>
 						<span
@@ -644,6 +773,7 @@ function ProjectItem({
 							<button
 								aria-label={`Project actions for ${workspace.name}`}
 								className="absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center rounded-lg text-passive transition-colors hover:bg-interactive-hover hover:text-foreground data-[state=open]:bg-interactive-hover data-[state=open]:text-foreground group-data-[collapsible=icon]:hidden [&_svg]:size-[17px]"
+								data-no-drag
 								onClick={(e) => e.stopPropagation()}
 								type="button"
 							>
@@ -672,7 +802,7 @@ function ProjectItem({
 				segment whose view is currently open glows (SEG_ACTIVE_CLASS, marked
 				aria-current="page"). Shown only when expanded. */}
 				{expanded && (
-					<div className="flex gap-[7px] px-1 pt-0.5 pb-1 group-data-[collapsible=icon]:hidden">
+					<div className="flex gap-[7px] px-1 pt-0.5 pb-1 group-data-[collapsible=icon]:hidden" data-no-drag>
 						<button
 							aria-current={dashboardActive ? "page" : undefined}
 							aria-label={`Open ${workspace.name} dashboard`}
