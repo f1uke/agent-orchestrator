@@ -97,6 +97,31 @@ paths:
       summary: Refresh the cached local agent adapter catalog
       tags:
       - agents
+  /api/v1/daemon/loops:
+    get:
+      operationId: listDaemonLoops
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListDaemonLoopsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the daemon's fixed-interval background loops with timing
+      tags:
+      - daemon
   /api/v1/events:
     get:
       operationId: streamEvents
@@ -3912,6 +3937,45 @@ components:
       required:
       - sessionId
       - reason
+      type: object
+    ControllersDaemonLoop:
+      properties:
+        description:
+          type: string
+        displayName:
+          type: string
+        intervalMs:
+          format: int64
+          type: integer
+        lastRunAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        name:
+          type: string
+        nextRunAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        running:
+          type: boolean
+      required:
+      - name
+      - displayName
+      - description
+      - intervalMs
+      - running
+      type: object
+    ControllersListDaemonLoopsResponse:
+      properties:
+        loops:
+          items:
+            $ref: '#/components/schemas/ControllersDaemonLoop'
+          type: array
+      required:
+      - loops
       type: object
     ControllersResetReviewResponse:
       properties:

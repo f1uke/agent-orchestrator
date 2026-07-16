@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
+	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -53,10 +54,16 @@ type lifecycleStack struct {
 // templates is the prompt-overrides store's Templates getter; it lets an
 // operator's edited nudge text take effect on the next observation without a
 // daemon restart.
-func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, autoNudgeDefault func() bool, logger *slog.Logger) *lifecycleStack {
+func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, autoNudgeDefault func() bool, reg *looptelemetry.Registry, logger *slog.Logger) *lifecycleStack {
 	renderer := messagetemplates.NewRenderer(templates)
 	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry), lifecycle.WithMessageRenderer(renderer), lifecycle.WithAutoNudgeDefault(autoNudgeDefault))
-	rp := reaper.New(lcm, store, runtime, reaper.Config{Logger: logger})
+	reaperRec := reg.Register(looptelemetry.Spec{
+		Name:        "reaper",
+		Display:     "Runtime liveness",
+		Description: "Probes each active session's runtime so dead tmux panes flip to terminated.",
+		Interval:    reaper.DefaultTickInterval,
+	})
+	rp := reaper.New(lcm, store, runtime, reaper.Config{Logger: logger, OnTick: reaperRec.Tick})
 	return &lifecycleStack{LCM: lcm, reaperDone: rp.Start(ctx)}
 }
 

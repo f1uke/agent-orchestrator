@@ -11,6 +11,7 @@ import (
 	trackergithub "github.com/aoagents/agent-orchestrator/backend/internal/adapters/tracker/github"
 	trackergitlab "github.com/aoagents/agent-orchestrator/backend/internal/adapters/tracker/gitlab"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	trackerintake "github.com/aoagents/agent-orchestrator/backend/internal/observe/trackerintake"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
@@ -26,7 +27,13 @@ import (
 // CLI call; no token is resolved until some enabled project is actually
 // polled. GitHub is always wired; GitLab is added only when AO_GITLAB_HOST
 // names at least one host.
-func startTrackerIntake(ctx context.Context, store *sqlite.Store, sessions *sessionsvc.Service, logger *slog.Logger) <-chan struct{} {
+func startTrackerIntake(ctx context.Context, store *sqlite.Store, sessions *sessionsvc.Service, reg *looptelemetry.Registry, logger *slog.Logger) <-chan struct{} {
+	rec := reg.Register(looptelemetry.Spec{
+		Name:        "tracker-intake",
+		Display:     "Issue polling",
+		Description: "Scans intake-enabled projects for eligible issues and spawns sessions for them.",
+		Interval:    trackerintake.DefaultTickInterval,
+	})
 	adapters := map[domain.TrackerProvider]ports.Tracker{
 		domain.TrackerProviderGitHub: newLazyGitHubTracker(logger),
 	}
@@ -34,7 +41,7 @@ func startTrackerIntake(ctx context.Context, store *sqlite.Store, sessions *sess
 		adapters[domain.TrackerProviderGitLab] = newLazyGitLabTracker(hosts[0], logger)
 	}
 	resolver := trackerintake.MultiTrackerResolver{Adapters: adapters}
-	observer := trackerintake.New(resolver, store, sessions, trackerintake.Config{Logger: logger})
+	observer := trackerintake.New(resolver, store, sessions, trackerintake.Config{Logger: logger, OnTick: rec.Tick})
 	return observer.Start(ctx)
 }
 

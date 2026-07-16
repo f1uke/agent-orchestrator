@@ -42,6 +42,7 @@ type APIDeps struct {
 	CDC                cdc.Source
 	Events             cdcSubscriber
 	Telemetry          ports.EventSink
+	LoopTelemetry      controllers.LoopTelemetrySource
 }
 
 // API owns one controller per resource and is the single Register call the
@@ -58,6 +59,7 @@ type API struct {
 	notifications *controllers.NotificationsController
 	imports       *controllers.ImportController
 	settings      *controllers.SettingsController
+	daemon        *controllers.DaemonController
 	events        *EventsController
 }
 
@@ -84,6 +86,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
 		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
@@ -112,6 +115,7 @@ func (a *API) Register(root chi.Router) {
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)
+			a.daemon.Register(r)
 			// Sibling REST controllers plug in here.
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.
