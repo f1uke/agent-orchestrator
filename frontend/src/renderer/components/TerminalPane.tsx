@@ -9,8 +9,12 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { findSessionLinks } from "../lib/session-ref";
 import { findExternalRefLinks, jiraBrowseBaseFromUrl, resolveScmRemotes } from "../lib/terminal-scm-links";
+import { findFileLinks, type FileLinkMatch } from "../lib/terminal-file-links";
+import { openWorkspaceFileRef, type WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useSessionJiraContext } from "../hooks/useSessionJiraContext";
 import { XtermTerminal } from "./XtermTerminal";
+import { FileCandidatePicker } from "./FileCandidatePicker";
+import { Toast } from "./inbox-ui";
 import { RestoreUnavailableDialog } from "./RestoreUnavailableDialog";
 
 type TerminalPaneProps = {
@@ -19,9 +23,22 @@ type TerminalPaneProps = {
 	daemonReady: boolean;
 	terminalTarget?: TerminalTarget;
 	fontSize: number;
+	/**
+	 * Open a workspace file (resolved from a clicked terminal file reference) in
+	 * the center-pane code viewer. Provided by SessionView for worker terminals;
+	 * absent → terminal file references are not linkified.
+	 */
+	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 };
 
-export function TerminalPane({ session, theme, daemonReady, terminalTarget, fontSize }: TerminalPaneProps) {
+export function TerminalPane({
+	session,
+	theme,
+	daemonReady,
+	terminalTarget,
+	fontSize,
+	onOpenWorkspaceFile,
+}: TerminalPaneProps) {
 	const terminalKey =
 		terminalTarget?.kind === "reviewer" ? terminalTarget.handleId : (session?.terminalHandleId ?? "empty");
 
@@ -66,6 +83,7 @@ export function TerminalPane({ session, theme, daemonReady, terminalTarget, font
 			daemonReady={daemonReady}
 			fontSize={fontSize}
 			terminalTarget={terminalTarget}
+			onOpenWorkspaceFile={onOpenWorkspaceFile}
 		/>
 	);
 }
@@ -139,7 +157,14 @@ function bannerText(state: TerminalSessionState, error?: string): string | undef
 	return undefined;
 }
 
-function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSize }: TerminalPaneProps) {
+function AttachedTerminal({
+	session,
+	theme,
+	daemonReady,
+	terminalTarget,
+	fontSize,
+	onOpenWorkspaceFile,
+}: TerminalPaneProps) {
 	const attachSession =
 		session && terminalTarget?.kind === "reviewer"
 			? { ...session, terminalHandleId: terminalTarget.handleId }
@@ -208,6 +233,47 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 		return { ...resolveScmRemotes(urls), jiraBrowseBase };
 	}, [workspaces, currentProjectId, session, jiraBrowseBase]);
 	const externalRefResolver = useCallback((line: string) => findExternalRefLinks(line, scmRemotes), [scmRemotes]);
+
+	// FILE reference linkification: a clicked path/filename token resolves against
+	// this session's workspace (backend /workspace/resolve) and opens in the
+	// center-pane code viewer. Enabled only when the parent provides an open
+	// target (worker terminals). One candidate opens directly; several open a
+	// picker; none shows a non-blocking toast — a click never errors the terminal.
+	const canOpenFiles = Boolean(session?.id && onOpenWorkspaceFile);
+	const [filePicker, setFilePicker] = useState<{ candidates: string[]; line?: number } | null>(null);
+	const [fileToast, setFileToast] = useState<string | null>(null);
+	const fileLinkResolver = useMemo(
+		() => (canOpenFiles ? (line: string) => findFileLinks(line) : undefined),
+		[canOpenFiles],
+	);
+	const onFileLinkActivate = useCallback(
+		(match: FileLinkMatch) => {
+			const sessionId = session?.id;
+			if (!sessionId || !onOpenWorkspaceFile) return;
+			void openWorkspaceFileRef({
+				sessionId,
+				ref: match.ref,
+				line: match.line,
+				resolve: async (sid, ref) => {
+					const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/workspace/resolve", {
+						params: { path: { sessionId: sid }, query: { ref } },
+					});
+					if (error) throw new Error(apiErrorMessage(error, "Unable to resolve file"));
+					return data?.candidates ?? [];
+				},
+				onOpen: onOpenWorkspaceFile,
+				onDisambiguate: (candidates, line) => setFilePicker({ candidates, line }),
+				onNotFound: (ref) => setFileToast(`Couldn't find ${ref} in this workspace`),
+			});
+		},
+		[session?.id, onOpenWorkspaceFile],
+	);
+	useEffect(() => {
+		if (!fileToast) return undefined;
+		const timer = window.setTimeout(() => setFileToast(null), 4000);
+		return () => window.clearTimeout(timer);
+	}, [fileToast]);
+
 	const hadAttachmentRef = useRef(false);
 	// Gate on the durable `isTerminated` fact, NOT the derived display status: a
 	// Done session (PR merged) reads status "merged" but is still terminated and
@@ -301,6 +367,8 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 					autoFocus={!showEmptyState}
 					fontSize={fontSize}
 					externalRefResolver={externalRefResolver}
+					fileLinkResolver={fileLinkResolver}
+					onFileLinkActivate={onFileLinkActivate}
 					onError={handleInitError}
 					onReady={handleReady}
 					onSessionLinkActivate={onSessionLinkActivate}
@@ -332,6 +400,19 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 					}}
 				/>
 			)}
+			<FileCandidatePicker
+				open={filePicker !== null}
+				candidates={filePicker?.candidates ?? []}
+				onOpenChange={(open) => {
+					if (!open) setFilePicker(null);
+				}}
+				onPick={(path) => {
+					const line = filePicker?.line;
+					setFilePicker(null);
+					onOpenWorkspaceFile?.({ path, line });
+				}}
+			/>
+			{fileToast && <Toast text={fileToast} />}
 		</div>
 	);
 }

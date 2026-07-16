@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/diffhunk"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
@@ -24,27 +25,31 @@ import (
 )
 
 type fakeSessionService struct {
-	sessions         map[domain.SessionID]domain.Session
-	sent             string
-	dispatchedPR     string
-	dispatchedThread string
-	dispatchedExtra  string
-	replyPR          string
-	replyThread      string
-	replyBody        string
-	replyErr         error
-	replyComment     sessionsvc.PRThreadComment
-	resolvePR        string
-	resolveThread    string
-	resolveErr       error
-	cleanupProjects  []domain.ProjectID
-	cleanupResult    []domain.SessionID
-	cleanupSkipped   []sessionsvc.CleanupSkipped
-	spawnErr         error
-	claimErr         error
-	listPRErr        error
-	prCommentGroups  []sessionsvc.PRCommentGroup
-	diffContext      sessionsvc.DiffContextResult
+	sessions          map[domain.SessionID]domain.Session
+	sent              string
+	dispatchedPR      string
+	dispatchedThread  string
+	dispatchedExtra   string
+	replyPR           string
+	replyThread       string
+	replyBody         string
+	replyErr          error
+	replyComment      sessionsvc.PRThreadComment
+	resolvePR         string
+	resolveThread     string
+	resolveErr        error
+	cleanupProjects   []domain.ProjectID
+	cleanupResult     []domain.SessionID
+	cleanupSkipped    []sessionsvc.CleanupSkipped
+	spawnErr          error
+	claimErr          error
+	listPRErr         error
+	prCommentGroups   []sessionsvc.PRCommentGroup
+	diffContext       sessionsvc.DiffContextResult
+	resolveCandidates []string
+	resolveRef        string
+	workspaceFile     sessionsvc.WorkspaceFileResult
+	workspaceFilePath string
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -359,6 +364,16 @@ func (f *fakeSessionService) ListPRCommentThreads(_ context.Context, _ domain.Se
 
 func (f *fakeSessionService) DiffContext(_ context.Context, _ domain.SessionID, _ sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error) {
 	return f.diffContext, nil
+}
+
+func (f *fakeSessionService) ResolveWorkspaceRef(_ context.Context, _ domain.SessionID, ref string) ([]string, error) {
+	f.resolveRef = ref
+	return f.resolveCandidates, nil
+}
+
+func (f *fakeSessionService) ReadWorkspaceFile(_ context.Context, _ domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error) {
+	f.workspaceFilePath = path
+	return f.workspaceFile, nil
 }
 
 func (f *fakeSessionService) ClaimPR(_ context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
@@ -1532,6 +1547,58 @@ func TestSessionsAPI_DiffContext(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"available":true`) || !strings.Contains(string(body), `"kind":"add"`) ||
 		!strings.Contains(string(body), `"text":"CHANGED"`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestSessionsAPI_ResolveWorkspaceRef(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.resolveCandidates = []string{"pkg/a.go", "other/a.go"}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/resolve?ref=a.go", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.resolveRef != "a.go" {
+		t.Fatalf("service got ref %q", svc.resolveRef)
+	}
+	if !strings.Contains(string(body), `"ref":"a.go"`) || !strings.Contains(string(body), `"pkg/a.go"`) ||
+		!strings.Contains(string(body), `"other/a.go"`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestSessionsAPI_ResolveWorkspaceRef_EmptyIsArrayNotNull(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.resolveCandidates = nil
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/resolve?ref=nope.go", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"candidates":[]`) {
+		t.Fatalf("empty candidates must serialize as [], got: %s", body)
+	}
+}
+
+func TestSessionsAPI_ReadWorkspaceFile(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceFile = sessionsvc.WorkspaceFileResult{
+		Available: true, Path: "a.go",
+		Lines:        []sessionsvc.DiffContextLine{{Kind: "context", NewLine: 1, Text: "package x"}},
+		ChangedLines: []diffhunk.LineChange{{Start: 1, End: 1, Kind: diffhunk.ChangeModified}},
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file?path=a.go", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceFilePath != "a.go" {
+		t.Fatalf("service got path %q", svc.workspaceFilePath)
+	}
+	if !strings.Contains(string(body), `"available":true`) ||
+		!strings.Contains(string(body), `"text":"package x"`) ||
+		!strings.Contains(string(body), `"kind":"modified"`) {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }

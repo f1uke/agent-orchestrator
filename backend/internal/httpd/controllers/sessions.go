@@ -70,6 +70,13 @@ type SessionService interface {
 	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
 	DiffContext(ctx context.Context, id domain.SessionID, q sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error)
+	// ResolveWorkspaceRef maps a terminal file reference (absolute path,
+	// workspace-relative path, or bare filename) to candidate workspace-relative
+	// paths, confined to the session's workspace.
+	ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, ref string) ([]string, error)
+	// ReadWorkspaceFile returns a workspace file's content plus its per-line
+	// uncommitted-change map (working tree vs HEAD), confined to the workspace.
+	ReadWorkspaceFile(ctx context.Context, id domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -105,6 +112,8 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/pr", c.listPRs)
 	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
+	r.Get("/sessions/{sessionId}/workspace/resolve", c.resolveWorkspaceRef)
+	r.Get("/sessions/{sessionId}/workspace/file", c.readWorkspaceFile)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
 	r.Patch("/sessions/{sessionId}/spec", c.updateSpec)
@@ -517,6 +526,42 @@ func (c *SessionsController) diffContext(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, diffContextResponse(res))
+}
+
+// resolveWorkspaceRef maps a file reference printed in the terminal to candidate
+// workspace-relative paths (0 = not found, 1 = open directly, many = the UI
+// shows a disambiguation picker). Resolution is confined to the session's
+// workspace.
+func (c *SessionsController) resolveWorkspaceRef(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/resolve")
+		return
+	}
+	ref := r.URL.Query().Get("ref")
+	candidates, err := c.Svc.ResolveWorkspaceRef(r.Context(), sessionID(r), ref)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if candidates == nil {
+		candidates = []string{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, WorkspaceResolveResponse{Ref: ref, Candidates: candidates})
+}
+
+// readWorkspaceFile returns a workspace file's content plus its per-line
+// uncommitted-change map, confined to the session's workspace.
+func (c *SessionsController) readWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/file")
+		return
+	}
+	res, err := c.Svc.ReadWorkspaceFile(r.Context(), sessionID(r), r.URL.Query().Get("path"))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, workspaceFileResponse(res))
 }
 
 func (c *SessionsController) claimPR(w http.ResponseWriter, r *http.Request) {

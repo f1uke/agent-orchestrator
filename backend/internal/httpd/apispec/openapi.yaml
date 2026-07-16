@@ -3238,6 +3238,98 @@ paths:
         it, else reset its idle-close countdown'
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/workspace/file:
+    get:
+      operationId: readWorkspaceFile
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Workspace-relative path of the file to read (from workspace/resolve).
+        in: query
+        name: path
+        schema:
+          description: Workspace-relative path of the file to read (from workspace/resolve).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return a workspace file's content and per-line uncommitted-change map
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/workspace/resolve:
+    get:
+      operationId: resolveWorkspaceRef
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: 'File reference printed in the terminal: an absolute path, a
+          workspace-relative path, or a bare filename.'
+        in: query
+        name: ref
+        schema:
+          description: 'File reference printed in the terminal: an absolute path,
+            a workspace-relative path, or a bare filename.'
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResolveResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Resolve a terminal file reference to candidate workspace paths
+      tags:
+      - sessions
   /api/v1/sessions/cleanup:
     post:
       operationId: cleanupSessions
@@ -4582,6 +4674,19 @@ components:
       required:
       - ok
       - sessionId
+      type: object
+    LineChangeDTO:
+      properties:
+        end:
+          type: integer
+        kind:
+          type: string
+        start:
+          type: integer
+      required:
+      - start
+      - end
+      - kind
       type: object
     ListAgentsResponse:
       properties:
@@ -6179,6 +6284,29 @@ components:
       - sessionId
       - session
       type: object
+    WorkspaceFileResponse:
+      properties:
+        available:
+          type: boolean
+        changedLines:
+          items:
+            $ref: '#/components/schemas/LineChangeDTO'
+          type: array
+        lines:
+          items:
+            $ref: '#/components/schemas/DiffContextLineDTO'
+          type: array
+        path:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - available
+      - path
+      - lines
+      - changedLines
+      - truncated
+      type: object
     WorkspaceRepo:
       properties:
         name:
@@ -6191,6 +6319,18 @@ components:
       - name
       - relativePath
       - repo
+      type: object
+    WorkspaceResolveResponse:
+      properties:
+        candidates:
+          items:
+            type: string
+          type: array
+        ref:
+          type: string
+      required:
+      - ref
+      - candidates
       type: object
 tags:
 - description: Supported and locally runnable agent adapters

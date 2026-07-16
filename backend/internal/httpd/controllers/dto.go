@@ -928,6 +928,59 @@ func diffContextResponse(res sessionsvc.DiffContextResult) DiffContextResponse {
 	return DiffContextResponse{Available: res.Available, Mode: res.Mode, Path: res.Path, Lines: lines, Truncated: res.Truncated}
 }
 
+// WorkspaceResolveParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/workspace/resolve.
+type WorkspaceResolveParams struct {
+	Ref string `query:"ref" description:"File reference printed in the terminal: an absolute path, a workspace-relative path, or a bare filename."`
+}
+
+// WorkspaceResolveResponse is the body of the workspace/resolve route: the
+// workspace-relative candidate paths a terminal file reference maps to. Empty
+// when nothing in the workspace matches.
+type WorkspaceResolveResponse struct {
+	Ref        string   `json:"ref"`
+	Candidates []string `json:"candidates"`
+}
+
+// WorkspaceFileParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/workspace/file.
+type WorkspaceFileParams struct {
+	Path string `query:"path" description:"Workspace-relative path of the file to read (from workspace/resolve)."`
+}
+
+// WorkspaceFileResponse is the body of the workspace/file route: a workspace
+// file's content as context lines plus the per-line map of its uncommitted
+// changes (working tree vs HEAD).
+type WorkspaceFileResponse struct {
+	Available    bool                 `json:"available"`
+	Path         string               `json:"path"`
+	Lines        []DiffContextLineDTO `json:"lines"`
+	ChangedLines []LineChangeDTO      `json:"changedLines"`
+	Truncated    bool                 `json:"truncated"`
+}
+
+// LineChangeDTO is one uncommitted-change gutter marker in new-side line
+// coordinates (1-based, inclusive). Kind is "added", "modified", or "removed";
+// a "removed" marker is zero-height (Start == End).
+type LineChangeDTO struct {
+	Start int    `json:"start"`
+	End   int    `json:"end"`
+	Kind  string `json:"kind"`
+}
+
+// workspaceFileResponse maps the service result to the wire DTO.
+func workspaceFileResponse(res sessionsvc.WorkspaceFileResult) WorkspaceFileResponse {
+	lines := make([]DiffContextLineDTO, 0, len(res.Lines))
+	for _, l := range res.Lines {
+		lines = append(lines, DiffContextLineDTO{Kind: l.Kind, OldLine: l.OldLine, NewLine: l.NewLine, Text: l.Text})
+	}
+	changed := make([]LineChangeDTO, 0, len(res.ChangedLines))
+	for _, c := range res.ChangedLines {
+		changed = append(changed, LineChangeDTO{Start: c.Start, End: c.End, Kind: string(c.Kind)})
+	}
+	return WorkspaceFileResponse{Available: res.Available, Path: res.Path, Lines: lines, ChangedLines: changed, Truncated: res.Truncated}
+}
+
 // ClaimPRRequest is the body of POST /sessions/{sessionId}/pr/claim.
 type ClaimPRRequest struct {
 	PR            string `json:"pr" minLength:"1"`
