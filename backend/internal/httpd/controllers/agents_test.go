@@ -125,6 +125,38 @@ func TestListAgentsExposesRealModelCatalogAfterRefresh(t *testing.T) {
 	}
 }
 
+func TestListAgentsMarksOpenEndedModels(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{
+		Agents: agentsvc.New(),
+	}, httpd.ControlDeps{}))
+	defer srv.Close()
+
+	if _, status, _ := doRequest(t, srv, http.MethodPost, "/api/v1/agents/refresh", ""); status != http.StatusOK {
+		t.Fatalf("POST /agents/refresh = %d", status)
+	}
+	body, status, _ := doRequest(t, srv, http.MethodGet, "/api/v1/agents", "")
+	if status != http.StatusOK {
+		t.Fatalf("GET /agents = %d, body=%s", status, body)
+	}
+	var inv agentsvc.Inventory
+	if err := json.Unmarshal(body, &inv); err != nil {
+		t.Fatalf("decode inventory: %v, body=%s", err, body)
+	}
+	openEnded := map[string]bool{}
+	for _, info := range inv.Supported {
+		openEnded[info.ID] = info.ModelsOpenEnded
+	}
+	// opencode's --model is a free-form provider/model string: open-ended.
+	// claude-code and codex are fixed-tier and must NOT be open-ended.
+	want := map[string]bool{"opencode": true, "claude-code": false, "codex": false}
+	for agentID, wantFlag := range want {
+		if openEnded[agentID] != wantFlag {
+			t.Fatalf("%s modelsOpenEnded = %v, want %v", agentID, openEnded[agentID], wantFlag)
+		}
+	}
+}
+
 func TestRefreshAgents(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	catalog := &fakeAgentCatalog{

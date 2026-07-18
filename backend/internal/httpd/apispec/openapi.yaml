@@ -3946,6 +3946,11 @@ components:
           items:
             $ref: '#/components/schemas/ModelInfo'
           type: array
+        modelsOpenEnded:
+          description: True when the agent's model is a free-form id (Models are examples,
+            not an exhaustive list); the UI offers a typeable combobox. False means
+            fixed tiers only.
+          type: boolean
       required:
       - id
       - label

@@ -41,6 +41,13 @@ type Info struct {
 	// project settings; the list is advisory (the model is passed through
 	// free-form at launch).
 	Models []ports.ModelInfo `json:"models,omitempty" description:"Selectable model tiers for this agent. Empty means no tier choice; the agent's default model is used."`
+	// ModelsOpenEnded reports that this agent's model is a free-form id, so its
+	// Models are examples/suggestions rather than an exhaustive tier list. The UI
+	// renders an editable combobox (type any value; the catalog is offered as
+	// suggestions; the first catalog entry seeds the placeholder example) instead
+	// of a fixed dropdown. False (the default) means fixed-tier: only the listed
+	// tiers plus the agent default are selectable.
+	ModelsOpenEnded bool `json:"modelsOpenEnded,omitempty" description:"True when the agent's model is a free-form id (Models are examples, not an exhaustive list); the UI offers a typeable combobox. False means fixed tiers only."`
 }
 
 // Inventory describes all daemon-supported agents and best-effort local probe
@@ -185,13 +192,24 @@ func agentModels(a ports.Agent) []ports.ModelInfo {
 	return catalog.SupportedModels()
 }
 
+// modelsOpenEnded reports whether an adapter's model is a free-form id (its
+// catalog is examples, not an exhaustive list), or false when the adapter does
+// not implement the optional capability (fixed-tier).
+func modelsOpenEnded(a ports.Agent) bool {
+	open, ok := a.(ports.OpenEndedModelCatalog)
+	if !ok {
+		return false
+	}
+	return open.ModelsOpenEnded()
+}
+
 // baseInfo builds an agent's probe-independent identity: id, label (with the
 // id fallback), and model-tier catalog. Every Info the service emits starts
 // here — both the initial supported inventory and each live probe — so the
 // model catalog is attached in exactly one place and can never be populated by
 // one path (supportedInfos) yet dropped by another (probeAgent) again.
 func baseInfo(item agentregistry.HarnessAgent) Info {
-	info := Info{ID: string(item.Harness), Label: item.Manifest.Name, Models: agentModels(item.Agent)}
+	info := Info{ID: string(item.Harness), Label: item.Manifest.Name, Models: agentModels(item.Agent), ModelsOpenEnded: modelsOpenEnded(item.Agent)}
 	if info.Label == "" {
 		info.Label = info.ID
 	}

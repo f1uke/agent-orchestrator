@@ -3,7 +3,8 @@ import type { components } from "../../../api/schema";
 import { RequiredAgentField } from "../CreateProjectAgentSheet";
 import { IntakeFields } from "../IntakeFields";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { SettingsGroup } from "./SettingsGroup";
+import { ModelField, nextModelOnAgentChange } from "./ModelField";
+import { SettingsGroup, ActionRow } from "./SettingsGroup";
 import { SettingsField } from "./SettingsField";
 import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
 import { SettingEditorRow } from "./SettingEditorRow";
@@ -173,30 +174,55 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 	// tiers, so the per-kind model selectors resolve their options from the agent
 	// the user picked above.
 	const agentEntry = (agentId: string): AgentInfo | undefined => agentCatalog?.supported?.find((a) => a.id === agentId);
-	// Changing an agent degrades the model gracefully: if the newly-chosen agent
-	// doesn't offer the previously-selected tier, fall back to that agent's
-	// default (empty) rather than carrying a tier the new agent can't run.
+	// Changing an agent degrades the model gracefully: a fixed-tier target that
+	// can't run the previously-selected value falls back to that agent's default
+	// (empty). A valid free-form value on an open-ended target is preserved even
+	// when it isn't a listed suggestion — see nextModelOnAgentChange.
 	const changeAgent = (
 		agentField: "workerAgent" | "orchestratorAgent",
 		modelField: "workerModel" | "orchestratorModel",
 		agentId: string,
 	) => {
 		setField(agentField, agentId);
-		const models = agentEntry(agentId)?.models ?? [];
-		if (draft[modelField] && !models.some((m) => m.id === draft[modelField])) {
-			setField(modelField, "");
+		const next = nextModelOnAgentChange(draft[modelField], agentEntry(agentId));
+		if (next !== draft[modelField]) {
+			setField(modelField, next);
 		}
 	};
 	return (
 		<>
 			<SectionTitle title="Agents" hint="who runs, on which model & permission" />
 
-			<SettingsGroup title="Defaults">
+			{/* Section-level instant action. Kept out of the Worker/Orchestrator
+			    blocks below so refreshing never splits an agent from its model. */}
+			<ActionRow className="mb-4 justify-between text-[12px] leading-5 text-muted-foreground">
+				<span>Agent availability is cached.</span>
+				<button
+					type="button"
+					className="shrink-0 rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
+					disabled={refreshAgentsMutation.isPending}
+					onClick={() => refreshAgentsMutation.mutate()}
+				>
+					{refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents"}
+				</button>
+			</ActionRow>
+			{refreshAgentsMutation.isError && (
+				<p className="mb-4 text-[12px] leading-5 text-error">
+					{refreshAgentsMutation.error instanceof Error
+						? refreshAgentsMutation.error.message
+						: "Could not refresh agent catalog."}
+				</p>
+			)}
+			{missingRequiredAgent && (
+				<p className="mb-4 text-[12px] leading-5 text-error">Worker and orchestrator agents are required.</p>
+			)}
+
+			<SettingsGroup title="Worker">
 				<RequiredAgentField
 					id="workerAgent"
 					value={draft.workerAgent}
 					placeholder="Select worker agent"
-					label="Default worker agent"
+					label="Worker agent"
 					authorized={agentCatalog?.authorized}
 					installed={agentCatalog?.installed}
 					supported={agentCatalog?.supported}
@@ -204,11 +230,27 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 					invalid={validationError !== null && draft.workerAgent === ""}
 					onChange={(v) => changeAgent("workerAgent", "workerModel", v)}
 				/>
+				<SettingsField
+					label="Worker model"
+					htmlFor="workerModel"
+					modified={isFieldDirty("workerModel")}
+					help="Model for this project's worker sessions. Default keeps the agent's own default."
+				>
+					<ModelField
+						id="workerModel"
+						value={draft.workerModel}
+						agent={agentEntry(draft.workerAgent)}
+						onChange={(v) => setField("workerModel", v)}
+					/>
+				</SettingsField>
+			</SettingsGroup>
+
+			<SettingsGroup title="Orchestrator">
 				<RequiredAgentField
 					id="orchestratorAgent"
 					value={draft.orchestratorAgent}
 					placeholder="Select orchestrator agent"
-					label="Default orchestrator agent"
+					label="Orchestrator agent"
 					authorized={agentCatalog?.authorized}
 					installed={agentCatalog?.installed}
 					supported={agentCatalog?.supported}
@@ -216,55 +258,29 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 					invalid={validationError !== null && draft.orchestratorAgent === ""}
 					onChange={(v) => changeAgent("orchestratorAgent", "orchestratorModel", v)}
 				/>
-				<p className="text-[11px] text-passive">Changing the orchestrator agent restarts the orchestrator on save.</p>
-				<div className="flex items-center justify-between gap-3 text-[12px] leading-5 text-muted-foreground">
-					<span>Agent availability is cached.</span>
-					<button
-						type="button"
-						className="shrink-0 rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
-						disabled={refreshAgentsMutation.isPending}
-						onClick={() => refreshAgentsMutation.mutate()}
-					>
-						{refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents"}
-					</button>
-				</div>
-				{refreshAgentsMutation.isError && (
-					<p className="text-[12px] leading-5 text-error">
-						{refreshAgentsMutation.error instanceof Error
-							? refreshAgentsMutation.error.message
-							: "Could not refresh agent catalog."}
-					</p>
-				)}
-				{missingRequiredAgent && (
-					<p className="text-[12px] leading-5 text-error">Worker and orchestrator agents are required.</p>
-				)}
 				<SettingsField
 					label="Orchestrator model"
 					htmlFor="orchestratorModel"
 					modified={isFieldDirty("orchestratorModel")}
-					help="Model tier for this project's orchestrator session. Default keeps the agent's own default."
+					help="Model for this project's orchestrator session. Default keeps the agent's own default."
 				>
-					<ModelSelect
+					<ModelField
 						id="orchestratorModel"
 						value={draft.orchestratorModel}
 						agent={agentEntry(draft.orchestratorAgent)}
 						onChange={(v) => setField("orchestratorModel", v)}
 					/>
 				</SettingsField>
+				<p className="text-[11px] text-passive">Changing the orchestrator agent restarts the orchestrator on save.</p>
+			</SettingsGroup>
+
+			<SettingsGroup title="Permissions">
 				<SettingsField
-					label="Worker model"
-					htmlFor="workerModel"
-					modified={isFieldDirty("workerModel")}
-					help="Model tier for this project's worker sessions. Default keeps the agent's own default."
+					label="Permission mode"
+					htmlFor="permissionMode"
+					modified={isFieldDirty("permissions")}
+					help="Applies to both worker and orchestrator sessions."
 				>
-					<ModelSelect
-						id="workerModel"
-						value={draft.workerModel}
-						agent={agentEntry(draft.workerAgent)}
-						onChange={(v) => setField("workerModel", v)}
-					/>
-				</SettingsField>
-				<SettingsField label="Permission mode" htmlFor="permissionMode" modified={isFieldDirty("permissions")}>
 					<PermissionModeSelect
 						id="permissionMode"
 						value={draft.permissions}
@@ -395,50 +411,6 @@ function AutomationSection({ form }: { form: ProjectForm }) {
 				</SettingsGroup>
 			)}
 		</>
-	);
-}
-
-function ModelSelect({
-	id,
-	value,
-	agent,
-	onChange,
-}: {
-	id: string;
-	value: string;
-	agent: AgentInfo | undefined;
-	onChange: (value: string) => void;
-}) {
-	const models = agent?.models ?? [];
-	if (models.length === 0) {
-		// The chosen agent exposes no tier choice (or none is selected yet):
-		// surface a short hint rather than an empty selector.
-		return (
-			<p className="text-[12px] leading-8 text-passive">
-				{agent
-					? `${agent.label} uses its own default model (no selectable tiers).`
-					: "Select an agent to choose a model."}
-			</p>
-		);
-	}
-	// Preserve a stored value the catalog doesn't list (e.g. a pinned model id set
-	// via the CLI) as an extra option so switching to this control never drops it.
-	const known = models.some((m) => m.id === value);
-	const extra = value && !known ? [{ id: value, label: value }] : [];
-	return (
-		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent>
-				<SelectItem value="__default__">Default ({agent?.label ?? "agent"} default)</SelectItem>
-				{[...extra, ...models].map((m) => (
-					<SelectItem key={m.id} value={m.id}>
-						{m.label}
-					</SelectItem>
-				))}
-			</SelectContent>
-		</Select>
 	);
 }
 

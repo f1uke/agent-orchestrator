@@ -66,6 +66,7 @@ var _ adapters.Adapter = (*Plugin)(nil)
 var _ ports.Agent = (*Plugin)(nil)
 var _ ports.AgentAuthChecker = (*Plugin)(nil)
 var _ ports.AgentModelCatalog = (*Plugin)(nil)
+var _ ports.OpenEndedModelCatalog = (*Plugin)(nil)
 
 // supportedModels are a curated set of flagship model tiers for `opencode
 // --model`, which takes a `provider/model` string. opencode's real model space
@@ -82,6 +83,13 @@ var supportedModels = []ports.ModelInfo{
 // SupportedModels reports the curated opencode model tiers.
 func (p *Plugin) SupportedModels() []ports.ModelInfo {
 	return supportedModels
+}
+
+// ModelsOpenEnded reports opencode's model as free-form: `--model` takes any
+// `provider/model` string, so SupportedModels is a suggestion set, not an
+// exhaustive list. The UI offers a typeable combobox and round-trips a custom id.
+func (p *Plugin) ModelsOpenEnded() bool {
+	return true
 }
 
 // Manifest returns the adapter's static self-description.

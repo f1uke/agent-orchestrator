@@ -1372,6 +1372,8 @@ export interface components {
             label: string;
             /** @description Selectable model tiers for this agent. Empty means no tier choice; the agent's default model is used. */
             models?: components["schemas"]["ModelInfo"][];
+            /** @description True when the agent's model is a free-form id (Models are examples, not an exhaustive list); the UI offers a typeable combobox. False means fixed tiers only. */
+            modelsOpenEnded?: boolean;
         };
         ApprovalRule: {
             enabled?: boolean;
