@@ -31,7 +31,8 @@ export type ProjectSettingsFormState = {
 	branchPrefix: string;
 	workerAgent: string;
 	orchestratorAgent: string;
-	model: string;
+	orchestratorModel: string;
+	workerModel: string;
 	permissions: string;
 	reviewerHarness: string;
 	intakeEnabled: boolean;
@@ -60,7 +61,8 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		branchPrefix: gitConvention.branchPrefix ?? "",
 		workerAgent: config.worker?.agent ?? "",
 		orchestratorAgent: config.orchestrator?.agent ?? "",
-		model: config.agentConfig?.model ?? "",
+		orchestratorModel: config.orchestrator?.agentConfig?.model ?? "",
+		workerModel: config.worker?.agentConfig?.model ?? "",
 		permissions: config.agentConfig?.permissions ?? "",
 		reviewerHarness: config.reviewers?.[0]?.harness ?? "",
 		intakeEnabled: intake.enabled ?? false,
@@ -179,11 +181,21 @@ export function useProjectSettingsForm({
 				...config,
 				defaultBranch: form.defaultBranch || undefined,
 				sessionPrefix: form.sessionPrefix || undefined,
-				worker: { ...config.worker, agent: form.workerAgent },
-				orchestrator: { ...config.orchestrator, agent: form.orchestratorAgent },
+				worker: {
+					...config.worker,
+					agent: form.workerAgent,
+					agentConfig: blankToUndefined({ ...config.worker?.agentConfig, model: form.workerModel || undefined }),
+				},
+				orchestrator: {
+					...config.orchestrator,
+					agent: form.orchestratorAgent,
+					agentConfig: blankToUndefined({
+						...config.orchestrator?.agentConfig,
+						model: form.orchestratorModel || undefined,
+					}),
+				},
 				agentConfig: blankToUndefined({
 					...config.agentConfig,
-					model: form.model || undefined,
 					permissions: form.permissions || undefined,
 				}),
 				reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,

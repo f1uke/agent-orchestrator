@@ -854,3 +854,16 @@ func containsSubsequence(values, needle []string) bool {
 	}
 	return false
 }
+
+func TestSupportedModelsListsClaudeTiers(t *testing.T) {
+	got := (&Plugin{}).SupportedModels()
+	ids := make(map[string]bool, len(got))
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	for _, want := range []string{"opus", "sonnet", "haiku", "claude-fable-5"} {
+		if !ids[want] {
+			t.Fatalf("SupportedModels %#v missing %q", got, want)
+		}
+	}
+}

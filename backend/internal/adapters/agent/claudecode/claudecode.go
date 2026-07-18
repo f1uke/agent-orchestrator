@@ -65,6 +65,25 @@ func New() *Plugin {
 var _ adapters.Adapter = (*Plugin)(nil)
 var _ ports.Agent = (*Plugin)(nil)
 var _ ports.AgentAuthChecker = (*Plugin)(nil)
+var _ ports.AgentModelCatalog = (*Plugin)(nil)
+
+// supportedModels are the model tiers Claude Code exposes to `claude --model`.
+// The three primary tiers use version-stable aliases (`opus`/`sonnet`/`haiku`)
+// so a tier keeps selecting the latest model in that tier across releases;
+// Fable has no short alias and uses its full model id. `claude --model` accepts
+// arbitrary model strings, so this list only scopes the selectors — a pinned id
+// set outside it is still passed through unchanged.
+var supportedModels = []ports.ModelInfo{
+	{ID: "opus", Label: "Opus"},
+	{ID: "sonnet", Label: "Sonnet"},
+	{ID: "haiku", Label: "Haiku"},
+	{ID: "claude-fable-5", Label: "Fable"},
+}
+
+// SupportedModels reports the selectable Claude Code model tiers.
+func (p *Plugin) SupportedModels() []ports.ModelInfo {
+	return supportedModels
+}
 
 // Manifest returns the adapter's static self-description.
 func (p *Plugin) Manifest() adapters.Manifest {

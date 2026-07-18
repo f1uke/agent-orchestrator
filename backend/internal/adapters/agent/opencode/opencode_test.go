@@ -650,3 +650,50 @@ func contains(values []string, needle string) bool {
 	}
 	return false
 }
+
+func hasFlagValue(cmd []string, flag, val string) bool {
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i] == flag && cmd[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGetLaunchCommandAppendsModelFlag(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "opencode"}
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{
+		Config: ports.AgentConfig{Model: "anthropic/claude-opus-4-8"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFlagValue(cmd, "--model", "anthropic/claude-opus-4-8") {
+		t.Fatalf("command %#v missing --model anthropic/claude-opus-4-8", cmd)
+	}
+}
+
+func TestGetLaunchCommandOmitsModelFlagWhenUnset(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "opencode"}
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range cmd {
+		if a == "--model" {
+			t.Fatalf("command %#v should not carry --model when model unset", cmd)
+		}
+	}
+}
+
+func TestSupportedModelsListsOpencodeTiers(t *testing.T) {
+	got := (&Plugin{}).SupportedModels()
+	if len(got) == 0 {
+		t.Fatal("SupportedModels returned no tiers")
+	}
+	for _, m := range got {
+		if !strings.Contains(m.ID, "/") {
+			t.Fatalf("opencode model id %q is not provider/model form", m.ID)
+		}
+	}
+}

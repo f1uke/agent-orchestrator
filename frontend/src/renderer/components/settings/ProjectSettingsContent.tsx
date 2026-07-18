@@ -11,6 +11,7 @@ import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import type { useProjectSettingsForm } from "./useProjectSettingsForm";
 
 type Project = components["schemas"]["Project"];
+type AgentInfo = components["schemas"]["AgentInfo"];
 
 const PERMISSION_MODE_OPTIONS = [
 	{ value: "default", label: "Default" },
@@ -168,6 +169,21 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 		missingRequiredAgent,
 		validationError,
 	} = form;
+	// The supported list carries every agent's full identity, including its model
+	// tiers, so the per-kind model selectors resolve their options from the agent
+	// the user picked above.
+	const agentEntry = (agentId: string): AgentInfo | undefined =>
+		agentCatalog?.supported?.find((a) => a.id === agentId);
+	// Changing an agent degrades the model gracefully: if the newly-chosen agent
+	// doesn't offer the previously-selected tier, fall back to that agent's
+	// default (empty) rather than carrying a tier the new agent can't run.
+	const changeAgent = (agentField: "workerAgent" | "orchestratorAgent", modelField: "workerModel" | "orchestratorModel", agentId: string) => {
+		setField(agentField, agentId);
+		const models = agentEntry(agentId)?.models ?? [];
+		if (draft[modelField] && !models.some((m) => m.id === draft[modelField])) {
+			setField(modelField, "");
+		}
+	};
 	return (
 		<>
 			<SectionTitle title="Agents" hint="who runs, on which model & permission" />
@@ -183,7 +199,7 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 					supported={agentCatalog?.supported}
 					disabled={agentsQuery.isFetching && agentCatalog === undefined}
 					invalid={validationError !== null && draft.workerAgent === ""}
-					onChange={(v) => setField("workerAgent", v)}
+					onChange={(v) => changeAgent("workerAgent", "workerModel", v)}
 				/>
 				<RequiredAgentField
 					id="orchestratorAgent"
@@ -195,7 +211,7 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 					supported={agentCatalog?.supported}
 					disabled={agentsQuery.isFetching && agentCatalog === undefined}
 					invalid={validationError !== null && draft.orchestratorAgent === ""}
-					onChange={(v) => setField("orchestratorAgent", v)}
+					onChange={(v) => changeAgent("orchestratorAgent", "orchestratorModel", v)}
 				/>
 				<p className="text-[11px] text-passive">Changing the orchestrator agent restarts the orchestrator on save.</p>
 				<div className="flex items-center justify-between gap-3 text-[12px] leading-5 text-muted-foreground">
@@ -219,13 +235,30 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 				{missingRequiredAgent && (
 					<p className="text-[12px] leading-5 text-error">Worker and orchestrator agents are required.</p>
 				)}
-				<SettingsField label="Model override" htmlFor="model" modified={isFieldDirty("model")}>
-					<input
-						id="model"
-						className={INPUT_CLASS}
-						value={draft.model}
-						onChange={(e) => setField("model", e.target.value)}
-						placeholder="(agent default)"
+				<SettingsField
+					label="Orchestrator model"
+					htmlFor="orchestratorModel"
+					modified={isFieldDirty("orchestratorModel")}
+					help="Model tier for this project's orchestrator session. Default keeps the agent's own default."
+				>
+					<ModelSelect
+						id="orchestratorModel"
+						value={draft.orchestratorModel}
+						agent={agentEntry(draft.orchestratorAgent)}
+						onChange={(v) => setField("orchestratorModel", v)}
+					/>
+				</SettingsField>
+				<SettingsField
+					label="Worker model"
+					htmlFor="workerModel"
+					modified={isFieldDirty("workerModel")}
+					help="Model tier for this project's worker sessions. Default keeps the agent's own default."
+				>
+					<ModelSelect
+						id="workerModel"
+						value={draft.workerModel}
+						agent={agentEntry(draft.workerAgent)}
+						onChange={(v) => setField("workerModel", v)}
 					/>
 				</SettingsField>
 				<SettingsField label="Permission mode" htmlFor="permissionMode" modified={isFieldDirty("permissions")}>
@@ -359,6 +392,50 @@ function AutomationSection({ form }: { form: ProjectForm }) {
 				</SettingsGroup>
 			)}
 		</>
+	);
+}
+
+function ModelSelect({
+	id,
+	value,
+	agent,
+	onChange,
+}: {
+	id: string;
+	value: string;
+	agent: AgentInfo | undefined;
+	onChange: (value: string) => void;
+}) {
+	const models = agent?.models ?? [];
+	if (models.length === 0) {
+		// The chosen agent exposes no tier choice (or none is selected yet):
+		// surface a short hint rather than an empty selector.
+		return (
+			<p className="text-[12px] leading-8 text-passive">
+				{agent
+					? `${agent.label} uses its own default model (no selectable tiers).`
+					: "Select an agent to choose a model."}
+			</p>
+		);
+	}
+	// Preserve a stored value the catalog doesn't list (e.g. a pinned model id set
+	// via the CLI) as an extra option so switching to this control never drops it.
+	const known = models.some((m) => m.id === value);
+	const extra = value && !known ? [{ id: value, label: value }] : [];
+	return (
+		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
+			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				<SelectItem value="__default__">Default ({agent?.label ?? "agent"} default)</SelectItem>
+				{[...extra, ...models].map((m) => (
+					<SelectItem key={m.id} value={m.id}>
+						{m.label}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
 	);
 }
 

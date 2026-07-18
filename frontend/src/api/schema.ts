@@ -1370,6 +1370,8 @@ export interface components {
             authStatus?: "authorized" | "unauthorized" | "unknown";
             id: string;
             label: string;
+            /** @description Selectable model tiers for this agent. Empty means no tier choice; the agent's default model is used. */
+            models?: components["schemas"]["ModelInfo"][];
         };
         ApprovalRule: {
             enabled?: boolean;
@@ -1734,6 +1736,10 @@ export interface components {
         };
         MessageTemplatesResponse: {
             templates: components["schemas"]["MessageTemplateItem"][];
+        };
+        ModelInfo: {
+            id: string;
+            label: string;
         };
         NotificationEnvelope: {
             notification: components["schemas"]["NotificationResponse"];
