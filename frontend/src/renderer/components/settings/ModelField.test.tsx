@@ -28,9 +28,7 @@ const CLAUDE: AgentInfo = {
 
 describe("nextModelOnAgentChange", () => {
 	it("keeps a free-form value when the target agent is open-ended", () => {
-		expect(nextModelOnAgentChange("openrouter/anthropic/claude-3.7", OPENCODE)).toBe(
-			"openrouter/anthropic/claude-3.7",
-		);
+		expect(nextModelOnAgentChange("openrouter/anthropic/claude-3.7", OPENCODE)).toBe("openrouter/anthropic/claude-3.7");
 	});
 
 	it("resets to Default when a fixed target does not list the value", () => {

@@ -565,9 +565,7 @@ describe("ProjectSettingsForm", () => {
 
 		expect(await screen.findByText("Worker and orchestrator agents are required.")).toBeInTheDocument();
 		expect(screen.getByRole("combobox", { name: "Worker agent" })).toHaveTextContent("Select worker agent");
-		expect(screen.getByRole("combobox", { name: "Orchestrator agent" })).toHaveTextContent(
-			"Select orchestrator agent",
-		);
+		expect(screen.getByRole("combobox", { name: "Orchestrator agent" })).toHaveTextContent("Select orchestrator agent");
 
 		// Pick only the worker agent → the bar appears but the guard still blocks
 		// save because the orchestrator agent is still empty.
