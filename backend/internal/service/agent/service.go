@@ -185,14 +185,23 @@ func agentModels(a ports.Agent) []ports.ModelInfo {
 	return catalog.SupportedModels()
 }
 
+// baseInfo builds an agent's probe-independent identity: id, label (with the
+// id fallback), and model-tier catalog. Every Info the service emits starts
+// here — both the initial supported inventory and each live probe — so the
+// model catalog is attached in exactly one place and can never be populated by
+// one path (supportedInfos) yet dropped by another (probeAgent) again.
+func baseInfo(item agentregistry.HarnessAgent) Info {
+	info := Info{ID: string(item.Harness), Label: item.Manifest.Name, Models: agentModels(item.Agent)}
+	if info.Label == "" {
+		info.Label = info.ID
+	}
+	return info
+}
+
 func supportedInfos(agents []agentregistry.HarnessAgent) []Info {
 	supported := make([]Info, 0, len(agents))
 	for _, item := range agents {
-		info := Info{ID: string(item.Harness), Label: item.Manifest.Name, Models: agentModels(item.Agent)}
-		if info.Label == "" {
-			info.Label = info.ID
-		}
-		supported = append(supported, info)
+		supported = append(supported, baseInfo(item))
 	}
 	sortInfos(supported)
 	return supported
@@ -213,10 +222,7 @@ func cloneInfos(in []Info) []Info {
 }
 
 func probeAgent(ctx context.Context, item agentregistry.HarnessAgent) probeResult {
-	info := Info{ID: string(item.Harness), Label: item.Manifest.Name}
-	if info.Label == "" {
-		info.Label = info.ID
-	}
+	info := baseInfo(item)
 	probeCtx, cancel := context.WithTimeout(ctx, agentInstallProbeTimeout)
 	defer cancel()
 	resolver, ok := item.Agent.(ports.AgentBinaryResolver)
