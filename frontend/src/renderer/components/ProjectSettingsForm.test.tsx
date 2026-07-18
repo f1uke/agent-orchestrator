@@ -93,6 +93,7 @@ const agentCatalogResponse = {
 			{
 				id: "opencode",
 				label: "OpenCode",
+				modelsOpenEnded: true,
 				models: [{ id: "anthropic/claude-opus-4-8", label: "Claude Opus 4.8" }],
 			},
 		],
@@ -179,8 +180,8 @@ describe("ProjectSettingsForm", () => {
 		await userEvent.type(screen.getByLabelText("Session prefix"), "rel");
 
 		await goToSection("Agents");
-		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
-		const orchestratorAgent = screen.getByRole("combobox", { name: "Default orchestrator agent" });
+		const workerAgent = screen.getByRole("combobox", { name: "Worker agent" });
+		const orchestratorAgent = screen.getByRole("combobox", { name: "Orchestrator agent" });
 		const permissionMode = screen.getByRole("combobox", { name: "Permission mode" });
 		const reviewerAgent = screen.getByRole("combobox", { name: "Default reviewer agent" });
 		// Once the agent catalog resolves the combobox shows the catalog label.
@@ -189,8 +190,9 @@ describe("ProjectSettingsForm", () => {
 		expect(permissionMode).toHaveTextContent("Auto");
 		expect(reviewerAgent).toHaveTextContent("claude-code");
 
-		// Changing the worker agent to one that doesn't offer the stored tier
-		// gracefully clears the worker model back to that agent's default.
+		// OpenCode is open-ended (free-form model), so switching the worker to it
+		// preserves the stored value rather than clearing it — only a fixed target
+		// that can't run the value resets to default.
 		await chooseOption(workerAgent, "OpenCode");
 		await chooseOption(orchestratorAgent, "Goose");
 		await chooseOption(permissionMode, "Bypass permissions");
@@ -209,7 +211,7 @@ describe("ProjectSettingsForm", () => {
 					postCreate: ["npm install"],
 					worker: {
 						agent: "opencode",
-						agentConfig: undefined,
+						agentConfig: { model: "worker-model" },
 					},
 					orchestrator: {
 						agent: "goose",
@@ -262,6 +264,64 @@ describe("ProjectSettingsForm", () => {
 		expect(body.orchestrator).toEqual({ agent: "claude-code", agentConfig: { model: "sonnet" } });
 		expect(body.worker).toEqual({ agent: "claude-code", agentConfig: { model: "opus" } });
 		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
+	});
+
+	it("round-trips a free-typed custom model for an open-ended worker agent", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "opencode" },
+				orchestrator: { agent: "claude-code" },
+				env: { FOO: "bar" },
+			},
+		});
+		renderSettings();
+		await goToSection("Agents");
+
+		// An open-ended agent's model is an editable input, not a fixed Select.
+		const workerModel = await screen.findByRole("combobox", { name: "Worker model" });
+		expect(workerModel.tagName).toBe("INPUT");
+		expect(workerModel).toHaveAttribute("placeholder", "anthropic/claude-opus-4-8");
+
+		// A custom id that is not one of the catalog suggestions must round-trip.
+		await userEvent.type(workerModel, "openrouter/anthropic/claude-3.7");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.worker).toEqual({ agent: "opencode", agentConfig: { model: "openrouter/anthropic/claude-3.7" } });
+		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
+	});
+
+	it("clears a free-form model when the worker switches to a fixed agent that can't run it", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "opencode", agentConfig: { model: "openrouter/anthropic/claude-3.7" } },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+		renderSettings();
+		await goToSection("Agents");
+
+		// Switching to claude-code (fixed tiers) can't run the free-form value, so
+		// the model resets to that agent's default rather than carrying it over.
+		await chooseOption(screen.getByRole("combobox", { name: "Worker agent" }), "Claude Code");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.worker).toEqual({ agent: "claude-code", agentConfig: undefined });
 	});
 
 	it("shows a hint instead of a model selector for an agent with no selectable tiers", async () => {
@@ -504,14 +564,12 @@ describe("ProjectSettingsForm", () => {
 		await goToSection("Agents");
 
 		expect(await screen.findByText("Worker and orchestrator agents are required.")).toBeInTheDocument();
-		expect(screen.getByRole("combobox", { name: "Default worker agent" })).toHaveTextContent("Select worker agent");
-		expect(screen.getByRole("combobox", { name: "Default orchestrator agent" })).toHaveTextContent(
-			"Select orchestrator agent",
-		);
+		expect(screen.getByRole("combobox", { name: "Worker agent" })).toHaveTextContent("Select worker agent");
+		expect(screen.getByRole("combobox", { name: "Orchestrator agent" })).toHaveTextContent("Select orchestrator agent");
 
 		// Pick only the worker agent → the bar appears but the guard still blocks
 		// save because the orchestrator agent is still empty.
-		await chooseOption(screen.getByRole("combobox", { name: "Default worker agent" }), "Codex");
+		await chooseOption(screen.getByRole("combobox", { name: "Worker agent" }), "Codex");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		expect(await screen.findAllByText("Worker and orchestrator agents are required.")).toHaveLength(2);
@@ -534,7 +592,7 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 		await goToSection("Agents");
-		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
+		const workerAgent = screen.getByRole("combobox", { name: "Worker agent" });
 		await userEvent.click(workerAgent);
 		const options = await screen.findAllByRole("option");
 		expect(options.map((option) => option.textContent)).toEqual([
@@ -836,7 +894,7 @@ describe("ProjectSettingsForm", () => {
 		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
 		await goToSection("Agents");
-		const orchestratorAgent = await screen.findByRole("combobox", { name: "Default orchestrator agent" });
+		const orchestratorAgent = await screen.findByRole("combobox", { name: "Orchestrator agent" });
 		await chooseOption(orchestratorAgent, "Goose");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 

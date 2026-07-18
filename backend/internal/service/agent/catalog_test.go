@@ -364,6 +364,67 @@ type fakeModelAgent struct {
 
 func (f fakeModelAgent) SupportedModels() []ports.ModelInfo { return f.models }
 
+// fakeOpenEndedAgent has a model catalog AND reports its model as free-form, so
+// its Info must carry ModelsOpenEnded == true.
+type fakeOpenEndedAgent struct {
+	fakeModelAgent
+}
+
+func (fakeOpenEndedAgent) ModelsOpenEnded() bool { return true }
+
+func TestOpenEndedFlagPopulatedAndPreserved(t *testing.T) {
+	svc := NewWithAgents([]agentregistry.HarnessAgent{
+		{
+			Harness:  domain.AgentHarness("opencode"),
+			Manifest: adapters.Manifest{ID: "opencode", Name: "opencode"},
+			Agent:    fakeOpenEndedAgent{fakeModelAgent{models: []ports.ModelInfo{{ID: "anthropic/claude-opus-4-8", Label: "Claude Opus 4.8"}}}},
+		},
+		{
+			// Has a catalog but does NOT implement OpenEndedModelCatalog: fixed-tier.
+			Harness:  domain.AgentHarness("claude-code"),
+			Manifest: adapters.Manifest{ID: "claude-code", Name: "Claude Code"},
+			Agent:    fakeModelAgent{models: []ports.ModelInfo{{ID: "opus", Label: "Opus"}}},
+		},
+	})
+
+	assertFlags := func(t *testing.T, infos []Info, where string) {
+		t.Helper()
+		byID := make(map[string]Info, len(infos))
+		for _, info := range infos {
+			byID[info.ID] = info
+		}
+		if oc := byID["opencode"]; !oc.ModelsOpenEnded {
+			t.Fatalf("%s opencode ModelsOpenEnded = false, want true", where)
+		}
+		if cc := byID["claude-code"]; cc.ModelsOpenEnded {
+			t.Fatalf("%s claude-code ModelsOpenEnded = true, want false (fixed-tier)", where)
+		}
+	}
+
+	listed, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	assertFlags(t, listed.Supported, "list")
+
+	// The flag must survive a refresh (both lists rebuilt from probeAgent),
+	// mirroring the model-catalog preservation guarantee.
+	refreshed, err := svc.Refresh(context.Background())
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	assertFlags(t, refreshed.Supported, "refreshed supported")
+	assertFlags(t, refreshed.Installed, "refreshed installed")
+
+	probed, err := svc.Probe(context.Background(), "opencode")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if !probed.Agent.ModelsOpenEnded {
+		t.Fatalf("probed opencode ModelsOpenEnded = false, want true")
+	}
+}
+
 func TestRefreshPreservesAgentModelCatalog(t *testing.T) {
 	svc := NewWithAgents([]agentregistry.HarnessAgent{
 		{

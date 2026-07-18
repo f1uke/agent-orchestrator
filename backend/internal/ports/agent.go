@@ -100,6 +100,19 @@ type AgentModelCatalog interface {
 	SupportedModels() []ModelInfo
 }
 
+// OpenEndedModelCatalog is the optional capability an adapter exposes when its
+// `--model` flag accepts an arbitrary id, so its SupportedModels() are EXAMPLES
+// (suggestions), not an exhaustive tier list. opencode is the canonical case: its
+// model is a free-form `provider/model` string and its real space is
+// provider-config-dependent. AO renders an editable combobox (free-typed value +
+// the catalog as suggestions) for these agents instead of a fixed Select, and a
+// typed value outside the catalog is a first-class valid choice. An adapter that
+// does not implement it is treated as fixed-tier (ModelsOpenEnded == false): only
+// its catalog tiers, plus the agent default, are selectable.
+type OpenEndedModelCatalog interface {
+	ModelsOpenEnded() bool
+}
+
 // AgentResolver maps a session's harness onto the Agent adapter that drives it,
 // so the Session Manager can spawn (and restore) a different agent per session
 // without depending on the concrete adapter registry. ok=false means no adapter

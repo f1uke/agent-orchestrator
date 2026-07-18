@@ -673,6 +673,27 @@ func TestGetLaunchCommandAppendsModelFlag(t *testing.T) {
 	}
 }
 
+func TestGetLaunchCommandAppendsCustomFreeFormModel(t *testing.T) {
+	// opencode's model is open-ended: a custom provider/model not in the curated
+	// catalog must still reach --model verbatim (the combobox round-trip case).
+	plugin := &Plugin{resolvedBinary: "opencode"}
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{
+		Config: ports.AgentConfig{Model: "openrouter/anthropic/claude-3.7"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFlagValue(cmd, "--model", "openrouter/anthropic/claude-3.7") {
+		t.Fatalf("command %#v missing --model openrouter/anthropic/claude-3.7", cmd)
+	}
+}
+
+func TestModelsOpenEndedIsTrue(t *testing.T) {
+	if !(&Plugin{}).ModelsOpenEnded() {
+		t.Fatal("opencode ModelsOpenEnded() = false, want true (free-form provider/model)")
+	}
+}
+
 func TestGetLaunchCommandOmitsModelFlagWhenUnset(t *testing.T) {
 	plugin := &Plugin{resolvedBinary: "opencode"}
 	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{})
