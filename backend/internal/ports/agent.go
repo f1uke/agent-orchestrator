@@ -79,6 +79,27 @@ type AgentBinaryResolver interface {
 	ResolveBinary(ctx context.Context) (path string, err error)
 }
 
+// ModelInfo describes one selectable model tier an agent supports. ID is the
+// exact value passed to the agent's launch model flag (e.g. claude-code
+// `--model opus`, codex `--model gpt-5.6-sol`, opencode `--model
+// anthropic/claude-opus-4-8`); Label is the human-facing tier name.
+type ModelInfo struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// AgentModelCatalog is the optional capability an adapter exposes when its
+// underlying CLI can select among a known set of model tiers. AO surfaces the
+// list in the agent inventory so project settings can offer per-kind
+// (orchestrator vs worker) model selectors scoped to the chosen agent. An
+// adapter that does not implement it (or returns an empty list) exposes no tier
+// choice, and the model must be left at the agent's own default. The list is
+// advisory: the model is still passed through free-form at launch, so a value
+// set outside this set (e.g. a pinned dated id via CLI) is not rejected.
+type AgentModelCatalog interface {
+	SupportedModels() []ModelInfo
+}
+
 // AgentResolver maps a session's harness onto the Agent adapter that drives it,
 // so the Session Manager can spawn (and restore) a different agent per session
 // without depending on the concrete adapter registry. ok=false means no adapter

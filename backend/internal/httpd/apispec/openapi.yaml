@@ -3940,6 +3940,12 @@ components:
           type: string
         label:
           type: string
+        models:
+          description: Selectable model tiers for this agent. Empty means no tier
+            choice; the agent's default model is used.
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+          type: array
       required:
       - id
       - label
@@ -4855,6 +4861,16 @@ components:
           type: array
       required:
       - templates
+      type: object
+    ModelInfo:
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+      required:
+      - id
+      - label
       type: object
     NotificationEnvelope:
       properties:

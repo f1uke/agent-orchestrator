@@ -35,6 +35,12 @@ type Info struct {
 	ID         string                `json:"id"`
 	Label      string                `json:"label"`
 	AuthStatus ports.AgentAuthStatus `json:"authStatus,omitempty" enum:"authorized,unauthorized,unknown" description:"Advisory local auth probe result. authorized means a recent local probe passed; spawn remains the authoritative validation point."`
+	// Models are the selectable model tiers this agent supports, in display
+	// order. Empty means the agent exposes no tier choice (its model is left at
+	// the agent's own default). It drives the per-kind model selectors in
+	// project settings; the list is advisory (the model is passed through
+	// free-form at launch).
+	Models []ports.ModelInfo `json:"models,omitempty" description:"Selectable model tiers for this agent. Empty means no tier choice; the agent's default model is used."`
 }
 
 // Inventory describes all daemon-supported agents and best-effort local probe
@@ -155,13 +161,10 @@ func (s *Service) Probe(ctx context.Context, agentID string) (ProbeResult, error
 		return ProbeResult{}, err
 	}
 	for _, item := range s.agents {
-		info := Info{ID: string(item.Harness), Label: item.Manifest.Name}
-		if info.Label == "" {
-			info.Label = info.ID
-		}
-		if info.ID != agentID {
+		if string(item.Harness) != agentID {
 			continue
 		}
+		// probeAgent builds the returned Info (id/label/models + probe status).
 		res := probeAgent(ctx, item)
 		return ProbeResult{
 			Agent:     res.info,
@@ -172,10 +175,20 @@ func (s *Service) Probe(ctx context.Context, agentID string) (ProbeResult, error
 	return ProbeResult{Agent: Info{ID: agentID}, Supported: false, Installed: false}, nil
 }
 
+// agentModels returns the model tiers an adapter supports, or nil when the
+// adapter exposes no model catalog.
+func agentModels(a ports.Agent) []ports.ModelInfo {
+	catalog, ok := a.(ports.AgentModelCatalog)
+	if !ok {
+		return nil
+	}
+	return catalog.SupportedModels()
+}
+
 func supportedInfos(agents []agentregistry.HarnessAgent) []Info {
 	supported := make([]Info, 0, len(agents))
 	for _, item := range agents {
-		info := Info{ID: string(item.Harness), Label: item.Manifest.Name}
+		info := Info{ID: string(item.Harness), Label: item.Manifest.Name, Models: agentModels(item.Agent)}
 		if info.Label == "" {
 			info.Label = info.ID
 		}

@@ -70,11 +70,31 @@ async function chooseOption(trigger: HTMLElement, optionName: string) {
 const agentCatalogResponse = {
 	data: {
 		supported: [
-			{ id: "claude-code", label: "Claude Code" },
-			{ id: "codex", label: "Codex" },
+			{
+				id: "claude-code",
+				label: "Claude Code",
+				models: [
+					{ id: "opus", label: "Opus" },
+					{ id: "sonnet", label: "Sonnet" },
+					{ id: "haiku", label: "Haiku" },
+					{ id: "claude-fable-5", label: "Fable" },
+				],
+			},
+			{
+				id: "codex",
+				label: "Codex",
+				models: [
+					{ id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+					{ id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+				],
+			},
 			{ id: "goose", label: "Goose" },
 			{ id: "kiro", label: "Kiro" },
-			{ id: "opencode", label: "OpenCode" },
+			{
+				id: "opencode",
+				label: "OpenCode",
+				models: [{ id: "anthropic/claude-opus-4-8", label: "Claude Opus 4.8" }],
+			},
 		],
 		installed: [
 			{ id: "claude-code", label: "Claude Code", authStatus: "authorized" },
@@ -159,7 +179,6 @@ describe("ProjectSettingsForm", () => {
 		await userEvent.type(screen.getByLabelText("Session prefix"), "rel");
 
 		await goToSection("Agents");
-		expect(screen.getByLabelText("Model override")).toHaveValue("claude-opus-4-5");
 		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
 		const orchestratorAgent = screen.getByRole("combobox", { name: "Default orchestrator agent" });
 		const permissionMode = screen.getByRole("combobox", { name: "Permission mode" });
@@ -170,8 +189,8 @@ describe("ProjectSettingsForm", () => {
 		expect(permissionMode).toHaveTextContent("Auto");
 		expect(reviewerAgent).toHaveTextContent("claude-code");
 
-		await userEvent.clear(screen.getByLabelText("Model override"));
-		await userEvent.type(screen.getByLabelText("Model override"), "gpt-5-codex");
+		// Changing the worker agent to one that doesn't offer the stored tier
+		// gracefully clears the worker model back to that agent's default.
 		await chooseOption(workerAgent, "OpenCode");
 		await chooseOption(orchestratorAgent, "Goose");
 		await chooseOption(permissionMode, "Bypass permissions");
@@ -190,11 +209,14 @@ describe("ProjectSettingsForm", () => {
 					postCreate: ["npm install"],
 					worker: {
 						agent: "opencode",
-						agentConfig: { model: "worker-model" },
+						agentConfig: undefined,
 					},
-					orchestrator: { agent: "goose" },
+					orchestrator: {
+						agent: "goose",
+						agentConfig: undefined,
+					},
 					agentConfig: {
-						model: "gpt-5-codex",
+						model: "claude-opus-4-5",
 						permissions: "bypass-permissions",
 					},
 					reviewers: [{ harness: "claude-code" }],
@@ -207,6 +229,62 @@ describe("ProjectSettingsForm", () => {
 		});
 		expect(await screen.findByText("Saved.")).toBeInTheDocument();
 	}, 20_000);
+
+	it("selects separate orchestrator and worker models and saves them per kind", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "claude-code" },
+				orchestrator: { agent: "claude-code" },
+				env: { FOO: "bar" },
+			},
+		});
+		renderSettings();
+		await goToSection("Agents");
+
+		const orchestratorModel = await screen.findByRole("combobox", { name: "Orchestrator model" });
+		const workerModel = screen.getByRole("combobox", { name: "Worker model" });
+		// Unset renders as the agent-default option, labelled with the agent.
+		expect(orchestratorModel).toHaveTextContent("Default (Claude Code default)");
+		expect(workerModel).toHaveTextContent("Default (Claude Code default)");
+
+		await chooseOption(orchestratorModel, "Sonnet");
+		await chooseOption(workerModel, "Opus");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.orchestrator).toEqual({ agent: "claude-code", agentConfig: { model: "sonnet" } });
+		expect(body.worker).toEqual({ agent: "claude-code", agentConfig: { model: "opus" } });
+		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
+	});
+
+	it("shows a hint instead of a model selector for an agent with no selectable tiers", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "goose" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+		renderSettings();
+		await goToSection("Agents");
+		// The claude-code orchestrator offers tiers...
+		expect(await screen.findByRole("combobox", { name: "Orchestrator model" })).toBeInTheDocument();
+		// ...but Goose exposes none, so the worker model is a hint, not a selector.
+		expect(screen.queryByRole("combobox", { name: "Worker model" })).not.toBeInTheDocument();
+		expect(screen.getByText(/Goose uses its own default model/)).toBeInTheDocument();
+	});
 
 	it("edits per-kind additional prompts in the drawer and saves them without dropping hidden config", async () => {
 		mockProject({

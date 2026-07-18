@@ -39,6 +39,23 @@ func New() *Plugin {
 var _ adapters.Adapter = (*Plugin)(nil)
 var _ ports.Agent = (*Plugin)(nil)
 var _ ports.AgentAuthChecker = (*Plugin)(nil)
+var _ ports.AgentModelCatalog = (*Plugin)(nil)
+
+// supportedModels are the model tiers Codex exposes to `codex --model`. Sourced
+// from OpenAI's Codex model lineup (the GPT-5.6 family plus the previous-gen
+// GPT-5.5); `gpt-5.6-sol` is Codex's own default. `codex --model` accepts other
+// slugs too, so this list only scopes the selectors.
+var supportedModels = []ports.ModelInfo{
+	{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol"},
+	{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra"},
+	{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna"},
+	{ID: "gpt-5.5", Label: "GPT-5.5"},
+}
+
+// SupportedModels reports the selectable Codex model tiers.
+func (p *Plugin) SupportedModels() []ports.ModelInfo {
+	return supportedModels
+}
 
 // Manifest returns the adapter's static self-description.
 func (p *Plugin) Manifest() adapters.Manifest {
@@ -72,6 +89,13 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	appendSessionHookFlags(&cmd)
 	appendTerminalCompatibilityFlags(&cmd)
 	appendWorkspaceTrustFlag(&cmd, cfg.WorkspacePath)
+
+	// A project's configured model (resolved per session kind before launch)
+	// selects the Codex tier via `--model`. Empty leaves Codex on its own
+	// default. The value is passed through free-form.
+	if model := strings.TrimSpace(cfg.Config.Model); model != "" {
+		cmd = append(cmd, "--model", model)
+	}
 
 	if cfg.SystemPromptFile != "" {
 		cmd = append(cmd, "-c", "model_instructions_file="+cfg.SystemPromptFile)

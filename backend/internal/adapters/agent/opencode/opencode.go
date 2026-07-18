@@ -65,6 +65,24 @@ func New() *Plugin {
 var _ adapters.Adapter = (*Plugin)(nil)
 var _ ports.Agent = (*Plugin)(nil)
 var _ ports.AgentAuthChecker = (*Plugin)(nil)
+var _ ports.AgentModelCatalog = (*Plugin)(nil)
+
+// supportedModels are a curated set of flagship model tiers for `opencode
+// --model`, which takes a `provider/model` string. opencode's real model space
+// is provider-config-dependent (dozens of models across many providers), so
+// this is a starting set of common flagships, not an exhaustive list; a
+// `provider/model` value set outside it is still passed through unchanged.
+var supportedModels = []ports.ModelInfo{
+	{ID: "anthropic/claude-opus-4-8", Label: "Claude Opus 4.8"},
+	{ID: "anthropic/claude-sonnet-5", Label: "Claude Sonnet 5"},
+	{ID: "anthropic/claude-haiku-4-5", Label: "Claude Haiku 4.5"},
+	{ID: "openai/gpt-5.6", Label: "GPT-5.6"},
+}
+
+// SupportedModels reports the curated opencode model tiers.
+func (p *Plugin) SupportedModels() []ports.ModelInfo {
+	return supportedModels
+}
 
 // Manifest returns the adapter's static self-description.
 func (p *Plugin) Manifest() adapters.Manifest {
@@ -98,6 +116,12 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 
 	cmd = []string{binary}
 	appendPermissionFlags(&cmd, cfg.Permissions)
+	// A project's configured model (resolved per session kind before launch)
+	// selects the opencode `provider/model` via `--model`. Empty leaves opencode
+	// on its own configured default. The value is passed through free-form.
+	if model := strings.TrimSpace(cfg.Config.Model); model != "" {
+		cmd = append(cmd, "--model", model)
+	}
 	if cfg.Prompt != "" {
 		cmd = append(cmd, "--prompt", cfg.Prompt)
 	}

@@ -613,3 +613,51 @@ func TestDoctorLaunchProbesMirrorLaunchFlags(t *testing.T) {
 		}
 	}
 }
+
+func hasFlagValue(cmd []string, flag, val string) bool {
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i] == flag && cmd[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGetLaunchCommandAppendsModelFlag(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "codex"}
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{
+		Config: ports.AgentConfig{Model: "gpt-5.6-sol"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFlagValue(cmd, "--model", "gpt-5.6-sol") {
+		t.Fatalf("command %#v missing --model gpt-5.6-sol", cmd)
+	}
+}
+
+func TestGetLaunchCommandOmitsModelFlagWhenUnset(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "codex"}
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range cmd {
+		if a == "--model" {
+			t.Fatalf("command %#v should not carry --model when model unset", cmd)
+		}
+	}
+}
+
+func TestSupportedModelsListsCodexTiers(t *testing.T) {
+	got := (&Plugin{}).SupportedModels()
+	ids := make(map[string]bool, len(got))
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	for _, want := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
+		if !ids[want] {
+			t.Fatalf("SupportedModels %#v missing %q", got, want)
+		}
+	}
+}

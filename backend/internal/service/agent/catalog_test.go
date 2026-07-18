@@ -356,3 +356,39 @@ func harnessAuthAgent(id, label string, status ports.AgentAuthStatus, err error)
 		Agent: fakeAuthAgent{fakeAgent: fakeAgent{}, status: status, authErr: err},
 	}
 }
+
+type fakeModelAgent struct {
+	fakeAgent
+	models []ports.ModelInfo
+}
+
+func (f fakeModelAgent) SupportedModels() []ports.ModelInfo { return f.models }
+
+func TestListPopulatesAgentModelCatalog(t *testing.T) {
+	svc := NewWithAgents([]agentregistry.HarnessAgent{
+		{
+			Harness:  domain.AgentHarness("claude-code"),
+			Manifest: adapters.Manifest{ID: "claude-code", Name: "Claude Code"},
+			Agent:    fakeModelAgent{models: []ports.ModelInfo{{ID: "opus", Label: "Opus"}}},
+		},
+		{
+			Harness:  domain.AgentHarness("goose"),
+			Manifest: adapters.Manifest{ID: "goose", Name: "Goose"},
+			Agent:    fakeAgent{},
+		},
+	})
+	got, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byID := make(map[string]Info, len(got.Supported))
+	for _, info := range got.Supported {
+		byID[info.ID] = info
+	}
+	if cc := byID["claude-code"]; len(cc.Models) != 1 || cc.Models[0].ID != "opus" {
+		t.Fatalf("claude-code models = %#v, want [{opus Opus}]", cc.Models)
+	}
+	if g := byID["goose"]; len(g.Models) != 0 {
+		t.Fatalf("goose models = %#v, want empty (no catalog)", g.Models)
+	}
+}
