@@ -364,6 +364,62 @@ type fakeModelAgent struct {
 
 func (f fakeModelAgent) SupportedModels() []ports.ModelInfo { return f.models }
 
+func TestRefreshPreservesAgentModelCatalog(t *testing.T) {
+	svc := NewWithAgents([]agentregistry.HarnessAgent{
+		{
+			Harness:  domain.AgentHarness("claude-code"),
+			Manifest: adapters.Manifest{ID: "claude-code", Name: "Claude Code"},
+			Agent:    fakeModelAgent{models: []ports.ModelInfo{{ID: "opus", Label: "Opus"}, {ID: "sonnet", Label: "Sonnet"}}},
+		},
+		{
+			Harness:  domain.AgentHarness("goose"),
+			Manifest: adapters.Manifest{ID: "goose", Name: "Goose"},
+			Agent:    fakeAgent{},
+		},
+	})
+
+	got, err := svc.Refresh(context.Background())
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	// The catalog must survive a refresh: both the Supported list and the
+	// Installed list (fakeModelAgent resolves its binary) carry the tiers.
+	for _, list := range []struct {
+		name  string
+		infos []Info
+	}{{"supported", got.Supported}, {"installed", got.Installed}} {
+		byID := make(map[string]Info, len(list.infos))
+		for _, info := range list.infos {
+			byID[info.ID] = info
+		}
+		cc := byID["claude-code"]
+		if len(cc.Models) != 2 || cc.Models[0].ID != "opus" || cc.Models[1].ID != "sonnet" {
+			t.Fatalf("%s claude-code models = %#v, want [opus sonnet]", list.name, cc.Models)
+		}
+		if g := byID["goose"]; len(g.Models) != 0 {
+			t.Fatalf("%s goose models = %#v, want empty", list.name, g.Models)
+		}
+	}
+}
+
+func TestProbePreservesAgentModelCatalog(t *testing.T) {
+	svc := NewWithAgents([]agentregistry.HarnessAgent{
+		{
+			Harness:  domain.AgentHarness("claude-code"),
+			Manifest: adapters.Manifest{ID: "claude-code", Name: "Claude Code"},
+			Agent:    fakeModelAgent{models: []ports.ModelInfo{{ID: "opus", Label: "Opus"}}},
+		},
+	})
+
+	got, err := svc.Probe(context.Background(), "claude-code")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(got.Agent.Models) != 1 || got.Agent.Models[0].ID != "opus" {
+		t.Fatalf("probed claude-code models = %#v, want [opus]", got.Agent.Models)
+	}
+}
+
 func TestListPopulatesAgentModelCatalog(t *testing.T) {
 	svc := NewWithAgents([]agentregistry.HarnessAgent{
 		{
