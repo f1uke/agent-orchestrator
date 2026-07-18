@@ -172,12 +172,15 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 	// The supported list carries every agent's full identity, including its model
 	// tiers, so the per-kind model selectors resolve their options from the agent
 	// the user picked above.
-	const agentEntry = (agentId: string): AgentInfo | undefined =>
-		agentCatalog?.supported?.find((a) => a.id === agentId);
+	const agentEntry = (agentId: string): AgentInfo | undefined => agentCatalog?.supported?.find((a) => a.id === agentId);
 	// Changing an agent degrades the model gracefully: if the newly-chosen agent
 	// doesn't offer the previously-selected tier, fall back to that agent's
 	// default (empty) rather than carrying a tier the new agent can't run.
-	const changeAgent = (agentField: "workerAgent" | "orchestratorAgent", modelField: "workerModel" | "orchestratorModel", agentId: string) => {
+	const changeAgent = (
+		agentField: "workerAgent" | "orchestratorAgent",
+		modelField: "workerModel" | "orchestratorModel",
+		agentId: string,
+	) => {
 		setField(agentField, agentId);
 		const models = agentEntry(agentId)?.models ?? [];
 		if (draft[modelField] && !models.some((m) => m.id === draft[modelField])) {
