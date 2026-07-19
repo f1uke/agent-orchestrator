@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { isXcodeAppName, type OpenInTargets, resolveOpenTargets } from "./open-in-targets";
+import { ANDROID_SUBDIR, isXcodeAppName, type OpenInTargets, resolveOpenTargets } from "./open-in-targets";
 
 // The macOS locations a .app bundle can live. Detection is a cheap existsSync
 // against these rather than a Spotlight (`mdfind`) query, which can be slow and
@@ -43,11 +43,19 @@ export async function detectOpenTargets(dir: string): Promise<OpenInTargets> {
 	} catch {
 		return { hasVSCode: false };
 	}
+	// Cross-platform mobile layouts (React Native, Flutter, Capacitor) keep the
+	// Gradle root in an `android/` subdir, so list it too when present. Best-effort:
+	// an unreadable/absent subdir yields undefined and detection falls back to root.
+	const androidSubdirEntries = entries.includes(ANDROID_SUBDIR)
+		? await readdir(path.join(dir, ANDROID_SUBDIR)).catch(() => undefined)
+		: undefined;
 	return resolveOpenTargets({
 		dir,
 		entries,
+		androidSubdirEntries,
 		vscodeInstalled: isAppInstalled("Visual Studio Code"),
 		xcodeInstalled: isXcodeInstalled(),
+		androidStudioInstalled: isAppInstalled("Android Studio"),
 	});
 }
 
@@ -94,4 +102,13 @@ export function openInEditor(dir: string): Promise<void> {
 export function openInXcode(targetPath: string): Promise<void> {
 	if (process.platform !== "darwin") return Promise.resolve();
 	return runOpen([targetPath]);
+}
+
+/**
+ * Open a Gradle project directory in Android Studio. Unlike Xcode, Android Studio
+ * opens a folder (the Gradle root), not a single project file. No-op off darwin.
+ */
+export function openInAndroidStudio(dir: string): Promise<void> {
+	if (process.platform !== "darwin") return Promise.resolve();
+	return runOpen(["-a", "Android Studio", dir]);
 }

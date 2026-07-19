@@ -1,4 +1,4 @@
-import { Code2, FolderOpen, Hammer, Share, SquareTerminal, Wrench } from "lucide-react";
+import { Code2, FolderOpen, Hammer, Share, Smartphone, SquareTerminal, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenInTargets } from "../../main/open-in-targets";
 import { aoBridge } from "../lib/bridge";
@@ -28,9 +28,10 @@ const TOAST_DISMISS_MS = 4000;
 /**
  * A share-style terminal-toolbar button that opens the session's working
  * directory in Terminal (Ghostty when installed, else Terminal.app), Finder,
- * VS Code (when installed), or an Xcode workspace/project detected at the
- * directory root. Detection runs in the Electron main process (fs + installed
- * apps); a failed launch surfaces a toast rather than crashing.
+ * VS Code (when installed), an Xcode workspace/project detected at the directory
+ * root, or Android Studio on a detected Gradle root (worktree root or `android/`
+ * subdir). Detection runs in the Electron main process (fs + installed apps); a
+ * failed launch surfaces a toast rather than crashing.
  */
 export function OpenInMenu({ directory }: OpenInMenuProps) {
 	const [open, setOpen] = useState(false);
@@ -96,6 +97,7 @@ export function OpenInMenu({ directory }: OpenInMenuProps) {
 	};
 
 	const xcode = targets?.xcode;
+	const android = targets?.android;
 
 	return (
 		<>
@@ -119,11 +121,17 @@ export function OpenInMenu({ directory }: OpenInMenuProps) {
 						<FolderOpen aria-hidden="true" />
 						Open in Finder
 					</DropdownMenuItem>
-					{(xcode || targets?.hasVSCode) && <DropdownMenuSeparator />}
+					{(xcode || android || targets?.hasVSCode) && <DropdownMenuSeparator />}
 					{xcode && (
 						<DropdownMenuItem onSelect={() => run(xcode.name, () => aoBridge.openIn.xcode(xcode.path))}>
 							<Hammer aria-hidden="true" />
 							Open {xcode.name}
+						</DropdownMenuItem>
+					)}
+					{android && (
+						<DropdownMenuItem onSelect={() => run("Android Studio", () => aoBridge.openIn.androidStudio(android.path))}>
+							<Smartphone aria-hidden="true" />
+							Open in Android Studio
 						</DropdownMenuItem>
 					)}
 					{targets?.hasVSCode && (
