@@ -53,7 +53,7 @@ import { connectSupervisor, type SupervisorLinkHandle } from "./main/supervisor-
 import { shouldLinkOnAttach } from "./main/daemon-owner";
 import { readMigrationState, updateMigration, writeAppStateMarker, type MigrationState } from "./main/app-state";
 import { createNativeNotifier, type NativeNotificationInput } from "./main/native-notifications";
-import { detectOpenTargets, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
+import { detectOpenTargets, openInAndroidStudio, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
 import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
 import { isAllowedTerminalLink } from "./main/open-terminal-link";
 import {
@@ -1234,6 +1234,7 @@ ipcMain.handle("openIn:finder", async (_event, dir: string) => {
 ipcMain.handle("openIn:terminal", (_event, dir: string) => openInTerminal(dir));
 ipcMain.handle("openIn:editor", (_event, dir: string) => openInEditor(dir));
 ipcMain.handle("openIn:xcode", (_event, targetPath: string) => openInXcode(targetPath));
+ipcMain.handle("openIn:androidStudio", (_event, dir: string) => openInAndroidStudio(dir));
 // Recursively find every project.yml under the session dir and run `xcodegen
 // generate` in each. xcodegen is typically a Homebrew binary, so a Finder/Dock
 // launch needs the login-shell PATH (or the static floor) to resolve it — the

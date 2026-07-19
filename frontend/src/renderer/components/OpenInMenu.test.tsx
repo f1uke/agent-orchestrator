@@ -10,6 +10,7 @@ const terminal = vi.fn<(dir: string) => Promise<void>>();
 const finder = vi.fn<(dir: string) => Promise<void>>();
 const editor = vi.fn<(dir: string) => Promise<void>>();
 const xcode = vi.fn<(targetPath: string) => Promise<void>>();
+const androidStudio = vi.fn<(dir: string) => Promise<void>>();
 const xcodegen = vi.fn<(dir: string) => Promise<RunXcodegenResult>>();
 
 vi.mock("../lib/bridge", () => ({
@@ -20,6 +21,7 @@ vi.mock("../lib/bridge", () => ({
 			finder: (dir: string) => finder(dir),
 			editor: (dir: string) => editor(dir),
 			xcode: (targetPath: string) => xcode(targetPath),
+			androidStudio: (dir: string) => androidStudio(dir),
 			xcodegen: (dir: string) => xcodegen(dir),
 		},
 	},
@@ -41,6 +43,7 @@ beforeEach(() => {
 	finder.mockResolvedValue(undefined);
 	editor.mockResolvedValue(undefined);
 	xcode.mockResolvedValue(undefined);
+	androidStudio.mockResolvedValue(undefined);
 	xcodegen.mockResolvedValue({ status: "no-specs", root: "" });
 });
 
@@ -91,6 +94,59 @@ describe("OpenInMenu", () => {
 		expect(await screen.findByText("Open in Terminal")).toBeInTheDocument();
 		expect(screen.queryByText("Open in Visual Studio Code")).not.toBeInTheDocument();
 		expect(screen.queryByText(/\.xcworkspace|\.xcodeproj/)).not.toBeInTheDocument();
+	});
+
+	it("shows Open in Android Studio only when an Android/Gradle target is detected", async () => {
+		detectTargets.mockResolvedValue({
+			hasVSCode: false,
+			android: { name: "android", path: `${DIR}/android` },
+		});
+		const user = userEvent.setup();
+		render(<OpenInMenu directory={DIR} />);
+
+		await user.click(screen.getByRole("button", { name: "Open in…" }));
+
+		expect(await screen.findByText("Open in Android Studio")).toBeInTheDocument();
+	});
+
+	it("hides Open in Android Studio when no Android target is detected", async () => {
+		detectTargets.mockResolvedValue({ hasVSCode: false });
+		const user = userEvent.setup();
+		render(<OpenInMenu directory={DIR} />);
+
+		await user.click(screen.getByRole("button", { name: "Open in…" }));
+
+		expect(await screen.findByText("Open in Terminal")).toBeInTheDocument();
+		expect(screen.queryByText("Open in Android Studio")).not.toBeInTheDocument();
+	});
+
+	it("opens the detected Gradle root directory in Android Studio when clicked", async () => {
+		detectTargets.mockResolvedValue({
+			hasVSCode: false,
+			android: { name: "android", path: `${DIR}/android` },
+		});
+		const user = userEvent.setup();
+		render(<OpenInMenu directory={DIR} />);
+
+		await user.click(screen.getByRole("button", { name: "Open in…" }));
+		await user.click(await screen.findByText("Open in Android Studio"));
+
+		expect(androidStudio).toHaveBeenCalledWith(`${DIR}/android`);
+	});
+
+	it("shows a toast instead of crashing when Android Studio fails to launch", async () => {
+		detectTargets.mockResolvedValue({
+			hasVSCode: false,
+			android: { name: "android", path: `${DIR}/android` },
+		});
+		androidStudio.mockRejectedValue(new Error("open failed"));
+		const user = userEvent.setup();
+		render(<OpenInMenu directory={DIR} />);
+
+		await user.click(screen.getByRole("button", { name: "Open in…" }));
+		await user.click(await screen.findByText("Open in Android Studio"));
+
+		expect(await screen.findByRole("status")).toHaveTextContent("Couldn't open in Android Studio.");
 	});
 
 	it("shows a toast instead of crashing when a launch fails", async () => {
