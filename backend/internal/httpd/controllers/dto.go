@@ -972,6 +972,75 @@ type LineChangeDTO struct {
 	Kind  string `json:"kind"`
 }
 
+// WorkspaceChangesResponse is the body of the workspace/changes route: the
+// files differing between the session's branch (working tree included) and its
+// resolved target branch.
+type WorkspaceChangesResponse struct {
+	Available bool `json:"available"`
+	// Reason explains an available=false response: "no_workspace" (the worktree
+	// is gone from disk), "not_a_repo", or "no_target_branch". Empty when the
+	// list is usable.
+	Reason string `json:"reason,omitempty"`
+	// TargetBranch is the resolved comparison branch and TargetSource says how
+	// it was resolved ("pr", "session_pr_target", "session_base", "project",
+	// "git_origin_head"), so the UI can distinguish a certain target from an
+	// inferred one. Both may be set on an available=false response.
+	TargetBranch string           `json:"targetBranch,omitempty"`
+	TargetSource string           `json:"targetSource,omitempty"`
+	MergeBase    string           `json:"mergeBase,omitempty"`
+	Files        []ChangedFileDTO `json:"files"`
+	Truncated    bool             `json:"truncated"`
+}
+
+// ChangedFileDTO is one changed file in the Changes list.
+type ChangedFileDTO struct {
+	// Path is repo-relative and slash-separated; for a rename it is the NEW path
+	// and OldPath carries the previous one.
+	Path    string `json:"path"`
+	OldPath string `json:"oldPath,omitempty"`
+	// Status is "added", "modified", "deleted", or "renamed".
+	Status    string `json:"status"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	// Binary reports that git emitted "-" counts; additions/deletions are then
+	// meaningless and must not be rendered arithmetically.
+	Binary bool `json:"binary"`
+	// Committed is false when the file also carries working-tree changes that
+	// are not yet committed.
+	Committed bool `json:"committed"`
+}
+
+// workspaceChangesResponse maps the service result to the wire DTO.
+func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceChangesResponse {
+	files := make([]ChangedFileDTO, 0, len(res.Files))
+	for _, f := range res.Files {
+		files = append(files, ChangedFileDTO{
+			Path:      f.Path,
+			OldPath:   f.OldPath,
+			Status:    f.Status,
+			Additions: f.Additions,
+			Deletions: f.Deletions,
+			Binary:    f.Binary,
+			Committed: f.Committed,
+		})
+	}
+	return WorkspaceChangesResponse{
+		Available:    res.Available,
+		Reason:       res.Reason,
+		TargetBranch: res.TargetBranch,
+		TargetSource: res.TargetSource,
+		MergeBase:    res.MergeBase,
+		Files:        files,
+		Truncated:    res.Truncated,
+	}
+}
+
+// WorkspaceFileDiffParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/workspace/file-diff.
+type WorkspaceFileDiffParams struct {
+	Path string `query:"path" description:"Repo-relative path of the file to diff against the session's target branch. Absolute and ~/ paths are rejected."`
+}
+
 // workspaceFileResponse maps the service result to the wire DTO.
 func workspaceFileResponse(res sessionsvc.WorkspaceFileResult) WorkspaceFileResponse {
 	lines := make([]DiffContextLineDTO, 0, len(res.Lines))

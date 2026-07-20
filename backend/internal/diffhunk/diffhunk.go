@@ -35,6 +35,39 @@ type Line struct {
 // whose body covers newLine on the new side. found is false when no hunk covers
 // newLine (e.g. the anchor is in an unchanged region far from any change).
 func HunkForLine(diff string, newLine int) ([]Line, bool) {
+	var found []Line
+	eachHunk(diff, func(body []Line) bool {
+		for _, l := range body {
+			// Only context and add lines exist on the new side; a del line
+			// carries NewLine == 0, so it can never match a 1-based target.
+			if l.NewLine == newLine {
+				found = body
+				return false // stop
+			}
+		}
+		return true // keep scanning
+	})
+	if found == nil {
+		return nil, false
+	}
+	return found, true
+}
+
+// AllLines parses a single file's unified diff and returns every hunk's lines in
+// order. Used by the Files panel, which shows a whole file's diff rather than
+// the one hunk around a review-comment anchor.
+func AllLines(diff string) []Line {
+	var out []Line
+	eachHunk(diff, func(body []Line) bool {
+		out = append(out, body...)
+		return true
+	})
+	return out
+}
+
+// eachHunk parses each hunk body in a unified diff and hands it to visit, which
+// returns false to stop scanning.
+func eachHunk(diff string, visit func(body []Line) bool) {
 	rows := strings.Split(diff, "\n")
 	i := 0
 	for i < len(rows) {
@@ -49,7 +82,6 @@ func HunkForLine(diff string, newLine int) ([]Line, bool) {
 		}
 		i++
 		body := make([]Line, 0, 16)
-		covers := false
 		for i < len(rows) {
 			r := rows[i]
 			if strings.HasPrefix(r, "@@") || strings.HasPrefix(r, "diff ") ||
@@ -64,16 +96,10 @@ func HunkForLine(diff string, newLine int) ([]Line, bool) {
 			switch r[0] {
 			case ' ':
 				body = append(body, Line{Kind: KindContext, OldLine: oldCur, NewLine: newCur, Text: r[1:]})
-				if newCur == newLine {
-					covers = true
-				}
 				oldCur++
 				newCur++
 			case '+':
 				body = append(body, Line{Kind: KindAdd, NewLine: newCur, Text: r[1:]})
-				if newCur == newLine {
-					covers = true
-				}
 				newCur++
 			case '-':
 				body = append(body, Line{Kind: KindDel, OldLine: oldCur, Text: r[1:]})
@@ -89,11 +115,10 @@ func HunkForLine(diff string, newLine int) ([]Line, bool) {
 			}
 			i++
 		}
-		if covers {
-			return body, true
+		if !visit(body) {
+			return
 		}
 	}
-	return nil, false
 }
 
 // parseHunkHeader reads "@@ -oldStart[,oldCount] +newStart[,newCount] @@ ..."

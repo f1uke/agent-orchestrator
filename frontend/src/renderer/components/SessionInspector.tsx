@@ -19,6 +19,7 @@ import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonL
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
+import { FilesPanel, type ChangedFileTarget } from "./FilesPanel";
 import { SmokeTestView } from "./SmokeTestView";
 import { JiraIssueSection } from "./JiraIssueSection";
 import { ProviderBadge } from "./ProviderBadge";
@@ -28,7 +29,7 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "tests" | "browser";
+export type InspectorView = "summary" | "reviews" | "files" | "tests" | "browser";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -51,6 +52,17 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		icon: (
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
 				<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+			</svg>
+		),
+	},
+	{
+		id: "files",
+		label: "Files",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+				<path d="M14 3v5h5" />
+				<path d="M9 13h6M9 17h4" />
 			</svg>
 		),
 	},
@@ -96,6 +108,8 @@ export function SessionInspector({
 	view: viewProp,
 	onViewChange,
 	onOpenFile,
+	onOpenChangedFile,
+	selectedChangedPath,
 }: {
 	session?: WorkspaceSession;
 	onOpenReviewerTerminal?: OpenReviewerTerminal;
@@ -108,6 +122,10 @@ export function SessionInspector({
 	onViewChange?: (view: InspectorView) => void;
 	/** Open a review comment's file as a full-file diff in the center pane. */
 	onOpenFile?: (target: FileDiffTarget) => void;
+	/** Open a Changes-mode row in the center pane. */
+	onOpenChangedFile?: (target: ChangedFileTarget) => void;
+	/** Path of the Changes row currently open in the center pane. */
+	selectedChangedPath?: string;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const view = viewProp ?? internalView;
@@ -115,6 +133,11 @@ export function SessionInspector({
 		setInternalView(next);
 		onViewChange?.(next);
 	};
+	// An orchestrator's workspace is the project checkout, not a per-task worktree,
+	// and it has no branch of its own to diff — the same reason the readiness strip
+	// is hidden for it.
+	const showFiles = session?.kind !== "orchestrator";
+	const views = showFiles ? VIEWS : VIEWS.filter((v) => v.id !== "files");
 
 	if (!session) {
 		return (
@@ -129,7 +152,7 @@ export function SessionInspector({
 	return (
 		<aside className="session-inspector" aria-label="Session inspector">
 			<div className="session-inspector__tabs" role="tablist">
-				{VIEWS.map((entry) => (
+				{views.map((entry) => (
 					<button
 						key={entry.id}
 						type="button"
@@ -157,11 +180,17 @@ export function SessionInspector({
 					view === "reviews" && "session-inspector__body--reviews",
 					// The Tests tab (smoke checklist) owns the same full-height layout.
 					view === "tests" && "session-inspector__body--tests",
+					// Files owns its own scroll (segmented control + summary pinned,
+					// list scrolling beneath), so it renders flush too.
+					view === "files" && "session-inspector__body--files",
 				)}
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
 				{view === "reviews" ? (
 					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
+				) : null}
+				{view === "files" && showFiles ? (
+					<FilesPanel sessionId={session.id} onOpenFile={onOpenChangedFile} selectedPath={selectedChangedPath} />
 				) : null}
 				{view === "tests" ? (
 					<SmokeTestView sessionId={session.id} worker={session.title} issueId={session.issueId} />

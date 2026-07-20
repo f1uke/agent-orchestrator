@@ -77,6 +77,8 @@ type SessionService interface {
 	// ReadWorkspaceFile returns a file's content plus its per-line
 	// uncommitted-change map (working tree vs HEAD), with the same shape split.
 	ReadWorkspaceFile(ctx context.Context, id domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error)
+	WorkspaceChanges(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceChangesResult, error)
+	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, path string) (sessionsvc.DiffContextResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -114,6 +116,8 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Get("/sessions/{sessionId}/workspace/resolve", c.resolveWorkspaceRef)
 	r.Get("/sessions/{sessionId}/workspace/file", c.readWorkspaceFile)
+	r.Get("/sessions/{sessionId}/workspace/changes", c.workspaceChanges)
+	r.Get("/sessions/{sessionId}/workspace/file-diff", c.workspaceFileDiff)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
 	r.Patch("/sessions/{sessionId}/spec", c.updateSpec)
@@ -563,6 +567,38 @@ func (c *SessionsController) readWorkspaceFile(w http.ResponseWriter, r *http.Re
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, workspaceFileResponse(res))
+}
+
+// workspaceChanges lists the files differing between the session's branch and
+// its resolved target branch. Degraded states (no worktree, not a repo, no
+// target branch) come back available=false with a reason, not an error.
+func (c *SessionsController) workspaceChanges(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/changes")
+		return
+	}
+	res, err := c.Svc.WorkspaceChanges(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, workspaceChangesResponse(res))
+}
+
+// workspaceFileDiff returns one file's diff against the session's target
+// branch. Unlike diff-context it needs no PR, so it serves a worker mid-task,
+// and it renders a deleted file (which has no working-tree content to read).
+func (c *SessionsController) workspaceFileDiff(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/file-diff")
+		return
+	}
+	res, err := c.Svc.WorkspaceFileDiff(r.Context(), sessionID(r), r.URL.Query().Get("path"))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, diffContextResponse(res))
 }
 
 func (c *SessionsController) claimPR(w http.ResponseWriter, r *http.Request) {

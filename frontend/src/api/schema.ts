@@ -1088,6 +1088,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/workspace/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List files differing between the session branch and its target branch */
+        get: operations["workspaceChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/workspace/file": {
         parameters: {
             query?: never;
@@ -1097,6 +1114,23 @@ export interface paths {
         };
         /** Return a workspace file's content and per-line uncommitted-change map */
         get: operations["readWorkspaceFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/workspace/file-diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return one file's diff against the session's target branch (no PR required) */
+        get: operations["workspaceFileDiff"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1385,6 +1419,15 @@ export interface components {
         };
         AutoNudgeSettingsResponse: {
             enabled: boolean;
+        };
+        ChangedFileDTO: {
+            additions: number;
+            binary: boolean;
+            committed: boolean;
+            deletions: number;
+            oldPath?: string;
+            path: string;
+            status: string;
         };
         ClaimPRRequest: {
             allowTakeover?: null | boolean;
@@ -2289,6 +2332,15 @@ export interface components {
             ok: boolean;
             session: components["schemas"]["ControllersSessionView"];
             sessionId: string;
+        };
+        WorkspaceChangesResponse: {
+            available: boolean;
+            files: components["schemas"]["ChangedFileDTO"][];
+            mergeBase?: string;
+            reason?: string;
+            targetBranch?: string;
+            targetSource?: string;
+            truncated: boolean;
         };
         WorkspaceFileResponse: {
             available: boolean;
@@ -6287,6 +6339,56 @@ export interface operations {
             };
         };
     };
+    workspaceChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceChangesResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     readWorkspaceFile: {
         parameters: {
             query?: {
@@ -6309,6 +6411,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceFileResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    workspaceFileDiff: {
+        parameters: {
+            query?: {
+                /** @description Repo-relative path of the file to diff against the session's target branch. Absolute and ~/ paths are rejected. */
+                path?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiffContextResponse"];
                 };
             };
             /** @description Not Found */
