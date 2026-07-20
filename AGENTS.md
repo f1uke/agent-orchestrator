@@ -26,7 +26,7 @@ Backend-specific checks:
 
 ```bash
 cd backend
-go build ./...
+go build ./...                       # compile check only; writes no binary
 go test ./...
 go test -race ./...
 go vet ./...
@@ -87,7 +87,7 @@ For code entry points:
 - SQLite change events come from DB triggers into `change_log`; do not add parallel manual CDC emission from store methods unless the architecture changes explicitly.
 - Keep generated OpenAPI/API DTO drift in mind: controller response shapes live in `backend/internal/httpd/controllers/dto.go` and tests may assert CLI/HTTP wire compatibility.
 - Do not add network calls to tests unless the package already has an integration/e2e pattern for them. Prefer `httptest`, fakes, and injected dependencies.
-- Do not commit local run state, daemon data, temporary worktrees, build outputs, or credentials.
+- Do not commit local run state, daemon data, temporary worktrees, build outputs, or credentials. Never build a binary into the working tree: use `go run ./cmd/ao ...`, or `go build -o /tmp/<name> ./cmd/ao`. `.gitignore` catches the usual landing spot, but a stray binary is invisible in `git diff --stat`, so `git add -A` will happily commit one.
 - All app state lives under `~/.ao` only. The daemon's data dir, `running.json`, worktrees, and the Electron supervisor's `userData` (Chromium cache, cookies, local/session storage, crash dumps) must resolve under `~/.ao` (overridable via `AO_DATA_DIR`/`AO_RUN_FILE`). Never write to or read from `~/Library/Application Support` or any other OS default app-data location. `main.ts` pins Electron's `userData` to `~/.ao/electron`; do not remove that override or rely on Electron's default path.
 
 ## API contract changes
