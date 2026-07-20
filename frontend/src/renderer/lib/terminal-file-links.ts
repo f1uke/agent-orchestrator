@@ -1,10 +1,16 @@
 // Terminal linkifier for FILE references — the third token family after the
 // `@`session refs (session-ref.ts) and `#`/`!`/Jira SCM refs
 // (terminal-scm-links.ts). When the agent prints a path or filename, the token
-// becomes clickable and opens the file in the workspace code viewer (resolved
-// and read INTERNALLY, confined to the session's workspace — never the OS
-// browser). Three shapes are recognised: an absolute path, a workspace-relative
-// path, and a bare filename with a known code extension.
+// becomes clickable and opens the file in the code viewer (resolved and read
+// INTERNALLY by the daemon — never the OS browser). Four shapes are recognised:
+// an absolute path, a `~/` home path, a workspace-relative path, and a bare
+// filename with a known code extension.
+//
+// Absolute and `~/` refs open the file WHEREVER it lives on disk — outside the
+// session's worktree included (an approved product decision; the backend
+// deliberately does not confine them, and `~` is expanded there, where the
+// daemon's `$HOME` is authoritative). Relative and bare refs stay scoped to the
+// session's workspace, since such a ref has no meaning outside one.
 //
 // Detection is deliberately CONSERVATIVE and runs on shape alone (this is the
 // xterm link-provider hot path; the real existence check happens on click, via
@@ -104,8 +110,26 @@ const CODE_EXTENSIONS = new Set([
 // or an opening delimiter — NOT after a path char (`/`, `.`, `:`, alnum). This
 // keeps a URL's path segments (preceded by `/` or `:`) and word-internal
 // fragments from being matched. Path chars include `+` (Swift `A+B.swift`), `-`,
-// `_`, `.`, and `/`. The optional `:<line>[:<col>]` suffix is captured separately.
-const FILE_TOKEN_RE = /(^|[\s(['"`=,>|{])([A-Za-z0-9._+/-]+)(:\d+(?::\d+)?)?/g;
+// `_`, `.`, and `/`. A `~/` is allowed only as the token's very first segment,
+// so `backup~/x.md` (a `~` mid-word) still does not start a link. The optional
+// `:<line>[:<col>]` suffix is captured separately.
+const FILE_TOKEN_RE = /(^|[\s(['"`=,>|{])((?:~\/)?[A-Za-z0-9._+/-]+)(:\d+(?::\d+)?)?/g;
+
+/** The four ref shapes the backend resolver distinguishes. */
+export type FileRefShape = "absolute" | "tilde" | "relative" | "bare";
+
+/**
+ * The shape of a file reference. `absolute` and `tilde` name a location
+ * globally and open anywhere on disk; `relative` and `bare` are resolved inside
+ * the session's workspace. Mirrors the backend's `refTarget` split — keep the
+ * two in step.
+ */
+export function classifyFileRef(ref: string): FileRefShape {
+	const trimmed = ref.trim();
+	if (trimmed === "~" || trimmed.startsWith("~/")) return "tilde";
+	if (trimmed.startsWith("/")) return "absolute";
+	return trimmed.includes("/") ? "relative" : "bare";
+}
 
 // Trailing characters trimmed from a captured token — sentence punctuation the
 // path char class greedily absorbed (a run can end in `.` or `-`).

@@ -19,26 +19,89 @@ import (
 // common basename in a huge tree can't return an unbounded list.
 const maxResolveCandidates = 50
 
-// maxWorkspaceFileBytes guards against reading a huge/binary blob into memory
-// before the line cap applies.
+// maxWorkspaceFileBytes caps how large a file the viewer will read. The cap is
+// checked against the stat size BEFORE the file is read, so a huge blob is never
+// pulled into memory.
 const maxWorkspaceFileBytes = 5 << 20 // 5 MiB
 
-// WorkspaceFileResult is a workspace file's content plus the per-line map of its
+// Reasons a file resolved but cannot be shown in the text viewer.
+const (
+	UnavailableTooLarge = "too_large"
+	UnavailableBinary   = "binary"
+)
+
+// WorkspaceFileResult is a file's content plus the per-line map of its
 // uncommitted changes (working tree vs HEAD).
 type WorkspaceFileResult struct {
-	Available    bool
-	Path         string // repo-relative, slash-separated
+	Available bool
+	// Path is workspace-relative (slash-separated) for a file inside the
+	// session's workspace, and an absolute path for one outside it.
+	Path         string
 	Lines        []DiffContextLine
 	ChangedLines []diffhunk.LineChange
 	Truncated    bool
+	// Reason explains an Available=false result (UnavailableTooLarge,
+	// UnavailableBinary); empty when the file is displayable.
+	Reason string
 }
 
-// ResolveWorkspaceRef maps a file reference printed in the terminal (an absolute
-// path, a workspace-relative path, or a bare filename) to candidate
-// workspace-relative paths. All resolution is confined to the session's
-// workspace: an absolute path pointing outside is never read, only its basename
-// is searched for inside the workspace. Zero candidates (no match) is not an
-// error; only an unknown session is.
+// refTarget classifies a terminal file reference by SHAPE and, for the two
+// shapes that name a location on disk, returns the absolute path they point at:
+//
+//   - absolute (`/a/b.go`) and tilde (`~/a/b.go`) name a location globally and
+//     return (abs, true);
+//   - relative (`pkg/a.go`) and bare (`a.go`) have no meaning outside a
+//     workspace and return ("", false), keeping their #127 workspace-scoped
+//     resolution.
+//
+// A `~` only expands as the whole ref or as a leading `~/` segment, so a path
+// segment that merely contains a tilde (`dir/~backup.md`) stays relative.
+func refTarget(ref string) (string, bool) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", false
+	}
+	if ref == "~" || strings.HasPrefix(ref, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "", false
+		}
+		rest := strings.TrimPrefix(strings.TrimPrefix(ref, "~"), "/")
+		if rest == "" {
+			return filepath.Clean(home), true
+		}
+		return filepath.Join(home, filepath.FromSlash(rest)), true
+	}
+	if filepath.IsAbs(ref) {
+		return filepath.Clean(ref), true
+	}
+	return "", false
+}
+
+// resolveTarget maps an absolute target to the real file it names: symlinks are
+// followed (the resolved target is what gets read and displayed) and the result
+// must be a regular file. A missing path, a broken symlink, or a directory
+// yields ok=false, which the caller degrades to "no candidates".
+func resolveTarget(abs string) (string, bool) {
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", false
+	}
+	if !isRegularFile(resolved) {
+		return "", false
+	}
+	return resolved, true
+}
+
+// ResolveWorkspaceRef maps a file reference printed in the terminal to the
+// candidate paths it can open. Resolution splits by ref shape:
+//
+//   - An ABSOLUTE or `~/` ref resolves to that exact path anywhere on disk,
+//     with NO workspace confinement (see the note on the absolute branch).
+//   - A RELATIVE or BARE ref stays workspace-scoped — such a ref has no meaning
+//     outside a workspace — and may return several candidates for the UI picker.
+//
+// Zero candidates (no match) is not an error; only an unknown session is.
 func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, ref string) ([]string, error) {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
@@ -49,29 +112,39 @@ func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, 
 	}
 	workspace := rec.Metadata.WorkspacePath
 	ref = strings.TrimSpace(ref)
-	if workspace == "" || ref == "" {
+	if ref == "" {
 		return nil, nil
 	}
-	root, err := filepath.Abs(workspace)
-	if err != nil {
-		return nil, nil //nolint:nilerr // an unresolvable workspace yields no candidates, not an error
+
+	// INTENTIONALLY UNCONFINED — approved product decision, do not "fix" back to
+	// a workspace-confined resolve. An absolute or `~/` path is meant to open
+	// wherever it points (a knowledge-store note, another session's worktree),
+	// so it is deliberately NOT checked against the session's workspace. The
+	// daemon stays loopback-only, which remains the containing boundary. Note
+	// there is no basename fallback here on purpose: an absolute ref that does
+	// not exist must not silently open a same-named file inside the workspace.
+	if abs, isAbs := refTarget(ref); isAbs {
+		resolved, ok := resolveTarget(abs)
+		if !ok {
+			return nil, nil
+		}
+		// A target that happens to live inside this session's workspace is
+		// reported workspace-relative, so the viewer shows the short path (and
+		// #127's in-worktree behaviour is unchanged).
+		if rel, within := relWithin(resolvedRoot(workspace), resolved); within {
+			return []string{filepath.ToSlash(rel)}, nil
+		}
+		return []string{resolved}, nil
 	}
 
-	if filepath.IsAbs(ref) {
-		// An absolute path inside the workspace resolves directly; one pointing
-		// elsewhere is NEVER read — fall back to a basename search inside.
-		if rel, within := relWithin(root, ref); within {
-			if abs, ok := previewutil.ConfinedPath(workspace, rel); ok && isRegularFile(abs) {
-				return []string{filepath.ToSlash(rel)}, nil
-			}
-		}
-		return s.searchWorkspaceFiles(ctx, workspace, filepath.Base(ref), false), nil
+	if workspace == "" {
+		return nil, nil
 	}
 
 	if strings.ContainsAny(ref, "/\\") {
 		clean := filepath.ToSlash(ref)
 		if abs, ok := previewutil.ConfinedPath(workspace, clean); ok && isRegularFile(abs) {
-			if rel, within := relWithin(root, abs); within {
+			if rel, within := relWithin(absRoot(workspace), abs); within {
 				return []string{filepath.ToSlash(rel)}, nil
 			}
 		}
@@ -163,11 +236,13 @@ func walkWorkspaceFiles(workspace string) []string {
 	return files
 }
 
-// ReadWorkspaceFile reads a workspace file's content (confined to the session's
-// workspace) and computes its per-line uncommitted-change map. A path escaping
-// the workspace, or a missing/non-regular file, is a NotFound error; an unknown
-// session is NotFound too. A non-git workspace yields content with no markers.
-func (s *Service) ReadWorkspaceFile(ctx context.Context, id domain.SessionID, relPath string) (WorkspaceFileResult, error) {
+// ReadWorkspaceFile reads a file's content and computes its per-line
+// uncommitted-change map. The path is interpreted with the same shape split as
+// ResolveWorkspaceRef: an absolute or `~/` path is read wherever it points
+// (unconfined, by design); anything else is resolved inside the session's
+// workspace and may not escape it. A missing/non-regular file is NotFound, as
+// is an unknown session. A file outside any git repo yields no change markers.
+func (s *Service) ReadWorkspaceFile(ctx context.Context, id domain.SessionID, filePath string) (WorkspaceFileResult, error) {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return WorkspaceFileResult{}, fmt.Errorf("get %s: %w", id, err)
@@ -175,38 +250,56 @@ func (s *Service) ReadWorkspaceFile(ctx context.Context, id domain.SessionID, re
 	if !ok {
 		return WorkspaceFileResult{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
+
+	// INTENTIONALLY UNCONFINED — approved product decision (see the matching
+	// note in ResolveWorkspaceRef). An absolute or `~/` path is read wherever it
+	// points, with no workspace containment check.
+	if abs, isAbs := refTarget(filePath); isAbs {
+		resolved, ok := resolveTarget(abs)
+		if !ok {
+			return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found")
+		}
+		return readFileForViewer(ctx, resolved, filepath.ToSlash(resolved))
+	}
+
+	// Relative / bare paths stay confined to the session's workspace.
 	workspace := rec.Metadata.WorkspacePath
 	if workspace == "" {
 		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
 	}
-	abs, ok := previewutil.ConfinedPath(workspace, relPath)
+	confined, ok := previewutil.ConfinedPath(workspace, filePath)
 	if !ok {
 		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
 	}
+	rel, err := filepath.Rel(absRoot(workspace), confined)
+	if err != nil {
+		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
+	}
+	return readFileForViewer(ctx, confined, filepath.ToSlash(rel))
+}
+
+// readFileForViewer turns a resolved file into viewer content: a size cap
+// checked against the stat size BEFORE reading, binary detection, the line cap,
+// and the per-line uncommitted-change map. An unreadable file is NotFound; a
+// file that exists but cannot be rendered comes back Available=false with a
+// Reason, so the viewer can say why rather than failing.
+func readFileForViewer(ctx context.Context, abs, display string) (WorkspaceFileResult, error) {
 	info, err := os.Stat(abs)
 	if err != nil || !info.Mode().IsRegular() {
-		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
+		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found")
 	}
-	data, err := os.ReadFile(abs) //nolint:gosec // path is confined to the workspace by ConfinedPath
+	if info.Size() > maxWorkspaceFileBytes {
+		return WorkspaceFileResult{Path: display, Reason: UnavailableTooLarge}, nil
+	}
+	data, err := os.ReadFile(abs) //nolint:gosec // reading an arbitrary absolute path is the intended behaviour here
 	if err != nil {
-		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
+		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found")
 	}
-	root, err := filepath.Abs(workspace)
-	if err != nil {
-		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
+	if isBinary(data) {
+		return WorkspaceFileResult{Path: display, Reason: UnavailableBinary}, nil
 	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
-	}
-	safePath := filepath.ToSlash(rel)
-
-	if isBinary(data) || info.Size() > maxWorkspaceFileBytes {
-		return WorkspaceFileResult{Available: false, Path: safePath}, nil
-	}
-
-	res := workspaceFileContent(safePath, string(data))
-	res.ChangedLines = uncommittedChanges(ctx, workspace, safePath, len(res.Lines))
+	res := workspaceFileContent(display, string(data))
+	res.ChangedLines = uncommittedChanges(ctx, abs, len(res.Lines))
 	return res, nil
 }
 
@@ -226,10 +319,16 @@ func workspaceFileContent(relPath, content string) WorkspaceFileResult {
 }
 
 // uncommittedChanges returns the per-line change map of the working tree vs
-// HEAD for one file. An untracked file is wholly added; an unchanged file, or a
-// non-git workspace, yields no markers.
-func uncommittedChanges(ctx context.Context, workspace, safePath string, lineCount int) []diffhunk.LineChange {
-	status, err := gitOutput(ctx, workspace, "status", "--porcelain=v1", "-z", "--", safePath)
+// HEAD for one file, probed in whatever git repository contains it (its own
+// directory is the git working dir, and the file is named by absolute path).
+// That covers all three cases with one code path: a file in the session's
+// workspace, a file in a DIFFERENT repo (another session's worktree — markers
+// come from that repo), and a file in no repo at all (a knowledge-store note),
+// where git errors out and the viewer simply shows no gutter markers.
+// An untracked file is wholly added; an unchanged file yields no markers.
+func uncommittedChanges(ctx context.Context, abs string, lineCount int) []diffhunk.LineChange {
+	dir := filepath.Dir(abs)
+	status, err := gitOutput(ctx, dir, "status", "--porcelain=v1", "-z", "--", abs)
 	if err != nil {
 		return nil // not a git repo (or git unavailable) — no markers
 	}
@@ -246,7 +345,7 @@ func uncommittedChanges(ctx context.Context, workspace, safePath string, lineCou
 		}
 		return []diffhunk.LineChange{{Start: 1, End: lineCount, Kind: diffhunk.ChangeAdded}}
 	}
-	diff, err := gitOutput(ctx, workspace, "diff", "HEAD", "--", safePath)
+	diff, err := gitOutput(ctx, dir, "diff", "HEAD", "--", abs)
 	if err != nil {
 		return nil //nolint:nilerr // no HEAD or diff failure degrades to no markers
 	}
@@ -260,6 +359,34 @@ func indexByteNUL(b []byte) int {
 		}
 	}
 	return -1
+}
+
+// absRoot is the workspace as a plain absolute path — the SAME root
+// ConfinedPath joins against, so a path it returns can be relativised back
+// against it.
+func absRoot(workspace string) string {
+	if workspace == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return workspace
+	}
+	return abs
+}
+
+// resolvedRoot is the workspace with symlinks resolved, for comparison against
+// an already symlink-resolved absolute target. Both sides must be resolved or
+// the comparison is lexical nonsense: on macOS a `/var` (or temp-dir) workspace
+// path is itself a symlink to `/private/var`.
+func resolvedRoot(workspace string) string {
+	if workspace == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(workspace); err == nil {
+		return resolved
+	}
+	return absRoot(workspace)
 }
 
 // relWithin returns absPath relative to root and whether it stays within root.

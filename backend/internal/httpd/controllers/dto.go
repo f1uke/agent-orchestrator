@@ -931,12 +931,13 @@ func diffContextResponse(res sessionsvc.DiffContextResult) DiffContextResponse {
 // WorkspaceResolveParams is the query string accepted by
 // GET /api/v1/sessions/{sessionId}/workspace/resolve.
 type WorkspaceResolveParams struct {
-	Ref string `query:"ref" description:"File reference printed in the terminal: an absolute path, a workspace-relative path, or a bare filename."`
+	Ref string `query:"ref" description:"File reference printed in the terminal: an absolute path, a ~/ path, a workspace-relative path, or a bare filename."`
 }
 
 // WorkspaceResolveResponse is the body of the workspace/resolve route: the
-// workspace-relative candidate paths a terminal file reference maps to. Empty
-// when nothing in the workspace matches.
+// candidate paths a terminal file reference maps to — workspace-relative for a
+// file inside the session's workspace, absolute for one outside it. Empty when
+// nothing matches.
 type WorkspaceResolveResponse struct {
 	Ref        string   `json:"ref"`
 	Candidates []string `json:"candidates"`
@@ -945,18 +946,21 @@ type WorkspaceResolveResponse struct {
 // WorkspaceFileParams is the query string accepted by
 // GET /api/v1/sessions/{sessionId}/workspace/file.
 type WorkspaceFileParams struct {
-	Path string `query:"path" description:"Workspace-relative path of the file to read (from workspace/resolve)."`
+	Path string `query:"path" description:"Path of the file to read (from workspace/resolve): workspace-relative, or absolute for a file outside the workspace."`
 }
 
-// WorkspaceFileResponse is the body of the workspace/file route: a workspace
-// file's content as context lines plus the per-line map of its uncommitted
-// changes (working tree vs HEAD).
+// WorkspaceFileResponse is the body of the workspace/file route: a file's
+// content as context lines plus the per-line map of its uncommitted changes
+// (working tree vs HEAD, empty when the file is not inside a git repository).
 type WorkspaceFileResponse struct {
-	Available    bool                 `json:"available"`
-	Path         string               `json:"path"`
-	Lines        []DiffContextLineDTO `json:"lines"`
-	ChangedLines []LineChangeDTO      `json:"changedLines"`
-	Truncated    bool                 `json:"truncated"`
+	Available bool                 `json:"available"`
+	Path      string               `json:"path"`
+	Lines     []DiffContextLineDTO `json:"lines"`
+	// Reason explains an available=false response: "too_large" or "binary".
+	// Empty when the file is displayable.
+	Reason       string          `json:"reason,omitempty"`
+	ChangedLines []LineChangeDTO `json:"changedLines"`
+	Truncated    bool            `json:"truncated"`
 }
 
 // LineChangeDTO is one uncommitted-change gutter marker in new-side line
@@ -978,7 +982,14 @@ func workspaceFileResponse(res sessionsvc.WorkspaceFileResult) WorkspaceFileResp
 	for _, c := range res.ChangedLines {
 		changed = append(changed, LineChangeDTO{Start: c.Start, End: c.End, Kind: string(c.Kind)})
 	}
-	return WorkspaceFileResponse{Available: res.Available, Path: res.Path, Lines: lines, ChangedLines: changed, Truncated: res.Truncated}
+	return WorkspaceFileResponse{
+		Available:    res.Available,
+		Path:         res.Path,
+		Lines:        lines,
+		Reason:       res.Reason,
+		ChangedLines: changed,
+		Truncated:    res.Truncated,
+	}
 }
 
 // ClaimPRRequest is the body of POST /sessions/{sessionId}/pr/claim.

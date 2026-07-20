@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import type { components } from "../../api/schema";
@@ -8,12 +8,43 @@ import { type ChangeMark, DiffRows } from "./DiffRows";
 
 type WorkspaceFile = components["schemas"]["WorkspaceFileResponse"];
 
+// Why a file that resolved still cannot be rendered. Reported inline rather
+// than as a toast: navigation has already happened, so the viewer itself is
+// where the explanation belongs. Both states are non-blocking — the back
+// button returns to an untouched terminal.
+const UNAVAILABLE_MESSAGE: Record<string, string> = {
+	too_large: "This file is too large to display.",
+	binary: "This looks like a binary file, so it can’t be displayed.",
+};
+
 /**
- * A workspace file opened from a clickable terminal file reference, shown in the
- * center pane (in place of the terminal) until dismissed — the same placement
- * the Reviews "Expand full file" view uses. Reuses the Reviews code viewer
+ * A path that truncates its DIRECTORY, never its filename. Paths here can be
+ * long absolute ones (a file outside the worktree), and a plain tail ellipsis
+ * would eat the one part that identifies the file.
+ */
+function PathLabel({ path, style }: { path: string; style?: CSSProperties }) {
+	const slash = path.lastIndexOf("/");
+	const dir = slash >= 0 ? path.slice(0, slash + 1) : "";
+	const base = slash >= 0 ? path.slice(slash + 1) : path;
+	return (
+		<span title={path} style={{ display: "flex", minWidth: 0, ...style }}>
+			{dir !== "" && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dir}</span>}
+			<span style={{ flex: "none", whiteSpace: "nowrap" }}>{base}</span>
+		</span>
+	);
+}
+
+/**
+ * A file opened from a clickable terminal file reference, shown in the center
+ * pane (in place of the terminal) until dismissed — the same placement the
+ * Reviews "Expand full file" view uses. Reuses the Reviews code viewer
  * (`DiffRows`) read-only, and overlays an Xcode-style gutter bar on lines that
  * are modified-but-not-committed (working tree vs HEAD), fetched with the file.
+ *
+ * `path` is workspace-relative for a file inside the session's workspace and
+ * absolute for one outside it (a knowledge-store note, another session's
+ * worktree). A file that is not inside any git repository simply has no change
+ * markers.
  */
 export function WorkspaceFileView({
 	sessionId,
@@ -136,20 +167,7 @@ export function WorkspaceFileView({
 				>
 					FILE
 				</span>
-				<span
-					title={path}
-					style={{
-						fontFamily: MONO,
-						fontSize: 12.5,
-						color: "#c7c7cc",
-						overflow: "hidden",
-						textOverflow: "ellipsis",
-						whiteSpace: "nowrap",
-						minWidth: 0,
-					}}
-				>
-					{path}
-				</span>
+				<PathLabel path={path} style={{ fontFamily: MONO, fontSize: 12.5, color: "#c7c7cc" }} />
 				{line != null && <span style={{ fontFamily: MONO, fontSize: 12, color: ACCENT, flex: "none" }}>:{line}</span>}
 				<div style={{ flex: 1 }} />
 				{changedCount > 0 && (
@@ -164,7 +182,9 @@ export function WorkspaceFileView({
 				{q.isLoading && <p style={{ fontSize: 12.5, color: P.muted2 }}>Loading file…</p>}
 				{q.error && <p style={{ fontSize: 12.5, color: P.red }}>{apiErrorMessage(q.error, "Unable to load file")}</p>}
 				{file && (!file.available || lines.length === 0) && !q.isLoading && (
-					<p style={{ fontSize: 12.5, color: P.muted2 }}>This file can’t be displayed.</p>
+					<p style={{ fontSize: 12.5, color: P.muted2 }}>
+						{(file.reason && UNAVAILABLE_MESSAGE[file.reason]) || "This file can’t be displayed."}
+					</p>
 				)}
 				{file && file.available && lines.length > 0 && (
 					<div
@@ -188,9 +208,10 @@ export function WorkspaceFileView({
 								fontFamily: MONO,
 								fontSize: 11.5,
 								color: "#b7b7bc",
+								minWidth: 0,
 							}}
 						>
-							{path}
+							<PathLabel path={path} />
 						</div>
 						<DiffRows
 							lines={lines}

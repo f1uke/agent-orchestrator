@@ -3,9 +3,10 @@
 // finding the file in the workspace happens here, on click, via an injected
 // resolver (backed by the backend /workspace/resolve endpoint). The three
 // outcomes map to the three UI responses: one candidate opens directly, several
-// open a disambiguation picker, none shows a non-blocking toast. Resolution is
-// confined to the session's workspace by the backend; a failure degrades to
-// not-found so a click can never error out the terminal.
+// open a disambiguation picker, none shows a non-blocking toast. The backend
+// scopes a relative/bare ref to the session's workspace but resolves an
+// absolute or `~/` ref anywhere on disk (deliberately unconfined); a failure
+// degrades to not-found so a click can never error out the terminal.
 
 /** A workspace file to open in the viewer. */
 export type WorkspaceFileOpen = { path: string; line?: number };
