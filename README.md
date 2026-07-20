@@ -287,10 +287,20 @@ Jira has no settings screen — it is configured entirely from the environment, 
 ```bash
 export AO_JIRA_URL=https://your-org.atlassian.net
 export AO_JIRA_EMAIL=you@your-org.com
-export AO_JIRA_TOKEN=…     # an Atlassian API token
+export JIRA_API_TOKEN=…    # an Atlassian API token
 ```
 
-`JIRA_SERVER`, `JIRA_LOGIN` and `JIRA_API_TOKEN` are accepted as fallbacks. If you already use [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), AO will read the URL and login from its config file (`~/.config/.jira/.config.yml`, or `JIRA_CONFIG_FILE`) — but the **token must come from the environment** either way.
+Each of the three is read from an AO-prefixed variable first, then the name `jira-cli` already uses:
+
+| Value | Checked in order                                      |
+| ----- | ----------------------------------------------------- |
+| URL   | `AO_JIRA_URL`, `JIRA_SERVER`, then jira-cli's config  |
+| Email | `AO_JIRA_EMAIL`, `JIRA_LOGIN`, then jira-cli's config |
+| Token | `AO_JIRA_TOKEN`, `JIRA_API_TOKEN`                     |
+
+So `JIRA_API_TOKEN` on its own is enough; `AO_JIRA_TOKEN` only matters if you want to point AO at a different token than the rest of your tooling uses.
+
+If you already use [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), AO reads the URL and login out of its config file (`~/.config/.jira/.config.yml`, or wherever `JIRA_CONFIG_FILE` points), so those two can be left unset. The **token is never read from that file** — it has to be in the environment. AO does not run the `jira` binary; it only reads the file.
 
 ### Check your setup
 
