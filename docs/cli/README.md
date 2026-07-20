@@ -70,7 +70,16 @@ paths. If `AO_SESSION_ID` is set but the session cannot be fetched, pass
 
 `ao spawn` requires `--from <branch>`: the source branch the session worktree is
 created from (the desktop "Start from" field). Omitting it fails fast with a
-usage error before any daemon call. `--branch` is the optional new branch name;
+usage error before any daemon call.
+
+`--target <branch>` is the separate, optional branch the worker's pull request
+merges _into_. It is a distinct concept from `--from`, which only says where the
+worktree is cut from: a hotfix may be cut from `release/2.1` and merge into
+`develop`. When `--target` is omitted it resolves to the `--from` branch (which
+itself defaults to the project's default branch); either way the resolved target
+is recorded on the session and shown in the session's Summary tab.
+
+`--branch` is the optional new branch name;
 leaving it blank asks the daemon to AI-name the branch from the task — the same
 `baseBranch` + `autoNameBranch` request the desktop New task modal sends — so the
 CLI and UI take an identical spawn path.

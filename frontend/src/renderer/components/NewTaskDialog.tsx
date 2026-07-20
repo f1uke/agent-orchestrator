@@ -153,7 +153,10 @@ export function NewTaskDialog({
 		}
 	}, [open, prTargetTouched, defaultBaseBranch]);
 
-	const canSubmit = title.trim().length > 0 && prompt.trim().length > 0;
+	// PR target is required, but pre-filled from the project default above, so
+	// the common path stays one keystroke. Requiring it is what makes the stored
+	// target an answer the human gave rather than one AO inferred later.
+	const canSubmit = title.trim().length > 0 && prompt.trim().length > 0 && prTarget.trim().length > 0;
 	const isNow = startMode === "now";
 
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -167,6 +170,10 @@ export function NewTaskDialog({
 		const cleanPrTarget = prTarget.trim();
 		if (!cleanTitle || !cleanPrompt) {
 			setError("Title and brief are required.");
+			return;
+		}
+		if (!cleanPrTarget) {
+			setError("PR target is required: name the branch this work will merge into.");
 			return;
 		}
 		// Optional Jira link: blank = a plain manual task. A picked issue (or a
@@ -361,7 +368,7 @@ export function NewTaskDialog({
 
 							<div className="space-y-1.5">
 								<label className="text-[12px] font-medium text-muted-foreground" htmlFor={prTargetId}>
-									PR target
+									PR target <span aria-hidden="true">*</span>
 								</label>
 								<BranchCombobox
 									id={prTargetId}

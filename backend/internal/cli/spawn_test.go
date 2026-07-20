@@ -210,6 +210,142 @@ func TestSpawnCommand_RejectsOverlongName(t *testing.T) {
 	}
 }
 
+// --target names the branch the worker's PR will merge into. It is optional on
+// the wire — an omitted target is resolved and recorded daemon-side — but when
+// given it must reach the daemon verbatim and stay independent of --from.
+func TestSpawnCommand_SendsTargetBranch(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var req spawnRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","config":{"worker":{"agent":"codex"}}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-11","status":"idle"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_PROJECT_ID", "demo")
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "release/2.1", "--target", "develop", "--prompt", "backport"); err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if req.PRTarget != "develop" {
+		t.Fatalf("prTarget = %q, want develop", req.PRTarget)
+	}
+	if req.BaseBranch != "release/2.1" {
+		t.Fatalf("baseBranch = %q, want release/2.1 (must stay independent of --target)", req.BaseBranch)
+	}
+}
+
+// An omitted --target sends nothing: the daemon resolves and records it, so the
+// CLI must not invent a value here (two independent resolutions is the bug this
+// feature exists to remove).
+func TestSpawnCommand_OmittedTargetSendsNothing(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var req spawnRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","config":{"worker":{"agent":"codex"}}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-11","status":"idle"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_PROJECT_ID", "demo")
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "main", "--prompt", "go"); err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if req.PRTarget != "" {
+		t.Fatalf("prTarget = %q, want empty (daemon resolves it)", req.PRTarget)
+	}
+}
+
+// Because the daemon resolves an omitted --target, the CLI must report what was
+// actually recorded. "Required means recorded" is only trustworthy if the human
+// can see the recorded value without going to look for it.
+func TestSpawnCommand_ReportsResolvedTarget(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","config":{"worker":{"agent":"codex"}}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-11","status":"idle","branch":"feature/x","targetBranch":"develop"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_PROJECT_ID", "demo")
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "main", "--prompt", "go")
+	if err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "develop") {
+		t.Fatalf("output does not report the recorded target branch: %s", out)
+	}
+}
+
+// A daemon that reports no target (an older one, or a project with nothing
+// configured) must not make the CLI print a blank or invented line.
+func TestSpawnCommand_OmitsTargetLineWhenDaemonReportsNone(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","config":{"worker":{"agent":"codex"}}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-11","status":"idle","branch":"feature/x"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_PROJECT_ID", "demo")
+
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "main", "--prompt", "go")
+	if err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	if strings.Contains(out, "PR target") {
+		t.Fatalf("printed a PR target line with nothing to report: %s", out)
+	}
+}
+
 func TestSpawnResolvesProjectFromEnvAndDefaultAgent(t *testing.T) {
 	cfg := setConfigEnv(t)
 	var requests []string

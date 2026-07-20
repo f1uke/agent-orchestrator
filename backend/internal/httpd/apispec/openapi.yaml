@@ -4313,6 +4313,15 @@ components:
           - terminated
           - merged
           type: string
+        targetBranch:
+          type: string
+        targetSource:
+          enum:
+          - pr
+          - session_pr_target
+          - session_base
+          - project
+          type: string
         terminalHandleId:
           type: string
         tokenUsage:

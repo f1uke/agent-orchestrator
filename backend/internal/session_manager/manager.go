@@ -360,6 +360,11 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		return domain.SessionRecord{}, fmt.Errorf("spawn: prompt: %w", err)
 	}
 
+	// Resolve the branch pair ONCE, before seeding, so the row records the same
+	// values materialization acts on. Leaving these to be re-derived downstream
+	// is what made a session's target branch unknowable.
+	cfg.BaseBranch, cfg.PRTarget = resolveSpawnBranches(cfg, project)
+
 	rec, err := m.store.CreateSession(ctx, seedRecord(cfg, m.clock()))
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: create: %w", err)
@@ -2126,9 +2131,38 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		Harness:         cfg.Harness,
 		DisplayName:     cfg.DisplayName,
 		Activity:        domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		BaseBranch:      cfg.BaseBranch,
+		PRTarget:        cfg.PRTarget,
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 	}
+}
+
+// resolveSpawnBranches fills in the branch pair a spawn did not state, so both
+// are recorded rather than re-derived later.
+//
+// BaseBranch (the ref the worktree is cut from) falls back to the project's
+// configured default — the same resolution createSessionWorkspace already did
+// internally, hoisted here so the persisted row and the worktree agree.
+//
+// PRTarget (where the PR merges) falls back to the RESOLVED BASE, not to the
+// project default. In the common path the two are identical, because an
+// unstated base is itself the project default. They diverge only when the
+// caller named a base explicitly — a hotfix cut from `release/2.1`, say — and
+// there "merge back into where I branched from" is the intent; defaulting such
+// a session to `develop` would record a confidently wrong target, which is the
+// failure mode this whole field exists to prevent. An explicit --target still
+// wins over both.
+func resolveSpawnBranches(cfg ports.SpawnConfig, project domain.ProjectRecord) (base, target string) {
+	base = strings.TrimSpace(cfg.BaseBranch)
+	if base == "" {
+		base = project.Config.WithDefaults().DefaultBranch
+	}
+	target = strings.TrimSpace(cfg.PRTarget)
+	if target == "" {
+		target = base
+	}
+	return base, target
 }
 
 // todoSeedRecord builds the durable row for a prepared TODO. Unlike seedRecord
@@ -2396,18 +2430,18 @@ func orchestratorGitConventionPrompt(conv domain.GitConventionConfig, baseBranch
 		return fmt.Sprintf("\n\n"+`## Git branch convention (gitflow)
 
 This project follows gitflow. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
-`+"`ao spawn --from %[1]s --branch <type>/<topic> ...`"+`
+`+"`ao spawn --from %[1]s --target %[1]s --branch <type>/<topic> ...`"+`
 - `+"`feature/<topic>`"+` — new features and enhancements
 - `+"`bugfix/<topic>`"+` — bug fixes
 - `+"`hotfix/<topic>`"+` — urgent production fixes
-When the task has a Jira card key, put it uppercase right after the type, e.g. `+"`feature/STAR-2270-ecoupon-list`"+`. Tell the worker to open its pull request against `+"`%[1]s`"+`. If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
+When the task has a Jira card key, put it uppercase right after the type, e.g. `+"`feature/STAR-2270-ecoupon-list`"+`. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere (e.g. a hotfix cut from a release branch that merges into `+"`%[1]s`"+`). If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
 	}
 	prefix := conv.NormalizedBranchPrefix()
 	return fmt.Sprintf("\n\n"+`## Git branch convention
 
 This project prefixes every branch with `+"`%[2]s`"+`. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
-`+"`ao spawn --from %[1]s --branch %[2]s<topic> ...`"+`
-For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sSTAR-2270-ecoupon-list`"+` when the task has a Jira card key. Tell the worker to open its pull request against `+"`%[1]s`"+`. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
+`+"`ao spawn --from %[1]s --target %[1]s --branch %[2]s<topic> ...`"+`
+For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sSTAR-2270-ecoupon-list`"+` when the task has a Jira card key. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
 }
 
 // confirmBeforeSpawn reports whether the orchestrator prompt should carry the
@@ -2439,9 +2473,9 @@ func orchestratorSpawnConfirmPrompt(enabled bool, conv domain.GitConventionConfi
 
 Before you run `+"`ao spawn`"+`, present a short confirmation summary to the human and wait for their explicit approval. Do NOT spawn until they confirm. The summary must list:
 - **Task** — one line on what the worker will do
-- **Source branch** — the `+"`--from`"+` base branch (default `+"`%[1]s`"+`)
+- **Source branch** — the `+"`--from`"+` branch the worktree is cut from (default `+"`%[1]s`"+`)
 - **New branch** — %[2]s
-- **PR target** — where the worker's pull request will merge (`+"`%[1]s`"+`)
+- **PR target** — the `+"`--target`"+` branch the worker's pull request will merge into; omit `+"`--target`"+` and it resolves to `+"`--from`"+` (so, by default, `+"`%[1]s`"+`)
 
 If the human asks for changes, revise and re-confirm. Run `+"`ao spawn`"+` only after they approve. This confirmation is conversational — ask in chat and wait; there is no separate UI dialog.`, baseBranch, newBranch)
 }
@@ -2458,12 +2492,12 @@ func workerGitConventionPrompt(conv domain.GitConventionConfig, baseBranch strin
 	if conv.Workflow == domain.GitWorkflowGitflow {
 		return fmt.Sprintf("\n\n"+`## Git branch convention
 
-This project follows gitflow: name branches by type (`+"`feature/…`"+`, `+"`bugfix/…`"+`, `+"`hotfix/…`"+`) and open your pull requests against `+"`%s`"+`.`, baseBranch)
+This project follows gitflow: name branches by type (`+"`feature/…`"+`, `+"`bugfix/…`"+`, `+"`hotfix/…`"+`) and open your pull requests against this session's recorded PR target (`+"`%s`"+` unless spawn set a different `+"`--target`"+`).`, baseBranch)
 	}
 	prefix := conv.NormalizedBranchPrefix()
 	return fmt.Sprintf("\n\n"+`## Git branch convention
 
-This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create under that prefix and open your pull requests against `+"`%[1]s`"+`.`, baseBranch, prefix)
+This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create under that prefix and open your pull requests against this session's recorded PR target (`+"`%[1]s`"+` unless spawn set a different `+"`--target`"+`).`, baseBranch, prefix)
 }
 
 // spawnEnv builds the runtime environment: the per-project env vars first, then

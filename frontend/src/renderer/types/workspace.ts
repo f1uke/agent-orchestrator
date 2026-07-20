@@ -322,11 +322,22 @@ export type WorkspaceSession = {
 	 * (terminated / todo / already suspended). Drives the board/sidebar countdown.
 	 */
 	idleCloseAt?: string;
-	/** TODO spec (present only while `isTodo`): the branch the worktree will start
-	 * from, the intended PR merge target, whether to auto-name the new branch, the
-	 * queuing orchestrator, and the task prompt — all editable before Start. */
+	/** The branch the worktree started from, and the branch this session's PR
+	 * merges into. Both are recorded on every session at spawn; `prTarget` is
+	 * additionally editable. `prTarget` is the STORED value — read
+	 * `targetBranch` below to display a session's target, since that also
+	 * accounts for an open PR and for sessions predating the stored value. */
 	baseBranch?: string;
 	prTarget?: string;
+	/** The resolved branch this session's work merges into, and where that answer
+	 * came from. Derived by the daemon on read: an open PR's real target wins,
+	 * then the stored `prTarget`, then the session's base, then the project
+	 * default. `targetBranch` is absent when nothing is known — render "not set",
+	 * never a guessed "main". `targetSource` lets the UI distinguish a value the
+	 * human set (`pr` / `session_pr_target`) from one merely inherited
+	 * (`session_base` / `project`). */
+	targetBranch?: string;
+	targetSource?: "pr" | "session_pr_target" | "session_base" | "project";
 	autoNameBranch?: boolean;
 	createdBy?: string;
 	prompt?: string;

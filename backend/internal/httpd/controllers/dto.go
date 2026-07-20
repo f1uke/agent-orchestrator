@@ -238,8 +238,12 @@ type SpawnSessionRequest struct {
 	// spawns the session now — the unchanged behavior. false stages it as a
 	// prepared TODO on the board (no branch/worktree/tmux until Start).
 	StartImmediately *bool `json:"startImmediately,omitempty"`
-	// PRTarget is the intended PR merge target, stored on a deferred TODO so the
-	// board detail modal can show/edit it. Ignored for an immediate spawn.
+	// PRTarget is the branch this session's PR merges INTO — distinct from
+	// BaseBranch, which only says where the worktree was cut from. Recorded on
+	// every session, immediate or deferred, and surfaced in the Summary tab.
+	// Absent/empty resolves to the base branch (itself the project default when
+	// unstated) and the RESOLVED value is what gets stored, so a session's target
+	// is always an answer on the row rather than something callers re-derive.
 	PRTarget string `json:"prTarget,omitempty"`
 	// CreatedBy is the orchestrator session id queuing a deferred TODO, kept for
 	// the report-back. `ao spawn --todo` sets it from AO_SESSION_ID.

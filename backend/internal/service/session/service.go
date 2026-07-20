@@ -804,10 +804,21 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		return domain.Session{}, fmt.Errorf("pr facts %s: %w", rec.ID, err)
 	}
 	var approvalRule domain.ApprovalRule
+	var projectDefaultBranch string
 	if project, ok, perr := s.store.GetProject(ctx, string(rec.ProjectID)); perr == nil && ok {
 		approvalRule = project.Config.ApprovalRule
+		projectDefaultBranch = project.Config.WithDefaults().DefaultBranch
 	}
 	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule)
+	// Resolve the target branch from facts already loaded above — no extra query
+	// and no subprocess, so this stays affordable on the sessions LIST endpoint.
+	// That budget is why the chain stops at the project default here: the
+	// origin/HEAD step needs a worktree and belongs to Changes mode alone.
+	targetPRs := make([]targetPR, 0, len(prs))
+	for _, p := range prs {
+		targetPRs = append(targetPRs, targetPR{Branch: p.TargetBranch, Open: !p.Merged && !p.Closed})
+	}
+	targetBranch, targetSource := resolveTargetChain(targetPRs, rec.PRTarget, rec.BaseBranch, projectDefaultBranch)
 	return domain.Session{
 		SessionRecord:    rec,
 		Status:           detail.Status,
@@ -817,6 +828,8 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		IdleCloseAt:      s.idleCloseAt(rec),
 		TerminalHandleID: rec.Metadata.RuntimeHandleID,
 		PRs:              prs,
+		TargetBranch:     targetBranch,
+		TargetSource:     targetSource,
 	}, nil
 }
 

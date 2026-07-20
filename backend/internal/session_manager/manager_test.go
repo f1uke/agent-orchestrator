@@ -583,6 +583,69 @@ func TestSpawn_UsesBaseBranch(t *testing.T) {
 	}
 }
 
+// A normal spawn must RECORD the branch it targets, not leave it to be
+// re-derived downstream. PRTarget is the PR merge target; BaseBranch is the ref
+// the worktree was cut from. Both were previously dropped by seedRecord (only
+// todoSeedRecord persisted them), so every normal session stored neither and
+// resolveTargetBranch had to guess from the project config.
+func TestSpawn_PersistsResolvedTargetAndBaseBranch(t *testing.T) {
+	newMgr := func() (*Manager, *fakeStore) {
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{
+			DefaultBranch: "develop",
+			Worker:        domain.RoleOverride{Harness: domain.HarnessClaudeCode},
+		}}
+		return New(Deps{
+			Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{},
+			Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
+			LookPath: func(string) (string, error) { return "/bin/true", nil },
+		}), st
+	}
+
+	// Omitted target resolves to the project default and is still recorded.
+	m, st := newMgr()
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if got := st.sessions[rec.ID].PRTarget; got != "develop" {
+		t.Fatalf("resolved PRTarget = %q, want develop (project default)", got)
+	}
+	if got := st.sessions[rec.ID].BaseBranch; got != "develop" {
+		t.Fatalf("resolved BaseBranch = %q, want develop (project default)", got)
+	}
+
+	// An explicit target is recorded verbatim and stays independent of the base.
+	m, st = newMgr()
+	rec, err = m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker,
+		BaseBranch: "STAR-2270", PRTarget: "release/2.1",
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if got := st.sessions[rec.ID].PRTarget; got != "release/2.1" {
+		t.Fatalf("explicit PRTarget = %q, want release/2.1", got)
+	}
+	if got := st.sessions[rec.ID].BaseBranch; got != "STAR-2270" {
+		t.Fatalf("explicit BaseBranch = %q, want STAR-2270", got)
+	}
+
+	// An explicit base with no target merges back into that base, NOT into the
+	// project default: a hotfix cut from release/2.1 targets release/2.1, and
+	// recording "develop" here would be confidently wrong.
+	m, st = newMgr()
+	rec, err = m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker, BaseBranch: "release/2.1",
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if got := st.sessions[rec.ID].PRTarget; got != "release/2.1" {
+		t.Fatalf("PRTarget = %q, want release/2.1 (follows explicit base, not project default)", got)
+	}
+}
+
 func TestSpawnPassesProjectAndBranchToRuntime(t *testing.T) {
 	m, _, rt, _ := newManager()
 	if _, err := m.Spawn(context.Background(), ports.SpawnConfig{ProjectID: "proj", Kind: domain.KindWorker, Branch: "feature/x", Harness: domain.HarnessClaudeCode}); err != nil {
@@ -1971,7 +2034,9 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 	t.Run("gitflow orchestrator", func(t *testing.T) {
 		cfg := domain.ProjectConfig{DefaultBranch: "develop", GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}}
 		sp := build(newMgr(cfg, false), domain.KindOrchestrator)
-		for _, want := range []string{"Git branch convention", "gitflow", "feature/", "bugfix/", "hotfix/", "--from develop", "against `develop`"} {
+		// --from is where the worktree is cut from, --target where the PR merges;
+		// the orchestrator prompt must name both flags and the branch.
+		for _, want := range []string{"Git branch convention", "gitflow", "feature/", "bugfix/", "hotfix/", "--from develop", "--target develop", "pull request merges"} {
 			if !strings.Contains(sp, want) {
 				t.Fatalf("orchestrator prompt missing %q:\n%s", want, sp)
 			}
@@ -1981,7 +2046,9 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 	t.Run("gitflow worker", func(t *testing.T) {
 		cfg := domain.ProjectConfig{DefaultBranch: "develop", GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}}
 		sp := build(newMgr(cfg, true), domain.KindWorker)
-		for _, want := range []string{"Git branch convention", "gitflow", "against `develop`"} {
+		// The worker is pointed at the session's recorded PR target, which defaults
+		// to the project branch but may have been overridden by `ao spawn --target`.
+		for _, want := range []string{"Git branch convention", "gitflow", "recorded PR target (`develop`", "`--target`"} {
 			if !strings.Contains(sp, want) {
 				t.Fatalf("worker prompt missing %q:\n%s", want, sp)
 			}
@@ -1992,7 +2059,7 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 		cfg := domain.ProjectConfig{GitConvention: domain.GitConventionConfig{Workflow: domain.GitWorkflowCustom, BranchPrefix: "feat"}}
 		sp := build(newMgr(cfg, false), domain.KindOrchestrator)
 		// Prefix is normalized to a trailing slash and the base defaults to main.
-		for _, want := range []string{"Git branch convention", "`feat/`", "--branch feat/<topic>", "against `main`"} {
+		for _, want := range []string{"Git branch convention", "`feat/`", "--branch feat/<topic>", "--from main", "--target main", "pull request merges"} {
 			if !strings.Contains(sp, want) {
 				t.Fatalf("custom orchestrator prompt missing %q:\n%s", want, sp)
 			}
