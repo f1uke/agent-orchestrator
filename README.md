@@ -5,15 +5,18 @@
 
 **The orchestration layer for parallel AI coding agents**
 
-[![Stars](https://img.shields.io/github/stars/AgentWrapper/agent-orchestrator)](https://github.com/AgentWrapper/agent-orchestrator/stargazers)
-[![Contributors](https://img.shields.io/github/contributors/AgentWrapper/agent-orchestrator)](https://github.com/AgentWrapper/agent-orchestrator/graphs/contributors)
-[![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?logo=twitter&logoColor=white)](https://x.com/aoagents)
-[![Discord](https://img.shields.io/badge/Discord-join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.com/invite/UZv7JjxbwG)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Fork of AgentWrapper/agent-orchestrator](https://img.shields.io/badge/fork%20of-AgentWrapper%2Fagent--orchestrator-24292f?logo=github)](https://github.com/AgentWrapper/agent-orchestrator)
 
 An Agentic IDE that supervises parallel AI coding agents in isolated workspaces, with complete control and automatic feedback loops from CI failures, review comments, and merge conflicts.
 
-<img src="docs/assets/readme/dashboard.png" alt="Agent Orchestrator dashboard showing parallel coding agent sessions" width="100%" />
+> **This is a fork** of [AgentWrapper/agent-orchestrator](https://github.com/AgentWrapper/agent-orchestrator).
+> It tracks upstream and adds a review-and-verify layer on top: a diff reviewer in the
+> session rail, human-played smoke-test checklists, GitLab merge-request write-back, and
+> Jira issue context. Development happens on the **`main-fluke`** branch, which is this
+> repository's default branch. Everything below describes that branch.
+
+<img src="docs/assets/readme/board.png" alt="Agent Orchestrator board showing parallel coding agent sessions grouped by state" width="100%" />
 </div>
 
 ---
@@ -34,6 +37,7 @@ Agent Orchestrator is built to keep that loop visible and manageable. It helps y
 - Keep every session in a separate git worktree
 - See which agents are working, waiting, finished, or blocked
 - Route CI failures, review comments, and merge conflicts back to the right session
+- Read what an agent actually changed, without leaving the app
 - Use different agent CLIs through one common supervisor
 
 ## How it works
@@ -51,46 +55,79 @@ The result is a local control layer for agentic coding: agents still do the codi
 
 ## Features
 
-The desktop app is the main control surface: projects on the left, active sessions in the center, and the selected session's terminal, pull request state, review runs, and browser preview in the inspector.
+The desktop app is the main control surface: projects on the left, active sessions in the center, and the selected session's terminal, issue context, changed files, smoke-test checklist, review state, and browser preview in the inspector rail.
 
 <table>
   <tr>
     <td width="36%">
       <h3>Parallel agent sessions</h3>
-      <p>Start multiple coding agents from the same project without mixing files, branches, terminals, or pull request state.</p>
+      <p>Start multiple coding agents from the same project without mixing files, branches, terminals, or pull request state. The board groups every session by what it needs from you next.</p>
     </td>
     <td width="64%">
-      <img src="docs/assets/readme/dashboard.png" alt="Agent Orchestrator board with multiple parallel sessions" />
+      <img src="docs/assets/readme/board.png" alt="Board with sessions grouped into Todo, Working, Needs you, In review, and Ready to merge" />
     </td>
   </tr>
   <tr>
     <td width="36%">
-      <h3>Live terminal control</h3>
-      <p>Open any session and attach to the worker terminal while keeping session summary, PR state, and follow-up actions in view.</p>
+      <h3>Terminal, status and issue context together</h3>
+      <p>Attach to the worker terminal while a readiness strip tracks the session from work through smoke, PR, CI, review and merge. A linked Jira issue renders inline, with its description, subtasks and a status move.</p>
     </td>
     <td width="64%">
-      <img src="docs/assets/readme/session-terminal.png" alt="Session terminal inside Agent Orchestrator" />
+      <img src="docs/assets/readme/session-summary.png" alt="Session terminal beside the Summary tab showing readiness strip and linked Jira issue" />
     </td>
   </tr>
   <tr>
     <td width="36%">
-      <h3>Review feedback loop</h3>
-      <p>Run reviewer agents, inspect review status, and route requested changes back to the right worker session.</p>
+      <h3>Read the diff before you trust it</h3>
+      <p>The Files tab lists everything the session changed against its target branch, as a folder tree or a flat list. Picking a file opens a stacked, unified diff in the centre pane; oversized files stay collapsed until you ask for them.</p>
     </td>
     <td width="64%">
-      <img src="docs/assets/readme/reviews-tab.png" alt="Reviews tab showing reviewer runs and actions" />
+      <img src="docs/assets/readme/files-changes.png" alt="Files tab with a changed-file tree beside a stacked unified diff" />
     </td>
   </tr>
   <tr>
     <td width="36%">
-      <h3>In-app browser preview</h3>
-      <p>Preview a session's local app beside the terminal so UI work, browser state, and agent output stay together.</p>
+      <h3>Smoke tests a human actually plays</h3>
+      <p>A worker writes a short checklist for what tests cannot cover. You play each case in the Tests tab, record pass/fail/skip, attach a screenshot or clip, then send the results back to the worker or post them to the linked Jira issue.</p>
     </td>
     <td width="64%">
-      <img src="docs/assets/readme/browser-preview.png" alt="Browser preview tab showing a local app preview" />
+      <img src="docs/assets/readme/smoke-tests.png" alt="Tests tab showing smoke-test cases with verdicts, steps, expected result and evidence dropzone" />
     </td>
   </tr>
 </table>
+
+Also in the session rail:
+
+- **Reviews** — reviewer runs, PR/MR review threads, and per-session toggles to auto-send unresolved comments to the worker and to auto-resolve a thread once your side replies.
+- **Browser** — an opt-in preview of the session's local dev server, for projects whose settings declare a web UI.
+
+## What this fork adds
+
+Everything above the line is upstream's product. These are the parts this fork built on top.
+
+**Reviewing the work**
+
+- **Files tab, Changes mode.** Every file the session touched, diffed from the merge base of its target branch against the working tree — so uncommitted and untracked work shows up too. Folder tree or flat list, a filename filter, per-file add/delete counts, a dot on files not yet committed, and a marker following whichever file you are reading in the stacked diff. Files over 500 changed lines, and everything past a 2000-line budget, stay collapsed until expanded. Diffs are unified and read-only. (A second **Browse** mode for the whole worktree is visible but not yet enabled.)
+- **Clickable file references in the terminal.** A path an agent prints — absolute, `~/`-relative, workspace-relative or a bare filename, with an optional `:line` — opens a read-only code viewer in the centre pane, scrolled to that line, with a gutter marking lines that are added, modified or removed but not yet committed. Absolute paths resolve anywhere on disk, not only inside the worktree. Recognition is limited to files whose extension is one of a fixed set of code extensions.
+
+**Verifying the work**
+
+- **Smoke-test checklists.** A worker is instructed to author a checklist — name, why it matters, steps, expected result, and the PR and `file:line` it covers — once its own checks pass and before it opens a PR, via `ao smoke set`. You then play the cases in the Tests tab: pass, fail or skip, a note, and evidence images or video with a zoomable lightbox. Results go back to the worker session with one button, or to the linked Jira issue as a comment with the evidence attached. Evidence is stored outside the checkout and purged after 30 days by default. The checklist is prompt-driven guidance, not a gate: nothing blocks a PR that has none, and workers are told to skip it for pure-logic changes.
+- **Approval progress.** Where the forge reports approval counts, review surfaces show approved-of-required with a meter, and a project can require a minimum number of approvals before AO calls a session ready to merge. Approval counts come from GitLab only.
+
+**Working with forges and trackers**
+
+- **GitLab merge requests.** MR state, draft status, conflicts, mergeability, approvals, the head pipeline and its individual jobs — including failed jobs past the first page of results. Review threads are read from resolvable MR discussions, and AO can **write** back: reply to a thread, resolve it, and retarget an MR's branch. Opt in per session and a thread resolves itself once your side replies.
+- **Retargeting a PR.** A session's target branch is shown in the inspector with where it came from, and editing it retargets the open pull request or merge request on GitHub or GitLab before anything is stored locally.
+- **Jira.** Browse issues by text, key or raw JQL with assignee, type, done and active-sprint filters, grouped by sprint and nested three levels deep through epics and subtasks. A read-only detail drawer, plus a sanctioned status move. Link an issue to a session and its context renders in the Summary tab, with inline image and video previews. AO writes exactly three things to Jira: a status transition, an attachment, and a comment.
+- **Issue intake.** A project can poll its GitHub or GitLab tracker and start one worker session per eligible issue.
+
+**Living in the app**
+
+- Per-project settings for the branch workflow and prefix, default branch, session prefix, worker and orchestrator agent and model, permission mode, reviewer agent, response language, extra system prompts, issue intake and approval rules.
+- A response language setting, global with a per-project override, that makes agents write their human-facing output in that language while code, commits and PR text stay English.
+- "Open in" for Terminal, Finder, Xcode, Android Studio and VS Code, shown only when the app and the relevant project files are present (macOS only).
+- Drag-and-drop project reordering in the sidebar, remembered per machine, and a daemon status button that opens a read-only popover showing when each background loop last ran and when it runs next.
 
 ## Supported Agents
 
@@ -106,44 +143,34 @@ Reviewer agents are configured separately. The current reviewer harnesses are:
 
 ## Install
 
-The fastest path is the same flow used by the installation docs:
+This fork is not published to npm. `npm install -g @aoagents/ao` installs **upstream's** CLI, which does not contain any of the work described above.
+
+### Build from source
+
+Needs Go (per `backend/go.mod`) and Node 20 or newer.
 
 ```bash
-npm install -g @aoagents/ao
-ao start
+git clone https://github.com/f1uke/agent-orchestrator.git
+cd agent-orchestrator/frontend
+npm ci
+npm run package
 ```
 
-Run `ao start` from the repository you want AO to manage. See the [installation guide](https://aoagents.dev/docs/installation) for pnpm, yarn, source installs, agent CLI setup, and troubleshooting.
+`npm run package` builds the Go daemon first, then produces the desktop app under `frontend/out/`. Use `npm run make` instead if you want a distributable installer.
 
-You can also download the latest desktop build for your platform:
+### Prebuilt desktop builds
 
-| Platform | Download                                                                                          |
-| -------- | ------------------------------------------------------------------------------------------------- |
-| Windows  | [Setup.exe](https://github.com/AgentWrapper/agent-orchestrator/releases/latest)                   |
-| macOS    | [Agent Orchestrator.dmg](https://github.com/AgentWrapper/agent-orchestrator/releases/latest)      |
-| Linux    | [Agent Orchestrator.AppImage](https://github.com/AgentWrapper/agent-orchestrator/releases/latest) |
+This fork publishes an automated nightly desktop build from `main-fluke`, on every day the branch has new commits. They are **pre-releases**, so `/releases/latest` does not resolve to them — browse the full list instead:
 
-## Witness AO's Journey on X
+| Platform | Download                                                                           |
+| -------- | ---------------------------------------------------------------------------------- |
+| Windows  | [Latest nightly `Setup.exe`](https://github.com/f1uke/agent-orchestrator/releases) |
+| macOS    | Not currently published — [build from source](#build-from-source)                  |
+| Linux    | Not currently published — [build from source](#build-from-source)                  |
 
-<table>
-  <tr>
-    <td width="33%" align="center">
-      <a href="https://x.com/agent_wrapper/status/2026329204405723180">
-        <img src="screenshots/tweet2.png" height="330" alt="Agent Orchestrator journey screenshot one" />
-      </a>
-    </td>
-    <td width="37.5%" align="center">
-      <a href="https://x.com/agent_wrapper/status/2025986105485733945">
-        <img src="screenshots/tweet1.png" height="330" alt="Agent Orchestrator journey screenshot two" />
-      </a>
-    </td>
-    <td width="29.5%" align="center">
-      <a href="https://x.com/agent_wrapper/status/2024885035774738700">
-        <img src="screenshots/tweet3.png" height="330" alt="Agent Orchestrator journey screenshot three" />
-      </a>
-    </td>
-  </tr>
-</table>
+> The macOS and Linux legs of the nightly workflow do not currently succeed, so only the
+> Windows installer is attached to each nightly release. Upstream's own releases do build
+> for all three platforms, but they do not contain this fork's changes.
 
 ## Documentation
 
@@ -152,10 +179,12 @@ You can also download the latest desktop build for your platform:
 | [docs/architecture.md](docs/architecture.md)                     | Backend mental model, lifecycle, persistence, CDC, status derivation, and daemon boundaries. |
 | [docs/backend-code-structure.md](docs/backend-code-structure.md) | Package ownership and where each backend concern belongs.                                    |
 | [docs/cli/README.md](docs/cli/README.md)                         | CLI behavior and daemon route mapping.                                                       |
-| [docs/STATUS.md](docs/STATUS.md)                                 | What currently ships on `main` and what remains in flight.                                   |
+| [docs/STATUS.md](docs/STATUS.md)                                 | Shipped-versus-in-flight inventory of the core daemon and frontend, inherited from upstream. |
 | [docs/stack.md](docs/stack.md)                                   | Library, runtime, and dependency decisions.                                                  |
 
 ## Telemetry
+
+The daemon's own telemetry is **off by default** — see the `AO_TELEMETRY_*` variables below.
 
 Agent Orchestrator's Electron renderer sends anonymous usage events to PostHog for reliability and product understanding, and PostHog session recording is enabled with local paths and local URLs redacted before transmission. Set `VITE_AO_POSTHOG_KEY` to an empty string before building to disable transmission. See [docs/telemetry.md](docs/telemetry.md).
 
@@ -168,7 +197,7 @@ go test -race ./...
 
 # Frontend tests
 cd frontend
-pnpm test
+npm test
 
 # Full CI validation locally
 npx @redwoodjs/agent-ci run --all
@@ -178,33 +207,49 @@ npx @redwoodjs/agent-ci run --all
 
 ## Configuration
 
-All configuration is environment-driven. The daemon takes no config file.
+All configuration is environment-driven. The daemon has no config file of its own; for
+forge and tracker credentials it reads the environment first and otherwise falls back to
+the `gh`, `glab` and `jira` CLIs' existing logins.
 
-| Variable              | Default              | Purpose                     |
-| --------------------- | -------------------- | --------------------------- |
-| `AO_PORT`             | `3001`               | HTTP bind port              |
-| `AO_REQUEST_TIMEOUT`  | `60s`                | Per-request timeout         |
-| `AO_SHUTDOWN_TIMEOUT` | `10s`                | Graceful shutdown cap       |
-| `AO_RUN_FILE`         | `~/.ao/running.json` | PID/port handshake          |
-| `AO_DATA_DIR`         | `~/.ao/data`         | SQLite data directory       |
-| `AO_AGENT`            | `claude-code`        | Compatibility agent adapter |
-| `GITHUB_TOKEN`        | -                    | GitHub auth token           |
-| `AO_GITLAB_HOST`      | -                    | GitLab host(s), see below   |
-| `AO_GITLAB_TOKEN`     | -                    | GitLab auth token           |
+| Variable                          | Default                    | Purpose                                           |
+| --------------------------------- | -------------------------- | ------------------------------------------------- |
+| `AO_PORT`                         | `3001`                     | HTTP bind port                                    |
+| `AO_REQUEST_TIMEOUT`              | `60s`                      | Per-request timeout                               |
+| `AO_SHUTDOWN_TIMEOUT`             | `10s`                      | Graceful shutdown cap                             |
+| `AO_SESSION_IDLE_CLOSE`           | `72h`                      | Idle session auto-close; `0` disables             |
+| `AO_RUN_FILE`                     | `~/.ao/running.json`       | PID/port handshake                                |
+| `AO_DATA_DIR`                     | `~/.ao/data`               | SQLite data directory                             |
+| `AO_AGENT`                        | `claude-code`              | Compatibility agent adapter                       |
+| `AO_ALLOWED_ORIGINS`              | `app://renderer`           | CORS origins, comma-separated                     |
+| `AO_TELEMETRY_EVENTS`             | `off`                      | Local event capture                               |
+| `AO_TELEMETRY_METRICS`            | `off`                      | Local metric capture                              |
+| `AO_TELEMETRY_REMOTE`             | `off`                      | Remote exporter (`off` \| `posthog`)              |
+| `AO_TELEMETRY_POSTHOG_KEY`        | -                          | PostHog project key                               |
+| `AO_TELEMETRY_POSTHOG_HOST`       | `https://us.i.posthog.com` | PostHog ingestion host                            |
+| `AO_GITHUB_TOKEN`, `GITHUB_TOKEN` | -                          | GitHub auth; otherwise falls back to `gh` login   |
+| `AO_GITLAB_HOST`                  | -                          | Enables GitLab, see below                         |
+| `AO_GITLAB_TOKEN`, `GITLAB_TOKEN` | -                          | GitLab auth; otherwise falls back to `glab` login |
+| `AO_JIRA_URL`, `JIRA_SERVER`      | -                          | Jira base URL                                     |
+| `AO_JIRA_EMAIL`, `JIRA_LOGIN`     | -                          | Jira account email                                |
+| `AO_JIRA_TOKEN`, `JIRA_API_TOKEN` | -                          | Jira API token                                    |
+
+The bind host is deliberately not configurable: the daemon is loopback-only, with no auth
+or TLS. Jira also falls back to `jira-cli`'s config file for its URL and login.
 
 ### GitLab (self-hosted)
 
 GitLab support is opt-in and additive: **if `AO_GITLAB_HOST` is unset, behavior
 is unchanged** and only GitHub is wired, exactly as before this feature existed.
 
-| Variable          | Purpose                                                                                                                                                                            |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AO_GITLAB_HOST`   | Enables GitLab. Sets both the composite provider's host matcher and the REST API base (`https://<host>/api/v4`). Comma-separated values are accepted, but **round 1 wires only the first host** in the list. |
-| `AO_GITLAB_TOKEN` / `GITLAB_TOKEN` | Auth token for the configured host. If unset, the daemon falls back to the `glab` CLI login (`glab auth status --show-token`) for that host.                                     |
+| Variable                           | Purpose                                                                                                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AO_GITLAB_HOST`                   | Enables GitLab. Sets both the composite provider's host matcher and the REST API base (`https://<host>/api/v4`). Comma-separated values are accepted, but **only the first host in the list is wired**. |
+| `AO_GITLAB_TOKEN` / `GITLAB_TOKEN` | Auth token for the configured host. If unset, the daemon falls back to the `glab` CLI login (`glab auth status --show-token`) for that host.                                                            |
 
-Round-1 scope: MR/pipeline observation and review-thread/decision tracking, plus
-issue intake, are **read-only**. Posting reviews back to GitLab is deferred to a
-later round.
+GitLab support covers merge-request and pipeline observation, individual pipeline jobs,
+approval counts, and review-thread and decision tracking. Issue intake is read-only. AO
+writes three things back to GitLab: a reply on an MR discussion, resolving a discussion,
+and retargeting an MR's branch. There is no approve, no merge, and no MR creation.
 
 ### Health Checks
 
@@ -217,31 +262,15 @@ curl localhost:3001/readyz    # Readiness probe
 
 ## Contributing
 
-We love contributions! Join our community on Discord to get started.
+This fork tracks [upstream](https://github.com/AgentWrapper/agent-orchestrator) and carries
+its own work on `main-fluke`. If your change is about the shared product, upstream is
+usually the better home for it; upstream runs the community, the Discord and the docs site.
+Changes to what this fork adds belong here.
 
-### Join us on Discord
-
-[![Discord](https://img.shields.io/badge/Discord-join%20the%20community-5865F2?style=for-the-badge&logo=discord&logoColor=white&logoSize=auto)](https://discord.com/invite/UZv7JjxbwG)
-
-**Daily contributor sync:** Every day at **10:00 PM IST**
-
-Get your issues verified by core contributors, ask questions, share progress, and learn from the community. New contributors are always welcome!
-
-**Why join Discord?**
-
-- Get your issues and PRs verified by core contributors before investing time
-- Learn from experienced contributors in daily sync calls
-- Share your progress and get feedback
-- Get help troubleshooting in real-time
-- Stay updated on the latest developments and roadmap
-
-### Quick Start
-
-1. **Join the Discord** - Connect with the community and get guidance
-2. **Read the contributor contract** - See [AGENTS.md](AGENTS.md) for repo layout, daemon/API boundaries, and coding conventions
-3. **Pick a focused problem** - Browse [open issues](https://github.com/AgentWrapper/agent-orchestrator/issues) and choose one small enough for a focused PR
-4. **Open a clear PR** - Keep changes narrow, explain user-visible impact, link issues, include tests
-5. **Iterate with contributors** - Use review feedback to tighten the PR until verified
+1. **Read the contributor contract** — see [AGENTS.md](AGENTS.md) for repo layout, daemon/API boundaries, and coding conventions
+2. **Branch from `main-fluke`** and keep one issue per pull request
+3. **Open a clear PR** — keep changes narrow, explain user-visible impact, link issues, include tests
+4. **Match the gate** — `npm run lint`, `npm run frontend:typecheck`, and the tests for whatever you touched
 
 ---
 
