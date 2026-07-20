@@ -113,8 +113,14 @@ func TestSetTargetBranch_ForgeFailurePersistsNothing(t *testing.T) {
 	}
 }
 
-// A nonexistent branch is refused BEFORE the write. Retargeting a PR onto a
-// branch that is not there is worse than refusing.
+// A nonexistent branch is refused BEFORE the write.
+//
+// This is not defensive politeness — on GitLab it is the ONLY guard. Verified
+// against a real instance (finnomena, MR !3041): a PUT naming a branch that does
+// not exist returns 200 and GitLab silently points the merge request at the
+// missing branch. GitHub refuses the same request with 422. So an implementation
+// that skipped this check and relied on the provider to object would leave every
+// GitLab merge request one typo away from aiming at nothing.
 func TestSetTargetBranch_RefusesMissingBranchWithoutWriting(t *testing.T) {
 	svc, st, scm := newRetargetFixture(t, "main", false, false)
 	scm.exists = false

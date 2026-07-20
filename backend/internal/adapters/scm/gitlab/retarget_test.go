@@ -44,9 +44,15 @@ func TestRetargetPR_PutsTargetBranch(t *testing.T) {
 	}
 }
 
-// GitLab answers 400 when the target branch is unusable. That MUST become
-// ErrSCMInvalid: without it the error falls through to a generic failure and
-// gets rendered as "SCM unavailable", blaming the service for bad input.
+// GitLab uses 400 when it refuses a change on its merits (target equal to the
+// source, merge request already merged). That MUST become ErrSCMInvalid, or the
+// error falls through to a generic failure rendered "SCM unavailable", blaming
+// the service for bad input.
+//
+// ⚠ This is NOT the nonexistent-branch case. Verified against a real GitLab
+// instance: a PUT naming a branch that does not exist returns 200 and GitLab
+// silently retargets the merge request at nothing. See
+// TestRetargetPR_NonexistentTargetIsAcceptedByGitlab below.
 func TestRetargetPR_BadRequestMapsToSCMInvalid(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v4/projects/grp%2Fproj/merge_requests/7", func(w http.ResponseWriter, _ *http.Request) {
@@ -135,5 +141,27 @@ func TestBranchExists_EscapesSlashes(t *testing.T) {
 	}
 	if want := "/api/v4/projects/grp%2Fproj/repository/branches/release%2F2.1"; gotPath != want {
 		t.Fatalf("path = %q, want %q", gotPath, want)
+	}
+}
+
+// GitLab ACCEPTS a target branch that does not exist — verified against a real
+// instance (finnomena, MR !3041): 200, and the merge request is left pointing at
+// a missing branch. GitHub refuses the identical request with 422.
+//
+// This test exists to stop anyone "simplifying" the service by dropping the
+// BranchExists pre-flight and relying on the provider to reject a bad target.
+// On GitLab there is no rejection to rely on: the pre-flight is the only guard.
+func TestRetargetPR_NonexistentTargetIsAcceptedByGitlab(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/grp%2Fproj/merge_requests/7", func(w http.ResponseWriter, _ *http.Request) {
+		// Real GitLab behaviour: 200 with the bogus branch echoed back.
+		_, _ = w.Write([]byte(`{"iid":7,"target_branch":"does-not-exist"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	if err := newTestProvider(t, srv.URL).RetargetPR(context.Background(), retargetRef(), "does-not-exist"); err != nil {
+		t.Fatalf("RetargetPR = %v, want nil: GitLab accepts a missing target, so the adapter "+
+			"must not invent a rejection the provider never made", err)
 	}
 }

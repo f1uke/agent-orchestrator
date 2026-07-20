@@ -45,12 +45,19 @@ func (p *Provider) RetargetPR(ctx context.Context, ref ports.SCMPRRef, target st
 	return nil
 }
 
-// classifyGitlabRetargetErr extends the shared write classifier with the 400
-// case. GitLab answers 400 when it refuses the change itself — target branch
-// missing or equal to the source, merge request already merged — which is a
-// statement about the REQUEST, not the service. Without this the error reaches
-// the human as a 503 "SCM unavailable" and tells them to retry something that
-// will never succeed.
+// classifyGitlabRetargetErr extends the shared write classifier with the 400/422
+// case: GitLab uses them when it refuses a change on its merits (target equal to
+// the source, merge request already merged), which is a statement about the
+// REQUEST, not the service. Without this the error reaches the human as a 503
+// "SCM unavailable" and tells them to retry something that can never succeed.
+//
+// ⚠ It does NOT cover a target branch that does not exist. Verified against a
+// real GitLab instance (finnomena, MR !3041): a PUT naming a nonexistent
+// target_branch returns **200** and GitLab silently points the merge request at
+// the missing branch. GitHub refuses the same request with 422. That asymmetry
+// is why BranchExists is checked BEFORE the write in the service layer rather
+// than inferring the outcome from the response — on GitLab the pre-flight is the
+// ONLY thing standing between a typo and a merge request aimed at nothing.
 func classifyGitlabRetargetErr(resp restResponse, err error) error {
 	if err == nil {
 		return nil
