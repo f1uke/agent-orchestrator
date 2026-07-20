@@ -17,9 +17,10 @@ Always read [`DESIGN.md`](DESIGN.md) before making any visual or UI decision —
 **start with the "clone agent-orchestrator verbatim" banner at the top**, which
 governs the current look.
 
-The renderer **clones the agent-orchestrator web app verbatim**
-(`~/Projects/agent-orchestrator/packages/web/src`) in looks and design, with a
-refined-blue accent and the terminal keeping its own palette. This **supersedes the
+The renderer **clones the agent-orchestrator web app verbatim** in looks and design,
+with a refined-blue accent and the terminal keeping its own palette. That reference is
+not an external checkout: it lives in this repo's own git history at
+`5897b4e8d:packages/web/src` (`git show` it - DESIGN.md has the commands). This **supersedes the
 older "match emdash" framing** in DESIGN.md (per explicit user decision 2026-06-10).
 Build new UI from shadcn primitives (`components/ui/*`) where a component fits. Do not
 deviate without explicit user approval. In QA/review, flag any renderer code that
