@@ -1,61 +1,68 @@
 // Pure helpers + palette for the Tests-tab "Smoke test" checklist. The tab is
-// pixel-matched to a hand-authored design (Tests.dc.html), so the exact hex
-// values live here rather than in the shared token layer — mirroring the sibling
-// Comments tab's lib/comment-inbox.ts precedent.
+// pixel-matched to a hand-authored design (Tests.dc.html), but each value below
+// resolves to a CSS custom property (defined per theme in `styles.css`) rather
+// than a raw hex — otherwise the tab stays dark when the app is in light mode.
+// Surfaces, borders and the text ramp come from the --inbox-* tokens the sibling
+// Comments tab uses (the two tabs share one design language); only the
+// checklist-specific roles carry --smoke-* tokens. The dark values behind these
+// tokens are still the verbatim handoff hexes; see the block in `styles.css`.
 
 import type { components } from "../../api/schema";
+import { ACCENT, MONO, accentMix, tint } from "./comment-inbox";
+
+/** Re-exported so the Tests-tab components keep a single import site. The accent
+ * is the app-wide token — this tab used to carry its own `#3b82f6` copy. */
+export { ACCENT, MONO, accentMix };
 
 export type SmokeCheck = components["schemas"]["SmokeCheck"];
 export type SmokeEvidence = components["schemas"]["SmokeEvidence"];
 export type SmokeVerdict = "pending" | "pass" | "fail" | "skip";
 
-/** Accent used across the tab (report button, WHY box, avatar chip, selection). */
-export const ACCENT = "#3b82f6";
-
-/** Monospace stack for PR/file refs and step badges. */
-export const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
-
-/** Exact design palette, grouped by role — verbatim from the Tests.dc.html handoff. */
+/** Design palette, by role. Each value is a themed token, not a literal. */
 export const PALETTE = {
-	rail: "#0a0a0c",
-	header: "#0a0a0c",
-	cardBg: "#0b0b0e",
-	cardBgOpen: "#0d0d10",
-	pillBg: "#18181c",
-	whyBg: "#0e0e12",
-	trackBg: "#161619",
-	reportBg: "#101014",
-	toastBg: "#1b1b20",
+	rail: "var(--inbox-rail)",
+	cardBg: "var(--smoke-card-bg)",
+	cardBgOpen: "var(--inbox-card-bg)",
+	pillBg: "var(--inbox-pill-bg)",
+	whyBg: "var(--smoke-why-bg)",
+	trackBg: "var(--smoke-track-bg)",
+	reportBg: "var(--inbox-batch-bg)",
 	// borders
-	divider: "#141417",
-	borderCard: "#1c1c20",
-	borderCardOpen: "#26262c",
-	borderPill: "#232327",
-	borderExpand: "#17171a",
-	borderReport: "#24242a",
-	borderToast: "#33333a",
+	divider: "var(--inbox-divider)",
+	borderCard: "var(--inbox-border-card)",
+	borderCardOpen: "var(--smoke-card-border-open)",
+	borderPill: "var(--inbox-border-pill)",
+	borderExpand: "var(--smoke-divider-expand)",
+	borderReport: "var(--inbox-border-batch)",
 	// text
-	textStrong: "#f2f2f5",
-	text: "#e7e7ea",
-	body: "#c2c2c8",
-	secondary: "#9a9aa0",
-	secondary2: "#8b8b92",
-	muted: "#6c6c72",
-	muted2: "#5c5c63",
+	textStrong: "var(--inbox-text-strong)",
+	text: "var(--inbox-text)",
+	body: "var(--inbox-body)",
+	secondary: "var(--inbox-secondary)",
+	secondary2: "var(--inbox-secondary-2)",
+	muted: "var(--inbox-muted)",
+	muted2: "var(--inbox-muted-2)",
+	/** Monospace PR/file-ref chips — same ramp as the viewer's path chrome. */
+	refChip: "var(--viewer-chrome-fg)",
+	/** Load-error copy, shared with the Failed verdict hue. */
+	danger: "var(--smoke-fail-fg)",
+	/** "· by you · 2h ago" — sits on the verdict pill's tint, so not `muted`. */
+	caption: "var(--smoke-caption)",
+	/** Accent label on an accent-tinted fill (Post to Jira), so not `ACCENT`. */
+	accentText: "var(--smoke-accent-text)",
 	// progress segments
-	segPass: "#4fae74",
-	segFail: "#e0655e",
-	segSkip: "#3a3a42",
+	segPass: "var(--smoke-pass)",
+	segFail: "var(--smoke-fail)",
+	segSkip: "var(--smoke-skip)",
 	// expected box
-	expectedBorder: "rgba(79,174,116,.28)",
-	expectedBody: "#b7c9bd",
-	evidenceOn: "#8b9a90",
+	expectedBg: tint("var(--smoke-pass)", 6),
+	expectedBorder: tint("var(--smoke-pass)", 28),
+	expectedBody: "var(--smoke-expected-body)",
+	evidenceOn: "var(--smoke-evidence-on)",
+	// Pass/Fail decision buttons (softer than the verdict pills' fills).
+	passBtnBg: tint("var(--smoke-pass)", 12),
+	failBtnBg: tint("var(--smoke-fail)", 12),
 } as const;
-
-/** color-mix tint of the accent (oklab), used for soft fills/borders. */
-export function accentMix(pct: number, base = "transparent"): string {
-	return `color-mix(in oklab, ${ACCENT} ${pct}%, ${base})`;
-}
 
 export type VerdictMeta = {
 	label: string;
@@ -69,20 +76,32 @@ export type VerdictMeta = {
 export const VERDICT_META: Record<SmokeVerdict, VerdictMeta> = {
 	pass: {
 		label: "Passed",
-		color: "#68c48c",
+		color: "var(--smoke-pass-fg)",
 		icon: "✓",
-		pillBg: "rgba(79,174,116,.14)",
-		pillBorder: "rgba(79,174,116,.4)",
+		pillBg: tint("var(--smoke-pass)", 14),
+		pillBorder: tint("var(--smoke-pass)", 40),
 	},
 	fail: {
 		label: "Failed",
-		color: "#e88f8f",
+		color: "var(--smoke-fail-fg)",
 		icon: "✗",
-		pillBg: "rgba(224,101,94,.14)",
-		pillBorder: "rgba(224,101,94,.45)",
+		pillBg: tint("var(--smoke-fail)", 14),
+		pillBorder: tint("var(--smoke-fail)", 45),
 	},
-	pending: { label: "To check", color: "#9a9aa0", icon: "○", pillBg: "#18181c", pillBorder: "#2a2a30" },
-	skip: { label: "Skipped", color: "#9a9aa0", icon: "⊘", pillBg: "#18181c", pillBorder: "#2a2a30" },
+	pending: {
+		label: "To check",
+		color: "var(--inbox-secondary)",
+		icon: "○",
+		pillBg: "var(--inbox-pill-bg)",
+		pillBorder: "var(--inbox-border-menu)",
+	},
+	skip: {
+		label: "Skipped",
+		color: "var(--inbox-secondary)",
+		icon: "⊘",
+		pillBg: "var(--inbox-pill-bg)",
+		pillBorder: "var(--inbox-border-menu)",
+	},
 };
 
 export function verdictMeta(v: string): VerdictMeta {

@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
-import { PALETTE as P, isVideoMime } from "../lib/smoke-test";
+import { isVideoMime } from "../lib/smoke-test";
+
+// The lightbox is a full-screen viewer over an opaque scrim, and thumbnails are
+// letterboxed against #000 — its chrome sits on media, never on an app surface.
+// So it stays dark in BOTH themes (as any OS image viewer does) and these are
+// deliberately fixed literals rather than the themed --smoke-*/--inbox-* tokens.
+// They were the smoke palette's dark values before that palette became
+// theme-aware; keeping them literal is what preserves the look in light mode.
+const OVERLAY = {
+	fg: "#c2c2c8",
+	muted: "#6c6c72",
+	mutedDim: "#5c5c63",
+	border: "#232327",
+	cardBg: "#0b0b0e",
+} as const;
 
 /**
  * One media item the thumbnail + lightbox render: `src` is the daemon URL the
@@ -88,7 +102,7 @@ export function MediaThumb({
 				fontSize: 10,
 				lineHeight: 1.3,
 				textAlign: "center",
-				color: P.muted2,
+				color: OVERLAY.mutedDim,
 				overflow: "hidden",
 			}}
 			aria-label={item.filename || "media"}
@@ -379,7 +393,7 @@ export function MediaLightbox({
 								Couldn&apos;t load {current?.filename || "this media"}
 							</div>
 						) : !url ? (
-							<div style={{ ...failedBox, color: P.muted }} aria-live="polite">
+							<div style={{ ...failedBox, color: OVERLAY.muted }} aria-live="polite">
 								Loading…
 							</div>
 						) : isVideo ? (
@@ -431,7 +445,7 @@ export function MediaLightbox({
 							>
 								<ZoomOut size={16} aria-hidden="true" />
 							</button>
-							<span aria-hidden="true" style={{ minWidth: 42, textAlign: "center", fontSize: 12, color: P.body }}>
+							<span aria-hidden="true" style={{ minWidth: 42, textAlign: "center", fontSize: 12, color: OVERLAY.fg }}>
 								{Math.round(scale * 100)}%
 							</span>
 							<button
@@ -481,9 +495,9 @@ const counterStyle: React.CSSProperties = {
 	transform: "translateX(-50%)",
 	fontSize: 12.5,
 	fontWeight: 600,
-	color: P.body,
+	color: OVERLAY.fg,
 	background: "rgba(15,15,18,.8)",
-	border: `1px solid ${P.borderPill}`,
+	border: `1px solid ${OVERLAY.border}`,
 	borderRadius: 999,
 	padding: "3px 12px",
 };
@@ -497,9 +511,9 @@ const failedBox: React.CSSProperties = {
 	padding: 24,
 	fontSize: 13,
 	textAlign: "center",
-	color: P.muted2,
-	background: P.cardBg,
-	border: `1px solid ${P.borderPill}`,
+	color: OVERLAY.mutedDim,
+	background: OVERLAY.cardBg,
+	border: `1px solid ${OVERLAY.border}`,
 	borderRadius: 10,
 };
 
@@ -512,7 +526,7 @@ const zoomBarStyle: React.CSSProperties = {
 	alignItems: "center",
 	gap: 6,
 	background: "rgba(15,15,18,.85)",
-	border: `1px solid ${P.borderPill}`,
+	border: `1px solid ${OVERLAY.border}`,
 	borderRadius: 999,
 	padding: "5px 8px",
 	backdropFilter: "blur(4px)",
@@ -531,7 +545,7 @@ function cornerBtn(_pos: "top"): React.CSSProperties {
 		justifyContent: "center",
 		color: "#fff",
 		background: "rgba(15,15,18,.8)",
-		border: `1px solid ${P.borderPill}`,
+		border: `1px solid ${OVERLAY.border}`,
 		cursor: "pointer",
 		padding: 0,
 	};
@@ -551,7 +565,7 @@ function edgeBtn(side: "left" | "right"): React.CSSProperties {
 		justifyContent: "center",
 		color: "#fff",
 		background: "rgba(15,15,18,.8)",
-		border: `1px solid ${P.borderPill}`,
+		border: `1px solid ${OVERLAY.border}`,
 		cursor: "pointer",
 		padding: 0,
 	};
@@ -565,7 +579,7 @@ function zoomBtn(disabled: boolean): React.CSSProperties {
 		display: "flex",
 		alignItems: "center",
 		justifyContent: "center",
-		color: disabled ? P.muted2 : "#fff",
+		color: disabled ? OVERLAY.mutedDim : "#fff",
 		background: "transparent",
 		border: "none",
 		cursor: disabled ? "default" : "pointer",

@@ -52,9 +52,10 @@ function evidenceUrl(sessionId: string, checkId: string, evidenceId: string): st
  * user plays live in the app, attaching evidence (drop/paste an image or short
  * clip), noting what they saw, and marking Pass / Fail / Skip. A report-back bar
  * composes the results and delivers them to the worker. Pixel-matched to the
- * Tests.dc.html design (exact dark palette + #3b82f6 accent), mirroring the
- * sibling Comments tab's inline-style approach. Always visible with an empty
- * state, even when the session has no checklist.
+ * Tests.dc.html design, mirroring the sibling Comments tab's inline-style
+ * approach — the palette resolves to themed tokens so the tab follows light
+ * mode. Always visible with an empty state, even when the session has no
+ * checklist.
  */
 export function SmokeTestView({
 	sessionId,
@@ -268,7 +269,7 @@ export function SmokeTestView({
 			<div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 24px" }}>
 				{query.isLoading && <p style={{ padding: 16, fontSize: 12.5, color: P.muted2 }}>Loading smoke checks…</p>}
 				{query.error && (
-					<p style={{ padding: 16, fontSize: 12.5, color: "#e88f8f" }}>
+					<p style={{ padding: 16, fontSize: 12.5, color: P.danger }}>
 						{apiErrorMessage(query.error, "Unable to load smoke checks")}
 					</p>
 				)}
@@ -343,8 +344,10 @@ function Header({ worker, progress }: { worker: string; progress: SmokeProgress 
 						alignItems: "center",
 						justifyContent: "center",
 						fontSize: 10,
-						color: "#fff",
-						background: "linear-gradient(135deg, #3b82f6, #5b8def)",
+						color: "var(--accent-fg)",
+						// Keeps the light end dark enough for the white glyph (3.8:1 at
+						// 85%, vs 3.0:1 if it tracked the handoff's lighter stop).
+						background: `linear-gradient(135deg, ${ACCENT}, ${accentMix(85, "#ffffff")})`,
 					}}
 				>
 					◆
@@ -582,7 +585,7 @@ function RefChip({ text, ellipsize }: { text: string; ellipsize?: boolean }) {
 			style={{
 				fontFamily: MONO,
 				fontSize: 10.5,
-				color: "#b7b7bc",
+				color: P.refChip,
 				background: P.pillBg,
 				border: `1px solid ${P.borderPill}`,
 				borderRadius: 5,
@@ -641,7 +644,7 @@ function Expected({ expected }: { expected: string }) {
 				border: `1px solid ${P.expectedBorder}`,
 				borderRadius: 8,
 				padding: "9px 11px",
-				background: "rgba(79,174,116,.06)",
+				background: P.expectedBg,
 			}}
 		>
 			<div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.segPass }}>EXPECTED RESULT</div>
@@ -822,6 +825,9 @@ function EvidenceThumb({
 	};
 
 	const label = evidence.filename || "evidence";
+	// The chrome below sits ON the media (letterboxed against #000), not on the
+	// card, so it stays dark in both themes — the same reasoning as any OS image
+	// viewer. These literals are deliberately not themed tokens.
 	const actionBtn: CSSProperties = {
 		display: "inline-flex",
 		alignItems: "center",
@@ -984,7 +990,7 @@ function VerdictControls({
 				>
 					<span aria-hidden="true">{meta.icon}</span>
 					<span>{DECIDED_CAPTION[check.verdict] ?? meta.label}</span>
-					<span style={{ color: P.muted, fontWeight: 500 }}>· by you{when ? ` · ${when}` : ""}</span>
+					<span style={{ color: P.caption, fontWeight: 500 }}>· by you{when ? ` · ${when}` : ""}</span>
 				</span>
 				<div style={{ flex: 1 }} />
 				<button
@@ -1008,6 +1014,8 @@ function VerdictControls({
 		);
 	}
 
+	const pass = verdictMeta("pass");
+	const fail = verdictMeta("fail");
 	return (
 		<div style={{ marginTop: 12 }}>
 			<div style={{ display: "flex", gap: 8 }}>
@@ -1015,7 +1023,7 @@ function VerdictControls({
 					type="button"
 					disabled={busy}
 					onClick={() => onDecide("pass")}
-					style={verdictButton("#68c48c", "rgba(79,174,116,.4)", "rgba(79,174,116,.12)")}
+					style={verdictButton(pass.color, pass.pillBorder, P.passBtnBg)}
 				>
 					✓ Works — Pass
 				</button>
@@ -1023,7 +1031,7 @@ function VerdictControls({
 					type="button"
 					disabled={busy}
 					onClick={() => onDecide("fail")}
-					style={verdictButton("#e88f8f", "rgba(224,101,94,.45)", "rgba(224,101,94,.12)")}
+					style={verdictButton(fail.color, fail.pillBorder, P.failBtnBg)}
 				>
 					✗ Broken — Fail
 				</button>
@@ -1114,7 +1122,7 @@ function ReportBar({
 					gap: 6,
 					fontSize: 12.5,
 					fontWeight: 600,
-					color: ACCENT,
+					color: P.accentText,
 					background: accentMix(10),
 					border: `1px solid ${accentMix(38)}`,
 					borderRadius: 8,
@@ -1135,7 +1143,7 @@ function ReportBar({
 					gap: 6,
 					fontSize: 12.5,
 					fontWeight: 600,
-					color: "#fff",
+					color: "var(--accent-fg)",
 					background: ACCENT,
 					border: "none",
 					borderRadius: 8,

@@ -230,6 +230,32 @@
 	--viewer-path-fg: #c7c7cc;
 	--viewer-add-count: #84cfa0;
 	--viewer-del-count: #e69696;
+
+	/* Tests tab ("Smoke test" checklist). Its surfaces, borders and text ramp
+	   come from the --inbox-* block above — the two tabs share one design
+	   language — so only the checklist-specific roles live here. Dark values are
+	   verbatim from the Tests.dc.html handoff; do not "tidy" them into the
+	   generic ramp. The soft fills/borders (expected box, verdict pills) are
+	   color-mix tints of --smoke-pass / --smoke-fail, not separate tokens. */
+	--smoke-card-bg: #0b0b0e;
+	--smoke-card-border-open: #26262c;
+	--smoke-divider-expand: #17171a;
+	--smoke-why-bg: #0e0e12;
+	--smoke-track-bg: #161619;
+	/* Progress-bar segment fills + count-chip dots. */
+	--smoke-pass: #4fae74;
+	--smoke-fail: #e0655e;
+	--smoke-skip: #3a3a42;
+	/* Verdict text (pills, decided caption, Pass/Fail buttons, load errors). */
+	--smoke-pass-fg: #68c48c;
+	--smoke-fail-fg: #e88f8f;
+	--smoke-expected-body: #b7c9bd;
+	--smoke-evidence-on: #8b9a90;
+	/* Two roles that sit on a *tinted* fill rather than a plain surface, so they
+	   need their own ramp: --inbox-muted / --accent are tuned against the flat
+	   card and drop below 4.5:1 once the tint darkens the backdrop. */
+	--smoke-caption: #6c6c72;
+	--smoke-accent-text: var(--accent);
 }
 
 :root[data-theme="light"] {
@@ -361,6 +387,28 @@
 	--viewer-path-fg: #35353a;
 	--viewer-add-count: #1a7f37;
 	--viewer-del-count: #c0392b;
+
+	/* Tests tab — light counterparts. Cards sit a hair off-white on the near-white
+	   rail (separation comes from the hairline borders, as in dark). The green and
+	   red are the app's light --green/--red rather than the dark handoff's mid
+	   tones: the same hue at dark-mode lightness fails WCAG once the surface is
+	   white, and these double as label text over their own tinted boxes. */
+	--smoke-card-bg: #fafafb;
+	--smoke-card-border-open: var(--border-1);
+	--smoke-divider-expand: #ececed;
+	--smoke-why-bg: #f5f8ff;
+	--smoke-track-bg: var(--bg-3);
+	--smoke-pass: var(--green);
+	--smoke-fail: var(--red);
+	--smoke-skip: #b4b4ba;
+	--smoke-pass-fg: #12692b;
+	--smoke-fail-fg: #b3261e;
+	--smoke-expected-body: #33533f;
+	--smoke-evidence-on: #46614f;
+	/* Measured on the 14% verdict pill / 10% accent fill, not on white:
+	   --inbox-muted gave 4.27:1 and --accent 4.14:1 there. */
+	--smoke-caption: #5a5a63;
+	--smoke-accent-text: #1d4ed8;
 }
 
 * {
