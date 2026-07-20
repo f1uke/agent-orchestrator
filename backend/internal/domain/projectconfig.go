@@ -63,6 +63,16 @@ type ProjectConfig struct {
 	// bodies, branch names, and identifiers stay English.
 	ResponseLanguage string `json:"responseLanguage,omitempty"`
 
+	// HasWebUI records whether this project renders in a browser. It is the single
+	// fact behind three effects, so they can never contradict each other: the
+	// desktop inspector's Browser tab, the `ao preview` guidance injected into
+	// this project's agents, and whether `ao preview` itself is accepted.
+	//
+	// It is opt-in (false). A project that says nothing has no web UI: there is
+	// nothing to preview, so its agents are never told to preview and never see a
+	// permanently empty panel.
+	HasWebUI bool `json:"hasWebUI,omitempty"`
+
 	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
 	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
 	// condition onto the existing ready-to-merge conditions. Approvals are only

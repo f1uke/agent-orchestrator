@@ -26,6 +26,7 @@ import (
 
 type fakeSessionService struct {
 	sessions              map[domain.SessionID]domain.Session
+	previewDisabled       bool
 	sent                  string
 	dispatchedPR          string
 	dispatchedThread      string
@@ -179,6 +180,18 @@ func (f *fakeSessionService) SetPreview(_ context.Context, id domain.SessionID, 
 	s.Metadata.PreviewRevision++
 	f.sessions[id] = s
 	return s, nil
+}
+
+// previewDisabled makes EnsurePreviewAllowed refuse, standing in for a project
+// whose config has no web UI.
+func (f *fakeSessionService) EnsurePreviewAllowed(_ context.Context, id domain.SessionID) error {
+	if _, ok := f.sessions[id]; !ok {
+		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	if f.previewDisabled {
+		return apierr.Conflict("WEB_PREVIEW_DISABLED", "Project \"AO\" has no web UI, so there is nothing to preview and `ao preview` is disabled for it. Turn on \"Web UI\" in the project's settings if it does render in a browser.", nil)
+	}
+	return nil
 }
 
 func (f *fakeSessionService) SetAutoNudge(_ context.Context, id domain.SessionID, override *bool) (domain.Session, error) {
@@ -1723,5 +1736,96 @@ func TestSetTargetBranch_RefusedRetargetIsNotA503(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "TARGET_BRANCH_NOT_FOUND") {
 		t.Fatalf("response does not name the cause: %s", body)
+	}
+}
+
+// TestSessionsAPI_SetPreviewRefusedWhenProjectHasNoWebUI: `ao preview` in a
+// project with no web UI must fail, and fail with the reason. The workspace here
+// DOES contain an index.html, so this also pins the ordering: the refusal has to
+// beat entry-point autodetection, or the agent gets a confusing 200 (or a
+// misleading "no entry point") instead of "this project has it disabled".
+func TestSessionsAPI_SetPreviewRefusedWhenProjectHasNoWebUI(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.previewDisabled = true
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "index.html"), []byte(`<html></html>`), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	s := svc.sessions["ao-1"]
+	s.Metadata = domain.SessionMetadata{WorkspacePath: workspace}
+	svc.sessions["ao-1"] = s
+	srv := newSessionTestServer(t, svc)
+
+	for _, tc := range []struct{ name, body string }{
+		{"bare ao preview", `{}`},
+		{"explicit url", `{"url":"http://localhost:5173"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/preview", tc.body)
+			if status != http.StatusConflict {
+				t.Fatalf("set preview = %d, want 409; body=%s", status, body)
+			}
+			if !strings.Contains(string(body), "WEB_PREVIEW_DISABLED") {
+				t.Errorf("error body should carry the machine code, got %s", body)
+			}
+			if !strings.Contains(strings.ToLower(string(body)), "web ui") {
+				t.Errorf("error body should say what to turn on, got %s", body)
+			}
+			// Nothing may have been persisted: a refused preview must leave the
+			// session exactly as it was.
+			if got := svc.sessions["ao-1"].Metadata.PreviewURL; got != "" {
+				t.Errorf("refused preview still wrote a target: %q", got)
+			}
+			if got := svc.sessions["ao-1"].Metadata.PreviewRevision; got != 0 {
+				t.Errorf("refused preview still bumped the revision to %d", got)
+			}
+		})
+	}
+}
+
+// TestSessionsAPI_ClearPreviewAllowedWhenProjectHasNoWebUI: clearing stays
+// available, so a target left over from before a project opted out can always be
+// dropped. Emptying the panel can never mislead an agent.
+func TestSessionsAPI_ClearPreviewAllowedWhenProjectHasNoWebUI(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.previewDisabled = true
+	s := svc.sessions["ao-1"]
+	s.Metadata = domain.SessionMetadata{PreviewURL: "http://localhost:5173"}
+	svc.sessions["ao-1"] = s
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/ao-1/preview", "")
+	if status != http.StatusOK {
+		t.Fatalf("clear preview = %d, want 200; body=%s", status, body)
+	}
+	if got := svc.sessions["ao-1"].Metadata.PreviewURL; got != "" {
+		t.Fatalf("preview target survived the clear: %q", got)
+	}
+}
+
+// TestSessionsAPI_SetPreviewRefusalBeatsEntryDetection pins the ORDERING that
+// TestSessionsAPI_SetPreviewRefusedWhenProjectHasNoWebUI cannot: with no
+// index.html and no stored target, entry-point autodetection would answer 404
+// "No preview entry point found in session workspace" — technically true, and
+// exactly the wrong thing to tell an agent whose project simply has the feature
+// turned off. This is the realistic shape of a no-web-UI project (an iOS app has
+// no index.html), so the gate must run first.
+func TestSessionsAPI_SetPreviewRefusalBeatsEntryDetection(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.previewDisabled = true
+	s := svc.sessions["ao-1"]
+	s.Metadata = domain.SessionMetadata{WorkspacePath: t.TempDir()} // no index.html, no stored target
+	svc.sessions["ao-1"] = s
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/preview", `{}`)
+	if status != http.StatusConflict {
+		t.Fatalf("set preview = %d, want 409 (the project is disabled, not merely missing an entry point); body=%s", status, body)
+	}
+	if !strings.Contains(string(body), "WEB_PREVIEW_DISABLED") {
+		t.Fatalf("expected the disabled-project reason, got %s", body)
+	}
+	if strings.Contains(string(body), "NO_PREVIEW_ENTRY") {
+		t.Fatalf("entry-point detection ran before the gate and masked the real reason: %s", body)
 	}
 }

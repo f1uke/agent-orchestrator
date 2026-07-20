@@ -80,6 +80,14 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const isOrchestrator = session ? isOrchestratorSession(session) : false;
 	// Orchestrator sessions are terminal-only; only worker sessions have the rail.
 	const hasInspector = !isOrchestrator;
+	// Whether this session's project renders in a browser (ProjectConfig.hasWebUI,
+	// opt-in). It gates the whole browser surface: the rail's Browser tab, the
+	// BrowserView host, and the `ao preview` reveal below. A session may still
+	// hold a previewUrl from before its project switched the web UI off — the
+	// stored target is left alone rather than destroyed, so switching back on
+	// restores it — which is exactly why every consumer has to gate on this and
+	// not on the URL's presence.
+	const hasWebUI = workspace?.hasWebUI ?? false;
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
 	const sessionLoaded = Boolean(session);
@@ -89,7 +97,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const previewRevealRef = useRef<{ sessionId: string; revision: number; url: string } | null>(null);
 	const browserView = useBrowserView({
 		sessionId,
-		active: Boolean(session && hasInspector && (browserPoppedOut || isInspectorOpen)),
+		active: Boolean(session && hasInspector && hasWebUI && (browserPoppedOut || isInspectorOpen)),
 		poppedOut: browserPoppedOut,
 		terminated: session?.status === "terminated",
 		previewUrl,
@@ -143,6 +151,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// previewRevision, so a URL change is also treated as a fresh preview.
 	useEffect(() => {
 		if (!sessionLoaded) return;
+		// No web UI means no Browser tab to reveal: selecting it would leave the rail
+		// on a view that does not exist.
+		if (!hasWebUI) return;
 		const revision = previewRevision ?? 0;
 		const url = previewUrl ?? "";
 		const prev = previewRevealRef.current;
@@ -152,7 +163,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		if (!url) return;
 		setInspectorView("browser");
 		if (!useUiStore.getState().isInspectorOpen) toggleInspector();
-	}, [sessionLoaded, sessionId, previewRevision, previewUrl, toggleInspector]);
+	}, [sessionLoaded, sessionId, hasWebUI, previewRevision, previewUrl, toggleInspector]);
 
 	// Computed when the inspector panel mounts and frozen while it stays
 	// mounted: rrp re-registers the panel (a layout effect keyed on defaultSize,
@@ -311,6 +322,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 							<div className="h-full min-w-[280px]">
 								<SessionInspector
 									browserPoppedOut={browserPoppedOut}
+									hasWebUI={hasWebUI}
 									isInspectorVisible={isInspectorOpen}
 									onOpenReviewerTerminal={({ handleId, harness }) =>
 										setTerminalTarget({ kind: "reviewer", handleId, harness })
@@ -337,7 +349,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
           sidebar + topbar, not just the session area) and sits outside any
           `[data-panel]` column, so the native WebContentsView is not clamped
           and fills the entire window. */}
-			{browserPoppedOut && session
+			{browserPoppedOut && hasWebUI && session
 				? createPortal(
 						<div className="browser-popout-overlay">
 							<BrowserPanelView

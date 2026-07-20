@@ -59,6 +59,7 @@ type SessionService interface {
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
+	EnsurePreviewAllowed(ctx context.Context, id domain.SessionID) error
 	SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	SetAutoResolve(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error)
@@ -369,6 +370,14 @@ func (c *SessionsController) setPreview(w http.ResponseWriter, r *http.Request) 
 	// write, and so autodetect/local resolution has the workspace path to probe.
 	sess, err := c.Svc.Get(r.Context(), sessionID(r))
 	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	// A project with no web UI has nothing to preview. Refuse BEFORE resolving a
+	// target, so the caller is told the feature is off for this project rather
+	// than getting whatever entry-point autodetection has to say about a
+	// workspace that was never going to render in a browser.
+	if err := c.Svc.EnsurePreviewAllowed(r.Context(), sessionID(r)); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}

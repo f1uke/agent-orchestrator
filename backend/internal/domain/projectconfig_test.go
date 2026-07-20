@@ -156,3 +156,38 @@ func TestProjectConfig_SystemPromptAdditions_RoundTripAndZero(t *testing.T) {
 		t.Fatalf("additions are free text and must validate: %v", err)
 	}
 }
+
+// A project's web UI is opt-in: a config that never mentions it — which is every
+// config stored before the field existed — must decode as "no web UI", and an
+// enabled config must survive the round-trip through the JSON blob column.
+func TestProjectConfig_HasWebUI_OptInRoundTrip(t *testing.T) {
+	var legacy ProjectConfig
+	if err := json.Unmarshal([]byte(`{"defaultBranch":"main"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.HasWebUI {
+		t.Fatal("a config with no hasWebUI key must decode as opt-out (no web UI)")
+	}
+	if legacy.WithDefaults().HasWebUI {
+		t.Fatal("WithDefaults must not enable the web UI a project never asked for")
+	}
+
+	cfg := ProjectConfig{HasWebUI: true}
+	if cfg.IsZero() {
+		t.Fatal("a config that enables the web UI must not be zero, or storage would persist SQL NULL and lose it")
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ProjectConfig
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.HasWebUI {
+		t.Fatalf("round-trip lost hasWebUI: %s", b)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("hasWebUI is a plain toggle and must validate: %v", err)
+	}
+}

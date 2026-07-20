@@ -1031,3 +1031,37 @@ func TestManager_AddWorkspaceRejectsBareParent(t *testing.T) {
 	_, err := m.Add(ctx, project.AddInput{Path: bareParent, ProjectID: ptr("bare"), AsWorkspace: true})
 	wantCode(t, err, "WORKSPACE_PARENT_BARE")
 }
+
+// TestManager_ListSummaryCarriesHasWebUI: the desktop inspector decides whether
+// to show the Browser tab from the project list, so the fact has to ride the
+// summary. It is opt-in, so a project that configures nothing must report false.
+func TestManager_ListSummaryCarriesHasWebUI(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name string
+		cfg  *domain.ProjectConfig
+		want bool
+	}{
+		{"no config at all", nil, false},
+		{"config that never mentions it", &domain.ProjectConfig{DefaultBranch: "develop"}, false},
+		{"opted in", &domain.ProjectConfig{HasWebUI: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newManager(t)
+			if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao"), Config: tc.cfg}); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			list, err := m.List(ctx)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(list) != 1 {
+				t.Fatalf("List len = %d, want 1", len(list))
+			}
+			if list[0].HasWebUI != tc.want {
+				t.Fatalf("summary hasWebUI = %v, want %v", list[0].HasWebUI, tc.want)
+			}
+		})
+	}
+}

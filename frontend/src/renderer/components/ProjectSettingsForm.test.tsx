@@ -440,6 +440,69 @@ describe("ProjectSettingsForm", () => {
 		expect(body.responseLanguage).toBeUndefined();
 	});
 
+	// One flag behind three effects (Browser tab, `ao preview` guidance, the
+	// `ao preview` command), so they can never be set to contradict each other.
+	it("turns the project's web UI on and saves it without dropping hidden config", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				env: { TOKEN: "secret" },
+			},
+		});
+
+		renderSettings();
+		await screen.findByText("git@github.com:acme/project-one.git");
+
+		// Opt-in: off for a project that never configured it.
+		const toggle = await screen.findByLabelText("This project has a web UI");
+		expect(toggle).not.toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.hasWebUI).toBe(true);
+		// Config the form does not expose must survive the round-trip.
+		expect(body.config.env).toEqual({ TOKEN: "secret" });
+	});
+
+	it("loads an already-enabled web UI and can turn it back off", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				hasWebUI: true,
+			},
+		});
+
+		renderSettings();
+		const toggle = await screen.findByLabelText("This project has a web UI");
+		expect(toggle).toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		// Off is the default, so it is omitted rather than written as false — an
+		// otherwise-unset config still persists as unset.
+		expect(body.config.hasWebUI).toBeUndefined();
+	});
+
 	it("shows the approval-rule toggle for GitLab projects only, and saves the enabled rule with a threshold", async () => {
 		mockProject({
 			id: "proj-1",

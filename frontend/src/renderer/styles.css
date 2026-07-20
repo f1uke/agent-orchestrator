@@ -1045,17 +1045,54 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	flex-direction: column;
 }
 
-/* Tab strip below 360px: the strip is an equal `flex: 1` split with no overflow
- * handling, so five tabs leave ~27px per label — about four characters. Even at
- * FOUR tabs the labels already truncate to "Sum…"/"Revie…"/"Brow…" at the rail's
- * 330px default, so dropping to icon-only (with the tab's own tooltip) fixes the
- * current crowding as well as making room for Files. */
-@container (max-width: 360px) {
-	.session-inspector__tab-label {
+/* Icon-only tab strip, per tab count. The strip is an equal `flex: 1` split with
+ * no overflow handling, so the width at which labels stop fitting depends on how
+ * many tabs are showing — and the count is no longer fixed: the Browser tab is
+ * per-project (ProjectConfig.hasWebUI) and Files is hidden for orchestrators.
+ *
+ * Each breakpoint sits just under the width where that count stops truncating:
+ *
+ *   required = n × (icon 14 + gap 6 + padding 12 + widest label) + 22 + 3×(n−1)
+ *
+ * with the widest label being "Summary" at 54px (11.5px/600). That gives 3 tabs
+ * 286px · 4 tabs 375px · 5 tabs 464px, matching the measured 285px and 373px.
+ * The breakpoints below add a few px of margin. Re-derive if a label is renamed
+ * or the type scale moves — and measure with the REAL rules, because these hide
+ * the label AND drop the tab's padding, so neutralising only one understates the
+ * width needed.
+ *
+ * Note 3 tabs do NOT fit at the rail's 280px content floor (SessionView wraps it
+ * in min-w-[280px]), so every count needs a rule.
+ *
+ * A single 360px breakpoint used to serve all counts, which was wrong in both
+ * directions: it truncated 5 tabs to "Summa…"/"Review…" from 361px all the way
+ * to 464px, and it hid 4 labels from 330px that only truncate below 373px. */
+@container (max-width: 469px) {
+	.session-inspector__tabs[data-tab-count="5"] .session-inspector__tab-label {
 		display: none;
 	}
 
-	.session-inspector__tab {
+	.session-inspector__tabs[data-tab-count="5"] .session-inspector__tab {
+		padding-inline: 0;
+	}
+}
+
+@container (max-width: 379px) {
+	.session-inspector__tabs[data-tab-count="4"] .session-inspector__tab-label {
+		display: none;
+	}
+
+	.session-inspector__tabs[data-tab-count="4"] .session-inspector__tab {
+		padding-inline: 0;
+	}
+}
+
+@container (max-width: 289px) {
+	.session-inspector__tabs[data-tab-count="3"] .session-inspector__tab-label {
+		display: none;
+	}
+
+	.session-inspector__tabs[data-tab-count="3"] .session-inspector__tab {
 		padding-inline: 0;
 	}
 }

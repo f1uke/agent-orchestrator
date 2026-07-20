@@ -4543,3 +4543,55 @@ func TestEffectiveIssueID(t *testing.T) {
 		})
 	}
 }
+
+// TestSystemPrompt_SkillPointerFollowsProjectWebUI: the skill catalog an agent is
+// pointed at is per-project, because whether `ao preview` exists for that agent
+// is per-project. A project with no web UI (the default) must be pointed at the
+// catalog that has no preview guidance in it at all; opting in swaps the pointer
+// to the full catalog. Every kind is checked: an orchestrator that still knew
+// about `ao preview` would go on telling its workers to use it.
+func TestSystemPrompt_SkillPointerFollowsProjectWebUI(t *testing.T) {
+	build := func(t *testing.T, cfg domain.ProjectConfig, kind domain.SessionKind, withOrch bool) string {
+		t.Helper()
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		if withOrch {
+			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
+		}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	kinds := []struct {
+		name     string
+		kind     domain.SessionKind
+		withOrch bool
+	}{
+		{"orchestrator", domain.KindOrchestrator, false},
+		{"worker_with_orchestrator", domain.KindWorker, true},
+		{"worker_without_orchestrator", domain.KindWorker, false},
+	}
+
+	for _, k := range kinds {
+		t.Run(k.name+"/no web UI is the default", func(t *testing.T) {
+			sp := build(t, domain.ProjectConfig{}, k.kind, k.withOrch)
+			if !strings.Contains(sp, "skills/using-ao/SKILL.md") {
+				t.Fatalf("expected the no-preview catalog pointer:\n%s", sp)
+			}
+			if strings.Contains(sp, "skills/using-ao-web/") {
+				t.Fatalf("a project that never opted in must not get the web catalog:\n%s", sp)
+			}
+		})
+		t.Run(k.name+"/opted in", func(t *testing.T) {
+			sp := build(t, domain.ProjectConfig{HasWebUI: true}, k.kind, k.withOrch)
+			if !strings.Contains(sp, "skills/using-ao-web/SKILL.md") {
+				t.Fatalf("expected the web-UI catalog pointer:\n%s", sp)
+			}
+		})
+	}
+}

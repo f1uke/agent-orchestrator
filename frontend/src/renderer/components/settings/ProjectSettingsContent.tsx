@@ -104,6 +104,23 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 				</SettingsReadOnlyPanel>
 			)}
 
+			<SettingsGroup title="Web UI">
+				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
+					<input
+						type="checkbox"
+						className="h-4 w-4 accent-accent"
+						checked={draft.hasWebUI}
+						onChange={(e) => setField("hasWebUI", e.target.checked)}
+					/>
+					This project has a web UI
+				</label>
+				<p className="text-[11px] text-passive">
+					Off by default. When on, a session's inspector gains a Browser tab and its agents are told how to use{" "}
+					<code>ao preview</code> to show a change there. When off there is nothing to preview, so the tab is hidden and{" "}
+					<code>ao preview</code> reports that the project has it disabled.
+				</p>
+			</SettingsGroup>
+
 			<SettingsGroup title="Worktrees">
 				<SettingsField label="Default branch" htmlFor="defaultBranch" modified={isFieldDirty("defaultBranch")}>
 					<input

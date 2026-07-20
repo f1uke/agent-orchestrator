@@ -1883,6 +1883,7 @@ export interface components {
                 [key: string]: string;
             };
             gitConvention?: components["schemas"]["GitConventionConfig"];
+            hasWebUI?: boolean;
             orchestrator?: components["schemas"]["RoleOverride"];
             postCreate?: string[];
             responseLanguage?: string;
@@ -1903,6 +1904,7 @@ export interface components {
             project: components["schemas"]["Project"];
         };
         ProjectSummary: {
+            hasWebUI: boolean;
             id: string;
             kind: string;
             name: string;

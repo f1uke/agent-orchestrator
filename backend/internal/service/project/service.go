@@ -117,6 +117,7 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 			Kind:              row.Kind.WithDefault(),
 			SessionPrefix:     resolveSessionPrefix(row),
 			OrchestratorAgent: row.Config.Orchestrator.Harness,
+			HasWebUI:          row.Config.HasWebUI,
 		})
 	}
 	return out, nil

@@ -638,6 +638,12 @@ export type WorkspaceSummary = {
 	workspaceRepos?: WorkspaceRepoSummary[];
 	type?: "main" | "worktree";
 	orchestratorAgent?: AgentProvider;
+	/**
+	 * Whether this project renders in a browser (ProjectConfig.hasWebUI). It is
+	 * opt-in: a project that says nothing has no web UI, so its sessions get no
+	 * Browser tab and its agents no `ao preview` guidance.
+	 */
+	hasWebUI?: boolean;
 	accentColor?: string;
 	diff?: {
 		additions: number;

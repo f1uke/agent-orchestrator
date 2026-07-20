@@ -35,6 +35,7 @@ export type ProjectSettingsFormState = {
 	workerModel: string;
 	permissions: string;
 	reviewerHarness: string;
+	hasWebUI: boolean;
 	intakeEnabled: boolean;
 	intakeRepo: string;
 	intakeAssignee: string;
@@ -65,6 +66,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		workerModel: config.worker?.agentConfig?.model ?? "",
 		permissions: config.agentConfig?.permissions ?? "",
 		reviewerHarness: config.reviewers?.[0]?.harness ?? "",
+		hasWebUI: config.hasWebUI ?? false,
 		intakeEnabled: intake.enabled ?? false,
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
@@ -199,6 +201,9 @@ export function useProjectSettingsForm({
 					permissions: form.permissions || undefined,
 				}),
 				reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,
+				// Off is the default, so omit it rather than writing false — an
+				// otherwise-unset config still persists as unset.
+				hasWebUI: form.hasWebUI || undefined,
 				trackerIntake: buildIntake(intakeForm),
 				gitConvention: buildGitConvention(form.gitWorkflow, form.branchPrefix),
 				approvalRule: buildApprovalRule(form.approvalRuleEnabled, form.approvalThreshold),

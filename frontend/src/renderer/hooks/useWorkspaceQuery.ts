@@ -48,6 +48,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 		kind: project.kind === "workspace" ? "workspace" : "single_repo",
 		path: project.path,
 		orchestratorAgent: project.orchestratorAgent ? toAgentProvider(project.orchestratorAgent) : undefined,
+		hasWebUI: project.hasWebUI,
 		sessions: (sessionsData?.sessions ?? [])
 			.filter((session) => session.projectId === project.id)
 			.map((session) => ({
