@@ -13,9 +13,29 @@ agent-orchestrator web app verbatim** in looks and design. This **supersedes the
 sections below — where they conflict, **agent-orchestrator wins**. Do not re-flag
 "this doesn't match emdash" in QA/review; flag divergence from **agent-orchestrator**.
 
-- **Reference (the user's own app):** `~/Projects/agent-orchestrator/packages/web/src`
-  — `app/globals.css`, `app/mc-board.css`, `app/mc-sidebar.css`,
-  `components/{ProjectSidebar,Dashboard,SessionCard,SessionDetailHeader,SessionInspector,StatusBadge}.tsx`.
+- **Reference — pinned in this repo's own git history, not an external checkout.**
+  There is no separate app to open any more: the path this line used to name
+  (`~/Projects/agent-orchestrator/packages/web/src`) does not exist, and no live branch
+  carries `packages/web`. The reference is the pre-graft agent-orchestrator web app,
+  preserved as the second parent of the graft commit `7a1b3030` ("graft ReverbCode
+  rewrite onto agent-orchestrator history"). Read it with `git show` - version-pinned,
+  offline, and it cannot rot:
+
+  ```sh
+  R=5897b4e8d8cefc33f681ab73bf0e3ebc0b17b517
+  git show $R:packages/web/src/app/globals.css     # tokens, dark + html.light
+  git show $R:packages/web/src/app/mc-board.css    # board
+  git show $R:packages/web/src/app/mc-sidebar.css  # sidebar
+  git show $R:packages/web/src/components/ProjectSidebar.tsx
+  git ls-tree -r --name-only $R packages/web/src   # browse everything
+  ```
+
+  Also `components/{Dashboard,SessionCard,SessionDetailHeader,SessionInspector,StatusBadge}.tsx`.
+  The reference **does** carry a light palette (`html.light` in `globals.css`) - consult
+  it before deriving one. Where it is genuinely silent (window chrome, anything added
+  since), derive from the live tokens in `frontend/src/renderer/styles.css` and
+  `components/ui/*`, and **record the decision here** - do not invent a new direction.
+
 - **Palette (live in `frontend/src/renderer/styles.css` `:root`):** `--bg #0a0b0d`,
   `--bg-1 #15171b`, `--fg #f4f5f7`, `--fg-muted #9ba1aa`, `--fg-passive #646a73`,
   hairline white-alpha borders, accent `--accent #4d8dff`; status: working=orange
@@ -189,7 +209,16 @@ and meaningful. Values are sRGB approximations of emdash's `color(display-p3 …
 - **Red** = `ci_failed` / destructive.
 - These map 1:1 to the daemon's derived statuses.
 
-### Status indicator (no text badges)
+### Status indicator (no text badges) — SUPERSEDED
+
+> **Superseded, retained for history.** The component this described (`StatusGlyph` in
+> `components/SideRail.tsx`) was **deleted in `e493de6ad`** — the same commit that
+> adopted the agent-orchestrator clone — and there is no orchestrator "Workers list"
+> today. Its "never a text pill/badge" rule is also contradicted by the banner, which
+> ships a breathing `StatusBadge` pill (`components/ShellTopbar.tsx`). What actually
+> renders session status now: the **`StatusBadge` pill** in `ShellTopbar.tsx`, and the
+> **`SessionGlyph`** lane glyphs in `components/Sidebar.tsx` (spec'd under _Board lane
+> colour system_ below). Do not implement from this section.
 
 Session status is a single ~14px glyph in one fixed slot, never a text pill/badge:
 
@@ -333,13 +362,15 @@ mirrors emdash exactly. Launching from a project row pre-fills the Project field
 
 ## Implementation notes
 
-- The renderer (`frontend/src/renderer/styles.css`) currently uses **Inter** and a
-  grayscale-blue theme. Migrate to this system: drop the Inter `font-family`, adopt the
-  system stack, and replace the token values with the emdash neutral ramp + blue accent above.
+- **Done.** The Inter → system-stack migration this section used to call for has
+  shipped: `styles.css` contains no `Inter`, and the live palette is the banner's at the
+  top of this file, **not** the emdash ramp under _Color_.
 - Keep tokens as CSS custom properties under `:root` (dark) and `:root[data-theme="light"]`.
-- A faithful HTML reference of all of the above (both views + topbar + spawn modal,
-  light/dark) is saved under
+- **Lost.** The 2026-06-09 HTML mockup of this system lived under
   `~/.gstack/projects/aoagents-agent-orchestrator/designs/design-system-20260609/`.
+  That directory no longer exists and the mockup was never committed, so it is
+  unrecoverable. Nothing depends on it - the live renderer plus the pinned reference in
+  the banner supersede it.
 
 ## Decisions Log
 
