@@ -10,6 +10,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"unicode"
 
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -108,10 +109,12 @@ func New(sessions SessionGateway, issues IssueReader, moves TransitionMover, sea
 
 // Jira issue-key shapes for query classification. fullKeyRE is a complete key
 // (PROJECT-123); projectKeyRE is a bare project key (e.g. ACME, DEMO) typed on its
-// own — matched case-insensitively after upper-casing.
+// own — matched case-insensitively after upper-casing; bareNumberRE is just the
+// number half of a key, which only resolves when a project is already selected.
 var (
 	fullKeyRE    = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
 	projectKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
+	bareNumberRE = regexp.MustCompile(`^\d+$`)
 )
 
 // Context returns the Jira display context for a session. It returns an error
@@ -440,11 +443,13 @@ const assigneeUnassigned = "unassigned"
 // returned verbatim and drives the search fully (the structured fields are ignored)
 // — Jira's advanced search; a malformed query surfaces as a 400 the caller renders.
 // Otherwise: a full key resolves that one issue (ignoring the filters — an exact
-// lookup is unambiguous); a bare project key (confirmed to exist, so we never send a
-// 400-inducing `project = NOPE`) scopes to that project — which is how "demo"
-// surfaces DEMO-* that a text match never would; anything else is a summary/text
-// contains-search. Assignee (accountId), issue types, hide-done and active-sprint,
-// when set, are ANDed in as server-side filters. Always newest-first.
+// lookup is unambiguous); a bare number with a project selected resolves that
+// project's issue, since a key is not searchable as prose; a bare project key
+// (confirmed to exist, so we never send a 400-inducing `project = NOPE`) scopes to
+// that project — which is how "demo" surfaces DEMO-* that a text match never would;
+// anything else is a summary/text contains-search built by textClause, which owns
+// the text-parser escaping. Assignee (accountId), issue types, hide-done and
+// active-sprint, when set, are ANDed in as server-side filters. Always newest-first.
 func (s *Service) buildJQL(ctx context.Context, p SearchParams) string {
 	if raw := strings.TrimSpace(p.JQL); raw != "" {
 		return raw
@@ -453,6 +458,12 @@ func (s *Service) buildJQL(ctx context.Context, p SearchParams) string {
 	text := strings.TrimSpace(p.Text)
 	if fullKeyRE.MatchString(strings.ToUpper(text)) {
 		return `key = "` + strings.ToUpper(text) + `"`
+	}
+	// A bare number is never findable as prose — an issue's key is not part of its
+	// summary/description text, so `~ "2271*"` matches nothing. With a project
+	// selected the number is unambiguous, so resolve it as that project's issue.
+	if project != "" && bareNumberRE.MatchString(text) {
+		return `key = "` + strings.ToUpper(escapeJQL(project)) + `-` + text + `"`
 	}
 	scope := project
 	if scope == "" && projectKeyRE.MatchString(strings.ToUpper(text)) {
@@ -465,9 +476,8 @@ func (s *Service) buildJQL(ctx context.Context, p SearchParams) string {
 	if scope != "" {
 		clauses = append(clauses, `project = "`+escapeJQL(scope)+`"`)
 	}
-	if text != "" {
-		esc := escapeJQL(text)
-		clauses = append(clauses, `(summary ~ "`+esc+`*" OR text ~ "`+esc+`*")`)
+	if clause := textClause(text); clause != "" {
+		clauses = append(clauses, clause)
 	}
 	if a := strings.TrimSpace(p.Assignee); a != "" {
 		if strings.EqualFold(a, assigneeUnassigned) {
@@ -529,10 +539,54 @@ func (s *Service) confirmProjectKey(ctx context.Context, text string) string {
 	return ""
 }
 
-// escapeJQL escapes a value for a JQL double-quoted string literal.
+// escapeJQL escapes a value for a JQL double-quoted string literal. This is the
+// OUTER of two escaping layers: it keeps a value from breaking out of the quotes.
+// It is NOT sufficient on its own for the operand of `~` — see textClause.
 func escapeJQL(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, `"`, `\"`)
+}
+
+// textTerms splits a user query into plain search terms for the `~` operand.
+//
+// The operand of `~` is not a string — Jira hands it to a Lucene-style text
+// parser where `+ - && || ! ( ) { } [ ] ^ " ~ * ? : \ /` are all operators. So
+// `e-coupon` parses as "e AND NOT coupon" and matches nothing, which is why a
+// large share of real searches silently returned zero rows.
+//
+// Splitting on every non-letter/digit rune neutralises the whole operator set at
+// once, and it matches how Jira indexes text: "E-Coupon" is tokenized to `e` +
+// `coupon`, so terms are what the index can actually match. Backslash-escaping
+// instead (`e\-coupon`) is the tempting fix and is WRONG once a wildcard is
+// involved — a wildcard term bypasses the analyzer, so `e\-coupon*` looks for a
+// single token that the index never contains. Verified against the real Jira.
+//
+// Terms are lowercased so an uppercase AND/OR/NOT is a plain word rather than a
+// boolean operator; text matching is case-insensitive, so nothing is lost.
+// unicode.IsLetter keeps non-ASCII scripts (Thai summaries are common here) whole.
+func textTerms(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// textClause builds the summary/text contains-clause, or "" when the query has no
+// searchable characters at all (so we never emit a bare `~ "*"`). Terms are ANDed
+// by Jira; only the LAST term takes the `*`, which is the word the user is still
+// typing — that preserves the existing type-ahead prefix behaviour.
+//
+// The escapeJQL call is the outer, string-literal layer. Given textTerms it is
+// currently a no-op — terms hold only letters and digits, so there is no `"` or
+// `\` left to escape, and no test can distinguish it. It stays as the layer that
+// keeps the two concerns honest: if textTerms is ever loosened to pass more
+// characters through, this is what still stops them breaking out of the quotes.
+func textClause(text string) string {
+	terms := textTerms(text)
+	if len(terms) == 0 {
+		return ""
+	}
+	esc := escapeJQL(strings.Join(terms, " ")) + "*"
+	return `(summary ~ "` + esc + `" OR text ~ "` + esc + `")`
 }
 
 // capDisplayName trims a title to the session display-name length budget (20
