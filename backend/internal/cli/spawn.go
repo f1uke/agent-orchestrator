@@ -85,6 +85,9 @@ type spawnResult struct {
 		Status    string `json:"status"`
 		ProjectID string `json:"projectId"`
 		Branch    string `json:"branch"`
+		// TargetBranch is the target the daemon RESOLVED and recorded, which for
+		// an omitted --target is the only place the caller learns what it got.
+		TargetBranch string `json:"targetBranch"`
 	} `json:"session"`
 }
 
@@ -219,6 +222,15 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			}
 			if _, err := fmt.Fprintf(out, "spawned session %s (%s)%s\n", res.Session.ID, res.Session.Status, claimLabel); err != nil {
 				return err
+			}
+			// Report the target the daemon recorded. With --target omitted this is
+			// the caller's only sight of what was resolved on their behalf, so a
+			// silent default never masquerades as a decision. Skipped entirely
+			// when the daemon reports none rather than printing an empty promise.
+			if target := strings.TrimSpace(res.Session.TargetBranch); target != "" {
+				if _, err := fmt.Fprintf(out, "PR target: %s\n", target); err != nil {
+					return err
+				}
 			}
 			_, err = fmt.Fprintf(out, "attach with: %s\n", spawnAttachHint(res.Session.ProjectID, res.Session.Branch, res.Session.ID))
 			return err

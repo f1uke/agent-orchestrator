@@ -283,6 +283,69 @@ func TestSpawnCommand_OmittedTargetSendsNothing(t *testing.T) {
 	}
 }
 
+// Because the daemon resolves an omitted --target, the CLI must report what was
+// actually recorded. "Required means recorded" is only trustworthy if the human
+// can see the recorded value without going to look for it.
+func TestSpawnCommand_ReportsResolvedTarget(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","config":{"worker":{"agent":"codex"}}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-11","status":"idle","branch":"feature/x","targetBranch":"develop"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_PROJECT_ID", "demo")
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "main", "--prompt", "go")
+	if err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "develop") {
+		t.Fatalf("output does not report the recorded target branch: %s", out)
+	}
+}
+
+// A daemon that reports no target (an older one, or a project with nothing
+// configured) must not make the CLI print a blank or invented line.
+func TestSpawnCommand_OmitsTargetLineWhenDaemonReportsNone(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","config":{"worker":{"agent":"codex"}}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-11","status":"idle","branch":"feature/x"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_PROJECT_ID", "demo")
+
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"spawn", "--from", "main", "--prompt", "go")
+	if err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	if strings.Contains(out, "PR target") {
+		t.Fatalf("printed a PR target line with nothing to report: %s", out)
+	}
+}
+
 func TestSpawnResolvesProjectFromEnvAndDefaultAgent(t *testing.T) {
 	cfg := setConfigEnv(t)
 	var requests []string
