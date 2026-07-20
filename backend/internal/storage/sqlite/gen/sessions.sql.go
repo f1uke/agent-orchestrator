@@ -397,8 +397,9 @@ type SetSessionIssueBindingParams struct {
 }
 
 // Set (or clear) a session's Jira binding after it is created: issue_id becomes
-// "jira:<KEY>" on link (display_name = the issue's human title) or a plain title
-// on unlink. Bumps updated_at so the sessions_cdc_update trigger refreshes the UI.
+// "jira:<KEY>" on link (display_name = the issue's human title) or "" on unlink
+// (display_name is kept so the card still reads well). issue_id NEVER holds a
+// human label. Bumps updated_at so the sessions_cdc_update trigger refreshes the UI.
 func (q *Queries) SetSessionIssueBinding(ctx context.Context, arg SetSessionIssueBindingParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionIssueBinding,
 		arg.IssueID,

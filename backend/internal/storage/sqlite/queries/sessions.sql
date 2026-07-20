@@ -77,8 +77,9 @@ UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetSessionIssueBinding :execrows
 -- Set (or clear) a session's Jira binding after it is created: issue_id becomes
--- "jira:<KEY>" on link (display_name = the issue's human title) or a plain title
--- on unlink. Bumps updated_at so the sessions_cdc_update trigger refreshes the UI.
+-- "jira:<KEY>" on link (display_name = the issue's human title) or "" on unlink
+-- (display_name is kept so the card still reads well). issue_id NEVER holds a
+-- human label. Bumps updated_at so the sessions_cdc_update trigger refreshes the UI.
 UPDATE sessions SET issue_id = ?, display_name = ?, updated_at = ? WHERE id = ?;
 
 -- name: SessionIsSeed :one

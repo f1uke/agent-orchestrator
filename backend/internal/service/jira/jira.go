@@ -409,9 +409,13 @@ func (s *Service) SetBinding(ctx context.Context, id domain.SessionID, key strin
 	return iss, nil
 }
 
-// Unlink removes a session's Jira binding: issue_id becomes the plain display
-// label (so the card still shows a name) and no longer carries the "jira:"
-// prefix. Reports ErrNotLinked when the session was not Jira-bound.
+// Unlink removes a session's Jira binding: issue_id is cleared to the empty
+// string (the unbound representation - the column is NOT NULL with an empty
+// default), while the display name is preserved so the card still shows a
+// readable label. A session that
+// never had a display name falls back to the key it was unlinked from, so the
+// card does not go blank. Reports ErrNotLinked when the session was not
+// Jira-bound.
 func (s *Service) Unlink(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	sess, err := s.sessions.Get(ctx, id)
 	if err != nil {
@@ -425,7 +429,7 @@ func (s *Service) Unlink(ctx context.Context, id domain.SessionID) (domain.Sessi
 	if label == "" {
 		label = key
 	}
-	return s.sessions.SetIssueBinding(ctx, id, label, label)
+	return s.sessions.SetIssueBinding(ctx, id, "", label)
 }
 
 // assigneeUnassigned is the sentinel the client sends for the "Unassigned" filter
