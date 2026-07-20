@@ -145,8 +145,9 @@ func TestBranchExists_EscapesSlashes(t *testing.T) {
 }
 
 // GitLab ACCEPTS a target branch that does not exist — verified against a real
-// instance (finnomena, MR !3041): 200, and the merge request is left pointing at
-// a missing branch. GitHub refuses the identical request with 422.
+// instance on two independent merge requests, the second driven through this
+// adapter end to end: 200, and the merge request is left pointing at a missing
+// branch. GitHub refuses the identical request with 422.
 //
 // This test exists to stop anyone "simplifying" the service by dropping the
 // BranchExists pre-flight and relying on the provider to reject a bad target.

@@ -52,12 +52,17 @@ func (p *Provider) RetargetPR(ctx context.Context, ref ports.SCMPRRef, target st
 // "SCM unavailable" and tells them to retry something that can never succeed.
 //
 // ⚠ It does NOT cover a target branch that does not exist. Verified against a
-// real GitLab instance (finnomena, MR !3041): a PUT naming a nonexistent
-// target_branch returns **200** and GitLab silently points the merge request at
-// the missing branch. GitHub refuses the same request with 422. That asymmetry
-// is why BranchExists is checked BEFORE the write in the service layer rather
-// than inferring the outcome from the response — on GitLab the pre-flight is the
-// ONLY thing standing between a typo and a merge request aimed at nothing.
+// real GitLab instance on two independent merge requests, the second driven
+// through this adapter end to end: a PUT naming a nonexistent target_branch
+// returns **200** and GitLab silently points the merge request at the missing
+// branch. GitHub refuses the same request with 422. That asymmetry is why
+// BranchExists is checked BEFORE the write in the service layer rather than
+// inferring the outcome from the response — on GitLab the pre-flight is the ONLY
+// thing standing between a typo and a merge request aimed at nothing.
+//
+// The rest of the contract is confirmed live too: a retarget to a real branch
+// succeeds and the forge reports the new target back, and repeating it is a
+// silent no-op rather than an error.
 func classifyGitlabRetargetErr(resp restResponse, err error) error {
 	if err == nil {
 		return nil
