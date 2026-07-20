@@ -101,7 +101,8 @@ export function FileTree<T>({
 						</button>
 					);
 				}
-				const KindIcon = KIND_ICON[fileKindFor(node.key)];
+				const kind = fileKindFor(node.key);
+				const KindIcon = KIND_ICON[kind];
 				const key = getFileKey ? getFileKey(node.item) : node.key;
 				const selected = selectedKey != null && key === selectedKey;
 				return (
@@ -118,10 +119,7 @@ export function FileTree<T>({
 						title={getTitle ? getTitle(node.item) : node.key}
 					>
 						{guides}
-						<KindIcon
-							aria-hidden="true"
-							className={cn("file-tree__icon", `file-tree__icon--${fileKindFor(node.key)}`)}
-						/>
+						<KindIcon aria-hidden="true" className={cn("file-tree__icon", `file-tree__icon--${kind}`)} />
 						{renderLead ? <span className="file-tree__lead">{renderLead(node.item)}</span> : null}
 						<span className="file-tree__name">
 							<bdi>{getFileLabel ? getFileLabel(node.item, node.label) : node.label}</bdi>
