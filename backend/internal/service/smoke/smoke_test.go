@@ -3,6 +3,7 @@ package smoke
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,14 @@ func (f *fakeStore) GetSmokeCheck(_ context.Context, id string) (domain.SmokeChe
 func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error) {
 	f.lastCases = cases
 	out := make([]domain.SmokeCheck, 0, len(cases))
+	for _, c := range cases {
+		// smoke_check.id is a global primary key, so reusing an id another
+		// session already owns fails the real insert. Model that here, or a
+		// test would pass against a collision the daemon 500s on.
+		if prior, ok := f.checks[c.ID]; ok && prior.SessionID != sessionID {
+			return nil, nil, fmt.Errorf("UNIQUE constraint failed: smoke_check.id (%s owned by %s)", c.ID, prior.SessionID)
+		}
+	}
 	for _, c := range cases {
 		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Seq: c.Seq, Name: c.Name, Steps: c.Steps, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
 		f.checks[c.ID] = check
@@ -174,6 +183,198 @@ func TestAuthorResolvesIdsAndSeq(t *testing.T) {
 		if c.Seq != i+1 {
 			t.Fatalf("case %d seq = %d, want %d", i, c.Seq, i+1)
 		}
+	}
+}
+
+// TestDerivedCaseIDCompatibility pins the ids ASCII names have produced since
+// the feature shipped. A checklist already stored keeps its ids only if these
+// stay byte-identical, so a verdict never detaches from its case.
+func TestDerivedCaseIDCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"A fresh MR shows up", "a-fresh-mr-shows-up"},
+		{"Build passes", "build-passes"},
+		{"Tests tab: verdict sticks (pass/fail)", "tests-tab-verdict-sticks-pass-fail"},
+		{"  padded  ", "padded"},
+		{"MiXeD CaSe 123", "mixed-case-123"},
+		{"worker เขียน smoke case", "worker-smoke-case"},
+		{
+			"a name that is considerably longer than the sixty four character cap imposed on ids",
+			"a-name-that-is-considerably-longer-than-the-sixty-four-character",
+		},
+	} {
+		if got := derivedCaseID(tc.name); got != tc.want {
+			t.Errorf("derivedCaseID(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestDerivedCaseIDNonASCII covers names the slug reduces to nothing: every
+// non-ASCII script, and ASCII that is pure punctuation. Each must still get a
+// usable id, and it must be deterministic so a re-author reproduces it.
+func TestDerivedCaseIDNonASCII(t *testing.T) {
+	// Oracle: first 8 hex of sha256(name), computed independently via shasum.
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"เปิดแอปแล้วเห็นหน้าแรก", "case-d531e72c"},
+		{"ลบรายการแล้วหายจากลิสต์", "case-cea420ac"},
+		{"---", "case-cb3f91d5"},
+	} {
+		got := derivedCaseID(tc.name)
+		if got != tc.want {
+			t.Errorf("derivedCaseID(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+		if again := derivedCaseID(tc.name); again != got {
+			t.Errorf("derivedCaseID(%q) not deterministic: %q then %q", tc.name, got, again)
+		}
+	}
+	// Distinct names must not share an id.
+	if derivedCaseID("เปิดแอปแล้วเห็นหน้าแรก") == derivedCaseID("ลบรายการแล้วหายจากลิสต์") {
+		t.Fatal("distinct non-ASCII names collapsed to the same id")
+	}
+}
+
+// TestAuthorThaiChecklistNoCollision is the reproduction: a Thai checklist
+// authored while ANOTHER session already owns ids derived the same way. The
+// pre-fix code derived the constant "case"/"case-2" for every such checklist,
+// so the second session's insert hit the global primary key and 500'd.
+func TestAuthorThaiChecklistNoCollision(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	store.sessions["w2"] = domain.SessionRecord{ID: "w2", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+
+	cases := []domain.SmokeAuthoredCase{
+		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
+		{Name: "กดปุ่มบันทึกแล้วขึ้นข้อความสำเร็จ"},
+	}
+	if _, err := svc.Author(context.Background(), "w1", cases); err != nil {
+		t.Fatalf("first session author: %v", err)
+	}
+	// A different session, different Thai names: must not collide.
+	if _, err := svc.Author(context.Background(), "w2", []domain.SmokeAuthoredCase{
+		{Name: "ลบรายการแล้วหายจากลิสต์"},
+	}); err != nil {
+		t.Fatalf("second session author: %v", err)
+	}
+	for _, c := range store.lastCases {
+		if c.ID == "" {
+			t.Fatal("derived an empty id")
+		}
+	}
+}
+
+// TestAuthorAvoidsIDOwnedByAnotherSession covers the general mechanism, not the
+// non-ASCII trigger: two sessions picking the SAME case name. The id column is
+// global, so the second session must land on a different id rather than fail.
+func TestAuthorAvoidsIDOwnedByAnotherSession(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	store.sessions["w2"] = domain.SessionRecord{ID: "w2", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+
+	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{{Name: "Build passes"}}); err != nil {
+		t.Fatalf("first session: %v", err)
+	}
+	if store.lastCases[0].ID != "build-passes" {
+		t.Fatalf("first session id = %q, want unchanged slug", store.lastCases[0].ID)
+	}
+	if _, err := svc.Author(context.Background(), "w2", []domain.SmokeAuthoredCase{{Name: "Build passes"}}); err != nil {
+		t.Fatalf("second session: %v", err)
+	}
+	second := store.lastCases[0].ID
+	if second == "build-passes" {
+		t.Fatal("second session reused the first session's id")
+	}
+	if second == "" {
+		t.Fatal("second session got an empty id")
+	}
+}
+
+// TestAuthorIDsStableAcrossReauthor is the whole point of a derived id: the
+// user's verdict, note and evidence survive the worker rewriting the checklist.
+func TestAuthorIDsStableAcrossReauthor(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	store.sessions["other"] = domain.SessionRecord{ID: "other", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+
+	// Another session holds the ids w1 would otherwise derive, forcing w1 down
+	// the collision path — the ids must still be reproducible.
+	if _, err := svc.Author(context.Background(), "other", []domain.SmokeAuthoredCase{
+		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
+		{Name: "Shared name"},
+	}); err != nil {
+		t.Fatalf("other session: %v", err)
+	}
+
+	cases := []domain.SmokeAuthoredCase{
+		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
+		{Name: "Shared name"},
+		{Name: "กดปุ่มบันทึกแล้วขึ้นข้อความสำเร็จ"},
+	}
+	if _, err := svc.Author(context.Background(), "w1", cases); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	first := make([]string, 0, len(store.lastCases))
+	for _, c := range store.lastCases {
+		first = append(first, c.ID)
+	}
+	// Re-author the identical checklist: same ids, or verdicts detach.
+	if _, err := svc.Author(context.Background(), "w1", cases); err != nil {
+		t.Fatalf("re-author: %v", err)
+	}
+	for i, c := range store.lastCases {
+		if c.ID != first[i] {
+			t.Errorf("case %d id shifted on re-author: %q then %q", i, first[i], c.ID)
+		}
+	}
+}
+
+// TestAuthorDedupesNonASCIIDuplicatesWithinChecklist keeps the within-payload
+// dedupe working for names that share a derived id.
+func TestAuthorDedupesNonASCIIDuplicatesWithinChecklist(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+
+	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{
+		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
+		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
+		{Name: "---"},
+	}); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	seen := map[string]struct{}{}
+	for i, c := range store.lastCases {
+		if c.ID == "" {
+			t.Fatalf("case %d got an empty id", i)
+		}
+		if _, dup := seen[c.ID]; dup {
+			t.Fatalf("case %d reused id %q within one checklist", i, c.ID)
+		}
+		seen[c.ID] = struct{}{}
+	}
+}
+
+// TestAuthorExplicitIDWithoutASCII falls back to the name when a supplied id
+// slugs away to nothing, instead of the old shared "case" constant.
+func TestAuthorExplicitIDWithoutASCII(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+
+	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{
+		{ID: "***", Name: "เปิดแอปแล้วเห็นหน้าแรก"},
+	}); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	if got := store.lastCases[0].ID; got != "case-d531e72c" {
+		t.Fatalf("id = %q, want the name-derived id", got)
 	}
 }
 
