@@ -119,10 +119,14 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 	}
 	baseOut, err := gitOutput(ctx, workspace, "merge-base", ref, "HEAD")
 	if err != nil {
-		// No common ancestor (unrelated histories, or an unborn HEAD).
+		// No common ancestor (unrelated histories, or an unborn HEAD). Degrading
+		// to an empty state rather than erroring is the same contract DiffContext
+		// follows; nilerr is suppressed on the `return` line because that is where
+		// it reports, not on the closing `}, nil`.
+		//nolint:nilerr // intentional: an unrelated history degrades, it is not an error
 		return WorkspaceChangesResult{
 			Reason: ChangesNoTargetBranch, TargetBranch: branch, TargetSource: source,
-		}, nil //nolint:nilerr // intentional: degrade, don't error
+		}, nil
 	}
 	mergeBase := strings.TrimSpace(string(baseOut))
 
