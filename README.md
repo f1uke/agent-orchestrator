@@ -282,25 +282,27 @@ export AO_GITLAB_TOKEN=…                   # or set a token yourself
 
 ### Connect Jira
 
-Jira has no settings screen — it is configured entirely from the environment, and `ao doctor` does not check it. The minimum is a URL, the account email and an API token:
+Jira has no settings screen — it is configured entirely from the environment, and `ao doctor` does not check it. The minimum is a URL, the account email and an API token.
+
+Create the token at **[id.atlassian.com → Security → API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)** ("Create API token"). It is shown once, so copy it before closing the dialog. Authentication is HTTP Basic over your email plus the token, so this must be an Atlassian **account API token**, not a project or OAuth credential — see [Atlassian's guide](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) if you need the walkthrough.
 
 ```bash
 export AO_JIRA_URL=https://your-org.atlassian.net
 export AO_JIRA_EMAIL=you@your-org.com
-export JIRA_API_TOKEN=…    # an Atlassian API token
+export JIRA_API_TOKEN=…    # the token you just created
 ```
 
-Each of the three is read from an AO-prefixed variable first, then the name `jira-cli` already uses:
+Each value has an AO-prefixed name and a generic fallback; either works.
 
-| Value | Checked in order                                      |
-| ----- | ----------------------------------------------------- |
-| URL   | `AO_JIRA_URL`, `JIRA_SERVER`, then jira-cli's config  |
-| Email | `AO_JIRA_EMAIL`, `JIRA_LOGIN`, then jira-cli's config |
-| Token | `AO_JIRA_TOKEN`, `JIRA_API_TOKEN`                     |
+| Value | Checked in order                  |
+| ----- | --------------------------------- |
+| URL   | `AO_JIRA_URL`, `JIRA_SERVER`      |
+| Email | `AO_JIRA_EMAIL`, `JIRA_LOGIN`     |
+| Token | `AO_JIRA_TOKEN`, `JIRA_API_TOKEN` |
 
 So `JIRA_API_TOKEN` on its own is enough; `AO_JIRA_TOKEN` only matters if you want to point AO at a different token than the rest of your tooling uses.
 
-If you already use [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), AO reads the URL and login out of its config file (`~/.config/.jira/.config.yml`, or wherever `JIRA_CONFIG_FILE` points), so those two can be left unset. The **token is never read from that file** — it has to be in the environment. AO does not run the `jira` binary; it only reads the file.
+If the URL or email is still unset, AO falls back to reading those two values — never the token — out of `~/.config/.jira/.config.yml` (or wherever `JIRA_CONFIG_FILE` points). Set both variables explicitly if you would rather that never happen.
 
 ### Check your setup
 
@@ -364,8 +366,7 @@ npx @redwoodjs/agent-ci run --all
 
 All configuration is environment-driven. The daemon has no config file of its own; for forge
 credentials it reads the environment first and otherwise falls back to the `gh` and `glab`
-CLIs' existing logins. Jira is environment-only — AO never runs a `jira` binary, though it
-will read a URL and login (never a token) out of `jira-cli`'s config file if you have one.
+CLIs' existing logins. Jira is environment-only.
 
 | Variable                          | Default                    | Purpose                                           |
 | --------------------------------- | -------------------------- | ------------------------------------------------- |
@@ -390,7 +391,7 @@ will read a URL and login (never a token) out of `jira-cli`'s config file if you
 | `AO_JIRA_TOKEN`, `JIRA_API_TOKEN` | -                          | Jira API token                                    |
 
 The bind host is deliberately not configurable: the daemon is loopback-only, with no auth
-or TLS. Jira also falls back to `jira-cli`'s config file for its URL and login.
+or TLS.
 
 ### GitLab (self-hosted)
 
