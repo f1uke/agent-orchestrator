@@ -300,7 +300,7 @@ Each value has an AO-prefixed name and a generic fallback; either works.
 | Email | `AO_JIRA_EMAIL`, `JIRA_LOGIN`     |
 | Token | `AO_JIRA_TOKEN`, `JIRA_API_TOKEN` |
 
-So `JIRA_API_TOKEN` on its own is enough; `AO_JIRA_TOKEN` only matters if you want to point AO at a different token than the rest of your tooling uses.
+Either name works on its own. The `AO_`-prefixed one is checked first, so set that when you want AO to use a different Jira account than the rest of your tooling — and keep to it throughout if you prefer AO's variables not to collide with anything else.
 
 If the URL or email is still unset, AO falls back to reading those two values — never the token — out of `~/.config/.jira/.config.yml` (or wherever `JIRA_CONFIG_FILE` points). Set both variables explicitly if you would rather that never happen.
 
