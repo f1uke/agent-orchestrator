@@ -94,6 +94,33 @@ The desktop app is the main control surface: projects on the left, active sessio
       <img src="docs/assets/readme/smoke-tests.png" alt="Tests tab showing smoke-test cases with verdicts, steps, expected result and evidence dropzone" />
     </td>
   </tr>
+  <tr>
+    <td width="36%">
+      <h3>Start work from the issue</h3>
+      <p>Browse a Jira project by text, key or raw JQL, filtered by type, assignee, done state and active sprint. Results group by sprint and nest subtasks under their story. Start a worker from an issue through the task dialog, or hand a selection to the orchestrator and let it decide. Nothing is imported automatically.</p>
+    </td>
+    <td width="64%">
+      <img src="docs/assets/readme/browse-jira.png" alt="Browse Jira showing issues grouped by sprint with subtasks nested under their story" />
+    </td>
+  </tr>
+  <tr>
+    <td width="36%">
+      <h3>Say where the work lands, up front</h3>
+      <p>Spawning a task takes an optional issue to bind, a title and brief, the branch to start from, the new branch name, the PR target branch, and which agent runs it. Start it immediately, or queue it in TODO.</p>
+    </td>
+    <td width="64%">
+      <img src="docs/assets/readme/new-task.png" alt="New task dialog with fields for Jira issue, title, brief, start branch, new branch, PR target and agent" />
+    </td>
+  </tr>
+  <tr>
+    <td width="36%">
+      <h3>Queued work stays editable</h3>
+      <p>A task queued in TODO has not launched its agent yet, so the whole worker spec — branches, PR target, agent and the prompt itself — stays editable. Start work once the brief is right.</p>
+    </td>
+    <td width="64%">
+      <img src="docs/assets/readme/todo-worker-spec.png" alt="A queued TODO session showing its editable worker spec and freeform prompt" />
+    </td>
+  </tr>
 </table>
 
 Also in the session rail:
