@@ -1910,6 +1910,25 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 		}
 	})
 
+	t.Run("smoke checklist follows the configured language", func(t *testing.T) {
+		// A worker's smoke checklist is played live by the human in the Tests tab, so
+		// its case prose is human-facing and must follow the language. The smoke
+		// protocol above it is English and carries a concrete English JSON example,
+		// so the assembled prompt has to say so explicitly or the example wins.
+		sp := build(newMgr(domain.ProjectConfig{ResponseLanguage: "Thai"}, "English", true), domain.KindWorker)
+		smokeIdx := strings.Index(sp, "## Smoke-test checklist (AO)")
+		langIdx := strings.Index(sp, "## Human-facing response language (AO)")
+		if smokeIdx < 0 || langIdx < 0 {
+			t.Fatalf("worker prompt must carry both the smoke protocol and the language directive:\n%s", sp)
+		}
+		if smokeIdx >= langIdx {
+			t.Fatalf("language directive must come AFTER the smoke protocol so it overrides it (smoke=%d lang=%d)", smokeIdx, langIdx)
+		}
+		if !strings.Contains(strings.ToLower(sp[langIdx:]), "smoke-test checklist") {
+			t.Fatalf("language directive must scope the smoke checklist into the language:\n%s", sp[langIdx:])
+		}
+	})
+
 	t.Run("English default injects nothing", func(t *testing.T) {
 		for _, k := range kinds {
 			sp := build(newMgr(domain.ProjectConfig{}, "English", k.withOrch), k.kind)

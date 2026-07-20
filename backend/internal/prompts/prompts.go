@@ -270,6 +270,15 @@ func ResolveResponseLanguage(projectOverride, globalDefault string) string {
 // titles and bodies, branch names, file names, and technical identifiers — in
 // English (the user's standing rule that commits/PRs are written normally).
 //
+// The human-facing set explicitly includes a worker's smoke-test checklist cases:
+// the user plays them live in the Tests tab, so the name/why/steps/expected prose
+// is addressed to a person. That mention has to live HERE rather than in
+// SmokeChecklistProtocol, which is injected for every worker in every language —
+// putting language wording there would change the prompt for every English project.
+// The directive also has to out-argue the concrete English JSON example the smoke
+// protocol hands the model a few hundred tokens earlier, hence the explicit "an
+// English example shows the shape, not the language" clause.
+//
 // English and an empty/whitespace value render "" so the default agent path is
 // byte-for-byte unchanged and spends no extra tokens (mirrors TaskSizeDirective's
 // standard/deep no-op). It is injected LAST — immediately before the
@@ -283,9 +292,9 @@ func ResponseLanguageDirective(lang string) string {
 	}
 	return "\n\n" + `## Human-facing response language (AO)
 
-Write ALL human-facing output - status updates, progress notes, final reports, questions to the human, and PR/MR review comments addressed to people - in ` + l + `, even when your instructions, prompt templates, and task brief are written in English. This directive overrides the language of everything above it: the English wording of the coordination floor and the brief sets the instructions, not the reply language.
+Write ALL human-facing output - status updates, progress notes, final reports, questions to the human, PR/MR review comments addressed to people, and the smoke-test checklist cases you author for the human to play (their name, why, steps and expected prose) - in ` + l + `, even when your instructions, prompt templates, and task brief are written in English. This directive overrides the language of everything above it: the English wording of the coordination floor and the brief sets the instructions, not the reply language, and an English example elsewhere in these instructions shows the shape to fill in, not the language to write it in.
 
-Keep everything that is part of the repository or its tooling in English: CODE, code comments, COMMIT MESSAGES, PR/MR TITLES and BODIES, BRANCH NAMES, file names, and technical identifiers (API names, CLI commands, error strings). Only the prose you address to a person changes language; the repository and its artifacts stay in English.`
+Keep everything that is part of the repository or its tooling in English: CODE, code comments, COMMIT MESSAGES, PR/MR TITLES and BODIES, BRANCH NAMES, file names, and technical identifiers (API names, CLI commands, error strings) - including a smoke case's fileRef and prNum, the ao smoke set command, and the JSON keys themselves. Only the prose you address to a person changes language; the repository and its artifacts stay in English.`
 }
 
 // ConfidentialityGuard is appended LAST to every assembled system prompt so its
