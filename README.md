@@ -207,9 +207,34 @@ Reviewer agents are configured separately. The current reviewer harnesses are:
 
 This fork is not published to npm. `npm install -g @aoagents/ao` installs **upstream's** CLI, which does not contain any of the work described above.
 
-### Build from source
+### What you need
 
-Needs Go (per `backend/go.mod`) and Node 20 or newer.
+To **run** the app:
+
+| Tool                   | Why                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `git` 2.25 or newer    | Every session gets its own worktree. Older git warns rather than fails.                               |
+| `tmux`                 | Backs each session's terminal on macOS and Linux. **Windows needs nothing** — ConPTY is built in.     |
+| At least one agent CLI | AO supervises agents, it does not include one. Install whichever of the 23 harnesses you plan to run. |
+
+To **build from source**, additionally:
+
+| Tool                                | Why                     |
+| ----------------------------------- | ----------------------- |
+| Go 1.25 or newer (`backend/go.mod`) | Builds the daemon       |
+| Node 20 or newer                    | Builds the Electron app |
+
+Optional, and only for the features that use them:
+
+| Tool                                    | Enables                                                                             |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `gh`                                    | GitHub auth without setting a token yourself                                        |
+| `glab`                                  | GitLab auth without setting a token yourself                                        |
+| Xcode, Android Studio, VS Code, Ghostty | The matching "Open in" entries, which only appear when the app is installed (macOS) |
+
+You do **not** need to put `ao` on your `PATH` for the app to work — the daemon pins `PATH` inside the sessions it spawns. Put it there if you want to drive AO from your own shell.
+
+### Build from source
 
 ```bash
 git clone https://github.com/f1uke/agent-orchestrator.git
@@ -233,6 +258,62 @@ This fork publishes an automated nightly desktop build from `main-fluke`, on eve
 > The macOS and Linux legs of the nightly workflow do not currently succeed, so only the
 > Windows installer is attached to each nightly release. Upstream's own releases do build
 > for all three platforms, but they do not contain this fork's changes.
+
+### Connect a forge
+
+AO reads credentials from the environment first and otherwise falls back to a CLI you have already logged in with. Pick whichever row suits you — you do not need both.
+
+**GitHub** works out of the box if `gh` is authenticated:
+
+```bash
+gh auth login              # AO then shells out to `gh auth token`
+export AO_GITHUB_TOKEN=…   # or set a token yourself; this wins over gh
+```
+
+**GitLab is opt-in.** Nothing GitLab-related is wired until `AO_GITLAB_HOST` names a host, so a GitHub-only setup is unaffected:
+
+```bash
+export AO_GITLAB_HOST=gitlab.example.com   # required to enable GitLab at all
+glab auth login --hostname gitlab.example.com
+export AO_GITLAB_TOKEN=…                   # or set a token yourself
+```
+
+`AO_GITLAB_HOST` accepts a comma-separated list, but **only the first host is wired**.
+
+### Connect Jira
+
+Jira has no settings screen — it is configured entirely from the environment, and `ao doctor` does not check it. The minimum is a URL, the account email and an API token:
+
+```bash
+export AO_JIRA_URL=https://your-org.atlassian.net
+export AO_JIRA_EMAIL=you@your-org.com
+export AO_JIRA_TOKEN=…     # an Atlassian API token
+```
+
+`JIRA_SERVER`, `JIRA_LOGIN` and `JIRA_API_TOKEN` are accepted as fallbacks. If you already use [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), AO will read the URL and login from its config file (`~/.config/.jira/.config.yml`, or `JIRA_CONFIG_FILE`) — but the **token must come from the environment** either way.
+
+### Check your setup
+
+`ao doctor` verifies the whole chain and tells you exactly what is missing:
+
+```console
+$ ao doctor
+Core:
+PASS config: runFile=~/.ao/running.json dataDir=~/.ao/data port=3001
+PASS daemon: ready pid=77118 port=3001
+
+Tools:
+PASS git: /usr/bin/git (version 2.50.1; supports worktrees)
+PASS tmux: /opt/homebrew/bin/tmux (tmux 3.6a)
+
+Agent harnesses:
+PASS claude-code: claude resolves to ~/.local/bin/claude
+
+GitHub:
+PASS github-token: gh token valid for <you> (scopes: repo, workflow, …)
+```
+
+The GitLab section only appears once `AO_GITLAB_HOST` is set. Add `--json` for machine-readable output.
 
 ## Documentation
 
