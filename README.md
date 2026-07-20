@@ -211,18 +211,18 @@ This fork is not published to npm. `npm install -g @aoagents/ao` installs **upst
 
 To **run** the app:
 
-| Tool                   | Why                                                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------------------------------- |
-| `git` 2.25 or newer    | Every session gets its own worktree. Older git warns rather than fails.                               |
-| `tmux`                 | Backs each session's terminal on macOS and Linux. **Windows needs nothing** — ConPTY is built in.     |
-| At least one agent CLI | AO supervises agents, it does not include one. Install whichever of the 23 harnesses you plan to run. |
+| Tool                   | Why                                                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git` 2.25 or newer    | Every session gets its own worktree. A missing git is fatal; an older one only warns.                                                        |
+| `tmux`                 | Backs each session's terminal on macOS and Linux. **Windows needs nothing** — ConPTY is built in.                                            |
+| At least one agent CLI | AO supervises agents, it does not bundle one. The app starts without any, but you cannot spawn a session for a harness whose CLI is missing. |
 
 To **build from source**, additionally:
 
-| Tool                                | Why                     |
-| ----------------------------------- | ----------------------- |
-| Go 1.25 or newer (`backend/go.mod`) | Builds the daemon       |
-| Node 20 or newer                    | Builds the Electron app |
+| Tool                                | Why                                                                                                      |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Go 1.25 or newer (`backend/go.mod`) | Builds the daemon. The frontend build shells out to it, so Go must be on `PATH` even though you run npm. |
+| Node 20 or newer                    | Builds the Electron app                                                                                  |
 
 Optional, and only for the features that use them:
 
@@ -261,7 +261,7 @@ This fork publishes an automated nightly desktop build from `main-fluke`, on eve
 
 ### Connect a forge
 
-AO reads credentials from the environment first and otherwise falls back to a CLI you have already logged in with. Pick whichever row suits you — you do not need both.
+AO reads credentials from the environment first and otherwise falls back to a CLI you have already logged in with. Pick whichever row suits you — you do not need both. Exporting from your login shell's rc file is enough: the app resolves your login-shell environment before it starts the daemon, so a Dock or Finder launch sees the same variables a terminal launch does.
 
 **GitHub** works out of the box if `gh` is authenticated:
 
@@ -278,7 +278,7 @@ glab auth login --hostname gitlab.example.com
 export AO_GITLAB_TOKEN=…                   # or set a token yourself
 ```
 
-`AO_GITLAB_HOST` accepts a comma-separated list, but **only the first host is wired**.
+`AO_GITLAB_HOST` accepts a comma-separated list, but **only the first host is wired**. `GITLAB_TOKEN` also works, though `ao doctor` does not currently look at it — the daemon will be authenticated while doctor reports a warning.
 
 ### Connect Jira
 
@@ -315,6 +315,8 @@ PASS github-token: gh token valid for <you> (scopes: repo, workflow, …)
 
 The GitLab section only appears once `AO_GITLAB_HOST` is set. Add `--json` for machine-readable output.
 
+Read the warnings, not just the failures: a missing `tmux` or a missing agent CLI is reported as `WARN`, but neither one lets you actually start a session. `ao doctor` can come back with zero failures on a machine that cannot spawn anything.
+
 ## Documentation
 
 | Document                                                         | Start here when you need                                                                     |
@@ -350,9 +352,10 @@ npx @redwoodjs/agent-ci run --all
 
 ## Configuration
 
-All configuration is environment-driven. The daemon has no config file of its own; for
-forge and tracker credentials it reads the environment first and otherwise falls back to
-the `gh`, `glab` and `jira` CLIs' existing logins.
+All configuration is environment-driven. The daemon has no config file of its own; for forge
+credentials it reads the environment first and otherwise falls back to the `gh` and `glab`
+CLIs' existing logins. Jira is environment-only — AO never runs a `jira` binary, though it
+will read a URL and login (never a token) out of `jira-cli`'s config file if you have one.
 
 | Variable                          | Default                    | Purpose                                           |
 | --------------------------------- | -------------------------- | ------------------------------------------------- |
