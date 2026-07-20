@@ -149,10 +149,45 @@ Everything above the line is upstream's product. These are the parts this fork b
 - **Jira.** Browse issues by text, key or raw JQL with assignee, type, done and active-sprint filters, grouped by sprint and nested three levels deep through epics and subtasks. A read-only detail drawer, plus a sanctioned status move. Link an issue to a session and its context renders in the Summary tab, with inline image and video previews. AO writes exactly three things to Jira: a status transition, an attachment, and a comment.
 - **Issue intake.** A project can poll its GitHub or GitLab tracker and start one worker session per eligible issue.
 
+**Tuning it per project**
+
+Settings is one two-pane shell with a scope switcher: global defaults, then any project as an override. Changes save as you make them.
+
+<table>
+  <tr>
+    <td width="36%">
+      <h3>Repository, worktrees and branch naming</h3>
+      <p>Point a project at its default branch, set the prefix its session ids use, and pick a branch workflow that tells auto-naming and the orchestrator how branches should look. The web-UI switch is off by default; turning it on is what adds the Browser tab.</p>
+    </td>
+    <td width="64%">
+      <img src="docs/assets/readme/settings-project.png" alt="Project settings General section with web UI toggle, default branch, session prefix and branch workflow" />
+    </td>
+  </tr>
+  <tr>
+    <td width="36%">
+      <h3>Who runs, on which model</h3>
+      <p>Workers and the orchestrator get their own agent and model, so a project can run a cheaper model for workers than for the session coordinating them. Permission mode and the reviewer agent sit alongside them.</p>
+    </td>
+    <td width="64%">
+      <img src="docs/assets/readme/settings-agents.png" alt="Project settings Agents section with separate worker and orchestrator agent and model selectors" />
+    </td>
+  </tr>
+  <tr>
+    <td width="36%">
+      <h3>Editable prompt bases</h3>
+      <p>The base prompt each session kind starts from is editable, globally and then per project on top. AO always appends its own coordination floor, confidentiality guard and dynamic context, and those are never editable. Reset to default at any time.</p>
+    </td>
+    <td width="64%">
+      <img src="docs/assets/readme/settings-prompts.png" alt="The worker prompt base open in an editor with Reset to default and staged save" />
+    </td>
+  </tr>
+</table>
+
+- A response language setting, global with a per-project override, that makes agents write their human-facing output in that language while code, commits and PR text stay English.
+- Per-project issue intake and approval rules, and additional system prompts appended per session kind.
+
 **Living in the app**
 
-- Per-project settings for the branch workflow and prefix, default branch, session prefix, worker and orchestrator agent and model, permission mode, reviewer agent, response language, extra system prompts, issue intake and approval rules.
-- A response language setting, global with a per-project override, that makes agents write their human-facing output in that language while code, commits and PR text stay English.
 - "Open in" for Terminal, Finder, Xcode, Android Studio and VS Code, shown only when the app and the relevant project files are present (macOS only).
 - Drag-and-drop project reordering in the sidebar, remembered per machine, and a daemon status button that opens a read-only popover showing when each background loop last ran and when it runs next.
 
