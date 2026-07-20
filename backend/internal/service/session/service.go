@@ -32,6 +32,14 @@ type Store interface {
 	SetSessionAutoNudge(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
 	SetSessionAutoResolve(ctx context.Context, id domain.SessionID, override *bool, updatedAt time.Time) (bool, error)
 	SetSessionKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error)
+	// SetSessionPRTarget records the branch this session's PR merges into.
+	// When the session has an open PR the caller retargets the forge FIRST and
+	// only calls this on success, so AO never stores a target the forge rejected.
+	SetSessionPRTarget(ctx context.Context, id domain.SessionID, target string, updatedAt time.Time) (bool, error)
+	// SetPRTargetBranch moves a tracked PR row after a successful retarget, so
+	// the read model (which ranks an open PR above the stored value) reflects
+	// the change immediately instead of waiting for the observer's next poll.
+	SetPRTargetBranch(ctx context.Context, prURL, target string, updatedAt time.Time) (bool, error)
 	SetSessionIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)

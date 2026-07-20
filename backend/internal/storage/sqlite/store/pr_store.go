@@ -550,3 +550,22 @@ func timeFromNull(t sql.NullTime) time.Time {
 	}
 	return t.Time
 }
+
+// SetPRTargetBranch records a tracked PR's new target branch after AO
+// successfully retargeted it on the SCM. Returns ok=false when the URL is not
+// tracked. This keeps the read model honest between the write and the
+// observer's next poll: an open PR outranks the session's stored target, so
+// without this a successful retarget would still render the old branch.
+func (s *Store) SetPRTargetBranch(ctx context.Context, prURL, target string, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetPRTargetBranch(ctx, gen.SetPRTargetBranchParams{
+		URL:          prURL,
+		TargetBranch: target,
+		UpdatedAt:    updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set target branch for pr %s: %w", prURL, err)
+	}
+	return rows > 0, nil
+}

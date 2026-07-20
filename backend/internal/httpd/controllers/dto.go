@@ -320,6 +320,16 @@ type SetSessionKeepWarmRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// SetSessionTargetRequest is the body of PUT
+// /api/v1/sessions/{sessionId}/target: change the branch this session's work
+// merges into. When the session owns an OPEN pull/merge request, the daemon
+// retargets that request on the forge FIRST and persists only if the forge
+// accepts — so a rejected retarget leaves AO's stored value untouched rather
+// than letting the two disagree.
+type SetSessionTargetRequest struct {
+	TargetBranch string `json:"targetBranch" minLength:"1"`
+}
+
 // RenameSessionResponse is the body of PATCH /api/v1/sessions/{sessionId}.
 type RenameSessionResponse struct {
 	OK          bool             `json:"ok"`

@@ -135,6 +135,10 @@ func (f *fakeSessionService) SetKeepWarmOnMerge(context.Context, domain.SessionI
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) SetTargetBranch(context.Context, domain.SessionID, string) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) error {
 	return nil
 }

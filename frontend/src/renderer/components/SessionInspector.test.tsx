@@ -6,15 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionInspector } from "./SessionInspector";
 import type { PRState, PullRequestFacts, WorkspaceSession } from "../types/workspace";
 
-const { getMock, postMock } = vi.hoisted(() => ({
+const { getMock, postMock, putMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	postMock: vi.fn(),
+	putMock: vi.fn(),
 }));
 
 vi.mock("../lib/api-client", () => ({
 	apiClient: {
 		GET: getMock,
 		POST: postMock,
+		PUT: putMock,
 	},
 	apiErrorMessage: (error: unknown, fallback = "Request failed") => {
 		if (error instanceof Error) return error.message;
@@ -549,6 +551,7 @@ describe("SessionInspector reviews tab", () => {
 describe("SessionInspector target branch", () => {
 	beforeEach(() => {
 		mockCommonGets();
+		putMock.mockReset();
 	});
 
 	// The overview must answer "where is this work going?" without the human
@@ -582,6 +585,71 @@ describe("SessionInspector target branch", () => {
 		const target = await screen.findByTestId("overview-target");
 		expect(target).toHaveTextContent("release/2.1");
 		expect(target).toHaveTextContent(/from pull request/i);
+	});
+
+	// The edit affordance: a human can change where the work lands without
+	// leaving Summary. On success the row shows the new target.
+	it("edits the target and sends it to the daemon", async () => {
+		putMock.mockResolvedValue({
+			data: { session: { id: "sess-1", targetBranch: "release/2.1", targetSource: "session_pr_target" } },
+			error: undefined,
+		});
+		renderWithQuery(
+			<SessionInspector session={session([], { targetBranch: "develop", targetSource: "session_pr_target" })} />,
+		);
+
+		await userEvent.click(await screen.findByRole("button", { name: /edit target branch/i }));
+		const input = await screen.findByLabelText(/target branch/i);
+		await userEvent.clear(input);
+		await userEvent.type(input, "release/2.1{Enter}");
+
+		await waitFor(() => {
+			expect(putMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/target",
+				expect.objectContaining({ body: { targetBranch: "release/2.1" } }),
+			);
+		});
+	});
+
+	// A refused retarget must show the human WHY, in the daemon's words. A
+	// generic "failed" would hide that the branch simply does not exist.
+	it("surfaces the daemon's reason when the retarget is refused", async () => {
+		putMock.mockResolvedValue({
+			data: undefined,
+			error: { code: "TARGET_BRANCH_NOT_FOUND", message: 'Branch "ghost" does not exist on the remote' },
+		});
+		renderWithQuery(
+			<SessionInspector session={session([], { targetBranch: "develop", targetSource: "session_pr_target" })} />,
+		);
+
+		await userEvent.click(await screen.findByRole("button", { name: /edit target branch/i }));
+		const input = await screen.findByLabelText(/target branch/i);
+		await userEvent.clear(input);
+		await userEvent.type(input, "ghost{Enter}");
+
+		expect(await screen.findByText(/does not exist on the remote/i)).toBeInTheDocument();
+		// The editor stays open holding the rejected value so the human can fix
+		// it -- the failure is recoverable, not a dead end.
+		expect(screen.getByLabelText(/target branch/i)).toHaveValue("ghost");
+		// And on abandoning the edit the ORIGINAL target is still there: the
+		// daemon stored nothing, so the UI must not pretend otherwise.
+		await userEvent.keyboard("{Escape}");
+		expect(screen.getByTestId("overview-target")).toHaveTextContent("develop");
+	});
+
+	// Escape abandons the edit without writing anything.
+	it("cancels an edit on Escape without calling the daemon", async () => {
+		renderWithQuery(
+			<SessionInspector session={session([], { targetBranch: "develop", targetSource: "session_pr_target" })} />,
+		);
+
+		await userEvent.click(await screen.findByRole("button", { name: /edit target branch/i }));
+		const input = await screen.findByLabelText(/target branch/i);
+		await userEvent.clear(input);
+		await userEvent.type(input, "whatever{Escape}");
+
+		expect(putMock).not.toHaveBeenCalled();
+		expect(screen.getByTestId("overview-target")).toHaveTextContent("develop");
 	});
 
 	// Never render a guessed "main": an unknown target must read as unknown.

@@ -108,6 +108,24 @@ func (s *Store) SetSessionAutoResolve(ctx context.Context, id domain.SessionID, 
 	return rows > 0, nil
 }
 
+// SetSessionPRTarget records the branch this session's PR merges into. Returns
+// ok=false when the session id does not exist. When the session has an open
+// PR/MR the caller retargets the forge FIRST and only calls this on success, so
+// a stored value never claims a target the forge has not accepted.
+func (s *Store) SetSessionPRTarget(ctx context.Context, id domain.SessionID, target string, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionPRTarget(ctx, gen.SetSessionPRTargetParams{
+		ID:        id,
+		PRTarget:  target,
+		UpdatedAt: updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set pr target for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionKeepWarmOnMerge toggles whether a worker suspends-in-place (keeps its
 // card on the board) rather than terminating to Done when its PR merges
 // (feature/merge-suspend-in-place). Returns ok=false when the session id does not

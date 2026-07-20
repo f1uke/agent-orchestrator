@@ -34,6 +34,7 @@ type fakeSessionService struct {
 	replyThread           string
 	replyBody             string
 	replyErr              error
+	targetErr             error
 	replyComment          sessionsvc.PRThreadComment
 	resolvePR             string
 	resolveThread         string
@@ -206,6 +207,21 @@ func (f *fakeSessionService) SetKeepWarmOnMerge(_ context.Context, id domain.Ses
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
 	s.KeepWarmOnMerge = enabled
+	f.sessions[id] = s
+	return s, nil
+}
+
+func (f *fakeSessionService) SetTargetBranch(_ context.Context, id domain.SessionID, target string) (domain.Session, error) {
+	if f.targetErr != nil {
+		return domain.Session{}, f.targetErr
+	}
+	s, ok := f.sessions[id]
+	if !ok {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	s.PRTarget = target
+	s.TargetBranch = target
+	s.TargetSource = "session_pr_target"
 	f.sessions[id] = s
 	return s, nil
 }
@@ -1675,5 +1691,37 @@ func TestSessionsAPI_WorkspaceFileDiff(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"kind":"del"`) || !strings.Contains(string(body), `"text":"gone"`) {
 		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+// The target endpoint returns the updated session on success.
+func TestSetTargetBranch_ReturnsUpdatedSession(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.sessions["ao-1"] = domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-1"}}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/target", `{"targetBranch":"develop"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+	if !strings.Contains(string(body), `"targetBranch":"develop"`) {
+		t.Fatalf("response does not carry the new target: %s", body)
+	}
+}
+
+// A refused retarget must reach the client as a 400 naming the cause, NOT as a
+// 503 that blames the service for what was bad input.
+func TestSetTargetBranch_RefusedRetargetIsNotA503(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.sessions["ao-1"] = domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-1"}}
+	svc.targetErr = apierr.Invalid("TARGET_BRANCH_NOT_FOUND", `Branch "ghost" does not exist on the remote`, nil)
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/target", `{"targetBranch":"ghost"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", status, body)
+	}
+	if !strings.Contains(string(body), "TARGET_BRANCH_NOT_FOUND") {
+		t.Fatalf("response does not name the cause: %s", body)
 	}
 }

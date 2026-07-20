@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { ArrowUpRight, GitPullRequest } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { ArrowUpRight, GitPullRequest, Pencil } from "lucide-react";
+import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
@@ -566,23 +567,107 @@ const TARGET_SOURCE_NOTE: Record<NonNullable<WorkspaceSession["targetSource"]>, 
 	project: "project default",
 };
 
-// Where this session's work is headed. Sits directly under Branch so the pair
-// reads as "from → into". Renders "Not set" rather than assuming a default: an
-// unknown target shown as `main` is exactly the confident-but-wrong answer this
-// row exists to replace.
+// Where this session's work is headed, and the one place a human can change it.
+//
+// Sits directly under Branch so the pair reads as "from → into". Renders
+// "Not set" rather than assuming a default: an unknown target shown as `main`
+// is exactly the confident-but-wrong answer this row exists to replace.
+//
+// Saving delegates the hard part to the daemon, which retargets an open PR/MR
+// on the forge BEFORE persisting. So a rejection here means nothing was stored,
+// and the row must keep showing the old value rather than implying the edit
+// landed. The daemon's message is shown verbatim because it names the cause —
+// branch missing, no permission, PR already merged — and a generic "failed"
+// would throw that away.
 function TargetRow({ session }: { session: WorkspaceSession }) {
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState(session.targetBranch ?? "");
+	const [error, setError] = useState("");
+	const [saving, setSaving] = useState(false);
+	const inputId = useId();
 	const note = session.targetBranch ? TARGET_SOURCE_NOTE[session.targetSource ?? "project"] : "";
+
+	const beginEdit = () => {
+		setDraft(session.targetBranch ?? "");
+		setError("");
+		setEditing(true);
+	};
+	const cancel = () => {
+		setEditing(false);
+		setError("");
+	};
+
+	const save = async () => {
+		const next = draft.trim();
+		if (!next || saving) return;
+		if (next === session.targetBranch) {
+			cancel();
+			return;
+		}
+		setSaving(true);
+		setError("");
+		const { error: apiError } = await apiClient.PUT("/api/v1/sessions/{sessionId}/target", {
+			params: { path: { sessionId: session.id } },
+			body: { targetBranch: next },
+		});
+		setSaving(false);
+		if (apiError) {
+			setError(apiErrorMessage(apiError, "Could not change the target branch"));
+			return;
+		}
+		setEditing(false);
+	};
+
 	return (
 		<div className="inspector-kv__row">
 			<dt className="inspector-kv__k">Target</dt>
 			<dd className="inspector-kv__v" data-testid="overview-target">
-				{session.targetBranch ? (
-					<>
-						<span className="inspector-kv__v--mono">{session.targetBranch}</span>
-						{note ? <span className="ml-1.5 text-passive">· {note}</span> : null}
-					</>
+				{editing ? (
+					<div className="flex flex-col gap-1">
+						<input
+							aria-label="Target branch"
+							autoFocus
+							className="inspector-kv__v--mono w-full rounded-[5px] border border-border bg-surface px-1.5 py-0.5 text-fg outline-none focus:border-accent"
+							disabled={saving}
+							id={inputId}
+							onBlur={cancel}
+							onChange={(event) => setDraft(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") {
+									event.preventDefault();
+									void save();
+								} else if (event.key === "Escape") {
+									event.preventDefault();
+									cancel();
+								}
+							}}
+							value={draft}
+						/>
+						{error ? <span className="text-[11px] text-destructive">{error}</span> : null}
+					</div>
 				) : (
-					<span className="text-passive">Not set</span>
+					<span className="flex items-center gap-1.5">
+						{session.targetBranch ? (
+							<>
+								<span className="inspector-kv__v--mono">{session.targetBranch}</span>
+								{note ? <span className="text-passive">· {note}</span> : null}
+							</>
+						) : (
+							<span className="text-passive">Not set</span>
+						)}
+						<button
+							aria-label="Edit target branch"
+							// Quietly visible rather than hover-revealed: this is the only
+							// affordance for changing where the work lands, and a control
+							// nobody can see is a feature nobody uses.
+							className="text-passive transition-colors hover:text-fg"
+							onClick={beginEdit}
+							title="Change where this work merges"
+							type="button"
+						>
+							<Pencil aria-hidden="true" size={11} />
+						</button>
+					</span>
 				)}
 			</dd>
 		</div>

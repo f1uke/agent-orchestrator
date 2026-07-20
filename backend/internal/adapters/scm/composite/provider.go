@@ -199,3 +199,31 @@ func (p *Provider) ResolveThread(ctx context.Context, ref ports.SCMPRRef, thread
 	}
 	return w.ResolveThread(ctx, ref, threadID)
 }
+
+// BranchExists routes to the child provider named by repo.Provider. If that
+// child does not implement scmobserve.PRRetargeter, it returns a clear "does
+// not support" error rather than panicking on the type assertion.
+func (p *Provider) BranchExists(ctx context.Context, repo ports.SCMRepo, branch string) (bool, error) {
+	child, err := p.lookup(repo.Provider)
+	if err != nil {
+		return false, err
+	}
+	w, ok := child.(scmobserve.PRRetargeter)
+	if !ok {
+		return false, fmt.Errorf("composite scm: provider %q does not support retargeting", repo.Provider)
+	}
+	return w.BranchExists(ctx, repo, branch)
+}
+
+// RetargetPR routes to the child provider named by ref.Repo.Provider.
+func (p *Provider) RetargetPR(ctx context.Context, ref ports.SCMPRRef, target string) error {
+	child, err := p.lookup(ref.Repo.Provider)
+	if err != nil {
+		return err
+	}
+	w, ok := child.(scmobserve.PRRetargeter)
+	if !ok {
+		return fmt.Errorf("composite scm: provider %q does not support retargeting", ref.Repo.Provider)
+	}
+	return w.RetargetPR(ctx, ref, target)
+}

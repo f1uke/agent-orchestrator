@@ -118,6 +118,29 @@ func (f *fakeStore) SetSessionAutoResolve(_ context.Context, id domain.SessionID
 	return true, nil
 }
 
+func (f *fakeStore) SetSessionPRTarget(_ context.Context, id domain.SessionID, target string, updatedAt time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	rec.PRTarget = target
+	rec.UpdatedAt = updatedAt
+	f.sessions[id] = rec
+	return true, nil
+}
+
+func (f *fakeStore) SetPRTargetBranch(_ context.Context, prURL, target string, updatedAt time.Time) (bool, error) {
+	for id, pr := range f.pr {
+		if pr.URL == prURL {
+			pr.TargetBranch = target
+			pr.UpdatedAt = updatedAt
+			f.pr[id] = pr
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeStore) SetSessionKeepWarmOnMerge(_ context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error) {
 	r, ok := f.sessions[id]
 	if !ok {
@@ -151,7 +174,7 @@ func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]
 	if !ok {
 		return nil, nil
 	}
-	return []domain.PullRequest{{URL: pr.URL, SessionID: id, Number: pr.Number, Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, CI: pr.CI, Review: pr.Review, Mergeability: pr.Mergeability, UpdatedAt: pr.UpdatedAt}}, nil
+	return []domain.PullRequest{{URL: pr.URL, SessionID: id, Number: pr.Number, Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, CI: pr.CI, Review: pr.Review, Mergeability: pr.Mergeability, SourceBranch: pr.SourceBranch, TargetBranch: pr.TargetBranch, UpdatedAt: pr.UpdatedAt}}, nil
 }
 
 func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {

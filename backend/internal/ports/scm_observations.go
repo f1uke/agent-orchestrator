@@ -17,6 +17,15 @@ var ErrSCMNotFound = errors.New("scm: not found")
 // not permitted to make (missing write scope / insufficient permission).
 var ErrSCMForbidden = errors.New("scm: forbidden")
 
+// ErrSCMInvalid is the provider-neutral sentinel for a write the provider
+// REFUSED because the request itself was unacceptable — a target branch that
+// does not exist, a pull request already merged or closed, a base equal to the
+// head. GitHub signals this with 422 and GitLab with 400; without this sentinel
+// both fall through to the generic error and get rendered as a 503
+// "SCM unavailable", which blames the service for what was bad input and leaves
+// the human with nothing to act on.
+var ErrSCMInvalid = errors.New("scm: invalid request")
+
 // SCMRepo identifies a repository without assuming a provider-specific URL
 // shape. Repo is conventionally "owner/name" for providers that expose an
 // owner namespace, while Owner/Name are kept split for provider calls.

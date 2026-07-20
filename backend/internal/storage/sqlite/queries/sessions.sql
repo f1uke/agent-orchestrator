@@ -75,6 +75,14 @@ UPDATE sessions SET auto_resolve_on_reply = ?, updated_at = ? WHERE id = ?;
 -- Bumps updated_at so the sessions_cdc_update trigger refreshes the board.
 UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?;
 
+-- name: SetSessionPRTarget :execrows
+-- Set the branch this session's PR merges into. Written at spawn and whenever
+-- the human edits the target; when the session has an open PR the caller has
+-- ALREADY retargeted it on the SCM, so this only ever records a value the forge
+-- has agreed to. Bumps updated_at so the sessions_cdc_update trigger refreshes
+-- the board.
+UPDATE sessions SET pr_target = ?, updated_at = ? WHERE id = ?;
+
 -- name: SetSessionIssueBinding :execrows
 -- Set (or clear) a session's Jira binding after it is created: issue_id becomes
 -- "jira:<KEY>" on link (display_name = the issue's human title) or "" on unlink
