@@ -5,6 +5,7 @@ import {
 	buildTree,
 	collectTreeContext,
 	countTreeNodes,
+	emptyResultHint,
 	groupBySprint,
 	groupTreeBySprint,
 	hasUnassigned,
@@ -207,5 +208,43 @@ describe("collectTreeContext", () => {
 		expect(context.map((c) => c.key)).toContain("T-1");
 		expect(context.map((c) => c.key)).not.toContain("T-2"); // done → excluded
 		expect(jqls.some((q) => q.includes("parent in (S-1) AND statusCategory != Done"))).toBe(true);
+	});
+});
+
+describe("emptyResultHint", () => {
+	it("says nothing beyond the basics when there is no query and no filters", () => {
+		expect(emptyResultHint({ text: "", projectKey: "STAR", filtersActive: false })).toBe("No issues match.");
+	});
+
+	it("explains that a key lookup found nothing when a number was resolved to a key", () => {
+		// The backend turns a bare number + selected project into `key = "STAR-9999"`,
+		// so the honest report is that the key does not exist, not that prose missed.
+		expect(emptyResultHint({ text: "9999", projectKey: "STAR", filtersActive: false })).toBe(
+			"No issue STAR-9999 found.",
+		);
+	});
+
+	it("explains a full key lookup the same way", () => {
+		expect(emptyResultHint({ text: "demo-4", projectKey: "STAR", filtersActive: false })).toBe(
+			"No issue DEMO-4 found.",
+		);
+	});
+
+	it("says free text is matched from the start of each word", () => {
+		expect(emptyResultHint({ text: "upon", projectKey: "STAR", filtersActive: false })).toBe(
+			'No issues match "upon". Words match from the start, so try the beginning of a word.',
+		);
+	});
+
+	it("mentions active filters as a narrowing cause", () => {
+		expect(emptyResultHint({ text: "", projectKey: "STAR", filtersActive: true })).toBe(
+			"No issues match. Filters are narrowing this list.",
+		);
+	});
+
+	it("does not claim a key lookup when a number has no project to resolve against", () => {
+		expect(emptyResultHint({ text: "9999", projectKey: "", filtersActive: false })).toBe(
+			'No issues match "9999". Words match from the start, so try the beginning of a word.',
+		);
 	});
 });

@@ -434,6 +434,127 @@ func TestBuildJQL_ExplicitProjectAndText(t *testing.T) {
 	}
 }
 
+// --- search-that-actually-finds-things (verified against real Jira) ---------
+//
+// The JQL shapes asserted below were each run against the live Finnomena Jira
+// (project STAR) before being encoded here; see
+// ~/.ao/knowledge/agent-orchestrator/plans/fix-jira-search-partial-match--plan.md
+// for the measured row counts behind every choice.
+
+func TestBuildJQL_BareNumberWithProjectResolvesKey(t *testing.T) {
+	// A bare number can never match prose — an issue's KEY is not part of its
+	// summary text (live: `summary ~ "2271*"` in STAR = 0 rows, while STAR-2271
+	// exists). With a project selected the number is unambiguous, so resolve it.
+	s := &fakeSearcher{issues: []jiraadapter.IssueSummary{{Key: "STAR-2271"}}}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Text: "2271"}); err != nil {
+		t.Fatal(err)
+	}
+	if s.gotJQL != `key = "STAR-2271"` {
+		t.Errorf("jql = %q, want an exact key lookup from project + number", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_BareNumberWithoutProjectStaysTextSearch(t *testing.T) {
+	// No project selected → nothing to build a key from; keep it a text search
+	// rather than inventing a project.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: "2271"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.gotJQL, "key =") {
+		t.Errorf("jql = %q, must not guess a key without a project", s.gotJQL)
+	}
+	if !strings.Contains(s.gotJQL, `summary ~ "2271*"`) {
+		t.Errorf("jql = %q, want a text search", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_HyphenatedTextSplitsIntoTerms(t *testing.T) {
+	// The `~` operand goes to Jira's Lucene-style text parser, where `-` means NOT:
+	// `summary ~ "e-coupon*"` is live-confirmed 0 rows against STAR even though
+	// "App - E-Coupon 3.0 …" exists. Backslash-escaping alone does NOT fix it —
+	// a wildcard term bypasses the analyzer, and the index holds `e` + `coupon`,
+	// never the single token `e-coupon`. Split into terms, wildcard the last.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Text: "e-coupon"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.gotJQL, `summary ~ "e coupon*"`) {
+		t.Errorf("jql = %q, want the hyphen split into ANDed terms with a trailing wildcard", s.gotJQL)
+	}
+	if strings.Contains(s.gotJQL, "-") {
+		t.Errorf("jql = %q, must not leave a bare hyphen in the text operand", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_OperatorCharactersNeutralised(t *testing.T) {
+	// Real titles are full of Lucene operators. Every one of
+	// `+ - && || ! ( ) { } [ ] ^ " ~ * ? : \ /` must stop being an operator.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: `(E-Coupon) 3.0 ~ "x" +y !z`}); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []string{"(", ")", "~ \"x", "+", "!", "-", "?", "^", "[", "]", "{", "}", ":", "/", `\`} {
+		operand := s.gotJQL
+		if i := strings.Index(operand, `summary ~ "`); i >= 0 {
+			operand = operand[i+len(`summary ~ "`):]
+			if j := strings.Index(operand, `"`); j >= 0 {
+				operand = operand[:j]
+			}
+		}
+		if strings.Contains(operand, op) {
+			t.Errorf("operand %q still contains the operator %q", operand, op)
+		}
+	}
+	if !strings.Contains(s.gotJQL, `summary ~ "e coupon 3 0 x y z*"`) {
+		t.Errorf("jql = %q, want operators reduced to ANDed terms", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_UppercaseBooleanWordsAreNotOperators(t *testing.T) {
+	// Live: `summary ~ "NOT coupon*"` returns rows that do NOT contain "coupon" —
+	// Jira honours the uppercase word as a negation. Lowercasing neutralises it,
+	// and costs nothing because text matching is case-insensitive.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: "NOT coupon"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.gotJQL, `summary ~ "not coupon*"`) {
+		t.Errorf("jql = %q, want the boolean word lowercased into a plain term", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_AllOperatorTextDropsTextClause(t *testing.T) {
+	// Input with no searchable characters must not emit a bare `~ "*"`.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Text: "---"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.gotJQL, "summary ~") {
+		t.Errorf("jql = %q, want the text clause dropped entirely", s.gotJQL)
+	}
+	if s.gotJQL != `project = "STAR" ORDER BY updated DESC` {
+		t.Errorf("jql = %q, want a plain project scope", s.gotJQL)
+	}
+}
+
+func TestBuildJQL_QuoteAndBackslashCannotBreakOutOfTheLiteral(t *testing.T) {
+	// A quote or backslash in the query must not break out of the JQL string
+	// literal. Term splitting is what achieves this today (they are not letters or
+	// digits, so they become separators); escapeJQL is the belt-and-braces layer
+	// behind it. This asserts the guarantee, not which layer provides it.
+	s := &fakeSearcher{}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: `a"b\c`}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.gotJQL, `"a"b`) {
+		t.Errorf("jql = %q, quote broke out of the literal", s.gotJQL)
+	}
+	if !strings.Contains(s.gotJQL, `summary ~ "a b c*"`) {
+		t.Errorf("jql = %q, want quote/backslash split into terms", s.gotJQL)
+	}
+}
+
 func TestBuildJQL_AssigneeFilterServerSide(t *testing.T) {
 	// The assignee (an accountId) is pushed into the JQL so Jira returns all of that
 	// person's issues — not just those in the most-recent page the client can pare.

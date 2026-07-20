@@ -276,3 +276,40 @@ export async function collectTreeContext(
 
 	return context;
 }
+
+/** Shape of a search that came back empty, for explaining WHY. */
+export interface EmptyResultContext {
+	/** The search box text, as sent. */
+	text: string;
+	/** The selected project key, or "" when browsing without one. */
+	projectKey: string;
+	/** Whether any narrowing filter (assignee/type/hide-done/sprint) is active. */
+	filtersActive: boolean;
+}
+
+/** A full Jira key typed on its own (PROJECT-123). Mirrors the server's fullKeyRE. */
+const FULL_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+/** Just the number half of a key — resolvable only with a project selected. */
+const BARE_NUMBER = /^\d+$/;
+
+/**
+ * Explains an empty result the way the query was ACTUALLY run, so the human is not
+ * left guessing. Deliberately limited to what the server-side classification can
+ * support (see buildJQL): a key lookup either found the issue or it does not exist,
+ * while free text is prefix-matched per word and cannot match mid-word. Nothing
+ * here is inferred beyond that.
+ */
+export function emptyResultHint({ text, projectKey, filtersActive }: EmptyResultContext): string {
+	const trimmed = text.trim();
+	const upper = trimmed.toUpperCase();
+	const key = FULL_KEY.test(upper)
+		? upper
+		: projectKey && BARE_NUMBER.test(trimmed)
+			? `${projectKey.toUpperCase()}-${trimmed}`
+			: "";
+	if (key) return `No issue ${key} found.`;
+	if (trimmed) {
+		return `No issues match "${trimmed}". Words match from the start, so try the beginning of a word.`;
+	}
+	return filtersActive ? "No issues match. Filters are narrowing this list." : "No issues match.";
+}

@@ -17,6 +17,7 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import {
 	buildTree,
 	countTreeNodes,
+	emptyResultHint,
 	groupTreeBySprint,
 	hasUnassigned,
 	isEpicIssue,
@@ -619,7 +620,16 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 							) : isFetching && results.length === 0 ? (
 								<p className="jira-browse__note">Searching…</p>
 							) : results.length === 0 ? (
-								<p className="jira-browse__note">No issues match.</p>
+								<p className="jira-browse__note">
+									{advancedMode
+										? "No issues match."
+										: emptyResultHint({
+												text: debounced,
+												projectKey,
+												filtersActive:
+													effectiveAssignee !== "" || selectedTypes.length > 0 || hideDone || activeSprintOnly,
+											})}
+								</p>
 							) : treeGroups ? (
 								treeGroups.map((group) => {
 									const isCollapsed = collapsedSprints.has(group.name);
