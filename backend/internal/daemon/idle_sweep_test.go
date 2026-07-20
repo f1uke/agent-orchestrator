@@ -10,7 +10,7 @@ import (
 
 func TestStartIdleSweep_DisabledClosesImmediately(t *testing.T) {
 	var calls int32
-	done := startIdleSweep(context.Background(), 0, func(context.Context) error {
+	done := startTickerSweep(context.Background(), "idle session sweep", 0, func(context.Context) error {
 		atomic.AddInt32(&calls, 1)
 		return nil
 	}, slog.Default())
@@ -28,7 +28,7 @@ func TestStartIdleSweep_DisabledClosesImmediately(t *testing.T) {
 func TestStartIdleSweep_TicksThenStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ticked := make(chan struct{}, 1)
-	done := startIdleSweep(ctx, 5*time.Millisecond, func(context.Context) error {
+	done := startTickerSweep(ctx, "idle session sweep", 5*time.Millisecond, func(context.Context) error {
 		select {
 		case ticked <- struct{}{}:
 		default:

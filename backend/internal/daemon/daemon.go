@@ -361,9 +361,25 @@ func Run() error {
 		Description: "Scans for idle sessions and closes them once past the idle TTL.",
 		Interval:    sweepInterval,
 	})
-	idleSweepDone := startIdleSweep(ctx, sweepInterval, func(ctx context.Context) error {
+	idleSweepDone := startTickerSweep(ctx, "idle session sweep", sweepInterval, func(ctx context.Context) error {
 		idleRec.Tick()
 		return sessMgr.CloseIdleSessions(ctx)
+	}, log)
+
+	// Keep every live orchestrator's worktree on its project's default branch.
+	// Spawn and restore already sync at startup; this covers the drift in
+	// between, because an orchestrator session runs for days while the default
+	// branch moves under it, and an orchestrator reading stale code answers
+	// questions about the codebase wrongly. Worker worktrees are never touched.
+	orchSyncRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "orchestrator-worktree-sync",
+		Display:     "Orchestrator code refresh",
+		Description: "Fast-forwards each live orchestrator's worktree to its project's default branch.",
+		Interval:    orchestratorSyncIntervalDefault,
+	})
+	orchSyncDone := startTickerSweep(ctx, "orchestrator worktree sync", orchestratorSyncIntervalDefault, func(ctx context.Context) error {
+		orchSyncRec.Tick()
+		return sessMgr.SyncOrchestratorWorkspaces(ctx)
 	}, log)
 
 	// Age-based evidence retention: periodic sweep (plus an immediate first run)
@@ -396,6 +412,7 @@ func Run() error {
 	stop()
 	<-previewDone
 	<-idleSweepDone
+	<-orchSyncDone
 	<-evidenceSweepDone
 	<-reclaimerDone
 	<-tokenUsageDone

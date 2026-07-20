@@ -100,6 +100,10 @@ func (s *stubWorkspace) ApplyPreserved(_ context.Context, _ ports.WorkspaceInfo,
 	return nil
 }
 
+func (s *stubWorkspace) SyncToBase(_ context.Context, _ ports.WorkspaceInfo, baseBranch string) (ports.WorkspaceSyncResult, error) {
+	return ports.WorkspaceSyncResult{Outcome: ports.WorkspaceSyncUpdated, BaseRef: "origin/" + baseBranch}, nil
+}
+
 type captureMessenger struct{ msgs []string }
 
 func (c *captureMessenger) Send(_ context.Context, _ domain.SessionID, msg string) error {

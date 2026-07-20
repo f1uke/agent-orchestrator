@@ -465,10 +465,11 @@ func TestProjectRepoResolver_ResolvesRegisteredProject(t *testing.T) {
 // assert the daemon wiring invokes the correct methods without needing a real
 // runtime or worktree.
 type fakeSessionLifecycle struct {
-	reconcileCalled  bool
-	restoreAllCalled bool
-	reconcileErr     error
-	restoreErr       error
+	reconcileCalled        bool
+	restoreAllCalled       bool
+	syncOrchestratorCalled bool
+	reconcileErr           error
+	restoreErr             error
 }
 
 func (f *fakeSessionLifecycle) Reconcile(_ context.Context) error {
@@ -482,6 +483,11 @@ func (f *fakeSessionLifecycle) RestoreAll(_ context.Context) error {
 }
 
 func (f *fakeSessionLifecycle) CloseIdleSessions(_ context.Context) error { return nil }
+
+func (f *fakeSessionLifecycle) SyncOrchestratorWorkspaces(_ context.Context) error {
+	f.syncOrchestratorCalled = true
+	return nil
+}
 
 // TestWiring_SessionLifecycleInterfaceInvokedByDaemon asserts the
 // sessionLifecycle interface is satisfied by *sessionmanager.Manager (compile
@@ -510,5 +516,48 @@ func TestWiring_SessionLifecycleInterfaceInvokedByDaemon(t *testing.T) {
 	}
 	if !fake.restoreAllCalled {
 		t.Fatal("RestoreAll was not called through the interface")
+	}
+
+	// The periodic orchestrator worktree sync reaches the manager through this
+	// same interface. Keeping it on the interface is what lets the daemon's
+	// ticker call it; dropping it would strand the loop.
+	if err := sl.SyncOrchestratorWorkspaces(ctx); err != nil {
+		t.Fatalf("SyncOrchestratorWorkspaces: %v", err)
+	}
+	if !fake.syncOrchestratorCalled {
+		t.Fatal("SyncOrchestratorWorkspaces was not called through the interface")
+	}
+}
+
+// TestStartTickerSweep_RunsSweepOnEveryTick pins the loop the orchestrator
+// worktree sync rides on: without it the sync is wired but never fires, and an
+// orchestrator would go stale over a long session exactly as before. A sweep
+// that returns an error must NOT stop the ticker — one unreachable repo cannot
+// be allowed to end refreshing for every other project.
+func TestStartTickerSweep_RunsSweepOnEveryTick(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	calls := make(chan struct{}, 8)
+	done := startTickerSweep(ctx, "test sweep", time.Millisecond, func(context.Context) error {
+		select {
+		case calls <- struct{}{}:
+		default:
+		}
+		return errors.New("sweep failed but the loop must continue")
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-calls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("sweep tick %d never fired", i+1)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sweep goroutine did not exit on context cancel")
 	}
 }

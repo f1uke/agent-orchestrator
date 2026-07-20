@@ -155,6 +155,75 @@ type Workspace interface {
 	// tree, and ErrPreservedConflict (wrapped) is returned. The ref must never
 	// be deleted on a failed or conflicted apply.
 	ApplyPreserved(ctx context.Context, info WorkspaceInfo, ref string) error
+	// SyncToBase advances the workspace's own branch to the head of baseBranch,
+	// so a long-lived worktree (the orchestrator's) shows current code instead of
+	// the commit it was cut from. It fetches baseBranch, then fast-forwards.
+	//
+	// It NEVER destroys work: a worktree with uncommitted changes is left alone,
+	// and a branch carrying commits the base does not have is left alone (a
+	// fast-forward is possible exactly when no committed work would be lost).
+	// Both cases return a skipped result naming the reason rather than an error.
+	//
+	// A non-nil error means the sync could not be evaluated at all. Callers treat
+	// that as non-fatal for session startup but MUST surface it: silently serving
+	// a stale tree is the failure this exists to prevent.
+	SyncToBase(ctx context.Context, info WorkspaceInfo, baseBranch string) (WorkspaceSyncResult, error)
+}
+
+// WorkspaceSyncOutcome names what SyncToBase did.
+type WorkspaceSyncOutcome string
+
+// Workspace sync outcomes.
+const (
+	// WorkspaceSyncUpdated reports the branch was fast-forwarded to the base.
+	WorkspaceSyncUpdated WorkspaceSyncOutcome = "updated"
+	// WorkspaceSyncAlreadyCurrent reports the branch already pointed at the base.
+	WorkspaceSyncAlreadyCurrent WorkspaceSyncOutcome = "already_current"
+	// WorkspaceSyncSkipped reports the sync was deliberately not performed;
+	// Reason says why. The workspace stays as it was.
+	WorkspaceSyncSkipped WorkspaceSyncOutcome = "skipped"
+)
+
+// Reasons carried by a skipped WorkspaceSyncResult.
+const (
+	// WorkspaceSyncReasonNoBaseBranch: no base branch was configured to sync to.
+	WorkspaceSyncReasonNoBaseBranch = "no-base-branch"
+	// WorkspaceSyncReasonDirty: the worktree holds uncommitted changes. Updating
+	// it could destroy work, so it is left untouched.
+	WorkspaceSyncReasonDirty = "dirty"
+	// WorkspaceSyncReasonDiverged: the branch carries commits the base does not,
+	// so no fast-forward exists. Advancing would discard those commits, so the
+	// branch is left where it is and the staleness is reported instead.
+	WorkspaceSyncReasonDiverged = "diverged"
+	// WorkspaceSyncReasonBaseUnreachable: the base branch resolves to no ref,
+	// locally or on the remote.
+	WorkspaceSyncReasonBaseUnreachable = "base-unreachable"
+)
+
+// WorkspaceSyncResult reports what SyncToBase did, in enough detail for a caller
+// to log a skip loudly and for a human to tell a current tree from a stale one.
+type WorkspaceSyncResult struct {
+	Outcome WorkspaceSyncOutcome
+	// Reason is set only when Outcome is WorkspaceSyncSkipped.
+	Reason string
+	// BaseRef is the ref the sync resolved the base branch to (e.g.
+	// "origin/main-fluke"). Empty when the base could not be resolved.
+	BaseRef string
+	// FromSHA and ToSHA bracket the move. On a skip they show how far behind the
+	// worktree actually is, which is the number a stale orchestrator needs.
+	FromSHA string
+	ToSHA   string
+	// FetchError records a failed `git fetch` in a run that still proceeded
+	// against already-fetched refs. Non-empty means the result may be based on
+	// stale remote-tracking data and must be surfaced.
+	FetchError string
+}
+
+// Stale reports whether the workspace is known to be behind its base branch —
+// true when a sync was skipped while base and branch pointed at different
+// commits. This is the condition a caller must make visible.
+func (r WorkspaceSyncResult) Stale() bool {
+	return r.Outcome == WorkspaceSyncSkipped && r.ToSHA != "" && r.FromSHA != r.ToSHA
 }
 
 // WorkspaceProject is an optional extension for projects composed from a

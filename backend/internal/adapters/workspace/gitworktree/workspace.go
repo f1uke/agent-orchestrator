@@ -570,6 +570,144 @@ func (w *Workspace) Restore(ctx context.Context, cfg ports.WorkspaceConfig) (por
 	return ports.WorkspaceInfo{Path: path, Branch: cfg.Branch, SessionID: cfg.SessionID, ProjectID: cfg.ProjectID, RepoPath: repo}, nil
 }
 
+// SyncToBase advances info's branch to the head of baseBranch. See
+// ports.Workspace.SyncToBase for the contract.
+//
+// The whole operation is a fetch plus a fast-forward, and that is deliberate.
+// The orchestrator's branch cannot BE the default branch — the user's main
+// checkout already holds it, and git refuses the same branch in two worktrees —
+// so the branch is instead kept pointing AT the default branch's commit. A
+// fast-forward is possible exactly when the branch carries no commits of its
+// own, which makes "never destroys work" a property of the operation rather
+// than a check that could be forgotten. Anything a fast-forward cannot do is
+// reported as a skip, never forced.
+func (w *Workspace) SyncToBase(ctx context.Context, info ports.WorkspaceInfo, baseBranch string) (ports.WorkspaceSyncResult, error) {
+	baseBranch = strings.TrimSpace(baseBranch)
+	if baseBranch == "" {
+		return skippedSync(ports.WorkspaceSyncReasonNoBaseBranch, "", "", ""), nil
+	}
+	if info.Path == "" {
+		return ports.WorkspaceSyncResult{}, errors.New("gitworktree: SyncToBase requires a workspace path")
+	}
+	repo, err := w.repoPathForInfo(info)
+	if err != nil {
+		return ports.WorkspaceSyncResult{}, err
+	}
+
+	// Check for uncommitted work FIRST, before any fetch: a dirty worktree is
+	// left completely alone, so there is no reason to touch the network.
+	dirty, err := w.isDirty(ctx, info.Path)
+	if err != nil {
+		return ports.WorkspaceSyncResult{}, err
+	}
+	head, err := w.revParse(ctx, info.Path, "HEAD")
+	if err != nil {
+		return ports.WorkspaceSyncResult{}, err
+	}
+	if dirty {
+		// ToSHA is resolved without fetching so the skip can still say how far
+		// behind the tree is; a failure to resolve it just leaves it empty.
+		target, _ := w.resolveSyncBaseRef(ctx, repo, baseBranch)
+		res := skippedSync(ports.WorkspaceSyncReasonDirty, target.ref, head, target.sha)
+		w.logSyncSkip(ctx, info, baseBranch, res)
+		return res, nil
+	}
+
+	// A failed fetch is recorded, not fatal: an offline daemon can still
+	// fast-forward onto refs it already has, which is strictly better than
+	// staying frozen. The error rides along on the result so it stays visible.
+	var fetchErr string
+	if _, err := w.run(ctx, w.binary, fetchBaseArgs(repo, baseBranch)...); err != nil {
+		fetchErr = err.Error()
+		slog.WarnContext(ctx, "gitworktree: SyncToBase fetch failed, falling back to already-fetched refs",
+			"worktree", info.Path, "baseBranch", baseBranch, "error", err)
+	}
+
+	target, err := w.resolveSyncBaseRef(ctx, repo, baseBranch)
+	if err != nil {
+		return ports.WorkspaceSyncResult{}, err
+	}
+	if target.ref == "" {
+		res := skippedSync(ports.WorkspaceSyncReasonBaseUnreachable, "", head, "")
+		res.FetchError = fetchErr
+		w.logSyncSkip(ctx, info, baseBranch, res)
+		return res, nil
+	}
+	if target.sha == head {
+		return ports.WorkspaceSyncResult{
+			Outcome: ports.WorkspaceSyncAlreadyCurrent,
+			BaseRef: target.ref, FromSHA: head, ToSHA: target.sha, FetchError: fetchErr,
+		}, nil
+	}
+
+	if _, err := w.run(ctx, w.binary, mergeFFOnlyArgs(info.Path, target.ref)...); err != nil {
+		// Not fast-forwardable: the branch has commits the base does not. Leave
+		// them alone and report the staleness instead of resolving it.
+		//
+		// The nil error is deliberate, not a swallowed failure. A refused
+		// fast-forward is the guard WORKING — it is how this code declines to
+		// discard committed work — so it is an outcome the caller must read off
+		// the result, not a fault. Returning an error here would make callers
+		// treat "we protected your commits" the same as "git is broken", and the
+		// staleness is already reported via the skipped result and logSyncSkip.
+		res := skippedSync(ports.WorkspaceSyncReasonDiverged, target.ref, head, target.sha)
+		res.FetchError = fetchErr
+		w.logSyncSkip(ctx, info, baseBranch, res)
+		return res, nil //nolint:nilerr // a refused fast-forward is a reported outcome, not an error
+	}
+	return ports.WorkspaceSyncResult{
+		Outcome: ports.WorkspaceSyncUpdated,
+		BaseRef: target.ref, FromSHA: head, ToSHA: target.sha, FetchError: fetchErr,
+	}, nil
+}
+
+// syncTarget is the resolved base: which ref answered, and the commit it names.
+type syncTarget struct {
+	ref string
+	sha string
+}
+
+// resolveSyncBaseRef finds the ref the base branch currently lives at. A zero
+// syncTarget (empty ref) means the base resolves nowhere — reported to the
+// caller as base-unreachable rather than treated as "nothing to do".
+func (w *Workspace) resolveSyncBaseRef(ctx context.Context, repo, baseBranch string) (syncTarget, error) {
+	for _, ref := range syncBaseRefCandidates(baseBranch) {
+		exists, err := w.refExists(ctx, repo, ref)
+		if err != nil {
+			return syncTarget{}, err
+		}
+		if !exists {
+			continue
+		}
+		sha, err := w.revParse(ctx, repo, ref)
+		if err != nil {
+			return syncTarget{}, err
+		}
+		return syncTarget{ref: ref, sha: sha}, nil
+	}
+	return syncTarget{}, nil
+}
+
+func skippedSync(reason, ref, from, to string) ports.WorkspaceSyncResult {
+	return ports.WorkspaceSyncResult{
+		Outcome: ports.WorkspaceSyncSkipped,
+		Reason:  reason, BaseRef: ref, FromSHA: from, ToSHA: to,
+	}
+}
+
+// logSyncSkip makes a skipped update audible. Staying stale silently is the
+// exact failure this whole path exists to prevent, so a skip that leaves the
+// worktree behind its base is logged at Warn with the SHAs needed to judge how
+// far behind it is.
+func (w *Workspace) logSyncSkip(ctx context.Context, info ports.WorkspaceInfo, baseBranch string, res ports.WorkspaceSyncResult) {
+	if !res.Stale() {
+		return
+	}
+	slog.WarnContext(ctx, "gitworktree: SyncToBase skipped — workspace is STALE",
+		"worktree", info.Path, "branch", info.Branch, "baseBranch", baseBranch,
+		"reason", res.Reason, "head", res.FromSHA, "baseHead", res.ToSHA)
+}
+
 func (w *Workspace) existingWorktree(ctx context.Context, repo, path string, cfg ports.WorkspaceConfig) (ports.WorkspaceInfo, bool, error) {
 	records, err := w.listRecords(ctx, repo)
 	if err != nil {

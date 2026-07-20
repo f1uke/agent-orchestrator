@@ -664,7 +664,11 @@ func (m *Manager) createSessionWorkspace(ctx context.Context, project domain.Pro
 			Branch:        branch,
 			BaseBranch:    baseBranch,
 		})
-		return ws, nil, err
+		if err != nil {
+			return ws, nil, err
+		}
+		m.syncOrchestratorWorkspace(ctx, cfg.Kind, id, ws, baseBranch)
+		return ws, nil, nil
 	}
 	workspaceProject, ok := m.workspace.(ports.WorkspaceProject)
 	if !ok {
@@ -709,6 +713,111 @@ func (m *Manager) createSessionWorkspace(ctx context.Context, project domain.Pro
 		}
 	}
 	return info.Root, &info, nil
+}
+
+// syncOrchestratorWorkspace brings an ORCHESTRATOR's worktree up to the
+// project's default branch. It is a no-op for every other kind.
+//
+// Why only the orchestrator: a worker's worktree is cut per-branch on purpose —
+// its branch IS the work, and advancing it onto the default branch would be
+// wrong even where it is possible. The orchestrator's worktree is the opposite:
+// nobody commits in it, it exists so the orchestrator can READ current code, and
+// it is long-lived. Its branch is released but never deleted when a session is
+// retired, so without this a replacement orchestrator silently re-checks-out the
+// commit its predecessor was frozen at, and answers questions about the codebase
+// from a tree that may be hundreds of commits stale.
+//
+// Called at the two points AO already materialises a worktree — spawn and
+// restore — because those are exactly the moments the tree is known to be idle
+// and unattended. Syncing mid-session would yank files out from under a running
+// agent; syncing at startup cannot.
+//
+// A failure here NEVER blocks the session: an orchestrator on a stale tree is
+// degraded, one that refuses to start is useless. But it must not be silent —
+// believing itself current while stale is the failure being fixed — so every
+// non-advance is logged at Warn with the SHAs needed to judge the gap.
+func (m *Manager) syncOrchestratorWorkspace(ctx context.Context, kind domain.SessionKind, id domain.SessionID, ws ports.WorkspaceInfo, baseBranch string) {
+	if kind != domain.KindOrchestrator || ws.Path == "" {
+		return
+	}
+	res, err := m.workspace.SyncToBase(ctx, ws, baseBranch)
+	if err != nil {
+		m.logger.Warn("orchestrator workspace sync FAILED — session may be serving stale code",
+			"sessionID", id, "workspace", ws.Path, "baseBranch", baseBranch, "error", err)
+		return
+	}
+	if res.FetchError != "" {
+		m.logger.Warn("orchestrator workspace sync could not fetch — result is based on already-fetched refs",
+			"sessionID", id, "baseBranch", baseBranch, "error", res.FetchError)
+	}
+	switch res.Outcome {
+	case ports.WorkspaceSyncSkipped:
+		m.logger.Warn("orchestrator workspace NOT updated — session is serving STALE code",
+			"sessionID", id, "workspace", ws.Path, "baseBranch", baseBranch,
+			"reason", res.Reason, "head", res.FromSHA, "baseHead", res.ToSHA)
+	case ports.WorkspaceSyncUpdated:
+		m.logger.Info("orchestrator workspace synced to base branch",
+			"sessionID", id, "baseBranch", baseBranch, "baseRef", res.BaseRef,
+			"from", res.FromSHA, "to", res.ToSHA)
+	case ports.WorkspaceSyncAlreadyCurrent:
+		// Nothing to report: the common steady state.
+	}
+}
+
+// SyncOrchestratorWorkspaces brings every LIVE orchestrator's worktree up to its
+// project's default branch. The daemon runs it on a timer.
+//
+// Spawn and restore alone only make an orchestrator current at STARTUP. These
+// sessions are long-lived — days — and the default branch moves under them the
+// whole time, so a session that has been up since Monday answers Friday's
+// questions from Monday's code. That is the same wrong answer the startup sync
+// was added to prevent, just delayed. The sweep is what makes "current" a
+// standing property instead of a one-off.
+//
+// Only orchestrators are touched. A periodic job that fast-forwarded WORKER
+// worktrees would walk them off their own branches and destroy in-flight work —
+// a far worse failure than the staleness this fixes.
+//
+// One session's failure never stops the sweep: aborting early would leave every
+// later orchestrator silently stale, which is precisely the bug class in play.
+func (m *Manager) SyncOrchestratorWorkspaces(ctx context.Context) error {
+	recs, err := m.store.ListAllSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("sync orchestrator workspaces: list sessions: %w", err)
+	}
+	projects := make(map[domain.ProjectID]domain.ProjectRecord)
+	for _, rec := range recs {
+		if rec.Kind != domain.KindOrchestrator || rec.IsTerminated || rec.IsTodo {
+			continue
+		}
+		if rec.Metadata.WorkspacePath == "" {
+			continue
+		}
+		project, ok := projects[rec.ProjectID]
+		if !ok {
+			project, err = m.loadProject(ctx, rec.ProjectID)
+			if err != nil {
+				m.logger.Warn("orchestrator workspace sync: load project failed",
+					"sessionID", rec.ID, "projectID", rec.ProjectID, "error", err)
+				continue
+			}
+			projects[rec.ProjectID] = project
+		}
+		m.syncOrchestratorWorkspace(ctx, rec.Kind, rec.ID, workspaceInfo(rec), orchestratorSyncBase(project, rec))
+	}
+	return nil
+}
+
+// orchestratorSyncBase names the branch a restored session's worktree is brought
+// up to: the base recorded at spawn when there is one, else the project's
+// CURRENT default. The fallback matters — sessions predating the recorded base
+// carry an empty value, and a project can change its default branch under a
+// long-lived orchestrator.
+func orchestratorSyncBase(project domain.ProjectRecord, rec domain.SessionRecord) string {
+	if base := strings.TrimSpace(rec.BaseBranch); base != "" {
+		return base
+	}
+	return project.Config.WithDefaults().DefaultBranch
 }
 
 func (m *Manager) destroySpawnWorkspace(ctx context.Context, ws ports.WorkspaceInfo, workspaceProject *ports.WorkspaceProjectInfo) {
@@ -1670,6 +1779,9 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 				m.logger.Error("restore-all: workspace restore failed", "sessionID", rec.ID, "error", restoreErr)
 				continue
 			}
+			// A daemon restart is the longest gap an orchestrator's worktree can
+			// sit through, so it is the point it is most likely to be stale.
+			m.syncOrchestratorWorkspace(ctx, rec.Kind, rec.ID, ws, orchestratorSyncBase(project, rec))
 		}
 		if ws.Path == "" {
 			m.logger.Error("restore-all: workspace restore failed", "sessionID", rec.ID, "error", "empty restored root path")
@@ -1760,13 +1872,18 @@ func (m *Manager) markSessionWorktreesActive(ctx context.Context, rows []domain.
 
 func (m *Manager) restoreSessionWorkspace(ctx context.Context, project domain.ProjectRecord, rec domain.SessionRecord) (ports.WorkspaceInfo, error) {
 	if project.Kind.WithDefault() != domain.ProjectKindWorkspace {
-		return m.workspace.Restore(ctx, ports.WorkspaceConfig{
+		ws, err := m.workspace.Restore(ctx, ports.WorkspaceConfig{
 			ProjectID:     rec.ProjectID,
 			SessionID:     rec.ID,
 			Kind:          rec.Kind,
 			SessionPrefix: sessionPrefix(project),
 			Branch:        rec.Metadata.Branch,
 		})
+		if err != nil {
+			return ws, err
+		}
+		m.syncOrchestratorWorkspace(ctx, rec.Kind, rec.ID, ws, orchestratorSyncBase(project, rec))
+		return ws, nil
 	}
 	rows, err := m.workspaceProjectRestoreRows(ctx, project, rec)
 	if err != nil {
