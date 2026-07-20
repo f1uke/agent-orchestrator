@@ -694,15 +694,46 @@ func TestSetBinding_UnknownKeyDoesNotBind(t *testing.T) {
 	}
 }
 
+// Unlink must genuinely CLEAR issue_id. It previously wrote the session's display
+// name into issue_id, so a session that reported {"linked":false} still carried
+// "My label" as its issue id - data corruption that survived because the old test
+// asserted exactly that. The display name is preserved so the card still reads well.
 func TestUnlink_Success(t *testing.T) {
 	rec := &bindRec{}
 	sess := domain.Session{SessionRecord: domain.SessionRecord{ID: "s1", IssueID: "jira:DEMO-2272", DisplayName: "My label"}}
 	svc := New(fakeSessions{sess: sess, rec: rec}, &fakeIssues{}, nil, &fakeSearcher{})
+	got, err := svc.Unlink(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rec.called {
+		t.Fatal("unlink must write the cleared binding")
+	}
+	if rec.issueID != "" {
+		t.Errorf("issue_id written = %q, want %q (unlink must clear it, never store a label)", rec.issueID, "")
+	}
+	if rec.display != "My label" {
+		t.Errorf("display_name written = %q, want %q (unlink must preserve the label)", rec.display, "My label")
+	}
+	if got.IssueID != "" {
+		t.Errorf("returned session IssueID = %q, want empty", got.IssueID)
+	}
+}
+
+// A session with no display name still must not get a label parked in issue_id:
+// the key it was unlinked from becomes the display name, and issue_id clears.
+func TestUnlink_NoDisplayNameFallsBackToKeyAsLabelOnly(t *testing.T) {
+	rec := &bindRec{}
+	sess := domain.Session{SessionRecord: domain.SessionRecord{ID: "s1", IssueID: "jira:DEMO-2272", DisplayName: "  "}}
+	svc := New(fakeSessions{sess: sess, rec: rec}, &fakeIssues{}, nil, &fakeSearcher{})
 	if _, err := svc.Unlink(context.Background(), "s1"); err != nil {
 		t.Fatal(err)
 	}
-	if !rec.called || rec.issueID != "My label" || rec.display != "My label" {
-		t.Errorf("unlink rec = %+v, want issue_id reset to the plain label", rec)
+	if rec.issueID != "" {
+		t.Errorf("issue_id written = %q, want empty", rec.issueID)
+	}
+	if rec.display != "DEMO-2272" {
+		t.Errorf("display_name written = %q, want the unlinked key as a readable fallback", rec.display)
 	}
 }
 

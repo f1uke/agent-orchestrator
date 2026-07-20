@@ -4382,24 +4382,44 @@ func TestBuildSystemPrompt_TaskSizeDirective(t *testing.T) {
 }
 
 // TestSpawn_AutoLinksJiraIssueFromPrompt reproduces the Send-to-Orchestrator bug:
-// a worker spawned from a Jira issue carries the Jira key in its prompt (and gets
-// it into the branch name) but historically no --issue, so the session had no
-// Jira link and the Summary panel showed "No Jira issue linked". The link record
-// is sessions.issue_id in canonical "jira:<KEY>" form (the same field the manual
-// "+ Link a Jira issue" button writes), so spawning with the key in the prompt
-// must bind it.
-func TestSpawn_AutoLinksJiraIssueFromPrompt(t *testing.T) {
+// a worker spawned onto a Jira-keyed branch must be linked to that issue: the
+// link record is sessions.issue_id in canonical "jira:<KEY>" form (the same field
+// the manual "+ Link a Jira issue" button writes), so the Summary panel shows the
+// issue without a manual link step. The branch is the deliberate signal.
+func TestSpawn_AutoLinksJiraIssueFromBranch(t *testing.T) {
 	m, _, _, _ := newManager()
 	rec, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer",
 		Kind:      domain.KindWorker,
-		Prompt:    "Please start work on STAR-2394 (noti hub defects). Each is a jira:STAR-2394 task.",
+		Branch:    "bugfix/STAR-2394-noti-hub",
+		Prompt:    "Please start work on the noti hub defects.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := string(rec.IssueID), "jira:STAR-2394"; got != want {
-		t.Fatalf("issue_id = %q, want %q (Send-to-Orchestrator must auto-link the Jira issue)", got, want)
+		t.Fatalf("issue_id = %q, want %q (a Jira-keyed branch must auto-link the issue)", got, want)
+	}
+}
+
+// A Jira key appearing incidentally in the free-text brief must NEVER bind the
+// session. Two real agent-orchestrator workers were silently attached to another
+// team's iOS story because their briefs merely mentioned a path containing its
+// key - which also aimed the Move-status write path at that team's issue. Here the
+// brief explicitly warns the reader off the path, and there is no branch, so the
+// session must come out unbound.
+func TestSpawn_DoesNotBindJiraKeyMentionedOnlyInPrompt(t *testing.T) {
+	m, _, _, _ := newManager()
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer",
+		Kind:      domain.KindWorker,
+		Prompt:    "Refactor the exporter. Do NOT touch docs/archive/STAR-2273-notes.md - it belongs to another team.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.IssueID != "" {
+		t.Fatalf("issue_id = %q, want empty (a key mentioned only in prose must never bind)", rec.IssueID)
 	}
 }
 
@@ -4413,12 +4433,16 @@ func TestEffectiveIssueID(t *testing.T) {
 		want domain.IssueID
 	}{
 		{"explicit issue wins over prompt key", ports.SpawnConfig{IssueID: "jira:DEMO-1", Prompt: "about STAR-9"}, "jira:DEMO-1"},
-		{"key from prompt", ports.SpawnConfig{Prompt: "Please start work on STAR-2394 (noti hub)"}, "jira:STAR-2394"},
 		{"key from branch", ports.SpawnConfig{Branch: "bugfix/STAR-2394-noti-hub"}, "jira:STAR-2394"},
-		{"branch preferred, still same canonical form", ports.SpawnConfig{Branch: "feature/PROJ-12-x", Prompt: "also mentions OTHER-3"}, "jira:PROJ-12"},
+		{"branch wins; prompt key is ignored", ports.SpawnConfig{Branch: "feature/PROJ-12-x", Prompt: "also mentions OTHER-3"}, "jira:PROJ-12"},
 		{"no jira signal stays unbound", ports.SpawnConfig{Prompt: "just refactor the parser", Branch: "chore/cleanup"}, ""},
 		{"non-jira issue id preserved verbatim", ports.SpawnConfig{IssueID: "github:owner/repo#7"}, "github:owner/repo#7"},
 		{"orchestrator is never auto-linked", ports.SpawnConfig{Kind: domain.KindOrchestrator, Prompt: "dispatch STAR-2394 work"}, ""},
+		// The prompt is never scraped: a key in prose must not bind. Each of these
+		// carries a key-shaped token in the brief and no branch, so each stays unbound.
+		{"prompt key alone does not bind", ports.SpawnConfig{Prompt: "Please start work on STAR-2394 (noti hub)"}, ""},
+		{"key in an example path does not bind", ports.SpawnConfig{Prompt: "Do NOT touch docs/archive/STAR-2273-notes.md - it belongs to another team."}, ""},
+		{"key in a quoted branch name in prose does not bind", ports.SpawnConfig{Prompt: `the old branch was "feature/MOBILITY-4612-x"`}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

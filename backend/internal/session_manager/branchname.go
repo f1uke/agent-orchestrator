@@ -38,14 +38,23 @@ func extractJiraKey(texts ...string) string {
 
 // effectiveIssueID resolves the Jira link a session is seeded with. An explicit
 // IssueID (from `ao spawn --issue`, or the manual link path) always wins and is
-// preserved verbatim. Otherwise, when the spawn carries a Jira key in its branch
-// or prompt (as a Send-to-Orchestrator worker does: the orchestrator threads the
-// key into the prompt, and thus the auto-named branch, but not necessarily
-// --issue) the key is bound as the canonical "jira:<KEY>" id. This derives the
-// link from the same extractJiraKey signal that names the branch, so a session
-// whose branch reads "bugfix/STAR-2394-x" is linked to STAR-2394 and the Summary
-// panel shows it without a manual "+ Link a Jira issue" step. It writes ONLY the
-// internal session-to-issue association; it performs no Jira write.
+// preserved verbatim. Otherwise the key is derived from the spawn's BRANCH only,
+// so a session whose branch reads "bugfix/STAR-2394-x" is linked to STAR-2394 and
+// the Summary panel shows it without a manual "+ Link a Jira issue" step. It
+// writes ONLY the internal session-to-issue association; it performs no Jira write.
+//
+// The free-text prompt is deliberately NOT scraped. A key-shaped token can appear
+// in a brief incidentally - an example path, a quoted branch name, even a sentence
+// warning the reader not to touch that path - and binding on it silently attached
+// workers to another team's issue, which also aims the Move-status write path (the
+// one sanctioned Jira write) at that issue. A branch name, by contrast, is typed
+// deliberately, so a key there is a real statement of intent.
+//
+// This runs at seed time (seedRecord/todoSeedRecord), before branch auto-naming,
+// so cfg.Branch here is exclusively the caller-supplied branch. That ordering is
+// load-bearing: the auto-namer takes its key hint from the prompt, so binding from
+// a generated branch would launder prose back into issue_id. A spawn that wants a
+// link without naming a branch must pass --issue.
 func effectiveIssueID(cfg ports.SpawnConfig) domain.IssueID {
 	if cfg.IssueID != "" {
 		return cfg.IssueID
@@ -56,7 +65,7 @@ func effectiveIssueID(cfg ports.SpawnConfig) domain.IssueID {
 	if cfg.Kind == domain.KindOrchestrator {
 		return ""
 	}
-	if key := extractJiraKey(cfg.Branch, cfg.Prompt); key != "" {
+	if key := extractJiraKey(cfg.Branch); key != "" {
 		return domain.IssueID(string(domain.TrackerProviderJira) + ":" + key)
 	}
 	return ""
