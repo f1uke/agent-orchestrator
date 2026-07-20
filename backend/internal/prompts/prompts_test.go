@@ -375,6 +375,26 @@ func TestSmokeChecklistProtocol_AuthorsBeforePR(t *testing.T) {
 	}
 }
 
+// TestSmokeChecklistProtocol_StaysLanguageNeutral: the smoke protocol is injected
+// for EVERY worker regardless of language, so response-language wording must never
+// land here — that would change the prompt for every English project and spend
+// tokens on the default path. The language scoping belongs in
+// ResponseLanguageDirective, which is already a no-op for English.
+func TestSmokeChecklistProtocol_StaysLanguageNeutral(t *testing.T) {
+	got := SmokeChecklistProtocol()
+	for _, forbidden := range []string{
+		"response language",
+		"Human-facing response language",
+		"in that language",
+		"configured language",
+		"Thai",
+	} {
+		if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
+			t.Fatalf("smoke protocol must stay language-neutral but mentions %q:\n%s", forbidden, got)
+		}
+	}
+}
+
 // TestTaskSizeDirective_MechanicalAuthorizesSkip: a mechanical task must render a
 // "\n\n"-prefixed block that (a) names itself, (b) explicitly authorizes skipping
 // the process skills, (c) grounds the skip as a deliberate override of the "you

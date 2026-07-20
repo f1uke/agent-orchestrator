@@ -62,6 +62,39 @@ func TestResponseLanguageDirective_NonEnglish(t *testing.T) {
 	}
 }
 
+// TestResponseLanguageDirective_CoversSmokeChecklist: a smoke-test checklist is
+// human-facing prose - the user plays it live in the Tests tab - so its case prose
+// must follow the configured language. The always-injected SmokeChecklistProtocol
+// is written in English and hands the model a concrete English JSON example, so
+// without an explicit mention here the nearby example wins and cases come out in
+// English. The smoke tooling (fileRef, prNum, the ao smoke set command, JSON keys)
+// stays English like every other technical identifier.
+func TestResponseLanguageDirective_CoversSmokeChecklist(t *testing.T) {
+	got := ResponseLanguageDirective("Thai")
+	// The case prose fields must be named so the model knows exactly what translates.
+	for _, want := range []string{
+		"smoke-test checklist",
+		"name", "why", "steps", "expected",
+	} {
+		if !strings.Contains(strings.ToLower(got), strings.ToLower(want)) {
+			t.Fatalf("directive must scope smoke case prose (%q) into the language:\n%s", want, got)
+		}
+	}
+	// The tooling half of a smoke case must stay English.
+	for _, want := range []string{"fileRef", "prNum", "ao smoke set"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("directive must keep smoke tooling %q in English:\n%s", want, got)
+		}
+	}
+	// The smoke mention must live in the language directive, which is already a
+	// no-op for English - never in the always-injected protocol.
+	for _, lang := range []string{"", "English"} {
+		if ResponseLanguageDirective(lang) != "" {
+			t.Fatalf("adding smoke wording must not break the English no-op for %q", lang)
+		}
+	}
+}
+
 // TestResponseLanguageDirective_LanguageReflected: the exact configured value is
 // what appears (free-form language name, trimmed).
 func TestResponseLanguageDirective_LanguageReflected(t *testing.T) {
