@@ -8,7 +8,7 @@ import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
 import { WorkspaceFileView } from "./WorkspaceFileView";
-import { WorkspaceFileDiffView } from "./WorkspaceFileDiffView";
+import { type ChangesFocus, WorkspaceChangesView } from "./WorkspaceChangesView";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable";
@@ -64,9 +64,13 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// A file opened from a clicked terminal reference takes over the same center
 	// slot (priority over fileView); cleared on session switch below.
 	const [workspaceFile, setWorkspaceFile] = useState<WorkspaceFileOpen | null>(null);
-	// A Changes-mode row takes over the same center slot, showing that file's diff
-	// against the target branch; cleared on session switch below.
-	const [changedFile, setChangedFile] = useState<string | null>(null);
+	// A Changes-mode row takes over the same center slot, showing EVERY changed
+	// file's diff stacked and scrolled to the clicked one; cleared on session
+	// switch below. The nonce lets the same row be clicked twice and still
+	// re-scroll. `activeChangedPath` is the reverse channel: the stacked view
+	// reports what the reader has scrolled to, so the rail's tree can follow.
+	const [changesFocus, setChangesFocus] = useState<ChangesFocus | null>(null);
+	const [activeChangedPath, setActiveChangedPath] = useState<string | null>(null);
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
 	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
@@ -98,7 +102,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setInspectorView("summary");
 		setFileView(null);
 		setWorkspaceFile(null);
-		setChangedFile(null);
+		setChangesFocus(null);
+		setActiveChangedPath(null);
 	}, [sessionId]);
 
 	// Opening/selecting a session counts as activity: POST /wake so the daemon
@@ -253,8 +258,16 @@ export function SessionView({ sessionId }: SessionViewProps) {
 							line={workspaceFile.line}
 							onClose={() => setWorkspaceFile(null)}
 						/>
-					) : changedFile ? (
-						<WorkspaceFileDiffView sessionId={sessionId} path={changedFile} onClose={() => setChangedFile(null)} />
+					) : changesFocus ? (
+						<WorkspaceChangesView
+							sessionId={sessionId}
+							focus={changesFocus}
+							onActivePathChange={setActiveChangedPath}
+							onClose={() => {
+								setChangesFocus(null);
+								setActiveChangedPath(null);
+							}}
+						/>
 					) : fileView ? (
 						<FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />
 					) : session?.isTodo ? (
@@ -305,8 +318,11 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									onToggleBrowserPopOut={setBrowserPoppedOut}
 									onViewChange={setInspectorView}
 									onOpenFile={setFileView}
-									onOpenChangedFile={({ path }) => setChangedFile(path)}
-									selectedChangedPath={changedFile ?? undefined}
+									onOpenChangedFile={({ path }) => {
+										setActiveChangedPath(path);
+										setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+									}}
+									selectedChangedPath={activeChangedPath ?? undefined}
 									view={inspectorView}
 									browserView={browserView}
 									session={session}

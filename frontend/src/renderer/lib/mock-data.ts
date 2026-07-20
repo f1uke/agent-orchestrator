@@ -3,6 +3,7 @@ import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
 
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
+type DiffContextResponse = components["schemas"]["DiffContextResponse"];
 
 const now = new Date().toISOString();
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
@@ -1152,6 +1153,44 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				binary: true,
 				committed: true,
 			},
+			// A genuinely deep path (six levels) and an oversized diff: the two
+			// cases the tree's chain-collapsing and the stacked view's
+			// collapsed-by-default budget exist for. Without them, mock mode
+			// exercises neither.
+			{
+				path: "backend/internal/httpd/controllers/testdata/fixtures/sessions_golden.json",
+				status: "added",
+				additions: 64,
+				deletions: 0,
+				binary: false,
+				committed: false,
+			},
+			{
+				path: "frontend/src/renderer/lib/generated-icons.ts",
+				status: "modified",
+				additions: 1840,
+				deletions: 220,
+				binary: false,
+				committed: true,
+			},
 		],
 	};
+}
+
+/**
+ * A stand-in per-file diff for mock mode, so the stacked Changes view renders
+ * without a daemon (`verify-renderer-ui-with-mock-data.md`). Long enough to make
+ * sticky headers and scroll-spy observable while scrolling.
+ */
+export function mockWorkspaceFileDiff(path: string): DiffContextResponse {
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	const lines: DiffContextResponse["lines"] = [];
+	for (let i = 1; i <= 26; i++) {
+		if (i === 7) lines.push({ kind: "del", text: `\tconst legacy = load("${name}");`, oldLine: i, newLine: 0 });
+		else if (i === 8)
+			lines.push({ kind: "add", text: `\tconst next = load("${name}", { strict: true });`, oldLine: 0, newLine: i });
+		else if (i === 9) lines.push({ kind: "add", text: "\tif (!next) return null;", oldLine: 0, newLine: i });
+		else lines.push({ kind: "context", text: `\t// line ${i} of ${name}`, oldLine: i, newLine: i });
+	}
+	return { available: true, truncated: false, mode: "file", path, lines };
 }

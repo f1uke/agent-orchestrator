@@ -31,8 +31,13 @@ function respondWith(body: unknown) {
 	getMock.mockResolvedValue({ data: body, error: undefined });
 }
 
+/** Tree mode renders rows as tree items; the flat list renders them as options. */
+const row = (name: RegExp) => screen.getByRole("treeitem", { name });
+const listRows = () => screen.getAllByRole("option");
+
 beforeEach(() => {
 	getMock.mockReset();
+	window.localStorage.clear();
 });
 
 describe("FilesPanel", () => {
@@ -46,13 +51,14 @@ describe("FilesPanel", () => {
 		});
 		render(<FilesPanel sessionId="s1" />, { wrapper });
 
-		expect(await screen.findByText("DiffRows.tsx")).toBeInTheDocument();
-		expect(screen.getByText("added.go")).toBeInTheDocument();
+		// Both paths are only-child chains, so each renders as one merged row.
+		expect(await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ })).toBeInTheDocument();
+		expect(screen.getByRole("treeitem", { name: /added\.go/ })).toBeInTheDocument();
 		// Scoped to the row: the summary line carries the same totals, so an
 		// unscoped text query matches twice.
-		const row = screen.getByRole("button", { name: /DiffRows\.tsx/ });
-		expect(within(row).getByText("+42")).toBeInTheDocument();
-		expect(within(row).getByText("−6")).toBeInTheDocument();
+		const target = row(/DiffRows\.tsx/);
+		expect(within(target).getByText("+42")).toBeInTheDocument();
+		expect(within(target).getByText("−6")).toBeInTheDocument();
 		// summary line names the branch it compared against
 		expect(screen.getByTitle("Comparing against main")).toBeInTheDocument();
 	});
@@ -78,10 +84,40 @@ describe("FilesPanel", () => {
 			files: [file({ path: "img.png", binary: true, additions: 0, deletions: 0 })],
 		});
 		render(<FilesPanel sessionId="s1" />, { wrapper });
-		const row = await screen.findByRole("button", { name: /img\.png/ });
-		expect(within(row).getByText("bin")).toBeInTheDocument();
-		// the row must NOT render "+0 −0" arithmetic for a binary file
-		expect(within(row).queryByText("+0")).not.toBeInTheDocument();
+		const target = await screen.findByRole("treeitem", { name: /img\.png/ });
+		expect(within(target).getByText("bin")).toBeInTheDocument();
+		expect(within(target).queryByText("+0")).not.toBeInTheDocument();
+	});
+
+	// GitLab shows status as a trailing box, not a leading letter — and it has to
+	// survive in both views.
+	it("marks each file's status with a trailing icon, after the counts", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			truncated: false,
+			files: [
+				file({ path: "a/added.go", status: "added" }),
+				file({ path: "b/gone.go", status: "deleted" }),
+				file({ path: "c/kept.go", status: "modified" }),
+			],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+
+		const added = await screen.findByRole("treeitem", { name: /added\.go/ });
+		expect(within(added).getByRole("img", { name: "Added" })).toBeInTheDocument();
+		expect(
+			within(screen.getByRole("treeitem", { name: /gone\.go/ })).getByRole("img", { name: "Deleted" }),
+		).toBeInTheDocument();
+
+		// The status box follows the counts in DOM order, so it reads last.
+		const meta = added.querySelector(".files-panel__meta");
+		expect(meta?.lastElementChild).toHaveAttribute("aria-label", "Added");
+
+		await userEvent.click(screen.getByRole("button", { name: "List view" }));
+		expect(
+			within(screen.getByRole("option", { name: /kept\.go/ })).getByRole("img", { name: "Modified" }),
+		).toBeInTheDocument();
 	});
 
 	it("flags uncommitted work so a mid-task worker is not under-reported", async () => {
@@ -128,7 +164,7 @@ describe("FilesPanel", () => {
 		const onOpenFile = vi.fn();
 		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
 
-		await userEvent.click(await screen.findByText("gone.ts"));
+		await userEvent.click(await screen.findByRole("treeitem", { name: /gone\.ts/ }));
 		expect(onOpenFile).toHaveBeenCalledWith({ path: "lib/gone.ts" });
 	});
 
@@ -137,9 +173,7 @@ describe("FilesPanel", () => {
 		render(<FilesPanel sessionId="s1" selectedPath="frontend/src/renderer/components/DiffRows.tsx" />, {
 			wrapper,
 		});
-		await waitFor(() =>
-			expect(screen.getByRole("button", { name: /DiffRows\.tsx/ }).getAttribute("aria-current")).toBe("true"),
-		);
+		await waitFor(() => expect(row(/DiffRows\.tsx/).getAttribute("aria-current")).toBe("true"));
 	});
 
 	it("keeps Browse present but disabled until it ships", async () => {
@@ -147,5 +181,123 @@ describe("FilesPanel", () => {
 		render(<FilesPanel sessionId="s1" />, { wrapper });
 		const browse = await screen.findByRole("tab", { name: /Browse/ });
 		expect(browse).toBeDisabled();
+	});
+
+	describe("tree view", () => {
+		const deepFiles = [
+			file({ path: "backend/internal/service/session/workspace_changes.go" }),
+			file({ path: "frontend/src/renderer/components/DiffRows.tsx" }),
+		];
+
+		it("defaults to the folder tree, with single-child chains collapsed into one row", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: deepFiles });
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+
+			expect(await screen.findByRole("tree")).toBeInTheDocument();
+			// Five path levels render as ONE directory row — the mechanism that makes
+			// a deep tree fit the rail's 280px floor.
+			expect(row(/^backend\/internal\/service\/session$/)).toBeInTheDocument();
+			expect(screen.queryByRole("treeitem", { name: /^internal$/ })).not.toBeInTheDocument();
+		});
+
+		it("collapses a directory so its files disappear from the rail", async () => {
+			respondWith({
+				available: true,
+				targetBranch: "main",
+				truncated: false,
+				// Two files under one directory, so that directory is a real branch
+				// point and keeps a collapsible row.
+				files: [
+					file({ path: "backend/internal/service/session/workspace_changes.go" }),
+					file({ path: "backend/internal/service/session/workspace_file.go" }),
+					file({ path: "frontend/src/renderer/components/DiffRows.tsx" }),
+				],
+			});
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+
+			await userEvent.click(await screen.findByRole("treeitem", { name: /^backend\/internal\/service\/session$/ }));
+			expect(screen.queryByText("workspace_changes.go")).not.toBeInTheDocument();
+			// the other branch of the tree is untouched
+			expect(screen.getByRole("treeitem", { name: /DiffRows\.tsx/ })).toBeInTheDocument();
+		});
+
+		it("switches to the flat list and back", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: deepFiles });
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("tree");
+
+			await userEvent.click(screen.getByRole("button", { name: "List view" }));
+			expect(screen.queryByRole("tree")).not.toBeInTheDocument();
+			// the flat list shows the parent directory on its own line instead of nesting
+			expect(screen.getByText("backend/internal/service/session")).toBeInTheDocument();
+			expect(listRows()).toHaveLength(2);
+
+			await userEvent.click(screen.getByRole("button", { name: "Tree view" }));
+			expect(screen.getByRole("tree")).toBeInTheDocument();
+		});
+
+		it("remembers the chosen view across remounts", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: deepFiles });
+			const first = render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("tree");
+			await userEvent.click(screen.getByRole("button", { name: "List view" }));
+			first.unmount();
+
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("option", { name: /DiffRows\.tsx/ });
+			expect(screen.queryByRole("tree")).not.toBeInTheDocument();
+		});
+	});
+
+	describe("search", () => {
+		const searchable = [
+			file({ path: "hotfix/login-crash.ts" }),
+			file({ path: "src/app/Main.vue" }),
+			file({ path: "src/app/Main.tsx" }),
+		];
+
+		// Substring, NOT prefix: this panel shipped prefix-only matching once and
+		// had to fix it, so `fix` must still find `hotfix/login-crash.ts`.
+		it("matches anywhere in the path, not just its start", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: searchable });
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("treeitem", { name: /login-crash\.ts/ });
+
+			await userEvent.type(screen.getByRole("searchbox", { name: /search/i }), "fix");
+			expect(screen.getByRole("treeitem", { name: /login-crash\.ts/ })).toBeInTheDocument();
+			expect(screen.queryByRole("treeitem", { name: /Main\.vue/ })).not.toBeInTheDocument();
+			expect(screen.queryByRole("treeitem", { name: /Main\.tsx/ })).not.toBeInTheDocument();
+		});
+
+		it("supports a glob, as the placeholder advertises", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: searchable });
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("treeitem", { name: /Main\.vue/ });
+
+			await userEvent.type(screen.getByRole("searchbox", { name: /search/i }), "*.vue");
+			expect(screen.getByRole("treeitem", { name: /Main\.vue/ })).toBeInTheDocument();
+			expect(screen.queryByRole("treeitem", { name: /Main\.tsx/ })).not.toBeInTheDocument();
+		});
+
+		it("filters the flat list too, not only the tree", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: searchable });
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("treeitem", { name: /login-crash\.ts/ });
+			await userEvent.click(screen.getByRole("button", { name: "List view" }));
+
+			await userEvent.type(screen.getByRole("searchbox", { name: /search/i }), "fix");
+			expect(listRows()).toHaveLength(1);
+			expect(screen.getByText("login-crash.ts")).toBeInTheDocument();
+		});
+
+		it("says so when nothing matches, rather than showing an empty rail", async () => {
+			respondWith({ available: true, targetBranch: "main", truncated: false, files: searchable });
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await screen.findByRole("treeitem", { name: /Main\.vue/ });
+
+			await userEvent.type(screen.getByRole("searchbox", { name: /search/i }), "nothing-here");
+			expect(screen.getByText(/No files match/)).toBeInTheDocument();
+			expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
+		});
 	});
 });
