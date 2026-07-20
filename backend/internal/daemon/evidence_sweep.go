@@ -54,7 +54,7 @@ func (e *evidenceSweeper) SweepEvidenceNow(ctx context.Context) (int, int64, err
 // startEvidenceRetentionSweep launches a background goroutine that runs sweep
 // immediately (to reclaim evidence accumulated before this boot) and then on
 // every tick until ctx is cancelled, returning a channel closed when the
-// goroutine exits so daemon shutdown can drain it (mirroring startIdleSweep). A
+// goroutine exits so daemon shutdown can drain it (mirroring startTickerSweep). A
 // non-positive interval disables the loop: the channel is already closed and
 // sweep is never called.
 func startEvidenceRetentionSweep(ctx context.Context, interval time.Duration, sweep func(context.Context) error, log *slog.Logger) <-chan struct{} {

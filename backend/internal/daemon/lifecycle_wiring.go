@@ -91,6 +91,7 @@ type sessionLifecycle interface {
 	Reconcile(ctx context.Context) error
 	RestoreAll(ctx context.Context) error
 	CloseIdleSessions(ctx context.Context) error
+	SyncOrchestratorWorkspaces(ctx context.Context) error
 }
 
 // startSession builds the controller-facing session service: a session manager

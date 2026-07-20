@@ -338,6 +338,13 @@ type fakeWorkspace struct {
 	forceDestroyErr error
 	// stashCalls counts StashUncommitted invocations.
 	stashCalls int
+	// syncCalls records every SyncToBase invocation (path + base branch), so
+	// tests can assert an orchestrator IS synced and a worker is NOT.
+	syncCalls []syncCall
+	// syncResult, when its Outcome is set, is what SyncToBase returns; syncErr
+	// takes precedence and makes it fail.
+	syncResult ports.WorkspaceSyncResult
+	syncErr    error
 	// calls records the sequence of workspace method calls for ordering assertions.
 	calls []string
 	// sharedLog, when non-nil, receives entries alongside calls so ordering
@@ -470,6 +477,23 @@ func (w *fakeWorkspace) ApplyPreserved(_ context.Context, info ports.WorkspaceIn
 	}
 	w.calls = append(w.calls, entry)
 	return w.applyErr
+}
+
+func (w *fakeWorkspace) SyncToBase(_ context.Context, info ports.WorkspaceInfo, baseBranch string) (ports.WorkspaceSyncResult, error) {
+	w.syncCalls = append(w.syncCalls, syncCall{path: info.Path, sessionID: info.SessionID, baseBranch: baseBranch})
+	if w.syncErr != nil {
+		return ports.WorkspaceSyncResult{}, w.syncErr
+	}
+	if w.syncResult.Outcome != "" {
+		return w.syncResult, nil
+	}
+	return ports.WorkspaceSyncResult{Outcome: ports.WorkspaceSyncUpdated, BaseRef: "origin/" + baseBranch}, nil
+}
+
+type syncCall struct {
+	path       string
+	sessionID  domain.SessionID
+	baseBranch string
 }
 
 func fakeWorkspaceRepoName(info ports.WorkspaceInfo) string {

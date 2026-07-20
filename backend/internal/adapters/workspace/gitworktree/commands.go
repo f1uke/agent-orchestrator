@@ -117,6 +117,31 @@ func ignoredCountArgs(worktree string) []string {
 	return []string{"-C", worktree, "status", "--ignored", "--porcelain"}
 }
 
+// fetchBaseArgs refreshes origin's view of the base branch in the shared repo.
+// The refspec is explicit so the fetch stays narrow and updates the
+// remote-tracking ref the sync then fast-forwards onto.
+func fetchBaseArgs(repo, baseBranch string) []string {
+	return []string{"-C", repo, "fetch", "--quiet", "origin",
+		"+refs/heads/" + baseBranch + ":refs/remotes/origin/" + baseBranch}
+}
+
+// mergeFFOnlyArgs advances the worktree's branch to ref, or fails. --ff-only is
+// load-bearing: it succeeds exactly when the branch has no commits of its own,
+// so it can never discard committed work.
+func mergeFFOnlyArgs(worktree, ref string) []string {
+	return []string{"-C", worktree, "merge", "--ff-only", ref}
+}
+
+// syncBaseRefCandidates lists where a base branch may live, remote-tracking
+// first so the shared remote wins over a possibly-behind local head. A qualified
+// base ("upstream/main") is used verbatim, matching baseRefCandidates.
+func syncBaseRefCandidates(baseBranch string) []string {
+	if strings.Contains(baseBranch, "/") {
+		return []string{baseBranch}
+	}
+	return []string{"refs/remotes/origin/" + baseBranch, "refs/heads/" + baseBranch}
+}
+
 func baseRefCandidates(branch, defaultBranch string) []string {
 	candidates := []string{"origin/" + branch}
 	if strings.Contains(defaultBranch, "/") {
