@@ -14,6 +14,7 @@ vi.mock("../lib/api-client", () => ({
 	apiErrorMessage: (e: unknown, fb = "Request failed") => (e instanceof Error ? e.message : fb),
 }));
 
+import { TOKEN_COLORS } from "../lib/comment-inbox";
 import { ReviewsView } from "./ReviewsView";
 
 const PR_URL = "https://github.com/o/agent-orchestrator/pull/1";
@@ -257,7 +258,7 @@ describe("ReviewsView (merged reviews + comments)", () => {
 		await userEvent.click(show);
 		const keyword = await screen.findByText("func");
 		expect(keyword.tagName.toLowerCase()).toBe("span");
-		expect(keyword).toHaveStyle({ color: "#FC5FA3" });
+		expect(keyword).toHaveStyle({ color: TOKEN_COLORS.keyword });
 	});
 
 	it("Expand full file calls onOpenFile with the comment's PR and thread", async () => {

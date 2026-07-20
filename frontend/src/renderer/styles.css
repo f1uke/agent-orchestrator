@@ -150,6 +150,81 @@
 	--kanban-card-bg: #121216;
 	--kanban-card-border: #212129;
 	--kanban-card-divider: #1b1b21;
+
+	/* ---- Reviews inbox + diff/code viewers -------------------------------
+	   These surfaces are inline-styled from JS (`lib/comment-inbox.ts`) rather
+	   than Tailwind classes, because the tab is pixel-matched to a hand-authored
+	   design handoff. They still have to follow the theme, so the constants there
+	   resolve to these custom properties instead of raw hex. Every dark value
+	   below is verbatim from the original handoff — do not "tidy" them into the
+	   generic ramp, or dark mode shifts. The light column is derived (there is no
+	   light-mode handoff): surfaces track --bg/--bg-1, text inverts, and the
+	   semantic hues reuse the light --green/--amber/--red so the inbox agrees
+	   with the rest of the app. */
+	--inbox-rail: #0a0a0c;
+	--inbox-card-bg: #0d0d10;
+	--inbox-file-header: #111114;
+	--inbox-pill-bg: #18181c;
+	--inbox-menu-bg: #141418;
+	--inbox-reply-bg: #0f0f12;
+	--inbox-prompt-bg: #0b0b0e;
+	--inbox-batch-bg: #101014;
+	--inbox-toast-bg: #1b1b20;
+	--inbox-resolved-bg: #0b0b0e;
+	--inbox-border-rail: #17171a;
+	--inbox-border-card: #1c1c20;
+	--inbox-border-pill: #232327;
+	--inbox-border-menu: #2a2a30;
+	--inbox-divider: #141417;
+	--inbox-divider-card: #151518;
+	--inbox-connector: #26262c;
+	--inbox-border-batch: #24242a;
+	--inbox-border-toast: #33333a;
+	--inbox-text-strong: #f2f2f5;
+	--inbox-text: #e7e7ea;
+	--inbox-body: #c2c2c8;
+	--inbox-secondary: #9a9aa0;
+	--inbox-secondary-2: #8b8b92;
+	--inbox-muted: #6c6c72;
+	--inbox-muted-2: #5c5c63;
+	--inbox-muted-3: #54545a;
+	--inbox-green: #5fb87a;
+	--inbox-green-bright: #8bdc75;
+	--inbox-amber: #e0a544;
+	--inbox-red: #ef6a63;
+	--inbox-code: #e0a86a;
+	--inbox-faint: #7c7c82;
+	--inbox-input-fg: #dcdce0;
+	/* Switch/checkbox chrome in the "off" state (the "on" state is the accent). */
+	--inbox-control-track: #2c2c33;
+	--inbox-control-border: #3a3a42;
+	--inbox-shadow-menu: 0 12px 30px rgba(0, 0, 0, 0.5);
+	--inbox-shadow-toast: 0 10px 34px rgba(0, 0, 0, 0.55);
+
+	/* Diff rows: tinted backgrounds + coloured sign glyphs. */
+	--diff-add-bg: rgba(63, 157, 107, 0.13);
+	--diff-del-bg: rgba(220, 90, 90, 0.13);
+	--diff-add-sign: #7fd8a0;
+	--diff-del-sign: #e88f8f;
+	--diff-context-sign: #5c5c63;
+
+	/* Syntax tokens — Xcode "Midnight" in dark, Xcode "Default" in light. */
+	--code-keyword: #fc5fa3;
+	--code-string: #fc6a5d;
+	--code-comment: #6c7986;
+	--code-number: #d0bf69;
+	--code-type: #5dd8ff;
+	--code-fn: #67b7a4;
+	--code-plain: #e8e8ea;
+
+	/* Full-file viewer chrome (the center-pane code/diff surface). */
+	--viewer-bg: #060607;
+	--viewer-card-bg: #0b0b0e;
+	--viewer-comment-bg: #0e0e12;
+	--viewer-chrome-fg: #b7b7bc;
+	--viewer-path-fg: #c7c7cc;
+	--viewer-add-count: #84cfa0;
+	--viewer-del-count: #e69696;
 }
 
 :root[data-theme="light"] {
@@ -202,6 +277,83 @@
 	--term-blue: #2563eb;
 	--term-amber: #9a6b00;
 	--shadow: 0 1px 0 rgb(0 0 0 / 0.03), 0 12px 30px rgb(20 30 50 / 0.1);
+
+	/* Reviews inbox + diff/code viewers — light counterparts of the dark block
+	   in :root. Surfaces stay within a tight near-white range so the inbox reads
+	   as one card stack rather than a set of grey bands; separation comes from
+	   the hairline borders, as it does in dark. */
+	--inbox-rail: var(--bg);
+	--inbox-card-bg: var(--bg-1);
+	--inbox-file-header: #f5f5f6;
+	--inbox-pill-bg: #f0f0f2;
+	--inbox-menu-bg: var(--bg-1);
+	--inbox-reply-bg: #fafafa;
+	--inbox-prompt-bg: var(--bg-1);
+	--inbox-batch-bg: #f5f5f6;
+	--inbox-toast-bg: var(--bg-1);
+	--inbox-resolved-bg: #fafafa;
+	--inbox-border-rail: var(--border);
+	--inbox-border-card: var(--border);
+	--inbox-border-pill: #dedee0;
+	--inbox-border-menu: var(--border-1);
+	--inbox-divider: #ededee;
+	--inbox-divider-card: #ededee;
+	--inbox-connector: #dcdcde;
+	--inbox-border-batch: var(--border-1);
+	--inbox-border-toast: var(--border-1);
+	/* Text ramp inverted. Each step keeps >= 4.5:1 on the light card surfaces so
+	   timestamps and line numbers stay readable, not just visible. */
+	--inbox-text-strong: #101011;
+	--inbox-text: var(--fg);
+	--inbox-body: #35353a;
+	--inbox-secondary: #55555c;
+	--inbox-secondary-2: #5f5f66;
+	--inbox-muted: #6b6b73;
+	--inbox-muted-2: #71717a;
+	/* Faintest step, and the one the diff gutter's line numbers use. Held at
+	   >= 4.5:1 against the *tinted* added/removed rows, not just the plain code
+	   surface — the tint is what pushes it under, so tuning against white alone
+	   leaves the numbers unreadable on exactly the rows that matter most. */
+	--inbox-muted-3: #6a6a74;
+	--inbox-green: var(--green);
+	--inbox-green-bright: #157f2e;
+	--inbox-amber: var(--amber);
+	--inbox-red: var(--red);
+	--inbox-code: #8a4f10;
+	--inbox-faint: #6b6b73;
+	--inbox-input-fg: #2a2a2e;
+	/* Off-state track is a mid grey, not a near-white, so the white knob still
+	   reads against it. */
+	--inbox-control-track: #c3c3c9;
+	--inbox-control-border: #b4b4ba;
+	--inbox-shadow-menu: 0 12px 30px rgba(20, 30, 50, 0.16);
+	--inbox-shadow-toast: 0 10px 34px rgba(20, 30, 50, 0.2);
+
+	--diff-add-bg: rgba(31, 136, 61, 0.12);
+	--diff-del-bg: rgba(207, 34, 46, 0.1);
+	/* A shade darker than --green: the +/- glyphs sit on their own tinted row,
+	   which costs ~0.6:1 versus the plain surface. */
+	--diff-add-sign: #177530;
+	--diff-del-sign: #c0392b;
+	--diff-context-sign: #6a6a74;
+
+	/* Xcode "Default" (light) syntax scheme — the light-mode sibling of the
+	   Midnight palette used in dark. All seven clear 4.5:1 on the code surface. */
+	--code-keyword: #9b2393;
+	--code-string: #c41a16;
+	--code-comment: #5d6c79;
+	--code-number: #1c00cf;
+	--code-type: #0b4f79;
+	--code-fn: #266b60;
+	--code-plain: var(--fg);
+
+	--viewer-bg: var(--bg);
+	--viewer-card-bg: var(--bg-1);
+	--viewer-comment-bg: #fafafa;
+	--viewer-chrome-fg: #45454b;
+	--viewer-path-fg: #35353a;
+	--viewer-add-count: #1a7f37;
+	--viewer-del-count: #c0392b;
 }
 
 * {

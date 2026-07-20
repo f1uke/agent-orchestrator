@@ -15,6 +15,7 @@ import {
 	ACCENT,
 	MONO,
 	PALETTE as P,
+	VIEWER as V,
 	accentMix,
 	avatarBg,
 	baseName,
@@ -25,6 +26,7 @@ import {
 	relativeTime,
 	splitBodyRuns,
 	splitNoteRuns,
+	tint,
 } from "../lib/comment-inbox";
 import { DiffRows } from "./DiffRows";
 import { CommentActions, MenuItemBody, Toast, menuBox, menuItemStyle, outlineBtn, pill, solidBtn } from "./inbox-ui";
@@ -73,7 +75,7 @@ type Tone = "neutral" | "running" | "success" | "danger";
  * review-comment threads nested underneath (resolve / reply / send-to-worker /
  * open-full-file), plus a select-mode batch bar, the auto-send override, and the
  * reviewer run/terminal controls. Pixel-matched to the Comments-inbox dark
- * palette (exact hexes + #3b82f6 accent), mirroring the sibling Tests tab.
+ * palette (themed tokens, app accent), mirroring the sibling Tests tab.
  * Wired to the reviews-trigger, comment-resolve/reply/dispatch, send, and
  * auto-nudge endpoints; drives the per-PR reviewer state from /reviews.
  */
@@ -542,8 +544,8 @@ function ReviewerStrip({
 						fontSize: 11.5,
 						lineHeight: 1.45,
 						color: P.red,
-						background: "color-mix(in srgb, #ef6a63 8%, transparent)",
-						border: "1px solid color-mix(in srgb, #ef6a63 28%, transparent)",
+						background: tint(P.red, 8),
+						border: `1px solid ${tint(P.red, 28)}`,
 						borderRadius: 7,
 						padding: "7px 10px",
 					}}
@@ -558,8 +560,8 @@ function ReviewerStrip({
 						fontSize: 11.5,
 						lineHeight: 1.45,
 						color: P.green,
-						background: "color-mix(in srgb, #5fb87a 8%, transparent)",
-						border: "1px solid color-mix(in srgb, #5fb87a 28%, transparent)",
+						background: tint(P.green, 8),
+						border: `1px solid ${tint(P.green, 28)}`,
 						borderRadius: 7,
 						padding: "7px 10px",
 					}}
@@ -612,9 +614,9 @@ function ReviewerStrip({
 							padding: "6px 11px",
 							borderRadius: 7,
 							cursor: runDisabled ? "not-allowed" : "pointer",
-							color: "#8bdc75",
-							border: "1px solid color-mix(in srgb, #5fb87a 40%, transparent)",
-							background: "color-mix(in srgb, #5fb87a 10%, transparent)",
+							color: P.greenBright,
+							border: `1px solid ${tint(P.green, 40)}`,
+							background: tint(P.green, 10),
 							opacity: runDisabled ? 0.5 : 1,
 							whiteSpace: "nowrap",
 						}}
@@ -703,8 +705,8 @@ function ReviewToggleRow({
 					cursor: busy ? "default" : "pointer",
 					padding: 0,
 					transition: "background .16s ease",
-					background: on ? ACCENT : "#2c2c33",
-					border: `1px solid ${on ? "transparent" : "#3a3a42"}`,
+					background: on ? ACCENT : P.controlTrack,
+					border: `1px solid ${on ? "transparent" : P.controlBorder}`,
 					opacity: busy ? 0.6 : 1,
 				}}
 			>
@@ -850,7 +852,7 @@ function PRBlock({
 							fontFamily: MONO,
 							fontSize: 9,
 							fontWeight: 600,
-							color: "#c7c7cc",
+							color: V.pathFg,
 							background: P.pillBg,
 							border: `1px solid ${P.borderMenu}`,
 							padding: "2px 5px",
@@ -980,7 +982,7 @@ function ThreadComment({
 							marginTop: 5,
 							borderRadius: "50%",
 							background: P.borderMenu,
-							border: "1px solid #3a3a42",
+							border: `1px solid ${P.controlBorder}`,
 						}}
 					/>
 					{connector}
@@ -1107,7 +1109,7 @@ function ThreadCard({
 						minWidth: 0,
 						fontFamily: MONO,
 						fontSize: 11.5,
-						color: "#b7b7bc",
+						color: V.chromeFg,
 						overflow: "hidden",
 						textOverflow: "ellipsis",
 						whiteSpace: "nowrap",
@@ -1145,14 +1147,14 @@ function ThreadCard({
 									height: 18,
 									marginTop: 3,
 									borderRadius: 5,
-									border: `1.5px solid ${selected ? ACCENT : "#3a3a42"}`,
+									border: `1.5px solid ${selected ? ACCENT : P.controlBorder}`,
 									background: selected ? ACCENT : "transparent",
 									display: "flex",
 									alignItems: "center",
 									justifyContent: "center",
 									cursor: "pointer",
 									padding: 0,
-									color: "#fff",
+									color: "var(--accent-fg)",
 									fontSize: 11,
 									fontWeight: 800,
 									lineHeight: 1,
@@ -1342,7 +1344,7 @@ function BatchBar({
 		>
 			<span style={{ fontSize: 12.5, fontWeight: 600, color: P.textStrong }}>{count} selected</span>
 			<div style={{ flex: 1 }} />
-			<button type="button" onClick={onResolve} style={outlineBtn(P.green, "rgba(95,184,122,.35)", "6px 11px")}>
+			<button type="button" onClick={onResolve} style={outlineBtn(P.green, tint(P.green, 35), "6px 11px")}>
 				✓ Resolve
 			</button>
 			<div style={{ display: "inline-flex" }}>

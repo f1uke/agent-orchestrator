@@ -8,6 +8,7 @@ import {
 	ACCENT,
 	MONO,
 	PALETTE as P,
+	VIEWER as V,
 	accentMix,
 	avatarBg,
 	initialsFor,
@@ -85,10 +86,10 @@ export function FileDiffView({
 			ref={anchorRef}
 			style={{
 				margin: "8px 14px 10px 20px",
-				border: `1px solid #26262c`,
+				border: `1px solid ${P.connector}`,
 				borderLeft: `2px solid ${ACCENT}`,
 				borderRadius: 9,
-				background: "#0e0e12",
+				background: V.commentBg,
 				padding: 15,
 			}}
 		>
@@ -167,7 +168,7 @@ export function FileDiffView({
 				flexDirection: "column",
 				height: "100%",
 				minHeight: 0,
-				background: "#060607",
+				background: V.bg,
 				color: P.text,
 			}}
 		>
@@ -192,9 +193,9 @@ export function FileDiffView({
 						gap: 6,
 						fontSize: 12.5,
 						fontWeight: 500,
-						color: "#b7b7bc",
+						color: V.chromeFg,
 						background: "transparent",
-						border: `1px solid #26262c`,
+						border: `1px solid ${P.connector}`,
 						borderRadius: 7,
 						padding: "5px 11px",
 						cursor: "pointer",
@@ -222,7 +223,7 @@ export function FileDiffView({
 					style={{
 						fontFamily: MONO,
 						fontSize: 12.5,
-						color: "#c7c7cc",
+						color: V.pathFg,
 						overflow: "hidden",
 						textOverflow: "ellipsis",
 						whiteSpace: "nowrap",
@@ -233,9 +234,9 @@ export function FileDiffView({
 				</span>
 				<span style={{ fontFamily: MONO, fontSize: 12, color: ACCENT, flex: "none" }}>:{thread.line}</span>
 				<div style={{ flex: 1 }} />
-				<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#84cfa0" }}>+{addCount}</span>
-				<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#e69696" }}>−{delCount}</span>
-				<span style={{ width: 1, height: 16, background: "#26262c" }} />
+				<span style={{ fontFamily: MONO, fontSize: 11.5, color: V.addCount }}>+{addCount}</span>
+				<span style={{ fontFamily: MONO, fontSize: 11.5, color: V.delCount }}>−{delCount}</span>
+				<span style={{ width: 1, height: 16, background: P.connector }} />
 				<a
 					href={providerHref}
 					target="_blank"
@@ -260,7 +261,7 @@ export function FileDiffView({
 							border: `1px solid ${P.borderCard}`,
 							borderRadius: 10,
 							overflow: "hidden",
-							background: "#0b0b0e",
+							background: V.cardBg,
 						}}
 					>
 						<div
@@ -274,7 +275,7 @@ export function FileDiffView({
 								borderBottom: `1px solid ${P.borderCard}`,
 								fontFamily: MONO,
 								fontSize: 11.5,
-								color: "#b7b7bc",
+								color: V.chromeFg,
 							}}
 						>
 							{thread.path}

@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { DropdownMenu } from "radix-ui";
-import { ACCENT, MONO, PALETTE as P, accentMix, genPrompt } from "../lib/comment-inbox";
+import { ACCENT, MONO, PALETTE as P, accentMix, genPrompt, tint } from "../lib/comment-inbox";
 
 // Shared leaf UI for the Comments inbox and the full-file diff viewer's anchored
 // comment. Kept here (not in CommentsView) so both surfaces render identical
@@ -40,7 +40,7 @@ export const solidBtn: CSSProperties = {
 	gap: 5,
 	fontSize: 12,
 	fontWeight: 600,
-	color: "#fff",
+	color: "var(--accent-fg)",
 	background: ACCENT,
 	border: "none",
 	padding: "7px 13px",
@@ -70,7 +70,7 @@ export function menuBox(width: number): CSSProperties {
 		borderRadius: 10,
 		padding: 5,
 		zIndex: 50,
-		boxShadow: "0 12px 30px rgba(0,0,0,.5)",
+		boxShadow: P.shadowMenu,
 	};
 }
 
@@ -101,7 +101,7 @@ export function Toast({ text }: { text: string }) {
 				fontWeight: 500,
 				padding: "10px 16px",
 				borderRadius: 9,
-				boxShadow: "0 10px 34px rgba(0,0,0,.55)",
+				boxShadow: P.shadowToast,
 				display: "flex",
 				alignItems: "center",
 				gap: 9,
@@ -119,7 +119,7 @@ export function MenuItemBody({ title, desc }: { title: string; desc: string }) {
 	return (
 		<>
 			<span style={{ fontSize: 12.5, fontWeight: 600, color: P.text }}>{title}</span>
-			<span style={{ fontSize: 11, color: "#7c7c82" }}>{desc}</span>
+			<span style={{ fontSize: 11, color: P.faint }}>{desc}</span>
 		</>
 	);
 }
@@ -176,7 +176,7 @@ export function CommentActions({
 					type="button"
 					disabled={busy}
 					onClick={() => onResolve(prUrl, threadId)}
-					style={outlineBtn(P.green, "rgba(95,184,122,.35)")}
+					style={outlineBtn(P.green, tint(P.green, 35))}
 				>
 					✓ Resolve
 				</button>
@@ -187,7 +187,15 @@ export function CommentActions({
 			</div>
 
 			{replyOpen && (
-				<div style={{ marginTop: 11, border: `1px solid #26262c`, borderRadius: 9, padding: 9, background: P.replyBg }}>
+				<div
+					style={{
+						marginTop: 11,
+						border: `1px solid ${P.connector}`,
+						borderRadius: 9,
+						padding: 9,
+						background: P.replyBg,
+					}}
+				>
 					<textarea
 						autoFocus
 						value={replyText}
@@ -220,7 +228,14 @@ export function CommentActions({
 								setReplyOpen(false);
 								setReplyText("");
 							}}
-							style={{ fontSize: 12, color: P.secondary, background: "transparent", border: "none", cursor: "pointer", padding: "6px 10px" }}
+							style={{
+								fontSize: 12,
+								color: P.secondary,
+								background: "transparent",
+								border: "none",
+								cursor: "pointer",
+								padding: "6px 10px",
+							}}
 						>
 							Cancel
 						</button>
@@ -235,14 +250,16 @@ export function CommentActions({
 				<div
 					style={{
 						marginTop: 11,
-						border: `1px solid ${accentMix(35, "#26262c")}`,
+						border: `1px solid ${accentMix(35, P.connector)}`,
 						borderRadius: 9,
 						padding: 11,
 						background: accentMix(6, P.replyBg),
 					}}
 				>
 					<div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-						<span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: ACCENT }}>⚡ PROMPT TO WORKER</span>
+						<span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: ACCENT }}>
+							⚡ PROMPT TO WORKER
+						</span>
 					</div>
 					<textarea
 						value={promptText}
@@ -256,22 +273,43 @@ export function CommentActions({
 							borderRadius: 7,
 							padding: 9,
 							outline: "none",
-							color: "#dcdce0",
+							color: P.inputFg,
 							fontSize: 11.5,
 							lineHeight: 1.6,
 							fontFamily: MONO,
 						}}
 					/>
 					<div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-						<label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: P.secondary2, cursor: "pointer" }}>
-							<input type="checkbox" checked={resolveAfter} onChange={(e) => setResolveAfter(e.target.checked)} style={{ accentColor: ACCENT }} />
+						<label
+							style={{
+								display: "inline-flex",
+								alignItems: "center",
+								gap: 6,
+								fontSize: 11.5,
+								color: P.secondary2,
+								cursor: "pointer",
+							}}
+						>
+							<input
+								type="checkbox"
+								checked={resolveAfter}
+								onChange={(e) => setResolveAfter(e.target.checked)}
+								style={{ accentColor: ACCENT }}
+							/>
 							Resolve after send
 						</label>
 						<div style={{ flex: 1 }} />
 						<button
 							type="button"
 							onClick={() => setPromptOpen(false)}
-							style={{ fontSize: 12, color: P.secondary, background: "transparent", border: "none", cursor: "pointer", padding: "6px 10px" }}
+							style={{
+								fontSize: 12,
+								color: P.secondary,
+								background: "transparent",
+								border: "none",
+								cursor: "pointer",
+								padding: "6px 10px",
+							}}
 						>
 							Cancel
 						</button>
@@ -303,7 +341,13 @@ export function SendSplit({ onQuick, onEdit }: { onQuick: () => void; onEdit: ()
 			<button
 				type="button"
 				onClick={onQuick}
-				style={{ ...splitSeg, borderRight: "none", padding: "7px 12px", borderRadius: "7px 0 0 7px", whiteSpace: "nowrap" }}
+				style={{
+					...splitSeg,
+					borderRight: "none",
+					padding: "7px 12px",
+					borderRadius: "7px 0 0 7px",
+					whiteSpace: "nowrap",
+				}}
 			>
 				⚡ Send to worker
 			</button>

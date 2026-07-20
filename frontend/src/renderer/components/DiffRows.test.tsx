@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { TOKEN_COLORS } from "../lib/comment-inbox";
 import { DiffRows } from "./DiffRows";
 
 const lines = [
@@ -14,7 +15,7 @@ describe("DiffRows", () => {
 		// keyword `func` is tokenized into its own colored span
 		const kw = screen.getByText("func");
 		expect(kw.tagName.toLowerCase()).toBe("span");
-		expect(kw).toHaveStyle({ color: "#FC5FA3" });
+		expect(kw).toHaveStyle({ color: TOKEN_COLORS.keyword });
 		// both the removed and added line texts render `return` as keyword spans
 		expect(screen.getAllByText("return")).toHaveLength(2);
 	});
