@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { ACCENT, MONO, PALETTE as P, accentMix } from "../lib/comment-inbox";
+import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
 import { type ChangeMark, DiffRows } from "./DiffRows";
 
 type WorkspaceFile = components["schemas"]["WorkspaceFileResponse"];
@@ -117,7 +117,7 @@ export function WorkspaceFileView({
 				flexDirection: "column",
 				height: "100%",
 				minHeight: 0,
-				background: "#060607",
+				background: V.bg,
 				color: P.text,
 			}}
 		>
@@ -142,9 +142,9 @@ export function WorkspaceFileView({
 						gap: 6,
 						fontSize: 12.5,
 						fontWeight: 500,
-						color: "#b7b7bc",
+						color: V.chromeFg,
 						background: "transparent",
-						border: `1px solid #26262c`,
+						border: `1px solid ${P.connector}`,
 						borderRadius: 7,
 						padding: "5px 11px",
 						cursor: "pointer",
@@ -167,7 +167,7 @@ export function WorkspaceFileView({
 				>
 					FILE
 				</span>
-				<PathLabel path={path} style={{ fontFamily: MONO, fontSize: 12.5, color: "#c7c7cc" }} />
+				<PathLabel path={path} style={{ fontFamily: MONO, fontSize: 12.5, color: V.pathFg }} />
 				{line != null && <span style={{ fontFamily: MONO, fontSize: 12, color: ACCENT, flex: "none" }}>:{line}</span>}
 				<div style={{ flex: 1 }} />
 				{changedCount > 0 && (
@@ -193,7 +193,7 @@ export function WorkspaceFileView({
 							border: `1px solid ${P.borderCard}`,
 							borderRadius: 10,
 							overflow: "hidden",
-							background: "#0b0b0e",
+							background: V.cardBg,
 						}}
 					>
 						<div
@@ -207,7 +207,7 @@ export function WorkspaceFileView({
 								borderBottom: `1px solid ${P.borderCard}`,
 								fontFamily: MONO,
 								fontSize: 11.5,
-								color: "#b7b7bc",
+								color: V.chromeFg,
 								minWidth: 0,
 							}}
 						>

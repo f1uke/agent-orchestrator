@@ -1,50 +1,78 @@
 // Pure helpers + palette for the Comments-tab "Unresolved inbox" redesign.
-// The tab is pixel-matched to a hand-authored design (Comments Inbox.dc.html),
-// so the exact hex values live here rather than in the shared token layer.
+// The tab is pixel-matched to a hand-authored design (Comments Inbox.dc.html).
+// These surfaces are inline-styled rather than Tailwind-classed, so each entry
+// resolves to a CSS custom property (defined per theme in `styles.css`) instead
+// of a raw hex — otherwise the inbox and the diff/code viewers stay dark when
+// the app is in light mode. The dark values behind these tokens are still the
+// verbatim handoff hexes; see the comment above the block in `styles.css`.
 
 /** Accent used across the inbox (primary buttons, links, selection, worker actions). */
-export const ACCENT = "#3b82f6";
+export const ACCENT = "var(--accent)";
 
 /** Monospace stack for paths, line refs, code, and diffs (uses the app's bundled fonts). */
 export const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
 
-/** Exact design palette. Grouped by role; values are verbatim from the design handoff. */
+/** Design palette, by role. Each value is a themed token, not a literal. */
 export const PALETTE = {
-	rail: "#0a0a0c",
-	cardBg: "#0d0d10",
-	fileHeader: "#111114",
-	pillBg: "#18181c",
-	menuBg: "#141418",
-	replyBg: "#0f0f12",
-	promptTextareaBg: "#0b0b0e",
-	batchBg: "#101014",
-	toastBg: "#1b1b20",
-	resolvedBg: "#0b0b0e",
+	rail: "var(--inbox-rail)",
+	cardBg: "var(--inbox-card-bg)",
+	fileHeader: "var(--inbox-file-header)",
+	pillBg: "var(--inbox-pill-bg)",
+	menuBg: "var(--inbox-menu-bg)",
+	replyBg: "var(--inbox-reply-bg)",
+	promptTextareaBg: "var(--inbox-prompt-bg)",
+	batchBg: "var(--inbox-batch-bg)",
+	toastBg: "var(--inbox-toast-bg)",
+	resolvedBg: "var(--inbox-resolved-bg)",
 	// borders
-	borderRail: "#17171a",
-	borderCard: "#1c1c20",
-	borderPill: "#232327",
-	borderMenu: "#2a2a30",
-	divider: "#141417",
-	dividerCard: "#151518",
+	borderRail: "var(--inbox-border-rail)",
+	borderCard: "var(--inbox-border-card)",
+	borderPill: "var(--inbox-border-pill)",
+	borderMenu: "var(--inbox-border-menu)",
+	divider: "var(--inbox-divider)",
+	dividerCard: "var(--inbox-divider-card)",
 	// vertical thread line linking consecutive comment avatars within a thread
-	connector: "#26262c",
-	borderBatch: "#24242a",
-	borderToast: "#33333a",
+	connector: "var(--inbox-connector)",
+	borderBatch: "var(--inbox-border-batch)",
+	borderToast: "var(--inbox-border-toast)",
 	// text
-	textStrong: "#f2f2f5",
-	text: "#e7e7ea",
-	body: "#c2c2c8",
-	secondary: "#9a9aa0",
-	secondary2: "#8b8b92",
-	muted: "#6c6c72",
-	muted2: "#5c5c63",
-	muted3: "#54545a",
+	textStrong: "var(--inbox-text-strong)",
+	text: "var(--inbox-text)",
+	body: "var(--inbox-body)",
+	secondary: "var(--inbox-secondary)",
+	secondary2: "var(--inbox-secondary-2)",
+	muted: "var(--inbox-muted)",
+	muted2: "var(--inbox-muted-2)",
+	muted3: "var(--inbox-muted-3)",
+	faint: "var(--inbox-faint)",
+	inputFg: "var(--inbox-input-fg)",
 	// semantic
-	green: "#5fb87a",
-	amber: "#e0a544",
-	red: "#ef6a63",
-	code: "#e0a86a",
+	green: "var(--inbox-green)",
+	greenBright: "var(--inbox-green-bright)",
+	amber: "var(--inbox-amber)",
+	red: "var(--inbox-red)",
+	code: "var(--inbox-code)",
+	// switch/checkbox chrome in the "off" state
+	controlTrack: "var(--inbox-control-track)",
+	controlBorder: "var(--inbox-control-border)",
+	shadowMenu: "var(--inbox-shadow-menu)",
+	shadowToast: "var(--inbox-shadow-toast)",
+} as const;
+
+/** A theme-following alpha tint of any palette colour (soft fills and borders). */
+export function tint(color: string, pct: number): string {
+	return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+}
+
+/** Full-file viewer chrome (the center-pane code/diff surface). */
+export const VIEWER = {
+	bg: "var(--viewer-bg)",
+	cardBg: "var(--viewer-card-bg)",
+	commentBg: "var(--viewer-comment-bg)",
+	chromeFg: "var(--viewer-chrome-fg)",
+	pathFg: "var(--viewer-path-fg)",
+	addCount: "var(--viewer-add-count)",
+	delCount: "var(--viewer-del-count)",
 } as const;
 
 /** color-mix tint of the accent (oklab), used for soft fills/borders. */
@@ -59,22 +87,22 @@ export function accentMix(pct: number, base = "transparent"): string {
  * the design's `styleDiffRow`.
  */
 export const DIFF_ROW = {
-	addBg: "rgba(63,157,107,.13)",
-	delBg: "rgba(220,90,90,.13)",
-	addSign: "#7fd8a0",
-	delSign: "#e88f8f",
-	contextSign: "#5c5c63",
+	addBg: "var(--diff-add-bg)",
+	delBg: "var(--diff-del-bg)",
+	addSign: "var(--diff-add-sign)",
+	delSign: "var(--diff-del-sign)",
+	contextSign: "var(--diff-context-sign)",
 } as const;
 
-/** Token colors for the lightweight code highlighter — verbatim from the design's `C`. */
+/** Token colors for the lightweight code highlighter (design's `C`, themed). */
 export const TOKEN_COLORS = {
-	keyword: "#FC5FA3",
-	string: "#FC6A5D",
-	comment: "#6C7986",
-	number: "#D0BF69",
-	type: "#5DD8FF",
-	fn: "#67B7A4",
-	plain: "#E8E8EA",
+	keyword: "var(--code-keyword)",
+	string: "var(--code-string)",
+	comment: "var(--code-comment)",
+	number: "var(--code-number)",
+	type: "var(--code-type)",
+	fn: "var(--code-fn)",
+	plain: "var(--code-plain)",
 } as const;
 
 // Go/Swift/TS keyword set the highlighter recognizes — verbatim from the design.
