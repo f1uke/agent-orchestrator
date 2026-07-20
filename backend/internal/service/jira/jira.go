@@ -443,11 +443,13 @@ const assigneeUnassigned = "unassigned"
 // returned verbatim and drives the search fully (the structured fields are ignored)
 // — Jira's advanced search; a malformed query surfaces as a 400 the caller renders.
 // Otherwise: a full key resolves that one issue (ignoring the filters — an exact
-// lookup is unambiguous); a bare project key (confirmed to exist, so we never send a
-// 400-inducing `project = NOPE`) scopes to that project — which is how "demo"
-// surfaces DEMO-* that a text match never would; anything else is a summary/text
-// contains-search. Assignee (accountId), issue types, hide-done and active-sprint,
-// when set, are ANDed in as server-side filters. Always newest-first.
+// lookup is unambiguous); a bare number with a project selected resolves that
+// project's issue, since a key is not searchable as prose; a bare project key
+// (confirmed to exist, so we never send a 400-inducing `project = NOPE`) scopes to
+// that project — which is how "demo" surfaces DEMO-* that a text match never would;
+// anything else is a summary/text contains-search built by textClause, which owns
+// the text-parser escaping. Assignee (accountId), issue types, hide-done and
+// active-sprint, when set, are ANDed in as server-side filters. Always newest-first.
 func (s *Service) buildJQL(ctx context.Context, p SearchParams) string {
 	if raw := strings.TrimSpace(p.JQL); raw != "" {
 		return raw
