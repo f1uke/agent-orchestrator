@@ -1,7 +1,10 @@
-import { FileText, FolderOpen, GitBranch, ListTree, RefreshCw } from "lucide-react";
+import { FileText, FolderOpen, GitBranch, List, ListTree, RefreshCw, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiErrorMessage } from "../lib/api-client";
+import { buildFileTree, matchesFileQuery } from "../lib/file-tree";
 import { cn } from "../lib/utils";
+import { FileTree } from "./FileTree";
 import { Skeleton } from "./ui/skeleton";
 import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
 
@@ -16,15 +19,32 @@ import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
  */
 export type ChangedFileTarget = { path: string };
 
+type FilesView = "tree" | "list";
+
+const VIEW_STORAGE_KEY = "ao.files.view";
+
+function storedView(): FilesView {
+	try {
+		return window.localStorage?.getItem(VIEW_STORAGE_KEY) === "list" ? "list" : "tree";
+	} catch {
+		// Private-mode / disabled storage must not take the panel down with it.
+		return "tree";
+	}
+}
+
 /**
  * Changes mode: the files differing between this session's branch (working tree
- * included) and its target branch.
+ * included) and its target branch, as a folder tree — GitLab's merge-request
+ * Changes navigator.
  *
  * The rail runs ~330px by default and never narrower than 280px (SessionView's
  * wrapper pins that min-width so the collapse animation does not reflow), so
- * this panel is a NAVIGATOR, not a viewer — a diff needs far more width than
- * that. Clicking a row opens the diff in the center pane, the same swap the
- * terminal's clickable file references already perform.
+ * this panel is a NAVIGATOR, not a viewer. Clicking a row scrolls the center
+ * pane's stacked diffs to that file, and the tree highlights whichever file the
+ * reader has scrolled to.
+ *
+ * Tree is the default; the flat list stays available because it is genuinely
+ * better for a two-file diff, where a tree only spends indent.
  * Browse mode ships separately; its segment is present but disabled so the
  * control does not change shape when it lands.
  */
@@ -39,6 +59,30 @@ export function FilesPanel({
 }) {
 	const query = useWorkspaceChanges(sessionId);
 	const data = query.data;
+
+	const [view, setView] = useState<FilesView>(storedView);
+	const [search, setSearch] = useState("");
+	const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
+
+	const chooseView = (next: FilesView) => {
+		setView(next);
+		try {
+			window.localStorage?.setItem(VIEW_STORAGE_KEY, next);
+		} catch {
+			// Preference is a nicety; failing to persist it must not break the view.
+		}
+	};
+
+	const files = useMemo(() => data?.files ?? [], [data]);
+	const visible = useMemo(() => files.filter((f) => matchesFileQuery(f.path, search)), [files, search]);
+	const tree = useMemo(() => buildFileTree(visible, (f) => f.path), [visible]);
+
+	const toggleDir = (key: string) =>
+		setCollapsedDirs((prev) => {
+			const next = new Set(prev);
+			if (!next.delete(key)) next.add(key);
+			return next;
+		});
 
 	return (
 		<TooltipProvider delayDuration={0}>
@@ -75,34 +119,58 @@ export function FilesPanel({
 						<SummaryLine
 							branch={data.targetBranch}
 							inferred={data.targetSource === "project" || data.targetSource === "git_origin_head"}
-							count={data.files.length}
-							additions={data.files.reduce((n, f) => n + (f.binary ? 0 : f.additions), 0)}
-							deletions={data.files.reduce((n, f) => n + (f.binary ? 0 : f.deletions), 0)}
+							count={files.length}
+							additions={files.reduce((n, f) => n + (f.binary ? 0 : f.additions), 0)}
+							deletions={files.reduce((n, f) => n + (f.binary ? 0 : f.deletions), 0)}
 							onRefresh={() => void query.refetch()}
 							refreshing={query.isFetching}
 						/>
-						{data.files.length === 0 ? (
+						{files.length === 0 ? (
 							<EmptyState
 								icon={<CheckIcon />}
 								title={`No changes vs ${data.targetBranch || "target"}`}
 								detail="This branch matches its target branch. Nothing to review yet."
 							/>
 						) : (
-							<div className="files-panel__list">
-								{data.files.map((file) => (
-									<ChangedFileRow
-										key={file.path}
-										file={file}
-										selected={file.path === selectedPath}
-										onOpen={onOpenFile}
-									/>
-								))}
-								{data.truncated ? (
-									<p className="files-panel__truncated">
-										Showing the first {data.files.length} files — the diff is larger.
-									</p>
-								) : null}
-							</div>
+							<>
+								<Toolbar search={search} onSearch={setSearch} view={view} onView={chooseView} />
+								{visible.length === 0 ? (
+									<p className="files-panel__truncated">No files match “{search.trim()}”.</p>
+								) : (
+									<div className="files-panel__list">
+										{view === "tree" ? (
+											<FileTree
+												nodes={tree}
+												collapsed={collapsedDirs}
+												onToggleDir={toggleDir}
+												onSelectFile={(f) => onOpenFile?.({ path: f.path })}
+												selectedKey={selectedPath}
+												label="Changed files"
+												getTitle={(f) => f.path}
+												getFileLabel={displayName}
+												renderLead={(f) => <UncommittedDot file={f} />}
+												renderMeta={(f) => <RowMeta file={f} />}
+											/>
+										) : (
+											<div role="listbox" aria-label="Changed files" className="files-panel__flat">
+												{visible.map((file) => (
+													<ChangedFileRow
+														key={file.path}
+														file={file}
+														selected={file.path === selectedPath}
+														onOpen={onOpenFile}
+													/>
+												))}
+											</div>
+										)}
+										{data.truncated ? (
+											<p className="files-panel__truncated">
+												Showing the first {files.length} files — the diff is larger.
+											</p>
+										) : null}
+									</div>
+								)}
+							</>
 						)}
 					</>
 				) : null}
@@ -111,12 +179,128 @@ export function FilesPanel({
 	);
 }
 
-const STATUS_LETTER: Record<string, string> = {
-	added: "A",
-	modified: "M",
-	deleted: "D",
-	renamed: "R",
+function Toolbar({
+	search,
+	onSearch,
+	view,
+	onView,
+}: {
+	search: string;
+	onSearch: (value: string) => void;
+	view: FilesView;
+	onView: (view: FilesView) => void;
+}) {
+	return (
+		<div className="files-panel__toolbar">
+			<span className="files-panel__search">
+				<Search aria-hidden="true" className="files-panel__search-icon" />
+				<input
+					type="search"
+					role="searchbox"
+					aria-label="Search changed files"
+					placeholder="Search (e.g. *.vue)"
+					className="files-panel__search-input"
+					value={search}
+					onChange={(e) => onSearch(e.target.value)}
+				/>
+			</span>
+			<span className="files-panel__view-toggle">
+				<ViewButton label="Tree view" active={view === "tree"} onClick={() => onView("tree")}>
+					<ListTree aria-hidden="true" className="h-3.5 w-3.5" />
+				</ViewButton>
+				<ViewButton label="List view" active={view === "list"} onClick={() => onView("list")}>
+					<List aria-hidden="true" className="h-3.5 w-3.5" />
+				</ViewButton>
+			</span>
+		</div>
+	);
+}
+
+function ViewButton({
+	label,
+	active,
+	onClick,
+	children,
+}: {
+	label: string;
+	active: boolean;
+	onClick: () => void;
+	children: React.ReactNode;
+}) {
+	return (
+		<SimpleTooltip label={label}>
+			<button
+				type="button"
+				aria-label={label}
+				aria-pressed={active}
+				className={cn("files-panel__view-btn", active && "is-active")}
+				onClick={onClick}
+			>
+				{children}
+			</button>
+		</SimpleTooltip>
+	);
+}
+
+/** Glyph inside the trailing status box, mirroring GitLab's own set. */
+const STATUS_GLYPH: Record<string, string> = {
+	added: "+",
+	modified: "●",
+	deleted: "−",
+	renamed: "→",
 };
+
+const STATUS_TITLE: Record<string, string> = {
+	added: "Added",
+	modified: "Modified",
+	deleted: "Deleted",
+	renamed: "Renamed",
+};
+
+/** Our own signal, not GitLab's: this file's change is not committed yet. */
+function UncommittedDot({ file }: { file: ChangedFile }) {
+	if (file.committed) return null;
+	return <span aria-label="uncommitted" className="files-panel__uncommitted" title="Uncommitted changes" />;
+}
+
+/**
+ * GitLab's trailing status box — a bordered square carrying `+`, `●`, `−` or
+ * `→` — rather than a leading letter, so the eye scans filenames down a clean
+ * left edge and picks up status on the right.
+ */
+function StatusBadge({ file }: { file: ChangedFile }) {
+	const status = file.status || "modified";
+	return (
+		<span
+			className={cn("files-panel__status", `is-${status}`)}
+			title={STATUS_TITLE[status] ?? "Modified"}
+			aria-label={STATUS_TITLE[status] ?? "Modified"}
+			role="img"
+		>
+			<span aria-hidden="true">{STATUS_GLYPH[status] ?? "●"}</span>
+		</span>
+	);
+}
+
+/** Counts then status box — the trailing cluster shared by both views. */
+function RowMeta({ file, className }: { file: ChangedFile; className?: string }) {
+	return (
+		<span className={cn("files-panel__meta", className)}>
+			<Counts file={file} />
+			<StatusBadge file={file} />
+		</span>
+	);
+}
+
+/**
+ * Renamed files read `old → new`, in whichever view they appear. `label` is what
+ * the row would otherwise show — the bare basename in the flat list, or a merged
+ * path fragment in the tree.
+ */
+function displayName(file: ChangedFile, label = file.path.slice(file.path.lastIndexOf("/") + 1)): string {
+	if (!file.oldPath) return label;
+	return `${file.oldPath.slice(file.oldPath.lastIndexOf("/") + 1)} → ${label}`;
+}
 
 function ChangedFileRow({
 	file,
@@ -128,14 +312,13 @@ function ChangedFileRow({
 	onOpen?: (target: ChangedFileTarget) => void;
 }) {
 	const slash = file.path.lastIndexOf("/");
-	const name = slash >= 0 ? file.path.slice(slash + 1) : file.path;
 	const dir = slash >= 0 ? file.path.slice(0, slash) : "";
-	const oldName = file.oldPath ? file.oldPath.slice(file.oldPath.lastIndexOf("/") + 1) : "";
-	const label = oldName ? `${oldName} → ${name}` : name;
 
 	return (
 		<button
 			type="button"
+			role="option"
+			aria-selected={selected}
 			data-path={file.path}
 			aria-current={selected ? "true" : undefined}
 			className={cn("files-panel__row", selected && "is-selected")}
@@ -143,20 +326,15 @@ function ChangedFileRow({
 			title={file.path}
 		>
 			<span className="files-panel__lead">
-				{!file.committed ? (
-					<span aria-label="uncommitted" className="files-panel__uncommitted" title="Uncommitted changes" />
-				) : null}
-				<span aria-hidden="true" className={cn("files-panel__glyph", `is-${file.status}`)}>
-					{STATUS_LETTER[file.status] ?? "M"}
-				</span>
+				<UncommittedDot file={file} />
 			</span>
 			<span className="files-panel__name">
-				<bdi>{label}</bdi>
+				<bdi>{displayName(file)}</bdi>
 			</span>
 			{/* One counts element placed by the row grid, rather than a second copy
 			    on the wrapped line — duplicate text would be announced twice by
 			    assistive tech whenever the stylesheet failed to load. */}
-			<Counts file={file} className="files-panel__counts" />
+			<RowMeta file={file} className="files-panel__counts" />
 			<span className="files-panel__dir">
 				<bdi>{dir}</bdi>
 			</span>
