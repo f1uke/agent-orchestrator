@@ -9,7 +9,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { findSessionLinks } from "../lib/session-ref";
 import { findExternalRefLinks, jiraBrowseBaseFromUrl, resolveScmRemotes } from "../lib/terminal-scm-links";
-import { findFileLinks, type FileLinkMatch } from "../lib/terminal-file-links";
+import { classifyFileRef, findFileLinks, type FileLinkMatch } from "../lib/terminal-file-links";
 import { openWorkspaceFileRef, type WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useSessionJiraContext } from "../hooks/useSessionJiraContext";
 import { XtermTerminal } from "./XtermTerminal";
@@ -234,11 +234,13 @@ function AttachedTerminal({
 	}, [workspaces, currentProjectId, session, jiraBrowseBase]);
 	const externalRefResolver = useCallback((line: string) => findExternalRefLinks(line, scmRemotes), [scmRemotes]);
 
-	// FILE reference linkification: a clicked path/filename token resolves against
-	// this session's workspace (backend /workspace/resolve) and opens in the
-	// center-pane code viewer. Enabled only when the parent provides an open
-	// target (worker terminals). One candidate opens directly; several open a
-	// picker; none shows a non-blocking toast — a click never errors the terminal.
+	// FILE reference linkification: a clicked path/filename token resolves via
+	// the backend (/workspace/resolve) and opens in the center-pane code viewer.
+	// An absolute or `~/` ref opens anywhere on disk; a relative or bare ref is
+	// searched inside this session's workspace. Enabled only when the parent
+	// provides an open target (worker terminals). One candidate opens directly;
+	// several open a picker; none shows a non-blocking toast — a click never
+	// errors the terminal.
 	const canOpenFiles = Boolean(session?.id && onOpenWorkspaceFile);
 	const [filePicker, setFilePicker] = useState<{ candidates: string[]; line?: number } | null>(null);
 	const [fileToast, setFileToast] = useState<string | null>(null);
@@ -263,7 +265,13 @@ function AttachedTerminal({
 				},
 				onOpen: onOpenWorkspaceFile,
 				onDisambiguate: (candidates, line) => setFilePicker({ candidates, line }),
-				onNotFound: (ref) => setFileToast(`Couldn't find ${ref} in this workspace`),
+				// A path that names a location globally was simply not there; only a
+				// relative/bare ref was searched "in this workspace".
+				onNotFound: (ref) => {
+					const shape = classifyFileRef(ref);
+					const global = shape === "absolute" || shape === "tilde";
+					setFileToast(global ? `Couldn't open ${ref}` : `Couldn't find ${ref} in this workspace`);
+				},
 			});
 		},
 		[session?.id, onOpenWorkspaceFile],

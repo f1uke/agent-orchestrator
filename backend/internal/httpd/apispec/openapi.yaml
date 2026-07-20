@@ -3249,11 +3249,13 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
-      - description: Workspace-relative path of the file to read (from workspace/resolve).
+      - description: 'Path of the file to read (from workspace/resolve): workspace-relative,
+          or absolute for a file outside the workspace.'
         in: query
         name: path
         schema:
-          description: Workspace-relative path of the file to read (from workspace/resolve).
+          description: 'Path of the file to read (from workspace/resolve): workspace-relative,
+            or absolute for a file outside the workspace.'
           type: string
       responses:
         "200":
@@ -3295,12 +3297,12 @@ paths:
           description: Session identifier, e.g. project-1.
           type: string
       - description: 'File reference printed in the terminal: an absolute path, a
-          workspace-relative path, or a bare filename.'
+          ~/ path, a workspace-relative path, or a bare filename.'
         in: query
         name: ref
         schema:
           description: 'File reference printed in the terminal: an absolute path,
-            a workspace-relative path, or a bare filename.'
+            a ~/ path, a workspace-relative path, or a bare filename.'
           type: string
       responses:
         "200":
@@ -6318,6 +6320,8 @@ components:
             $ref: '#/components/schemas/DiffContextLineDTO'
           type: array
         path:
+          type: string
+        reason:
           type: string
         truncated:
           type: boolean

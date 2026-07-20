@@ -2295,6 +2295,7 @@ export interface components {
             changedLines: components["schemas"]["LineChangeDTO"][];
             lines: components["schemas"]["DiffContextLineDTO"][];
             path: string;
+            reason?: string;
             truncated: boolean;
         };
         WorkspaceRepo: {
@@ -6289,7 +6290,7 @@ export interface operations {
     readWorkspaceFile: {
         parameters: {
             query?: {
-                /** @description Workspace-relative path of the file to read (from workspace/resolve). */
+                /** @description Path of the file to read (from workspace/resolve): workspace-relative, or absolute for a file outside the workspace. */
                 path?: string;
             };
             header?: never;
@@ -6342,7 +6343,7 @@ export interface operations {
     resolveWorkspaceRef: {
         parameters: {
             query?: {
-                /** @description File reference printed in the terminal: an absolute path, a workspace-relative path, or a bare filename. */
+                /** @description File reference printed in the terminal: an absolute path, a ~/ path, a workspace-relative path, or a bare filename. */
                 ref?: string;
             };
             header?: never;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findFileLinks } from "./terminal-file-links";
+import { classifyFileRef, findFileLinks } from "./terminal-file-links";
 
 // Helper: assert exactly one match whose text is `ref` and whose range slices
 // back to `ref` (+ optional line suffix) out of the line.
@@ -28,6 +28,35 @@ describe("findFileLinks — the three recognised shapes", () => {
 		const m = single("see CheckoutRequest.swift for details");
 		expect(m.ref).toBe("CheckoutRequest.swift");
 	});
+
+	it("linkifies a tilde path, including the leading ~", () => {
+		const path = "~/some/dir/notes.md";
+		const line = `saved the design to ${path} for later`;
+		const m = single(line);
+		expect(m.ref).toBe(path);
+		expect(line.slice(m.startIndex, m.endIndex)).toBe(path);
+	});
+
+	it("linkifies a tilde path with a :line suffix", () => {
+		const m = single("see ~/notes/todo.md:12 for the list");
+		expect(m.ref).toBe("~/notes/todo.md");
+		expect(m.line).toBe(12);
+	});
+});
+
+describe("classifyFileRef — the four ref shapes", () => {
+	it("classifies each shape", () => {
+		expect(classifyFileRef("/Users/x/repo/main.go")).toBe("absolute");
+		expect(classifyFileRef("~/some/dir/notes.md")).toBe("tilde");
+		expect(classifyFileRef("~")).toBe("tilde");
+		expect(classifyFileRef("pkg/a.go")).toBe("relative");
+		expect(classifyFileRef("./pkg/a.go")).toBe("relative");
+		expect(classifyFileRef("a.go")).toBe("bare");
+	});
+
+	it("does not treat a ~ inside a path as a tilde ref", () => {
+		expect(classifyFileRef("dir/~backup.md")).toBe("relative");
+	});
 });
 
 describe("findFileLinks — false-positive guards", () => {
@@ -51,6 +80,15 @@ describe("findFileLinks — false-positive guards", () => {
 
 	it("does NOT linkify a path inside an http(s) URL", () => {
 		expect(findFileLinks("https://github.com/o/r/blob/main/src/app.ts")).toHaveLength(0);
+	});
+
+	it("does NOT linkify a home shorthand without a known extension", () => {
+		expect(findFileLinks("cd ~/ then run it")).toHaveLength(0);
+		expect(findFileLinks("stored under ~/some/dir here")).toHaveLength(0);
+	});
+
+	it("does NOT treat a mid-word ~ as the start of a tilde path", () => {
+		expect(findFileLinks("backup~/some/dir/notes.md")).toHaveLength(0);
 	});
 });
 
