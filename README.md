@@ -247,17 +247,29 @@ npm run package
 
 ### Prebuilt desktop builds
 
-This fork publishes an automated nightly desktop build from `main-fluke`, on every day the branch has new commits. They are **pre-releases**, so `/releases/latest` does not resolve to them — browse the full list instead:
+This fork publishes an automated nightly desktop build from `main-fluke`, on every day the branch has new commits. Everything here is a **pre-release**, so `/releases/latest` does not resolve to any of it — browse the full list instead:
 
-| Platform | Download                                                                           |
-| -------- | ---------------------------------------------------------------------------------- |
-| Windows  | [Latest nightly `Setup.exe`](https://github.com/f1uke/agent-orchestrator/releases) |
-| macOS    | Not currently published — [build from source](#build-from-source)                  |
-| Linux    | Not currently published — [build from source](#build-from-source)                  |
+| Platform              | Download                                                                                                        |
+| --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Windows               | [Latest nightly `Setup.exe`](https://github.com/f1uke/agent-orchestrator/releases)                              |
+| macOS (Apple Silicon) | [`v0.10.3-mac.1`](https://github.com/f1uke/agent-orchestrator/releases/tag/v0.10.3-mac.1) — read the note below |
+| macOS (Intel), Linux  | Not published — [build from source](#build-from-source)                                                         |
 
-> The macOS and Linux legs of the nightly workflow do not currently succeed, so only the
-> Windows installer is attached to each nightly release. Upstream's own releases do build
-> for all three platforms, but they do not contain this fork's changes.
+> **The macOS build is ad-hoc signed and not notarized.** This fork has no Apple Developer ID
+> certificate, so macOS blocks the app until you clear the quarantine flag:
+>
+> ```bash
+> xattr -dr com.apple.quarantine "/Applications/Agent Orchestrator.app"
+> ```
+>
+> On macOS 15 and later the right-click → Open shortcut no longer works, so this command (or
+> System Settings → Privacy & Security → **Open Anyway**) is the way through. Being
+> unnotarized also means it does not auto-update.
+
+> Only the Windows leg of the nightly workflow succeeds — the macOS legs need Apple signing
+> secrets and the Linux leg fails in its `deb` maker — so the macOS build above was made by
+> hand rather than by CI. Upstream's own releases do build all three platforms, but they do
+> not contain this fork's changes.
 
 ### Connect a forge
 
