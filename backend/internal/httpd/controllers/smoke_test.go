@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
+	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
 type fakeSmokeService struct {
@@ -155,6 +156,124 @@ func TestSmokeAuthorMapsCases(t *testing.T) {
 	}
 	if len(svc.authored[0].Steps) != 1 || svc.authored[0].Steps[0] != "do x" {
 		t.Fatalf("steps not mapped: %+v", svc.authored[0].Steps)
+	}
+}
+
+// TestSmokeAuthorNonASCIINamesNeverReturn500 drives the REAL service over a
+// REAL store, because the crash it guards lives below the controller: case ids
+// are derived from the name, and smoke_check.id is a global primary key, so two
+// sessions whose names derive the same id used to fail the insert and surface
+// as a 500. A Thai name slugged to nothing, making every such checklist derive
+// the same constant id, so the second session to author one always crashed.
+func TestSmokeAuthorNonASCIINamesNeverReturn500(t *testing.T) {
+	st, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := st.UpsertProject(ctx, domain.ProjectRecord{ID: "proj", Path: "/tmp/proj", RegisteredAt: now}); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	var ids []domain.SessionID
+	for i := 0; i < 2; i++ {
+		rec, err := st.CreateSession(ctx, domain.SessionRecord{
+			ProjectID: "proj", Kind: domain.KindWorker,
+			Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+			CreatedAt: now, UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("seed session %d: %v", i, err)
+		}
+		ids = append(ids, rec.ID)
+	}
+	w1, w2 := string(ids[0]), string(ids[1])
+	srv := newSmokeTestServer(t, smokesvc.New(st, t.TempDir(), nil))
+
+	for _, tc := range []struct {
+		session string
+		payload string
+	}{
+		// Thai names, no explicit id - the path workers now take by default.
+		{w1, `{"cases":[{"name":"เปิดแอปแล้วเห็นหน้าแรก","why":"ก","steps":["เปิดแอป"],"expected":"เห็นหน้าแรก"},{"name":"กดปุ่มบันทึกแล้วขึ้นข้อความสำเร็จ","why":"ข","steps":["กดบันทึก"],"expected":"สำเร็จ"}]}`},
+		// A second session authoring its own Thai checklist: used to 500.
+		{w2, `{"cases":[{"name":"ลบรายการแล้วหายจากลิสต์","why":"ค","steps":["กดลบ"],"expected":"หาย"}]}`},
+		// Other scripts and punctuation-only names slug to nothing too.
+		{w2, `{"cases":[{"name":"日本語のケース名"},{"name":"---"},{"name":"мой случай"}]}`},
+		// Re-author must stay accepted and keep ids stable.
+		{w2, `{"cases":[{"name":"日本語のケース名"},{"name":"---"},{"name":"мой случай"}]}`},
+	} {
+		body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/"+tc.session+"/smoke-checks", tc.payload)
+		if status != http.StatusOK {
+			t.Fatalf("session %s: status = %d, want 200; body=%s", tc.session, status, body)
+		}
+		if strings.Contains(string(body), `"id":""`) {
+			t.Fatalf("session %s: a case got an empty id: %s", tc.session, body)
+		}
+	}
+
+	byName := func(session domain.SessionID) map[string]string {
+		t.Helper()
+		checks, err := st.ListSmokeChecksBySession(ctx, session)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		out := map[string]string{}
+		for _, c := range checks {
+			if c.ID == "" {
+				t.Fatal("stored an empty id")
+			}
+			if prior, dup := out[c.Name]; dup {
+				t.Fatalf("duplicate name %q at ids %q and %q", c.Name, prior, c.ID)
+			}
+			out[c.Name] = c.ID
+		}
+		return out
+	}
+
+	before := byName(ids[1])
+	if len(before) != 3 {
+		t.Fatalf("checks = %d, want 3", len(before))
+	}
+
+	// Drop the FIRST case and re-author. An id derived from the name survives
+	// this; a positional one silently slides onto the wrong case, handing the
+	// dropped case's verdict, note and evidence to its neighbour.
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/"+w2+"/smoke-checks",
+		`{"cases":[{"name":"---"},{"name":"мой случай"}]}`)
+	if status != http.StatusOK {
+		t.Fatalf("re-author after drop: status = %d body=%s", status, body)
+	}
+	after := byName(ids[1])
+	for _, name := range []string{"---", "мой случай"} {
+		if after[name] != before[name] {
+			t.Errorf("id for %q shifted when another case was dropped: %q then %q", name, before[name], after[name])
+		}
+	}
+
+	// The underlying mechanism, independent of the script: two sessions that
+	// pick the SAME case name derive the same id, and the id column is global.
+	// Both must be accepted, on distinct ids.
+	shared := `{"cases":[{"name":"แอปเปิดได้ไม่ค้าง"},{"name":"Build passes"}]}`
+	for _, session := range []string{w1, w2} {
+		body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/"+session+"/smoke-checks", shared)
+		if status != http.StatusOK {
+			t.Fatalf("session %s shared names: status = %d, want 200; body=%s", session, status, body)
+		}
+	}
+	first, second := byName(ids[0]), byName(ids[1])
+	for _, name := range []string{"แอปเปิดได้ไม่ค้าง", "Build passes"} {
+		if first[name] == "" || second[name] == "" {
+			t.Fatalf("case %q missing an id: %q / %q", name, first[name], second[name])
+		}
+		if first[name] == second[name] {
+			t.Errorf("both sessions got id %q for %q; the id column is global", first[name], name)
+		}
+	}
+	// The first session keeps the historical slug; only the loser moves.
+	if first["Build passes"] != "build-passes" {
+		t.Errorf("first session id = %q, want the unchanged slug", first["Build passes"])
 	}
 }
 

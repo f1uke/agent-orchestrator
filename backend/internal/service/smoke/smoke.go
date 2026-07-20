@@ -7,6 +7,8 @@ package smoke
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -201,7 +203,13 @@ func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases 
 	if !ok {
 		return SessionSmoke{}, fmt.Errorf("%w: session %q", ErrNotFound, sessionID)
 	}
-	resolved, err := resolveCases(cases)
+	resolved, err := resolveCases(sessionID, cases, func(id string) (bool, error) {
+		existing, ok, err := s.store.GetSmokeCheck(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		return ok && existing.SessionID != sessionID, nil
+	})
 	if err != nil {
 		return SessionSmoke{}, err
 	}
@@ -647,9 +655,10 @@ func (s *Service) workerLabel(ctx context.Context, sessionID domain.SessionID) s
 }
 
 // resolveCases assigns 1-based seq from position and a stable id for each case
-// (the worker-supplied id when present, else a slug of the name, deduped within
-// the payload). Every case must carry a non-empty name.
-func resolveCases(cases []domain.SmokeAuthoredCase) ([]domain.SmokeAuthoredCase, error) {
+// (the worker-supplied id when present, else derived from the name, deduped
+// within the payload and against ids other sessions already hold). Every case
+// must carry a non-empty name.
+func resolveCases(sessionID domain.SessionID, cases []domain.SmokeAuthoredCase, ownedElsewhere func(string) (bool, error)) ([]domain.SmokeAuthoredCase, error) {
 	out := make([]domain.SmokeAuthoredCase, 0, len(cases))
 	used := make(map[string]struct{}, len(cases))
 	for i, c := range cases {
@@ -657,16 +666,14 @@ func resolveCases(cases []domain.SmokeAuthoredCase) ([]domain.SmokeAuthoredCase,
 		if name == "" {
 			return nil, fmt.Errorf("%w: case %d is missing a name", ErrInvalid, i+1)
 		}
-		id := strings.TrimSpace(c.ID)
-		if id == "" {
-			id = slugify(name)
-		} else {
-			id = slugify(id)
+		base := slugify(strings.TrimSpace(c.ID))
+		if base == "" {
+			base = derivedCaseID(name)
 		}
-		if id == "" {
-			id = "case"
+		id, err := resolveID(base, sessionID, used, ownedElsewhere)
+		if err != nil {
+			return nil, err
 		}
-		id = dedupeID(id, used)
 		used[id] = struct{}{}
 		out = append(out, domain.SmokeAuthoredCase{
 			ID:       id,
@@ -682,6 +689,26 @@ func resolveCases(cases []domain.SmokeAuthoredCase) ([]domain.SmokeAuthoredCase,
 	return out, nil
 }
 
+// resolveID picks an id this checklist has not used and no OTHER session owns.
+// smoke_check.id is a global primary key, so an id another session holds would
+// fail the insert (that is the crash this guards). The alternative appends a
+// hash of the session id rather than a counter, so it stays deterministic: it
+// does not drift when the other session's checklist changes, and a re-author
+// lands on the same id again.
+func resolveID(base string, sessionID domain.SessionID, used map[string]struct{}, ownedElsewhere func(string) (bool, error)) (string, error) {
+	for _, candidateBase := range []string{base, withSuffix(base, shortHash(string(sessionID)))} {
+		candidate := dedupeID(candidateBase, used)
+		owned, err := ownedElsewhere(candidate)
+		if err != nil {
+			return "", err
+		}
+		if !owned {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("%w: could not derive a free id for case %q; supply a distinct \"id\" for it", ErrInvalid, base)
+}
+
 func dedupeID(id string, used map[string]struct{}) string {
 	if _, ok := used[id]; !ok {
 		return id
@@ -692,6 +719,34 @@ func dedupeID(id string, used map[string]struct{}) string {
 			return candidate
 		}
 	}
+}
+
+// maxCaseIDLen bounds a derived id, matching the slug cap.
+const maxCaseIDLen = 64
+
+// derivedCaseID turns a case name into its stable id. A name carrying ASCII
+// alphanumerics slugs exactly as it always has, so ids already stored never
+// shift. A name that slugs to nothing (Thai, CJK, punctuation-only) falls back
+// to a hash of the name: still deterministic, so a re-author reproduces the id
+// and the user's verdict, note and evidence stay attached.
+func derivedCaseID(name string) string {
+	if s := slugify(name); s != "" {
+		return s
+	}
+	return "case-" + shortHash(name)
+}
+
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:4])
+}
+
+// withSuffix appends -<suffix>, trimming the base to stay within the id cap.
+func withSuffix(base, suffix string) string {
+	if len(base)+1+len(suffix) > maxCaseIDLen {
+		base = strings.Trim(base[:maxCaseIDLen-1-len(suffix)], "-")
+	}
+	return base + "-" + suffix
 }
 
 var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
