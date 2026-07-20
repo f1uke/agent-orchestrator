@@ -362,10 +362,25 @@ describe("SessionInspector Activity section", () => {
 });
 
 describe("SessionInspector tabs", () => {
-	it("exposes Summary, Reviews, Tests, and Browser as the inspector tabs (Comments merged into Reviews)", () => {
+	it("exposes Summary, Reviews, Files, Tests, and Browser as the inspector tabs (Comments merged into Reviews)", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
 		const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
+		// Files sits beside Reviews (both are diff surfaces) and ahead of Browser,
+		// which is empty unless the worker ran `ao preview`.
+		expect(tabs).toEqual(["Summary", "Reviews", "Files", "Tests", "Browser"]);
+	});
+
+	// An orchestrator's workspace is the project checkout, not a per-task
+	// worktree, and it has no branch of its own to diff.
+	it("hides Files for an orchestrator session", () => {
+		renderWithQuery(<SessionInspector session={{ ...session([]), kind: "orchestrator" }} />);
+		const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
 		expect(tabs).toEqual(["Summary", "Reviews", "Tests", "Browser"]);
+	});
+
+	it("still defaults to Summary rather than the new Files tab", () => {
+		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
+		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 	});
 
 	it("shows the intake issue id in the summary overview when present", () => {

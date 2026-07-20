@@ -2,6 +2,8 @@ import type { PRState, PullRequestFacts, WorkspaceSummary } from "../types/works
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
 
+type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
+
 const now = new Date().toISOString();
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
@@ -1044,6 +1046,105 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				evidence: [],
 				createdAt: now,
 				updatedAt: now,
+			},
+		],
+	};
+}
+
+/**
+ * Changes-mode fixtures for the Files panel, keyed by session. Covers one of
+ * every row shape the panel must render — modified, added, deleted, renamed,
+ * binary, and an uncommitted row — plus the two degraded states, so the rail's
+ * responsive breakpoints and empty views are verifiable with `VITE_NO_ELECTRON=1`
+ * and no daemon.
+ */
+export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesResponse {
+	if (sessionId === "demo-no-target") {
+		return { available: false, reason: "no_target_branch", files: [], truncated: false };
+	}
+	if (sessionId === "demo-merged") {
+		return { available: false, reason: "no_workspace", files: [], truncated: false };
+	}
+	if (sessionId === "demo-clean") {
+		return {
+			available: true,
+			targetBranch: "main",
+			targetSource: "pr",
+			files: [],
+			truncated: false,
+		};
+	}
+	return {
+		available: true,
+		targetBranch: "main",
+		targetSource: "pr",
+		mergeBase: "abc1234",
+		truncated: false,
+		files: [
+			{
+				path: "frontend/src/renderer/components/DiffRows.tsx",
+				status: "modified",
+				additions: 42,
+				deletions: 6,
+				binary: false,
+				committed: true,
+			},
+			{
+				path: "frontend/src/renderer/components/FilesPanel.tsx",
+				status: "added",
+				additions: 180,
+				deletions: 0,
+				binary: false,
+				committed: true,
+			},
+			{
+				path: "backend/internal/service/session/workspace_changes.go",
+				status: "added",
+				additions: 210,
+				deletions: 0,
+				binary: false,
+				committed: true,
+			},
+			{
+				path: "frontend/src/renderer/lib/legacy-diff.ts",
+				status: "deleted",
+				additions: 0,
+				deletions: 38,
+				binary: false,
+				committed: true,
+			},
+			{
+				path: "frontend/src/renderer/lib/tree.ts",
+				oldPath: "frontend/src/renderer/lib/session-tree.ts",
+				status: "renamed",
+				additions: 12,
+				deletions: 3,
+				binary: false,
+				committed: true,
+			},
+			{
+				path: "frontend/src/renderer/styles.css",
+				status: "modified",
+				additions: 18,
+				deletions: 2,
+				binary: false,
+				committed: true,
+			},
+			{
+				path: "frontend/src/api/schema.ts",
+				status: "modified",
+				additions: 9,
+				deletions: 0,
+				binary: false,
+				committed: false,
+			},
+			{
+				path: "frontend/ao-dashboard-preview.png",
+				status: "modified",
+				additions: 0,
+				deletions: 0,
+				binary: true,
+				committed: true,
 			},
 		],
 	};

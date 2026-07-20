@@ -780,12 +780,330 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    own their internal layout (fixed header/strips, scrolling list, pinned batch
    bar, toast). */
 .session-inspector__body.session-inspector__body--reviews,
-.session-inspector__body.session-inspector__body--tests {
+.session-inspector__body.session-inspector__body--tests,
+.session-inspector__body.session-inspector__body--files {
 	padding: 0;
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
 }
+
+/* Tab strip below 360px: the strip is an equal `flex: 1` split with no overflow
+ * handling, so five tabs leave ~27px per label — about four characters. Even at
+ * FOUR tabs the labels already truncate to "Sum…"/"Revie…"/"Brow…" at the rail's
+ * 330px default, so dropping to icon-only (with the tab's own tooltip) fixes the
+ * current crowding as well as making room for Files. */
+@container (max-width: 360px) {
+	.session-inspector__tab-label {
+		display: none;
+	}
+
+	.session-inspector__tab {
+		padding-inline: 0;
+	}
+}
+
+/* ── Files panel (Changes mode) ─────────────────────────────────────────── */
+.files-panel {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.files-panel__modes {
+	flex-shrink: 0;
+	padding: 10px 11px;
+}
+
+.files-panel__seg {
+	display: flex;
+	height: 32px;
+	gap: 2px;
+	border-radius: 7px;
+	background: var(--bg-2);
+	padding: 2px;
+}
+
+.files-panel__seg-btn {
+	display: inline-flex;
+	flex: 1;
+	min-width: 0;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	border-radius: 5px;
+	color: var(--fg-muted);
+	/* The unlayered `button { font: inherit }` reset in this file beats Tailwind's
+	   layered font utilities, so button text sizing needs `!` or plain CSS. */
+	font-size: 11.5px;
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+
+.files-panel__seg-btn:hover:not(:disabled):not(.is-active) {
+	color: var(--fg);
+}
+
+.files-panel__seg-btn.is-active {
+	background: var(--bg);
+	color: var(--fg);
+	font-weight: 600;
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+}
+
+.files-panel__seg-btn:disabled {
+	cursor: not-allowed;
+	opacity: 0.38;
+}
+
+.files-panel__summary {
+	display: flex;
+	min-width: 0;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 7px;
+	padding: 0 11px 9px;
+	font-size: 11.5px;
+	color: var(--fg-muted);
+}
+
+.files-panel__vs {
+	overflow: hidden;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--fg);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.files-panel__inferred {
+	color: var(--fg-passive);
+}
+
+.files-panel__sep {
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.files-panel__count {
+	flex: none;
+	white-space: nowrap;
+}
+
+.files-panel__totals {
+	margin-left: auto;
+	flex: none;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.files-panel__add {
+	color: var(--green);
+}
+
+.files-panel__del {
+	color: var(--red);
+}
+
+.files-panel__refresh {
+	display: inline-flex;
+	height: 20px;
+	width: 20px;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--radius-sm);
+	color: var(--fg-passive);
+	cursor: pointer;
+}
+
+.files-panel__refresh:hover {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.files-panel__list {
+	min-height: 0;
+	flex: 1;
+	overflow-y: auto;
+	padding-bottom: 10px;
+}
+
+/* A grid so the counts element exists ONCE and is repositioned at narrow
+   widths, rather than being duplicated into a second line. */
+.files-panel__row {
+	display: grid;
+	width: 100%;
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	grid-template-areas:
+		"lead name counts"
+		"....  dir  dir";
+	align-items: center;
+	column-gap: 6px;
+	border-left: 2px solid transparent;
+	padding: 7px 11px;
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.1s ease;
+}
+
+.files-panel__lead {
+	grid-area: lead;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.files-panel__name {
+	grid-area: name;
+}
+
+.files-panel__counts {
+	grid-area: counts;
+	justify-self: end;
+}
+
+.files-panel__dir {
+	grid-area: dir;
+}
+
+.files-panel__row:hover {
+	background: var(--interactive-hover);
+}
+
+.files-panel__row.is-selected {
+	border-left-color: var(--accent);
+	background: var(--interactive-active);
+}
+
+.files-panel__uncommitted {
+	height: 5px;
+	width: 5px;
+	flex: none;
+	margin-right: -2px;
+	border-radius: 50%;
+	background: var(--orange);
+}
+
+.files-panel__glyph {
+	width: 12px;
+	flex: none;
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	font-weight: 700;
+	text-align: center;
+}
+
+/* Status hues reuse the diff renderer's own mapping: added green, modified
+   accent, deleted red, renamed amber. */
+.files-panel__glyph.is-added {
+	color: var(--green);
+}
+
+.files-panel__glyph.is-modified {
+	color: var(--accent);
+}
+
+.files-panel__glyph.is-deleted {
+	color: var(--red);
+}
+
+.files-panel__glyph.is-renamed {
+	color: var(--amber);
+}
+
+/* Filename and directory truncate from the LEFT so the extension and the
+   deepest folder — the identifying parts — always survive. */
+.files-panel__name,
+.files-panel__dir {
+	overflow: hidden;
+	min-width: 0;
+	direction: rtl;
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.files-panel__name bdi,
+.files-panel__dir bdi {
+	direction: ltr;
+}
+
+.files-panel__name {
+	font-size: 12.5px;
+	color: var(--fg);
+}
+
+.files-panel__row.is-selected .files-panel__name {
+	font-weight: 500;
+}
+
+.files-panel__dir {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--fg-passive);
+}
+
+.files-panel__counts {
+	flex: none;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: -0.02em;
+	white-space: nowrap;
+}
+
+.files-panel__counts--binary {
+	color: var(--fg-passive);
+}
+
+.files-panel__truncated {
+	padding: 8px 11px 0;
+	font-size: 11px;
+	color: var(--fg-passive);
+}
+
+.files-panel__empty {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 9px;
+	padding: 26px 22px;
+	text-align: center;
+}
+
+.files-panel__empty-icon {
+	color: var(--fg-passive);
+	opacity: 0.5;
+}
+
+.files-panel__empty-title {
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--fg);
+}
+
+.files-panel__empty-text {
+	max-width: 236px;
+	padding: 0 11px;
+	font-size: 11.5px;
+	line-height: 1.6;
+	color: var(--fg-passive);
+}
+
+/* The rail's content width never drops below 280px: the wrapper in SessionView
+   carries `min-w-[280px]` so the panel keeps a stable width through the collapse
+   animation (DESIGN.md, approved divergence 2026-06-10) and the PANE clips
+   instead of the content reflowing. Verified live: at a 280px rail every row's
+   counts and even a 4-level directory render unclipped, so the narrower
+   breakpoints this panel was first designed with could never fire. The one
+   container query that IS reachable is the 360px tab-strip rule above. */
 
 /* Inspector resize handle (shadcn resizable separator, AO visual): a 7px
  * transparent grab strip whose centered 1px line lights accent on hover, drag
@@ -3540,4 +3858,12 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	background: color-mix(in srgb, var(--red) 8%, var(--bg));
 	color: var(--red);
 	font-size: 12px;
+}
+
+/* The disabled Browse segment needs a hoverable wrapper: a disabled button
+   emits no pointer events, so its tooltip would never open. */
+.files-panel__seg-slot {
+	display: flex;
+	flex: 1;
+	min-width: 0;
 }

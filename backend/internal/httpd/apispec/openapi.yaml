@@ -3238,6 +3238,45 @@ paths:
         it, else reset its idle-close countdown'
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/workspace/changes:
+    get:
+      operationId: workspaceChanges
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceChangesResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List files differing between the session branch and its target branch
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/workspace/file:
     get:
       operationId: readWorkspaceFile
@@ -3283,6 +3322,53 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Return a workspace file's content and per-line uncommitted-change map
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/workspace/file-diff:
+    get:
+      operationId: workspaceFileDiff
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Repo-relative path of the file to diff against the session's
+          target branch. Absolute and ~/ paths are rejected.
+        in: query
+        name: path
+        schema:
+          description: Repo-relative path of the file to diff against the session's
+            target branch. Absolute and ~/ paths are rejected.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffContextResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return one file's diff against the session's target branch (no PR required)
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/workspace/resolve:
@@ -3980,6 +4066,30 @@ components:
           type: boolean
       required:
       - enabled
+      type: object
+    ChangedFileDTO:
+      properties:
+        additions:
+          type: integer
+        binary:
+          type: boolean
+        committed:
+          type: boolean
+        deletions:
+          type: integer
+        oldPath:
+          type: string
+        path:
+          type: string
+        status:
+          type: string
+      required:
+      - path
+      - status
+      - additions
+      - deletions
+      - binary
+      - committed
       type: object
     ClaimPRRequest:
       properties:
@@ -6306,6 +6416,29 @@ components:
       - ok
       - sessionId
       - session
+      type: object
+    WorkspaceChangesResponse:
+      properties:
+        available:
+          type: boolean
+        files:
+          items:
+            $ref: '#/components/schemas/ChangedFileDTO'
+          type: array
+        mergeBase:
+          type: string
+        reason:
+          type: string
+        targetBranch:
+          type: string
+        targetSource:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - available
+      - files
+      - truncated
       type: object
     WorkspaceFileResponse:
       properties:

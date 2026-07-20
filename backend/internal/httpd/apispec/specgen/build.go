@@ -227,6 +227,9 @@ var schemaNames = map[string]string{
 	"ControllersWorkspaceFileParams":              "WorkspaceFileParams",
 	"ControllersWorkspaceFileResponse":            "WorkspaceFileResponse",
 	"ControllersLineChangeDTO":                    "LineChangeDTO",
+	"ControllersWorkspaceChangesResponse":         "WorkspaceChangesResponse",
+	"ControllersChangedFileDTO":                   "ChangedFileDTO",
+	"ControllersWorkspaceFileDiffParams":          "WorkspaceFileDiffParams",
 	"ControllersSetActivityRequest":               "SetActivityRequest",
 	"ControllersSetActivityResponse":              "SetActivityResponse",
 	"ControllersSpawnOrchestratorRequest":         "SpawnOrchestratorRequest",
@@ -1093,6 +1096,28 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceFileParams{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WorkspaceFileResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/changes", id: "workspaceChanges", tag: "sessions",
+			summary:    "List files differing between the session branch and its target branch",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WorkspaceChangesResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/file-diff", id: "workspaceFileDiff", tag: "sessions",
+			summary:    "Return one file's diff against the session's target branch (no PR required)",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceFileDiffParams{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.DiffContextResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

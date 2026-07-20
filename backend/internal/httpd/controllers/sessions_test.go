@@ -25,31 +25,34 @@ import (
 )
 
 type fakeSessionService struct {
-	sessions          map[domain.SessionID]domain.Session
-	sent              string
-	dispatchedPR      string
-	dispatchedThread  string
-	dispatchedExtra   string
-	replyPR           string
-	replyThread       string
-	replyBody         string
-	replyErr          error
-	replyComment      sessionsvc.PRThreadComment
-	resolvePR         string
-	resolveThread     string
-	resolveErr        error
-	cleanupProjects   []domain.ProjectID
-	cleanupResult     []domain.SessionID
-	cleanupSkipped    []sessionsvc.CleanupSkipped
-	spawnErr          error
-	claimErr          error
-	listPRErr         error
-	prCommentGroups   []sessionsvc.PRCommentGroup
-	diffContext       sessionsvc.DiffContextResult
-	resolveCandidates []string
-	resolveRef        string
-	workspaceFile     sessionsvc.WorkspaceFileResult
-	workspaceFilePath string
+	sessions              map[domain.SessionID]domain.Session
+	sent                  string
+	dispatchedPR          string
+	dispatchedThread      string
+	dispatchedExtra       string
+	replyPR               string
+	replyThread           string
+	replyBody             string
+	replyErr              error
+	replyComment          sessionsvc.PRThreadComment
+	resolvePR             string
+	resolveThread         string
+	resolveErr            error
+	cleanupProjects       []domain.ProjectID
+	cleanupResult         []domain.SessionID
+	cleanupSkipped        []sessionsvc.CleanupSkipped
+	spawnErr              error
+	claimErr              error
+	listPRErr             error
+	prCommentGroups       []sessionsvc.PRCommentGroup
+	diffContext           sessionsvc.DiffContextResult
+	resolveCandidates     []string
+	resolveRef            string
+	workspaceFile         sessionsvc.WorkspaceFileResult
+	workspaceFilePath     string
+	workspaceChanges      sessionsvc.WorkspaceChangesResult
+	workspaceFileDiff     sessionsvc.DiffContextResult
+	workspaceFileDiffPath string
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -374,6 +377,15 @@ func (f *fakeSessionService) ResolveWorkspaceRef(_ context.Context, _ domain.Ses
 func (f *fakeSessionService) ReadWorkspaceFile(_ context.Context, _ domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error) {
 	f.workspaceFilePath = path
 	return f.workspaceFile, nil
+}
+
+func (f *fakeSessionService) WorkspaceChanges(_ context.Context, _ domain.SessionID) (sessionsvc.WorkspaceChangesResult, error) {
+	return f.workspaceChanges, nil
+}
+
+func (f *fakeSessionService) WorkspaceFileDiff(_ context.Context, _ domain.SessionID, path string) (sessionsvc.DiffContextResult, error) {
+	f.workspaceFileDiffPath = path
+	return f.workspaceFileDiff, nil
 }
 
 func (f *fakeSessionService) ClaimPR(_ context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
@@ -1599,6 +1611,69 @@ func TestSessionsAPI_ReadWorkspaceFile(t *testing.T) {
 	if !strings.Contains(string(body), `"available":true`) ||
 		!strings.Contains(string(body), `"text":"package x"`) ||
 		!strings.Contains(string(body), `"kind":"modified"`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestSessionsAPI_WorkspaceChanges(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceChanges = sessionsvc.WorkspaceChangesResult{
+		Available: true, TargetBranch: "main", TargetSource: sessionsvc.TargetFromPR, MergeBase: "abc123",
+		Files: []sessionsvc.ChangedFile{
+			{Path: "a.go", Status: sessionsvc.ChangeModified, Additions: 4, Deletions: 1, Committed: true},
+			{Path: "new.go", OldPath: "old.go", Status: sessionsvc.ChangeRenamed, Additions: 2, Deletions: 0, Committed: true},
+			{Path: "img.png", Status: sessionsvc.ChangeModified, Binary: true},
+		},
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/changes", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	for _, want := range []string{
+		`"available":true`, `"targetBranch":"main"`, `"targetSource":"pr"`,
+		`"path":"a.go"`, `"status":"modified"`, `"additions":4`,
+		`"oldPath":"old.go"`, `"status":"renamed"`,
+		`"binary":true`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s:\n%s", want, body)
+		}
+	}
+}
+
+// TestSessionsAPI_WorkspaceChangesUnavailable pins the contract that a degraded
+// session (worktree cleaned up, no target branch) is a 200 with a reason the UI
+// renders as its own empty state — never an error status.
+func TestSessionsAPI_WorkspaceChangesUnavailable(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceChanges = sessionsvc.WorkspaceChangesResult{Reason: sessionsvc.ChangesNoTargetBranch}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/changes", "")
+	if status != http.StatusOK {
+		t.Fatalf("a degraded session must still be 200, got %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"reason":"no_target_branch"`) ||
+		!strings.Contains(string(body), `"files":[]`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestSessionsAPI_WorkspaceFileDiff(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceFileDiff = sessionsvc.DiffContextResult{
+		Available: true, Mode: "file", Path: "a.go",
+		Lines: []sessionsvc.DiffContextLine{{Kind: "del", OldLine: 1, Text: "gone"}},
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file-diff?path=a.go", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceFileDiffPath != "a.go" {
+		t.Fatalf("service got path %q", svc.workspaceFileDiffPath)
+	}
+	if !strings.Contains(string(body), `"kind":"del"`) || !strings.Contains(string(body), `"text":"gone"`) {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }
