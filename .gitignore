@@ -15,8 +15,20 @@ bin/
 *.test
 *.out
 vendor/
-# compiled daemon binary
-/backend/backend
+# Compiled Go binaries. `go build` writes its output into the working directory
+# under whatever name `-o` chooses, and Git cannot match "an executable" by
+# pattern, so naming the binaries individually never keeps up. Instead ignore
+# every extensionless file directly inside backend/ - the module root, and the
+# cwd for every go command in AGENTS.md. Subdirectories and anything with an
+# extension stay tracked as before; if you add an extensionless file here that
+# belongs in Git (a Makefile, say), re-include it with a `!` line.
+# Better still: build to a temp path (`go run`, `go build -o /tmp/...`).
+/backend/*
+!/backend/*/
+!/backend/*.*
+# Windows binaries carry an extension, so this must stay below the re-inclusion
+# above to win over it (last matching rule decides).
+*.exe
 agent-orchestrator.yaml
 
 # Backend runtime data artifacts (SQLite store + WAL, CDC event log).
