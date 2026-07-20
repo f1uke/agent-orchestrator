@@ -30,6 +30,12 @@ var (
 	ErrNotFound    = ports.ErrSCMNotFound
 	ErrAuthFailed  = errors.New("github scm: authentication failed")
 	ErrRateLimited = errors.New("github scm: rate limited")
+	// ErrUnprocessable is GitHub's 422: the request was understood and refused
+	// on its merits — a base branch that does not exist, a pull request already
+	// merged, a base equal to the head. Previously 422 fell through to the
+	// untyped default, so callers could not tell a rejected request from a
+	// broken service and rendered it as "SCM unavailable".
+	ErrUnprocessable = ports.ErrSCMInvalid
 )
 
 // RateLimitError carries the structured backoff hints from a rate-limit
@@ -424,6 +430,8 @@ func classifyError(resp *http.Response, body []byte) error {
 	switch resp.StatusCode {
 	case http.StatusNotFound:
 		return fmt.Errorf("%w: %s", ErrNotFound, msg)
+	case http.StatusUnprocessableEntity:
+		return fmt.Errorf("%w: %s", ErrUnprocessable, msg)
 	case http.StatusTooManyRequests:
 		return rateLimited(resp, msg)
 	case http.StatusUnauthorized:

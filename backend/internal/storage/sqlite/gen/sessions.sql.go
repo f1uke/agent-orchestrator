@@ -434,6 +434,29 @@ func (q *Queries) SetSessionKeepWarmOnMerge(ctx context.Context, arg SetSessionK
 	return result.RowsAffected()
 }
 
+const setSessionPRTarget = `-- name: SetSessionPRTarget :execrows
+UPDATE sessions SET pr_target = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionPRTargetParams struct {
+	PRTarget  string
+	UpdatedAt time.Time
+	ID        domain.SessionID
+}
+
+// Set the branch this session's PR merges into. Written at spawn and whenever
+// the human edits the target; when the session has an open PR the caller has
+// ALREADY retargeted it on the SCM, so this only ever records a value the forge
+// has agreed to. Bumps updated_at so the sessions_cdc_update trigger refreshes
+// the board.
+func (q *Queries) SetSessionPRTarget(ctx context.Context, arg SetSessionPRTargetParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionPRTarget, arg.PRTarget, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setSessionPreviewURL = `-- name: SetSessionPreviewURL :execrows
 UPDATE sessions SET preview_url = ?, preview_revision = preview_revision + 1, updated_at = ? WHERE id = ?
 `

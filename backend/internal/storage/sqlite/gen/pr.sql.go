@@ -347,6 +347,28 @@ func (q *Queries) ListPRsBySession(ctx context.Context, sessionID domain.Session
 	return items, nil
 }
 
+const setPRTargetBranch = `-- name: SetPRTargetBranch :execrows
+UPDATE pr SET target_branch = ?, updated_at = ? WHERE url = ?
+`
+
+type SetPRTargetBranchParams struct {
+	TargetBranch string
+	UpdatedAt    time.Time
+	URL          string
+}
+
+// Move a tracked PR's recorded target branch after AO retargeted it on the SCM.
+// Without this the read model keeps resolving the OLD target from this row --
+// an open PR outranks the session's stored value -- so a successful retarget
+// would look like it failed until the observer next polls.
+func (q *Queries) SetPRTargetBranch(ctx context.Context, arg SetPRTargetBranchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPRTargetBranch, arg.TargetBranch, arg.UpdatedAt, arg.URL)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updatePRLastNudgeSignature = `-- name: UpdatePRLastNudgeSignature :exec
 UPDATE pr SET last_nudge_signature = ? WHERE url = ?
 `

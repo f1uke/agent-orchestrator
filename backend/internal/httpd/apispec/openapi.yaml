@@ -3198,6 +3198,69 @@ paths:
       summary: Start (materialize) a prepared TODO session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/target:
+    put:
+      operationId: setSessionTarget
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSessionTargetRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Set the branch this session's work merges into (retargets an open PR/MR)
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/wake:
     post:
       operationId: wakeSession
@@ -6009,6 +6072,14 @@ components:
           description: Preview target URL. When empty, the daemon autodetects a static
             entry point in the session workspace.
           type: string
+      type: object
+    SetSessionTargetRequest:
+      properties:
+        targetBranch:
+          minLength: 1
+          type: string
+      required:
+      - targetBranch
       type: object
     SetSmokeVerdictInput:
       properties:

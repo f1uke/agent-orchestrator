@@ -324,3 +324,75 @@ func TestParseRepositoryNoMatch(t *testing.T) {
 		t.Fatalf("ParseRepository: expected zero-value SCMRepo, got %+v", repo)
 	}
 }
+
+// A child that implements Provider but NOT scmobserve.PRRetargeter must fail
+// with a clear "does not support" error rather than panicking on the type
+// assertion — and crucially must NOT satisfy ErrSCMInvalid, or the caller would
+// report a missing capability to the human as "your branch is invalid".
+func TestRetargetPR_ChildWithoutRetargeterErrors(t *testing.T) {
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com"}
+	c := New(Entry{"gitlab", gl})
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Repo: "o/n"}
+	ref := ports.SCMPRRef{Repo: repo, Number: 3}
+
+	err := c.RetargetPR(context.Background(), ref, "develop")
+	if err == nil {
+		t.Fatal("RetargetPR: expected error when child does not implement PRRetargeter, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("RetargetPR error %q does not explain the missing capability", err.Error())
+	}
+	for _, sentinel := range []error{ports.ErrSCMInvalid, ports.ErrSCMNotFound, ports.ErrSCMForbidden} {
+		if errors.Is(err, sentinel) {
+			t.Fatalf("RetargetPR error must not satisfy errors.Is(%v): %v", sentinel, err)
+		}
+	}
+
+	if _, err := c.BranchExists(context.Background(), repo, "develop"); err == nil {
+		t.Fatal("BranchExists: expected error when child does not implement PRRetargeter, got nil")
+	}
+}
+
+// Routing must reach the named child and pass the target through verbatim.
+func TestRetargetPR_RoutesToChild(t *testing.T) {
+	gh := &fakeRetargetProvider{fakeProvider: fakeProvider{name: "github", host: "github.com"}, exists: true}
+	c := New(Entry{"github", gh})
+	repo := ports.SCMRepo{Provider: "github", Host: "github.com", Owner: "o", Name: "n"}
+
+	if err := c.RetargetPR(context.Background(), ports.SCMPRRef{Repo: repo, Number: 9}, "release/2.1"); err != nil {
+		t.Fatalf("RetargetPR: %v", err)
+	}
+	if gh.gotTarget != "release/2.1" {
+		t.Fatalf("child received target %q, want release/2.1", gh.gotTarget)
+	}
+	if gh.gotRef.Number != 9 {
+		t.Fatalf("child received PR %d, want 9", gh.gotRef.Number)
+	}
+	ok, err := c.BranchExists(context.Background(), repo, "release/2.1")
+	if err != nil || !ok {
+		t.Fatalf("BranchExists = %v, %v; want true, nil", ok, err)
+	}
+	if gh.gotBranch != "release/2.1" {
+		t.Fatalf("child received branch %q, want release/2.1", gh.gotBranch)
+	}
+}
+
+// fakeRetargetProvider is a fakeProvider that also implements PRRetargeter.
+type fakeRetargetProvider struct {
+	fakeProvider
+
+	gotRef    ports.SCMPRRef
+	gotTarget string
+	gotBranch string
+	exists    bool
+}
+
+func (f *fakeRetargetProvider) RetargetPR(_ context.Context, ref ports.SCMPRRef, target string) error {
+	f.gotRef, f.gotTarget = ref, target
+	return nil
+}
+
+func (f *fakeRetargetProvider) BranchExists(_ context.Context, _ ports.SCMRepo, branch string) (bool, error) {
+	f.gotBranch = branch
+	return f.exists, nil
+}

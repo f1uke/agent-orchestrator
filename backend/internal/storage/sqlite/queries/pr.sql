@@ -151,3 +151,10 @@ SELECT pr.session_id, sessions.is_terminated
 FROM pr
 JOIN sessions ON sessions.id = pr.session_id
 WHERE pr.url = ?;
+
+-- name: SetPRTargetBranch :execrows
+-- Move a tracked PR's recorded target branch after AO retargeted it on the SCM.
+-- Without this the read model keeps resolving the OLD target from this row --
+-- an open PR outranks the session's stored value -- so a successful retarget
+-- would look like it failed until the observer next polls.
+UPDATE pr SET target_branch = ?, updated_at = ? WHERE url = ?;

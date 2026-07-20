@@ -102,6 +102,11 @@
 	--fg-passive: #646a73;
 	--border: rgb(255 255 255 / 0.06);
 	--border-1: rgb(255 255 255 / 0.1);
+	/* Scrollbars. The thumb floats on a transparent track (overlay style) so a
+	   scroll container never paints a band down its edge. Deliberately dimmer
+	   than --border-1: a scrollbar is a wayfinding hint, not a structural line. */
+	--scrollbar-thumb: rgb(255 255 255 / 0.16);
+	--scrollbar-thumb-hover: rgb(255 255 255 / 0.28);
 	--accent: #4d8dff;
 	--accent-fg: #ffffff;
 	--accent-weak: rgb(77 141 255 / 0.16);
@@ -238,6 +243,8 @@
 	--fg-passive: #9a9a9a;
 	--border: #e3e3e5;
 	--border-1: #d4d4d6;
+	--scrollbar-thumb: rgb(0 0 0 / 0.18);
+	--scrollbar-thumb-hover: rgb(0 0 0 / 0.3);
 	--accent: #2563eb;
 	--accent-fg: #ffffff;
 	--accent-weak: rgb(37 99 235 / 0.12);
@@ -358,6 +365,56 @@
 
 * {
 	box-sizing: border-box;
+}
+
+/* Scrollbars, app-wide and theme-aware.
+   Chromium paints the OS default otherwise, which in light mode is a heavy dark
+   bar against a white surface — it read as a UI element rather than a hint, in
+   every scroll container (Reviews, Files, the branch suggestion list).
+   The thumb is inset with a transparent border + background-clip so it looks
+   like a floating pill rather than a full-width slab, and the track stays
+   transparent so nothing is painted until there is something to scroll.
+   NOTE: the terminal opts OUT below (.xterm .xterm-viewport) — its rules are
+   more specific, so hiding the scrollbar there still wins over these. */
+/* The standard properties and the -webkit- pseudo-elements are mutually
+   exclusive in Chromium: `scrollbar-color` INHERITS, and any non-auto value
+   makes the engine draw its own scrollbar and ignore ::-webkit-scrollbar
+   wholesale. Setting both on html therefore silently kills every rule below
+   (measured: 15px recoloured default instead of the 10px inset pill).
+   This app is Electron, so the pseudo-elements are the richer, reliable path
+   here; the standard properties are kept only for engines that lack them. */
+@supports not selector(::-webkit-scrollbar) {
+	html {
+		scrollbar-width: thin;
+		scrollbar-color: var(--scrollbar-thumb) transparent;
+	}
+}
+
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+	background-color: var(--scrollbar-thumb);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+	border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background-color: var(--scrollbar-thumb-hover);
+	background-clip: padding-box;
+}
+
+/* Where both axes scroll, the little square where they meet would otherwise
+   paint as an opaque OS-coloured block. */
+*::-webkit-scrollbar-corner {
+	background: transparent;
 }
 
 html,
@@ -1459,6 +1516,16 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* While a row is being edited, its value cell hosts an absolutely-positioned
+   suggestion list. The truncation rules above (overflow: hidden) would clip that
+   list out of existence — it renders, reports real geometry, and is simply never
+   painted. Editing opts out of them: there is nothing to ellipsize while an
+   input owns the cell. */
+.inspector-kv__v--editing {
+	overflow: visible;
+	white-space: normal;
 }
 
 .inspector-kv__v--mono {
