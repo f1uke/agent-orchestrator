@@ -1461,6 +1461,16 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	white-space: nowrap;
 }
 
+/* While a row is being edited, its value cell hosts an absolutely-positioned
+   suggestion list. The truncation rules above (overflow: hidden) would clip that
+   list out of existence — it renders, reports real geometry, and is simply never
+   painted. Editing opts out of them: there is nothing to ellipsize while an
+   input owns the cell. */
+.inspector-kv__v--editing {
+	overflow: visible;
+	white-space: normal;
+}
+
 .inspector-kv__v--mono {
 	font-family: var(--font-mono);
 	font-size: 11.5px;

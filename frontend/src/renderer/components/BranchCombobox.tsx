@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
 
@@ -8,9 +8,37 @@ type BranchComboboxProps = {
 	onChange: (value: string) => void;
 	id?: string;
 	placeholder?: string;
+	/** Accessible name for the input, when no visible <label> is wired to it. */
+	ariaLabel?: string;
+	autoFocus?: boolean;
+	/**
+	 * Fired ONLY when a branch is chosen from the list, never on typing. Lets a
+	 * caller treat picking a real branch as a confirmed choice while a typed
+	 * value still needs an explicit commit.
+	 */
+	onSelect?: (branch: string) => void;
+	/**
+	 * Forwarded from the input. Escape always closes the suggestion list AND
+	 * reaches the caller, so an inline editor can cancel in one press. Making
+	 * the caller press Escape twice — once for the list, once for the edit —
+	 * would be a worse escape hatch than the plain input it replaced.
+	 */
+	onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+	onBlur?: () => void;
 };
 
-export function BranchCombobox({ branches, value, onChange, id, placeholder }: BranchComboboxProps) {
+export function BranchCombobox({
+	branches,
+	value,
+	onChange,
+	id,
+	placeholder,
+	ariaLabel,
+	autoFocus,
+	onSelect,
+	onKeyDown,
+	onBlur,
+}: BranchComboboxProps) {
 	const [query, setQuery] = useState(value);
 	const [open, setOpen] = useState(false);
 	const [hasTyped, setHasTyped] = useState(false);
@@ -40,12 +68,15 @@ export function BranchCombobox({ branches, value, onChange, id, placeholder }: B
 		onChange(branch);
 		setOpen(false);
 		setHasTyped(false);
+		onSelect?.(branch);
 	};
 
 	return (
 		<div ref={containerRef} className="relative">
 			<Input
 				id={id}
+				aria-label={ariaLabel}
+				autoFocus={autoFocus}
 				autoComplete="off"
 				placeholder={placeholder}
 				value={query}
@@ -69,12 +100,14 @@ export function BranchCombobox({ branches, value, onChange, id, placeholder }: B
 				onBlur={() => {
 					setOpen(false);
 					setHasTyped(false);
+					onBlur?.();
 				}}
 				onKeyDown={(event) => {
 					if (event.key === "Escape") {
 						setOpen(false);
 						setHasTyped(false);
 					}
+					onKeyDown?.(event);
 				}}
 			/>
 			{open && filtered.length > 0 && (

@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest, Pencil } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { useProjectBranches } from "../hooks/useProjectBranches";
+import { BranchCombobox } from "./BranchCombobox";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
@@ -585,6 +587,9 @@ function TargetRow({ session }: { session: WorkspaceSession }) {
 	const [error, setError] = useState("");
 	const [saving, setSaving] = useState(false);
 	const inputId = useId();
+	// workspaceId IS the project id (useWorkspaceQuery maps project.id onto it).
+	// Only fetched while editing, so opening Summary costs nothing.
+	const { branches } = useProjectBranches(editing ? session.workspaceId : undefined);
 	const note = session.targetBranch ? TARGET_SOURCE_NOTE[session.targetSource ?? "project"] : "";
 
 	const beginEdit = () => {
@@ -597,8 +602,10 @@ function TargetRow({ session }: { session: WorkspaceSession }) {
 		setError("");
 	};
 
-	const save = async () => {
-		const next = draft.trim();
+	const save = async (override?: string) => {
+		// The override matters: a list pick calls save() in the same tick as
+		// setDraft, so reading draft here would still see the OLD value.
+		const next = (override ?? draft).trim();
 		if (!next || saving) return;
 		if (next === session.targetBranch) {
 			cancel();
@@ -621,17 +628,16 @@ function TargetRow({ session }: { session: WorkspaceSession }) {
 	return (
 		<div className="inspector-kv__row">
 			<dt className="inspector-kv__k">Target</dt>
-			<dd className="inspector-kv__v" data-testid="overview-target">
+			<dd className={cn("inspector-kv__v", editing && "inspector-kv__v--editing")} data-testid="overview-target">
 				{editing ? (
 					<div className="flex flex-col gap-1">
-						<input
-							aria-label="Target branch"
+						<BranchCombobox
+							ariaLabel="Target branch"
 							autoFocus
-							className="inspector-kv__v--mono w-full rounded-[5px] border border-border bg-surface px-1.5 py-0.5 text-fg outline-none focus:border-accent"
-							disabled={saving}
+							branches={branches}
 							id={inputId}
 							onBlur={cancel}
-							onChange={(event) => setDraft(event.target.value)}
+							onChange={setDraft}
 							onKeyDown={(event) => {
 								if (event.key === "Enter") {
 									event.preventDefault();
@@ -641,6 +647,11 @@ function TargetRow({ session }: { session: WorkspaceSession }) {
 									cancel();
 								}
 							}}
+							// Picking a real branch off the list IS the confirmation, so it
+							// commits without a second keystroke. A TYPED value still needs
+							// Enter: it may not exist, and this write reaches the forge.
+							onSelect={(branch) => void save(branch)}
+							placeholder="branch to merge into"
 							value={draft}
 						/>
 						{error ? <span className="text-[11px] text-destructive">{error}</span> : null}
