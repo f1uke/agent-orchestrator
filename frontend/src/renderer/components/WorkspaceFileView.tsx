@@ -28,9 +28,7 @@ function PathLabel({ path, style }: { path: string; style?: CSSProperties }) {
 	const base = slash >= 0 ? path.slice(slash + 1) : path;
 	return (
 		<span title={path} style={{ display: "flex", minWidth: 0, ...style }}>
-			{dir !== "" && (
-				<span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dir}</span>
-			)}
+			{dir !== "" && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dir}</span>}
 			<span style={{ flex: "none", whiteSpace: "nowrap" }}>{base}</span>
 		</span>
 	);

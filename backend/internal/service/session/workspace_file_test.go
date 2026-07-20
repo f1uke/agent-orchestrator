@@ -323,6 +323,9 @@ func TestReadWorkspaceFile_AbsoluteMissingIsNotFound(t *testing.T) {
 func TestRefTarget(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Built rather than hardcoded so the "absolute" case is absolute on every
+	// platform (a leading slash is not absolute on Windows).
+	someAbs := filepath.Join(t.TempDir(), "x", "a.go")
 	for _, tc := range []struct {
 		ref      string
 		wantAbs  string
@@ -331,7 +334,7 @@ func TestRefTarget(t *testing.T) {
 		{"~/some/dir/notes.md", filepath.Join(home, "some", "dir", "notes.md"), true},
 		{"~", home, true},
 		{"~/", home, true},
-		{"/tmp/x/a.go", filepath.FromSlash("/tmp/x/a.go"), true},
+		{someAbs, someAbs, true},
 		{"pkg/a.go", "", false},
 		{"./pkg/a.go", "", false},
 		{"a.go", "", false},
