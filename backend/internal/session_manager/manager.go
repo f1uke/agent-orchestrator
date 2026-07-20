@@ -2419,7 +2419,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	// override when set, otherwise the global default; English/empty renders nothing
 	// so the default path is byte-for-byte unchanged.
 	lang := prompts.ResolveResponseLanguage(cfg.ResponseLanguage, m.globalResponseLanguage())
-	return base + m.aoSkillPointer() + prompts.ResponseLanguageDirective(lang) + prompts.ConfidentialityGuard, nil
+	return base + m.aoSkillPointer(cfg.HasWebUI) + prompts.ResponseLanguageDirective(lang) + prompts.ConfidentialityGuard, nil
 }
 
 // globalResponseLanguage returns the global default human-facing response
@@ -2451,8 +2451,12 @@ func (m *Manager) effectiveBase(k prompts.Kind, projectID domain.ProjectID) stri
 // project's worktree, not just the AO repo (the only place a repo-relative
 // skills/ path would exist). The skill file carries exact flags and examples,
 // so the standing prompt stays a short pointer rather than a command dump.
-func (m *Manager) aoSkillPointer() string {
-	dir := skillassets.Dir(m.dataDir)
+//
+// Which catalog it points at is per-project: a project with no web UI is pointed
+// at the variant with no `ao preview` guidance in it, so its agents are never
+// told to preview something they cannot preview.
+func (m *Manager) aoSkillPointer(hasWebUI bool) string {
+	dir := skillassets.Dir(m.dataDir, hasWebUI)
 	skillFile := filepath.Join(dir, "SKILL.md")
 	commandsGlob := filepath.Join(dir, "commands", "*.md")
 	return "\n\n" + "## Using the ao CLI\n\n" +

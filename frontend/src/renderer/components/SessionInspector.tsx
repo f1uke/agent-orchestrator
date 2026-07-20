@@ -104,6 +104,7 @@ const prStateTone: Record<SessionPRSummary["state"], string> = {
 export function SessionInspector({
 	session,
 	onOpenReviewerTerminal,
+	hasWebUI = false,
 	browserPoppedOut = false,
 	isInspectorVisible = true,
 	onToggleBrowserPopOut,
@@ -116,6 +117,13 @@ export function SessionInspector({
 }: {
 	session?: WorkspaceSession;
 	onOpenReviewerTerminal?: OpenReviewerTerminal;
+	/**
+	 * Whether this session's project renders in a browser
+	 * (ProjectConfig.hasWebUI). It is opt-in: without it there is nothing to
+	 * preview, so the Browser tab is not offered at all rather than sitting there
+	 * permanently empty.
+	 */
+	hasWebUI?: boolean;
 	browserPoppedOut?: boolean;
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
@@ -131,7 +139,7 @@ export function SessionInspector({
 	selectedChangedPath?: string;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
-	const view = viewProp ?? internalView;
+	const requestedView = viewProp ?? internalView;
 	const setView = (next: InspectorView) => {
 		setInternalView(next);
 		onViewChange?.(next);
@@ -140,7 +148,14 @@ export function SessionInspector({
 	// and it has no branch of its own to diff — the same reason the readiness strip
 	// is hidden for it.
 	const showFiles = session?.kind !== "orchestrator";
-	const views = showFiles ? VIEWS : VIEWS.filter((v) => v.id !== "files");
+	// A project with no web UI has nothing to preview, so the Browser tab is not
+	// offered at all — an always-empty tab is worse than one tab fewer.
+	const views = VIEWS.filter((v) => (v.id === "files" ? showFiles : v.id === "browser" ? hasWebUI : true));
+	// The requested tab can name a view this session does not show: a remembered
+	// Browser tab in a project that has since switched the web UI off, or Files on
+	// an orchestrator. Without this the strip would render with nothing selected
+	// above an empty body.
+	const view = views.some((v) => v.id === requestedView) ? requestedView : "summary";
 
 	if (!session) {
 		return (
@@ -154,7 +169,10 @@ export function SessionInspector({
 
 	return (
 		<aside className="session-inspector" aria-label="Session inspector">
-			<div className="session-inspector__tabs" role="tablist">
+			{/* The strip is an equal `flex: 1` split, so the width at which labels
+			    stop fitting depends on how many tabs there are. The count drives the
+			    icon-only breakpoints in styles.css. */}
+			<div className="session-inspector__tabs" data-tab-count={views.length} role="tablist">
 				{views.map((entry) => (
 					<button
 						key={entry.id}

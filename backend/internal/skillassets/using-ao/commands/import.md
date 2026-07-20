@@ -20,7 +20,7 @@ ao import [flags]
 ## Examples
 
 ```bash
-# Preview what would be imported without writing anything
+# Show what would be imported without writing anything
 ao import --dry-run
 ```
 

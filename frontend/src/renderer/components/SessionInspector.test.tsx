@@ -367,25 +367,62 @@ describe("SessionInspector Activity section", () => {
 });
 
 describe("SessionInspector tabs", () => {
+	const tabNames = () => screen.getAllByRole("tab").map((el) => el.textContent?.trim());
+
 	it("exposes Summary, Reviews, Files, Tests, and Browser as the inspector tabs (Comments merged into Reviews)", () => {
-		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
-		const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
+		renderWithQuery(<SessionInspector hasWebUI session={session([pr(1, "open")])} />);
 		// Files sits beside Reviews (both are diff surfaces) and ahead of Browser,
 		// which is empty unless the worker ran `ao preview`.
-		expect(tabs).toEqual(["Summary", "Reviews", "Files", "Tests", "Browser"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Tests", "Browser"]);
 	});
 
 	// An orchestrator's workspace is the project checkout, not a per-task
 	// worktree, and it has no branch of its own to diff.
 	it("hides Files for an orchestrator session", () => {
-		renderWithQuery(<SessionInspector session={{ ...session([]), kind: "orchestrator" }} />);
-		const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
-		expect(tabs).toEqual(["Summary", "Reviews", "Tests", "Browser"]);
+		renderWithQuery(<SessionInspector hasWebUI session={{ ...session([]), kind: "orchestrator" }} />);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Tests", "Browser"]);
 	});
 
 	it("still defaults to Summary rather than the new Files tab", () => {
+		renderWithQuery(<SessionInspector hasWebUI session={session([pr(1, "open")])} />);
+		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+	});
+
+	// A project with no web UI has nothing to preview, so the Browser tab would be
+	// permanently empty. It is opt-in, so this is what MOST projects show.
+	it("hides Browser for a project with no web UI", () => {
+		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Tests"]);
+		expect(screen.queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
+	});
+
+	it("hides Browser for an orchestrator in a project with no web UI", () => {
+		renderWithQuery(<SessionInspector session={{ ...session([]), kind: "orchestrator" }} />);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Tests"]);
+	});
+
+	it("still opens on Summary when Browser is hidden", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+	});
+
+	// The remembered/controlled tab can name a view this session no longer shows —
+	// a session whose tab was Browser when the project got switched off, or the
+	// long-standing Files-on-an-orchestrator case. Falling through would render a
+	// tab strip with nothing selected above an empty body.
+	it.each([
+		{ name: "Browser on a project with no web UI", props: { view: "browser" as const } },
+		{
+			name: "Files on an orchestrator",
+			props: { view: "files" as const, session: { ...session([]), kind: "orchestrator" as const } },
+		},
+	])("falls back to Summary when the active view is not available ($name)", ({ props }) => {
+		const { session: overrideSession, ...rest } = props as { view: "browser" | "files"; session?: WorkspaceSession };
+		renderWithQuery(<SessionInspector session={overrideSession ?? session([pr(1, "open")])} {...rest} />);
+
+		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+		// And the body actually renders Summary, not nothing.
+		expect(screen.getByText("Branch")).toBeInTheDocument();
 	});
 
 	it("shows the intake issue id in the summary overview when present", () => {
@@ -772,5 +809,26 @@ describe("SessionInspector target branch", () => {
 		const target = await screen.findByTestId("overview-target");
 		expect(target).toHaveTextContent(/not set/i);
 		expect(target).not.toHaveTextContent("main");
+	});
+});
+
+// The icon-only breakpoints in styles.css are per tab count (5 tabs need 462px
+// for untruncated labels, 4 need 326px, 3 fit at the 280px rail floor), so the
+// count has to reach the CSS. Without it every layout falls back to one
+// breakpoint, which truncates 5 tabs and needlessly hides 4 that would fit.
+describe("SessionInspector tab-strip width class", () => {
+	it.each([
+		{ name: "worker with a web UI", props: { hasWebUI: true }, expected: "5" },
+		{ name: "worker with no web UI", props: {}, expected: "4" },
+		{ name: "orchestrator with a web UI", props: { hasWebUI: true, orchestrator: true }, expected: "4" },
+		{ name: "orchestrator with no web UI", props: { orchestrator: true }, expected: "3" },
+	])("reports $expected tabs to the stylesheet for a $name", ({ props, expected }) => {
+		const { orchestrator, ...rest } = props as { hasWebUI?: boolean; orchestrator?: boolean };
+		renderWithQuery(
+			<SessionInspector session={orchestrator ? { ...session([]), kind: "orchestrator" } : session([])} {...rest} />,
+		);
+		const strip = screen.getByRole("tablist");
+		expect(strip).toHaveAttribute("data-tab-count", expected);
+		expect(screen.getAllByRole("tab")).toHaveLength(Number(expected));
 	});
 });

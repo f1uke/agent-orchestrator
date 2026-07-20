@@ -4,7 +4,7 @@ Natural-language-to-command mappings for common AO tasks.
 
 | You want to... | Command |
 |---|---|
-| Show me this webpage / open this page | `ao preview "<url>"` |
+| Show me this webpage / open this page | `ao preview "<url>"` | <!-- web-ui -->
 | Spawn a worker on issue N | `ao spawn --project <p> --from <base-branch> --issue N --name "<=20 chars>" --prompt "..."` |
 | Spawn a worker whose PR merges into a different branch | `ao spawn --project <p> --from <base-branch> --target <pr-target-branch> --name "<=20 chars>" --prompt "..."` |
 | Message a running agent | `ao send --session <id> --message "..."` |
@@ -19,9 +19,9 @@ Natural-language-to-command mappings for common AO tasks.
 | Open the desktop app | `ao start` |
 | Check the daemon is up | `ao status` |
 | Run health checks | `ao doctor` |
-| Clear the preview panel | `ao preview clear` |
+| Clear the preview panel | `ao preview clear` | <!-- web-ui -->
 | List orchestrator sessions | `ao orchestrator ls` |
 | Claim an existing PR for a session | `ao session claim-pr <id> <pr-ref>` |
 | Submit a code review verdict | `ao review submit <session-id> --run <run-id> --verdict approved` |
 | Configure a project's default branch or model | `ao project set-config <id> --default-branch <branch> --model <model>` |
-| Import projects from a legacy AO install | `ao import --dry-run` (preview), then `ao import -y` |
+| Import projects from a legacy AO install | `ao import --dry-run` first, then `ao import -y` |

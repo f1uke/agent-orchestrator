@@ -28,12 +28,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
@@ -46,7 +48,8 @@ import (
 // the CLI's request body. Every other method is a no-op so it satisfies the
 // controllers.SessionService interface.
 type fakeSessionService struct {
-	spawned ports.SpawnConfig
+	spawned    ports.SpawnConfig
+	previewErr error
 }
 
 var _ controllers.SessionService = (*fakeSessionService)(nil)
@@ -121,6 +124,12 @@ func (f *fakeSessionService) Rename(context.Context, domain.SessionID, string) e
 
 func (f *fakeSessionService) SetPreview(context.Context, domain.SessionID, string) (domain.Session, error) {
 	return domain.Session{}, nil
+}
+
+// previewErr, when set, is what EnsurePreviewAllowed returns — standing in for a
+// project whose config has no web UI.
+func (f *fakeSessionService) EnsurePreviewAllowed(context.Context, domain.SessionID) error {
+	return f.previewErr
 }
 
 func (f *fakeSessionService) SetAutoNudge(context.Context, domain.SessionID, *bool) (domain.Session, error) {
@@ -381,4 +390,35 @@ func TestE2E_SpawnAndProjectAddDTORoundTrip(t *testing.T) {
 			t.Errorf("output missing %q; got: %s", "registered project", out.String())
 		}
 	})
+}
+
+// TestE2E_PreviewRefusedWhenProjectHasNoWebUI drives the real `ao preview`
+// command against a real router: what matters is what the AGENT sees. A worker
+// in a project with no web UI must get a non-zero exit and a message that says
+// the project has it disabled, not a silent success it would take as proof the
+// change was demoed.
+func TestE2E_PreviewRefusedWhenProjectHasNoWebUI(t *testing.T) {
+	sessions := &fakeSessionService{previewErr: apierr.Conflict(
+		"WEB_PREVIEW_DISABLED",
+		`Project "nter-ios-app" has no web UI, so there is nothing to preview and `+"`ao preview`"+` is disabled for it. Turn on "Web UI" in the project's settings if it does render in a browser.`,
+		nil,
+	)}
+	startDriftTestDaemon(t, sessions, &fakeProjectManager{})
+	t.Setenv("AO_SESSION_ID", "mer-1")
+
+	var out bytes.Buffer
+	root := NewRootCommand(Deps{Out: &out, Err: &out, HTTPClient: &http.Client{}, ProcessAlive: func(int) bool { return true }})
+	root.SetArgs([]string{"preview", "http://localhost:5173"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatalf("ao preview must fail for a project with no web UI; output: %s", out.String())
+	}
+	msg := err.Error() + out.String()
+	if !strings.Contains(msg, "no web UI") {
+		t.Errorf("error should say the project has no web UI, got: %s", msg)
+	}
+	if !strings.Contains(msg, "Web UI") {
+		t.Errorf("error should name the setting to turn on, got: %s", msg)
+	}
 }

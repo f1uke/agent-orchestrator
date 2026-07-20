@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SessionView } from "./SessionView";
 import { useUiStore } from "../stores/ui-store";
@@ -48,7 +48,7 @@ const { workspaces, panels } = vi.hoisted(() => {
 		prompt: "do the queued thing",
 	} satisfies WorkspaceSession;
 	const workspaces: WorkspaceSummary[] = [
-		{ id: "proj-1", name: "my-app", path: "/p", type: "main", sessions: [worker, orchestrator, todo] },
+		{ id: "proj-1", name: "my-app", path: "/p", type: "main", hasWebUI: true, sessions: [worker, orchestrator, todo] },
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
 });
@@ -94,8 +94,16 @@ vi.mock("../hooks/useBrowserView", () => ({
 	}),
 }));
 vi.mock("./SessionInspector", () => ({
-	SessionInspector: ({ onToggleBrowserPopOut, view }: { onToggleBrowserPopOut?: () => void; view?: string }) => (
-		<button type="button" data-view={view} onClick={onToggleBrowserPopOut}>
+	SessionInspector: ({
+		onToggleBrowserPopOut,
+		view,
+		hasWebUI,
+	}: {
+		onToggleBrowserPopOut?: () => void;
+		view?: string;
+		hasWebUI?: boolean;
+	}) => (
+		<button type="button" data-has-web-ui={String(Boolean(hasWebUI))} data-view={view} onClick={onToggleBrowserPopOut}>
 			pop browser
 		</button>
 	),
@@ -388,6 +396,48 @@ describe("SessionView", () => {
 			expect(useUiStore.getState().isInspectorOpen).toBe(true);
 			expect(screen.getByRole("button", { name: "pop browser" })).toHaveAttribute("data-view", "browser");
 		} finally {
+			delete worker.previewUrl;
+			delete worker.previewRevision;
+		}
+	});
+
+	// The project's web-UI fact rides the project row, and the rail needs it to
+	// decide whether to offer a Browser tab at all.
+	it("passes the project's web-UI fact down to the inspector", () => {
+		render(<SessionView sessionId="sess-1" />);
+		expect(screen.getByRole("button", { name: "pop browser" })).toHaveAttribute("data-has-web-ui", "true");
+
+		workspaces[0].hasWebUI = false;
+		try {
+			cleanup();
+			render(<SessionView sessionId="sess-1" />);
+			expect(screen.getByRole("button", { name: "pop browser" })).toHaveAttribute("data-has-web-ui", "false");
+		} finally {
+			workspaces[0].hasWebUI = true;
+		}
+	});
+
+	// A session can still hold a previewUrl from before its project switched the
+	// web UI off (the target is left in place, not destroyed). The reveal effect
+	// selects the Browser tab — a tab that no longer exists — and force-opens the
+	// rail, so it must not fire.
+	it("does not reveal the Browser tab when the project has no web UI", () => {
+		const worker = workspaces[0].sessions[0];
+		workspaces[0].hasWebUI = false;
+		worker.previewUrl = undefined;
+		worker.previewRevision = 1;
+		try {
+			useUiStore.setState({ isInspectorOpen: false });
+			const { rerender } = render(<SessionView sessionId="sess-1" />);
+
+			worker.previewUrl = "http://localhost:5173/";
+			worker.previewRevision = 2;
+			rerender(<SessionView sessionId="sess-1" />);
+
+			expect(useUiStore.getState().isInspectorOpen).toBe(false);
+			expect(screen.getByRole("button", { name: "pop browser", hidden: true })).toHaveAttribute("data-view", "summary");
+		} finally {
+			workspaces[0].hasWebUI = true;
 			delete worker.previewUrl;
 			delete worker.previewRevision;
 		}

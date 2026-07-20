@@ -5257,6 +5257,8 @@ components:
           type: object
         gitConvention:
           $ref: '#/components/schemas/GitConventionConfig'
+        hasWebUI:
+          type: boolean
         orchestrator:
           $ref: '#/components/schemas/RoleOverride'
         postCreate:
@@ -5309,6 +5311,8 @@ components:
       type: object
     ProjectSummary:
       properties:
+        hasWebUI:
+          type: boolean
         id:
           type: string
         kind:
@@ -5329,6 +5333,7 @@ components:
       - path
       - kind
       - sessionPrefix
+      - hasWebUI
       type: object
     ReclaimSettingsResponse:
       properties:

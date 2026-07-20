@@ -32,6 +32,11 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 		name: "ao-demo",
 		path: "/demo/ao-demo",
 		type: "main",
+		// The two projects deliberately differ here so the mock renderer exercises
+		// both inspector rails: ao-demo opts into the web UI (five tabs, Browser
+		// last), docs-site leaves it unset like every project that never opts in
+		// (four tabs, no Browser).
+		hasWebUI: true,
 		orchestratorAgent: "codex",
 		accentColor: "#6ee7b7",
 		sessions: [
