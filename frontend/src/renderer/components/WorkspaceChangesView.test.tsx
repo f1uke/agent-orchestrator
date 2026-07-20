@@ -101,6 +101,21 @@ describe("WorkspaceChangesView", () => {
 		expect(within(section("src/a.ts")).getByText("−1")).toBeInTheDocument();
 	});
 
+	// The rail's tree groups directories before files, so stacking in raw API
+	// order would make scrolling here and reading down the tree disagree.
+	it("stacks the files in the rail's tree order, not the order the API returned", async () => {
+		serve([file("root.ts"), file("src/b.ts"), file("src/a.ts"), file("docs/x.md")]);
+		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });
+
+		await screen.findByRole("region", { name: "root.ts" });
+		expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual([
+			"docs/x.md",
+			"src/a.ts",
+			"src/b.ts",
+			"root.ts",
+		]);
+	});
+
 	it("fetches a diff only for the files it actually expanded", async () => {
 		const diffPaths = serve([file("small.ts", 3, 1), file("huge.ts", 900, 0)]);
 		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });

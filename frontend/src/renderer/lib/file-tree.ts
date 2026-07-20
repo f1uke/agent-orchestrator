@@ -131,6 +131,21 @@ export function flattenFileTree<T>(
 }
 
 /**
+ * The items in the order the fully-expanded tree lists them.
+ *
+ * The single source of ordering for the whole feature: the rail's tree, the flat
+ * list and the center pane's stacked diffs all run through this, so scrolling
+ * the diffs and reading down the tree walk the files in the same sequence. Left
+ * to the raw API order they diverge, because the tree groups directories before
+ * files at every level.
+ */
+export function orderedFileItems<T>(items: readonly T[], getPath: (item: T) => string): T[] {
+	return flattenFileTree(buildFileTree(items, getPath), new Set())
+		.map((row) => (row.node.kind === "file" ? row.node.item : null))
+		.filter((item): item is T => item !== null);
+}
+
+/**
  * Does `path` match the panel's search box?
  *
  * Substring by default — searching `fix` has to find `hotfix/login-crash`, and a

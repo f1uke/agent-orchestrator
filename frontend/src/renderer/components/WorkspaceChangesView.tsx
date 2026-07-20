@@ -4,6 +4,7 @@ import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChan
 import { useWorkspaceFileDiff } from "../hooks/useWorkspaceFileDiff";
 import { apiErrorMessage } from "../lib/api-client";
 import { activeIndexFromTops } from "../lib/active-section";
+import { orderedFileItems } from "../lib/file-tree";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
 import { DiffRows } from "./DiffRows";
 
@@ -62,7 +63,10 @@ export function WorkspaceChangesView({
 	onActivePathChange?: (path: string) => void;
 }) {
 	const query = useWorkspaceChanges(sessionId);
-	const files = useMemo(() => query.data?.files ?? [], [query.data]);
+	// Stacked in the SAME order the rail's tree lists them, so scrolling here and
+	// reading down the tree walk the files in one sequence. The raw API order
+	// does not match — the tree groups directories before files at every level.
+	const files = useMemo(() => orderedFileItems(query.data?.files ?? [], (f) => f.path), [query.data]);
 
 	// The automatic decision is derived, never stored; an explicit toggle wins
 	// over it, so a refetch cannot silently re-collapse what the reader opened.

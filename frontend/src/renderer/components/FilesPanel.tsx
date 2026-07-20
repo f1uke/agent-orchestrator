@@ -2,7 +2,7 @@ import { FileText, FolderOpen, GitBranch, List, ListTree, RefreshCw, Search } fr
 import { useMemo, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiErrorMessage } from "../lib/api-client";
-import { buildFileTree, matchesFileQuery } from "../lib/file-tree";
+import { buildFileTree, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
 import { cn } from "../lib/utils";
 import { FileTree } from "./FileTree";
 import { Skeleton } from "./ui/skeleton";
@@ -76,6 +76,9 @@ export function FilesPanel({
 	const files = useMemo(() => data?.files ?? [], [data]);
 	const visible = useMemo(() => files.filter((f) => matchesFileQuery(f.path, search)), [files, search]);
 	const tree = useMemo(() => buildFileTree(visible, (f) => f.path), [visible]);
+	// The flat list follows the tree's order too, so switching views re-groups the
+	// rows without resequencing them — and both match the stacked diffs.
+	const ordered = useMemo(() => orderedFileItems(visible, (f) => f.path), [visible]);
 
 	const toggleDir = (key: string) =>
 		setCollapsedDirs((prev) => {
@@ -153,7 +156,7 @@ export function FilesPanel({
 											/>
 										) : (
 											<div role="listbox" aria-label="Changed files" className="files-panel__flat">
-												{visible.map((file) => (
+												{ordered.map((file) => (
 													<ChangedFileRow
 														key={file.path}
 														file={file}

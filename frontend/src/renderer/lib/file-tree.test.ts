@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFileTree, flattenFileTree, matchesFileQuery } from "./file-tree";
+import { buildFileTree, flattenFileTree, matchesFileQuery, orderedFileItems } from "./file-tree";
 
 type Item = { path: string };
 const items = (...paths: string[]): Item[] => paths.map((path) => ({ path }));
@@ -81,6 +81,39 @@ describe("flattenFileTree", () => {
 		const tree = build("a/one.ts");
 		expect(flattenFileTree(tree, new Set(["a"]))[0]).toMatchObject({ expanded: false });
 		expect(flattenFileTree(tree, new Set())[0]).toMatchObject({ expanded: true });
+	});
+});
+
+describe("orderedFileItems", () => {
+	const order = (...paths: string[]) => orderedFileItems(items(...paths), (f) => f.path).map((f) => f.path);
+
+	// The center pane stacks diffs in this order and the rail lists rows in it,
+	// so reading down the tree and scrolling the diffs walk the same sequence.
+	// Raw API order does NOT match, because the tree groups directories first.
+	it("returns files in the order the fully-expanded tree renders them", () => {
+		expect(order("root.ts", "src/b.ts", "src/a.ts", "docs/x.md")).toEqual([
+			"docs/x.md",
+			"src/a.ts",
+			"src/b.ts",
+			"root.ts",
+		]);
+	});
+
+	it("keeps a directory's files together even when the input interleaves them", () => {
+		expect(order("a/one.ts", "b/two.ts", "a/three.ts")).toEqual(["a/one.ts", "a/three.ts", "b/two.ts"]);
+	});
+
+	it("walks a merged chain in place, not at the end", () => {
+		expect(order("zzz.ts", "deep/nested/only/file.go", "aaa.ts")).toEqual([
+			"deep/nested/only/file.go",
+			"aaa.ts",
+			"zzz.ts",
+		]);
+	});
+
+	it("returns every file exactly once", () => {
+		const paths = ["a/b/c.ts", "a/d.ts", "e.ts", "f/g/h/i.ts"];
+		expect(order(...paths).sort()).toEqual([...paths].sort());
 	});
 });
 
