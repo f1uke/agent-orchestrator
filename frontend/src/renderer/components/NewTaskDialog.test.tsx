@@ -78,7 +78,13 @@ beforeEach(() => {
 			return { data: { branches: [] }, error: undefined };
 		}
 		return {
-			data: { status: "ok", project: { id: "proj-1", config: { worker: { agent: "claude-code" } } } },
+			// A registered project always resolves a default branch; the dialog
+			// pre-fills the required PR target from it, so omitting it here would
+			// only exercise a state real projects do not reach.
+			data: {
+				status: "ok",
+				project: { id: "proj-1", defaultBranch: "main", config: { worker: { agent: "claude-code" } } },
+			},
 			error: undefined,
 		};
 	});
@@ -107,7 +113,14 @@ describe("NewTaskDialog", () => {
 				issueId: "Fix fallback renderer",
 				prompt: "Restore the fallback renderer after WebGL init fails.",
 				branch: undefined,
+				// Both branch fields ride along pre-filled from the project default:
+				// baseBranch is where the worktree starts, prTarget where the PR
+				// lands. The dialog always sends a target so the daemon records the
+				// human's answer rather than inferring one later.
+				baseBranch: "main",
+				prTarget: "main",
 				autoNameBranch: true,
+				displayName: undefined,
 			},
 		});
 		expect(onCreated).toHaveBeenCalledWith("task-1");
@@ -296,6 +309,23 @@ describe("NewTaskDialog", () => {
 
 		await user.type(screen.getByLabelText("Brief"), "B");
 		expect(submit).toBeEnabled();
+	});
+
+	// PR target is required, so a session can never be spawned without recording
+	// where its work is headed. It arrives pre-filled from the project default,
+	// so this only bites when the human deliberately clears it.
+	it("blocks submission when the pre-filled PR target is cleared", async () => {
+		renderDialog();
+		const user = userEvent.setup();
+		await waitForAgentCatalog();
+
+		await user.type(screen.getByLabelText("Title"), "T");
+		await user.type(screen.getByLabelText("Brief"), "B");
+		const submit = screen.getByRole("button", { name: "Start now" });
+		expect(submit).toBeEnabled();
+
+		await user.clear(screen.getByLabelText(/PR target/));
+		expect(submit).toBeDisabled();
 	});
 
 	it.each([

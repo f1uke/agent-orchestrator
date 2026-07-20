@@ -39,6 +39,57 @@ const (
 	TargetFromGitOriginHead   = "git_origin_head"
 )
 
+// targetPR is the only thing target resolution needs to know about a pull
+// request. It exists so the one chain below can serve callers holding either
+// domain.PullRequest or domain.PRFacts without either type leaking into it.
+type targetPR struct {
+	Branch string
+	Open   bool
+}
+
+// resolveTargetChain is THE target-branch resolution, shared by the session read
+// model (toSession) and the Files panel's Changes mode. Keeping it in one place
+// is the point of the feature: a session whose target is resolved differently
+// depending on who is asking is a session with no target at all.
+//
+// Precedence, most authoritative first:
+//
+//  1. an OPEN PR's real target — the forge is ground truth, and a PR retargeted
+//     directly on GitHub/GitLab must beat AO's stored intent;
+//  2. any other PR's target — weaker, but still an observed fact;
+//  3. the session's stored PRTarget — recorded at spawn, editable by the human;
+//  4. the session's stored BaseBranch — for sessions predating a stored target;
+//  5. the project's default branch.
+//
+// It deliberately does NOT fall back to a hardcoded "main": a wrong target
+// produces a confidently wrong diff, which is worse than admitting we do not
+// know. Callers with a worktree in hand may extend it with real repo knowledge
+// (see resolveTargetBranch's origin/HEAD step); nobody may extend it with a guess.
+func resolveTargetChain(prs []targetPR, prTarget, baseBranch, projectDefault string) (string, string) {
+	for _, p := range prs {
+		if p.Open {
+			if b := strings.TrimSpace(p.Branch); b != "" {
+				return b, TargetFromPR
+			}
+		}
+	}
+	for _, p := range prs {
+		if b := strings.TrimSpace(p.Branch); b != "" {
+			return b, TargetFromPR
+		}
+	}
+	if b := strings.TrimSpace(prTarget); b != "" {
+		return b, TargetFromSessionPRTarget
+	}
+	if b := strings.TrimSpace(baseBranch); b != "" {
+		return b, TargetFromSessionBase
+	}
+	if b := strings.TrimSpace(projectDefault); b != "" {
+		return b, TargetFromProject
+	}
+	return "", ""
+}
+
 // maxChangedFiles bounds the returned list so a branch that rewrites a huge tree
 // cannot return an unbounded payload to the rail.
 const maxChangedFiles = 2000
@@ -182,31 +233,13 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 // via WithDefaults) for the same reason — WithDefaults would synthesise "main"
 // for a project that never configured one.
 func (s *Service) resolveTargetBranch(ctx context.Context, rec domain.SessionRecord, workspace string) (string, string) {
-	if prs, err := s.store.ListPRsBySession(ctx, rec.ID); err == nil {
-		// A still-open PR is the only source that reflects where this work is
-		// actually going; prefer it over any spawn-time intent. A merged/closed
-		// PR still beats the weaker fallbacks, so it is tried second.
-		for _, p := range prs {
-			if !p.Merged && !p.Closed {
-				if b := strings.TrimSpace(p.TargetBranch); b != "" {
-					return b, TargetFromPR
-				}
-			}
-		}
-		for _, p := range prs {
-			if b := strings.TrimSpace(p.TargetBranch); b != "" {
-				return b, TargetFromPR
-			}
+	var prs []targetPR
+	if rows, err := s.store.ListPRsBySession(ctx, rec.ID); err == nil {
+		for _, p := range rows {
+			prs = append(prs, targetPR{Branch: p.TargetBranch, Open: !p.Merged && !p.Closed})
 		}
 	}
-	// PRTarget/BaseBranch are only populated for TODO-spawned sessions
-	// (domain/session.go: "Empty for normal spawns"), so they usually miss.
-	if b := strings.TrimSpace(rec.PRTarget); b != "" {
-		return b, TargetFromSessionPRTarget
-	}
-	if b := strings.TrimSpace(rec.BaseBranch); b != "" {
-		return b, TargetFromSessionBase
-	}
+	var projectDefault string
 	if proj, ok, err := s.store.GetProject(ctx, string(rec.ProjectID)); err == nil && ok {
 		// WithDefaults, not the raw field: session_manager creates the worktree
 		// from `project.Config.WithDefaults().DefaultBranch` (manager.go:651), so
@@ -215,11 +248,16 @@ func (s *Service) resolveTargetBranch(ctx context.Context, rec domain.SessionRec
 		// requires the ref to exist (resolveBranchRef) before diffing against it,
 		// so a synthesised default that is not really in the repo degrades to
 		// "no target branch" instead of a confidently wrong diff.
-		if b := strings.TrimSpace(proj.Config.WithDefaults().DefaultBranch); b != "" {
-			return b, TargetFromProject
-		}
+		projectDefault = proj.Config.WithDefaults().DefaultBranch
 	}
-	// origin/HEAD is real knowledge read out of the repo, not an assumption.
+	if b, src := resolveTargetChain(prs, rec.PRTarget, rec.BaseBranch, projectDefault); b != "" {
+		return b, src
+	}
+	// Below the shared chain, and only here: origin/HEAD is real knowledge read
+	// out of the repo, not an assumption — but it needs a worktree, which the
+	// read model does not have. This is the one step Changes mode can take that
+	// toSession cannot, which is why it lives at this call site rather than in
+	// resolveTargetChain.
 	if out, err := gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		if b := strings.TrimSpace(string(out)); b != "" {
 			return strings.TrimPrefix(b, "origin/"), TargetFromGitOriginHead

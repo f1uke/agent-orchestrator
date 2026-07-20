@@ -337,8 +337,11 @@ against upstream. There is no remote-patch script. Branch off `upstream/main`.
   guess:
 
   ```bash
-  ao spawn --project agent-orchestrator --prompt "Fix #<n>: <one-line problem statement>. \
-  Root cause: <file:line + mechanism>. Suggested approach: <approach>. Branch off upstream/main. \
+  # --from is required: the branch the worktree is cut FROM. --target is optional:
+  # the branch the PR merges INTO (defaults to --from; pass it only when they differ).
+  ao spawn --project agent-orchestrator --from main --target main \
+  --name "fix-<n>" --prompt "Fix #<n>: <one-line problem statement>. \
+  Root cause: <file:line + mechanism>. Suggested approach: <approach>. Rebase onto upstream/main. \
   Build with 'cd backend && go build ./... && go test ./...' before opening a PR against AgentWrapper/agent-orchestrator."
   ```
 

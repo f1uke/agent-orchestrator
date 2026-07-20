@@ -296,6 +296,7 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 					<Row k="Agent" v={session.provider} mono />
 					{issueId && <Row k="Issue" v={issueId} mono />}
 					<Row k="Branch" v={branchLabel} mono />
+					<TargetRow session={session} />
 					<Row k="Started" v={formatTimeCompact(session.createdAt ?? session.updatedAt)} mono />
 					<Row k="Session" v={session.id} mono />
 				</dl>
@@ -551,6 +552,40 @@ function BrowserView({
 			poppedOut={false}
 			session={session}
 		/>
+	);
+}
+
+// How a resolved target branch was arrived at, in the human's words. A target
+// the human recorded needs no caveat, so it maps to no note at all; anything
+// merely inherited says so, because a value nobody chose must never read like
+// one somebody did.
+const TARGET_SOURCE_NOTE: Record<NonNullable<WorkspaceSession["targetSource"]>, string> = {
+	pr: "from pull request",
+	session_pr_target: "",
+	session_base: "inherited from start branch",
+	project: "project default",
+};
+
+// Where this session's work is headed. Sits directly under Branch so the pair
+// reads as "from → into". Renders "Not set" rather than assuming a default: an
+// unknown target shown as `main` is exactly the confident-but-wrong answer this
+// row exists to replace.
+function TargetRow({ session }: { session: WorkspaceSession }) {
+	const note = session.targetBranch ? TARGET_SOURCE_NOTE[session.targetSource ?? "project"] : "";
+	return (
+		<div className="inspector-kv__row">
+			<dt className="inspector-kv__k">Target</dt>
+			<dd className="inspector-kv__v" data-testid="overview-target">
+				{session.targetBranch ? (
+					<>
+						<span className="inspector-kv__v--mono">{session.targetBranch}</span>
+						{note ? <span className="ml-1.5 text-passive">· {note}</span> : null}
+					</>
+				) : (
+					<span className="text-passive">Not set</span>
+				)}
+			</dd>
+		</div>
 	);
 }
 

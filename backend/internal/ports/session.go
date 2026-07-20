@@ -29,9 +29,11 @@ type SpawnConfig struct {
 	// DisplayName is the user-facing sidebar label. Empty falls back to the
 	// session id in the read model (e.g. orchestrator sessions).
 	DisplayName string
-	// PRTarget is the intended PR merge target for a deferred/TODO task,
-	// informational and convention-derived. Persisted on the TODO row so the
-	// board detail modal can show/edit it; not consumed by materialization.
+	// PRTarget is the branch this session's PR merges INTO. Distinct from
+	// BaseBranch: a hotfix can be cut from `release/2.1` and still target
+	// `develop`, or vice versa. Empty falls back to the resolved BaseBranch, and
+	// the resolved value is persisted on every session — deferred or immediate —
+	// so the target is a durable fact rather than something each reader infers.
 	PRTarget string
 	// CreatedBy is the orchestrator session id that queued a deferred/TODO task,
 	// so it can be pinged with the report-back when the worker finishes. Empty

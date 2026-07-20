@@ -545,3 +545,51 @@ describe("SessionInspector reviews tab", () => {
 		expect(await screen.findByText("No pull request opened yet.")).toBeInTheDocument();
 	});
 });
+
+describe("SessionInspector target branch", () => {
+	beforeEach(() => {
+		mockCommonGets();
+	});
+
+	// The overview must answer "where is this work going?" without the human
+	// opening the PR — that question having no answer in the UI is the whole
+	// reason this row exists.
+	it("shows the resolved target branch beside the branch", async () => {
+		renderWithQuery(
+			<SessionInspector session={session([], { targetBranch: "develop", targetSource: "session_pr_target" })} />,
+		);
+
+		const target = await screen.findByTestId("overview-target");
+		expect(target).toHaveTextContent("develop");
+		// An explicitly-recorded target carries no provenance caveat.
+		expect(target).not.toHaveTextContent(/inherited|project default/i);
+	});
+
+	// A value nobody chose must not look like one somebody did.
+	it("marks an inherited target as inherited", async () => {
+		renderWithQuery(<SessionInspector session={session([], { targetBranch: "main", targetSource: "project" })} />);
+
+		const target = await screen.findByTestId("overview-target");
+		expect(target).toHaveTextContent("main");
+		expect(target).toHaveTextContent(/project default/i);
+	});
+
+	// An open PR is the forge's own answer, so it is labelled as such rather
+	// than passed off as AO's stored intent.
+	it("attributes a target that came from an open PR", async () => {
+		renderWithQuery(<SessionInspector session={session([], { targetBranch: "release/2.1", targetSource: "pr" })} />);
+
+		const target = await screen.findByTestId("overview-target");
+		expect(target).toHaveTextContent("release/2.1");
+		expect(target).toHaveTextContent(/from pull request/i);
+	});
+
+	// Never render a guessed "main": an unknown target must read as unknown.
+	it("says the target is not set when nothing is known", async () => {
+		renderWithQuery(<SessionInspector session={session([])} />);
+
+		const target = await screen.findByTestId("overview-target");
+		expect(target).toHaveTextContent(/not set/i);
+		expect(target).not.toHaveTextContent("main");
+	});
+});

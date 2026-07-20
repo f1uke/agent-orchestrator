@@ -80,6 +80,8 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				idleCloseAt: session.idleCloseAt ?? undefined,
 				baseBranch: session.baseBranch,
 				prTarget: session.prTarget,
+				targetBranch: session.targetBranch,
+				targetSource: session.targetSource,
 				autoNameBranch: session.autoNameBranch,
 				createdBy: session.createdBy,
 				prompt: session.prompt,

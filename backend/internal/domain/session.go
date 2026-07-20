@@ -109,12 +109,20 @@ type SessionRecord struct {
 	// with a restarted countdown. Zero = never opened. Internal durable fact, not
 	// in the API read model — its effect rides the derived IdleCloseAt.
 	LastOpenedAt time.Time `json:"-"`
-	// BaseBranch, AutoNameBranch, PRTarget and CreatedBy are the deferred spec
-	// captured at TODO create-time and replayed verbatim on Start. BaseBranch is
-	// the branch the worktree is created from; AutoNameBranch asks for an AI
-	// branch name when Branch is empty; PRTarget is the intended PR merge target
-	// (informational, convention-derived); CreatedBy is the orchestrator session
-	// that queued the task (for report-back). Empty for normal spawns.
+	// BaseBranch is the branch the worktree is created from and PRTarget is the
+	// branch this session's PR merges INTO. They are NOT synonyms: BaseBranch is
+	// load-bearing (it becomes the base ref of `git worktree add`), while
+	// PRTarget records where the work is headed, which a gitflow hotfix can set
+	// independently. Both are resolved at spawn and persisted on EVERY session —
+	// deferred or immediate — so the target branch is a durable fact rather than
+	// something each reader re-derives; PRTarget is additionally editable by the
+	// human, which retargets a live PR/MR on the SCM to keep the two in step.
+	// (Sessions created before this was recorded carry empty values and fall back
+	// through resolveTargetBranch; no backfill guesses on their behalf.)
+	//
+	// AutoNameBranch asks for an AI branch name when Branch is empty; CreatedBy
+	// is the orchestrator session that queued the task (for report-back). Those
+	// two remain part of the deferred TODO spec, replayed verbatim on Start.
 	BaseBranch     string    `json:"baseBranch,omitempty"`
 	AutoNameBranch bool      `json:"autoNameBranch,omitempty"`
 	PRTarget       string    `json:"prTarget,omitempty"`
@@ -163,6 +171,15 @@ type Session struct {
 	// Derived on read from durable facts; drives the board/sidebar countdown.
 	IdleCloseAt      *time.Time `json:"idleCloseAt,omitempty"`
 	TerminalHandleID string     `json:"terminalHandleId,omitempty"`
+	// TargetBranch is the branch this session's work merges into, and
+	// TargetSource names WHERE that answer came from so the UI can distinguish a
+	// value the human set from one inherited off the project. Both are derived on
+	// read from durable facts (the session's stored PRTarget, its PRs, the
+	// project default) — never stored, so they cannot go stale against them.
+	// TargetBranch is empty when nothing is known; the UI must say so rather than
+	// assume "main".
+	TargetBranch string `json:"targetBranch,omitempty"`
+	TargetSource string `json:"targetSource,omitempty" enum:"pr,session_pr_target,session_base,project"`
 	// PRs are the session's attributed pull requests (one session can own many).
 	// They feed status derivation and are surfaced on the API read model. Not
 	// serialized here: the HTTP boundary maps them to the curated wire shape.

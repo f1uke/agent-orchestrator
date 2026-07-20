@@ -28,6 +28,7 @@ type spawnOptions struct {
 	project        string
 	harness        string
 	from           string
+	target         string
 	branch         string
 	prompt         string
 	promptFile     string
@@ -51,6 +52,12 @@ type spawnRequest struct {
 	// BaseBranch is the branch the new worktree is created from (the UI's
 	// "Start from" field). `ao spawn` requires it via --from.
 	BaseBranch string `json:"baseBranch,omitempty"`
+	// PRTarget is the branch the worker's PR merges INTO (`--target`), distinct
+	// from BaseBranch, which is only where the worktree was cut from. Left empty
+	// when --target is omitted: the daemon resolves it and records the result, so
+	// the CLI must not resolve it too — two independent resolutions of the same
+	// concept is exactly what makes a session's target unknowable.
+	PRTarget string `json:"prTarget,omitempty"`
 	// AutoNameBranch asks the daemon to AI-name the new branch from the task
 	// when Branch is empty, matching the UI's "AI names it if blank" behavior.
 	AutoNameBranch bool   `json:"autoNameBranch,omitempty"`
@@ -169,6 +176,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				Harness:         opts.harness,
 				Branch:          newBranch,
 				BaseBranch:      baseBranch,
+				PRTarget:        strings.TrimSpace(opts.target),
 				AutoNameBranch:  newBranch == "",
 				Prompt:          opts.prompt,
 				DisplayName:     name,
@@ -228,6 +236,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.project, "project", "", "Project id to spawn the session in (default: AO_PROJECT_ID or current registered repo)")
 	f.StringVar(&opts.harness, "harness", "", "Agent harness / --agent: claude-code, codex, aider, opencode, grok, droid, amp, agy, crush, cursor, qwen, copilot, goose, auggie, continue, devin, cline, kimi, kiro, kilocode, vibe, pi, autohand (default: project worker.agent; required if the project has none)")
 	f.StringVar(&opts.from, "from", "", "REQUIRED source branch the worktree is created from, e.g. main (matches the UI \"Start from\" field)")
+	f.StringVar(&opts.target, "target", "", "Branch the worker's PR will merge into, e.g. develop (default: the --from branch). Distinct from --from, which only says where the worktree is cut from; recorded on the session and shown in the Summary tab")
 	f.StringVar(&opts.branch, "branch", "", "New branch name for the session worktree (default: AI-named from the task, like the UI when left blank)")
 	f.StringVar(&opts.prompt, "prompt", "", "Initial prompt for the agent")
 	f.StringVar(&opts.promptFile, "prompt-file", "", "Read the initial prompt from a file, or '-' for stdin; mutually exclusive with --prompt. Use for large prompts that would exceed the shell's argument-length limit.")

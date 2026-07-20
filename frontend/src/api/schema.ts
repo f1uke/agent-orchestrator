@@ -1507,6 +1507,9 @@ export interface components {
             status: "todo" | "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** @enum {string} */
             statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged";
+            targetBranch?: string;
+            /** @enum {string} */
+            targetSource?: "pr" | "session_pr_target" | "session_base" | "project";
             terminalHandleId?: string;
             tokenUsage?: components["schemas"]["SessionTokenUsage"];
             /** Format: date-time */

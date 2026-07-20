@@ -118,6 +118,43 @@ func TestOrchestratorDefault_DocumentsTodoFlag(t *testing.T) {
 	}
 }
 
+// TestOrchestratorDefault_DocumentsTargetFlag: the orchestrator base must teach
+// the dispatcher that --from and --target are DISTINCT — --from is the ref the
+// worktree is cut from, --target the branch the PR merges into — and that
+// --target is optional, resolving to --from when omitted. Without this the
+// dispatcher conflates the two and can never spawn a worker that branches off
+// one line and lands on another (e.g. a hotfix cut from a release branch).
+func TestOrchestratorDefault_DocumentsTargetFlag(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"`--target <branch>`", // the flag is named
+		"CUT FROM",            // what --from means
+		"MERGES INTO",         // what --target means
+		"resolves to --from",  // it is optional, not required
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("orchestrator default missing --target guidance %q:\n%s", want, base)
+		}
+	}
+}
+
+// TestWorkerDefault_TargetsRecordedPRTarget: the worker base must point the worker
+// at the session's RECORDED PR target (the `--target` chosen at spawn) rather than
+// assuming it equals the branch the worktree was cut from. Without this a worker
+// spawned with a distinct --target opens its PR against the wrong branch.
+func TestWorkerDefault_TargetsRecordedPRTarget(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	for _, want := range []string{
+		"recorded PR target", // the concept is named
+		"`--target`",         // where it comes from
+		"may differ from it", // it is not necessarily the base ref
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("worker default missing PR-target guidance %q:\n%s", want, base)
+		}
+	}
+}
+
 // TestOrchestratorDefault_CuratesIndexWithPruneOnAdd: the orchestrator base must
 // teach the dispatcher to keep the knowledge INDEX.md a small HOT map of one-line
 // entries and prune merged+installed entries to ARCHIVE-INDEX.md whenever it adds
