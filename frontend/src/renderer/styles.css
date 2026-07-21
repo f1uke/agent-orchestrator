@@ -1665,9 +1665,11 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    carries `min-w-[280px]` so the panel keeps a stable width through the collapse
    animation (DESIGN.md, approved divergence 2026-06-10) and the PANE clips
    instead of the content reflowing. Verified live: at a 280px rail every row's
-   counts and even a 4-level directory render unclipped, so the narrower
-   breakpoints this panel was first designed with could never fire. The one
-   container query that IS reachable is the 360px tab-strip rule above. */
+   counts render unclipped, and a six-level tree still fits because the tree's
+   indent tapers with depth (`indentFor` in FileTree.tsx) and the name cell
+   truncates — so the narrower breakpoints this panel was first designed with
+   could never fire. The one container query that IS reachable is the 360px
+   tab-strip rule above. */
 
 /* Inspector resize handle (shadcn resizable separator, AO visual): a 7px
  * transparent grab strip whose centered 1px line lights accent on hover, drag

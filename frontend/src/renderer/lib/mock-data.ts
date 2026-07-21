@@ -1158,10 +1158,11 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				binary: true,
 				committed: true,
 			},
-			// A genuinely deep path (six levels) and an oversized diff: the two
-			// cases the tree's chain-collapsing and the stacked view's
-			// collapsed-by-default budget exist for. Without them, mock mode
-			// exercises neither.
+			// A long SINGLE-CHILD path and an oversized diff: the cases the tree's
+			// chain-collapsing and the stacked view's collapsed-by-default budget
+			// exist for. Note this one is six path levels but only THREE rendered
+			// levels — chain-collapsing merges it — which is exactly why it cannot
+			// stand in for the branchy fixture below.
 			{
 				path: "backend/internal/httpd/controllers/testdata/fixtures/sessions_golden.json",
 				status: "added",
@@ -1170,6 +1171,28 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				binary: false,
 				committed: false,
 			},
+			// A BRANCHY deep tree, modelled on a real Swift app. Every level here
+			// forks, so chain-collapsing has nothing to merge and the rendered depth
+			// really does reach five — the only shape that exercises the tree's
+			// per-level indent at depth. The long single-child path above collapses
+			// to three levels and can never reach it, which is how a clamp at level
+			// four shipped unnoticed.
+			...[
+				"NterApp/NterApp/Commons/Loading/Views/ErrorViewV2.swift",
+				"NterApp/NterApp/Commons/Networking/APIClient.swift",
+				"NterApp/NterApp/Investment/Trade/OrderReview/ViewControllers/ConsentOrdersViewController.swift",
+				"NterApp/NterApp/Investment/Trade/OrderReview/Models/CouponCellAccessory.swift",
+				"NterApp/NterApp/Investment/Trade/OrderReview/ViewModels/ConsentOrdersViewModel.swift",
+				"NterApp/NterApp/Investment/Trade/Portfolio/PortfolioSummaryView.swift",
+				"NterApp/NterApp/Investment/Fund/FundListViewController.swift",
+			].map((path) => ({
+				path,
+				status: "modified" as const,
+				additions: 12,
+				deletions: 4,
+				binary: false,
+				committed: true,
+			})),
 			{
 				path: "frontend/src/renderer/lib/generated-icons.ts",
 				status: "modified",

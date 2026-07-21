@@ -15,10 +15,28 @@ const KIND_ICON: Record<FileKind, typeof File> = {
 	other: File,
 };
 
-/** Indent per level, and the level at which indenting stops growing. */
-const INDENT_STEP = 11;
 const INDENT_BASE = 8;
-const MAX_INDENT_DEPTH = 4;
+/** Indent per level, and the half-step levels past `TAPER_AFTER` fall back to. */
+const INDENT_STEP = 11;
+const INDENT_STEP_DEEP = 6;
+const TAPER_AFTER = 4;
+
+/**
+ * Left offset of a row at `depth`.
+ *
+ * The step NARROWS past the fourth level rather than stopping: a rail whose
+ * content floor is 280px cannot spend 11px a level forever, but a level that
+ * costs nothing is a level the reader cannot see. Every level moves, so a file
+ * is never drawn at its parent's x — the thing the tree exists to say. The
+ * first four levels keep the full step, so the shallow trees that are the
+ * common case render exactly as before.
+ *
+ * Nothing overflows the rail as depth grows: the row is a flex line whose name
+ * cell truncates (`.file-tree__name`), so depth costs name width, never layout.
+ */
+function indentFor(depth: number): number {
+	return INDENT_BASE + Math.min(depth, TAPER_AFTER) * INDENT_STEP + Math.max(0, depth - TAPER_AFTER) * INDENT_STEP_DEEP;
+}
 
 /**
  * A collapsible folder tree over any item type.
@@ -28,10 +46,9 @@ const MAX_INDENT_DEPTH = 4;
  * separately) is meant to drop straight in with its own items and renderers
  * rather than grow a second tree.
  *
- * Indent is capped at four levels because the rail's content floor is 280px —
- * past that, indenting costs more than the hierarchy is worth. Single-child
- * directory chains are already merged upstream in `buildFileTree`, which is what
- * keeps this repo's four-plus-level paths to one or two levels here.
+ * Indent tapers with depth rather than stopping (see `indentFor`), and
+ * single-child directory chains are already merged upstream in `buildFileTree`,
+ * so most trees never reach the narrow steps at all.
  */
 export function FileTree<T>({
 	nodes,
@@ -80,7 +97,7 @@ export function FileTree<T>({
 	return (
 		<div className="file-tree" role="tree" aria-label={label}>
 			{rows.map(({ node, depth, expanded }) => {
-				const indent = INDENT_BASE + Math.min(depth, MAX_INDENT_DEPTH) * INDENT_STEP;
+				const indent = indentFor(depth);
 				const guides = <IndentGuides depth={depth} />;
 				if (node.kind === "dir") {
 					return (
@@ -148,18 +165,20 @@ export function FileTree<T>({
  * The hairlines that trace each open ancestor down the rows beneath it, as
  * GitLab's tree draws them. Purely decorative — depth is already exposed to
  * assistive tech via `aria-level`.
+ *
+ * One per ancestor at every depth, positioned by the same `indentFor` the rows
+ * use — a guide that stopped where the indent tapers would leave the deepest
+ * levels the only ones untraced. They REINFORCE the indent rather than replace
+ * it: measured against their surface these hairlines sit at 1.13:1 (dark) and
+ * 1.25:1 (light), so the row's own offset has to carry the nesting on its own,
+ * which is why the taper keeps a half-step instead of shrinking toward zero.
  */
 function IndentGuides({ depth }: { depth: number }) {
 	if (depth === 0) return null;
 	return (
 		<>
-			{Array.from({ length: Math.min(depth, MAX_INDENT_DEPTH) }, (_, i) => (
-				<span
-					key={i}
-					aria-hidden="true"
-					className="file-tree__guide"
-					style={{ left: INDENT_BASE + i * INDENT_STEP + 5 }}
-				/>
+			{Array.from({ length: depth }, (_, i) => (
+				<span key={i} aria-hidden="true" className="file-tree__guide" style={{ left: indentFor(i) + 5 }} />
 			))}
 		</>
 	);
