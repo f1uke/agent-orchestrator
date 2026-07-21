@@ -288,3 +288,117 @@ func TestReadyToMergeNotifiesAgainAfterLeavingAndReenteringReadyState(t *testing
 			"re-entering the ready state is a genuine edge and must notify", got)
 	}
 }
+
+// closedSCMObservation is the same PR after it closed without merging.
+// (mergedSCMObservation for the merged case already lives in scm_observer_test.go.)
+func closedSCMObservation(prURL string, num int, headSHA string) ports.SCMObservation {
+	o := readySCMObservation(prURL, num, headSHA)
+	o.PR.State = string(domain.PRStateClosed)
+	o.PR.Closed = true
+	return o
+}
+
+// TestMergedNotifiesOnceForAnAlreadyMergedPR pins pr_merged as EDGE-triggered,
+// the same property #148 gave ready_to_merge and left off the other two.
+//
+// This is driven through lifecycle rather than Observer.Poll on purpose. The
+// observer's openTrackedPRs filter drops merged and closed PRs from the poll set,
+// so in production this defect does not fire today - by luck, not by design.
+// Anything that delivers a second observation of a merged PR (a reopen, a manual
+// refresh, a backfill) resurrects the exact #148 symptom, so the guarantee has to
+// be pinned where the decision is actually made.
+func TestMergedNotifiesOnceForAnAlreadyMergedPR(t *testing.T) {
+	ctx := context.Background()
+	f := newSCMFixture(t, "feat/x")
+	const (
+		prURL   = "https://github.com/octocat/hello/pull/77"
+		headSHA = "d15ea5e"
+	)
+	seedReadyPR(f, prURL, 77, headSHA)
+	pollN(t, f, 1) // establishes the PR row
+
+	merged := mergedSCMObservation(prURL, 77, headSHA)
+	if err := f.lcm.ApplySCMObservation(ctx, f.session.ID, merged); err != nil {
+		t.Fatalf("ApplySCMObservation (merge edge): %v", err)
+	}
+	before := unreadCount(t, f)
+
+	// The human reads the tray, clearing the store's unread-only dedup index.
+	if _, err := f.store.MarkAllNotificationsRead(ctx); err != nil {
+		t.Fatalf("MarkAllNotificationsRead: %v", err)
+	}
+
+	// The PR is still merged. It did not merge again, so there is no new edge.
+	for i := 0; i < 3; i++ {
+		if err := f.lcm.ApplySCMObservation(ctx, f.session.ID, merged); err != nil {
+			t.Fatalf("ApplySCMObservation (repeat %d): %v", i+1, err)
+		}
+	}
+	if got := unreadCount(t, f); got != 0 {
+		t.Fatalf("unread = %d after re-observing an already-merged PR, want 0: "+
+			"pr_merged re-fired because the PR IS merged, not because it just merged "+
+			"(first edge produced %d)", got, before)
+	}
+}
+
+// TestClosedNotifiesOnceAndAgainAfterAReopen is the control for the clearing
+// side of the marker: a reopened PR that closes a second time is genuinely news.
+func TestClosedNotifiesOnceAndAgainAfterAReopen(t *testing.T) {
+	ctx := context.Background()
+	f := newSCMFixture(t, "feat/x")
+	const (
+		prURL   = "https://github.com/octocat/hello/pull/78"
+		headSHA = "b0bacafe"
+	)
+	seedReadyPR(f, prURL, 78, headSHA)
+	pollN(t, f, 1)
+	// The seeding poll legitimately announces ready-to-merge. Clear it so the
+	// counts below are about the close/reopen edges only.
+	if _, err := f.store.MarkAllNotificationsRead(ctx); err != nil {
+		t.Fatalf("MarkAllNotificationsRead (baseline): %v", err)
+	}
+
+	closed := closedSCMObservation(prURL, 78, headSHA)
+	apply := func(o ports.SCMObservation, what string) {
+		t.Helper()
+		if err := f.lcm.ApplySCMObservation(ctx, f.session.ID, o); err != nil {
+			t.Fatalf("ApplySCMObservation (%s): %v", what, err)
+		}
+	}
+
+	apply(closed, "close edge")
+	apply(closed, "still closed")
+	if got := unreadOfType(t, f, domain.NotificationPRClosedUnmerged); got != 1 {
+		t.Fatalf("unread pr_closed_unmerged = %d after closing once, want 1", got)
+	}
+	if _, err := f.store.MarkAllNotificationsRead(ctx); err != nil {
+		t.Fatalf("MarkAllNotificationsRead: %v", err)
+	}
+
+	// Reopened: the closed state is left, so the marker must clear. The reopen
+	// also re-enters the ready state, which is its own legitimate notification -
+	// hence the assertions below count pr_closed_unmerged specifically.
+	apply(readySCMObservation(prURL, 78, headSHA), "reopen")
+	// Closed again. This IS a new edge and must notify.
+	apply(closed, "second close edge")
+	if got := unreadOfType(t, f, domain.NotificationPRClosedUnmerged); got != 1 {
+		t.Fatalf("unread pr_closed_unmerged = %d after a reopen-then-close, want 1: "+
+			"closing a second time is genuine news and the marker must have cleared "+
+			"on the reopen", got)
+	}
+}
+
+func unreadOfType(t *testing.T, f *scmFixture, typ domain.NotificationType) int {
+	t.Helper()
+	rows, err := f.store.ListUnreadNotifications(context.Background(), 50)
+	if err != nil {
+		t.Fatalf("ListUnreadNotifications: %v", err)
+	}
+	n := 0
+	for _, r := range rows {
+		if r.Type == typ {
+			n++
+		}
+	}
+	return n
+}

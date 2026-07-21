@@ -384,48 +384,80 @@ func (m *Manager) notificationIntentForCurrentSCM(ctx context.Context, id domain
 	unresolved := durableUnresolvedComments(facts, prURL)
 	intent := m.notificationIntentForSCM(rec, o, unresolved)
 
-	// "PR #N is ready to merge" is only worth reading if it means the PR JUST
-	// became ready. The condition being true is not news; the transition into it
-	// is. Without this the notification re-fires on every later observation that
-	// reaches lifecycle while the PR happens to still be ready — the store's
-	// dedup index only suppresses while the previous row is unread, so reading
-	// the notification re-arms it.
+	// Every one of these notifications is news only on the transition INTO its
+	// state. The condition being true is not news; becoming true is. Without
+	// this they re-fire on every later observation that reaches lifecycle while
+	// the PR happens to still be in that state - the store's dedup index only
+	// suppresses while the previous row is unread, so reading the notification
+	// re-arms it.
 	//
-	// The marker means "the human has already been told about this ready
-	// episode", so it is set only when a notification is actually produced.
-	// A PR that is ready while the notification is suppressed for session
-	// reasons (terminated, or the agent is awaiting input) leaves the marker
-	// untouched, so it can still notify once the session becomes eligible.
-	notifying := intent != nil && intent.Type == domain.NotificationReadyToMerge
-	fresh, err := m.syncReadyToMergeMark(ctx, prURL, scmObservationIsReadyToMerge(o, unresolved), notifying)
+	// The marker means "the human has already been told about this episode", so
+	// it is set only when a notification is actually produced. A PR that is
+	// ready while the notification is suppressed for session reasons
+	// (terminated, or the agent is awaiting input) leaves the marker untouched,
+	// so it can still notify once the session becomes eligible.
+	announcing := domain.NotificationType("")
+	if intent != nil {
+		announcing = intent.Type
+	}
+	fresh, err := m.syncAnnouncementMarks(ctx, prURL, scmAnnouncements(o, unresolved), announcing)
 	if err != nil {
 		return nil, err
 	}
-	if notifying && !fresh {
+	if intent != nil && !fresh {
 		return nil, nil
 	}
 	return intent, nil
 }
 
-// readyToMergeReactionType namespaces the ready-to-merge marker inside the
-// per-PR reaction signatures persisted in pr.last_nudge_signature. Reusing that
-// store (rather than adding a column) means the marker survives a daemon
-// restart for free, exactly like the agent-nudge dedup beside it.
-const readyToMergeReactionType = "ready"
+// The reaction types namespace each announcement marker inside the per-PR
+// reaction signatures persisted in pr.last_nudge_signature. Reusing that store
+// (rather than adding a column) means the markers survive a daemon restart for
+// free, exactly like the agent-nudge dedup beside it.
+const (
+	readyToMergeReactionType = "ready"
+	mergedReactionType       = "merged"
+	closedReactionType       = "closed"
+)
 
-// syncReadyToMergeMark maintains the durable "already told the human this PR is
-// ready" marker for prURL and reports whether notifying now would be fresh news.
-//
-// ready is the PR's current readiness; notifying is whether a ready-to-merge
-// notification is about to be produced. Leaving the ready state clears the
-// marker, so a later return to ready is news again. It returns true only when
-// the marker was absent and is now being set — i.e. this is the not-ready ->
-// ready edge the human has not seen yet.
-func (m *Manager) syncReadyToMergeMark(ctx context.Context, prURL string, ready, notifying bool) (bool, error) {
-	if prURL == "" {
-		return ready, nil
+// announcementState pairs an edge-triggered notification with the condition that
+// defines the state it announces.
+type announcementState struct {
+	typ   domain.NotificationType
+	key   string
+	holds bool
+}
+
+// scmAnnouncements lists every edge-triggered SCM notification alongside whether
+// its state currently holds. Merged wins over closed because a merged PR reads as
+// closed on some providers, and notificationIntentForSCM resolves them in that
+// same order.
+func scmAnnouncements(o ports.SCMObservation, unresolvedComments bool) []announcementState {
+	merged := o.PR.Merged
+	return []announcementState{
+		{typ: domain.NotificationPRMerged, key: mergedReactionType, holds: merged},
+		{typ: domain.NotificationPRClosedUnmerged, key: closedReactionType, holds: o.PR.Closed && !merged},
+		{typ: domain.NotificationReadyToMerge, key: readyToMergeReactionType, holds: scmObservationIsReadyToMerge(o, unresolvedComments)},
 	}
-	key := readyToMergeReactionType + ":" + prURL
+}
+
+// syncAnnouncementMarks maintains the durable "already told the human" marker for
+// every state in states and reports whether announcing the `announcing` type now
+// would be fresh news.
+//
+// Leaving a state clears its marker, so a later return to it is news again. This
+// matters most for a reopened PR: closed goes false, the marker clears, and
+// closing it a second time notifies again. It returns true only when the marker
+// for `announcing` was absent and is now being set, i.e. this observation is the
+// edge the human has not seen yet. A zero `announcing` means no notification is
+// pending, in which case the return value is unused and only the clearing side
+// effects matter.
+func (m *Manager) syncAnnouncementMarks(ctx context.Context, prURL string, states []announcementState, announcing domain.NotificationType) (bool, error) {
+	if prURL == "" {
+		// Without a durable key there is nothing to dedup against, so treat the
+		// announcement as fresh rather than silently swallowing it.
+		return true, nil
+	}
 
 	m.react.mu.Lock()
 	defer m.react.mu.Unlock()
@@ -436,25 +468,34 @@ func (m *Manager) syncReadyToMergeMark(ctx context.Context, prURL string, ready,
 		}
 		m.react.loaded[prURL] = true
 	}
-	marked := m.react.seen[key] != ""
 
-	switch {
-	case !ready:
-		if !marked {
-			return false, nil
+	fresh, dirty := false, false
+	for _, st := range states {
+		key := st.key + ":" + prURL
+		marked := m.react.seen[key] != ""
+		switch {
+		case !st.holds:
+			if !marked {
+				continue
+			}
+			// Clear by deletion rather than storing an empty marker: both read as
+			// "not told" above, and deleting keeps the persisted payload free of a
+			// residual entry for every PR that has ever left the state.
+			delete(m.react.seen, key)
+			dirty = true
+		case st.typ != announcing, marked:
+			// In the state, but either already announced or not announceable right
+			// now. Either way there is nothing new to record.
+			continue
+		default:
+			m.react.seen[key] = st.key
+			dirty, fresh = true, true
 		}
-		// Clear by deletion rather than storing an empty marker: both read as "not
-		// told" above, and deleting keeps the persisted payload free of a residual
-		// entry for every PR that has ever left the ready state.
-		delete(m.react.seen, key)
-	case !notifying, marked:
-		// Ready but either already announced, or not announceable right now. Either
-		// way there is nothing new to record.
-		return false, nil
-	default:
-		m.react.seen[key] = "ready"
 	}
 
+	if !dirty {
+		return fresh, nil
+	}
 	// Persist before reporting. Unlike a nudge (where the agent has already seen
 	// the message, so persisting after sending is the safe order), nothing has
 	// been delivered yet. Failing here and reporting "not fresh" costs at most a
@@ -463,7 +504,7 @@ func (m *Manager) syncReadyToMergeMark(ctx context.Context, prURL string, ready,
 	if err := m.persistPRSignaturesLocked(ctx, prURL); err != nil {
 		return false, err
 	}
-	return ready, nil
+	return fresh, nil
 }
 
 // durableUnresolvedComments reports whether the persisted PR facts for prURL
@@ -486,6 +527,7 @@ func (m *Manager) notificationIntentForSCM(rec domain.SessionRecord, o ports.SCM
 		PRURL:              prURL,
 		CreatedAt:          timeOr(o.ObservedAt, m.clock()),
 		SessionDisplayName: rec.DisplayName,
+		SessionKind:        rec.Kind,
 		PRNumber:           o.PR.Number,
 		PRTitle:            o.PR.Title,
 		PRSourceBranch:     o.PR.SourceBranch,

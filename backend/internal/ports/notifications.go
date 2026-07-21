@@ -18,10 +18,13 @@ type NotificationIntent struct {
 
 	// Enrichment hints. These avoid storage reads on the hot path.
 	SessionDisplayName string
-	PRNumber           int
-	PRTitle            string
-	PRSourceBranch     string
-	PRTargetBranch     string
-	Provider           string
-	Repo               string
+	// SessionKind lets the copy name an orchestrator session, which carries no
+	// display name by design, the way the renderer already names it.
+	SessionKind    domain.SessionKind
+	PRNumber       int
+	PRTitle        string
+	PRSourceBranch string
+	PRTargetBranch string
+	Provider       string
+	Repo           string
 }
