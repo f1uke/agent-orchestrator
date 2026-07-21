@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { JiraIssueDetail } from "./JiraIssueDetail";
 import { JiraProjectPicker } from "./JiraProjectPicker";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
 import {
 	type JiraIssueSummary,
@@ -45,6 +46,11 @@ const TYPE_FILTERS: { label: string; jql: string[]; tip: string }[] = [
 ];
 
 const TOAST_MS = 3200;
+
+// Radix Select reserves the empty string (it marks the placeholder), so the
+// "no assignee filter" case travels through the listbox under a sentinel and is
+// mapped back to "" — the value the search/prefs layer already understands.
+const ALL_ASSIGNEES = "__all__";
 
 /**
  * Browse Jira — the manual, project-first discovery surface. Pick a project
@@ -501,23 +507,27 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 									</SimpleTooltip>
 								))}
 								<span className="jira-browse__filters-gap" aria-hidden="true" />
-								<label className="jira-browse__assignee-filter">
+								<span className="jira-browse__assignee-filter">
 									<span className="jira-browse__assignee-label">Assignee</span>
-									<select
-										value={effectiveAssignee}
-										aria-label="Filter by assignee"
-										onChange={(event) => setAssignee(event.target.value)}
+									<Select
+										value={effectiveAssignee === "" ? ALL_ASSIGNEES : effectiveAssignee}
+										onValueChange={(v) => setAssignee(v === ALL_ASSIGNEES ? "" : v)}
 										disabled={!projectKey}
 									>
-										<option value="">All assignees</option>
-										{unassignedPresent ? <option value={UNASSIGNED}>Unassigned</option> : null}
-										{assignees.map((a) => (
-											<option key={a.name} value={a.name}>
-												{a.name}
-											</option>
-										))}
-									</select>
-								</label>
+										<SelectTrigger className="jira-browse__assignee-trigger" aria-label="Filter by assignee">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent className="jira-browse__assignee-list">
+											<SelectItem value={ALL_ASSIGNEES}>All assignees</SelectItem>
+											{unassignedPresent ? <SelectItem value={UNASSIGNED}>Unassigned</SelectItem> : null}
+											{assignees.map((a) => (
+												<SelectItem key={a.name} value={a.name}>
+													{a.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</span>
 								<SimpleTooltip label="Hide issues that are Done">
 									<button
 										type="button"

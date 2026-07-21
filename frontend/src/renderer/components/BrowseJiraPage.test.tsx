@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { searchMock, treeMock, myselfMock, navigateMock, orchMock, sendMock } = vi.hoisted(() => ({
@@ -320,12 +321,13 @@ describe("BrowseJiraPage", () => {
 		expect(JSON.parse(window.localStorage.getItem("ao.jira.browsePrefs")!).groupBySprint).toBe(false);
 	});
 
-	it("filters the list by assignee", () => {
+	it("filters the list by assignee", async () => {
 		setSearch({ data: richData });
 		renderPage();
 		fireEvent.click(screen.getByText("picker:none"));
 
-		fireEvent.change(screen.getByLabelText("Filter by assignee"), { target: { value: "Sam" } });
+		await userEvent.click(screen.getByLabelText("Filter by assignee"));
+		await userEvent.click(await screen.findByRole("option", { name: "Sam" }));
 		expect(screen.getByText("DEMO-4")).toBeTruthy();
 		expect(screen.getByText("DEMO-2")).toBeTruthy();
 		expect(screen.queryByText("DEMO-1")).toBeNull();

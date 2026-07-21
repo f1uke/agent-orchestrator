@@ -3154,7 +3154,10 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	align-items: center;
 	gap: 6px;
 	font-size: 11.5px;
-	color: var(--fg-passive);
+	/* --fg-muted, not --fg-passive: measured 3.61:1 on this surface, under the
+	   4.5:1 this label owes as real text. --fg-muted lands at 6.91:1 and is what
+	   the chip labels beside it already use. */
+	color: var(--fg-muted);
 }
 
 /* Advanced JQL mode (Browse Jira enhancements) */
@@ -3212,20 +3215,53 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	white-space: nowrap;
 }
 
-.jira-browse__assignee-filter select {
+/* The assignee listbox trigger wears the same pill as .jira-browse__chip beside
+   it — a native <select> renders OS chrome that matches neither theme, so this is
+   a shadcn/Radix Select (portalled, keyboard-operable) dressed as a chip. Height
+   and shadow are reset because the shared SelectTrigger is sized for forms, not
+   for a filter row. */
+.jira-browse__assignee-trigger {
+	height: auto;
 	font-size: 11.5px;
 	color: var(--fg);
 	background: color-mix(in srgb, var(--fg) 5%, transparent);
 	border: 1px solid var(--border-1);
 	border-radius: 999px;
 	padding: 4px 10px;
+	gap: 6px;
 	cursor: pointer;
 	max-width: 180px;
+	box-shadow: none;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease,
+		color 0.12s ease;
 }
 
-.jira-browse__assignee-filter select:disabled {
+.jira-browse__assignee-trigger:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.jira-browse__assignee-trigger:disabled {
 	opacity: 0.5;
 	cursor: default;
+}
+
+/* Chevron is aria-hidden, so it owes only 3:1 — but --fg-passive measured 2.99:1
+   on the chip fill, a hair under. --fg-muted clears it with room in both themes.
+   The primitive's own opacity-50 would sink it further, hence the reset. */
+.jira-browse__assignee-trigger svg {
+	opacity: 1;
+	width: 13px;
+	height: 13px;
+	color: var(--fg-muted);
+}
+
+/* The shared SelectItem is text-sm (14px), which towers over an 11.5px chip row.
+   Pull the listbox onto the same compact scale so the popup reads as part of the
+   filter bar rather than a form control that wandered in. */
+.jira-browse__assignee-list [data-slot="select-item"] {
+	font-size: 12.5px;
 }
 
 .jira-browse__list {

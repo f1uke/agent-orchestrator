@@ -311,7 +311,7 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 					label="Default reviewer agent"
 					htmlFor="reviewerHarness"
 					modified={isFieldDirty("reviewerHarness")}
-					help="Used by AO's internal code reviewer. Was its own card — folded into Agents."
+					help="Agent that runs AO's code reviews on this project's pull requests."
 				>
 					<ReviewerSelect
 						id="reviewerHarness"
