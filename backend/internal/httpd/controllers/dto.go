@@ -948,13 +948,27 @@ type WorkspaceResolveParams struct {
 	Ref string `query:"ref" description:"File reference printed in the terminal: an absolute path, a ~/ path, a workspace-relative path, or a bare filename."`
 }
 
+// WorkspaceResolveCandidateDTO is one path a terminal file reference maps to.
+type WorkspaceResolveCandidateDTO struct {
+	// Path is workspace-relative for a file inside the session's workspace,
+	// absolute for one outside it.
+	Path string `json:"path"`
+	// InWorkspace reports whether the file lives inside the session's workspace.
+	// The Files tab reveals a clicked reference in its tree only when this is
+	// true; a reference outside the workspace keeps the standalone viewer.
+	//
+	// Read this flag rather than testing Path's shape: an absolute or `~/` ref is
+	// resolved anywhere on disk by design, and only the server can decide
+	// containment correctly (it must compare symlink-resolved paths — a macOS
+	// worktree under /var is really /private/var).
+	InWorkspace bool `json:"inWorkspace"`
+}
+
 // WorkspaceResolveResponse is the body of the workspace/resolve route: the
-// candidate paths a terminal file reference maps to — workspace-relative for a
-// file inside the session's workspace, absolute for one outside it. Empty when
-// nothing matches.
+// candidates a terminal file reference maps to. Empty when nothing matches.
 type WorkspaceResolveResponse struct {
-	Ref        string   `json:"ref"`
-	Candidates []string `json:"candidates"`
+	Ref        string                         `json:"ref"`
+	Candidates []WorkspaceResolveCandidateDTO `json:"candidates"`
 }
 
 // WorkspaceFileParams is the query string accepted by

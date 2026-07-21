@@ -48,7 +48,7 @@ type fakeSessionService struct {
 	listPRErr             error
 	prCommentGroups       []sessionsvc.PRCommentGroup
 	diffContext           sessionsvc.DiffContextResult
-	resolveCandidates     []string
+	resolveCandidates     []sessionsvc.ResolveCandidate
 	resolveRef            string
 	workspaceFile         sessionsvc.WorkspaceFileResult
 	workspaceFilePath     string
@@ -398,7 +398,7 @@ func (f *fakeSessionService) DiffContext(_ context.Context, _ domain.SessionID, 
 	return f.diffContext, nil
 }
 
-func (f *fakeSessionService) ResolveWorkspaceRef(_ context.Context, _ domain.SessionID, ref string) ([]string, error) {
+func (f *fakeSessionService) ResolveWorkspaceRef(_ context.Context, _ domain.SessionID, ref string) ([]sessionsvc.ResolveCandidate, error) {
 	f.resolveRef = ref
 	return f.resolveCandidates, nil
 }
@@ -1594,7 +1594,10 @@ func TestSessionsAPI_DiffContext(t *testing.T) {
 
 func TestSessionsAPI_ResolveWorkspaceRef(t *testing.T) {
 	svc := newFakeSessionService()
-	svc.resolveCandidates = []string{"pkg/a.go", "other/a.go"}
+	svc.resolveCandidates = []sessionsvc.ResolveCandidate{
+		{Path: "pkg/a.go", InWorkspace: true},
+		{Path: "other/a.go", InWorkspace: true},
+	}
 	srv := newSessionTestServer(t, svc)
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/resolve?ref=a.go", "")
 	if status != http.StatusOK {
@@ -1606,6 +1609,27 @@ func TestSessionsAPI_ResolveWorkspaceRef(t *testing.T) {
 	if !strings.Contains(string(body), `"ref":"a.go"`) || !strings.Contains(string(body), `"pkg/a.go"`) ||
 		!strings.Contains(string(body), `"other/a.go"`) {
 		t.Fatalf("unexpected body: %s", body)
+	}
+	// The Files tab reveal reads inWorkspace off the wire, so the flag has to be
+	// serialized per candidate — not inferred by the client from the path's shape.
+	if !strings.Contains(string(body), `"inWorkspace":true`) {
+		t.Fatalf("candidates must carry inWorkspace: %s", body)
+	}
+}
+
+// TestSessionsAPI_ResolveWorkspaceRef_SerializesOutOfWorkspace pins the false
+// case too: a candidate outside the workspace must say so on the wire, or the
+// renderer would reveal a file the Files tab cannot contain.
+func TestSessionsAPI_ResolveWorkspaceRef_SerializesOutOfWorkspace(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.resolveCandidates = []sessionsvc.ResolveCandidate{{Path: "/etc/hosts", InWorkspace: false}}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/resolve?ref=/etc/hosts", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"inWorkspace":false`) {
+		t.Fatalf("an out-of-workspace candidate must serialize inWorkspace:false: %s", body)
 	}
 }
 

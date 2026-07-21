@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
@@ -16,6 +16,7 @@ import { useUiStore } from "../stores/ui-store";
 import { useShell } from "../lib/shell-context";
 import { useBrowserView } from "../hooks/useBrowserView";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
+import { useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiClient } from "../lib/api-client";
 import { isOrchestratorSession } from "../types/workspace";
 import type { TerminalTarget } from "../types/terminal";
@@ -71,6 +72,11 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// reports what the reader has scrolled to, so the rail's tree can follow.
 	const [changesFocus, setChangesFocus] = useState<ChangesFocus | null>(null);
 	const [activeChangedPath, setActiveChangedPath] = useState<string | null>(null);
+	// A file clicked in the terminal that lives INSIDE the project is also
+	// revealed in the rail's Files tab — the tab is selected, the tree expands to
+	// it and scrolls it into view. The nonce lets the same ref be clicked twice
+	// and still re-reveal, exactly like changesFocus. Cleared on session switch.
+	const [revealInTree, setRevealInTree] = useState<ChangesFocus | null>(null);
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
 	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
@@ -95,6 +101,41 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// session, keyed by sessionId. Only a change against this baseline counts as a
 	// live `ao preview` (see the reveal effect below).
 	const previewRevealRef = useRef<{ sessionId: string; revision: number; url: string } | null>(null);
+	// Reveal needs this because the Files tab is CHANGES-only: a file that does not
+	// differ from the target branch has no row to scroll to, and switching the rail
+	// to a tab that cannot show the clicked file is worse than not switching.
+	//
+	// Cost, stated honestly: this shares the Files tab's cache entry (same query
+	// key), so it is free whenever that tab or the stacked diff view is already
+	// open — but on a worker session where neither is ever opened it does add one
+	// `workspace/changes` call (a `git merge-base` + three `git diff`s + a
+	// `git status`) per session-view mount. It is deliberate: the alternative is
+	// deciding reveal from the path's shape, and the answer would be wrong exactly
+	// when a repo is unusual.
+	const workspaceChanges = useWorkspaceChanges(sessionId, hasInspector);
+	const changedPaths = useMemo(
+		() => new Set((workspaceChanges.data?.files ?? []).map((f) => f.path)),
+		[workspaceChanges.data],
+	);
+
+	// A terminal file reference always opens in the center viewer (unchanged). A
+	// reference INSIDE the project additionally reveals the file in the rail's
+	// Files tab. The viewer is deliberately kept for both: it shows the whole file
+	// and honours the ref's `:line`, whereas the Changes view shows only diff
+	// hunks and could not scroll to a line that is not part of one.
+	const openWorkspaceFile = useCallback(
+		(file: WorkspaceFileOpen) => {
+			setWorkspaceFile(file);
+			// inWorkspace is the SERVER's containment verdict; never re-derive it
+			// from the path's shape here.
+			if (!file.inWorkspace || !changedPaths.has(file.path)) return;
+			setInspectorView("files");
+			if (!useUiStore.getState().isInspectorOpen) toggleInspector();
+			setRevealInTree((prev) => ({ path: file.path, nonce: (prev?.nonce ?? 0) + 1 }));
+		},
+		[changedPaths, toggleInspector],
+	);
+
 	const browserView = useBrowserView({
 		sessionId,
 		active: Boolean(session && hasInspector && hasWebUI && (browserPoppedOut || isInspectorOpen)),
@@ -112,6 +153,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setWorkspaceFile(null);
 		setChangesFocus(null);
 		setActiveChangedPath(null);
+		setRevealInTree(null);
 	}, [sessionId]);
 
 	// Opening/selecting a session counts as activity: POST /wake so the daemon
@@ -292,7 +334,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 							daemonReady={daemonStatus.state === "ready"}
 							directory={directory}
 							onSelectWorkerTerminal={() => setTerminalTarget({ kind: "worker" })}
-							onOpenWorkspaceFile={setWorkspaceFile}
+							onOpenWorkspaceFile={openWorkspaceFile}
 							session={session}
 							terminalTarget={terminalTarget}
 							theme={theme}
@@ -335,6 +377,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 										setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
 									}}
 									selectedChangedPath={activeChangedPath ?? undefined}
+									revealInTree={revealInTree}
 									view={inspectorView}
 									browserView={browserView}
 									session={session}

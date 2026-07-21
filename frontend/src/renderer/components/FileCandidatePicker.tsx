@@ -1,12 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { FileCode } from "lucide-react";
+import type { ResolvedCandidate } from "../lib/open-workspace-file";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 
 type FileCandidatePickerProps = {
 	open: boolean;
-	/** Workspace-relative candidate paths a terminal ref resolved to. */
-	candidates: string[];
-	onPick: (path: string) => void;
+	/** Candidate paths a terminal ref resolved to, with their containment verdict. */
+	candidates: ResolvedCandidate[];
+	onPick: (candidate: ResolvedCandidate) => void;
 	onOpenChange: (open: boolean) => void;
 };
 
@@ -30,15 +31,15 @@ export function FileCandidatePicker({ open, candidates, onPick, onOpenChange }: 
 						This reference matches several files in the workspace.
 					</Dialog.Description>
 					<ul className="mt-3 flex max-h-[320px] flex-col gap-0.5 overflow-auto">
-						{candidates.map((path) => (
-							<li key={path}>
+						{candidates.map((candidate) => (
+							<li key={candidate.path}>
 								<button
 									type="button"
-									onClick={() => onPick(path)}
+									onClick={() => onPick(candidate)}
 									className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-mono text-[12.5px] text-foreground transition hover:bg-interactive-hover"
 								>
 									<FileCode aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-									<span className="truncate">{path}</span>
+									<span className="truncate">{candidate.path}</span>
 								</button>
 							</li>
 						))}

@@ -53,9 +53,25 @@ const { workspaces, panels } = vi.hoisted(() => {
 	return { workspaces, panels: new Map<string, PanelEntry>() };
 });
 
+// Drives the reveal routing: what CenterPane hands back from a clicked terminal
+// file reference, and what the Files tab's changed-file list currently holds.
+const { openFileArg, changesData } = vi.hoisted(() => ({
+	openFileArg: { current: undefined as unknown },
+	changesData: { current: undefined as { files: { path: string }[] } | undefined },
+}));
+
 // The terminal and inspector body pull in xterm/SSE machinery irrelevant to
 // the split under test. (The topbar is shell-owned — see ShellTopbar.)
-vi.mock("./CenterPane", () => ({ CenterPane: () => <div>terminal center</div> }));
+vi.mock("./CenterPane", () => ({
+	CenterPane: ({ onOpenWorkspaceFile }: { onOpenWorkspaceFile?: (f: unknown) => void }) => (
+		<div>
+			terminal center
+			<button type="button" onClick={() => onOpenWorkspaceFile?.(openFileArg.current)}>
+				open workspace file
+			</button>
+		</div>
+	),
+}));
 vi.mock("./TodoSessionPane", () => ({
 	TodoSessionPane: ({ session }: { session: { id: string } }) => <div>todo editor for {session.id}</div>,
 }));
@@ -123,6 +139,7 @@ const { wakeMock, invalidateMock } = vi.hoisted(() => ({ wakeMock: vi.fn(), inva
 vi.mock("../lib/api-client", () => ({ apiClient: { POST: wakeMock } }));
 vi.mock("@tanstack/react-query", () => ({
 	useQueryClient: () => ({ invalidateQueries: invalidateMock }),
+	useQuery: () => ({ data: changesData.current }),
 }));
 
 // jsdom has no layout engine, so the real react-resizable-panels would never
@@ -203,6 +220,8 @@ describe("SessionView", () => {
 		browserDestroy.mockReset();
 		wakeMock.mockReset().mockResolvedValue({ error: undefined });
 		invalidateMock.mockReset();
+		openFileArg.current = undefined;
+		changesData.current = undefined;
 	});
 
 	// Regression: react-resizable-panels v4 treats bare numeric sizes as PIXELS
@@ -493,5 +512,70 @@ describe("SessionView", () => {
 
 		expect(screen.getByText("terminal center")).toBeInTheDocument();
 		expect(screen.queryByText(/todo editor/)).not.toBeInTheDocument();
+	});
+});
+
+// --- routing a clicked terminal file reference --------------------------------
+//
+// This is the whole of Feature 1's decision: a reference INSIDE the project
+// reveals in the Files tab; anything else keeps today's standalone viewer,
+// untouched. Getting it wrong in the permissive direction hijacks the rail on a
+// file the tab cannot even show.
+describe("SessionView terminal file reference routing", () => {
+	const clickOpen = async () => {
+		await act(async () => {
+			fireEvent.click(screen.getByText("open workspace file"));
+		});
+	};
+
+	it("reveals the Files tab for an in-project file that the tab can show", async () => {
+		changesData.current = { files: [{ path: "src/a.ts" }] };
+		openFileArg.current = { path: "src/a.ts", line: 12, inWorkspace: true };
+		render(<SessionView sessionId="sess-1" />);
+
+		await clickOpen();
+		await waitFor(() => expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "files"));
+	});
+
+	// The verdict comes from the server; a path that merely LOOKS relative is not
+	// enough, and a file outside the project must not touch the rail at all.
+	it("leaves the rail alone for a file outside the project", async () => {
+		changesData.current = { files: [{ path: "src/a.ts" }] };
+		openFileArg.current = { path: "/etc/hosts", inWorkspace: false };
+		render(<SessionView sessionId="sess-1" />);
+
+		await clickOpen();
+		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
+	});
+
+	// The Files tab is CHANGES-only. An in-project file that does not differ from
+	// the target branch has no row, so switching to the tab would strand the user
+	// on a list that does not contain what they clicked.
+	it("leaves the rail alone for an in-project file with no row in the tab", async () => {
+		changesData.current = { files: [{ path: "src/other.ts" }] };
+		openFileArg.current = { path: "src/unchanged.ts", inWorkspace: true };
+		render(<SessionView sessionId="sess-1" />);
+
+		await clickOpen();
+		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
+	});
+});
+
+// Precedence: the SERVER's verdict wins over a path that merely matches a row.
+// In today's data the two can't disagree — an out-of-workspace candidate comes
+// back absolute and the changed list is workspace-relative, so membership alone
+// would happen to be sufficient. This pins the rule anyway, because "it happens
+// to line up" is not the contract: inWorkspace is the confinement decision, and
+// a row match is only about whether the tab can display it.
+describe("SessionView reveal precedence", () => {
+	it("refuses to reveal a file the server says is outside, even if a row matches", async () => {
+		changesData.current = { files: [{ path: "src/a.ts" }] };
+		openFileArg.current = { path: "src/a.ts", inWorkspace: false };
+		render(<SessionView sessionId="sess-1" />);
+
+		await act(async () => {
+			fireEvent.click(screen.getByText("open workspace file"));
+		});
+		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
 	});
 });

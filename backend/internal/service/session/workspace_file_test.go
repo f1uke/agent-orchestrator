@@ -434,12 +434,15 @@ func TestReadWorkspaceFile_PathEscapeRejected(t *testing.T) {
 	}
 }
 
-func equalStrings(a, b []string) bool {
+// equalStrings compares resolve candidates against their expected paths. The
+// InWorkspace verdict is asserted separately, by the TestResolveWorkspaceRef_*
+// InWorkspace tests, so the path-shape cases below stay readable.
+func equalStrings(a []ResolveCandidate, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if a[i].Path != b[i] {
 			return false
 		}
 	}
@@ -468,5 +471,189 @@ func TestReadWorkspaceFile_RelativePathIsEchoedBack(t *testing.T) {
 	}
 	if res.Path != "pkg/a.go" {
 		t.Fatalf("path = %q, want %q", res.Path, "pkg/a.go")
+	}
+}
+
+// --- candidateWithinWorkspace: the reveal-in-tree gate (Files tab) -----------
+//
+// Clicking a terminal file ref reveals the file in the Files tab ONLY when it
+// lives inside the session's workspace; a ref pointing outside keeps the
+// standalone viewer. That decision must NOT be inferred from ResolveWorkspaceRef,
+// which is INTENTIONALLY UNCONFINED for absolute/`~` refs (#132) and would
+// happily hand back a path outside the worktree.
+//
+// Like TestConfinedWorkspacePath_*, these assert on the helper's ok flag rather
+// than on any downstream output: a wrong verdict here shows up as "the tree
+// didn't scroll", which no endpoint-level assertion can distinguish from a
+// correctly-refused reveal. Each test below was mutation-checked by deleting the
+// guard it covers and confirming it goes red.
+
+// TestCandidateWithinWorkspace_RejectsOutsideAbsolute is the core guard: an
+// absolute path that resolves outside the worktree must never be revealable.
+// Mutation check: drop the relWithin test in the absolute branch -> red.
+func TestCandidateWithinWorkspace_RejectsOutsideAbsolute(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "package a\n"})
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{outside, "/etc/passwd", "/"} {
+		if rel, ok := candidateWithinWorkspace(dir, p); ok {
+			t.Errorf("%q must NOT be revealable, got ok with rel=%q", p, rel)
+		}
+	}
+	// Positive control: the same shape of input, inside the workspace, resolves.
+	inside := filepath.Join(dir, "pkg", "a.go")
+	if rel, ok := candidateWithinWorkspace(dir, inside); !ok || rel != "pkg/a.go" {
+		t.Fatalf("in-workspace absolute broke: ok=%v rel=%q, want true/%q", ok, rel, "pkg/a.go")
+	}
+}
+
+// TestCandidateWithinWorkspace_RejectsTildeOutside covers the `~` shape, which
+// refTarget widens exactly like an absolute path.
+// Mutation check: route `~` down the relative branch -> red.
+func TestCandidateWithinWorkspace_RejectsTildeOutside(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "package a\n"})
+	if home, err := os.UserHomeDir(); err != nil || home == "" {
+		t.Skip("no home dir")
+	}
+	for _, p := range []string{"~/.ssh/id_rsa", "~"} {
+		if rel, ok := candidateWithinWorkspace(dir, p); ok {
+			t.Errorf("%q must NOT be revealable, got ok with rel=%q", p, rel)
+		}
+	}
+}
+
+// TestCandidateWithinWorkspace_SymlinkEscape pins the sharp edge that
+// previewutil.ConfinedPath is purely lexical: a link inside the worktree
+// pointing outside it must not be revealable, by either shape of input.
+// Mutation check: drop the EvalSymlinks re-check -> red.
+func TestCandidateWithinWorkspace_SymlinkEscape(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "package a\n"})
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if rel, ok := candidateWithinWorkspace(dir, "link.txt"); ok {
+		t.Errorf("relative symlink escaping the worktree must be rejected, got rel=%q", rel)
+	}
+	if rel, ok := candidateWithinWorkspace(dir, filepath.Join(dir, "link.txt")); ok {
+		t.Errorf("absolute symlink escaping the worktree must be rejected, got rel=%q", rel)
+	}
+}
+
+// TestCandidateWithinWorkspace_EmptyIsRejected pins the other ConfinedPath sharp
+// edge: it rewrites an empty or "." path to "index.html", which would make the
+// tree try to reveal a file nobody asked for.
+//
+// Mutation check, honestly reported: deleting the empty/workspace guard in
+// candidateWithinWorkspace leaves this test GREEN, and that is by design rather
+// than a weak test. Empty is rejected twice over — confinedWorkspacePath has its
+// own empty guard, and relWithin/absRoot reject a "" root because filepath.Rel
+// errors against a relative root. The guard is kept anyway so this function's
+// contract does not silently depend on those two incidentals (note
+// filepath.Abs("") returns the CWD, so the defence is subtler than it looks).
+// What this test pins is the BEHAVIOUR, which no single deletion can break.
+func TestCandidateWithinWorkspace_EmptyIsRejected(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "package a\n"})
+	for _, p := range []string{"", "   ", "."} {
+		if rel, ok := candidateWithinWorkspace(dir, p); ok {
+			t.Errorf("%q must be rejected, not rewritten; got rel=%q", p, rel)
+		}
+	}
+	if rel, ok := candidateWithinWorkspace("", "pkg/a.go"); ok {
+		t.Errorf("an empty workspace must be rejected, got rel=%q", rel)
+	}
+}
+
+// TestCandidateWithinWorkspace_RelativeStaysConfined guards the traversal shape.
+// Mutation check: swap confinedWorkspacePath for a bare filepath.Join -> red.
+func TestCandidateWithinWorkspace_RelativeStaysConfined(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "package a\n"})
+	for _, p := range []string{"../escape.go", "pkg/../../escape.go"} {
+		if rel, ok := candidateWithinWorkspace(dir, p); ok {
+			t.Errorf("%q must NOT escape the worktree, got rel=%q", p, rel)
+		}
+	}
+	if rel, ok := candidateWithinWorkspace(dir, "pkg/a.go"); !ok || rel != "pkg/a.go" {
+		t.Fatalf("plain relative broke: ok=%v rel=%q", ok, rel)
+	}
+}
+
+// TestCandidateWithinWorkspace_MacOSPrivateVar guards the /var -> /private/var
+// trap called out on resolvedRoot: a workspace under a symlinked temp dir must
+// still recognise its own files, or reveal silently never fires on macOS.
+// Mutation check: compare against absRoot instead of resolvedRoot -> red on macOS.
+func TestCandidateWithinWorkspace_MacOSPrivateVar(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "package a\n"})
+	resolved := mustEvalSymlinks(t, dir)
+	if resolved == dir {
+		t.Skip("temp dir is not symlinked on this platform")
+	}
+	if rel, ok := candidateWithinWorkspace(dir, filepath.Join(resolved, "pkg", "a.go")); !ok || rel != "pkg/a.go" {
+		t.Fatalf("symlink-resolved workspace path broke: ok=%v rel=%q", ok, rel)
+	}
+}
+
+// TestResolveWorkspaceRef_InWorkspaceVerdict pins the flag the Files tab reveal
+// depends on, across all four ref shapes. equalStrings deliberately ignores the
+// verdict, so without this test the flag would be entirely unasserted.
+func TestResolveWorkspaceRef_InWorkspaceVerdict(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "x\n"})
+	svc := serviceForRepo(t, dir)
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "a.go")
+	if err := os.WriteFile(outside, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name        string
+		ref         string
+		wantPath    string
+		wantInWorks bool
+	}{
+		{"relative inside", "pkg/a.go", "pkg/a.go", true},
+		{"bare inside", "a.go", "pkg/a.go", true},
+		{"absolute inside", filepath.Join(dir, "pkg", "a.go"), "pkg/a.go", true},
+		{"absolute outside", outside, mustEvalSymlinks(t, outside), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := svc.ResolveWorkspaceRef(context.Background(), "s1", tc.ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("candidates = %+v, want exactly 1", got)
+			}
+			if got[0].Path != tc.wantPath {
+				t.Errorf("path = %q, want %q", got[0].Path, tc.wantPath)
+			}
+			if got[0].InWorkspace != tc.wantInWorks {
+				t.Errorf("inWorkspace = %v, want %v", got[0].InWorkspace, tc.wantInWorks)
+			}
+		})
+	}
+}
+
+// TestResolveWorkspaceRef_OutsideCandidateIsNotRevealable is the regression guard
+// for the whole point of the feature: a ref outside the project must never come
+// back marked revealable, however it is spelled.
+func TestResolveWorkspaceRef_OutsideCandidateIsNotRevealable(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "x\n"})
+	svc := serviceForRepo(t, dir)
+	for _, ref := range []string{"/etc/hosts", "~/.ssh/id_rsa"} {
+		got, err := svc.ResolveWorkspaceRef(context.Background(), "s1", ref)
+		if err != nil {
+			t.Fatalf("%s: %v", ref, err)
+		}
+		for _, c := range got {
+			if c.InWorkspace {
+				t.Errorf("%s resolved to a revealable candidate %q", ref, c.Path)
+			}
+		}
 	}
 }
