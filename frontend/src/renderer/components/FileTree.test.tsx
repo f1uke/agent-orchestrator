@@ -122,6 +122,58 @@ describe("FileTree", () => {
 		const root = screen.getByRole("treeitem", { name: /root\.ts/ });
 		expect(indentOf(deep)).toBeGreaterThan(indentOf(root));
 	});
+
+	// Indent used to stop growing after the fourth level, so a file six levels
+	// deep rendered at EXACTLY its parent folder's x and read as that folder's
+	// sibling — the tree stating the wrong structure.
+	//
+	// This needs a BRANCHY fixture: every level below forks, so chain-collapsing
+	// has nothing to merge and the rendered depth really reaches six. A
+	// single-child path like `a/b/c/d/e/f.ts` collapses to two rows and can never
+	// reach the clamp, which is how the clamp shipped past a test that only ever
+	// compared level 3 against level 1.
+	describe("at depth", () => {
+		const deepPaths = [
+			"App/Commons/Networking/APIClient.swift",
+			"App/Investment/Fund/FundList.swift",
+			"App/Investment/Trade/OrderReview/Models/Coupon.swift",
+			"App/Investment/Trade/OrderReview/ViewModels/Consent.swift",
+			"App/Investment/Trade/Portfolio/Summary.swift",
+		];
+
+		it("never renders a file at its parent folder's indent", () => {
+			render(<Harness paths={deepPaths} />);
+			const models = screen.getByRole("treeitem", { name: /^Models$/ });
+			const coupon = screen.getByRole("treeitem", { name: /Coupon\.swift/ });
+			// Guard the fixture itself: if chain-collapsing ever flattens these, the
+			// indent assertion below would pass while testing nothing.
+			expect(models).toHaveAttribute("aria-level", "5");
+			expect(coupon).toHaveAttribute("aria-level", "6");
+			expect(indentOf(coupon)).toBeGreaterThan(indentOf(models));
+		});
+
+		it("gives every level its own indent, all the way down", () => {
+			render(<Harness paths={deepPaths} />);
+			// One representative row per level, level 1 → 6.
+			const chain = [/^App$/, /^Investment$/, /^Trade$/, /^OrderReview$/, /^Models$/, /Coupon\.swift/].map((name) =>
+				screen.getByRole("treeitem", { name }),
+			);
+			expect(chain.map((row) => row.getAttribute("aria-level"))).toEqual(["1", "2", "3", "4", "5", "6"]);
+
+			const indents = chain.map(indentOf);
+			for (let i = 1; i < indents.length; i++) {
+				expect(indents[i]).toBeGreaterThan(indents[i - 1]);
+			}
+		});
+
+		// The hairlines are what carry structure once the per-level step narrows,
+		// so they have to keep pace with depth rather than stopping with it.
+		it("traces a guide for every ancestor, not just the first four", () => {
+			render(<Harness paths={deepPaths} />);
+			const coupon = screen.getByRole("treeitem", { name: /Coupon\.swift/ });
+			expect(coupon.querySelectorAll(".file-tree__guide")).toHaveLength(5);
+		});
+	});
 });
 
 function indentOf(el: HTMLElement): number {
