@@ -356,13 +356,9 @@ func (p *Provider) fetchOnePullRequest(ctx context.Context, ref ports.SCMPRRef) 
 		return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode MR detail: %w", err)
 	}
 
-	resp, err = p.client.doREST(ctx, mrPath+"/pipelines", nil)
+	pipelines, err := p.fetchAllMRPipelines(ctx, mrPath)
 	if err != nil {
 		return ports.SCMObservation{}, err
-	}
-	var pipelines []restPipeline
-	if err := json.Unmarshal(resp.Body, &pipelines); err != nil {
-		return ports.SCMObservation{}, fmt.Errorf("gitlab scm: decode MR pipelines: %w", err)
 	}
 	pipeline := latestPipelineForSHA(pipelines, mr.SHA)
 
@@ -662,6 +658,69 @@ const maxDiscussionPages = 100
 // per page = 2k jobs, far beyond any real pipeline.
 const maxPipelineJobPages = 20
 
+// maxMRPipelinePages bounds the MR-pipelines pagination loop. 20 pages × 100
+// per page = 2k pipelines, far beyond any real merge request.
+const maxMRPipelinePages = 20
+
+// fetchAllMRPipelines pages through an MR's pipelines endpoint and returns every
+// pipeline, so latestPipelineForSHA can match the MR's head SHA against the whole
+// list rather than whatever fits on one page.
+//
+// It is tempting to assume one page is enough because the endpoint returns the
+// newest pipeline first. It does not. GitLab builds this list as a UNION of two
+// separately id-descending partitions — the MR's own pipelines
+// (merge_request_event/detached/merged_result) first, then the source branch's
+// `push` pipelines — so a HIGHER-id push pipeline sorts BELOW every lower-id
+// merge_request_event row. Confirmed against the real API (gitlab.finnomena.com):
+// MR !2986 lists push pipelines 177164/177162/177160 after merge_request_event
+// pipelines 176858/176825/176804, and kratos-ui MR !1 lists 15
+// merge_request_event rows then 15 push rows.
+//
+// That matters because when the head SHA's only pipeline is a `push` one (25% of
+// 1135 MRs surveyed on that instance), it sits in the second partition behind
+// every MR-event row. A page-1-only read then matches no pipeline for the head
+// SHA at all and the MR reads ci=unknown with no checks — the MR silently stops
+// reporting CI. No live MR was observed in that state (the largest first
+// partition seen was 15, and no head pipeline sat past index 6), so this closes a
+// reachable gap rather than a bug caught in the act. Note the default page size
+// is an instance setting, not a constant: an unparameterised GET returned
+// X-Per-Page: 15 there, not the 20 GitLab's docs quote — another reason not to
+// rely on one page. Offset pagination guarantees a short page (< perPage) is the
+// last one.
+func (p *Provider) fetchAllMRPipelines(ctx context.Context, mrPath string) ([]restPipeline, error) {
+	return fetchAllPages[restPipeline](ctx, p, mrPath+"/pipelines", maxMRPipelinePages, "MR pipelines")
+}
+
+// fetchAllPages walks a GitLab offset-paginated list endpoint and returns every
+// row. GitLab caps per_page at 100 and defaults it to an INSTANCE SETTING (15 on
+// gitlab.finnomena.com, not the 20 the docs quote), so no list fetch may assume
+// one page is enough — see the three callers' comments for what each silently
+// dropped when it did. Offset pagination guarantees a page shorter than perPage
+// is the last one; maxPages bounds the loop as a safety net against a server that
+// never signals a final page. what names the resource in decode errors.
+func fetchAllPages[T any](ctx context.Context, p *Provider, path string, maxPages int, what string) ([]T, error) {
+	const perPage = 100
+	var all []T
+	for page := 1; page <= maxPages; page++ {
+		q := url.Values{}
+		q.Set("per_page", strconv.Itoa(perPage))
+		q.Set("page", strconv.Itoa(page))
+		resp, err := p.client.doREST(ctx, path, q)
+		if err != nil {
+			return nil, err
+		}
+		var batch []T
+		if err := json.Unmarshal(resp.Body, &batch); err != nil {
+			return nil, fmt.Errorf("gitlab scm: decode %s page %d: %w", what, page, err)
+		}
+		all = append(all, batch...)
+		if len(batch) < perPage {
+			break
+		}
+	}
+	return all, nil
+}
+
 // fetchAllPipelineJobs pages through a pipeline's jobs endpoint and returns every
 // job. GitLab paginates /pipelines/:id/jobs (default 20, max 100 per page) and
 // orders jobs newest-id-first, so a large pipeline's EARLY-stage jobs (e.g. a
@@ -672,27 +731,8 @@ const maxPipelineJobPages = 20
 // bug as the discussions page-1-only truncation (fix/reviews-gitlab-resolved-
 // refresh). Offset pagination guarantees a short page (< perPage) is the last.
 func (p *Provider) fetchAllPipelineJobs(ctx context.Context, repo ports.SCMRepo, pipelineID int) ([]restJob, error) {
-	const perPage = 100
 	jobsPath := "projects/" + projectID(repo) + "/pipelines/" + strconv.Itoa(pipelineID) + "/jobs"
-	var all []restJob
-	for page := 1; page <= maxPipelineJobPages; page++ {
-		q := url.Values{}
-		q.Set("per_page", strconv.Itoa(perPage))
-		q.Set("page", strconv.Itoa(page))
-		resp, err := p.client.doREST(ctx, jobsPath, q)
-		if err != nil {
-			return nil, err
-		}
-		var batch []restJob
-		if err := json.Unmarshal(resp.Body, &batch); err != nil {
-			return nil, fmt.Errorf("gitlab scm: decode pipeline jobs page %d: %w", page, err)
-		}
-		all = append(all, batch...)
-		if len(batch) < perPage {
-			break
-		}
-	}
-	return all, nil
+	return fetchAllPages[restJob](ctx, p, jobsPath, maxPipelineJobPages, "pipeline jobs")
 }
 
 // fetchAllDiscussions pages through GitLab's MR discussions endpoint and returns
@@ -704,26 +744,7 @@ func (p *Provider) fetchAllPipelineJobs(ctx context.Context, repo ports.SCMRepo,
 // pagination guarantees a short page (< perPage, including empty) is the last
 // one, so the loop stops there.
 func (p *Provider) fetchAllDiscussions(ctx context.Context, mrPath string) ([]restDiscussion, error) {
-	const perPage = 100
-	var all []restDiscussion
-	for page := 1; page <= maxDiscussionPages; page++ {
-		q := url.Values{}
-		q.Set("per_page", strconv.Itoa(perPage))
-		q.Set("page", strconv.Itoa(page))
-		resp, err := p.client.doREST(ctx, mrPath+"/discussions", q)
-		if err != nil {
-			return nil, err
-		}
-		var batch []restDiscussion
-		if err := json.Unmarshal(resp.Body, &batch); err != nil {
-			return nil, fmt.Errorf("gitlab scm: decode MR discussions page %d: %w", page, err)
-		}
-		all = append(all, batch...)
-		if len(batch) < perPage {
-			break
-		}
-	}
-	return all, nil
+	return fetchAllPages[restDiscussion](ctx, p, mrPath+"/discussions", maxDiscussionPages, "MR discussions")
 }
 
 // discussionToThread normalizes one discussion into a review thread. It
