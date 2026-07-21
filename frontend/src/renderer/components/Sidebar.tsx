@@ -103,8 +103,19 @@ const HOVER_ACTION_CLASS =
 // SEG_ACTIVE_CLASS on top (see below). font-size/weight take `!` because
 // styles.css resets `button { font: inherit }` (unlayered → beats Tailwind's
 // layered utilities); `!important` is the codebase's override idiom.
+// `flex-auto min-w-0` is load-bearing, and the pair has to be exactly this:
+//   - `flex-1` (basis 0) would split the row 50/50 and ellipsize the longer
+//     "Orchestrator" label even at the default rail width. `flex-auto` sizes each
+//     segment from its own content and shares only the leftover, so both labels
+//     stay whole and each still gets a sliver of breathing room.
+//   - without `min-w-0`, flex items keep `min-width: auto` and refuse to shrink
+//     below their content. Dragging the rail toward its 200px floor then pushes
+//     the "Orchestrator" segment straight through the card's right border and out
+//     of the sidebar, chopped by its edge.
+// Together with the truncating labels below, the segments stay inside the card
+// across the whole 200-420px resize range.
 const SEG_CLASS =
-	"flex flex-1 items-center justify-center gap-[7px] h-9 rounded-[9px] border text-[12.5px]! font-semibold! " +
+	"flex flex-auto min-w-0 items-center justify-center gap-[7px] h-9 rounded-[9px] border text-[12.5px]! font-semibold! " +
 	"bg-raised border-border-strong text-muted-foreground transition-colors " +
 	"hover:bg-overlay hover:text-foreground " +
 	"active:border-accent-dim active:bg-accent-weak active:text-accent " +
@@ -828,7 +839,7 @@ function ProjectItem({
 							type="button"
 						>
 							<LayoutDashboard aria-hidden="true" />
-							Dashboard
+							<span className="truncate">Dashboard</span>
 						</button>
 						<button
 							aria-current={orchestratorActive ? "page" : undefined}
@@ -839,7 +850,7 @@ function ProjectItem({
 							type="button"
 						>
 							<OrchestratorIcon aria-hidden="true" />
-							Orchestrator
+							<span className="truncate">Orchestrator</span>
 						</button>
 					</div>
 				)}
