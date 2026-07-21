@@ -195,9 +195,9 @@ func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, 
 		return nil, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
 	workspace := rec.Metadata.WorkspacePath
-	paths, err := resolveRefPaths(ctx, s, workspace, ref)
-	if err != nil || len(paths) == 0 {
-		return nil, err
+	paths := s.resolveRefPaths(ctx, workspace, ref)
+	if len(paths) == 0 {
+		return nil, nil
 	}
 	out := make([]ResolveCandidate, 0, len(paths))
 	for _, p := range paths {
@@ -214,11 +214,13 @@ func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, 
 
 // resolveRefPaths is ResolveWorkspaceRef's resolution half, split out so the
 // confinement verdict is applied uniformly to every branch's result rather than
-// duplicated across the returns below.
-func resolveRefPaths(ctx context.Context, s *Service, workspace, ref string) ([]string, error) {
+// duplicated across the returns below. It reports no error of its own: every
+// failure mode here degrades to "no candidates", and the only real error in this
+// operation (the session lookup) belongs to the caller.
+func (s *Service) resolveRefPaths(ctx context.Context, workspace, ref string) []string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return nil, nil
+		return nil
 	}
 
 	// INTENTIONALLY UNCONFINED — approved product decision, do not "fix" back to
@@ -231,37 +233,37 @@ func resolveRefPaths(ctx context.Context, s *Service, workspace, ref string) ([]
 	if abs, isAbs := refTarget(ref); isAbs {
 		resolved, ok := resolveTarget(abs)
 		if !ok {
-			return nil, nil
+			return nil
 		}
 		// A target that happens to live inside this session's workspace is
 		// reported workspace-relative, so the viewer shows the short path (and
 		// #127's in-worktree behaviour is unchanged).
 		if rel, within := relWithin(resolvedRoot(workspace), resolved); within {
-			return []string{filepath.ToSlash(rel)}, nil
+			return []string{filepath.ToSlash(rel)}
 		}
-		return []string{resolved}, nil
+		return []string{resolved}
 	}
 
 	if workspace == "" {
-		return nil, nil
+		return nil
 	}
 
 	if strings.ContainsAny(ref, "/\\") {
 		clean := filepath.ToSlash(ref)
 		if abs, ok := previewutil.ConfinedPath(workspace, clean); ok && isRegularFile(abs) {
 			if rel, within := relWithin(absRoot(workspace), abs); within {
-				return []string{filepath.ToSlash(rel)}, nil
+				return []string{filepath.ToSlash(rel)}
 			}
 		}
 		// Not present at that exact relative location: try a path-suffix match
 		// (the ref may be rooted deeper than the workspace), then basename.
 		if cands := s.searchWorkspaceFiles(ctx, workspace, clean, true); len(cands) > 0 {
-			return cands, nil
+			return cands
 		}
-		return s.searchWorkspaceFiles(ctx, workspace, path.Base(clean), false), nil
+		return s.searchWorkspaceFiles(ctx, workspace, path.Base(clean), false)
 	}
 
-	return s.searchWorkspaceFiles(ctx, workspace, ref, false), nil
+	return s.searchWorkspaceFiles(ctx, workspace, ref, false)
 }
 
 // searchWorkspaceFiles returns workspace-relative paths matching needle. When
