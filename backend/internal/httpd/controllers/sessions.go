@@ -74,8 +74,9 @@ type SessionService interface {
 	DiffContext(ctx context.Context, id domain.SessionID, q sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error)
 	// ResolveWorkspaceRef maps a terminal file reference to candidate paths. An
 	// absolute or `~/` ref resolves anywhere on disk (deliberately unconfined);
-	// a relative or bare ref stays scoped to the session's workspace.
-	ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, ref string) ([]string, error)
+	// a relative or bare ref stays scoped to the session's workspace. Each
+	// candidate carries an explicit in-workspace verdict for the Files tab.
+	ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, ref string) ([]sessionsvc.ResolveCandidate, error)
 	// ReadWorkspaceFile returns a file's content plus its per-line
 	// uncommitted-change map (working tree vs HEAD), with the same shape split.
 	ReadWorkspaceFile(ctx context.Context, id domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error)
@@ -579,10 +580,11 @@ func (c *SessionsController) resolveWorkspaceRef(w http.ResponseWriter, r *http.
 		envelope.WriteError(w, r, err)
 		return
 	}
-	if candidates == nil {
-		candidates = []string{}
+	out := make([]WorkspaceResolveCandidateDTO, 0, len(candidates))
+	for _, c := range candidates {
+		out = append(out, WorkspaceResolveCandidateDTO{Path: c.Path, InWorkspace: c.InWorkspace})
 	}
-	envelope.WriteJSON(w, http.StatusOK, WorkspaceResolveResponse{Ref: ref, Candidates: candidates})
+	envelope.WriteJSON(w, http.StatusOK, WorkspaceResolveResponse{Ref: ref, Candidates: out})
 }
 
 // readWorkspaceFile returns a file's content plus its per-line

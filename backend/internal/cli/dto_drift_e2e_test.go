@@ -180,7 +180,7 @@ func (f *fakeSessionService) DiffContext(context.Context, domain.SessionID, sess
 	return sessionsvc.DiffContextResult{}, nil
 }
 
-func (f *fakeSessionService) ResolveWorkspaceRef(context.Context, domain.SessionID, string) ([]string, error) {
+func (f *fakeSessionService) ResolveWorkspaceRef(context.Context, domain.SessionID, string) ([]sessionsvc.ResolveCandidate, error) {
 	return nil, nil
 }
 

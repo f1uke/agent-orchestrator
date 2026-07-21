@@ -39,6 +39,7 @@ export function FileTree<T>({
 	onToggleDir,
 	onSelectFile,
 	selectedKey,
+	revealedKey,
 	label,
 	renderLead,
 	renderMeta,
@@ -47,6 +48,13 @@ export function FileTree<T>({
 	getTitle,
 }: {
 	nodes: readonly FileTreeNode<T>[];
+	/**
+	 * Key of a file just revealed from a terminal reference. Transient (the owner
+	 * clears it), and styled as a RING rather than a fill so it stays legible
+	 * against — and distinct from — `selectedKey`, which is the reader's
+	 * scroll-spy position and owns the accent left bar + fill.
+	 */
+	revealedKey?: string | null;
 	/** Keys of the directories that are CLOSED; everything else is open. */
 	collapsed: ReadonlySet<string>;
 	onToggleDir: (key: string) => void;
@@ -113,7 +121,11 @@ export function FileTree<T>({
 						aria-level={depth + 1}
 						aria-current={selected ? "true" : undefined}
 						data-path={key}
-						className={cn("file-tree__row file-tree__row--file", selected && "is-selected")}
+						className={cn(
+							"file-tree__row file-tree__row--file",
+							selected && "is-selected",
+							revealedKey != null && key === revealedKey && "is-revealed",
+						)}
 						style={{ paddingLeft: indent }}
 						onClick={() => onSelectFile?.(node.item)}
 						title={getTitle ? getTitle(node.item) : node.key}

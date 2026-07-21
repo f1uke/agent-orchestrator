@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, GitBranch, List, ListTree, RefreshCw, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiErrorMessage } from "../lib/api-client";
 import { buildFileTree, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
@@ -33,6 +33,13 @@ function storedView(): FilesView {
 }
 
 /**
+ * How long the reveal ring stays before clearing. Long enough to find the row
+ * after the tab switches, short enough that it never reads as a persistent
+ * state — it is a cue, not a marker.
+ */
+const REVEAL_RING_MS = 1400;
+
+/**
  * Changes mode: the files differing between this session's branch (working tree
  * included) and its target branch, as a folder tree — GitLab's merge-request
  * Changes navigator.
@@ -52,10 +59,13 @@ export function FilesPanel({
 	sessionId,
 	onOpenFile,
 	selectedPath,
+	reveal,
 }: {
 	sessionId: string;
 	onOpenFile?: (target: ChangedFileTarget) => void;
 	selectedPath?: string;
+	/** A terminal reference to reveal: expand to it, scroll it in, ring it briefly. */
+	reveal?: { path: string; nonce: number } | null;
 }) {
 	const query = useWorkspaceChanges(sessionId);
 	const data = query.data;
@@ -63,6 +73,8 @@ export function FilesPanel({
 	const [view, setView] = useState<FilesView>(storedView);
 	const [search, setSearch] = useState("");
 	const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
+	const [revealedPath, setRevealedPath] = useState<string | null>(null);
+	const listRef = useRef<HTMLDivElement | null>(null);
 
 	const chooseView = (next: FilesView) => {
 		setView(next);
@@ -86,6 +98,53 @@ export function FilesPanel({
 			if (!next.delete(key)) next.add(key);
 			return next;
 		});
+
+	// Reveal, step 1: make the row EXIST. Two sharp edges of this panel's state
+	// have to be undone first, or the row the next effect scrolls to is not
+	// rendered at all.
+	const revealNonce = reveal?.nonce;
+	const revealPath = reveal?.path;
+	useEffect(() => {
+		if (!revealPath) return;
+		// The search box filters BEFORE the tree is built, so a target the current
+		// query excludes has no row. Clear the query rather than fail silently.
+		setSearch((prev) => (prev.trim() === "" || matchesFileQuery(revealPath, prev) ? prev : ""));
+		// `collapsedDirs` names the CLOSED directories, so OPENING the ancestors
+		// means DELETING their keys. Directory keys are post-chain-merge — an
+		// only-child chain a/b/c collapses to a single row keyed "a/b/c", not "a" —
+		// so deleting every path prefix is a superset that always contains the real
+		// key, and the prefixes that name no row are harmless no-ops.
+		setCollapsedDirs((prev) => {
+			if (prev.size === 0) return prev;
+			const parts = revealPath.split("/");
+			const next = new Set(prev);
+			for (let i = 1; i < parts.length; i++) next.delete(parts.slice(0, i).join("/"));
+			return next.size === prev.size ? prev : next;
+		});
+		setRevealedPath(revealPath);
+	}, [revealPath, revealNonce]);
+
+	// Reveal, step 2: scroll to the row, now that step 1's state has rendered.
+	// Keyed on the nonce too, so clicking the same reference twice re-scrolls.
+	// `block: "nearest"` leaves an already-visible row where it is instead of
+	// yanking the list. jsdom has no scrollIntoView (test/setup.ts stubs it), so
+	// this is guarded exactly like the center pane's viewers.
+	useEffect(() => {
+		if (!revealedPath) return;
+		const row = listRef.current?.querySelector(`[data-path="${CSS.escape(revealedPath)}"]`);
+		if (row instanceof HTMLElement && typeof row.scrollIntoView === "function") {
+			row.scrollIntoView({ block: "nearest" });
+		}
+	}, [revealedPath, revealNonce, view]);
+
+	// The ring is a "look here" cue, not a state: it says where the tree just
+	// jumped, then gets out of the way. Holding it would leave a second
+	// persistent marker competing with the scroll-spy one.
+	useEffect(() => {
+		if (!revealedPath) return undefined;
+		const timer = window.setTimeout(() => setRevealedPath(null), REVEAL_RING_MS);
+		return () => window.clearTimeout(timer);
+	}, [revealedPath, revealNonce]);
 
 	return (
 		<TooltipProvider delayDuration={0}>
@@ -140,7 +199,7 @@ export function FilesPanel({
 								{visible.length === 0 ? (
 									<p className="files-panel__truncated">No files match “{search.trim()}”.</p>
 								) : (
-									<div className="files-panel__list">
+									<div className="files-panel__list" ref={listRef}>
 										{view === "tree" ? (
 											<FileTree
 												nodes={tree}
@@ -148,6 +207,7 @@ export function FilesPanel({
 												onToggleDir={toggleDir}
 												onSelectFile={(f) => onOpenFile?.({ path: f.path })}
 												selectedKey={selectedPath}
+												revealedKey={revealedPath}
 												label="Changed files"
 												getTitle={(f) => f.path}
 												getFileLabel={displayName}
@@ -161,6 +221,7 @@ export function FilesPanel({
 														key={file.path}
 														file={file}
 														selected={file.path === selectedPath}
+														revealed={file.path === revealedPath}
 														onOpen={onOpenFile}
 													/>
 												))}
@@ -308,10 +369,12 @@ function displayName(file: ChangedFile, label = file.path.slice(file.path.lastIn
 function ChangedFileRow({
 	file,
 	selected,
+	revealed,
 	onOpen,
 }: {
 	file: ChangedFile;
 	selected: boolean;
+	revealed: boolean;
 	onOpen?: (target: ChangedFileTarget) => void;
 }) {
 	const slash = file.path.lastIndexOf("/");
@@ -324,7 +387,7 @@ function ChangedFileRow({
 			aria-selected={selected}
 			data-path={file.path}
 			aria-current={selected ? "true" : undefined}
-			className={cn("files-panel__row", selected && "is-selected")}
+			className={cn("files-panel__row", selected && "is-selected", revealed && "is-revealed")}
 			onClick={() => onOpen?.({ path: file.path })}
 			title={file.path}
 		>

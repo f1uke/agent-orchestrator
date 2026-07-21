@@ -114,6 +114,7 @@ export function SessionInspector({
 	onOpenFile,
 	onOpenChangedFile,
 	selectedChangedPath,
+	revealInTree,
 }: {
 	session?: WorkspaceSession;
 	onOpenReviewerTerminal?: OpenReviewerTerminal;
@@ -137,6 +138,8 @@ export function SessionInspector({
 	onOpenChangedFile?: (target: ChangedFileTarget) => void;
 	/** Path of the Changes row currently open in the center pane. */
 	selectedChangedPath?: string;
+	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
+	revealInTree?: { path: string; nonce: number } | null;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const requestedView = viewProp ?? internalView;
@@ -211,7 +214,12 @@ export function SessionInspector({
 					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
 				) : null}
 				{view === "files" && showFiles ? (
-					<FilesPanel sessionId={session.id} onOpenFile={onOpenChangedFile} selectedPath={selectedChangedPath} />
+					<FilesPanel
+						sessionId={session.id}
+						onOpenFile={onOpenChangedFile}
+						selectedPath={selectedChangedPath}
+						reveal={revealInTree}
+					/>
 				) : null}
 				{view === "tests" ? (
 					<SmokeTestView sessionId={session.id} worker={session.title} issueId={session.issueId} />

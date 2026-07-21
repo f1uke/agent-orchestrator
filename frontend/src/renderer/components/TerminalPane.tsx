@@ -10,7 +10,7 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { findSessionLinks } from "../lib/session-ref";
 import { findExternalRefLinks, jiraBrowseBaseFromUrl, resolveScmRemotes } from "../lib/terminal-scm-links";
 import { classifyFileRef, findFileLinks, type FileLinkMatch } from "../lib/terminal-file-links";
-import { openWorkspaceFileRef, type WorkspaceFileOpen } from "../lib/open-workspace-file";
+import { openWorkspaceFileRef, type ResolvedCandidate, type WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useSessionJiraContext } from "../hooks/useSessionJiraContext";
 import { XtermTerminal } from "./XtermTerminal";
 import { FileCandidatePicker } from "./FileCandidatePicker";
@@ -242,7 +242,7 @@ function AttachedTerminal({
 	// several open a picker; none shows a non-blocking toast — a click never
 	// errors the terminal.
 	const canOpenFiles = Boolean(session?.id && onOpenWorkspaceFile);
-	const [filePicker, setFilePicker] = useState<{ candidates: string[]; line?: number } | null>(null);
+	const [filePicker, setFilePicker] = useState<{ candidates: ResolvedCandidate[]; line?: number } | null>(null);
 	const [fileToast, setFileToast] = useState<string | null>(null);
 	const fileLinkResolver = useMemo(
 		() => (canOpenFiles ? (line: string) => findFileLinks(line) : undefined),
@@ -414,10 +414,10 @@ function AttachedTerminal({
 				onOpenChange={(open) => {
 					if (!open) setFilePicker(null);
 				}}
-				onPick={(path) => {
+				onPick={(candidate) => {
 					const line = filePicker?.line;
 					setFilePicker(null);
-					onOpenWorkspaceFile?.({ path, line });
+					onOpenWorkspaceFile?.({ path: candidate.path, line, inWorkspace: candidate.inWorkspace });
 				}}
 			/>
 			{fileToast && <Toast text={fileToast} />}

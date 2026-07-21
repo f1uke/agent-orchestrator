@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -299,5 +299,91 @@ describe("FilesPanel", () => {
 			expect(screen.getByText(/No files match/)).toBeInTheDocument();
 			expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
 		});
+	});
+});
+
+// --- reveal from a clicked terminal reference --------------------------------
+//
+// jsdom cannot see scrolling (test/setup.ts stubs scrollIntoView) or CSS, so
+// these assert the things that DECIDE whether a human sees anything: that the
+// target row EXISTS after the panel's own state is undone, and that the reveal
+// marker lands on it. The scroll itself is verified visually, not here.
+describe("FilesPanel reveal", () => {
+	const deep = "frontend/src/renderer/components/DiffRows.tsx";
+
+	it("marks the revealed row, distinctly from the scroll-spy selection", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			targetSource: "project",
+			files: [file(), file({ path: "backend/main.go" })],
+		});
+		const { rerender } = render(<FilesPanel sessionId="s1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+
+		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+		const revealed = await waitFor(() => {
+			const el = document.querySelector(`[data-path="${deep}"]`);
+			expect(el?.className).toContain("is-revealed");
+			return el as HTMLElement;
+		});
+		// The reveal cue must NOT borrow the scroll-spy marker's class, or the two
+		// facts become indistinguishable on the same row.
+		expect(revealed.className).not.toContain("is-selected");
+	});
+
+	// collapsedDirs names the CLOSED directories, so revealing has to DELETE
+	// ancestor keys. Adding them (the intuitive reading) would collapse the target
+	// out of the tree instead of opening it — and the row would never render.
+	it("expands collapsed ancestors so the target row exists", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			targetSource: "project",
+			files: [file(), file({ path: "backend/main.go" })],
+		});
+		const { rerender } = render(<FilesPanel sessionId="s1" />, { wrapper });
+		const dir = await screen.findByRole("treeitem", { name: /frontend/ });
+		await userEvent.click(dir);
+		expect(document.querySelector(`[data-path="${deep}"]`)).toBeNull();
+
+		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+		await waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).not.toBeNull());
+	});
+
+	// The search box filters BEFORE the tree is built, so a query that excludes
+	// the target leaves no row to reveal at all.
+	it("clears a search query that would filter the target out", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			targetSource: "project",
+			files: [file(), file({ path: "backend/main.go" })],
+		});
+		const { rerender } = render(<FilesPanel sessionId="s1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+		await userEvent.type(screen.getByRole("searchbox"), "main.go");
+		await waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).toBeNull());
+
+		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+		await waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).not.toBeNull());
+	});
+
+	it("drops the cue after its hold, so it never reads as a second selection", async () => {
+		vi.useFakeTimers();
+		try {
+			respondWith({ available: true, targetBranch: "main", targetSource: "project", files: [file()] });
+			const { rerender } = render(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />, { wrapper });
+			await vi.waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).not.toBeNull());
+			await vi.waitFor(() => expect(document.querySelector(".is-revealed")).not.toBeNull());
+			// The clear is a setTimeout -> setState, so the advance has to flush React.
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(1500);
+			});
+			expect(document.querySelector(".is-revealed")).toBeNull();
+			rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

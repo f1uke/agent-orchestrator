@@ -4407,6 +4407,16 @@ components:
       - status
       - prs
       type: object
+    ControllersWorkspaceResolveCandidateDTO:
+      properties:
+        inWorkspace:
+          type: boolean
+        path:
+          type: string
+      required:
+      - path
+      - inWorkspace
+      type: object
     DegradedProject:
       properties:
         id:
@@ -6567,7 +6577,7 @@ components:
       properties:
         candidates:
           items:
-            type: string
+            $ref: '#/components/schemas/ControllersWorkspaceResolveCandidateDTO'
           type: array
         ref:
           type: string

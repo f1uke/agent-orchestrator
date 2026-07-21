@@ -1533,6 +1533,10 @@ export interface components {
             updatedAt: string;
             workspacePath?: string;
         };
+        ControllersWorkspaceResolveCandidateDTO: {
+            inWorkspace: boolean;
+            path: string;
+        };
         DegradedProject: {
             id: string;
             kind: string;
@@ -2381,7 +2385,7 @@ export interface components {
             repo: string;
         };
         WorkspaceResolveResponse: {
-            candidates: string[];
+            candidates: components["schemas"]["ControllersWorkspaceResolveCandidateDTO"][];
             ref: string;
         };
     };

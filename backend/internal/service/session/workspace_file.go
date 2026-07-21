@@ -93,6 +93,89 @@ func resolveTarget(abs string) (string, bool) {
 	return resolved, true
 }
 
+// candidateWithinWorkspace reports whether a resolve candidate names a file
+// INSIDE the session's workspace, returning its slash-separated workspace-
+// relative path when it does.
+//
+// This is the gate for revealing a clicked terminal ref in the Files tab: an
+// in-workspace file is revealed in the tree, one outside keeps the standalone
+// viewer. It deliberately does NOT ask ResolveWorkspaceRef or ReadWorkspaceFile,
+// which are INTENTIONALLY UNCONFINED for absolute and `~` refs (#132) and would
+// answer "yes" for a path anywhere on disk. Nor can previewutil.ConfinedPath be
+// asked directly: it REINTERPRETS an absolute path as workspace-relative
+// ("/etc/passwd" -> "<workspace>/etc/passwd", ok=true) instead of rejecting it,
+// so it cannot distinguish inside from outside.
+//
+// The two ref shapes need genuinely different treatment:
+//
+//   - ABSOLUTE or `~`: symlinks are resolved and the result is compared against
+//     the symlink-resolved workspace root. Both sides must be resolved or the
+//     comparison is lexical nonsense — see resolvedRoot on the macOS
+//     /var -> /private/var trap, which otherwise makes reveal never fire.
+//   - RELATIVE or BARE: reuses the hardened confinedWorkspacePath, which already
+//     rejects empty/"." (ConfinedPath would rewrite them to "index.html") and
+//     re-checks containment after EvalSymlinks. A `..` segment is rejected here
+//     first: ConfinedPath CLAMPS traversal rather than rejecting it, turning
+//     "../escape.go" into "<workspace>/escape.go". That stays confined, so it is
+//     not a containment hole — but revealing a DIFFERENT file than the one
+//     clicked is a lie, and a wrong reveal is worse than no reveal.
+//
+// A candidate that does not resolve to a regular file is not revealable; the
+// caller degrades that to the standalone viewer, which is today's behaviour.
+func candidateWithinWorkspace(workspace, candidate string) (string, bool) {
+	candidate = strings.TrimSpace(candidate)
+	if workspace == "" || candidate == "" {
+		return "", false
+	}
+	if abs, isAbs := refTarget(candidate); isAbs {
+		resolved, ok := resolveTarget(abs)
+		if !ok {
+			return "", false
+		}
+		rel, within := relWithin(resolvedRoot(workspace), resolved)
+		if !within {
+			return "", false
+		}
+		return filepath.ToSlash(rel), true
+	}
+	if hasParentSegment(candidate) {
+		return "", false
+	}
+	_, safeRel, ok := confinedWorkspacePath(workspace, candidate)
+	if !ok {
+		return "", false
+	}
+	return safeRel, true
+}
+
+// hasParentSegment reports whether a slash- or backslash-separated path contains
+// a ".." segment. It matches on whole segments, so a file legitimately named
+// "..config" or a directory "a..b" is unaffected.
+func hasParentSegment(p string) bool {
+	for _, seg := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveCandidate is one path a terminal file reference can open.
+type ResolveCandidate struct {
+	// Path is what the viewer displays and passes back to workspace/file:
+	// workspace-relative for a file inside the workspace, absolute for one
+	// outside it.
+	Path string
+	// InWorkspace reports whether Path names a file inside the session's
+	// workspace. It is DECIDED by candidateWithinWorkspace, never inferred from
+	// Path's shape — "it looks relative, so it must be inside" is an implicit
+	// contract that would break silently the day the formatting changes.
+	//
+	// The Files tab reveals a clicked ref in its tree only when this is true;
+	// anything else keeps the standalone viewer, which is unchanged.
+	InWorkspace bool
+}
+
 // ResolveWorkspaceRef maps a file reference printed in the terminal to the
 // candidate paths it can open. Resolution splits by ref shape:
 //
@@ -101,8 +184,9 @@ func resolveTarget(abs string) (string, bool) {
 //   - A RELATIVE or BARE ref stays workspace-scoped — such a ref has no meaning
 //     outside a workspace — and may return several candidates for the UI picker.
 //
+// Each candidate carries an explicit InWorkspace verdict for the Files tab.
 // Zero candidates (no match) is not an error; only an unknown session is.
-func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, ref string) ([]string, error) {
+func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, ref string) ([]ResolveCandidate, error) {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get %s: %w", id, err)
@@ -111,9 +195,32 @@ func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, 
 		return nil, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
 	workspace := rec.Metadata.WorkspacePath
+	paths := s.resolveRefPaths(ctx, workspace, ref)
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	out := make([]ResolveCandidate, 0, len(paths))
+	for _, p := range paths {
+		rel, within := candidateWithinWorkspace(workspace, p)
+		// A revealable candidate is reported by its workspace-relative path, so
+		// the Files tab can match it against the changed-file list directly.
+		if within {
+			p = rel
+		}
+		out = append(out, ResolveCandidate{Path: p, InWorkspace: within})
+	}
+	return out, nil
+}
+
+// resolveRefPaths is ResolveWorkspaceRef's resolution half, split out so the
+// confinement verdict is applied uniformly to every branch's result rather than
+// duplicated across the returns below. It reports no error of its own: every
+// failure mode here degrades to "no candidates", and the only real error in this
+// operation (the session lookup) belongs to the caller.
+func (s *Service) resolveRefPaths(ctx context.Context, workspace, ref string) []string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return nil, nil
+		return nil
 	}
 
 	// INTENTIONALLY UNCONFINED — approved product decision, do not "fix" back to
@@ -126,37 +233,37 @@ func (s *Service) ResolveWorkspaceRef(ctx context.Context, id domain.SessionID, 
 	if abs, isAbs := refTarget(ref); isAbs {
 		resolved, ok := resolveTarget(abs)
 		if !ok {
-			return nil, nil
+			return nil
 		}
 		// A target that happens to live inside this session's workspace is
 		// reported workspace-relative, so the viewer shows the short path (and
 		// #127's in-worktree behaviour is unchanged).
 		if rel, within := relWithin(resolvedRoot(workspace), resolved); within {
-			return []string{filepath.ToSlash(rel)}, nil
+			return []string{filepath.ToSlash(rel)}
 		}
-		return []string{resolved}, nil
+		return []string{resolved}
 	}
 
 	if workspace == "" {
-		return nil, nil
+		return nil
 	}
 
 	if strings.ContainsAny(ref, "/\\") {
 		clean := filepath.ToSlash(ref)
 		if abs, ok := previewutil.ConfinedPath(workspace, clean); ok && isRegularFile(abs) {
 			if rel, within := relWithin(absRoot(workspace), abs); within {
-				return []string{filepath.ToSlash(rel)}, nil
+				return []string{filepath.ToSlash(rel)}
 			}
 		}
 		// Not present at that exact relative location: try a path-suffix match
 		// (the ref may be rooted deeper than the workspace), then basename.
 		if cands := s.searchWorkspaceFiles(ctx, workspace, clean, true); len(cands) > 0 {
-			return cands, nil
+			return cands
 		}
-		return s.searchWorkspaceFiles(ctx, workspace, path.Base(clean), false), nil
+		return s.searchWorkspaceFiles(ctx, workspace, path.Base(clean), false)
 	}
 
-	return s.searchWorkspaceFiles(ctx, workspace, ref, false), nil
+	return s.searchWorkspaceFiles(ctx, workspace, ref, false)
 }
 
 // searchWorkspaceFiles returns workspace-relative paths matching needle. When

@@ -1546,6 +1546,21 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	background: var(--interactive-active);
 }
 
+/* Reveal cue: a clicked terminal reference just jumped the tree to this row.
+   Deliberately a RING, not the accent left-bar + fill that `.is-selected` owns —
+   `.is-selected` means the reader's scroll-spy position in the stacked diffs
+   (which file the HUMAN is looking at), a different fact that can be true on the
+   same row at the same time. Two fills would be ambiguous; a ring composes.
+   Static, not animated: it is cleared on a timer after REVEAL_RING_MS, so it
+   needs no keyframes and is inert under prefers-reduced-motion by construction. */
+.file-tree__row.is-revealed,
+.files-panel__row.is-revealed {
+	box-shadow: inset 0 0 0 1px var(--accent);
+	/* Rounded so the ring reads as a deliberate highlight rather than a table
+	   border — full-bleed square corners on a full-width row look like chrome. */
+	border-radius: var(--radius-sm);
+}
+
 .file-tree__chevron {
 	height: 12px;
 	width: 12px;
