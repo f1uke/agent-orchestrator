@@ -381,7 +381,81 @@ func (m *Manager) notificationIntentForCurrentSCM(ctx context.Context, id domain
 		return nil, err
 	}
 	prURL := firstSCMNonEmpty(o.PR.URL, o.PR.HTMLURL)
-	return m.notificationIntentForSCM(rec, o, durableUnresolvedComments(facts, prURL)), nil
+	unresolved := durableUnresolvedComments(facts, prURL)
+	intent := m.notificationIntentForSCM(rec, o, unresolved)
+
+	// "PR #N is ready to merge" is only worth reading if it means the PR JUST
+	// became ready. Track readiness as a durable per-PR edge: the condition being
+	// true is not news, the transition into it is. Without this the notification
+	// re-fires on every later observation that reaches lifecycle while the PR
+	// happens to still be ready — the store's dedup index only suppresses while
+	// the previous row is unread, so reading the notification re-arms it.
+	//
+	// Readiness is recorded from the observation itself rather than from whether
+	// an intent was produced, so a suppressed-but-ready PR (terminated session,
+	// agent awaiting input) does not look like it left the ready state and then
+	// re-entered it once it becomes eligible again.
+	edge, err := m.recordReadyToMergeState(ctx, prURL, scmObservationIsReadyToMerge(o, unresolved))
+	if err != nil {
+		return nil, err
+	}
+	if intent != nil && intent.Type == domain.NotificationReadyToMerge && !edge {
+		return nil, nil
+	}
+	return intent, nil
+}
+
+// readyToMergeReactionType namespaces the ready-to-merge edge marker inside the
+// per-PR reaction signatures persisted in pr.last_nudge_signature. Reusing that
+// store (rather than adding a column) means the marker survives a daemon
+// restart for free, exactly like the agent-nudge dedup beside it.
+const readyToMergeReactionType = "ready"
+
+// recordReadyToMergeState durably records whether prURL is currently ready to
+// merge and reports whether this observation is the TRANSITION into that state.
+// It returns false while the PR stays ready, and false when it is not ready, so
+// only a genuine not-ready -> ready edge notifies. A PR that leaves the ready
+// state clears the marker, so a later return to ready notifies again.
+func (m *Manager) recordReadyToMergeState(ctx context.Context, prURL string, ready bool) (bool, error) {
+	if prURL == "" {
+		return ready, nil
+	}
+	key := readyToMergeReactionType + ":" + prURL
+	sig := ""
+	if ready {
+		sig = "ready"
+	}
+
+	m.react.mu.Lock()
+	defer m.react.mu.Unlock()
+
+	if !m.react.loaded[prURL] {
+		if err := m.loadPRSignaturesLocked(ctx, prURL); err != nil {
+			return false, err
+		}
+		m.react.loaded[prURL] = true
+	}
+	if m.react.seen[key] == sig {
+		return false, nil
+	}
+	if ready {
+		m.react.seen[key] = sig
+	} else {
+		// Clear by deletion rather than storing an empty marker: an absent key and
+		// an empty one mean the same thing to the check above, and deleting keeps
+		// the persisted payload free of a residual entry for every PR that has
+		// ever left the ready state.
+		delete(m.react.seen, key)
+	}
+	// Persist before reporting the edge: unlike a nudge (where the agent has
+	// already seen the message, so persisting after sending is the safe order),
+	// nothing has been delivered yet. Failing here and reporting no edge costs at
+	// most a delayed notification; the inverse would let a persist failure
+	// re-notify on every restart.
+	if err := m.persistPRSignaturesLocked(ctx, prURL); err != nil {
+		return false, err
+	}
+	return ready, nil
 }
 
 // durableUnresolvedComments reports whether the persisted PR facts for prURL

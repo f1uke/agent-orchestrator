@@ -1515,7 +1515,19 @@ func reviewSemanticHash(review ports.SCMReviewObservation) string {
 		Partial                bool `json:",omitempty"`
 	}
 	return stableHash(reviewHashPayload{
-		Decision:               review.Decision,
+		// Normalize exactly as domainFromObservation does before persisting the
+		// decision. The hash is the "did review change?" cursor, so it must be a
+		// function of the value that gets stored and of nothing else. Hashing the
+		// raw decision made an untouched merge request alternate between two
+		// hashes depending only on which path assembled the observation: a round
+		// that fetched metadata leaves Decision empty on GitLab (its MR detail
+		// carries no review decision, and approvalDecision returns "" whenever
+		// the project enforces no approval rule of its own), while a review-only
+		// round rebuilds the observation from the stored row and carries "none".
+		// Both persist as "none", so both must hash the same; otherwise every
+		// alternation looked like fresh review activity and re-delivered the
+		// observation to lifecycle, re-firing the ready-to-merge notification.
+		Decision:               firstNonEmpty(review.Decision, string(domain.ReviewNone)),
 		ApprovalsCount:         review.ApprovalsCount,
 		ApprovalsRequired:      review.ApprovalsRequired,
 		ApprovalRuleConfigured: review.ApprovalRuleConfigured,
