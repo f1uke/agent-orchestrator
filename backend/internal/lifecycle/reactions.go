@@ -385,46 +385,47 @@ func (m *Manager) notificationIntentForCurrentSCM(ctx context.Context, id domain
 	intent := m.notificationIntentForSCM(rec, o, unresolved)
 
 	// "PR #N is ready to merge" is only worth reading if it means the PR JUST
-	// became ready. Track readiness as a durable per-PR edge: the condition being
-	// true is not news, the transition into it is. Without this the notification
-	// re-fires on every later observation that reaches lifecycle while the PR
-	// happens to still be ready — the store's dedup index only suppresses while
-	// the previous row is unread, so reading the notification re-arms it.
+	// became ready. The condition being true is not news; the transition into it
+	// is. Without this the notification re-fires on every later observation that
+	// reaches lifecycle while the PR happens to still be ready — the store's
+	// dedup index only suppresses while the previous row is unread, so reading
+	// the notification re-arms it.
 	//
-	// Readiness is recorded from the observation itself rather than from whether
-	// an intent was produced, so a suppressed-but-ready PR (terminated session,
-	// agent awaiting input) does not look like it left the ready state and then
-	// re-entered it once it becomes eligible again.
-	edge, err := m.recordReadyToMergeState(ctx, prURL, scmObservationIsReadyToMerge(o, unresolved))
+	// The marker means "the human has already been told about this ready
+	// episode", so it is set only when a notification is actually produced.
+	// A PR that is ready while the notification is suppressed for session
+	// reasons (terminated, or the agent is awaiting input) leaves the marker
+	// untouched, so it can still notify once the session becomes eligible.
+	notifying := intent != nil && intent.Type == domain.NotificationReadyToMerge
+	fresh, err := m.syncReadyToMergeMark(ctx, prURL, scmObservationIsReadyToMerge(o, unresolved), notifying)
 	if err != nil {
 		return nil, err
 	}
-	if intent != nil && intent.Type == domain.NotificationReadyToMerge && !edge {
+	if notifying && !fresh {
 		return nil, nil
 	}
 	return intent, nil
 }
 
-// readyToMergeReactionType namespaces the ready-to-merge edge marker inside the
+// readyToMergeReactionType namespaces the ready-to-merge marker inside the
 // per-PR reaction signatures persisted in pr.last_nudge_signature. Reusing that
 // store (rather than adding a column) means the marker survives a daemon
 // restart for free, exactly like the agent-nudge dedup beside it.
 const readyToMergeReactionType = "ready"
 
-// recordReadyToMergeState durably records whether prURL is currently ready to
-// merge and reports whether this observation is the TRANSITION into that state.
-// It returns false while the PR stays ready, and false when it is not ready, so
-// only a genuine not-ready -> ready edge notifies. A PR that leaves the ready
-// state clears the marker, so a later return to ready notifies again.
-func (m *Manager) recordReadyToMergeState(ctx context.Context, prURL string, ready bool) (bool, error) {
+// syncReadyToMergeMark maintains the durable "already told the human this PR is
+// ready" marker for prURL and reports whether notifying now would be fresh news.
+//
+// ready is the PR's current readiness; notifying is whether a ready-to-merge
+// notification is about to be produced. Leaving the ready state clears the
+// marker, so a later return to ready is news again. It returns true only when
+// the marker was absent and is now being set — i.e. this is the not-ready ->
+// ready edge the human has not seen yet.
+func (m *Manager) syncReadyToMergeMark(ctx context.Context, prURL string, ready, notifying bool) (bool, error) {
 	if prURL == "" {
 		return ready, nil
 	}
 	key := readyToMergeReactionType + ":" + prURL
-	sig := ""
-	if ready {
-		sig = "ready"
-	}
 
 	m.react.mu.Lock()
 	defer m.react.mu.Unlock()
@@ -435,23 +436,30 @@ func (m *Manager) recordReadyToMergeState(ctx context.Context, prURL string, rea
 		}
 		m.react.loaded[prURL] = true
 	}
-	if m.react.seen[key] == sig {
-		return false, nil
-	}
-	if ready {
-		m.react.seen[key] = sig
-	} else {
-		// Clear by deletion rather than storing an empty marker: an absent key and
-		// an empty one mean the same thing to the check above, and deleting keeps
-		// the persisted payload free of a residual entry for every PR that has
-		// ever left the ready state.
+	marked := m.react.seen[key] != ""
+
+	switch {
+	case !ready:
+		if !marked {
+			return false, nil
+		}
+		// Clear by deletion rather than storing an empty marker: both read as "not
+		// told" above, and deleting keeps the persisted payload free of a residual
+		// entry for every PR that has ever left the ready state.
 		delete(m.react.seen, key)
+	case !notifying, marked:
+		// Ready but either already announced, or not announceable right now. Either
+		// way there is nothing new to record.
+		return false, nil
+	default:
+		m.react.seen[key] = "ready"
 	}
-	// Persist before reporting the edge: unlike a nudge (where the agent has
-	// already seen the message, so persisting after sending is the safe order),
-	// nothing has been delivered yet. Failing here and reporting no edge costs at
-	// most a delayed notification; the inverse would let a persist failure
-	// re-notify on every restart.
+
+	// Persist before reporting. Unlike a nudge (where the agent has already seen
+	// the message, so persisting after sending is the safe order), nothing has
+	// been delivered yet. Failing here and reporting "not fresh" costs at most a
+	// delayed notification; the inverse would let a persist failure re-notify on
+	// every restart.
 	if err := m.persistPRSignaturesLocked(ctx, prURL); err != nil {
 		return false, err
 	}
