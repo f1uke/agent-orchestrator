@@ -1669,6 +1669,53 @@ func TestSCMObservation_NotReadyWhenUnresolvedCommentsPersisted(t *testing.T) {
 	}
 }
 
+// TestSCMObservation_ReadyToMergeStillNotifiesAfterWaitingInputClears guards the
+// interaction between the waiting-input suppression above and the ready-to-merge
+// edge marker. The marker records "the human has already been told"; a PR whose
+// notification was suppressed for session reasons was never announced, so the
+// marker must stay clear and the notification must still arrive once the session
+// becomes eligible. Recording readiness unconditionally would swallow it forever.
+func TestSCMObservation_ReadyToMergeStillNotifiesAfterWaitingInputClears(t *testing.T) {
+	st := newFakeStore()
+	sink := &fakeNotificationSink{}
+	m := New(st, nil, WithNotificationSink(sink))
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityWaitingInput
+	st.sessions["mer-1"] = rec
+	obs := ports.SCMObservation{
+		Fetched:      true,
+		PR:           ports.SCMPRObservation{URL: "https://github.com/o/r/pull/1", Number: 1},
+		CI:           ports.SCMCIObservation{Summary: string(domain.CIPassing)},
+		Mergeability: ports.SCMMergeabilityObservation{State: string(domain.MergeMergeable)},
+	}
+	if err := m.ApplySCMObservation(ctx, "mer-1", obs); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.intents) != 0 {
+		t.Fatalf("waiting-input session emitted ready notification: %+v", sink.intents)
+	}
+
+	// The agent stops waiting. The PR is unchanged and still ready — but the
+	// human has not been told yet, so this is their first chance to hear it.
+	active := st.sessions["mer-1"]
+	active.Activity.State = domain.ActivityActive
+	st.sessions["mer-1"] = active
+	if err := m.ApplySCMObservation(ctx, "mer-1", obs); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.intents) != 1 {
+		t.Fatalf("ready notification not delivered once the session became eligible: %+v", sink.intents)
+	}
+
+	// Still ready, still unchanged: no second notification.
+	if err := m.ApplySCMObservation(ctx, "mer-1", obs); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.intents) != 1 {
+		t.Fatalf("ready notification repeated for an unchanged PR: %+v", sink.intents)
+	}
+}
+
 func TestSCMObservation_ReadyToMergeSuppressedWhileWaitingInput(t *testing.T) {
 	st := newFakeStore()
 	sink := &fakeNotificationSink{}

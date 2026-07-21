@@ -11,6 +11,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -192,7 +193,11 @@ func newSCMFixture(t *testing.T, branch string) *scmFixture {
 	}
 
 	spy := &scmMessengerSpy{}
-	lcm := lifecycle.New(store, spy)
+	// Wire the REAL write-side notification manager over the REAL store, exactly
+	// as daemon/lifecycle_wiring.go does. The lifecycle unit tests all use a fake
+	// sink, so the production dedup path (notify.Manager -> store's unread-only
+	// partial unique index) has no coverage without this.
+	lcm := lifecycle.New(store, spy, lifecycle.WithNotificationSink(newSCMNotifier(store, now)))
 	provider := newCannedSCMProvider()
 	observer := scmobserve.New(provider, store, lcm, scmobserve.Config{
 		Tick:   time.Hour,
@@ -646,8 +651,23 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetPRLastNudgeSignature child: %v", err)
 		}
+		// Assert on the nudge bookkeeping specifically rather than on the blob
+		// being empty. The same payload also carries the ready-to-merge edge
+		// marker, which legitimately records that this child was ready in poll 1
+		// and stopped being ready in poll 2 — that is readiness state, not a nudge.
+		// attempts is written only by sendOnce, so an empty attempts map is exactly
+		// the claim this test makes: the child was suppressed at the reaction
+		// layer, never sent and then deduped.
+		var childPayload struct {
+			Attempts map[string]int `json:"attempts"`
+		}
 		if childSig != "" {
-			t.Fatalf("stacked child must not record a nudge signature: %q", childSig)
+			if err := json.Unmarshal([]byte(childSig), &childPayload); err != nil {
+				t.Fatalf("decode child signature %q: %v", childSig, err)
+			}
+		}
+		if len(childPayload.Attempts) != 0 {
+			t.Fatalf("stacked child must not record a nudge attempt: %q", childSig)
 		}
 	})
 }
