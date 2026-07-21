@@ -253,6 +253,7 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 			ProjectID:          next.ProjectID,
 			CreatedAt:          next.Activity.LastActivityAt,
 			SessionDisplayName: next.DisplayName,
+			SessionKind:        next.Kind,
 		}
 	}
 	waitingEvents := m.waitingInputEvents(next, prevState, prevAt, now)
