@@ -105,6 +105,14 @@ body {
 	flex: 0 0 auto;
 }
 
+/* The speech bubble, above the Proc. */
+.companion-proc-bubble {
+	position: absolute;
+	bottom: calc(100% - 26px);
+	left: var(--procs-figure-left, 0);
+	pointer-events: none;
+}
+
 /* The hover tooltip, above the Proc and out of the way of its own bubble. */
 .companion-proc-tooltip {
 	position: absolute;

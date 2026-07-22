@@ -1314,6 +1314,13 @@ ipcMain.on("companion:setInteractive", (_event, interactive: unknown) => {
 	companionOverlay?.setInteractive(interactive === true);
 });
 
+// The overlay page has no daemon connection of its own and the port is discovered,
+// so it asks for the base URL rather than assuming one. Null while the daemon is
+// not running; the overlay retries and stays on its mock until it answers.
+ipcMain.handle("companion:daemonUrl", (): string | null =>
+	daemonStatus.state === "ready" && daemonStatus.port ? `http://127.0.0.1:${daemonStatus.port}` : null,
+);
+
 ipcMain.handle("updates:getStatus", (): UpdateStatus => getUpdateStatus());
 ipcMain.handle("updates:check", async () => {
 	const runFile = runFilePath();

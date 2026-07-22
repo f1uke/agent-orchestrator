@@ -10,6 +10,8 @@ import {
 	type Pet,
 	type World,
 } from "./behaviour";
+import { Bubble } from "./Bubble";
+import type { ComposedBubble } from "./bubble-compose";
 import { castForSession } from "./cast";
 import { hoverAt, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
@@ -42,6 +44,12 @@ const TICK_MS = 500;
 
 export type CompanionStageProps = {
 	feed?: CompanionFeed;
+	/**
+	 * What each Proc may honestly say right now. Re-read on every tick rather than
+	 * pushed, because a claim expires on the CLOCK — silence from the feed means a
+	 * line has run out, not that it is still true.
+	 */
+	bubbleFor?: (sessionId: string) => ComposedBubble | null;
 	/** Called with true while the pointer is over a Proc, so the shell can take clicks. */
 	onInteractiveChange?: (interactive: boolean) => void;
 };
@@ -60,11 +68,14 @@ function prefersReducedMotion(): boolean {
 	return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProps) {
+export function CompanionStage({ feed, bubbleFor, onInteractiveChange }: CompanionStageProps) {
 	const source = useMemo(() => feed ?? createMockFeed(), [feed]);
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
 	// rebuilt on every state change.
+	// Bumped by the same tick the engine runs on, so an expiring bubble re-renders
+	// itself away without needing an event to tell it to.
+	const [bubbleTick, setBubbleTick] = useState(0);
 	const [world, setWorld] = useState<World>(() => ({
 		...createWorld(bandFor(window.innerWidth)),
 		// Clearance is the whole DRAWN FRAME, not just the figure. Spacing them by the
@@ -92,6 +103,7 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 	useEffect(() => {
 		const timer = setInterval(() => {
 			setWorld((current) => tick(current, Date.now(), Math.random));
+			setBubbleTick((n) => n + 1);
 		}, TICK_MS);
 		return () => clearInterval(timer);
 	}, []);
@@ -199,13 +211,29 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 	return (
 		<div className="companion-stage">
 			{world.pets.map((pet) => (
-				<ProcOnStage key={pet.id} pet={pet} tooltip={openTooltip === pet.id} />
+				<ProcOnStage
+					key={pet.id}
+					pet={pet}
+					tooltip={openTooltip === pet.id}
+					bubble={bubbleFor?.(pet.id) ?? null}
+					bubbleTick={bubbleTick}
+				/>
 			))}
 		</div>
 	);
 }
 
-function ProcOnStage({ pet, tooltip }: { pet: Pet; tooltip: boolean }) {
+function ProcOnStage({
+	pet,
+	tooltip,
+	bubble,
+}: {
+	pet: Pet;
+	tooltip: boolean;
+	bubble: ComposedBubble | null;
+	/** Only here to re-render the bubble as its claim ages. */
+	bubbleTick: number;
+}) {
 	// The character is a stable function of the session ref, so the same worker is
 	// always the same Proc — that is what lets someone learn to recognise it.
 	const cast = castForSession(pet.id);
@@ -236,6 +264,13 @@ function ProcOnStage({ pet, tooltip }: { pet: Pet; tooltip: boolean }) {
 				["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
 			}}
 		>
+			{/* The tooltip wins the space when it is open: it is a deliberate request
+			    for detail, and two cards over one Proc would collide. */}
+			{bubble && !held && !tooltip ? (
+				<div className="companion-proc-bubble">
+					<Bubble text={bubble.text} tone={bubble.tone} decay={bubble.decay} />
+				</div>
+			) : null}
 			{tooltip && !held ? (
 				<div className="companion-proc-tooltip">
 					<PetTooltip name={pet.name} sessionId={pet.id} project={pet.project} status={pet.status} />
