@@ -33,6 +33,14 @@ body {
 	pointer-events: auto;
 }
 
+/* The drawing is wider than the figure — a scene hangs a ground prop to the right
+   and a held prop to the left — so it is nudged left by exactly that overhang,
+   keeping the FIGURE at the position the engine placed it. */
+.companion-proc-art {
+	display: block;
+	margin-left: var(--procs-offset-x, 0);
+}
+
 /* The four-beat leg strip. `steps(4, end)` steps the row of poses one cell at a
    time, which is why the frames genuinely differ instead of the Proc being nudged. */
 @keyframes procs-walk {
@@ -64,5 +72,77 @@ body {
 
 	.companion-proc * {
 		animation: none !important;
+	}
+}
+
+/* ---- Scene animations. transform/opacity only, so every one stays on the
+   compositor and an idle desktop still costs ~0% CPU. ---- */
+
+/* Rising Z's over a sleeping Proc. */
+@keyframes procs-zzz {
+	0% {
+		opacity: 0;
+		transform: translateY(6px) scale(0.9);
+	}
+	25% {
+		opacity: 1;
+	}
+	70% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(-10px) scale(1.05);
+	}
+}
+
+/* CI sparks: a short sharp pulse, not a gentle glow — it is a failure. */
+@keyframes procs-spark {
+	0%,
+	100% {
+		opacity: 0.15;
+		transform: scale(0.7);
+	}
+	40% {
+		opacity: 1;
+		transform: scale(1.15);
+	}
+}
+
+/* Confetti falls and fades. */
+@keyframes procs-confetti {
+	0% {
+		opacity: 0;
+		transform: translateY(-8px);
+	}
+	20% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(22px);
+	}
+}
+
+/* Data moving down the cord while the agent actually runs. */
+@keyframes procs-pip {
+	0%,
+	100% {
+		opacity: 0.1;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+/* The cord tugging at you. Small on purpose: it should catch the eye at the edge
+   of vision without becoming something you have to look away from. */
+@keyframes procs-tug {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	50% {
+		transform: translateX(1.6px);
 	}
 }

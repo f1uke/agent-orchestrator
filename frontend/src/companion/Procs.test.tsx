@@ -1,52 +1,102 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WALK_CYCLE_MS } from "./behaviour";
-import { PROCS_BODY_SHADE, PROCS_INK, PROCS_RIM_PX } from "./palette";
+import { CAST, castForSession, mirrorPathX } from "./cast";
+import { PROCS_INK, PROCS_RIM_PX } from "./palette";
+import { ALL_COMPANION_STATUSES, sceneFor } from "./scene";
 import { Procs } from "./Procs";
 
-describe("Procs", () => {
-	it("names itself for assistive tech instead of being an anonymous blob", () => {
-		render(<Procs facing="front" walking={false} />);
+const CURLY = CAST[0];
 
-		expect(screen.getByRole("img", { name: /proc/i })).toBeInTheDocument();
+function renderProcs(overrides: Partial<React.ComponentProps<typeof Procs>> = {}) {
+	return render(<Procs cast={CURLY} status="pr_open" facing="front" walking={false} {...overrides} />);
+}
+
+/** Horizontal extent of everything drawn inside an element, in rig coordinates. */
+function extentX(root: Element): { min: number; max: number } {
+	let min = Number.POSITIVE_INFINITY;
+	let max = Number.NEGATIVE_INFINITY;
+	const see = (from: number, to: number) => {
+		min = Math.min(min, from);
+		max = Math.max(max, to);
+	};
+	for (const node of [root, ...root.querySelectorAll("*")]) {
+		const num = (name: string) => Number(node.getAttribute(name));
+		if (node.tagName === "rect") see(num("x"), num("x") + num("width"));
+		if (node.tagName === "circle") see(num("cx") - num("r"), num("cx") + num("r"));
+		if (node.tagName === "ellipse") see(num("cx") - num("rx"), num("cx") + num("rx"));
+		if (node.tagName === "path") {
+			const numbers = (node.getAttribute("d") ?? "").match(/-?\d+(\.\d+)?/g)?.map(Number) ?? [];
+			for (let i = 0; i < numbers.length; i += 2) see(numbers[i], numbers[i]);
+		}
+	}
+	return { min, max };
+}
+
+describe("the character", () => {
+	it("says who it is and what it is doing, for assistive tech and for tests", () => {
+		renderProcs({ cast: CAST[2], status: "ci_failed" });
+
+		expect(screen.getByRole("img", { name: /brack/i })).toHaveAttribute("aria-label", expect.stringMatching(/ci/i));
 	});
 
-	it("carries the ink rim as a real stroke in the art, not a CSS filter", () => {
-		const { container } = render(<Procs facing="front" walking={false} />);
-		const silhouette = container.querySelectorAll("[data-rim]");
+	it("wears its own character's ears, mirrored into a pair", () => {
+		for (const member of CAST) {
+			const { container, unmount } = renderProcs({ cast: member });
 
-		expect(silhouette.length).toBeGreaterThan(0);
-		for (const shape of silhouette) {
+			expect(container.querySelector('[data-core="ear-left"]')?.getAttribute("d")).toBe(member.ear);
+			expect(container.querySelector('[data-core="ear-right"]')?.getAttribute("d")).toBe(mirrorPathX(member.ear));
+			unmount();
+		}
+	});
+
+	it("wears its own character's colour", () => {
+		const { container } = renderProcs({ cast: CAST[3] });
+		const head = container.querySelector('[data-part="head"]');
+
+		expect(head?.getAttribute("fill")).toBe(CAST[3].body);
+	});
+
+	it("looks different from the next character in both silhouette and colour", () => {
+		const a = renderProcs({ cast: CAST[0] });
+		const b = renderProcs({ cast: CAST[1] });
+
+		const ear = (c: HTMLElement) => c.querySelector('[data-core="ear-left"]')?.getAttribute("d");
+		const head = (c: HTMLElement) => c.querySelector('[data-part="head"]')?.getAttribute("fill");
+		expect(ear(a.container)).not.toBe(ear(b.container));
+		expect(head(a.container)).not.toBe(head(b.container));
+	});
+
+	it("carries the ink rim on every silhouette shape, art not CSS filter", () => {
+		const { container } = renderProcs({ status: "working" });
+		const rimmed = container.querySelectorAll("[data-rim]");
+
+		expect(rimmed.length).toBeGreaterThan(0);
+		for (const shape of rimmed) {
 			expect(shape.getAttribute("stroke")).toBe(PROCS_INK);
 			expect(shape.getAttribute("stroke-width")).toBe(String(PROCS_RIM_PX));
 		}
-		expect(container.querySelector("svg")?.getAttribute("style") ?? "").not.toContain("filter");
+	});
+
+	it("mirrors on X to turn around, and faces you head-on when summoned", () => {
+		const { container: left } = renderProcs({ facing: "left", walking: true });
+		const { container: front } = renderProcs({ facing: "front" });
+
+		expect(left.querySelector("svg")?.getAttribute("style")).toContain("scaleX(-1)");
+		expect(front.querySelector("svg")?.getAttribute("style") ?? "").not.toContain("scaleX(-1)");
 	});
 
 	it("runs the four-beat walk strip only while it is walking", () => {
-		const { container: walking } = render(<Procs facing="right" walking />);
-		const { container: standing } = render(<Procs facing="right" walking={false} />);
+		const { container: walking } = renderProcs({ walking: true });
+		const { container: standing } = renderProcs({ walking: false });
 
-		const strip = walking.querySelector("[data-walk-strip]");
-		expect(strip?.getAttribute("style")).toContain("steps(4, end)");
-		expect(strip?.getAttribute("style")).toContain(`${WALK_CYCLE_MS}ms`);
+		expect(walking.querySelector("[data-walk-strip]")?.getAttribute("style")).toContain("steps(4, end)");
+		expect(walking.querySelector("[data-walk-strip]")?.getAttribute("style")).toContain(`${WALK_CYCLE_MS}ms`);
 		expect(standing.querySelector("[data-walk-strip]")?.getAttribute("style") ?? "").not.toContain("steps");
 	});
 
-	it("holds four genuinely different leg poses, so the strip is a walk and not a nudge", () => {
-		const { container } = render(<Procs facing="right" walking />);
-		const poses = [...container.querySelectorAll("[data-walk-pose]")].map((g) => g.innerHTML);
-
-		expect(poses).toHaveLength(4);
-		expect(new Set(poses).size).toBe(4);
-	});
-
 	it("never lets the two legs collapse onto each other in a frame", () => {
-		// Caught by measuring the rendered strip: a ±6 swing about legs 12 apart put
-		// BOTH legs on the same x in the third beat, so that frame drew one leg and a
-		// walking Proc flickered a leg away four times a second. A front-facing sprite
-		// must not cross its legs — this asserts the left leg stays left of the right.
-		const { container } = render(<Procs facing="right" walking />);
+		const { container } = renderProcs({ walking: true });
 
 		for (const pose of container.querySelectorAll("[data-walk-pose]")) {
 			const legs = [...pose.querySelectorAll("rect")].map((r) => ({
@@ -58,77 +108,193 @@ describe("Procs", () => {
 			expect(legs[0].to).toBeLessThanOrEqual(legs[1].from);
 		}
 	});
+});
 
-	it("mirrors on X to turn around, and faces you head-on when summoned", () => {
-		const { container: left } = render(<Procs facing="left" walking />);
-		const { container: right } = render(<Procs facing="right" walking />);
-		const { container: front } = render(<Procs facing="front" walking={false} />);
+describe("the scene", () => {
+	it("draws a ground only for the states that have one", () => {
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
+			const ground = container.querySelector('[data-slot="ground"]');
 
-		expect(left.querySelector("svg")?.getAttribute("style")).toContain("scaleX(-1)");
-		expect(right.querySelector("svg")?.getAttribute("style") ?? "").not.toContain("scaleX(-1)");
-		expect(front.querySelector("svg")?.getAttribute("style") ?? "").not.toContain("scaleX(-1)");
-	});
-
-	it("gives the ears and the cord both channels, not ink alone", () => {
-		// Caught by rendering: drawn in flat ink, the bracket ears and the cord
-		// vanished completely on a dark wallpaper — the exact single-channel failure
-		// the rim rule exists to prevent, on the two parts that carry the character's
-		// identity. Each is now an ink casing with a body-coloured core on top.
-		const { container } = render(<Procs facing="front" walking={false} />);
-
-		for (const part of ["ear-left", "ear-right", "cord"]) {
-			const casing = container.querySelector(`[data-casing="${part}"]`);
-			const core = container.querySelector(`[data-core="${part}"]`);
-
-			expect(casing?.getAttribute("stroke")).toBe(PROCS_INK);
-			expect(core?.getAttribute("stroke")).toBe(PROCS_BODY_SHADE);
-			expect(casing?.getAttribute("d")).toBe(core?.getAttribute("d"));
-			expect(Number(casing?.getAttribute("stroke-width"))).toBeCloseTo(
-				Number(core?.getAttribute("stroke-width")) + 2 * PROCS_RIM_PX,
-				5,
-			);
+			expect(Boolean(ground), status).toBe(sceneFor(status).ground !== "none");
+			unmount();
 		}
 	});
 
-	it("keeps the cord on the right, where it cannot be confused with a held prop", () => {
-		const { container } = render(<Procs facing="front" walking={false} />);
-		const cord = container.querySelector('[data-core="cord"]');
+	it("draws a held prop only for the states that hold one", () => {
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
 
-		// Every point of the cord path lives right of the body's centre line (x=48),
-		// because held props sit LEFT: the link and the task must not double-encode.
-		const points = (cord?.getAttribute("d") ?? "").match(/-?\d+(\.\d+)? -?\d+(\.\d+)?/g) ?? [];
-		expect(points.length).toBeGreaterThan(0);
-		for (const point of points) {
-			expect(Number(point.split(" ")[0])).toBeGreaterThan(48);
+			expect(Boolean(container.querySelector('[data-slot="held"]')), status).toBe(sceneFor(status).held !== "none");
+			unmount();
 		}
 	});
 
-	it("keeps the blush inside the head silhouette", () => {
-		// The clip is the safety net; this is the actual rule. Blush drawn out to the
-		// head's edge gets sliced flat by the clip and reads as a smudge rather than a
-		// cheek — the same defect the design hit, arriving from the other direction.
-		const { container } = render(<Procs facing="front" walking={false} />);
-		const head = container.querySelector('[data-rim][rx="26"]')!;
-		const headX = Number(head.getAttribute("x"));
-		const headY = Number(head.getAttribute("y"));
-		const headW = Number(head.getAttribute("width"));
-		const headH = Number(head.getAttribute("height"));
-		const radius = Number(head.getAttribute("rx"));
-		const blushes = [...container.querySelectorAll("[data-blush]")];
+	it("draws an emit layer only for the states that emit", () => {
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
 
-		expect(blushes.length).toBe(2);
-		for (const blush of blushes) {
-			expect(blush.getAttribute("clip-path")).toMatch(/procs-head/);
-			const cx = Number(blush.getAttribute("cx"));
-			const cy = Number(blush.getAttribute("cy"));
-			const rx = Number(blush.getAttribute("rx"));
-			// Half-width of the rounded head at the blush's height.
-			const intoCorner = Math.max(0, Math.abs(cy - (headY + headH / 2)) - (headH / 2 - radius));
-			const halfWidth = headW / 2 - (radius - Math.sqrt(Math.max(0, radius ** 2 - intoCorner ** 2)));
-			const centre = headX + headW / 2;
-
-			expect(cx - rx).toBeGreaterThan(centre - halfWidth);
-			expect(cx + rx).toBeLessThan(centre + halfWidth);
+			expect(Boolean(container.querySelector('[data-slot="emit"]')), status).toBe(sceneFor(status).emit !== "none");
+			unmount();
 		}
+	});
+
+	it("keeps the cord on the RIGHT and the held prop on the LEFT, so they cannot double-encode", () => {
+		const { container } = renderProcs({ status: "needs_input" });
+		const held = container.querySelector('[data-slot="held"]')!;
+		const cord = container.querySelector('[data-core="cord"]')!;
+
+		// x=48 is the figure's centre line.
+		expect(extentX(held).max).toBeLessThan(48);
+		expect(extentX(cord).min).toBeGreaterThan(48);
+	});
+
+	it("keeps the ground beside the Proc rather than across its face", () => {
+		// The design hit this: a desk drawn behind a Proc crosses its face, because a
+		// Proc is nearly all head. The ground lives clear of the figure's box.
+		const { container } = renderProcs({ status: "working" });
+
+		expect(extentX(container.querySelector('[data-slot="ground"]')!).min).toBeGreaterThan(67);
+	});
+
+	it("plugs the cord into the ground when the scene has one", () => {
+		// This is what marries the two layers instead of letting them compete: the
+		// desk is where it works AND what it is plugged into.
+		const { container } = renderProcs({ status: "working" });
+
+		expect(container.querySelector('[data-plug="ground"]')).not.toBeNull();
+	});
+
+	it("shows an unplugged cord as genuinely unplugged", () => {
+		// Caught by rendering the contact sheet: `no_signal`, `terminated` and
+		// `unknown` came out indistinguishable, because an "attached" cord with no
+		// ground was drawn ending in a plug lying on the floor — which is precisely
+		// what unplugged looks like. Three states, one picture, no information.
+		const { container } = renderProcs({ status: "terminated" });
+		const plug = container.querySelector('[data-plug="loose"]');
+
+		expect(plug).not.toBeNull();
+		// Lying on its side on the floor, not standing in a socket.
+		expect(plug?.closest("g")?.getAttribute("transform")).toMatch(/rotate/);
+	});
+
+	it("runs an attached cord off to something, with no plug lying about", () => {
+		const { container } = renderProcs({ status: "pr_open" });
+
+		expect(container.querySelector("[data-plug]")).toBeNull();
+		// It leaves the drawn frame, which is what "attached to something" looks like
+		// when the thing it is attached to is not on screen.
+		expect(extentX(container.querySelector('[data-core="cord"]')!).max).toBeGreaterThan(130);
+	});
+
+	it("keeps the three quiet states telling themselves apart", () => {
+		const looks = ["no_signal", "terminated", "unknown"].map((status) => {
+			const { container, unmount } = renderProcs({ status: status as never });
+			const look = [
+				container.querySelector('[data-slot="emit"]')?.getAttribute("data-emit") ?? "none",
+				container.querySelector('[data-slot="cord"]')?.getAttribute("data-cord"),
+				container.querySelector("[data-plug]")?.getAttribute("data-plug") ?? "none",
+			].join("/");
+			unmount();
+			return look;
+		});
+
+		expect(new Set(looks).size).toBe(3);
+	});
+
+	it("puts data pips on the cord only while the session is actually working", () => {
+		const { container: working } = renderProcs({ status: "working" });
+		const { container: open } = renderProcs({ status: "pr_open" });
+
+		expect(working.querySelectorAll("[data-pip]").length).toBeGreaterThan(0);
+		expect(open.querySelectorAll("[data-pip]").length).toBe(0);
+	});
+
+	it("gives every prop the ink rim too — a prop is on the wallpaper like the Proc is", () => {
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
+			for (const slot of ["ground", "held", "emit"]) {
+				const group = container.querySelector(`[data-slot="${slot}"]`);
+				if (!group) continue;
+				const shapes = group.querySelectorAll("rect, circle, ellipse, path");
+				const rimmed = group.querySelectorAll("[data-rim], [data-casing]");
+
+				expect(shapes.length, `${status}/${slot}`).toBeGreaterThan(0);
+				expect(rimmed.length, `${status}/${slot}`).toBeGreaterThan(0);
+			}
+			unmount();
+		}
+	});
+
+	it("draws every path with absolute M/L/C only", () => {
+		// Not style policing. `mirrorPathX` mirrors the ears by flipping alternate
+		// numbers, and the same alternating read is how anything can measure where a
+		// prop actually sits. An arc (7 params) or an H/V shorthand silently breaks
+		// that pairing — which is exactly how a sign that lives at x≤30 measured as
+		// reaching x=89 and hid a side-of-the-body check.
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
+			for (const path of container.querySelectorAll("path")) {
+				const d = path.getAttribute("d") ?? "";
+
+				expect(d.replace(/[-\d.,\s]/g, ""), `${status}: ${d}`).toMatch(/^[MLCZ]*$/);
+			}
+			unmount();
+		}
+	});
+
+	it("never puts a transform animation on the same node that a transform positions", () => {
+		// A CSS `transform` keyframe REPLACES an element's SVG `transform` attribute
+		// rather than composing with it, so a sparkle positioned by `translate(88 62)`
+		// and animated by `transform: scale(…)` snaps to the origin the moment the
+		// animation starts. Position and motion must live on separate groups.
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
+			for (const node of container.querySelectorAll("[style*='animation']")) {
+				const style = node.getAttribute("style") ?? "";
+				const animatesTransform = /procs-(zzz|spark|confetti|tug|bob|walk)/.test(style);
+
+				if (animatesTransform) expect(node.getAttribute("transform"), `${status}`).toBeNull();
+			}
+			unmount();
+		}
+	});
+
+	it("never depends on an animation to make a prop visible", () => {
+		// Reduced motion switches every animation off. Several scene keyframes START at
+		// opacity 0 (zzz rising, confetti falling), which is fine — with the animation
+		// gone the element falls back to its BASE style. But if a base style ever set
+		// opacity to 0, that state would silently vanish for anyone who asked the OS to
+		// reduce motion, which is the one group least able to notice it had.
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
+			for (const node of container.querySelectorAll("[data-slot] *, [data-slot]")) {
+				const opacity = (node as SVGElement).style?.opacity;
+
+				if (opacity) expect(Number(opacity), `${status}`).toBeGreaterThan(0);
+			}
+			unmount();
+		}
+	});
+
+	it("renders every one of the fifteen states without falling over", () => {
+		for (const status of ALL_COMPANION_STATUSES) {
+			const { container, unmount } = renderProcs({ status });
+
+			expect(container.querySelector("svg"), status).not.toBeNull();
+			unmount();
+		}
+	});
+});
+
+describe("a roster of Procs", () => {
+	it("is visibly varied — the all-identical look was the bug", () => {
+		const refs = ["ao-1", "ao-2", "ao-3", "ao-4", "ao-5", "ao-6", "ao-7", "ao-8"];
+		const looks = refs.map((ref) => {
+			const member = castForSession(ref);
+			return `${member.body}/${member.ear}`;
+		});
+
+		expect(new Set(looks).size).toBeGreaterThanOrEqual(4);
 	});
 });

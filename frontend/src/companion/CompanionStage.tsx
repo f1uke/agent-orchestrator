@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createWorld, syncActivities, tick, type Band, type Pet, type World } from "./behaviour";
+import { castForSession } from "./cast";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { Procs } from "./Procs";
+import { procsFrame, Procs } from "./Procs";
 
 // The stage: the only stateful part of the overlay renderer. It owns a World,
 // advances it on a slow tick, and paints each Proc with a `transform` — the engine
@@ -11,8 +12,8 @@ import { Procs } from "./Procs";
 
 /** Drawn Proc height. `full` tier from the design's size rules. */
 const PET_HEIGHT = 128;
-/** Drawn Proc width, from the art's 96×132 viewBox. */
-const PET_WIDTH = Math.round((PET_HEIGHT / 132) * 96);
+/** The drawn frame: the figure's own width plus whatever its scene hangs either side. */
+const FRAME = procsFrame(PET_HEIGHT);
 /**
  * How far the turnaround sits in from the screen edge. A Proc turns here rather
  * than at the edge, so it never half-exits the display.
@@ -31,9 +32,14 @@ export type CompanionStageProps = {
 	onInteractiveChange?: (interactive: boolean) => void;
 };
 
+// The band is inset by the SCENE's overhang, not just the figure's: a Proc parked
+// at the right edge with a desk beside it would otherwise have half its desk off
+// the display, and the desk is how that Proc says what it is doing.
 function bandFor(width: number): Band {
-	const maxX = Math.max(EDGE_INSET, width - EDGE_INSET - PET_WIDTH);
-	return { minX: Math.min(EDGE_INSET, maxX), maxX };
+	const left = EDGE_INSET - FRAME.offsetX;
+	const right = width - EDGE_INSET - FRAME.figureWidth - FRAME.overhangRight;
+	const maxX = Math.max(left, right);
+	return { minX: Math.min(left, maxX), maxX };
 }
 
 function prefersReducedMotion(): boolean {
@@ -95,6 +101,9 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 }
 
 function ProcOnStage({ pet, onInteractiveChange }: { pet: Pet; onInteractiveChange?: (interactive: boolean) => void }) {
+	// The character is a stable function of the session ref, so the same worker is
+	// always the same Proc — that is what lets someone learn to recognise it.
+	const cast = castForSession(pet.id);
 	const walking = pet.motion.kind === "walking";
 	// While walking, paint at the DESTINATION and let the transition carry the Proc
 	// there over exactly the walk's duration; the engine sets `x` to the same value
@@ -112,11 +121,19 @@ function ProcOnStage({ pet, onInteractiveChange }: { pet: Pet; onInteractiveChan
 				transitionProperty: "transform",
 				transitionTimingFunction: "linear",
 				transitionDuration: `${durationMs}ms`,
+				["--procs-offset-x" as string]: `${FRAME.offsetX}px`,
 			}}
 			onPointerEnter={() => onInteractiveChange?.(true)}
 			onPointerLeave={() => onInteractiveChange?.(false)}
 		>
-			<Procs facing={pet.facing} walking={walking} size={PET_HEIGHT} />
+			<Procs
+				cast={cast}
+				status={pet.status}
+				facing={pet.facing}
+				walking={walking}
+				size={PET_HEIGHT}
+				className="companion-proc-art"
+			/>
 		</div>
 	);
 }

@@ -173,6 +173,37 @@ describe("walking", () => {
 		expect(MAX_CONCURRENT_WALKS).toBeLessThanOrEqual(MAX_ANIMATING);
 	});
 
+	it("counts an animated SCENE against the budget, not just a walker", () => {
+		// With the full art most of the motion on screen is scenes — sparks, zzz,
+		// confetti, a streaming cord — so the backstop only means anything if those
+		// count. A deskful of busy sessions must stop the strolling, not add to it.
+		const busy = ready([
+			["a", "ci_failed"],
+			["b", "ci_failed"],
+			["c", "ci_failed"],
+			["d", "ci_failed"],
+			["e", "ci_failed"],
+			["f", "ci_failed"],
+			["g", "ci_failed"],
+			["h", "ci_failed"],
+			["walker", "pr_open"],
+		]);
+		const next = tick(busy, T0 + 1, half);
+
+		expect(petById(next, "walker").motion.kind).toBe("standing");
+	});
+
+	it("still lets a Proc stroll when only a few scenes are animating", () => {
+		const calm = ready([
+			["a", "idle"],
+			["b", "working"],
+			["walker", "pr_open"],
+		]);
+		const next = tick(calm, T0 + 1, half);
+
+		expect(petById(next, "walker").motion.kind).toBe("walking");
+	});
+
 	it("stops starting strolls once the ~8 animating backstop is full", () => {
 		// A hand-built world past the backstop. The two-walker rule means a real
 		// desktop never reaches it — this proves the gate is wired, not decorative.
