@@ -172,6 +172,7 @@ function SplitLeafView({
 		<div
 			className="relative h-full min-h-0 min-w-0"
 			data-split-pane={sessionId}
+			data-drop-pane={sessionId}
 			onMouseDownCapture={(event) => {
 				if (focused) return;
 				// A press on the pane's own controls (split picker, remove) acts on

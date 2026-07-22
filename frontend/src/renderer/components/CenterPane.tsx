@@ -9,6 +9,7 @@ import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
 import { SessionGlyph } from "./SessionGlyph";
 import { TerminalPane } from "./TerminalPane";
+import { startSplitDrag } from "../lib/split-drag";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 
 type CenterPaneProps = {
@@ -131,22 +132,38 @@ export function CenterPane({
 		[updateFontSize],
 	);
 
+	// In the split view the pane header doubles as the drag handle: press it to
+	// rearrange the pane, never the terminal body (which owns the mouse for text
+	// selection). The control buttons stay separate, so one-click controls are
+	// untouched. Single view has no draggable header. Drop targeting: the split
+	// leaf wrapper tags itself; the single-view frame tags itself here so a
+	// sidebar session can be dropped onto it to create the first split.
+	const paneHeaderTitle = !session ? "No session" : isOrchestratorSession(session) ? "Orchestrator" : session.title;
+	const paneDraggable = Boolean(pane && session);
+
 	return (
 		<div
 			ref={paneRef}
 			className="terminal-pane-frame flex h-full min-h-0 min-w-0 flex-col bg-background"
+			data-drop-pane={!pane && session ? session.id : undefined}
 			onWheelCapture={handleWheelZoom}
 		>
 			<div className={cn("terminal-toolbar", pane && !pane.focused && "opacity-60")}>
-				<div className="terminal-toolbar__label">
+				<div
+					className={cn("terminal-toolbar__label", paneDraggable && "cursor-grab select-none")}
+					title={paneDraggable ? "Drag to rearrange this pane" : undefined}
+					onPointerDown={
+						paneDraggable && session
+							? (event) => startSplitDrag({ kind: "pane", sessionId: session.id }, paneHeaderTitle, event)
+							: undefined
+					}
+				>
 					{/* In the split view the toolbar doubles as the pane's header: the
 					    status glyph + branch identify the pane at a glance, replacing
 					    the TERMINAL eyebrow (redundant when every pane is a terminal). */}
 					{pane && session ? <SessionGlyph session={session} /> : null}
 					{pane ? null : <span className="terminal-toolbar__eyebrow">TERMINAL</span>}
-					<span className="terminal-toolbar__session">
-						{!session ? "No session" : isOrchestratorSession(session) ? "Orchestrator" : session.title}
-					</span>
+					<span className="terminal-toolbar__session">{paneHeaderTitle}</span>
 					{pane && session?.branch ? (
 						<span className="hidden min-w-0 truncate font-mono text-[10px] text-muted-foreground md:inline">
 							{session.branch}

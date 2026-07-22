@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SessionView } from "./SessionView";
 import { useUiStore } from "../stores/ui-store";
 import { leaf, paneSessionIds, splitPane, type SplitNode } from "../lib/split-layout";
+import { startSplitDrag } from "../lib/split-drag";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 
 type FakePanelHandle = {
@@ -777,5 +778,69 @@ describe("SessionView unsplit", () => {
 			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "sess-2" }, replace: true }),
 		);
 		expect(useUiStore.getState().splitLayouts["proj-1"]).toBeUndefined();
+	});
+});
+
+describe("SessionView drag-and-drop wiring", () => {
+	function hsplit(a: SplitNode, b: SplitNode): SplitNode {
+		return { kind: "split", orientation: "horizontal", ratio: 0.5, first: a, second: b };
+	}
+	function stubRect(sessionId: string, rect: { left: number; top: number; width: number; height: number }) {
+		const el = document.querySelector<HTMLElement>(`[data-drop-pane="${sessionId}"]`)!;
+		el.getBoundingClientRect = () =>
+			({
+				left: rect.left,
+				top: rect.top,
+				right: rect.left + rect.width,
+				bottom: rect.top + rect.height,
+				width: rect.width,
+				height: rect.height,
+				x: rect.left,
+				y: rect.top,
+				toJSON: () => "",
+			}) as DOMRect;
+	}
+	function pointer(type: string, x: number, y: number) {
+		return Object.assign(new Event(type, { bubbles: true }), { clientX: x, clientY: y, button: 0, pointerId: 1 });
+	}
+
+	it("a sidebar-session drop registered by SessionView adds the session as a pane", async () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("sess-2")));
+		render(<SessionView sessionId="sess-1" />);
+		stubRect("sess-2", { left: 500, top: 0, width: 400, height: 400 });
+
+		// Drive the real drag controller: a sidebar session dragged onto sess-2's
+		// right edge → split right, added after sess-2.
+		startSplitDrag({ kind: "session", sessionId: "sess-3" }, "third thing", {
+			button: 0,
+			clientX: 10,
+			clientY: 10,
+			pointerId: 1,
+		} as unknown as React.PointerEvent);
+		window.dispatchEvent(pointer("pointermove", 880, 200)); // past threshold, right strip of sess-2
+		window.dispatchEvent(pointer("pointerup", 880, 200));
+
+		await waitFor(() => expect(paneSessionIds(storedLayout()!)).toEqual(["sess-1", "sess-2", "sess-3"]));
+	});
+
+	function storedLayout(): SplitNode | undefined {
+		return useUiStore.getState().splitLayouts["proj-1"];
+	}
+
+	it("a pane dropped on another pane's centre swaps them (structure preserved)", () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("sess-2")));
+		render(<SessionView sessionId="sess-1" />);
+		stubRect("sess-2", { left: 500, top: 0, width: 400, height: 400 });
+
+		startSplitDrag({ kind: "pane", sessionId: "sess-1" }, "first", {
+			button: 0,
+			clientX: 10,
+			clientY: 10,
+			pointerId: 1,
+		} as unknown as React.PointerEvent);
+		window.dispatchEvent(pointer("pointermove", 700, 200)); // sess-2 centre
+		window.dispatchEvent(pointer("pointerup", 700, 200));
+
+		expect(paneSessionIds(storedLayout()!)).toEqual(["sess-2", "sess-1"]);
 	});
 });

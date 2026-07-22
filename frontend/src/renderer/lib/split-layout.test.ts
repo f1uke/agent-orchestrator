@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
 import {
 	addPane,
+	applyDrop,
 	containsSession,
 	eligibleSplitSessions,
 	leaf,
 	MAX_SPLIT_PANES,
 	MIN_PANE_HEIGHT,
 	MIN_PANE_WIDTH,
+	movePane,
 	nearestPaneInDirection,
 	paneCount,
 	paneSessionIds,
@@ -16,10 +18,12 @@ import {
 	removePane,
 	replaceSession,
 	requiredExtent,
+	resolveDropZone,
 	serializeSplitLayouts,
 	setRatioAtPath,
 	SPLIT_HANDLE_SIZE,
 	splitPane,
+	swapPanes,
 	type SplitNode,
 } from "./split-layout";
 
@@ -305,5 +309,160 @@ describe("eligibleSplitSessions", () => {
 
 	it("treats a missing tree as nothing on screen", () => {
 		expect(eligibleSplitSessions(sessions, null).map((s) => s.id)).toEqual(["live", "orch", "onscreen"]);
+	});
+});
+
+describe("swapPanes (pane drag, centre drop)", () => {
+	it("exchanges two leaves' sessions, leaving the tree structure untouched", () => {
+		const root = swapPanes(threePane(), "a", "c");
+		// a<->c: structure identical, only the ids at those leaves swapped.
+		expect(root).toEqual({
+			kind: "split",
+			orientation: "horizontal",
+			ratio: 0.5,
+			first: leaf("c"),
+			second: { kind: "split", orientation: "vertical", ratio: 0.5, first: leaf("b"), second: leaf("a") },
+		});
+	});
+
+	it("swaps immediate siblings without restructuring", () => {
+		const root = swapPanes(threePane(), "b", "c");
+		expect(root).toMatchObject({
+			second: { kind: "split", orientation: "vertical", first: leaf("c"), second: leaf("b") },
+		});
+	});
+
+	it("is a no-op onto itself or when a session is missing", () => {
+		const root = threePane();
+		expect(swapPanes(root, "a", "a")).toBe(root);
+		expect(swapPanes(root, "a", "zzz")).toBe(root);
+	});
+
+	it("does not change the pane count (allowed at cap)", () => {
+		const full = chainOf(MAX_SPLIT_PANES);
+		const swapped = swapPanes(full, "s0", "s9");
+		expect(paneCount(swapped)).toBe(MAX_SPLIT_PANES);
+		expect(paneSessionIds(swapped).at(0)).toBe("s9");
+		expect(paneSessionIds(swapped).at(-1)).toBe("s0");
+	});
+});
+
+describe("movePane (pane drag, edge drop)", () => {
+	it("detaches the dragged leaf, collapses its old parent, and re-splits at the target", () => {
+		// a | (b / c): move a next to c, downward.
+		const root = movePane(threePane(), "a", "c", "down");
+		expect(paneSessionIds(root)).toEqual(["b", "c", "a"]);
+		expect(root).toMatchObject({
+			// a's old parent (the root split) collapses; the right column is promoted to root.
+			kind: "split",
+			orientation: "vertical",
+			first: leaf("b"),
+			second: { kind: "split", orientation: "vertical", first: leaf("c"), second: leaf("a") },
+		});
+	});
+
+	it("moving onto an immediate sibling repositions without an orphan or single-child node", () => {
+		// b and c are siblings in the right column; move b below c.
+		const root = movePane(threePane(), "b", "c", "down");
+		expect(paneSessionIds(root)).toEqual(["a", "c", "b"]);
+		expect(root).toEqual({
+			kind: "split",
+			orientation: "horizontal",
+			ratio: 0.5,
+			first: leaf("a"),
+			second: { kind: "split", orientation: "vertical", ratio: 0.5, first: leaf("c"), second: leaf("b") },
+		});
+	});
+
+	it("moving one of two panes just flips their arrangement, staying a clean 2-leaf split", () => {
+		const root = movePane(
+			{ kind: "split", orientation: "horizontal", ratio: 0.5, first: leaf("a"), second: leaf("b") },
+			"a",
+			"b",
+			"down",
+		);
+		expect(root).toEqual({
+			kind: "split",
+			orientation: "vertical",
+			ratio: 0.5,
+			first: leaf("b"),
+			second: leaf("a"),
+		});
+	});
+
+	it("is a no-op onto itself or when a session is missing", () => {
+		const root = threePane();
+		expect(movePane(root, "a", "a", "right")).toBe(root);
+		expect(movePane(root, "a", "zzz", "right")).toBe(root);
+		expect(movePane(root, "zzz", "a", "right")).toBe(root);
+	});
+
+	it("does NOT change the pane count — a move is allowed at the cap", () => {
+		const full = chainOf(MAX_SPLIT_PANES);
+		const moved = movePane(full, "s0", "s9", "down");
+		expect(paneCount(moved)).toBe(MAX_SPLIT_PANES);
+		expect(containsSession(moved, "s0")).toBe(true);
+	});
+
+	it("survives a serialise/restore round-trip", () => {
+		const moved = movePane(threePane(), "a", "c", "down");
+		const restored = parseSplitLayouts(serializeSplitLayouts({ p: moved })).p;
+		expect(restored).toEqual(moved);
+	});
+});
+
+describe("resolveDropZone", () => {
+	it("session drags split the pane along the diagonal: upper-right → right, lower-left → down", () => {
+		expect(resolveDropZone(0.9, 0.2, "session")).toBe("right");
+		expect(resolveDropZone(0.2, 0.9, "session")).toBe("down");
+		// No centre for a sidebar session — the whole pane resolves to right or down.
+		expect(resolveDropZone(0.5, 0.5, "session")).not.toBe("center");
+	});
+
+	it("pane drags reserve a central swap zone, with right/bottom edge strips for moves", () => {
+		expect(resolveDropZone(0.5, 0.5, "pane")).toBe("center");
+		expect(resolveDropZone(0.9, 0.5, "pane")).toBe("right");
+		expect(resolveDropZone(0.4, 0.9, "pane")).toBe("down");
+		// The right strip owns the bottom-right corner (no ambiguous overlap).
+		expect(resolveDropZone(0.9, 0.9, "pane")).toBe("right");
+	});
+});
+
+describe("applyDrop", () => {
+	it("sidebar session, right/down → split at the target", () => {
+		const right = applyDrop(threePane(), { kind: "session", sessionId: "new" }, "b", "right");
+		expect(paneSessionIds(right.root)).toEqual(["a", "b", "new", "c"]);
+		expect(right.refused).toBeFalsy();
+
+		const down = applyDrop(threePane(), { kind: "session", sessionId: "new" }, "b", "down");
+		expect(paneSessionIds(down.root)).toEqual(["a", "b", "new", "c"]);
+		expect(down.root).toMatchObject({
+			second: { first: { kind: "split", orientation: "vertical", first: leaf("b"), second: leaf("new") } },
+		});
+	});
+
+	it("sidebar session at the cap is REFUSED, not silently dropped", () => {
+		const full = chainOf(MAX_SPLIT_PANES);
+		const result = applyDrop(full, { kind: "session", sessionId: "new" }, "s3", "right");
+		expect(result.refused).toBe(true);
+		expect(result.root).toBe(full);
+	});
+
+	it("pane drag, centre → swap the two sessions", () => {
+		const result = applyDrop(threePane(), { kind: "pane", sessionId: "a" }, "c", "center");
+		expect(paneSessionIds(result.root)).toEqual(["c", "b", "a"]);
+		expect(result.refused).toBeFalsy();
+	});
+
+	it("pane drag, edge → move, allowed even at the cap", () => {
+		const full = chainOf(MAX_SPLIT_PANES);
+		const result = applyDrop(full, { kind: "pane", sessionId: "s0" }, "s9", "down");
+		expect(result.refused).toBeFalsy();
+		expect(paneCount(result.root)).toBe(MAX_SPLIT_PANES);
+	});
+
+	it("a pane dropped on its own centre is a no-op", () => {
+		const root = threePane();
+		expect(applyDrop(root, { kind: "pane", sessionId: "b" }, "b", "center").root).toBe(root);
 	});
 });
