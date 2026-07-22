@@ -21,20 +21,74 @@ export const MOCK_FEED_STEP_MS = 20_000;
 // it was driven by was mostly one state, and correct art looks broken when every
 // figure on screen is doing the same thing.
 //
-// The ids are deliberately varied strings, not `mock-1..8`: the character comes
-// from a stable hash of the ref, so the ids ARE the demo's casting decision. They
-// were chosen to spread across the cast, which is not cheating — demonstrating the
-// range is the mock's whole job, and mock-feed.test.ts holds the roster to it so a
-// later edit cannot quietly put five of eight sessions on the same character again.
-const SCRIPTS: Array<{ sessionId: string; states: SessionStatus[] }> = [
-	{ sessionId: "worker-refactor-parser", states: ["working", "working", "pr_open", "review_pending", "approved"] },
-	{ sessionId: "worker-flaky-test", states: ["ci_failed", "working", "ci_failed", "changes_requested"] },
-	{ sessionId: "worker-ask-the-human", states: ["needs_input", "needs_input", "working", "mergeable", "merged"] },
-	{ sessionId: "worker-nap-time", states: ["idle", "idle", "working"] },
-	{ sessionId: "worker-backlog-item", states: ["todo", "todo", "working", "draft", "pr_open", "mergeable", "merged"] },
-	{ sessionId: "worker-lost-contact", states: ["no_signal", "no_signal", "working", "idle"] },
-	{ sessionId: "worker-shipped-it", states: ["merged", "terminated", "todo", "working", "approved", "mergeable"] },
-	{ sessionId: "worker-odd-one-out", states: ["unknown", "draft", "review_pending", "changes_requested", "no_signal"] },
+// The NAMES are BOARD NAMES: the short label a person already calls the work by,
+// which is what the app's own sidebar shows. They went through two wrong shapes
+// first:
+// "refactor the parser" read as what the session is DOING, which is the bubble's
+// job, and branch names read as plumbing. A board name is what a person already
+// calls the work, which is the only thing worth putting under a character.
+//
+// Everything here is INVENTED. It is demo data that ships in the repo, so it must
+// never be lifted from a real board — the shape is what matters, not the content.
+//
+// Session refs follow the real `<project>-<n>` shape, because the tooltip shows them
+// and because the character is a stable hash of the ref. A first set of realistic
+// refs clustered four of eight sessions onto one character — five shared a project
+// prefix and differed only in a low number — which is the all-identical complaint
+// again, caught by the roster test rather than by eye — so these ids ARE the
+// demo's casting decision. They were chosen to spread across the cast, which is not
+// cheating: demonstrating the range is the mock's whole job, and mock-feed.test.ts
+// holds the roster to it so a later edit cannot quietly put five of eight sessions
+// on the same character again.
+const SCRIPTS: Array<{ sessionId: string; name: string; project: string; states: SessionStatus[] }> = [
+	{
+		sessionId: "demo-app-59",
+		name: "login rate limit",
+		project: "demo-app",
+		states: ["working", "working", "pr_open", "review_pending", "approved"],
+	},
+	{
+		sessionId: "demo-app-74",
+		name: "lint rules",
+		project: "demo-app",
+		states: ["ci_failed", "working", "ci_failed", "changes_requested"],
+	},
+	{
+		sessionId: "demo-app-48",
+		name: "banner cta",
+		project: "demo-app",
+		states: ["needs_input", "needs_input", "working", "mergeable", "merged"],
+	},
+	{
+		sessionId: "demo-app-35",
+		name: "cache warmup",
+		project: "demo-app",
+		states: ["idle", "idle", "working"],
+	},
+	{
+		sessionId: "demo-app-70",
+		name: "search filters",
+		project: "demo-app",
+		states: ["todo", "todo", "working", "draft", "pr_open", "mergeable", "merged"],
+	},
+	{
+		sessionId: "demo-api-86",
+		name: "webhook retries",
+		project: "demo-api",
+		states: ["no_signal", "no_signal", "working", "idle"],
+	},
+	{
+		sessionId: "demo-api-29",
+		name: "invoice export",
+		project: "demo-api",
+		states: ["merged", "terminated", "todo", "working", "approved", "mergeable"],
+	},
+	{
+		sessionId: "demo-app-10",
+		name: "onboarding tour",
+		project: "demo-app",
+		states: ["unknown", "draft", "review_pending", "changes_requested", "no_signal"],
+	},
 ];
 
 /** Steps before the whole cast repeats: the lcm of the script lengths. */
@@ -49,8 +103,10 @@ function lcm(a: number, b: number): number {
 
 /** The roster at a given step. Pure, cyclic, stable session ids. */
 export function mockActivitiesAt(step: number): CompanionActivity[] {
-	return SCRIPTS.map(({ sessionId, states }) => ({
+	return SCRIPTS.map(({ sessionId, name, project, states }) => ({
 		sessionId,
+		name,
+		project,
 		status: states[((step % states.length) + states.length) % states.length],
 	}));
 }

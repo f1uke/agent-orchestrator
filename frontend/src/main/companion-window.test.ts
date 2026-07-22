@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { COMPANION_CONTENT_HEIGHT, petFrame } from "../companion/layout";
 import {
 	OVERLAY_BAND_HEIGHT,
 	createCompanionOverlay,
@@ -68,6 +69,23 @@ function harness(workArea = WORK_AREA) {
 	});
 	return { overlay, created, errors, last: () => created[created.length - 1] };
 }
+
+describe("OVERLAY_BAND_HEIGHT", () => {
+	it("is tall enough for everything the overlay draws", () => {
+		// It was guessed at 190px once. A Proc's hover tooltip reaches 218px above the
+		// floor, so it was clipped off the top of the window and hovering appeared to
+		// do nothing at all. The band is derived from the art now, and this is what
+		// stops it drifting back to a number somebody liked the look of.
+		expect(OVERLAY_BAND_HEIGHT).toBeGreaterThanOrEqual(COMPANION_CONTENT_HEIGHT);
+		expect(OVERLAY_BAND_HEIGHT).toBeGreaterThanOrEqual(petFrame().height + 60);
+	});
+
+	it("is no taller than it needs to be", () => {
+		// Every pixel of the band is a pixel of desktop the overlay has to forward
+		// clicks through.
+		expect(OVERLAY_BAND_HEIGHT).toBeLessThanOrEqual(COMPANION_CONTENT_HEIGHT + 8);
+	});
+});
 
 describe("overlayBandBounds", () => {
 	it("is a band across the bottom of the work area, which already excludes the Dock", () => {

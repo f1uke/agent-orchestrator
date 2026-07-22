@@ -23,6 +23,10 @@ import type { SessionStatus } from "../renderer/types/workspace";
 export type CompanionActivity = {
 	sessionId: string;
 	status: SessionStatus;
+	/** The session's board name, shown under its Proc. Optional: no name, no chip. */
+	name?: string;
+	/** Which project it belongs to. Shown in the hover tooltip. */
+	project?: string;
 };
 
 export interface CompanionFeed {

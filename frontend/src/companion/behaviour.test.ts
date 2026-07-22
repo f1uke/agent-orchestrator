@@ -12,7 +12,11 @@ import {
 	WALK_MAX_PX,
 	WALK_MIN_MS,
 	WALK_MIN_PX,
+	animatingCount,
 	createWorld,
+	dragPet,
+	grabPet,
+	releasePet,
 	syncActivities,
 	tick,
 	walkingCount,
@@ -618,5 +622,124 @@ describe("facing", () => {
 		w = syncActivities(w, [activity("a", "draft")], T0 + 1_000, half);
 
 		expect(petById(w, "a").facing).toBe("left");
+	});
+});
+
+describe("dragging", () => {
+	const SPACING = 100;
+
+	function dragWorld(ids: string[] = ["a"]): World {
+		const base = syncActivities(
+			{ ...world(), spacing: SPACING },
+			ids.map((id) => activity(id, "pr_open")),
+			T0,
+			half,
+		);
+		return { ...base, pets: base.pets.map((pet, i) => ({ ...pet, x: 300 + i * 200, restUntil: T0 })) };
+	}
+
+	it("picks a Proc up when it is grabbed", () => {
+		const next = grabPet(dragWorld(), "a", T0);
+
+		expect(petById(next, "a").motion.kind).toBe("held");
+	});
+
+	it("follows the pointer, even off the end of the band", () => {
+		let w = grabPet(dragWorld(), "a", T0);
+		w = dragPet(w, "a", BAND.maxX + 250);
+
+		expect(petById(w, "a").x).toBe(BAND.maxX + 250);
+	});
+
+	it("stands where it is dropped", () => {
+		let w = grabPet(dragWorld(), "a", T0);
+		w = dragPet(w, "a", 640);
+		w = releasePet(w, "a", T0 + 2_000, half);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").x).toBe(640);
+	});
+
+	it("comes back onto the band when it is thrown off the end", () => {
+		// The band is the floor. A Proc left beyond it would be half off the display,
+		// or gone entirely — which looks like the session vanished.
+		let w = grabPet(dragWorld(), "a", T0);
+		w = dragPet(w, "a", BAND.maxX + 400);
+		w = releasePet(w, "a", T0 + 2_000, half);
+		const pet = petById(w, "a");
+
+		expect(pet.x).toBeLessThanOrEqual(BAND.maxX);
+		expect(pet.x).toBeGreaterThanOrEqual(BAND.minX);
+		// And it walks back in rather than snapping, so you can see where it went.
+		expect(pet.motion.kind).toBe("walking");
+	});
+
+	it("never walks off on its own while you are holding it", () => {
+		let w = grabPet(dragWorld(), "a", T0);
+		for (let i = 0; i < 40; i++) w = tick(w, T0 + i * 1_000, scripted(0.2, 0.8, 0.6));
+
+		expect(petById(w, "a").motion.kind).toBe("held");
+		expect(walkingCount(w)).toBe(0);
+	});
+
+	it("is not shoved around by the crowding sweep while held", () => {
+		// The human is holding it. Something else moving it under their pointer would
+		// feel like the app fighting them for it.
+		let w = dragWorld(["a", "b"]);
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 500);
+		w = { ...w, pets: w.pets.map((pet) => (pet.id === "b" ? { ...pet, x: 500 } : pet)) };
+		w = tick(w, T0 + 1, half);
+
+		expect(petById(w, "a").x).toBe(500);
+	});
+
+	it("does not land on top of another Proc when let go", () => {
+		let w = dragWorld(["a", "b"]);
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", petById(w, "b").x + 5);
+		w = releasePet(w, "a", T0 + 2_000, half);
+		w = tick(w, T0 + 2_001, half);
+
+		expect(Math.abs(petById(w, "a").x - petById(w, "b").x)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("only ever holds one Proc, because there is only one pointer", () => {
+		let w = grabPet(dragWorld(["a", "b"]), "a", T0);
+		w = grabPet(w, "b", T0 + 100);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "b").motion.kind).toBe("held");
+	});
+
+	it("counts a held Proc against the animation budget, because it is flailing", () => {
+		const w = grabPet(dragWorld(["a"]), "a", T0);
+
+		expect(animatingCount(w)).toBe(1);
+	});
+
+	it("can be dragged even when it is anchored to a desk", () => {
+		// Anchoring says a working Proc cannot WANDER. Being picked up by the human is
+		// not wandering, and refusing to move would just feel broken.
+		const base = syncActivities({ ...world(), spacing: SPACING }, [activity("a", "working")], T0, half);
+		let w = grabPet(base, "a", T0);
+		w = dragPet(w, "a", 700);
+		w = releasePet(w, "a", T0 + 2_000, half);
+
+		expect(petById(w, "a").x).toBe(700);
+	});
+
+	it("still works with motion reduced — the drag is the user's, not ours", () => {
+		let w = grabPet({ ...dragWorld(), reducedMotion: true }, "a", T0);
+		w = dragPet(w, "a", 620);
+		w = releasePet(w, "a", T0 + 2_000, half);
+
+		expect(petById(w, "a").x).toBe(620);
+		expect(petById(w, "a").motion.kind).toBe("standing");
+	});
+
+	it("ignores a grab for a Proc that is not there", () => {
+		expect(() => grabPet(dragWorld(), "ghost", T0)).not.toThrow();
+		expect(grabPet(dragWorld(), "ghost", T0).pets).toHaveLength(1);
 	});
 });

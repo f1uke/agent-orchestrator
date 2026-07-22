@@ -221,3 +221,82 @@ describe("CompanionStage", () => {
 		expect(unsubscribed()).toBe(1);
 	});
 });
+
+describe("dragging and naming", () => {
+	function pushNamed() {
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} />);
+		push([{ sessionId: "a", status: "pr_open", name: "fix the flaky test", project: "agent-orchestrator" }]);
+		return { ...view, push };
+	}
+
+	it("shows each Proc's board name under it", () => {
+		const { container } = pushNamed();
+
+		expect(container.querySelector("[data-name-tag]")?.textContent).toBe("fix the flaky test");
+	});
+
+	it("picks a Proc up on press and puts it down on release", () => {
+		const { container } = pushNamed();
+		// Re-queried every time: picking a Proc up swaps its pose, so React replaces
+		// the node and the one grabbed a moment ago is no longer in the document.
+		const figure = () => container.querySelector("[data-figure] rect")!;
+
+		fireEvent.pointerDown(figure(), { bubbles: true, clientX: 400 });
+		expect(container.querySelector("[data-teased]")).not.toBeNull();
+
+		fireEvent.pointerUp(figure(), { bubbles: true, clientX: 400 });
+		expect(container.querySelector("[data-teased]")).toBeNull();
+	});
+
+	it("carries the Proc with the pointer while it is held", () => {
+		const { container } = pushNamed();
+		const figure = () => container.querySelector("[data-figure] rect")!;
+		const at = () =>
+			Number(
+				/translate3d\((-?[\d.]+)px/.exec(container.querySelector("[data-proc]")!.getAttribute("style") ?? "")?.[1],
+			);
+
+		const before = at();
+		fireEvent.pointerDown(figure(), { bubbles: true, clientX: 400 });
+		fireEvent.pointerMove(figure(), { bubbles: true, clientX: 520 });
+
+		expect(at()).toBeCloseTo(before + 120, 0);
+	});
+
+	it("keeps the pointer for the whole drag, even once it slips off the Proc", () => {
+		// A drag pulls the pointer off constantly. Reverting to click-through mid-drag
+		// would hand the rest of the gesture to the desktop.
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+		const figure = container.querySelector("[data-figure] rect")!;
+
+		fireEvent.pointerDown(figure, { bubbles: true, clientX: 400 });
+		onInteractiveChange.mockClear();
+
+		fireEvent.pointerMove(container.querySelector(".companion-stage")!, { bubbles: true, clientX: 520 });
+
+		expect(onInteractiveChange).not.toHaveBeenCalledWith(false);
+	});
+
+	it("opens a tooltip only after the pointer has rested, and closes it when it leaves", () => {
+		vi.useFakeTimers();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+		push([{ sessionId: "a", status: "working", name: "fix the flaky test", project: "agent-orchestrator" }]);
+		const figure = container.querySelector("[data-figure] rect")!;
+
+		fireEvent.pointerMove(figure, { bubbles: true });
+		act(() => vi.advanceTimersByTime(400));
+		expect(container.querySelector("[data-tooltip]")).toBeNull();
+
+		act(() => vi.advanceTimersByTime(1_200));
+		expect(container.querySelector("[data-tooltip]")?.textContent).toContain("agent-orchestrator");
+
+		fireEvent.pointerMove(container.querySelector(".companion-stage")!, { bubbles: true });
+		act(() => vi.advanceTimersByTime(400));
+		expect(container.querySelector("[data-tooltip]")).toBeNull();
+	});
+});

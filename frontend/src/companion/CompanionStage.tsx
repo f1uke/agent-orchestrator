@@ -1,20 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
-import { createWorld, syncActivities, tick, type Band, type Pet, type World } from "./behaviour";
+import {
+	createWorld,
+	dragPet,
+	grabPet,
+	releasePet,
+	syncActivities,
+	tick,
+	type Band,
+	type Pet,
+	type World,
+} from "./behaviour";
 import { castForSession } from "./cast";
-import { createInteractionTracker } from "./pointer-region";
+import { hoverAt, idleHover, tooltipTarget, type HoverState } from "./hover";
+import { NameTag, PetTooltip } from "./NameTag";
+import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { procsFrame, Procs } from "./Procs";
+import { figureLeft, PET_HEIGHT, petFrame } from "./layout";
+import { Procs } from "./Procs";
 
 // The stage: the only stateful part of the overlay renderer. It owns a World,
 // advances it on a slow tick, and paints each Proc with a `transform` — the engine
 // hands out destinations, CSS interpolates between them on the compositor. Nothing
 // here re-implements a behaviour rule; every decision comes from behaviour.ts.
 
-/** Drawn Proc height. `full` tier from the design's size rules. */
-const PET_HEIGHT = 128;
 /** The drawn frame: the figure's own width plus whatever its scene hangs either side. */
-const FRAME = procsFrame(PET_HEIGHT);
+const FRAME = petFrame(PET_HEIGHT);
 /**
  * How far the turnaround sits in from the screen edge. A Proc turns here rather
  * than at the edge, so it never half-exits the display.
@@ -69,6 +80,15 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 		});
 	}, [source]);
 
+	// Re-read on the same slow tick the engine runs on, so the tooltip opens without
+	// a timer of its own.
+	const [hover, setHover] = useState<HoverState>(idleHover);
+	const [openTooltip, setOpenTooltip] = useState<string | null>(null);
+	useEffect(() => {
+		const timer = setInterval(() => setOpenTooltip(tooltipTarget(hover, Date.now())), 250);
+		return () => clearInterval(timer);
+	}, [hover]);
+
 	useEffect(() => {
 		const timer = setInterval(() => {
 			setWorld((current) => tick(current, Date.now(), Math.random));
@@ -106,17 +126,70 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 	// entirely — flick the pointer off the bottom of the screen and no leave ever
 	// arrives — and a missed leave leaves the whole band swallowing clicks.
 	useEffect(() => {
-		if (!onInteractiveChange) return;
-		const tracker = createInteractionTracker(onInteractiveChange);
-		const onMove = (event: PointerEvent) => tracker.update(event.target);
-		const onOut = () => tracker.release();
+		const tracker = createInteractionTracker(onInteractiveChange ?? (() => {}));
+		// The pointer's x in band coordinates: the stage fills the window, and a Proc's
+		// transform is its own left edge, so a grab keeps the offset it was grabbed at
+		// instead of snapping the Proc's corner to the cursor.
+		let grabOffset = 0;
+
+		const petIdAt = (target: EventTarget | null): string | null => {
+			if (!(target instanceof Element)) return null;
+			return target.closest("[data-proc]")?.getAttribute("data-session") ?? null;
+		};
+
+		const onMove = (event: PointerEvent) => {
+			tracker.update(event.target);
+			setWorld((current) => {
+				const holding = current.pets.find((pet) => pet.motion.kind === "held");
+				if (holding) return dragPet(current, holding.id, event.clientX - grabOffset);
+				return current;
+			});
+			const over = isOverPet(event.target) ? petIdAt(event.target) : null;
+			setHover((current) => hoverAt(current, over, Date.now()));
+		};
+
+		const onDown = (event: PointerEvent) => {
+			tracker.update(event.target);
+			if (!isOverPet(event.target)) return;
+			const id = petIdAt(event.target);
+			if (!id) return;
+			// Keep the pointer for the whole gesture: a drag pulls it off the Proc
+			// constantly, and reverting to click-through mid-drag would hand the rest of
+			// it to the desktop.
+			tracker.hold(true);
+			setWorld((current) => {
+				const pet = current.pets.find((entry) => entry.id === id);
+				grabOffset = pet ? event.clientX - pet.x : 0;
+				return grabPet(current, id, Date.now());
+			});
+			setHover(idleHover());
+		};
+
+		const onUp = (event: PointerEvent) => {
+			tracker.hold(false);
+			setWorld((current) => {
+				const holding = current.pets.find((pet) => pet.motion.kind === "held");
+				return holding ? releasePet(current, holding.id, Date.now(), Math.random) : current;
+			});
+			tracker.update(event.target);
+		};
+
+		const onOut = () => {
+			tracker.release();
+			setHover(idleHover());
+		};
+
 		document.addEventListener("pointermove", onMove, true);
-		document.addEventListener("pointerdown", onMove, true);
+		document.addEventListener("pointerdown", onDown, true);
+		document.addEventListener("pointerup", onUp, true);
+		document.addEventListener("pointercancel", onUp, true);
 		document.addEventListener("pointerleave", onOut, true);
 		window.addEventListener("blur", onOut);
 		return () => {
 			document.removeEventListener("pointermove", onMove, true);
-			document.removeEventListener("pointerdown", onMove, true);
+			document.removeEventListener("pointerdown", onDown, true);
+			document.removeEventListener("pointerup", onUp, true);
+			document.removeEventListener("pointercancel", onUp, true);
 			document.removeEventListener("pointerleave", onOut, true);
 			window.removeEventListener("blur", onOut);
 			tracker.release();
@@ -126,21 +199,23 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 	return (
 		<div className="companion-stage">
 			{world.pets.map((pet) => (
-				<ProcOnStage key={pet.id} pet={pet} />
+				<ProcOnStage key={pet.id} pet={pet} tooltip={openTooltip === pet.id} />
 			))}
 		</div>
 	);
 }
 
-function ProcOnStage({ pet }: { pet: Pet }) {
+function ProcOnStage({ pet, tooltip }: { pet: Pet; tooltip: boolean }) {
 	// The character is a stable function of the session ref, so the same worker is
 	// always the same Proc — that is what lets someone learn to recognise it.
 	const cast = castForSession(pet.id);
 	const walking = pet.motion.kind === "walking";
+	const held = pet.motion.kind === "held";
 	// While walking, paint at the DESTINATION and let the transition carry the Proc
 	// there over exactly the walk's duration; the engine sets `x` to the same value
 	// when the walk ends, so there is never a jump at the hand-off.
 	const targetX = pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
+	// A held Proc must track the pointer exactly, so no transition on the drag.
 	const durationMs = pet.motion.kind === "walking" ? pet.motion.endsAt - pet.motion.startedAt : 0;
 
 	return (
@@ -154,16 +229,30 @@ function ProcOnStage({ pet }: { pet: Pet }) {
 				transitionTimingFunction: "linear",
 				transitionDuration: `${durationMs}ms`,
 				["--procs-offset-x" as string]: `${FRAME.offsetX}px`,
+				["--procs-figure-width" as string]: `${FRAME.figureWidth}px`,
+				// Mirroring the sprite to walk left moves the figure across its own
+				// frame, and the chrome pinned under it does not mirror — so it is told
+				// where the figure actually went.
+				["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
 			}}
 		>
+			{tooltip && !held ? (
+				<div className="companion-proc-tooltip">
+					<PetTooltip name={pet.name} sessionId={pet.id} project={pet.project} status={pet.status} />
+				</div>
+			) : null}
 			<Procs
 				cast={cast}
 				status={pet.status}
 				facing={pet.facing}
 				walking={walking}
+				held={held}
 				size={PET_HEIGHT}
 				className="companion-proc-art"
 			/>
+			<div className="companion-proc-name">
+				<NameTag name={pet.name} />
+			</div>
 		</div>
 	);
 }
