@@ -230,9 +230,9 @@ import (
 )
 
 func TestParseGlabToken(t *testing.T) {
-	sample := `gitlab.finnomena.com
-  ✓ Logged in to gitlab.finnomena.com as fluke.s (config.yml)
-  ✓ Git operations for gitlab.finnomena.com configured to use https protocol.
+	sample := `gitlab.example.com
+  ✓ Logged in to gitlab.example.com as fluke.s (config.yml)
+  ✓ Git operations for gitlab.example.com configured to use https protocol.
   ✓ Token: glpat-abc123DEF
 `
 	got, err := parseGlabToken(sample)
@@ -254,7 +254,7 @@ func TestEnvTokenSourcePrecedence(t *testing.T) {
 }
 
 func TestGlabTokenSourceUsesInjectedHook(t *testing.T) {
-	src := &GlabTokenSource{Host: "gitlab.finnomena.com", Glab: func(ctx context.Context, host string) (string, error) {
+	src := &GlabTokenSource{Host: "gitlab.example.com", Glab: func(ctx context.Context, host string) (string, error) {
 		return "  ✓ Token: glpat-XYZ\n", nil
 	}}
 	tok, err := src.Token(context.Background())
@@ -326,18 +326,18 @@ git commit -m "feat(scm/gitlab): env + glab token sources"
 
 ```go
 func TestParseRepositoryNestedGroup(t *testing.T) {
-	p, _ := NewProvider(ProviderOptions{Host: "gitlab.finnomena.com", APIBase: "https://gitlab.finnomena.com/api/v4", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
+	p, _ := NewProvider(ProviderOptions{Host: "gitlab.example.com", APIBase: "https://gitlab.example.com/api/v4", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
 	cases := []string{
-		"git@gitlab.finnomena.com:group/sub/proj.git",
-		"https://gitlab.finnomena.com/group/sub/proj.git",
-		"https://gitlab.finnomena.com/group/sub/proj",
+		"git@gitlab.example.com:group/sub/proj.git",
+		"https://gitlab.example.com/group/sub/proj.git",
+		"https://gitlab.example.com/group/sub/proj",
 	}
 	for _, remote := range cases {
 		repo, ok := p.ParseRepository(remote)
 		if !ok {
 			t.Fatalf("%s: not parsed", remote)
 		}
-		if repo.Provider != "gitlab" || repo.Host != "gitlab.finnomena.com" {
+		if repo.Provider != "gitlab" || repo.Host != "gitlab.example.com" {
 			t.Fatalf("%s: provider/host = %q/%q", remote, repo.Provider, repo.Host)
 		}
 		if repo.Repo != "group/sub/proj" || repo.Owner != "group/sub" || repo.Name != "proj" {
@@ -347,7 +347,7 @@ func TestParseRepositoryNestedGroup(t *testing.T) {
 }
 
 func TestParseRepositoryRejectsOtherHost(t *testing.T) {
-	p, _ := NewProvider(ProviderOptions{Host: "gitlab.finnomena.com", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
+	p, _ := NewProvider(ProviderOptions{Host: "gitlab.example.com", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
 	if _, ok := p.ParseRepository("git@github.com:acme/demo.git"); ok {
 		t.Fatalf("github.com remote should not be claimed by gitlab provider")
 	}
@@ -407,7 +407,7 @@ func TestListOpenPRsByRepo(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL) // helper builds Provider with APIBase=srv.URL, Host set
-	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
 	prs, err := p.ListOpenPRsByRepo(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("ListOpenPRsByRepo: %v", err)
@@ -439,7 +439,7 @@ func TestRepoPRListGuard304(t *testing.T) {
 }
 ```
 
-Add a `newTestProvider(t, apiBase string) *Provider` helper in the test file (builds `ProviderOptions{Client: NewClient(ClientOptions{APIBase: apiBase, Token: StaticTokenSource("t")}), Host: "gitlab.finnomena.com", SkipTokenPreflight: true}`).
+Add a `newTestProvider(t, apiBase string) *Provider` helper in the test file (builds `ProviderOptions{Client: NewClient(ClientOptions{APIBase: apiBase, Token: StaticTokenSource("t")}), Host: "gitlab.example.com", SkipTokenPreflight: true}`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -490,7 +490,7 @@ func TestFetchPullRequestsMergeabilityAndCI(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL)
-	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.finnomena.com", Provider: "gitlab"}, Number: 7}
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.example.com", Provider: "gitlab"}, Number: 7}
 	obs, err := p.FetchPullRequests(context.Background(), []ports.SCMPRRef{ref})
 	if err != nil {
 		t.Fatalf("FetchPullRequests: %v", err)
@@ -722,11 +722,11 @@ func (f *fakeProvider) FetchFailedCheckLogTail(context.Context, ports.SCMRepo, p
 func (f *fakeProvider) FetchReviewThreads(context.Context, ports.SCMPRRef) (ports.SCMReviewObservation, error) { return ports.SCMReviewObservation{}, nil }
 
 func TestParseRoutesByHost(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com", listN: 3}
 	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
-	repo, ok := c.ParseRepository("https://gitlab.finnomena.com/o/n.git")
+	repo, ok := c.ParseRepository("https://gitlab.example.com/o/n.git")
 	if !ok || repo.Provider != "gitlab" {
 		t.Fatalf("parse => %+v ok=%v", repo, ok)
 	}
@@ -889,9 +889,9 @@ git commit -m "feat(trackerintake): multi-provider tracker resolver"
 
 ```go
 func TestGitlabHostsParsing(t *testing.T) {
-	t.Setenv("AO_GITLAB_HOST", " gitlab.finnomena.com , gl.example.com ")
+	t.Setenv("AO_GITLAB_HOST", " gitlab.example.com , gl.example.com ")
 	got := gitlabHosts()
-	if len(got) != 2 || got[0] != "gitlab.finnomena.com" || got[1] != "gl.example.com" {
+	if len(got) != 2 || got[0] != "gitlab.example.com" || got[1] != "gl.example.com" {
 		t.Fatalf("hosts=%v", got)
 	}
 	t.Setenv("AO_GITLAB_HOST", "")
@@ -939,7 +939,7 @@ Run: `npm run lint && npm run frontend:typecheck`
 Also: `cd backend && go test -race ./internal/adapters/... ./internal/observe/... ./internal/daemon/... ./internal/domain/...`
 Expected: PASS.
 
-- [ ] **Step 3: Manual smoke (optional, requires glab login)** — with `AO_GITLAB_HOST=gitlab.finnomena.com`, start the daemon and confirm the SCM observer logs no credential warning and picks up a GitLab MR for a session whose origin is on that host. Do not commit any run state.
+- [ ] **Step 3: Manual smoke (optional, requires glab login)** — with `AO_GITLAB_HOST=gitlab.example.com`, start the daemon and confirm the SCM observer logs no credential warning and picks up a GitLab MR for a session whose origin is on that host. Do not commit any run state.
 
 - [ ] **Step 4: Commit**
 

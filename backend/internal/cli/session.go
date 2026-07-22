@@ -288,7 +288,7 @@ func newSessionCleanupCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Clean up terminated sessions",
-		Long:  "Clean up terminated sessions by reclaiming eligible workspaces. Dirty worktrees are skipped by the daemon.",
+		Long:  "Clean up terminated sessions by reclaiming available workspaces. Dirty worktrees are skipped by the daemon.",
 		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return ctx.cleanupSessions(cmd.Context(), cmd, opts)

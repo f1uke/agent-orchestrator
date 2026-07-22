@@ -40,9 +40,9 @@ func TestGlabAuthStatusCapturesStderr(t *testing.T) {
 }
 
 func TestParseGlabToken(t *testing.T) {
-	sample := `gitlab.finnomena.com
-  ✓ Logged in to gitlab.finnomena.com as fluke.s (config.yml)
-  ✓ Git operations for gitlab.finnomena.com configured to use https protocol.
+	sample := `gitlab.example.com
+  ✓ Logged in to gitlab.example.com as fluke.s (config.yml)
+  ✓ Git operations for gitlab.example.com configured to use https protocol.
   ✓ Token: glpat-abc123DEF
 `
 	got, err := parseGlabToken(sample)
@@ -55,8 +55,8 @@ func TestParseGlabToken(t *testing.T) {
 }
 
 func TestParseGlabTokenSkipsMasked(t *testing.T) {
-	sample := `gitlab.finnomena.com
-  ✓ Logged in to gitlab.finnomena.com as fluke.s (config.yml)
+	sample := `gitlab.example.com
+  ✓ Logged in to gitlab.example.com as fluke.s (config.yml)
   ✓ Token: ****************
 `
 	if _, err := parseGlabToken(sample); !errors.Is(err, ErrNoToken) {
@@ -65,7 +65,7 @@ func TestParseGlabTokenSkipsMasked(t *testing.T) {
 }
 
 func TestParseGlabTokenNoMatch(t *testing.T) {
-	sample := "gitlab.finnomena.com\n  x Not logged in\n"
+	sample := "gitlab.example.com\n  x Not logged in\n"
 	if _, err := parseGlabToken(sample); !errors.Is(err, ErrNoToken) {
 		t.Fatalf("err = %v, want ErrNoToken", err)
 	}
@@ -115,7 +115,7 @@ func TestFallbackTokenSourceSkipsErrNoToken(t *testing.T) {
 }
 
 func TestGlabTokenSourceUsesInjectedHook(t *testing.T) {
-	src := &GlabTokenSource{Host: "gitlab.finnomena.com", Glab: func(ctx context.Context, host string) (string, error) {
+	src := &GlabTokenSource{Host: "gitlab.example.com", Glab: func(ctx context.Context, host string) (string, error) {
 		return "  ✓ Token: glpat-XYZ\n", nil
 	}}
 	tok, err := src.Token(context.Background())
@@ -127,7 +127,7 @@ func TestGlabTokenSourceUsesInjectedHook(t *testing.T) {
 func TestGlabTokenSourceMemoizesAndInvalidates(t *testing.T) {
 	calls := 0
 	src := &GlabTokenSource{
-		Host: "gitlab.finnomena.com",
+		Host: "gitlab.example.com",
 		Glab: func(ctx context.Context, host string) (string, error) {
 			calls++
 			return "  ✓ Token: glpat-cached\n", nil
@@ -160,14 +160,14 @@ func TestGlabTokenSourceMemoizesAndInvalidates(t *testing.T) {
 
 func TestGlabTokenSourcePassesHost(t *testing.T) {
 	var gotHost string
-	src := &GlabTokenSource{Host: "gitlab.finnomena.com", Glab: func(ctx context.Context, host string) (string, error) {
+	src := &GlabTokenSource{Host: "gitlab.example.com", Glab: func(ctx context.Context, host string) (string, error) {
 		gotHost = host
 		return "  ✓ Token: glpat-abc\n", nil
 	}}
 	if _, err := src.Token(context.Background()); err != nil {
 		t.Fatalf("Token: %v", err)
 	}
-	if gotHost != "gitlab.finnomena.com" {
-		t.Fatalf("host passed to Glab = %q, want gitlab.finnomena.com", gotHost)
+	if gotHost != "gitlab.example.com" {
+		t.Fatalf("host passed to Glab = %q, want gitlab.example.com", gotHost)
 	}
 }

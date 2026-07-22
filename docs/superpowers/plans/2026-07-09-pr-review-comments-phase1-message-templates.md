@@ -16,7 +16,7 @@
 - Frontend gates (from `frontend/`): `npm run test` (vitest) and `npm run typecheck` (`tsc --noEmit`). There is no frontend lint script; formatting follows the repo `.prettierrc` — **use tabs**, matching surrounding code.
 - After any frontend build/test, revert incidental `routeTree.gen.ts` and `pnpm-lock.yaml` churn — do not commit it.
 - Nudge messages reach a worker's live terminal pane. Dynamic values injected into templates (comment bodies, CI log tails, PR fields) are attacker-influenceable and MUST be passed through `domain.SanitizeControlChars` **before** being placed in the template data — exactly as the current code does. Template text itself (built-in or operator-edited) is trusted.
-- Commit after each task (frequent commits). Branch: `bugfix/STAR-2272-gitlab-mr-detection` (PR #36).
+- Commit after each task (frequent commits). Branch: `bugfix/PROJ-2272-gitlab-mr-detection` (PR #36).
 
 ---
 

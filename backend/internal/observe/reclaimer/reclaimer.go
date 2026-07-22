@@ -99,8 +99,8 @@ func (r *Reclaimer) Tick(ctx context.Context) error {
 	for _, id := range candidates {
 		current[id] = true
 	}
-	// Drop clock entries for sessions no longer eligible so grace restarts if
-	// they return. Also drop reclaimed-marks for sessions no longer eligible:
+	// Drop clock entries for sessions no longer available so grace restarts if
+	// they return. Also drop reclaimed-marks for sessions no longer available:
 	// if one later leaves candidacy (e.g. restored) and comes back, it must be
 	// reclaimable again.
 	for id := range r.firstSeen {

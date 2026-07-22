@@ -16,17 +16,17 @@ import (
 //
 // This exists because the bug it guards was invisible to fake-based tests. The
 // operand of `~` is handed to a Lucene-style parser where `-` means NOT, so
-// `summary ~ "e-coupon*"` returned ZERO rows against a project full of "E-Coupon"
+// `summary ~ "checkout*"` returned ZERO rows against a project full of "E-Item"
 // issues — and every unit test still passed, because they only assert the string we
-// built. Worse, the obvious fix (backslash-escaping to `e\-coupon*`) also returns
-// zero: a wildcard term bypasses the analyzer, and the index holds `e` + `coupon`,
-// never the single token `e-coupon`. Only a live query distinguishes the three.
+// built. Worse, the obvious fix (backslash-escaping to `e\-item*`) also returns
+// zero: a wildcard term bypasses the analyzer, and the index holds `e` + `item`,
+// never the single token `checkout`. Only a live query distinguishes the three.
 //
 // Gated behind AO_JIRA_LIVE=1 so CI never runs it (no credential there). Read-only.
 // Nothing is hardcoded — supply a project and a substring you know exists, with the
 // separator of your choice:
 //
-//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_PROJECT=STAR AO_JIRA_LIVE_TEXT=e-coupon \
+//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_PROJECT=PROJ AO_JIRA_LIVE_TEXT=checkout \
 //	  go test -run TestLive_SearchFindsHyphenatedText ./internal/service/jira/ -v
 func TestLive_SearchFindsHyphenatedText(t *testing.T) {
 	if os.Getenv("AO_JIRA_LIVE") != "1" {
@@ -74,7 +74,7 @@ func TestLive_SearchFindsHyphenatedText(t *testing.T) {
 // than being searched as prose (which can never match, since a key is not part of
 // an issue's text). Gated and read-only, as above.
 //
-//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_PROJECT=STAR AO_JIRA_LIVE_NUMBER=2271 \
+//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_PROJECT=PROJ AO_JIRA_LIVE_NUMBER=2271 \
 //	  go test -run TestLive_SearchBareNumberResolvesKey ./internal/service/jira/ -v
 func TestLive_SearchBareNumberResolvesKey(t *testing.T) {
 	if os.Getenv("AO_JIRA_LIVE") != "1" {

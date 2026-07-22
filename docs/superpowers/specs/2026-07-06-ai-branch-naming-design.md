@@ -9,7 +9,7 @@ Branch: feat/gitlab-support
 When a user creates a task and leaves "New branch name" blank, AO auto-names
 the worker branch `ao/<session-id>/root` — a machine name that carries no
 meaning about the work. Users who follow a gitflow + Jira convention (e.g.
-`feature/STAR-2271-ecoupon-result`) must type the full name by hand every time.
+`feature/PROJ-2271-checkout-result`) must type the full name by hand every time.
 They want to leave the field blank and have the agent name it for them, matching
 their `<type>/<JIRA-KEY>-<short-desc>` house style.
 
@@ -18,7 +18,7 @@ their `<type>/<JIRA-KEY>-<short-desc>` house style.
 When "New branch name" is left blank in the New Task dialog, generate a
 gitflow-style branch name by asking the session's own agent CLI (one-shot),
 following `<type>/<JIRA-KEY>-<short-desc>` (e.g.
-`feature/STAR-2271-ecoupon-result`). If generation fails, times out, produces an
+`feature/PROJ-2271-checkout-result`). If generation fails, times out, produces an
 invalid name, or the harness has no one-shot mode, fall back to the current
 `ao/<session-id>/root` name. Spawning must never fail or hang because of naming.
 
@@ -38,8 +38,8 @@ invalid name, or the harness has no one-shot mode, fall back to the current
   attributes a PR when its source branch equals the session's own branch
   (`Metadata.Branch`) OR lives under `<session-branch>/`. The `ao/` prefix is
   just the default name, not a hard requirement. So
-  `feature/STAR-2271-ecoupon-result` is attributed, and stacked children
-  `feature/STAR-2271-ecoupon-result/<topic>` are attributed too.
+  `feature/PROJ-2271-checkout-result` is attributed, and stacked children
+  `feature/PROJ-2271-checkout-result/<topic>` are attributed too.
 - **No prompt change needed.** `workerMultiPRPrompt()`
   (`session_manager/manager.go:1132`) is already branch-name-agnostic — it refers
   to `<namespace>/<topic>` and `your-branch/<topic>` and handles the `/root`
@@ -118,10 +118,10 @@ func buildNamingPrompt(title, brief, jiraKeyHint string) string
 Instructs the agent to output ONLY a git branch name, no prose, following:
 - gitflow type: one of `feature`, `bugfix`, `hotfix`, `chore` (infer from intent)
 - include the Jira key when one is provided/detectable, uppercase, right after the
-  `/` (e.g. `feature/STAR-2271-...`); omit gracefully when none
+  `/` (e.g. `feature/PROJ-2271-...`); omit gracefully when none
 - short description: 2–4 words, kebab-case, lowercase, abbreviated
 - total length ≤ 60 chars; ASCII `[a-z0-9/-]` only; no trailing `/`, no `..`
-- example given verbatim: `feature/STAR-2271-ecoupon-result`
+- example given verbatim: `feature/PROJ-2271-checkout-result`
 
 **Sanitizer (defends against chatty output):**
 ```go
@@ -231,17 +231,17 @@ NewTaskDialog (blank name) ──POST /sessions {autoNameBranch:true, branch:und
 No network and no real agent CLI in Go tests — the `OneShotNamer` is faked.
 
 - **Sanitizer table** (`branchname_test.go`): plain name passes; prose/backticked
-  output (`` `feature/STAR-2271-x`\nSure! ``) → `feature/STAR-2271-x`; uppercase
+  output (`` `feature/PROJ-2271-x`\nSure! ``) → `feature/PROJ-2271-x`; uppercase
   → lowercased; spaces/invalid chars → `-`; missing gitflow prefix → `ok=false`;
   `..`, overlength, control chars → `ok=false`.
-- **Jira key extraction table**: `STAR-2271` in title; in brief URL; none →
-  `""`; lowercase `star-2271` not matched.
+- **Jira key extraction table**: `PROJ-2271` in title; in brief URL; none →
+  `""`; lowercase `proj-2271` not matched.
 - **ensureUniqueBranch**: candidate free → unchanged; taken → `-2`; `-2` also
   taken → `-3`.
 - **Manager** (fake `OneShotNamer` + fake workspace capturing `WorkspaceConfig`):
   - `AutoNameBranch=false` → branch `ao/<id>/root`.
-  - `AutoNameBranch=true`, namer returns `feature/STAR-2271-x` → `WorkspaceConfig.
-    Branch == "feature/star-2271-x"` (post-sanitize), unique-suffixed vs. a seeded
+  - `AutoNameBranch=true`, namer returns `feature/PROJ-2271-x` → `WorkspaceConfig.
+    Branch == "feature/proj-2271-x"` (post-sanitize), unique-suffixed vs. a seeded
     existing set.
   - `AutoNameBranch=true`, namer returns garbage → fallback `ao/<id>/root`.
   - `AutoNameBranch=true`, `Kind=orchestrator` → orchestrator name, namer never

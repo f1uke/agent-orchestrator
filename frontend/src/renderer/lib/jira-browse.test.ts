@@ -213,31 +213,31 @@ describe("collectTreeContext", () => {
 
 describe("emptyResultHint", () => {
 	it("says nothing beyond the basics when there is no query and no filters", () => {
-		expect(emptyResultHint({ text: "", projectKey: "STAR", filtersActive: false })).toBe("No issues match.");
+		expect(emptyResultHint({ text: "", projectKey: "PROJ", filtersActive: false })).toBe("No issues match.");
 	});
 
 	it("explains that a key lookup found nothing when a number was resolved to a key", () => {
-		// The backend turns a bare number + selected project into `key = "STAR-9999"`,
+		// The backend turns a bare number + selected project into `key = "PROJ-9999"`,
 		// so the honest report is that the key does not exist, not that prose missed.
-		expect(emptyResultHint({ text: "9999", projectKey: "STAR", filtersActive: false })).toBe(
-			"No issue STAR-9999 found.",
+		expect(emptyResultHint({ text: "9999", projectKey: "PROJ", filtersActive: false })).toBe(
+			"No issue PROJ-9999 found.",
 		);
 	});
 
 	it("explains a full key lookup the same way", () => {
-		expect(emptyResultHint({ text: "demo-4", projectKey: "STAR", filtersActive: false })).toBe(
+		expect(emptyResultHint({ text: "demo-4", projectKey: "PROJ", filtersActive: false })).toBe(
 			"No issue DEMO-4 found.",
 		);
 	});
 
 	it("says free text is matched from the start of each word", () => {
-		expect(emptyResultHint({ text: "upon", projectKey: "STAR", filtersActive: false })).toBe(
+		expect(emptyResultHint({ text: "upon", projectKey: "PROJ", filtersActive: false })).toBe(
 			'No issues match "upon". Words match from the start, so try the beginning of a word.',
 		);
 	});
 
 	it("mentions active filters as a narrowing cause", () => {
-		expect(emptyResultHint({ text: "", projectKey: "STAR", filtersActive: true })).toBe(
+		expect(emptyResultHint({ text: "", projectKey: "PROJ", filtersActive: true })).toBe(
 			"No issues match. Filters are narrowing this list.",
 		);
 	});

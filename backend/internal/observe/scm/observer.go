@@ -847,8 +847,8 @@ func (o *Observer) discoverNewPRs(ctx context.Context, sessionRepos []sessionRep
 			// stranger's fork PR carries a head repo no session owns and is
 			// dropped (as is an empty head repo from a deleted fork), preserving
 			// the no-misattribution guarantee.
-			eligible := candidatesForHeadRepo(byRepo[repoKey], pr.HeadRepo)
-			sr, ok := matchSession(eligible, pr.SourceBranch)
+			available := candidatesForHeadRepo(byRepo[repoKey], pr.HeadRepo)
+			sr, ok := matchSession(available, pr.SourceBranch)
 			if !ok {
 				continue
 			}

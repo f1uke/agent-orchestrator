@@ -87,7 +87,7 @@ func (o *Observer) Start(ctx context.Context) <-chan struct{} {
 	return observe.StartPollLoop(ctx, o.tick, o.poll, o.logger, "token-usage observer", o.onTick)
 }
 
-// poll refreshes token telemetry for every eligible session. It never returns on a
+// poll refreshes token telemetry for every available session. It never returns on a
 // per-session parse/persist failure — one bad transcript must not stall the others
 // or kill the loop. It returns an error only when the session enumeration itself
 // fails (so StartPollLoop logs it and retries next tick).

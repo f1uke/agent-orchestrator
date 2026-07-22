@@ -88,11 +88,11 @@ describe("prBrowserUrl", () => {
 			prBrowserUrl(
 				summary({
 					provider: "gitlab",
-					url: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42/diffs?tab=x",
-					htmlUrl: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42/diffs?tab=x",
+					url: "https://gitlab.example.com/group/sub/proj/-/merge_requests/42/diffs?tab=x",
+					htmlUrl: "https://gitlab.example.com/group/sub/proj/-/merge_requests/42/diffs?tab=x",
 				}),
 			),
-		).toBe("https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42");
+		).toBe("https://gitlab.example.com/group/sub/proj/-/merge_requests/42");
 	});
 });
 
@@ -121,7 +121,7 @@ describe("provider-aware PR/MR labels", () => {
 
 describe("providerFromPRURL", () => {
 	it("detects a GitLab merge request URL by its path marker", () => {
-		expect(providerFromPRURL("https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42")).toBe("gitlab");
+		expect(providerFromPRURL("https://gitlab.example.com/group/sub/proj/-/merge_requests/42")).toBe("gitlab");
 	});
 
 	it("defaults to github for a pull URL", () => {
@@ -134,18 +134,18 @@ describe("GitLab MR conflict link", () => {
 		const parts = prSummaryParts(
 			summary({
 				provider: "gitlab",
-				url: "https://gitlab.finnomena.com/group/proj/-/merge_requests/9",
-				htmlUrl: "https://gitlab.finnomena.com/group/proj/-/merge_requests/9",
+				url: "https://gitlab.example.com/group/proj/-/merge_requests/9",
+				htmlUrl: "https://gitlab.example.com/group/proj/-/merge_requests/9",
 				mergeability: {
 					state: "conflicting",
 					reasons: [],
-					prUrl: "https://gitlab.finnomena.com/group/proj/-/merge_requests/9",
+					prUrl: "https://gitlab.example.com/group/proj/-/merge_requests/9",
 					conflictFiles: [],
 				},
 			}),
 		);
 		const merge = parts.find((part) => part.key === "merge");
-		expect(merge?.links[0]?.href).toBe("https://gitlab.finnomena.com/group/proj/-/merge_requests/9/conflicts");
+		expect(merge?.links[0]?.href).toBe("https://gitlab.example.com/group/proj/-/merge_requests/9/conflicts");
 	});
 });
 

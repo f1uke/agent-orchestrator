@@ -235,7 +235,7 @@ func TestDoctorChecksGitLabTokenFromEnv(t *testing.T) {
 	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("git version 2.43.0\n"), nil
 	})
-	t.Setenv("AO_GITLAB_HOST", "gitlab.finnomena.com")
+	t.Setenv("AO_GITLAB_HOST", "gitlab.example.com")
 	t.Setenv("AO_GITLAB_TOKEN", "env-gitlab-token")
 	c.deps.HTTPClient = srv.Client()
 	c.deps.DoctorGitLabRESTBase = srv.URL
@@ -252,7 +252,7 @@ func TestDoctorFailsRejectedGitLabToken(t *testing.T) {
 	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("git version 2.43.0\n"), nil
 	})
-	t.Setenv("AO_GITLAB_HOST", "gitlab.finnomena.com")
+	t.Setenv("AO_GITLAB_HOST", "gitlab.example.com")
 	t.Setenv("AO_GITLAB_TOKEN", "bad-token")
 	c.deps.HTTPClient = srv.Client()
 	c.deps.DoctorGitLabRESTBase = srv.URL

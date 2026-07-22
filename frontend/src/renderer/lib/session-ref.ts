@@ -29,7 +29,7 @@ export type ResolveOptions = {
 //   @<project>-<num>   sigil + full canonical id
 //   <project>-<num>    bare canonical id (as it appears in logs / `[from …]`)
 //   @<num>             short form (project implied by the terminal's own session)
-// The id body is lowercase [a-z0-9-] so an uppercase Jira key like STAR-2272 is
+// The id body is lowercase [a-z0-9-] so an uppercase Jira key like PROJ-2272 is
 // never even a candidate; resolution against the known-id set is the real gate.
 // A bare number without `@` is deliberately NOT matched (never linkify a raw
 // number). Group 1 is a leading boundary (line start or a non-word/@/- char) so

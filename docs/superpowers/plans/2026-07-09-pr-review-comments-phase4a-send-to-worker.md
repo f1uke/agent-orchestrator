@@ -16,7 +16,7 @@
 - Backend gate: `go build ./...` + targeted `go test` (CLI e2e `TestSpawn*` fail spuriously inside a live AO session — run touched packages only). gofmt tabs; `gofmt -l`/`go vet` clean.
 - Frontend gates (from `frontend/`): `npm run test` + `npm run typecheck`. Tabs indentation. Revert `routeTree.gen.ts`/`pnpm-lock.yaml` churn.
 - Renderer reuses the `review-comment-dispatch` template (`messagetemplates.NameReviewCommentDispatch`, data `messagetemplates.ReviewCommentData{Comments string}`), which stays operator-editable via Global Settings.
-- Commit after each task. Branch: `bugfix/STAR-2272-gitlab-mr-detection` (PR #36).
+- Commit after each task. Branch: `bugfix/PROJ-2272-gitlab-mr-detection` (PR #36).
 
 ## File Structure
 

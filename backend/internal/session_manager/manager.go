@@ -2555,14 +2555,14 @@ This project follows gitflow. When you spawn a worker, start it from `+"`%[1]s`"
 - `+"`feature/<topic>`"+` — new features and enhancements
 - `+"`bugfix/<topic>`"+` — bug fixes
 - `+"`hotfix/<topic>`"+` — urgent production fixes
-When the task has a Jira card key, put it uppercase right after the type, e.g. `+"`feature/STAR-2270-ecoupon-list`"+`. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere (e.g. a hotfix cut from a release branch that merges into `+"`%[1]s`"+`). If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
+When the task has a Jira card key, put it uppercase right after the type, e.g. `+"`feature/PROJ-2270-checkout-list`"+`. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere (e.g. a hotfix cut from a release branch that merges into `+"`%[1]s`"+`). If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
 	}
 	prefix := conv.NormalizedBranchPrefix()
 	return fmt.Sprintf("\n\n"+`## Git branch convention
 
 This project prefixes every branch with `+"`%[2]s`"+`. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
 `+"`ao spawn --from %[1]s --target %[1]s --branch %[2]s<topic> ...`"+`
-For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sSTAR-2270-ecoupon-list`"+` when the task has a Jira card key. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
+For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sPROJ-2270-checkout-list`"+` when the task has a Jira card key. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
 }
 
 // confirmBeforeSpawn reports whether the orchestrator prompt should carry the

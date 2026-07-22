@@ -62,7 +62,7 @@ func (c *commandContext) resolvePRRef(ctx context.Context, ref string, project p
 const gitlabMRPathMarker = "/-/merge_requests/"
 
 // isGitLabMRRef reports whether ref looks like a GitLab merge-request URL. It is
-// host-agnostic (Finnomena runs self-hosted GitLab, not gitlab.com), keying only
+// host-agnostic (Example Org runs self-hosted GitLab, not gitlab.com), keying only
 // on the "/-/merge_requests/" path marker.
 func isGitLabMRRef(ref string) bool {
 	u, err := url.Parse(strings.TrimSpace(ref))

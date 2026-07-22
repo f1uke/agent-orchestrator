@@ -85,7 +85,7 @@ func applyConventionPrefix(sanitized string, cfg GitConventionConfig) string
 - **none / gitflow:** return `sanitized` unchanged (the namer already emits gitflow
   `<type>/…`; gitflow only nudges the naming prompt with the default prefix).
 - **custom:** strip the AI's `<type>/` segment, prepend the normalized custom prefix
-  → `feat/STAR-123-x` (Jira key + description preserved).
+  → `feat/PROJ-123-x` (Jira key + description preserved).
 
 Wired into `manager.go Spawn`: after `gen(...)` returns a name, run
 `applyConventionPrefix(name, cfg.GitConvention)` before `ensureUniqueBranch`.
@@ -102,7 +102,7 @@ returns "" for none, else a "Git branch convention" section:
 - **Orchestrator** (primary mechanism): instruct it to spawn workers with
   `--from <defaultBranch>` and an explicit `--branch <prefix><topic>`; list the
   gitflow types (feature/bugfix/hotfix) or the single custom prefix; give the
-  Jira-key format (`feature/STAR-2270-ecoupon-list`); say PRs target
+  Jira-key format (`feature/PROJ-2270-checkout-list`); say PRs target
   `<defaultBranch>`. Placed before the confidentiality guard.
 - **Worker**: a shorter note so it keeps sibling/stacked branches on-convention and
   targets `<defaultBranch>`. Appended alongside `workerMultiPRPrompt`.

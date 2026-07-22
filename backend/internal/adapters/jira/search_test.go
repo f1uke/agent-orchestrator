@@ -47,7 +47,7 @@ func TestSearchIssues_ParsesRows(t *testing.T) {
 			{"key":"DEMO-101","fields":{"summary":"Example issue summary","issuetype":{"name":"Story"},
 				"status":{"name":"Ready for QA","statusCategory":{"key":"new","colorName":"blue-gray"}},
 				"assignee":{"displayName":"Alex Rivera"}}},
-			{"key":"DEMO-88","fields":{"summary":"Coupon empty state","issuetype":{"name":"Bug"},
+			{"key":"DEMO-88","fields":{"summary":"Item empty state","issuetype":{"name":"Bug"},
 				"status":{"name":"In Progress","statusCategory":{"key":"indeterminate","colorName":"yellow"}},
 				"assignee":{"displayName":""}}}
 		]}`)

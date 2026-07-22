@@ -241,9 +241,9 @@ describe("Sidebar", () => {
 		});
 
 		it("places the Jira key badge on line 2 — above the @<project>-<num> id (enhancement #4)", () => {
-			const jiraSession: WorkspaceSession = { ...session, issueId: "jira:STAR-2272" };
+			const jiraSession: WorkspaceSession = { ...session, issueId: "jira:PROJ-2272" };
 			renderSidebar({ workspaces: [{ ...workspace, sessions: [jiraSession] }] });
-			const key = screen.getByText("STAR-2272");
+			const key = screen.getByText("PROJ-2272");
 			const ref = screen.getByText("@proj-1-1");
 			// The badge is rendered directly under the work name, so it precedes the
 			// id line in DOM order.

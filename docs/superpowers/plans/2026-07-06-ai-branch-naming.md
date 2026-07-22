@@ -133,10 +133,10 @@ func TestExtractJiraKey(t *testing.T) {
 		texts []string
 		want  string
 	}{
-		{"in title", []string{"STAR-2271 result UI", "brief"}, "STAR-2271"},
+		{"in title", []string{"PROJ-2271 result UI", "brief"}, "PROJ-2271"},
 		{"in brief url", []string{"E-Coupon", "see https://x.atlassian.net/browse/ABC-42 now"}, "ABC-42"},
 		{"none", []string{"no key here", "plain brief"}, ""},
-		{"lowercase not matched", []string{"star-2271", ""}, ""},
+		{"lowercase not matched", []string{"proj-2271", ""}, ""},
 		{"multi-letter project", []string{"PROJ12-9 thing", ""}, "PROJ12-9"},
 	}
 	for _, c := range cases {
@@ -155,13 +155,13 @@ func TestSanitizeBranchName(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		{"clean", "feature/STAR-2271-ecoupon-result", "feature/star-2271-ecoupon-result", true},
-		{"backticked with prose", "`feature/STAR-2271-x`\nSure, here you go!", "feature/star-2271-x", true},
+		{"clean", "feature/PROJ-2271-checkout-result", "feature/proj-2271-checkout-result", true},
+		{"backticked with prose", "`feature/PROJ-2271-x`\nSure, here you go!", "feature/proj-2271-x", true},
 		{"label prefix", "branch: bugfix/ABC-1-fix-crash", "bugfix/abc-1-fix-crash", true},
-		{"spaces and junk", "feature/STAR 2271  e coupon!!", "feature/star-2271-e-coupon", true},
-		{"no gitflow prefix", "star-2271-result", "", false},
-		{"bad type", "release/STAR-1-x", "", false},
-		{"dotdot", "feature/STAR..1", "", false},
+		{"spaces and junk", "feature/PROJ 2271  e coupon!!", "feature/proj-2271-checkout", true},
+		{"no gitflow prefix", "proj-2271-result", "", false},
+		{"bad type", "release/PROJ-1-x", "", false},
+		{"dotdot", "feature/PROJ..1", "", false},
 		{"empty", "", "", false},
 		{"trailing slash trimmed then ok", "chore/cleanup/", "chore/cleanup", true},
 	}
@@ -177,20 +177,20 @@ func TestSanitizeBranchName(t *testing.T) {
 
 func TestEnsureUniqueBranch(t *testing.T) {
 	existing := map[string]bool{
-		"feature/star-2271-x":   true,
-		"feature/star-2271-x-2": true,
+		"feature/proj-2271-x":   true,
+		"feature/proj-2271-x-2": true,
 	}
-	if got := ensureUniqueBranch(existing, "feature/star-2271-y"); got != "feature/star-2271-y" {
+	if got := ensureUniqueBranch(existing, "feature/proj-2271-y"); got != "feature/proj-2271-y" {
 		t.Fatalf("free candidate changed: %q", got)
 	}
-	if got := ensureUniqueBranch(existing, "feature/star-2271-x"); got != "feature/star-2271-x-3" {
+	if got := ensureUniqueBranch(existing, "feature/proj-2271-x"); got != "feature/proj-2271-x-3" {
 		t.Fatalf("collision suffix wrong: %q", got)
 	}
 }
 
 func TestBuildNamingPromptMentionsKeyAndRules(t *testing.T) {
-	p := buildNamingPrompt("E-Coupon Order Result", "make the UI", "STAR-2271")
-	for _, want := range []string{"STAR-2271", "feature", "bugfix", "hotfix", "chore", "E-Coupon Order Result"} {
+	p := buildNamingPrompt("E-Coupon Order Result", "make the UI", "PROJ-2271")
+	for _, want := range []string{"PROJ-2271", "feature", "bugfix", "hotfix", "chore", "E-Coupon Order Result"} {
 		if !contains(p, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, p)
 		}
@@ -231,7 +231,7 @@ var (
 	repeatedSlashDash = regexp.MustCompile(`[-]{2,}`)
 )
 
-// extractJiraKey returns the first Jira-style key (e.g. STAR-2271) found across
+// extractJiraKey returns the first Jira-style key (e.g. PROJ-2271) found across
 // the given texts, or "" when none is present.
 func extractJiraKey(texts ...string) string {
 	for _, t := range texts {
@@ -255,7 +255,7 @@ Format: <type>/<JIRA-KEY>-<short-desc>
 - %s
 - <short-desc>: 2 to 4 words, kebab-case, lowercase, abbreviated.
 - Total length <= 60 characters. Use only lowercase a-z, 0-9, hyphen and one slash.
-- Example: feature/STAR-2271-ecoupon-result
+- Example: feature/PROJ-2271-checkout-result
 
 Task title: %s
 
@@ -386,7 +386,7 @@ func TestSpawnBranchNaming(t *testing.T) {
 
 	t.Run("unsupported harness falls back", func(t *testing.T) {
 		h := newManagerHarness(t) // fake agent does NOT implement OneShotNamer
-		_, err := h.mgr.Spawn(ctx, ports.SpawnConfig{ProjectID: h.projectID, Kind: domain.KindWorker, Harness: h.harness, AutoNameBranch: true, IssueID: "STAR-1 thing"})
+		_, err := h.mgr.Spawn(ctx, ports.SpawnConfig{ProjectID: h.projectID, Kind: domain.KindWorker, Harness: h.harness, AutoNameBranch: true, IssueID: "PROJ-1 thing"})
 		if err != nil { t.Fatal(err) }
 		if !strings.HasPrefix(h.workspace.lastCfg.Branch, "ao/") {
 			t.Fatalf("want fallback ao/, got %q", h.workspace.lastCfg.Branch)

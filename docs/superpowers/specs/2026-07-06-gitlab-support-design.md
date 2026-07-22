@@ -9,7 +9,7 @@ Add GitLab as a first-class SCM/tracker provider **inside the existing
 codebase**, running alongside the current GitHub provider. No hard fork: GitHub
 and GitLab repositories are both observed by one daemon, selected per-repo.
 
-Primary target is **self-hosted GitLab** (e.g. `gitlab.finnomena.com`). The
+Primary target is **self-hosted GitLab** (e.g. `gitlab.example.com`). The
 gitlab.com SaaS path is designed for but not the initial validation target.
 
 ## Non-goals (deferred to a later round — YAGNI)

@@ -15,7 +15,7 @@ worktree, and `tmux ls` all tell the same story.
 
 - **tmux's namespace is flat and global.** Unlike the worktree path, which nests
   under `<projectID>`, a single tmux server shares one flat set of session names
-  across every project. A raw branch name (e.g. an AI-generated `feature/STAR-xxx`)
+  across every project. A raw branch name (e.g. an AI-generated `feature/PROJ-xxx`)
   could collide across two projects.
 - **tmux reserves `.` and `:`.** They are target syntax (`session:window.pane`), so
   a session name must not contain them — a deliberate divergence from the worktree
@@ -44,7 +44,7 @@ Examples:
 
 | projectID | branch                        | tmux name                     |
 |-----------|-------------------------------|-------------------------------|
-| `mer`     | `feature/STAR-2271-x`         | `mer-feature-STAR-2271-x`     |
+| `mer`     | `feature/PROJ-2271-x`         | `mer-feature-PROJ-2271-x`     |
 | `mer`     | `ao/mer-1/root` (default)     | `mer-ao-mer-1-root`           |
 | `mer`     | `ao/<prefix>-orchestrator`    | `mer-ao-<prefix>-orchestrator`|
 
@@ -94,7 +94,7 @@ breakage. Clean, readable names were the explicit choice over the hashed variant
 ## Tests
 
 - **`tmux` unit tests** for `SessionNameFor`:
-  - projectID + gitflow branch → `mer-feature-STAR-2271-x`
+  - projectID + gitflow branch → `mer-feature-PROJ-2271-x`
   - projectID + default `ao/<id>/root` branch
   - punctuation/unsafe chars collapsed to dashes (`.`, space, `@`, `/`)
   - empty branch → session-id fallback

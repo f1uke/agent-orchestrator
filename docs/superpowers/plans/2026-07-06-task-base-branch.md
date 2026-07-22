@@ -31,7 +31,7 @@
 
 **Interfaces:**
 - Produces: `projectsvc.Manager.ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error)` — returns deduped short branch names from `refs/heads` + `refs/remotes/origin`, with `origin/HEAD` removed; returns an empty slice (nil, no error) when the repo is unavailable/unregistered so the UI degrades gracefully.
-- Produces: `GET /api/v1/projects/{id}/branches` → `{"branches": ["develop","main","origin/STAR-2270", ...]}`.
+- Produces: `GET /api/v1/projects/{id}/branches` → `{"branches": ["develop","main","origin/PROJ-2270", ...]}`.
 
 - [ ] **Step 1: Write the failing service test** — over a temp git repo with a couple of branches (mirror the temp-repo setup in `service/project/service_test.go`, which does `exec.Command("git","init","-b","main",dir)` etc.):
 
@@ -95,9 +95,9 @@ git commit -m "feat(api): list project branches endpoint"
 func TestSpawnUsesBaseBranch(t *testing.T) {
 	fake := &captureWorkspace{} // records last WorkspaceConfig.BaseBranch
 	m := newManagerWithWorkspace(t, fake, projectWithDefaultBranch("develop"))
-	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: pid, Kind: domain.SessionKindWorker, Harness: "claude-code", BaseBranch: "STAR-2270"})
+	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: pid, Kind: domain.SessionKindWorker, Harness: "claude-code", BaseBranch: "PROJ-2270"})
 	if err != nil { t.Fatalf("spawn: %v", err) }
-	if fake.lastBase != "STAR-2270" { t.Fatalf("base = %q, want STAR-2270", fake.lastBase) }
+	if fake.lastBase != "PROJ-2270" { t.Fatalf("base = %q, want PROJ-2270", fake.lastBase) }
 
 	_, _ = m.Spawn(ctx, ports.SpawnConfig{ProjectID: pid, Kind: domain.SessionKindWorker, Harness: "claude-code"})
 	if fake.lastBase != "develop" { t.Fatalf("fallback base = %q, want develop", fake.lastBase) }
@@ -126,7 +126,7 @@ ws, err := m.workspace.Create(ctx, ports.WorkspaceConfig{
 
 Add `BaseBranch` to `SpawnSessionRequest` and pass `BaseBranch: in.BaseBranch` at sessions.go:137.
 
-- [ ] **Step 4: Add a controller decode test** — assert a POST body with `"baseBranch":"STAR-2270"` reaches `Svc.Spawn` with `BaseBranch=="STAR-2270"` (mirror the existing spawn handler test with a fake `Svc` capturing the `SpawnConfig`).
+- [ ] **Step 4: Add a controller decode test** — assert a POST body with `"baseBranch":"PROJ-2270"` reaches `Svc.Spawn` with `BaseBranch=="PROJ-2270"` (mirror the existing spawn handler test with a fake `Svc` capturing the `SpawnConfig`).
 
 - [ ] **Step 5: Run + regenerate**
 
@@ -163,11 +163,11 @@ import { BranchCombobox } from "./BranchCombobox";
 
 it("filters branches and selects one", async () => {
 	const onChange = vi.fn();
-	render(<BranchCombobox branches={["develop", "main", "origin/STAR-2270"]} value="develop" onChange={onChange} />);
+	render(<BranchCombobox branches={["develop", "main", "origin/PROJ-2270"]} value="develop" onChange={onChange} />);
 	await userEvent.click(screen.getByRole("textbox"));
 	await userEvent.type(screen.getByRole("textbox"), "2270");
-	await userEvent.click(screen.getByText("origin/STAR-2270"));
-	expect(onChange).toHaveBeenCalledWith("origin/STAR-2270");
+	await userEvent.click(screen.getByText("origin/PROJ-2270"));
+	expect(onChange).toHaveBeenCalledWith("origin/PROJ-2270");
 });
 ```
 

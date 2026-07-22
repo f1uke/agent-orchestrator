@@ -19,13 +19,13 @@ var (
 	nonBranchChars    = regexp.MustCompile(`[^a-z0-9/-]+`)
 	repeatedSlashDash = regexp.MustCompile(`-{2,}`)
 	// leadingJiraKeyRe matches a lowercased Jira key at the START of the branch's
-	// segment after the type slash (e.g. the "star-2271" in "star-2271-ecoupon"),
+	// segment after the type slash (e.g. the "proj-2271" in "proj-2271-checkout"),
 	// so only the card key is re-uppercased and later "-2" de-dup suffixes or
 	// hyphenated words in the description are left untouched.
 	leadingJiraKeyRe = regexp.MustCompile(`^[a-z][a-z0-9]*-\d+`)
 )
 
-// extractJiraKey returns the first Jira-style key (e.g. STAR-2271) found across
+// extractJiraKey returns the first Jira-style key (e.g. PROJ-2271) found across
 // the given texts, or "" when none is present.
 func extractJiraKey(texts ...string) string {
 	for _, t := range texts {
@@ -39,7 +39,7 @@ func extractJiraKey(texts ...string) string {
 // effectiveIssueID resolves the Jira link a session is seeded with. An explicit
 // IssueID (from `ao spawn --issue`, or the manual link path) always wins and is
 // preserved verbatim. Otherwise the key is derived from the spawn's BRANCH only,
-// so a session whose branch reads "bugfix/STAR-2394-x" is linked to STAR-2394 and
+// so a session whose branch reads "bugfix/PROJ-2394-x" is linked to PROJ-2394 and
 // the Summary panel shows it without a manual "+ Link a Jira issue" step. It
 // writes ONLY the internal session-to-issue association; it performs no Jira write.
 //
@@ -84,7 +84,7 @@ Format: <type>/<JIRA-KEY>-<short-desc>
 - %s
 - <short-desc>: 2 to 4 words, kebab-case, lowercase, abbreviated.
 - Total length <= 60 characters. Use only lowercase a-z, 0-9, hyphen and one slash.
-- Example: feature/STAR-2271-ecoupon-result
+- Example: feature/PROJ-2271-checkout-result
 
 Task title: %s
 
@@ -132,7 +132,7 @@ func sanitizeBranchName(raw string) (string, bool) {
 	}
 	// Restore Jira-card casing: uppercase the key sitting right after the type
 	// slash so the branch (and the worktree that mirrors it) reads
-	// "feature/STAR-2271-x" like the Jira card, not "feature/star-2271-x".
+	// "feature/PROJ-2271-x" like the Jira card, not "feature/proj-2271-x".
 	rest := line[slash+1:]
 	if m := leadingJiraKeyRe.FindString(rest); m != "" {
 		line = line[:slash+1] + strings.ToUpper(m) + rest[len(m):]

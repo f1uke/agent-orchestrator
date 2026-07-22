@@ -60,26 +60,26 @@ func TestNormalizePRRefGitLabMergeRequest(t *testing.T) {
 	}{
 		{
 			name:       "nested group MR url",
-			ref:        "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/123",
-			origin:     "git@gitlab.finnomena.com:group/sub/proj.git",
-			wantURL:    "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/123",
+			ref:        "https://gitlab.example.com/group/sub/proj/-/merge_requests/123",
+			origin:     "git@gitlab.example.com:group/sub/proj.git",
+			wantURL:    "https://gitlab.example.com/group/sub/proj/-/merge_requests/123",
 			wantNumber: 123,
 		},
 		{
 			name:       "trailing slash, query and sub-tab are dropped",
-			ref:        "https://gitlab.finnomena.com/group/proj/-/merge_requests/7/diffs?tab=x",
-			origin:     "https://gitlab.finnomena.com/group/proj",
-			wantURL:    "https://gitlab.finnomena.com/group/proj/-/merge_requests/7",
+			ref:        "https://gitlab.example.com/group/proj/-/merge_requests/7/diffs?tab=x",
+			origin:     "https://gitlab.example.com/group/proj",
+			wantURL:    "https://gitlab.example.com/group/proj/-/merge_requests/7",
 			wantNumber: 7,
 		},
 		{
 			name:    "missing iid is invalid",
-			ref:     "https://gitlab.finnomena.com/group/proj/-/merge_requests/",
+			ref:     "https://gitlab.example.com/group/proj/-/merge_requests/",
 			wantErr: true,
 		},
 		{
 			name:    "single-segment project path is invalid",
-			ref:     "https://gitlab.finnomena.com/proj/-/merge_requests/5",
+			ref:     "https://gitlab.example.com/proj/-/merge_requests/5",
 			wantErr: true,
 		},
 	}
@@ -103,11 +103,11 @@ func TestNormalizePRRefGitLabMergeRequest(t *testing.T) {
 }
 
 func TestParseGitLabMRURLParts(t *testing.T) {
-	host, projectPath, iid, err := parseGitLabMRURL("https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/88")
+	host, projectPath, iid, err := parseGitLabMRURL("https://gitlab.example.com/group/sub/proj/-/merge_requests/88")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if host != "gitlab.finnomena.com" || projectPath != "group/sub/proj" || iid != 88 {
+	if host != "gitlab.example.com" || projectPath != "group/sub/proj" || iid != 88 {
 		t.Fatalf("parts = (%q, %q, %d)", host, projectPath, iid)
 	}
 	// A GitHub pull URL is not a GitLab MR URL.
@@ -117,18 +117,18 @@ func TestParseGitLabMRURLParts(t *testing.T) {
 }
 
 func TestRequireSameRepoGitLab(t *testing.T) {
-	const mrURL = "https://gitlab.finnomena.com/group/proj/-/merge_requests/9"
+	const mrURL = "https://gitlab.example.com/group/proj/-/merge_requests/9"
 	cases := []struct {
 		name   string
 		prURL  string
 		origin string
 		want   error
 	}{
-		{"ssh origin matches", mrURL, "git@gitlab.finnomena.com:group/proj.git", nil},
-		{"https origin matches", mrURL, "https://gitlab.finnomena.com/group/proj", nil},
+		{"ssh origin matches", mrURL, "git@gitlab.example.com:group/proj.git", nil},
+		{"https origin matches", mrURL, "https://gitlab.example.com/group/proj", nil},
 		{"blank origin is allowed", mrURL, "", nil},
 		{"host mismatch", mrURL, "git@gitlab.other.com:group/proj.git", ErrProjectMismatch},
-		{"path mismatch", mrURL, "git@gitlab.finnomena.com:group/elsewhere.git", ErrProjectMismatch},
+		{"path mismatch", mrURL, "git@gitlab.example.com:group/elsewhere.git", ErrProjectMismatch},
 		{"gitlab MR against github origin", mrURL, "https://github.com/acme/repo", ErrProjectMismatch},
 	}
 	for _, tc := range cases {
@@ -144,11 +144,11 @@ func TestRequireSameRepoGitLab(t *testing.T) {
 func TestScmRepoForClaimGitLabFallback(t *testing.T) {
 	// fakeSCM.ParseRepository only recognizes github origins, so a GitLab origin
 	// forces scmRepoForClaim onto the MR-URL fallback path.
-	repo, err := scmRepoForClaim(fakeSCM{}, "", "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/12")
+	repo, err := scmRepoForClaim(fakeSCM{}, "", "https://gitlab.example.com/group/sub/proj/-/merge_requests/12")
 	if err != nil {
 		t.Fatalf("scmRepoForClaim: %v", err)
 	}
-	if repo.Provider != "gitlab" || repo.Host != "gitlab.finnomena.com" || repo.Owner != "group/sub" || repo.Name != "proj" || repo.Repo != "group/sub/proj" {
+	if repo.Provider != "gitlab" || repo.Host != "gitlab.example.com" || repo.Owner != "group/sub" || repo.Name != "proj" || repo.Repo != "group/sub/proj" {
 		t.Fatalf("repo = %+v", repo)
 	}
 }
@@ -157,14 +157,14 @@ func TestClaimPRGitLabMergeRequest(t *testing.T) {
 	st := newFakeStore()
 	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Metadata: domain.SessionMetadata{WorkspacePath: "/ws"}}
-	st.projects["mer"] = domain.ProjectRecord{ID: "mer", RepoOriginURL: "git@gitlab.finnomena.com:group/sub/proj.git"}
-	const mrURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", RepoOriginURL: "git@gitlab.example.com:group/sub/proj.git"}
+	const mrURL = "https://gitlab.example.com/group/sub/proj/-/merge_requests/42"
 	st.pr["mer-1"] = domain.PRFacts{URL: mrURL, Number: 42, CI: domain.CIPassing, UpdatedAt: now}
 
 	scm := &gitlabFakeSCM{obs: ports.SCMObservation{
 		Fetched:  true,
 		Provider: "gitlab",
-		Host:     "gitlab.finnomena.com",
+		Host:     "gitlab.example.com",
 		Repo:     "group/sub/proj",
 		PR:       ports.SCMPRObservation{URL: mrURL, Number: 42},
 	}}
@@ -189,11 +189,11 @@ func TestClaimPRGitLabMergeRequest(t *testing.T) {
 func TestClaimPRGitLabProjectMismatch(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Metadata: domain.SessionMetadata{WorkspacePath: "/ws"}}
-	st.projects["mer"] = domain.ProjectRecord{ID: "mer", RepoOriginURL: "git@gitlab.finnomena.com:group/proj.git"}
-	scm := &gitlabFakeSCM{obs: ports.SCMObservation{Fetched: true, Provider: "gitlab", Host: "gitlab.finnomena.com", Repo: "group/other"}}
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", RepoOriginURL: "git@gitlab.example.com:group/proj.git"}
+	scm := &gitlabFakeSCM{obs: ports.SCMObservation{Fetched: true, Provider: "gitlab", Host: "gitlab.example.com", Repo: "group/other"}}
 	svc := NewWithDeps(Deps{Store: st, PRClaimer: fakePRClaimer{}, SCM: scm})
 
-	_, err := svc.ClaimPR(context.Background(), "mer-1", "https://gitlab.finnomena.com/group/other/-/merge_requests/1", ClaimPROptions{AllowTakeover: true})
+	_, err := svc.ClaimPR(context.Background(), "mer-1", "https://gitlab.example.com/group/other/-/merge_requests/1", ClaimPROptions{AllowTakeover: true})
 	if !errors.Is(err, ErrProjectMismatch) {
 		t.Fatalf("err = %v, want ErrProjectMismatch", err)
 	}

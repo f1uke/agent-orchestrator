@@ -11,7 +11,7 @@ branch is always created off the **project default branch** — the base is not
 selectable. `session_manager/manager.go` sets `WorkspaceConfig.BaseBranch =
 project.Config.DefaultBranch` unconditionally, and `SpawnConfig` has no
 `BaseBranch` field. So a user who wants a task to start from an existing branch
-(e.g. a stacked `STAR-2270`) gets a fresh branch off `main` that lacks that work.
+(e.g. a stacked `PROJ-2270`) gets a fresh branch off `main` that lacks that work.
 
 ## Goal
 
@@ -41,7 +41,7 @@ In the New Task dialog let the user specify BOTH:
 
 ### 1. List branches endpoint
 `GET /api/v1/projects/{projectId}/branches` → `{ "branches": ["develop", "main",
-"origin/STAR-2270", ...] }`.
+"origin/PROJ-2270", ...] }`.
 - Implemented via git: `for-each-ref --format=%(refname:short) refs/heads
   refs/remotes/origin`, deduped, with `origin/HEAD` dropped. Follows the
   existing `gitOutput`/git-exec pattern in `service/project`.

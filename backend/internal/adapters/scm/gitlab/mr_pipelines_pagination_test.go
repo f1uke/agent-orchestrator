@@ -15,7 +15,7 @@ import (
 // It is a UNION of two id-descending partitions — the MR's own pipelines
 // (merge_request_event/detached/merged_result) first, then the source branch's
 // `push` pipelines — so a HIGHER-id push pipeline sorts BELOW every lower-id
-// merge_request_event row. Verified against the real API (gitlab.finnomena.com,
+// merge_request_event row. Verified against the real API (gitlab.example.com,
 // MR !2986: push pipelines 177164/177162/177160 appear after merge_request_event
 // pipelines 176858/176825/176804, and MR !1 of kratos-ui: 15 merge_request_event
 // rows then 15 push rows, the head SHA's failed push pipeline landing at index
@@ -72,7 +72,7 @@ func TestFetchPullRequests_PaginatesMRPipelinesToFindHeadSHAPipelineBeyondFirstP
 	defer srv.Close()
 
 	p := newTestProvider(t, srv.URL)
-	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.finnomena.com", Provider: "gitlab"}, Number: 7}
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.example.com", Provider: "gitlab"}, Number: 7}
 	obs, err := p.FetchPullRequests(context.Background(), []ports.SCMPRRef{ref})
 	if err != nil {
 		t.Fatalf("FetchPullRequests: %v", err)
@@ -121,7 +121,7 @@ func TestFetchPullRequests_MRPipelinesStopsAfterShortPage(t *testing.T) {
 	defer srv.Close()
 
 	p := newTestProvider(t, srv.URL)
-	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.finnomena.com", Provider: "gitlab"}, Number: 7}
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.example.com", Provider: "gitlab"}, Number: 7}
 	obs, err := p.FetchPullRequests(context.Background(), []ports.SCMPRRef{ref})
 	if err != nil {
 		t.Fatalf("FetchPullRequests: %v", err)

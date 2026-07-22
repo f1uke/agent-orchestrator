@@ -156,7 +156,7 @@ func TestSessionNameForMirrorsBranch(t *testing.T) {
 		sessionID string
 		want      string
 	}{
-		{"gitflow branch", "mer", "feature/STAR-2271-x", "mer-1", "mer-feature-STAR-2271-x"},
+		{"gitflow branch", "mer", "feature/PROJ-2271-x", "mer-1", "mer-feature-PROJ-2271-x"},
 		{"default ao branch", "mer", "ao/mer-1/root", "mer-1", "mer-ao-mer-1-root"},
 		{"orchestrator branch", "mer", "ao/mer12-orchestrator", "mer-1", "mer-ao-mer12-orchestrator"},
 		{"unsafe chars collapse to dashes", "mer", "feature/foo bar@baz.1", "mer-1", "mer-feature-foo-bar-baz-1"},
@@ -346,17 +346,17 @@ func TestCreateNamesSessionAfterBranch(t *testing.T) {
 	h, err := r.Create(context.Background(), ports.RuntimeConfig{
 		SessionID:     "mer-1",
 		ProjectID:     "mer",
-		Branch:        "feature/STAR-2271-x",
+		Branch:        "feature/PROJ-2271-x",
 		WorkspacePath: "/tmp/ws",
 		Argv:          []string{"echo", "hi"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if h.ID != "mer-feature-STAR-2271-x" {
-		t.Fatalf("handle ID = %q, want mer-feature-STAR-2271-x", h.ID)
+	if h.ID != "mer-feature-PROJ-2271-x" {
+		t.Fatalf("handle ID = %q, want mer-feature-PROJ-2271-x", h.ID)
 	}
-	if joined := strings.Join(fr.calls[0].args, " "); !strings.Contains(joined, "-s mer-feature-STAR-2271-x") {
+	if joined := strings.Join(fr.calls[0].args, " "); !strings.Contains(joined, "-s mer-feature-PROJ-2271-x") {
 		t.Fatalf("new-session args missing branch-based -s: %v", fr.calls[0].args)
 	}
 }

@@ -275,7 +275,7 @@ describe("ReviewsView (merged reviews + comments)", () => {
 	});
 
 	it("renders a GitLab system note as a de-emphasized line with a clean hyperlink, not a raw URL", async () => {
-		const rawUrl = "/finnomena/mobility/nter-ios-app/-/merge_requests/3028/diffs?diff_id=177522";
+		const rawUrl = "/example-org/apps/demo-ios-app/-/merge_requests/3028/diffs?diff_id=177522";
 		const base = commentsPayload().prs[0];
 		commentsData = {
 			prs: [

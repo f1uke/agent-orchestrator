@@ -45,12 +45,12 @@ ao spawn --project agent-orchestrator --from main --issue 142 --name "fix-sessio
 
 ```bash
 # Spawn a worker off develop with an explicit new branch name
-ao spawn --project agent-orchestrator --from develop --branch feature/STAR-142-session-leak --name "fix-session-leak" --prompt "Fix the session leak."
+ao spawn --project agent-orchestrator --from develop --branch feature/PROJ-142-session-leak --name "fix-session-leak" --prompt "Fix the session leak."
 ```
 
 ```bash
 # Gitflow hotfix: cut the worktree from release/2.1, but merge the PR into develop
-ao spawn --project agent-orchestrator --from release/2.1 --target develop --branch hotfix/STAR-142-session-leak --name "hotfix-session-leak" --prompt "Fix the session leak."
+ao spawn --project agent-orchestrator --from release/2.1 --target develop --branch hotfix/PROJ-142-session-leak --name "hotfix-session-leak" --prompt "Fix the session leak."
 ```
 
 ```bash

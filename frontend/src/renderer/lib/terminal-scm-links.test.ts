@@ -162,11 +162,11 @@ describe("findExternalRefLinks — no false positives", () => {
 
 describe("findExternalRefLinks — Jira keys", () => {
 	it("links a bare Jira key to its browse URL", () => {
-		const line = "moved STAR-2272 to QA";
+		const line = "moved PROJ-2272 to QA";
 		const matches = findExternalRefLinks(line, ALL);
 		expect(matches).toHaveLength(1);
-		expect(matches[0].url).toBe(`${JIRA}/browse/STAR-2272`);
-		expect(line.slice(matches[0].startIndex, matches[0].endIndex)).toBe("STAR-2272");
+		expect(matches[0].url).toBe(`${JIRA}/browse/PROJ-2272`);
+		expect(line.slice(matches[0].startIndex, matches[0].endIndex)).toBe("PROJ-2272");
 	});
 
 	it("links a key at start of line and one in parentheses", () => {
@@ -175,23 +175,23 @@ describe("findExternalRefLinks — Jira keys", () => {
 	});
 
 	it("links multiple keys and orders them with #/! by position", () => {
-		const matches = findExternalRefLinks("STAR-1 fixed in #7 and !8", ALL);
-		expect(matches.map((m) => m.url)).toEqual([`${JIRA}/browse/STAR-1`, `${GH}/pull/7`, `${GL}/-/merge_requests/8`]);
+		const matches = findExternalRefLinks("PROJ-1 fixed in #7 and !8", ALL);
+		expect(matches.map((m) => m.url)).toEqual([`${JIRA}/browse/PROJ-1`, `${GH}/pull/7`, `${GL}/-/merge_requests/8`]);
 	});
 
 	it("does not link a Jira key when no browse base is known (gating)", () => {
-		expect(findExternalRefLinks("moved STAR-2272 to QA", BOTH)).toHaveLength(0);
+		expect(findExternalRefLinks("moved PROJ-2272 to QA", BOTH)).toHaveLength(0);
 	});
 
 	it("does not link a key embedded in a branch name (path/hyphen bounded)", () => {
-		expect(findExternalRefLinks("on feature/STAR-2272-order-eligible-ui now", ALL)).toHaveLength(0);
-		expect(findExternalRefLinks("STAR-2272-order glued", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("on feature/PROJ-2272-order-eligible-ui now", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("PROJ-2272-order glued", ALL)).toHaveLength(0);
 	});
 
 	it("ignores lowercase, word-glued, and non-key hyphen-number tokens", () => {
-		expect(findExternalRefLinks("star-2272 lower", ALL)).toHaveLength(0);
-		expect(findExternalRefLinks("xSTAR-1 glued", ALL)).toHaveLength(0);
-		expect(findExternalRefLinks("STAR-1x glued", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("proj-2272 lower", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("xPROJ-1 glued", ALL)).toHaveLength(0);
+		expect(findExternalRefLinks("PROJ-1x glued", ALL)).toHaveLength(0);
 		expect(findExternalRefLinks("build 123-45 numbers", ALL)).toHaveLength(0);
 	});
 });

@@ -187,7 +187,7 @@ func TestGet_InvalidKeyRejectedBeforeRequest(t *testing.T) {
 		called = true
 		_, _ = w.Write([]byte("{}"))
 	})
-	for _, bad := range []string{"", "nope", "demo-101", "STAR 2272", "STAR-", "-1", "DROP;TABLE-1"} {
+	for _, bad := range []string{"", "nope", "demo-101", "PROJ 2272", "PROJ-", "-1", "DROP;TABLE-1"} {
 		if _, err := c.Get(context.Background(), bad); !errors.Is(err, ErrBadKey) {
 			t.Errorf("Get(%q) err = %v, want ErrBadKey", bad, err)
 		}

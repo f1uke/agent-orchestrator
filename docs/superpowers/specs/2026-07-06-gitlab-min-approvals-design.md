@@ -13,7 +13,7 @@ whenever `approvals_left == 0 && len(approved_by) > 0`. That value is derived fr
 GitLab's own configured **approval rules**.
 
 When a GitLab project has **no approval rule** (`approvals_required: 0`,
-`has_approval_rules: false` — e.g. `finnomena/mobility/nter-ios-app`), `approvals_left`
+`has_approval_rules: false` — e.g. `example-org/apps/demo-ios-app`), `approvals_left`
 is always `0`, so a **single** approval already reads as `approved` in AO. The team's
 real convention ("needs N human approvals") is invisible to AO.
 

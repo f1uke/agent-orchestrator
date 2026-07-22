@@ -241,7 +241,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// drags it into needless, potentially destructive re-rebasing. A REAL current
 	// conflict is always freshly fetched (MergeabilityStale=false) and still nudges.
 	if o.Mergeability == domain.MergeConflicting && !o.MergeabilityStale {
-		// Only the bottom of a stack is eligible for the rebase nudge. A PR
+		// Only the bottom of a stack is available for the rebase nudge. A PR
 		// stacked on an open parent is expected to report conflicts against its
 		// parent branch until the parent merges and it retargets, so nudging the
 		// agent to rebase it now would be noise. Mergeability UNKNOWN (the brief
@@ -395,7 +395,7 @@ func (m *Manager) notificationIntentForCurrentSCM(ctx context.Context, id domain
 	// it is set only when a notification is actually produced. A PR that is
 	// ready while the notification is suppressed for session reasons
 	// (terminated, or the agent is awaiting input) leaves the marker untouched,
-	// so it can still notify once the session becomes eligible.
+	// so it can still notify once the session becomes available.
 	announcing := domain.NotificationType("")
 	if intent != nil {
 		announcing = intent.Type

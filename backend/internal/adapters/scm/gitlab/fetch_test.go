@@ -23,7 +23,7 @@ func TestFetchPullRequestsMergeabilityAndCI(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL)
-	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.finnomena.com", Provider: "gitlab"}, Number: 7}
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.example.com", Provider: "gitlab"}, Number: 7}
 	obs, err := p.FetchPullRequests(context.Background(), []ports.SCMPRRef{ref})
 	if err != nil {
 		t.Fatalf("FetchPullRequests: %v", err)

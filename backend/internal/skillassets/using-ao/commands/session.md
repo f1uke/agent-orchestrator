@@ -148,7 +148,7 @@ ao session restore mer-3
 
 ### ao session cleanup
 
-Clean up terminated sessions by reclaiming eligible workspaces. Dirty worktrees are skipped by the daemon.
+Clean up terminated sessions by reclaiming available workspaces. Dirty worktrees are skipped by the daemon.
 
 **Syntax:**
 ```

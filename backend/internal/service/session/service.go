@@ -129,7 +129,7 @@ type Service struct {
 	orchestratorLocksMu sync.Mutex
 	orchestratorLocks   map[domain.ProjectID]*sync.Mutex
 	// signalCapable reports whether a harness has a hook pipeline that can
-	// deliver activity signals at all. Only capable harnesses are eligible for
+	// deliver activity signals at all. Only capable harnesses are available for
 	// the no_signal downgrade: a hook-less harness staying silent forever is
 	// normal, not a broken pipeline. nil means "unknown": never downgrade.
 	signalCapable func(domain.AgentHarness) bool

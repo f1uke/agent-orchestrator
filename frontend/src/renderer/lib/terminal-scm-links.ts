@@ -1,7 +1,7 @@
 // Terminal linkifier for SCM reference tokens — the `#`/`!` half of the AO
 // id-reference convention (see the id-reference doc). `#<num>` names a GitHub
 // pull request / issue, `!<num>` a GitLab merge request. A bare Jira key
-// (`STAR-2272`) is linkified too, opening the issue's browse URL. Unlike the
+// (`PROJ-2272`) is linkified too, opening the issue's browse URL. Unlike the
 // `@<project>-<num>` session refs in session-ref.ts (which navigate INTERNALLY on
 // the board), these open the PR/MR/issue in the OS browser.
 //
@@ -143,12 +143,12 @@ export function resolveScmRemotes(urls: Iterable<string>): ScmRemotes {
 const GITHUB_REF_RE = /(^|[^\w#!/])#(\d+)(?![\w-])/g;
 const GITLAB_REF_RE = /(^|[^\w#!/])!(\d+)(?![\w-])/g;
 
-// A bare Jira issue key: an uppercase project key (`STAR`, `DEMO`, `AB1`) + `-` +
+// A bare Jira issue key: an uppercase project key (`PROJ`, `DEMO`, `AB1`) + `-` +
 // an issue number. Group 1 is a start-of-line or a char that is NOT a word char,
-// `/`, or `-` — so a key glued to a path or word (`feature/STAR-2272`, embedded in
+// `/`, or `-` — so a key glued to a path or word (`feature/PROJ-2272`, embedded in
 // a longer branch) does not match — and the trailing lookahead forbids a
-// continuing word char or `-`, so `STAR-2272-order-eligible-ui` (a branch name)
-// is rejected while a standalone `STAR-2272` in log output survives. Group 2 is
+// continuing word char or `-`, so `PROJ-2272-order-eligible-ui` (a branch name)
+// is rejected while a standalone `PROJ-2272` in log output survives. Group 2 is
 // the full key. Same shape as the backend's key validator (`^[A-Z][A-Z0-9]+-\d+$`).
 const JIRA_KEY_RE = /(^|[^\w/-])([A-Z][A-Z0-9]+-\d+)(?![\w-])/g;
 

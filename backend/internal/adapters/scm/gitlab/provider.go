@@ -29,7 +29,7 @@ type ProviderOptions struct {
 	// "https://gitlab.example.com/api/v4".
 	APIBase string
 	// Host is the GitLab hostname this provider claims remotes for, e.g.
-	// "gitlab.finnomena.com". ParseRepository rejects remotes whose host
+	// "gitlab.example.com". ParseRepository rejects remotes whose host
 	// does not match, so a composite dispatcher can try multiple SCM
 	// providers without one claiming another's remote.
 	Host      string

@@ -597,7 +597,7 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		// http/OSC-8 links above — which openExternal to the OS browser — session
 		// links resolve INTERNALLY via onSessionLinkActivate. The resolver only
 		// yields tokens that name a currently-known session, so unrelated
-		// hyphen-number tokens (a Jira key like STAR-2272) are never linkified.
+		// hyphen-number tokens (a Jira key like PROJ-2272) are never linkified.
 		// Session ids are ASCII and short, so a token's string offset on a line maps
 		// 1:1 to its cell column (no wide-char remap) and we do not stitch wrapped
 		// rows.

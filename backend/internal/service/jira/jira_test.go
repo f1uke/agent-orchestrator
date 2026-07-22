@@ -387,10 +387,10 @@ func TestBuildJQL_ExactKey(t *testing.T) {
 
 func TestBuildJQL_TextSearch(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: "eligible"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: "available"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.gotJQL, `summary ~ "eligible*"`) || !strings.Contains(s.gotJQL, `text ~ "eligible*"`) {
+	if !strings.Contains(s.gotJQL, `summary ~ "available*"`) || !strings.Contains(s.gotJQL, `text ~ "available*"`) {
 		t.Errorf("jql = %q, want a summary/text contains-search", s.gotJQL)
 	}
 	if !strings.HasSuffix(s.gotJQL, "ORDER BY updated DESC") {
@@ -426,30 +426,30 @@ func TestBuildJQL_BareTokenNotAProjectFallsBackToText(t *testing.T) {
 
 func TestBuildJQL_ExplicitProjectAndText(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "DEMO", Text: "coupon"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "DEMO", Text: "item"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(s.gotJQL, `project = "DEMO" AND (summary ~ "coupon*"`) {
+	if !strings.HasPrefix(s.gotJQL, `project = "DEMO" AND (summary ~ "item*"`) {
 		t.Errorf("jql = %q, want project-scoped text search", s.gotJQL)
 	}
 }
 
 // --- search-that-actually-finds-things (verified against real Jira) ---------
 //
-// The JQL shapes asserted below were each run against the live Finnomena Jira
-// (project STAR) before being encoded here; see
+// The JQL shapes asserted below were each run against the live Example Org Jira
+// (project PROJ) before being encoded here; see
 // ~/.ao/knowledge/agent-orchestrator/plans/fix-jira-search-partial-match--plan.md
 // for the measured row counts behind every choice.
 
 func TestBuildJQL_BareNumberWithProjectResolvesKey(t *testing.T) {
 	// A bare number can never match prose — an issue's KEY is not part of its
-	// summary text (live: `summary ~ "2271*"` in STAR = 0 rows, while STAR-2271
+	// summary text (live: `summary ~ "2271*"` in PROJ = 0 rows, while PROJ-2271
 	// exists). With a project selected the number is unambiguous, so resolve it.
-	s := &fakeSearcher{issues: []jiraadapter.IssueSummary{{Key: "STAR-2271"}}}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Text: "2271"}); err != nil {
+	s := &fakeSearcher{issues: []jiraadapter.IssueSummary{{Key: "PROJ-2271"}}}
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Text: "2271"}); err != nil {
 		t.Fatal(err)
 	}
-	if s.gotJQL != `key = "STAR-2271"` {
+	if s.gotJQL != `key = "PROJ-2271"` {
 		t.Errorf("jql = %q, want an exact key lookup from project + number", s.gotJQL)
 	}
 }
@@ -471,15 +471,15 @@ func TestBuildJQL_BareNumberWithoutProjectStaysTextSearch(t *testing.T) {
 
 func TestBuildJQL_HyphenatedTextSplitsIntoTerms(t *testing.T) {
 	// The `~` operand goes to Jira's Lucene-style text parser, where `-` means NOT:
-	// `summary ~ "e-coupon*"` is live-confirmed 0 rows against STAR even though
-	// "App - E-Coupon 3.0 …" exists. Backslash-escaping alone does NOT fix it —
-	// a wildcard term bypasses the analyzer, and the index holds `e` + `coupon`,
-	// never the single token `e-coupon`. Split into terms, wildcard the last.
+	// `summary ~ "gift-card*"` is live-confirmed 0 rows even though "App - Gift-Card
+	// 3.0 …" exists. Backslash-escaping alone does NOT fix it — a wildcard term
+	// bypasses the analyzer, and the index holds `gift` + `card`, never the single
+	// token `gift-card`. Split into terms, wildcard the last.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Text: "e-coupon"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Text: "gift-card"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.gotJQL, `summary ~ "e coupon*"`) {
+	if !strings.Contains(s.gotJQL, `summary ~ "gift card*"`) {
 		t.Errorf("jql = %q, want the hyphen split into ANDed terms with a trailing wildcard", s.gotJQL)
 	}
 	if strings.Contains(s.gotJQL, "-") {
@@ -491,7 +491,7 @@ func TestBuildJQL_OperatorCharactersNeutralised(t *testing.T) {
 	// Real titles are full of Lucene operators. Every one of
 	// `+ - && || ! ( ) { } [ ] ^ " ~ * ? : \ /` must stop being an operator.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: `(E-Coupon) 3.0 ~ "x" +y !z`}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: `(Gift-Card) 3.0 ~ "x" +y !z`}); err != nil {
 		t.Fatal(err)
 	}
 	for _, op := range []string{"(", ")", "~ \"x", "+", "!", "-", "?", "^", "[", "]", "{", "}", ":", "/", `\`} {
@@ -506,20 +506,20 @@ func TestBuildJQL_OperatorCharactersNeutralised(t *testing.T) {
 			t.Errorf("operand %q still contains the operator %q", operand, op)
 		}
 	}
-	if !strings.Contains(s.gotJQL, `summary ~ "e coupon 3 0 x y z*"`) {
+	if !strings.Contains(s.gotJQL, `summary ~ "gift card 3 0 x y z*"`) {
 		t.Errorf("jql = %q, want operators reduced to ANDed terms", s.gotJQL)
 	}
 }
 
 func TestBuildJQL_UppercaseBooleanWordsAreNotOperators(t *testing.T) {
-	// Live: `summary ~ "NOT coupon*"` returns rows that do NOT contain "coupon" —
+	// Live: `summary ~ "NOT item*"` returns rows that do NOT contain "item" —
 	// Jira honours the uppercase word as a negation. Lowercasing neutralises it,
 	// and costs nothing because text matching is case-insensitive.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: "NOT coupon"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Text: "NOT item"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.gotJQL, `summary ~ "not coupon*"`) {
+	if !strings.Contains(s.gotJQL, `summary ~ "not item*"`) {
 		t.Errorf("jql = %q, want the boolean word lowercased into a plain term", s.gotJQL)
 	}
 }
@@ -527,13 +527,13 @@ func TestBuildJQL_UppercaseBooleanWordsAreNotOperators(t *testing.T) {
 func TestBuildJQL_AllOperatorTextDropsTextClause(t *testing.T) {
 	// Input with no searchable characters must not emit a bare `~ "*"`.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Text: "---"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Text: "---"}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(s.gotJQL, "summary ~") {
 		t.Errorf("jql = %q, want the text clause dropped entirely", s.gotJQL)
 	}
-	if s.gotJQL != `project = "STAR" ORDER BY updated DESC` {
+	if s.gotJQL != `project = "PROJ" ORDER BY updated DESC` {
 		t.Errorf("jql = %q, want a plain project scope", s.gotJQL)
 	}
 }
@@ -559,20 +559,20 @@ func TestBuildJQL_AssigneeFilterServerSide(t *testing.T) {
 	// The assignee (an accountId) is pushed into the JQL so Jira returns all of that
 	// person's issues — not just those in the most-recent page the client can pare.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Assignee: "6192fbf4d2e64c00718e026d"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Assignee: "6192fbf4d2e64c00718e026d"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(s.gotJQL, `assignee = "6192fbf4d2e64c00718e026d"`) {
 		t.Errorf("jql = %q, want a server-side assignee clause", s.gotJQL)
 	}
-	if !strings.HasPrefix(s.gotJQL, `project = "STAR" AND assignee =`) {
+	if !strings.HasPrefix(s.gotJQL, `project = "PROJ" AND assignee =`) {
 		t.Errorf("jql = %q, want project AND assignee", s.gotJQL)
 	}
 }
 
 func TestBuildJQL_UnassignedSentinel(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Assignee: "unassigned"}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Assignee: "unassigned"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(s.gotJQL, "assignee is EMPTY") {
@@ -585,7 +585,7 @@ func TestBuildJQL_UnassignedSentinel(t *testing.T) {
 
 func TestBuildJQL_TypeFilterServerSide(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Types: []string{"Sub-task", "Subtask"}}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Types: []string{"Sub-task", "Subtask"}}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(s.gotJQL, `issuetype in ("Sub-task", "Subtask")`) {
@@ -595,11 +595,11 @@ func TestBuildJQL_TypeFilterServerSide(t *testing.T) {
 
 func TestBuildJQL_AssigneeAndTypeCombine(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Assignee: "acc-9", Types: []string{"Bug"}}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Assignee: "acc-9", Types: []string{"Bug"}}); err != nil {
 		t.Fatal(err)
 	}
 	// project + assignee + issuetype are all ANDed, newest-first.
-	if !strings.HasPrefix(s.gotJQL, `project = "STAR" AND assignee = "acc-9" AND issuetype in ("Bug")`) {
+	if !strings.HasPrefix(s.gotJQL, `project = "PROJ" AND assignee = "acc-9" AND issuetype in ("Bug")`) {
 		t.Errorf("jql = %q, want project AND assignee AND issuetype", s.gotJQL)
 	}
 	if !strings.HasSuffix(s.gotJQL, "ORDER BY updated DESC") {
@@ -610,7 +610,7 @@ func TestBuildJQL_AssigneeAndTypeCombine(t *testing.T) {
 func TestBuildJQL_EmptyTypesAllTypes(t *testing.T) {
 	// "All types" (no names) must not emit an issuetype clause.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", Types: []string{"", "  "}}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", Types: []string{"", "  "}}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(s.gotJQL, "issuetype") {
@@ -631,7 +631,7 @@ func TestBuildJQL_ExactKeyIgnoresFilters(t *testing.T) {
 
 func TestBuildJQL_HideDone(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", HideDone: true}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", HideDone: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(s.gotJQL, "statusCategory != Done") {
@@ -645,7 +645,7 @@ func TestBuildJQL_HideDone(t *testing.T) {
 
 func TestBuildJQL_ActiveSprintOnly(t *testing.T) {
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", ActiveSprint: true}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", ActiveSprint: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(s.gotJQL, "sprint in openSprints()") {
@@ -656,11 +656,11 @@ func TestBuildJQL_ActiveSprintOnly(t *testing.T) {
 func TestBuildJQL_HideDoneAndActiveSprintCombine(t *testing.T) {
 	s := &fakeSearcher{}
 	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{
-		Project: "STAR", Assignee: "acc-9", HideDone: true, ActiveSprint: true,
+		Project: "PROJ", Assignee: "acc-9", HideDone: true, ActiveSprint: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`project = "STAR"`, `assignee = "acc-9"`, "statusCategory != Done", "sprint in openSprints()"} {
+	for _, want := range []string{`project = "PROJ"`, `assignee = "acc-9"`, "statusCategory != Done", "sprint in openSprints()"} {
 		if !strings.Contains(s.gotJQL, want) {
 			t.Errorf("jql = %q, missing %q", s.gotJQL, want)
 		}
@@ -673,7 +673,7 @@ func TestBuildJQL_HideDoneAndActiveSprintCombine(t *testing.T) {
 func TestBuildJQL_AdvancedJQLReplacesEverything(t *testing.T) {
 	// Advanced JQL drives the search verbatim; the structured fields are ignored.
 	s := &fakeSearcher{}
-	raw := `project = STAR AND labels = urgent ORDER BY created ASC`
+	raw := `project = PROJ AND labels = urgent ORDER BY created ASC`
 	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{
 		Project: "DEMO", Text: "ignored", Assignee: "acc-9", Types: []string{"Bug"}, HideDone: true, JQL: raw,
 	}); err != nil {
@@ -690,10 +690,10 @@ func TestBuildJQL_AdvancedJQLReplacesEverything(t *testing.T) {
 func TestBuildJQL_BlankAdvancedJQLFallsBackToStructured(t *testing.T) {
 	// Whitespace-only advanced JQL is not "advanced" — use the structured query.
 	s := &fakeSearcher{}
-	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "STAR", JQL: "   "}); err != nil {
+	if _, err := newSearchSvc(s).Search(context.Background(), SearchParams{Project: "PROJ", JQL: "   "}); err != nil {
 		t.Fatal(err)
 	}
-	if s.gotJQL != `project = "STAR" ORDER BY updated DESC` {
+	if s.gotJQL != `project = "PROJ" ORDER BY updated DESC` {
 		t.Errorf("jql = %q, want the structured project scope", s.gotJQL)
 	}
 }

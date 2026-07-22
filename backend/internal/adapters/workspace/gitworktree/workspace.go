@@ -1141,7 +1141,7 @@ func (w *Workspace) managedPath(cfg ports.WorkspaceConfig) (string, error) {
 		path = filepath.Join(w.managedRoot, string(cfg.ProjectID), "orchestrator", prefix+"-orchestrator")
 	} else {
 		// A worker's worktree directory mirrors its branch so the folder is
-		// recognisable (e.g. branch "feature/STAR-2271-x" -> ".../feature/STAR-2271-x").
+		// recognisable (e.g. branch "feature/PROJ-2271-x" -> ".../feature/PROJ-2271-x").
 		segs, err := branchPathSegments(cfg.Branch)
 		if err != nil {
 			return "", err

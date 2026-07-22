@@ -17,7 +17,7 @@
 - After frontend build/test, revert incidental `routeTree.gen.ts` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` churn — do not commit it.
 - **Read-only phase:** NO reply/resolve/send-to-worker and NO change to the auto-nudge here — those are Phases 3–4. This phase only reads and displays.
 - Git subprocess safety: pass the worktree via `cmd.Dir` (or `-C <path>`), pass refs/paths as separate args (never shell-interpolated), and validate the file path with `preview.ConfinedPath` before use.
-- Commit after each task. Branch: `bugfix/STAR-2272-gitlab-mr-detection` (PR #36).
+- Commit after each task. Branch: `bugfix/PROJ-2272-gitlab-mr-detection` (PR #36).
 
 ---
 

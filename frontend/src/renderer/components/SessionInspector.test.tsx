@@ -702,7 +702,7 @@ describe("SessionInspector target branch", () => {
 	});
 
 	// Matching must be substring, not prefix. Branch names carry their meaning in
-	// the MIDDLE — "hotfix/login-crash", "feature/STAR-2273-coupon" — so a
+	// the MIDDLE — "hotfix/login-crash", "feature/PROJ-2273-coupon" — so a
 	// prefix-only filter would force the human to recall the namespace before
 	// they can find anything.
 	it("matches in the middle of a branch name, not just the start", async () => {

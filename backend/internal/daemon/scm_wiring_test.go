@@ -10,9 +10,9 @@ import (
 // its empty-env fast path (AO_GITLAB_HOST unset/blank must disable GitLab
 // wiring entirely).
 func TestGitlabHostsParsing(t *testing.T) {
-	t.Setenv("AO_GITLAB_HOST", " gitlab.finnomena.com , gl.example.com ")
+	t.Setenv("AO_GITLAB_HOST", " gitlab.example.com , gl.example.com ")
 	got := gitlabHosts()
-	if len(got) != 2 || got[0] != "gitlab.finnomena.com" || got[1] != "gl.example.com" {
+	if len(got) != 2 || got[0] != "gitlab.example.com" || got[1] != "gl.example.com" {
 		t.Fatalf("hosts=%v", got)
 	}
 

@@ -2,7 +2,7 @@
 
 Date: 2026-07-09
 Status: Approved for planning
-Branch/PR: `bugfix/STAR-2272-gitlab-mr-detection` (PR #36)
+Branch/PR: `bugfix/PROJ-2272-gitlab-mr-detection` (PR #36)
 
 ## Summary
 

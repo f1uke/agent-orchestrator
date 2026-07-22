@@ -34,7 +34,7 @@ describe("splitBodyRuns", () => {
 describe("splitNoteRuns", () => {
 	it("renders a GitLab system note's markdown link as a link run with an absolute href", () => {
 		const origin = "https://gitlab.com";
-		const rel = "/finnomena/mobility/nter-ios-app/-/merge_requests/3028/diffs?diff_id=177522";
+		const rel = "/example-org/apps/demo-ios-app/-/merge_requests/3028/diffs?diff_id=177522";
 		const runs = splitNoteRuns(`changed this line in [version 6 of the diff](${rel})`, origin);
 		expect(runs).toEqual([
 			{ text: "changed this line in " },

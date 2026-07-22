@@ -671,7 +671,7 @@ const maxMRPipelinePages = 20
 // separately id-descending partitions — the MR's own pipelines
 // (merge_request_event/detached/merged_result) first, then the source branch's
 // `push` pipelines — so a HIGHER-id push pipeline sorts BELOW every lower-id
-// merge_request_event row. Confirmed against the real API (gitlab.finnomena.com):
+// merge_request_event row. Confirmed against the real API (gitlab.example.com):
 // MR !2986 lists push pipelines 177164/177162/177160 after merge_request_event
 // pipelines 176858/176825/176804, and kratos-ui MR !1 lists 15
 // merge_request_event rows then 15 push rows.
@@ -693,7 +693,7 @@ func (p *Provider) fetchAllMRPipelines(ctx context.Context, mrPath string) ([]re
 
 // fetchAllPages walks a GitLab offset-paginated list endpoint and returns every
 // row. GitLab caps per_page at 100 and defaults it to an INSTANCE SETTING (15 on
-// gitlab.finnomena.com, not the 20 the docs quote), so no list fetch may assume
+// gitlab.example.com, not the 20 the docs quote), so no list fetch may assume
 // one page is enough — see the three callers' comments for what each silently
 // dropped when it did. Offset pagination guarantees a page shorter than perPage
 // is the last one; maxPages bounds the loop as a safety net against a server that

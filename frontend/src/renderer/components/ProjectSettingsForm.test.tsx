@@ -753,7 +753,7 @@ describe("ProjectSettingsForm", () => {
 			name: "Project One",
 			kind: "single_repo",
 			path: "/repo/project-one",
-			repo: "git@gitlab.finnomena.com:group/sub/project-one.git",
+			repo: "git@gitlab.example.com:group/sub/project-one.git",
 			defaultBranch: "main",
 			config: {
 				worker: { agent: "codex" },
@@ -769,7 +769,7 @@ describe("ProjectSettingsForm", () => {
 		// the preview links to the self-hosted host, not github.com.
 		expect(screen.getByRole("link", { name: "group/sub/project-one" })).toHaveAttribute(
 			"href",
-			"https://gitlab.finnomena.com/group/sub/project-one",
+			"https://gitlab.example.com/group/sub/project-one",
 		);
 		await userEvent.type(screen.getByLabelText("Assignee"), "octocat");
 

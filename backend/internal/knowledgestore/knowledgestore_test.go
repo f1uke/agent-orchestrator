@@ -9,8 +9,8 @@ import (
 )
 
 func TestPlansDir_UnderDataDirKnowledge(t *testing.T) {
-	got := PlansDir("/home/u/.ao", "nter-ios-app")
-	want := filepath.Join("/home/u/.ao", "knowledge", "nter-ios-app", "plans")
+	got := PlansDir("/home/u/.ao", "demo-ios-app")
+	want := filepath.Join("/home/u/.ao", "knowledge", "demo-ios-app", "plans")
 	if got != want {
 		t.Fatalf("PlansDir = %q, want %q", got, want)
 	}
