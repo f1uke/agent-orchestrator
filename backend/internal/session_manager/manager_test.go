@@ -1367,11 +1367,12 @@ func TestRestore_RefusesLiveSession(t *testing.T) {
 	}
 }
 
-// TestRestart_KillsLiveSessionThenRestores: Restart is the atomic
-// kill-then-restore a live session uses to pick up a freshly recomputed system
-// prompt without losing its conversation. The old runtime/workspace are torn
-// down and the session relaunches under the SAME id, marked live again.
-func TestRestart_KillsLiveSessionThenRestores(t *testing.T) {
+// TestRestart_RecyclesLiveSessionRuntimeInPlace: Restart is how a live session
+// picks up a freshly recomputed system prompt (or a newly installed agent
+// binary) without losing its conversation. It recycles ONLY the runtime — the
+// workspace is never torn down, because the agent's uncommitted work lives there
+// — and the session relaunches under the SAME id, marked live again.
+func TestRestart_RecyclesLiveSessionRuntimeInPlace(t *testing.T) {
 	m, st, rt, ws := newManager()
 	st.sessions["mer-1"] = domain.SessionRecord{
 		ID: "mer-1", ProjectID: "mer",
@@ -1383,8 +1384,8 @@ func TestRestart_KillsLiveSessionThenRestores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
-	if rt.destroyed != 1 || ws.destroyed != 1 {
-		t.Fatalf("kill leg should tear down runtime+workspace, got runtime=%d workspace=%d", rt.destroyed, ws.destroyed)
+	if rt.destroyed != 1 || ws.destroyed != 0 {
+		t.Fatalf("restart should recycle the runtime and leave the workspace alone, got runtime=%d workspace=%d", rt.destroyed, ws.destroyed)
 	}
 	if rt.created != 1 {
 		t.Fatalf("restore leg should relaunch, runtime created = %d, want 1", rt.created)
