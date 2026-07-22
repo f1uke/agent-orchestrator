@@ -43,6 +43,12 @@ export const PROP_COLOURS = {
 	confettiC: "#fabad1",
 	/** The muted "nothing is coming" dots. Deliberately low-energy, still legible. */
 	quiet: "#cfcad8",
+	/**
+	 * Bubble text colours. Measured against the bubble's OWN `paper` fill, never
+	 * against the wallpaper — that is the point of it being a self-contained card.
+	 */
+	bubbleMuted: "#5b5566",
+	bubbleAlert: "#a3341f",
 } as const;
 
 function channel(value: number): number {

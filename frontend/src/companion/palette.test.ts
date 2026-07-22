@@ -21,7 +21,12 @@ function exposedColours(): Array<{ what: string; colour: string }> {
 		{ what: `${member.name} hat`, colour: member.hatFill },
 		{ what: `${member.name} hat trim`, colour: member.hatTrim },
 	]);
-	const fromProps = Object.entries(PROP_COLOURS).map(([what, colour]) => ({ what: `prop ${what}`, colour }));
+	// Bubble TEXT is drawn on the bubble's own fill, never on the wallpaper, so it is
+	// judged against that fill instead (see Bubble.test.tsx). Sweeping it here would
+	// demand it be light enough to survive a dark desktop, i.e. unreadable on paper.
+	const fromProps = Object.entries(PROP_COLOURS)
+		.filter(([what]) => !what.startsWith("bubble"))
+		.map(([what, colour]) => ({ what: `prop ${what}`, colour }));
 	return [...fromCast, ...fromProps];
 }
 

@@ -10,6 +10,7 @@ import { SettingsGroup } from "./SettingsGroup";
 import { SettingsField } from "./SettingsField";
 import { SettingEditorRow } from "./SettingEditorRow";
 import { CompanionControls } from "./CompanionControls";
+import { CompanionPreview } from "./CompanionPreview";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import type { PromptKind } from "./useGlobalSettingsForm";
@@ -356,6 +357,7 @@ function SystemSection({ form }: { form: GlobalForm }) {
 					sits above the Dock and clicks pass straight through it, except on a character itself.
 				</p>
 				<CompanionControls />
+				<CompanionPreview />
 			</SettingsGroup>
 
 			<SettingsGroup title="Migration">
