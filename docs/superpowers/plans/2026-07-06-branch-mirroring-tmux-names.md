@@ -21,10 +21,12 @@
 ### Task 1: tmux branch-based naming helper
 
 **Files:**
+
 - Modify: `backend/internal/adapters/runtime/tmux/tmux.go` (session-name helpers, ~lines 287–321)
 - Test: `backend/internal/adapters/runtime/tmux/tmux_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `func SessionNameFor(projectID, branch, sessionID string) (string, error)` — branch-based name when `projectID` and `branch` are both non-empty; otherwise falls back to `tmuxSessionName(domain.SessionID(sessionID))` (which errors on an empty session id).
   - `func sanitizeName(raw string, maxLen int) string` — collapses `raw` to `[A-Za-z0-9_-]`, other runs → single `-`, trims dashes, empty → `"session"`, caps at `maxLen`.
@@ -179,6 +181,7 @@ git commit -m "feat(tmux): derive branch-mirroring session name via SessionNameF
 ### Task 2: Carry ProjectID/Branch through RuntimeConfig and name the tmux session with them
 
 **Files:**
+
 - Modify: `backend/internal/ports/outbound.go` (`RuntimeConfig`, ~lines 90–95)
 - Modify: `backend/internal/adapters/runtime/tmux/tmux.go` (`Create`, ~line 105)
 - Modify: `backend/internal/session_manager/manager.go` (two `RuntimeConfig{}` sites, ~lines 323 and 629)
@@ -186,6 +189,7 @@ git commit -m "feat(tmux): derive branch-mirroring session name via SessionNameF
 - Test: `backend/internal/session_manager/manager_test.go`
 
 **Interfaces:**
+
 - Consumes: `SessionNameFor` from Task 1.
 - Produces: `ports.RuntimeConfig` now has `ProjectID domain.ProjectID` and `Branch string`. `tmux.Runtime.Create` names the session via `SessionNameFor(string(cfg.ProjectID), cfg.Branch, string(cfg.SessionID))`.
 
@@ -331,9 +335,11 @@ git commit -m "feat(session): name tmux sessions after their branch"
 ### Task 3: Fix the `ao spawn` attach hint to reuse the branch-based name
 
 **Files:**
+
 - Modify: `backend/internal/cli/spawn.go` (`spawnResult`, ~lines 49–54; attach hint, ~lines 140–145)
 
 **Interfaces:**
+
 - Consumes: `tmux.SessionNameFor` from Task 1; `projectId` and `branch` fields already serialized on the session read model (`domain.SessionRecord.ProjectID`, `SessionView.Branch`).
 - Produces: nothing new.
 

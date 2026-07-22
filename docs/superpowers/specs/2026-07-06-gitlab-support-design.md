@@ -78,15 +78,15 @@ internal/adapters/scm/composite/
 
 The 7 methods of `observe/scm.Provider`:
 
-| Method | GitLab REST v4 | Normalization notes |
-|---|---|---|
-| `ParseRepository(remote)` | derive from remote URL | Support **nested groups** (`group/sub/project`): `SCMRepo.Repo` = full path, `Owner` = everything before last `/`, `Name` = last segment. Project id for API calls = URL-encoded full path. |
-| `ListOpenPRsByRepo` | `GET /projects/:id/merge_requests?state=opened&per_page=...` | `opened`->open, `merged`->merged, `closed`->closed; `draft`/`work_in_progress` -> Draft. `iid` is the MR number. |
-| `RepoPRListGuard` | `If-None-Match` on the MR list | GitLab does not send ETag on every endpoint. When absent, report modified and fetch fully. 304 -> `NotModified`. |
-| `CommitChecksGuard` | `If-None-Match` on pipelines for SHA | Same graceful-fallback rule. |
-| `FetchPullRequests` | `GET /projects/:id/merge_requests/:iid` (+ `.../pipelines`) | Mergeability from `merge_status` (`can_be_merged`/`cannot_be_merged`) + `has_conflicts`; diff stats from `changes_count` / `diff_refs`; branches from `source_branch`/`target_branch`; `sha` -> HeadSHA. |
-| `FetchFailedCheckLogTail` | `.../pipelines/:pid/jobs` then `GET /projects/:id/jobs/:job/trace` | CI summary: `success`->passing, `failed`->failing, `running`/`pending`/`created`->pending, else unknown. Log tail = last 20 lines of trace. `SCMCheckObservation.ProviderID` = job id. |
-| `FetchReviewThreads` | `.../merge_requests/:iid/discussions` (+ `.../approvals`) | discussion -> thread, note -> comment, `resolvable`/`resolved` preserved, `position.new_path`/`new_line` -> Path/Line. Decision derived from approvals (approved when required approvals met). Bot detection from note author. |
+| Method                    | GitLab REST v4                                                     | Normalization notes                                                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ParseRepository(remote)` | derive from remote URL                                             | Support **nested groups** (`group/sub/project`): `SCMRepo.Repo` = full path, `Owner` = everything before last `/`, `Name` = last segment. Project id for API calls = URL-encoded full path.                                    |
+| `ListOpenPRsByRepo`       | `GET /projects/:id/merge_requests?state=opened&per_page=...`       | `opened`->open, `merged`->merged, `closed`->closed; `draft`/`work_in_progress` -> Draft. `iid` is the MR number.                                                                                                               |
+| `RepoPRListGuard`         | `If-None-Match` on the MR list                                     | GitLab does not send ETag on every endpoint. When absent, report modified and fetch fully. 304 -> `NotModified`.                                                                                                               |
+| `CommitChecksGuard`       | `If-None-Match` on pipelines for SHA                               | Same graceful-fallback rule.                                                                                                                                                                                                   |
+| `FetchPullRequests`       | `GET /projects/:id/merge_requests/:iid` (+ `.../pipelines`)        | Mergeability from `merge_status` (`can_be_merged`/`cannot_be_merged`) + `has_conflicts`; diff stats from `changes_count` / `diff_refs`; branches from `source_branch`/`target_branch`; `sha` -> HeadSHA.                       |
+| `FetchFailedCheckLogTail` | `.../pipelines/:pid/jobs` then `GET /projects/:id/jobs/:job/trace` | CI summary: `success`->passing, `failed`->failing, `running`/`pending`/`created`->pending, else unknown. Log tail = last 20 lines of trace. `SCMCheckObservation.ProviderID` = job id.                                         |
+| `FetchReviewThreads`      | `.../merge_requests/:iid/discussions` (+ `.../approvals`)          | discussion -> thread, note -> comment, `resolvable`/`resolved` preserved, `position.new_path`/`new_line` -> Path/Line. Decision derived from approvals (approved when required approvals met). Bot detection from note author. |
 
 ### GitHub differences to absorb in the adapter
 
@@ -98,11 +98,11 @@ The 7 methods of `observe/scm.Provider`:
 
 ## Tracker (`ports.Tracker`) -> GitLab issues
 
-| Method | GitLab REST v4 |
-|---|---|
-| `Get` | `GET /projects/:id/issues/:iid` -> `domain.Issue` |
-| `List` | `GET /projects/:id/issues?...` with the `domain.ListFilter` mapped to GitLab query params |
-| `Preflight` | cheap authenticated call (e.g. `GET /user`) to validate the credential |
+| Method      | GitLab REST v4                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `Get`       | `GET /projects/:id/issues/:iid` -> `domain.Issue`                                         |
+| `List`      | `GET /projects/:id/issues?...` with the `domain.ListFilter` mapped to GitLab query params |
+| `Preflight` | cheap authenticated call (e.g. `GET /user`) to validate the credential                    |
 
 Issue IDs namespace as `gitlab:<native>` via the existing scheme in
 `trackerintake/observer.go` (no collision with `github:<native>`).
@@ -158,8 +158,7 @@ JSON fixtures for MR / pipeline / jobs / discussions / issues. No real network
 - Composite routing: GitLab host -> gitlab provider; other host -> github;
   no GitLab config -> github-only, unchanged behavior.
 - `GlabTokenSource` parser: token extracted from a captured
-  `glab auth status --show-token` sample; env precedence over CLI; invalidate on
-  401.
+  `glab auth status --show-token` sample; env precedence over CLI; invalidate on 401.
 - Tracker: `Get`/`List`/`Preflight` against the fake server; multi-resolver
   picks the right adapter per provider.
 

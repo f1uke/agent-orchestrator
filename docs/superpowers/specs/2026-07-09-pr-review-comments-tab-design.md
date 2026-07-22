@@ -8,7 +8,7 @@ Branch/PR: `bugfix/PROJ-2272-gitlab-mr-detection` (PR #36)
 
 Replace AO's automatic "unresolved review comment → nudge the worker" behavior
 with a **Comments** tab in the session inspector rail where the human reads
-review threads GitHub-style, replies, resolves, and *manually* dispatches them to
+review threads GitHub-style, replies, resolves, and _manually_ dispatches them to
 the worker with a default (or customized) prompt. Additionally, make every
 runtime nudge message AO sends into a worker's pane editable from the global
 Settings page.
@@ -38,14 +38,14 @@ templating layer.
 - No creating comments on arbitrary lines — only replying to existing threads.
 - No editing/deleting others' comments.
 - No new resolved-thread history beyond what the observer already persists.
-- No change to how review *decision* / board status is computed.
+- No change to how review _decision_ / board status is computed.
 
 ## Background: what already exists (reused, not rebuilt)
 
 - **Persistence.** `pr_review_threads` (`thread_id, path, line, resolved, is_bot,
-  semantic_hash, updated_at`) and `pr_comment` (`comment_id, author, file, line,
-  body, resolved, created_at, thread_id, url, is_bot`) hold every thread/comment
-  for **both** GitHub and GitLab. The observer writes *all* threads (resolved +
+semantic_hash, updated_at`) and `pr_comment` (`comment_id, author, file, line,
+body, resolved, created_at, thread_id, url, is_bot`) hold every thread/comment
+  for **both** GitHub and GitLab. The observer writes _all_ threads (resolved +
   unresolved, human + bot) with flags — `observer.go` ~1062–1074. No schema
   change is needed to display threads.
 - **Thread identifiers usable for writes.** GitHub thread `id` is the GraphQL
@@ -102,7 +102,7 @@ templates.
    merge-conflict, and AO-internal-reviewer nudges stay automatic.
 3. **Resolve:** included in v1 (build the thread write-path for reply + resolve;
    implement the `resolve-comments` stub).
-4. **Editable templates:** *all* runtime nudge templates editable via a new
+4. **Editable templates:** _all_ runtime nudge templates editable via a new
    global Settings "Message templates" section.
 
 ## Architecture
@@ -120,33 +120,33 @@ Response shape (illustrative):
 
 ```jsonc
 {
-  "prs": [
-    {
-      "prUrl": "https://github.com/.../pull/36",
-      "provider": "github",
-      "number": 36,
-      "threads": [
-        {
-          "threadId": "PRRT_kw...",
-          "path": "backend/internal/adapters/scm/gitlab/observer_provider_test.go",
-          "line": 172,
-          "resolved": false,
-          "isBot": false,
-          "comments": [
-            {
-              "id": "PRRC_kw...",
-              "author": "f1uke",
-              "body": "remove this comment",
-              "url": "https://github.com/.../#discussion_r...",
-              "resolved": false,
-              "isBot": false,
-              "createdAt": "2026-07-09T10:00:00Z"
-            }
-          ]
-        }
-      ]
-    }
-  ]
+	"prs": [
+		{
+			"prUrl": "https://github.com/.../pull/36",
+			"provider": "github",
+			"number": 36,
+			"threads": [
+				{
+					"threadId": "PRRT_kw...",
+					"path": "backend/internal/adapters/scm/gitlab/observer_provider_test.go",
+					"line": 172,
+					"resolved": false,
+					"isBot": false,
+					"comments": [
+						{
+							"id": "PRRC_kw...",
+							"author": "f1uke",
+							"body": "remove this comment",
+							"url": "https://github.com/.../#discussion_r...",
+							"resolved": false,
+							"isBot": false,
+							"createdAt": "2026-07-09T10:00:00Z",
+						},
+					],
+				},
+			],
+		},
+	],
 }
 ```
 
@@ -249,7 +249,7 @@ A new small templating layer sitting beside `internal/prompts`.
   `PUT /api/v1/settings/message-templates/{name}`,
   `DELETE /api/v1/settings/message-templates/{name}` (parallel to
   `settings/prompts`). `GET` returns each template's `{name, default, custom,
-  placeholders}`.
+placeholders}`.
 - **Frontend:** a **Message templates** section in `GlobalSettingsForm.tsx`
   reusing the `SystemPromptsSection` editor pattern (textarea, default preview,
   reset-to-default), listing each template with its documented placeholders.
@@ -258,14 +258,14 @@ A new small templating layer sitting beside `internal/prompts`.
 
 Templates and their placeholders (Go `text/template`):
 
-| Name | Default (abridged) | Placeholders |
-|------|--------------------|--------------|
-| `review-comment-dispatch` | `A reviewer left feedback on your PR. Address it and push.\n\n{{.Comments}}` | `.Comments` |
-| `ci-failing` | `CI is failing on your PR. Review the output below and push a fix.{{if .LogTail}}\n\nFailing output:\n{{.LogTail}}{{end}}` | `.LogTail` |
-| `merge-conflict` | `Your PR has merge conflicts. Rebase onto the base branch and resolve them.` | (none) |
-| `tracker-bot-comment` | `A bot left a new comment on your tracker issue. Address it and update the session.{{if .Comments}}\n\n{{.Comments}}{{end}}` | `.Comments` |
-| `ao-reviewer-batch` | current `reactions.go:70-85` text, `{{range .Reviews}}…{{end}}` | `.Count`, `.Reviews[]{ PRURL, Verdict, TargetSHA, ReviewID, Body }` |
-| `ao-reviewer-single` | current `reactions.go:209-217` text | `.PRURL`, `.Verdict`, `.ReviewID`, `.Body` |
+| Name                      | Default (abridged)                                                                                                           | Placeholders                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `review-comment-dispatch` | `A reviewer left feedback on your PR. Address it and push.\n\n{{.Comments}}`                                                 | `.Comments`                                                         |
+| `ci-failing`              | `CI is failing on your PR. Review the output below and push a fix.{{if .LogTail}}\n\nFailing output:\n{{.LogTail}}{{end}}`   | `.LogTail`                                                          |
+| `merge-conflict`          | `Your PR has merge conflicts. Rebase onto the base branch and resolve them.`                                                 | (none)                                                              |
+| `tracker-bot-comment`     | `A bot left a new comment on your tracker issue. Address it and update the session.{{if .Comments}}\n\n{{.Comments}}{{end}}` | `.Comments`                                                         |
+| `ao-reviewer-batch`       | current `reactions.go:70-85` text, `{{range .Reviews}}…{{end}}`                                                              | `.Count`, `.Reviews[]{ PRURL, Verdict, TargetSHA, ReviewID, Body }` |
+| `ao-reviewer-single`      | current `reactions.go:209-217` text                                                                                          | `.PRURL`, `.Verdict`, `.ReviewID`, `.Body`                          |
 
 The user's optional `note` in send-to-worker is appended by the endpoint after
 rendering (not a template placeholder) to keep the template simple.
@@ -323,6 +323,7 @@ reactions.go nudges ──render template (override|default)──> messenger �
 ## Testing (TDD)
 
 Backend (Go, table/httptest style already used in the repo):
+
 - `ReplyToThread` / `ResolveThread` for GitHub (fake GraphQL server) and GitLab
   (fake REST server): correct endpoint, payload, error mapping.
 - Read service: groups threads by PR; includes resolved with flags.
@@ -339,6 +340,7 @@ Backend (Go, table/httptest style already used in the repo):
   tracker/AO-reviewer still fire and now render via templates.
 
 Frontend (vitest + testing-library, mocked API, `VITE_NO_ELECTRON` mock path):
+
 - CommentsView renders threads/hunks; expand loads full file.
 - Reply submits and optimistically appends.
 - Resolve calls endpoint and collapses the thread.

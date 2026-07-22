@@ -24,11 +24,13 @@
 ### Task 1: `OneShotNamer` port + claude-code adapter
 
 **Files:**
+
 - Modify: `backend/internal/ports/agent.go`
 - Modify: `backend/internal/adapters/agent/claudecode/claudecode.go`
 - Test: `backend/internal/adapters/agent/claudecode/claudecode_test.go`
 
 **Interfaces:**
+
 - Produces: `ports.OneShotNamer` interface; `*claudecode.Provider` implements `OneShotArgv(ctx, prompt) (argv []string, ok bool, err error)`.
 
 - [ ] **Step 1: Write the failing test** in `claudecode_test.go`
@@ -100,6 +102,7 @@ Expected: PASS (or SKIP if no claude binary — the compile-time `var namer port
 - [ ] **Step 6: Build + commit**
 
 Run: `cd backend && go build ./...`
+
 ```bash
 git add backend/internal/ports/agent.go backend/internal/adapters/agent/claudecode/
 git commit -m "feat(agent): add OneShotNamer port and claude-code claude -p impl"
@@ -110,10 +113,12 @@ git commit -m "feat(agent): add OneShotNamer port and claude-code claude -p impl
 ### Task 2: Pure branch-name helpers
 
 **Files:**
+
 - Create: `backend/internal/session_manager/branchname.go`
 - Test: `backend/internal/session_manager/branchname_test.go`
 
 **Interfaces:**
+
 - Produces (all in `package session_manager`):
   - `func extractJiraKey(texts ...string) string`
   - `func buildNamingPrompt(title, brief, jiraKeyHint string) string`
@@ -337,12 +342,14 @@ git commit -m "feat(session): add gitflow branch-name helpers (extract/sanitize/
 ### Task 3: Manager generation + wiring + `SpawnConfig.AutoNameBranch`
 
 **Files:**
+
 - Modify: `backend/internal/ports/session.go`
 - Modify: `backend/internal/session_manager/branchname.go` (add manager methods)
 - Modify: `backend/internal/session_manager/manager.go` (~L225-228)
 - Test: `backend/internal/session_manager/manager_test.go` (or a new `branchname_manager_test.go`)
 
 **Interfaces:**
+
 - Consumes: `ports.OneShotNamer` (Task 1); `extractJiraKey`, `buildNamingPrompt`, `sanitizeBranchName`, `ensureUniqueBranch` (Task 2).
 - Produces: `SpawnConfig.AutoNameBranch bool`; `(m *Manager) generateBranchName(ctx, agent ports.Agent, cfg ports.SpawnConfig, project domain.ProjectRecord) (string, bool)`; `(m *Manager) existingBranchNames(ctx, project domain.ProjectRecord) map[string]bool`.
 
@@ -355,6 +362,7 @@ git commit -m "feat(session): add gitflow branch-name helpers (extract/sanitize/
 	// back to the default name.
 	AutoNameBranch bool
 ```
+
 (Add inside the `SpawnConfig` struct, after `Branch`/`BaseBranch`.)
 
 - [ ] **Step 2: Write the failing manager test**
@@ -523,12 +531,14 @@ git commit -m "feat(session): generate gitflow branch name via session agent at 
 ### Task 4: HTTP request field + codegen
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go`
 - Modify: the create-session controller that maps the request DTO to `ports.SpawnConfig` (same file/handler that already maps `Branch`/`BaseBranch`)
 - Regenerate: `openapi.yaml`, `frontend/src/api/schema.ts`
 - Test: `backend/internal/httpd/controllers/*_test.go` (extend the existing create-session mapping test if present)
 
 **Interfaces:**
+
 - Consumes: `ports.SpawnConfig.AutoNameBranch` (Task 3).
 - Produces: request JSON field `autoNameBranch` mapped into `SpawnConfig`.
 
@@ -550,6 +560,7 @@ git commit -m "feat(session): generate gitflow branch name via session agent at 
 	// given a request body with "autoNameBranch": true, the SpawnConfig passed to
 	// the fake service has AutoNameBranch == true.
 ```
+
 If no such test exists, add a minimal one following the nearest existing create-session handler test.
 
 - [ ] **Step 4: Regenerate the API**
@@ -574,10 +585,12 @@ git commit -m "feat(api): add autoNameBranch to create-session request"
 ### Task 5: NewTaskDialog — full-width layout + opt-in flag
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/NewTaskDialog.tsx`
 - Test: `frontend/src/renderer/components/NewTaskDialog.test.tsx` (extend if present; else add)
 
 **Interfaces:**
+
 - Consumes: `autoNameBranch` request field (Task 4, via regenerated `schema.ts`).
 
 - [ ] **Step 1: Write/extend the failing test** in `NewTaskDialog.test.tsx`
@@ -587,6 +600,7 @@ git commit -m "feat(api): add autoNameBranch to create-session request"
 // 2. Typed new-branch-name → body has branch set and no autoNameBranch (or false/undefined).
 // 3. Renders three stacked fields in order: "Start from", "New branch name", "Agent".
 ```
+
 Follow the existing test's mocking of `apiClient.POST` to capture the request body. Assert on the captured `body.autoNameBranch` and `body.branch`, and on field order via `getAllByText`/label queries.
 
 - [ ] **Step 2: Run to verify it fails**
@@ -648,8 +662,11 @@ Order in the form: Title → Brief → Start from → New branch name → Agent.
 - [ ] **Step 5: Update the submit label** for the naming wait — where the button renders `"Starting..."`:
 
 ```tsx
-	{isSubmitting ? (branch.trim() === "" ? "Naming branch…" : "Starting…") : "Start task"}
+{
+	isSubmitting ? (branch.trim() === "" ? "Naming branch…" : "Starting…") : "Start task";
+}
 ```
+
 (Keep the existing spinner icon.)
 
 - [ ] **Step 6: Run test + typecheck**

@@ -270,11 +270,11 @@ func TestUnlabelledWorkerFallsBackToPRTitleBeforeSessionID(t *testing.T) {
 func TestRepoShortKeepsTheLastSegment(t *testing.T) {
 	for in, want := range map[string]string{
 		"example-org/apps/demo-ios-app": "demo-ios-app",
-		"f1uke/agent-orchestrator":        "agent-orchestrator",
-		"solo":                            "solo",
-		"trailing/slash/":                 "slash",
-		"":                                "",
-		"   ":                             "",
+		"f1uke/agent-orchestrator":      "agent-orchestrator",
+		"solo":                          "solo",
+		"trailing/slash/":               "slash",
+		"":                              "",
+		"   ":                           "",
 	} {
 		if got := repoShort(in); got != want {
 			t.Errorf("repoShort(%q) = %q, want %q", in, got, want)

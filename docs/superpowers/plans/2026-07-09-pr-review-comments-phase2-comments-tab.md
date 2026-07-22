@@ -24,6 +24,7 @@
 ## File Structure
 
 Created:
+
 - `backend/internal/diffhunk/diffhunk.go` — pure unified-diff hunk parser (`Line`, `Kind`, `HunkForLine`).
 - `backend/internal/diffhunk/diffhunk_test.go`.
 - `backend/internal/service/session/pr_comments.go` — `ListPRCommentThreads` + its return types.
@@ -37,6 +38,7 @@ Created:
 - `frontend/src/renderer/components/DiffHunk.test.tsx`.
 
 Modified:
+
 - `backend/internal/httpd/controllers/dto.go` — response DTOs.
 - `backend/internal/httpd/controllers/sessions.go` — 2 handlers, 2 routes, `SessionService` interface additions.
 - `backend/internal/httpd/controllers/sessions_test.go` — handler tests.
@@ -46,6 +48,7 @@ Modified:
 - Generated (via `npm run api`): `openapi.yaml`, `frontend/src/api/schema.ts`.
 
 Reference facts (verified against the tree):
+
 - `session.Service` already has store methods `GetSession`, `ListPRsBySession`, `ListPRComments`, `ListPRReviewThreads` (interface at `internal/service/session/service.go`). No new store plumbing.
 - `domain.PullRequest`: `URL, Number, Provider, HTMLURL, HeadSHA, BaseSHA, SourceBranch, TargetBranch, Draft, Merged, Closed`.
 - `domain.PullRequestComment`: `ThreadID, ID, Author, File, Line, Body, URL, Resolved, IsBot, CreatedAt`.
@@ -60,10 +63,12 @@ Reference facts (verified against the tree):
 ## Task 1: `internal/diffhunk` — unified-diff hunk parser
 
 **Files:**
+
 - Create: `backend/internal/diffhunk/diffhunk.go`
 - Test: `backend/internal/diffhunk/diffhunk_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `type Kind string` with `KindContext`, `KindAdd`, `KindDel`.
   - `type Line struct { Kind Kind; OldLine int; NewLine int; Text string }` (line numbers 1-based; 0 where N/A — `OldLine==0` for adds, `NewLine==0` for deletions).
@@ -312,10 +317,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 2: `session.Service.ListPRCommentThreads`
 
 **Files:**
+
 - Create: `backend/internal/service/session/pr_comments.go`
 - Test: `backend/internal/service/session/pr_comments_test.go`
 
 **Interfaces:**
+
 - Consumes (already on the service's `store`): `GetSession`, `ListPRsBySession`, `ListPRComments`, `ListPRReviewThreads`.
 - Produces (package `session`):
   - `type PRThreadComment struct { ID, Author, Body, URL string; Resolved, IsBot bool; CreatedAt time.Time }`
@@ -520,6 +527,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 3: Read API — `GET /sessions/{sessionId}/pr-comments`
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go`
 - Modify: `backend/internal/httpd/controllers/sessions.go`
 - Modify: `backend/internal/httpd/apispec/specgen/build.go`
@@ -527,6 +535,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Regenerate: `openapi.yaml`, `frontend/src/api/schema.ts`
 
 **Interfaces:**
+
 - Consumes: `session.Service.ListPRCommentThreads` (Task 2).
 - Produces (wire):
   - DTOs `ListSessionPRCommentsResponse{SessionID; PRs []SessionPRCommentGroup}`, `SessionPRCommentGroup{PrURL, HtmlURL, Provider string; Number int; HeadSHA string; Threads []SessionPRCommentThread}`, `SessionPRCommentThread{ThreadID, Path string; Line int; Resolved, IsBot bool; Comments []SessionPRThreadComment}`, `SessionPRThreadComment{ID, Author, Body, URL string; Resolved, IsBot bool; CreatedAt string}`.
@@ -730,10 +739,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 4: `session.Service.DiffContext` (git-backed)
 
 **Files:**
+
 - Create: `backend/internal/service/session/diff_context.go`
 - Test: `backend/internal/service/session/diff_context_test.go`
 
 **Interfaces:**
+
 - Consumes: `s.store.GetSession` (worktree path), `s.store.ListPRsBySession` (PR base/head SHAs — also scopes authorization to the session's own PRs), `diffhunk.HunkForLine`, `preview.ConfinedPath`, `aoprocess.CommandContext`.
 - Produces:
   - `type DiffContextLine struct { Kind string; OldLine, NewLine int; Text string }` (Kind = "context"/"add"/"del").
@@ -743,6 +754,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   - A package-level indirection `var gitOutput = func(ctx context.Context, dir string, args ...string) ([]byte, error) { ... }` so tests can run against a real temp git repo (default impl shells to git).
 
 Behavior:
+
 - Resolve session → `rec.Metadata.WorkspacePath`; unknown session → NotFound.
 - Find the PR in `ListPRsBySession` by `q.PRURL`; not found → NotFound (`PR_NOT_FOUND`) — this both fetches SHAs and enforces the PR belongs to the session.
 - Validate `q.Path` via `preview.ConfinedPath(workspacePath, q.Path)`; invalid → `Available:false`.
@@ -984,10 +996,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 5: Diff-context API — `GET /sessions/{sessionId}/diff-context`
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go`, `sessions.go`, `sessions_test.go`, `apispec/specgen/build.go`
 - Regenerate: `openapi.yaml`, `schema.ts`
 
 **Interfaces:**
+
 - Consumes: `session.Service.DiffContext` (Task 4).
 - Produces: route `GET /api/v1/sessions/{sessionId}/diff-context` (query: `prUrl`, `path`, `line`, `mode`); DTOs `DiffContextResponse{Available bool; Mode, Path string; Lines []DiffContextLineDTO; Truncated bool}`, `DiffContextLineDTO{Kind string; OldLine, NewLine int; Text string}`; `SessionService` gains `DiffContext(ctx, id, sessionsvc.DiffContextQuery) (sessionsvc.DiffContextResult, error)`.
 
@@ -1136,6 +1150,7 @@ Add schemaNames entries for the new named types:
 	"ControllersDiffContextResponse": "DiffContextResponse",
 	"ControllersDiffContextLineDTO":  "DiffContextLineDTO",
 ```
+
 (and `"ControllersDiffContextParams": "DiffContextParams"` only if you kept the params struct.)
 
 - [ ] **Step 4a: Controller test**
@@ -1162,12 +1177,14 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 6: Frontend — Comments tab + thread list (read-only)
 
 **Files:**
+
 - Create: `frontend/src/renderer/hooks/useSessionPRComments.ts`
 - Create: `frontend/src/renderer/components/CommentsView.tsx`
 - Create: `frontend/src/renderer/components/CommentsView.test.tsx`
 - Modify: `frontend/src/renderer/components/SessionInspector.tsx`
 
 **Interfaces:**
+
 - Consumes: generated `apiClient` path `/api/v1/sessions/{sessionId}/pr-comments` (Task 3 regen).
 - Produces: `useSessionPRComments(sessionId)` hook; `CommentsView` component; a new `"comments"` member of `InspectorView`.
 
@@ -1201,13 +1218,35 @@ beforeEach(() => {
 	getMock.mockReset().mockResolvedValue({
 		data: {
 			sessionId: "s1",
-			prs: [{
-				prUrl: "https://gh/pr/1", htmlUrl: "https://gh/pr/1", provider: "github", number: 1, headSha: "abc",
-				threads: [{
-					threadId: "T1", path: "a.go", line: 10, resolved: false, isBot: false,
-					comments: [{ id: "C1", author: "alice", body: "please fix", url: "", resolved: false, isBot: false, createdAt: "2026-07-09T10:00:00Z" }],
-				}],
-			}],
+			prs: [
+				{
+					prUrl: "https://gh/pr/1",
+					htmlUrl: "https://gh/pr/1",
+					provider: "github",
+					number: 1,
+					headSha: "abc",
+					threads: [
+						{
+							threadId: "T1",
+							path: "a.go",
+							line: 10,
+							resolved: false,
+							isBot: false,
+							comments: [
+								{
+									id: "C1",
+									author: "alice",
+									body: "please fix",
+									url: "",
+									resolved: false,
+									isBot: false,
+									createdAt: "2026-07-09T10:00:00Z",
+								},
+							],
+						},
+					],
+				},
+			],
 		},
 		error: undefined,
 	});
@@ -1304,9 +1343,7 @@ function ThreadCard({ thread }: { thread: Thread }) {
 			<div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
 				<span className="font-mono text-[11.5px] text-foreground">{thread.path}</span>
 				<span className="text-[11px] text-muted-foreground">:{thread.line}</span>
-				{thread.resolved && (
-					<span className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-success">Resolved</span>
-				)}
+				{thread.resolved && <span className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-success">Resolved</span>}
 			</div>
 			<div className="flex flex-col gap-2 px-3 py-2">
 				{thread.comments.map((c) => (
@@ -1347,11 +1384,13 @@ Expected: PASS.
 In `frontend/src/renderer/components/SessionInspector.tsx`:
 
 Change the `InspectorView` type:
+
 ```tsx
 export type InspectorView = "summary" | "reviews" | "comments" | "browser";
 ```
 
 Add a `VIEWS` entry (after the `reviews` entry) — reuse a message-square style icon:
+
 ```tsx
 	{
 		id: "comments",
@@ -1365,11 +1404,15 @@ Add a `VIEWS` entry (after the `reviews` entry) — reuse a message-square style
 ```
 
 Render it in the body (after the reviews line):
+
 ```tsx
-				{view === "comments" ? <CommentsView sessionId={session.id} /> : null}
+{
+	view === "comments" ? <CommentsView sessionId={session.id} /> : null;
+}
 ```
 
 Add the import at the top:
+
 ```tsx
 import { CommentsView } from "./CommentsView";
 ```
@@ -1393,11 +1436,13 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 7: Frontend — diff hunk display + expand-to-file
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/DiffHunk.tsx`
 - Create: `frontend/src/renderer/components/DiffHunk.test.tsx`
 - Modify: `frontend/src/renderer/components/CommentsView.tsx` (render `<DiffHunk>` per thread)
 
 **Interfaces:**
+
 - Consumes: generated `apiClient` path `/api/v1/sessions/{sessionId}/diff-context` (Task 5 regen).
 - Produces: `DiffHunk` component that lazily loads and renders the anchored code, with an Expand button switching `mode=hunk`→`mode=file`.
 
@@ -1432,14 +1477,30 @@ beforeEach(() => {
 	getMock.mockReset().mockImplementation(async (_path, opts) => {
 		const mode = opts?.params?.query?.mode ?? "hunk";
 		if (mode === "file") {
-			return { data: { available: true, mode: "file", path: "a.go", truncated: false, lines: [
-				{ kind: "context", oldLine: 1, newLine: 1, text: "l1" },
-				{ kind: "context", oldLine: 2, newLine: 2, text: "CHANGED" },
-			] }, error: undefined };
+			return {
+				data: {
+					available: true,
+					mode: "file",
+					path: "a.go",
+					truncated: false,
+					lines: [
+						{ kind: "context", oldLine: 1, newLine: 1, text: "l1" },
+						{ kind: "context", oldLine: 2, newLine: 2, text: "CHANGED" },
+					],
+				},
+				error: undefined,
+			};
 		}
-		return { data: { available: true, mode: "hunk", path: "a.go", truncated: false, lines: [
-			{ kind: "add", oldLine: 0, newLine: 2, text: "CHANGED" },
-		] }, error: undefined };
+		return {
+			data: {
+				available: true,
+				mode: "hunk",
+				path: "a.go",
+				truncated: false,
+				lines: [{ kind: "add", oldLine: 0, newLine: 2, text: "CHANGED" }],
+			},
+			error: undefined,
+		};
 	});
 });
 
@@ -1517,8 +1578,13 @@ export function DiffHunk({
 								: "text-muted-foreground"
 					}
 				>
-					<span className="inline-block w-10 select-none pr-2 text-right opacity-50">{l.newLine || l.oldLine || ""}</span>
-					<span className="whitespace-pre">{lineSign(l.kind)}{l.text}</span>
+					<span className="inline-block w-10 select-none pr-2 text-right opacity-50">
+						{l.newLine || l.oldLine || ""}
+					</span>
+					<span className="whitespace-pre">
+						{lineSign(l.kind)}
+						{l.text}
+					</span>
 				</div>
 			))}
 			{mode === "hunk" && (
@@ -1552,13 +1618,15 @@ Expected: PASS.
 In `frontend/src/renderer/components/CommentsView.tsx`, `ThreadCard` needs the session id and PR url to render `<DiffHunk>`. Thread the `sessionId` and `prUrl` down and render the hunk between the file header and the comments:
 
 Change `CommentsView`'s thread map to pass context:
+
 ```tsx
-					{g.threads.map((t) => (
-						<ThreadCard key={t.threadId} sessionId={sessionId} prUrl={g.prUrl} thread={t} />
-					))}
+{
+	g.threads.map((t) => <ThreadCard key={t.threadId} sessionId={sessionId} prUrl={g.prUrl} thread={t} />);
+}
 ```
 
 Update `ThreadCard`:
+
 ```tsx
 function ThreadCard({ sessionId, prUrl, thread }: { sessionId: string; prUrl: string; thread: Thread }) {
 	return (
@@ -1606,17 +1674,21 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - [ ] **Step 1: Backend build + touched-package tests**
 
 Run:
+
 ```bash
 cd backend && go build ./... && go test ./internal/diffhunk/ ./internal/service/session/ ./internal/httpd/...
 ```
+
 Expected: PASS (incl. drift + parity guards). Then `go vet ./internal/diffhunk/ ./internal/service/session/ ./internal/httpd/...` and `gofmt -l internal/diffhunk internal/service/session internal/httpd/controllers internal/httpd/apispec` (clean). Run golangci-lint on the touched packages if available.
 
 - [ ] **Step 2: Frontend typecheck + suite**
 
 Run:
+
 ```bash
 cd frontend && npm run typecheck && npm run test
 ```
+
 Expected: PASS.
 
 - [ ] **Step 3: Cleanliness**
@@ -1628,6 +1700,7 @@ Run: `git status` — no unintended churn (`pnpm-lock.yaml`, `routeTree.gen.ts`,
 ## Self-Review
 
 **Spec coverage (Phase 2 slice of `2026-07-09-pr-review-comments-tab-design.md`):**
+
 - "Read API `/pr-comments` — threads grouped per PR (DB only)" → Tasks 2, 3. ✅
 - "Diff-context API — git-backed hunk + full-file expand" → Tasks 1, 4, 5. ✅
 - "Comments tab (read-only view with expand)" → Tasks 6, 7. ✅

@@ -106,16 +106,20 @@ type OneShotNamer interface {
 Pure, testable helpers plus one method that shells out.
 
 **Jira key extraction:**
+
 ```go
 var jiraKeyRe = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
 func extractJiraKey(texts ...string) string // first match across title+prompt, or ""
 ```
 
 **Naming prompt builder:**
+
 ```go
 func buildNamingPrompt(title, brief, jiraKeyHint string) string
 ```
+
 Instructs the agent to output ONLY a git branch name, no prose, following:
+
 - gitflow type: one of `feature`, `bugfix`, `hotfix`, `chore` (infer from intent)
 - include the Jira key when one is provided/detectable, uppercase, right after the
   `/` (e.g. `feature/PROJ-2271-...`); omit gracefully when none
@@ -124,9 +128,11 @@ Instructs the agent to output ONLY a git branch name, no prose, following:
 - example given verbatim: `feature/PROJ-2271-checkout-result`
 
 **Sanitizer (defends against chatty output):**
+
 ```go
 func sanitizeBranchName(raw string) (string, bool)
 ```
+
 - take the first non-empty line; strip surrounding backticks/quotes/whitespace and
   a leading `branch:`-style label if present
 - lowercase; replace runs of disallowed chars with `-`; collapse repeated `-`/`/`;
@@ -137,9 +143,11 @@ func sanitizeBranchName(raw string) (string, bool)
 - otherwise return the cleaned name, `ok=true`
 
 **Uniqueness:**
+
 ```go
 func ensureUniqueBranch(existing map[string]bool, candidate string) string
 ```
+
 - `existing` holds every taken name (local `refs/heads/*`, `refs/remotes/origin/*`,
   and active worktree branches), keyed without the `refs/...` prefix
 - if `candidate` is free, return it; else append `-2`, `-3`, … until free
@@ -147,10 +155,12 @@ func ensureUniqueBranch(existing map[string]bool, candidate string) string
   plumbing as `service/project.ListBranches`) plus `git worktree list`
 
 **Orchestrating method (shells out):**
+
 ```go
 func (m *Manager) generateBranchName(ctx context.Context, agent ports.Agent,
     cfg ports.SpawnConfig, project domain.ProjectRecord) (string, bool)
 ```
+
 1. type-assert `agent.(OneShotNamer)`; not ok → return `"", false`
 2. `key := extractJiraKey(cfg.IssueID, cfg.Prompt)`
 3. `prompt := buildNamingPrompt(cfg.IssueID, cfg.Prompt, key)`
@@ -193,10 +203,11 @@ fields ("Start from", "New branch name") adjacent as a logical group, with Agent
 separated below.
 
 **Behavior.**
+
 - New-branch-name placeholder → `optional — AI names it if blank`.
 - On submit, send `autoNameBranch: cleanBranch === "" ? true : undefined` (true
   only when the field is blank). Continue sending `branch: cleanBranch ||
-  undefined`.
+undefined`.
 - Because naming blocks the spawn a few seconds, the existing submit spinner
   covers it; update the submitting label to `Naming branch…` when
   `autoNameBranch` was sent and the field was blank (otherwise `Starting…`).
@@ -241,7 +252,7 @@ No network and no real agent CLI in Go tests — the `OneShotNamer` is faked.
 - **Manager** (fake `OneShotNamer` + fake workspace capturing `WorkspaceConfig`):
   - `AutoNameBranch=false` → branch `ao/<id>/root`.
   - `AutoNameBranch=true`, namer returns `feature/PROJ-2271-x` → `WorkspaceConfig.
-    Branch == "feature/proj-2271-x"` (post-sanitize), unique-suffixed vs. a seeded
+Branch == "feature/proj-2271-x"` (post-sanitize), unique-suffixed vs. a seeded
     existing set.
   - `AutoNameBranch=true`, namer returns garbage → fallback `ao/<id>/root`.
   - `AutoNameBranch=true`, `Kind=orchestrator` → orchestrator name, namer never

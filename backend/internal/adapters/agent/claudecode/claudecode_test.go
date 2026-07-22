@@ -472,7 +472,7 @@ func TestClaudeProjectDirName(t *testing.T) {
 	// yields the double dash "--ao"). If Claude changes this, resume detection
 	// silently breaks, so lock it down.
 	cases := map[string]string{
-		"/Users/fluke/.ao/data/worktrees/demo-ios-app/chore/TEAM-4546-guard-let-self":     "-Users-fluke--ao-data-worktrees-demo-ios-app-chore-TEAM-4546-guard-let-self",
+		"/Users/fluke/.ao/data/worktrees/demo-ios-app/chore/TEAM-4546-guard-let-self":         "-Users-fluke--ao-data-worktrees-demo-ios-app-chore-TEAM-4546-guard-let-self",
 		"/Users/fluke/.ao/data/worktrees/demo-ios-app/orchestrator/demo-ios-app-orchestrator": "-Users-fluke--ao-data-worktrees-demo-ios-app-orchestrator-demo-ios-app-orchestrator",
 		"/tmp/Weird_Dir.Name test": "-tmp-Weird-Dir-Name-test",
 	}
