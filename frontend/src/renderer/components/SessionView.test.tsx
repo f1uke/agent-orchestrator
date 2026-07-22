@@ -758,15 +758,13 @@ describe("SessionView split view", () => {
 
 describe("SessionView unsplit", () => {
 	it("keeps the pane whose picker asked, not the focused one", async () => {
-		useUiStore
-			.getState()
-			.setSplitLayout("proj-1", {
-				kind: "split",
-				orientation: "horizontal",
-				ratio: 0.5,
-				first: leaf("sess-1"),
-				second: leaf("sess-2"),
-			});
+		useUiStore.getState().setSplitLayout("proj-1", {
+			kind: "split",
+			orientation: "horizontal",
+			ratio: 0.5,
+			first: leaf("sess-1"),
+			second: leaf("sess-2"),
+		});
 		render(<SessionView sessionId="sess-1" />);
 
 		// Open the UNFOCUSED pane's picker (controls act without moving focus).
