@@ -32,6 +32,16 @@ export type CompanionActivity = {
 	kind?: SessionKind;
 };
 
+/** One `ao send` between two sessions, as the overlay needs to stage it. */
+export type CompanionConversation = {
+	/** The sending session. `ao send` stamps it onto the message body itself. */
+	from: string;
+	/** The receiving session — the frame's own session id. */
+	to: string;
+	/** What was said, without the sender stamp. */
+	line: string;
+};
+
 export interface CompanionFeed {
 	/**
 	 * Register for roster snapshots. The listener is called once immediately with
@@ -39,4 +49,10 @@ export interface CompanionFeed {
 	 * waiting for a change), then on every update. Returns an unsubscribe.
 	 */
 	subscribe(listener: (activities: CompanionActivity[]) => void): () => void;
+	/**
+	 * Register for conversations — messages between two sessions, both of which are
+	 * named. Optional: a feed that cannot see them simply has none, and the overlay
+	 * goes on showing every message in the recipient's bubble as it always did.
+	 */
+	conversations?(listener: (conversation: CompanionConversation) => void): () => void;
 }

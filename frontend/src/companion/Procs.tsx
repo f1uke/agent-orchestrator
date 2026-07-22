@@ -1,6 +1,6 @@
 import { useId } from "react";
 import type { SessionStatus } from "../renderer/types/workspace";
-import { WALK_CYCLE_MS, type Facing } from "./behaviour";
+import { RUN_CYCLE_MS, WALK_CYCLE_MS, type Facing } from "./behaviour";
 import type { CastMember } from "./cast";
 import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX } from "./palette";
 import { FIGURE_ATTRIBUTE } from "./pointer-region";
@@ -60,12 +60,29 @@ export type ProcsProps = {
 	walking: boolean;
 	/** Picked up by the human: dangling, startled, and flailing a bit. */
 	held?: boolean;
+	/** On its way to meet another Proc: the same walk, stepped faster. */
+	running?: boolean;
+	/** Face to face with the Proc it came to meet: a couple of hops. */
+	greeting?: boolean;
 	/** Drawn height of the FIGURE in px; props extend beyond it. */
 	size?: number;
 	className?: string;
 };
 
-export function Procs({ cast, status, facing, walking, held = false, size = DEFAULT_SIZE, className }: ProcsProps) {
+export function Procs({
+	cast,
+	status,
+	facing,
+	walking,
+	held = false,
+	running = false,
+	greeting = false,
+	size = DEFAULT_SIZE,
+	className,
+}: ProcsProps) {
+	// A run is the same four-beat strip stepped faster — not a second animation, so
+	// the legs can never disagree with themselves about which pose comes next.
+	const cycleMs = running ? RUN_CYCLE_MS : WALK_CYCLE_MS;
 	const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
 	const headClip = `procs-head-${uid}`;
 	const cellClip = `procs-cell-${uid}`;
@@ -108,17 +125,20 @@ export function Procs({ cast, status, facing, walking, held = false, size = DEFA
 			<g {...{ [FIGURE_ATTRIBUTE]: "" }}>
 				<g
 					data-teased={held || undefined}
+					data-greeting={greeting || undefined}
 					style={
 						held
 							? { animation: "procs-flail 620ms ease-in-out infinite alternate", transformOrigin: "48px 8px" }
-							: undefined
+							: greeting
+								? { animation: "procs-hop 760ms ease-out 2" }
+								: undefined
 					}
 				>
 					{/* Legs, drawn before the body so the body's rim covers where they meet it. */}
 					<g clipPath={`url(#${cellClip})`}>
 						<g
 							data-walk-strip
-							style={walking ? { animation: `procs-walk ${WALK_CYCLE_MS}ms steps(4, end) infinite` } : undefined}
+							style={walking ? { animation: `procs-walk ${cycleMs}ms steps(4, end) infinite` } : undefined}
 						>
 							{(held ? DANGLE_POSES : LEG_POSES).map((pose, index) => (
 								<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
@@ -130,7 +150,7 @@ export function Procs({ cast, status, facing, walking, held = false, size = DEFA
 					</g>
 
 					{/* Body and hat bob on their own eased track, separate from the leg steps. */}
-					<g style={walking ? { animation: `procs-bob ${WALK_CYCLE_MS}ms ease-in-out infinite alternate` } : undefined}>
+					<g style={walking ? { animation: `procs-bob ${cycleMs}ms ease-in-out infinite alternate` } : undefined}>
 						<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
 
 						<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />

@@ -24,6 +24,35 @@ body {
 	inset: 0;
 }
 
+/* The characters, and above them everything they are SAYING.
+
+   Two layers rather than one, because a Proc's `transform` makes it a stacking
+   context: a bubble drawn inside its own Proc cannot rise above the Proc standing
+   next to it, whatever its z-index says, so a neighbour to the right painted
+   straight over what it was saying. Speech is chrome ABOVE the scene. */
+.companion-cast,
+.companion-chrome {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.companion-chrome {
+	z-index: 1;
+}
+
+/* Carries the same transform as its Proc, so a card travels with a walking Proc
+   instead of being left behind, and its height is the Proc's so the cards are
+   positioned off the same box they always were. */
+.companion-proc-chrome {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	height: calc(var(--procs-frame-height, 151px) + var(--procs-name-room, 0px));
+	will-change: transform;
+	pointer-events: none;
+}
+
 .companion-proc {
 	position: absolute;
 	bottom: 0;
@@ -120,6 +149,12 @@ body {
 	pointer-events: none;
 }
 
+/* Opening the other way: the card's RIGHT edge lines up with the figure's, so it
+   grows away from whoever this Proc is facing instead of across them. */
+.companion-proc-bubble[data-opens="left"] {
+	transform: translateX(calc(-100% + var(--procs-figure-width, 96px)));
+}
+
 /* The hover tooltip, above the Proc and out of the way of its own bubble. */
 .companion-proc-tooltip {
 	position: absolute;
@@ -131,6 +166,26 @@ body {
 	   limiting now, as it was always meant to. */
 	width: max-content;
 	pointer-events: none;
+}
+
+/* Two hops when a Proc meets the one that just messaged it. Transform only, and
+   it runs twice rather than forever: a greeting is an event, not a state. */
+@keyframes procs-hop {
+	0% {
+		transform: translateY(0);
+	}
+	35% {
+		transform: translateY(-13px);
+	}
+	70% {
+		transform: translateY(0);
+	}
+	85% {
+		transform: translateY(-5px);
+	}
+	100% {
+		transform: translateY(0);
+	}
 }
 
 /* ---- Scene animations. transform/opacity only, so every one stays on the

@@ -24,6 +24,9 @@ import { PROCS_INK, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
 /** What a bubble collapses to when its detail has gone stale. */
 export const BUBBLE_COARSE_TEXT = "Working…";
 
+/** The widest a bubble card ever gets. Shared with the layout, which decides which way it opens. */
+export const BUBBLE_MAX_WIDTH = 200;
+
 export type BubbleTone = "normal" | "alert";
 
 /**
@@ -38,6 +41,12 @@ export type BubbleProps = {
 	text: string;
 	tone?: BubbleTone;
 	decay?: BubbleDecay;
+	/**
+	 * Which side of the card the tail hangs from — i.e. which way the card opens
+	 * from its Proc. Right by default; flipped when the card would otherwise open
+	 * straight across whoever the Proc is talking to.
+	 */
+	tail?: "left" | "right";
 	className?: string;
 };
 
@@ -57,7 +66,7 @@ export function looksLikeRawCommand(text: string): boolean {
 	return COMMAND_SHAPES.some((shape) => shape.test(text));
 }
 
-export function Bubble({ text, tone = "normal", decay = "fresh", className }: BubbleProps) {
+export function Bubble({ text, tone = "normal", decay = "fresh", tail = "left", className }: BubbleProps) {
 	const trimmed = text.trim();
 	if (!trimmed) return null;
 
@@ -86,7 +95,7 @@ export function Bubble({ text, tone = "normal", decay = "fresh", className }: Bu
 					// twice as much AND lean less far over the Proc beside it — the bubble
 					// grows upward, into empty sky, rather than sideways into a neighbour.
 					boxSizing: "border-box",
-					maxWidth: "200px",
+					maxWidth: `${BUBBLE_MAX_WIDTH}px`,
 					display: "-webkit-box",
 					WebkitBoxOrient: "vertical",
 					WebkitLineClamp: 3,
@@ -108,7 +117,13 @@ export function Bubble({ text, tone = "normal", decay = "fresh", className }: Bu
 				width="18"
 				height="11"
 				viewBox="0 0 18 11"
-				style={{ position: "absolute", left: "18px", top: "100%", marginTop: "-1px", opacity: DECAY_OPACITY[decay] }}
+				style={{
+					position: "absolute",
+					[tail === "left" ? "left" : "right"]: "18px",
+					top: "100%",
+					marginTop: "-1px",
+					opacity: DECAY_OPACITY[decay],
+				}}
 			>
 				<path
 					d="M1 0 L9 9 L17 0"

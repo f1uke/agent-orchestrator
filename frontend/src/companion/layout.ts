@@ -1,3 +1,4 @@
+import { BUBBLE_MAX_WIDTH } from "./Bubble";
 import { PROCS_BOX, PROCS_VIEW } from "./Procs";
 
 // Sizes shared by the overlay WINDOW (main process) and the stage that draws into
@@ -82,4 +83,39 @@ export function figureLeft(mirrored: boolean, size: number = PET_HEIGHT): number
 	if (!mirrored) return 0;
 	const frame = petFrame(size);
 	return 2 * frame.offsetX + frame.width - frame.figureWidth;
+}
+
+/**
+ * Which way a Proc's speech bubble opens.
+ *
+ * Rightward from the figure by default — the tail sits under the Proc's head
+ * either way; only the card's growth direction changes. Two things override it,
+ * both found by looking at the thing rather than by reasoning about it:
+ *
+ *   - two Procs standing face to face open their cards the same way, and the one
+ *     on the left lays its card straight across the one on the right. Each opens
+ *     AWAY from whoever it is talking to instead.
+ *   - a Proc near a screen edge opens its card off the screen. The edge wins over
+ *     the preference: an unreadable card helps nobody.
+ *
+ * When neither side fits, it opens right, so at least the tail still points at
+ * the Proc that is speaking.
+ */
+export function bubbleOpensLeft({
+	figureX,
+	figureWidth,
+	screenWidth,
+	preferLeft,
+}: {
+	/** The figure's left edge, in screen px. */
+	figureX: number;
+	figureWidth: number;
+	screenWidth: number;
+	/** True when this Proc is talking to someone on its right. */
+	preferLeft: boolean;
+}): boolean {
+	const roomLeft = figureX + figureWidth - BUBBLE_MAX_WIDTH >= 0;
+	const roomRight = figureX + BUBBLE_MAX_WIDTH <= screenWidth;
+	if (preferLeft) return roomLeft;
+	return !roomRight && roomLeft;
 }

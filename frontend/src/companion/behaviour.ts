@@ -48,9 +48,32 @@ export const MAX_ANIMATING = 8;
 /** The walk cycle is four beats driven by `steps(4, end)` in the renderer. */
 export const WALK_CYCLE_STEPS = 4;
 export const WALK_CYCLE_MS = 520;
+/** The same four beats, stepped faster, for a Proc running to meet another one. */
+export const RUN_CYCLE_MS = 260;
 
 /** Gap between two Procs summoned at the same time, so they never stack up. */
 export const SUMMON_SPACING_PX = 96;
+
+/**
+ * How far apart two Procs stand while they talk. Close enough to read as one
+ * exchange, far enough that neither is standing on the other's face — and their
+ * two bubbles need somewhere to go.
+ */
+export const MEET_GAP_PX = 108;
+/** How long they stay together once they arrive. */
+export const MEET_GREET_MS = 3_500;
+/** A run is capped rather than paced: crossing the whole desktop must not take a minute. */
+export const MEET_RUN_MAX_MS = 1_600;
+export const MEET_RUN_MIN_MS = 400;
+/**
+ * One conversation at a time.
+ *
+ * A meeting is a dramatisation of something that happened at a MOMENT. Queueing
+ * one to play out later would stage an event that is already over, which is the
+ * same lie the bubble's TTL exists to prevent — so a second message still lands
+ * in its Proc's bubble, and only the performance is skipped.
+ */
+export const MAX_CONCURRENT_MEETS = 1;
 
 /**
  * Default centre-to-centre clearance between two Procs standing on the band. The
@@ -109,6 +132,26 @@ export type Pet = {
 	 * standing where the ENGINE put it, and the crowding rules own that spot again.
 	 */
 	placed?: boolean;
+	/** Set while this Proc is away meeting another one. See {@link startConversation}. */
+	meeting?: Meeting;
+};
+
+/**
+ * One end of a conversation between two sessions.
+ *
+ * The only behaviour on this desktop that is about a RELATIONSHIP rather than
+ * about one session, which is why it is the one time two Procs act together.
+ */
+export type Meeting = {
+	/** The Proc at the other end. */
+	withId: string;
+	/** Where this one was standing when the message arrived. It goes back there. */
+	homeX: number;
+	/** What it says while they are together. Empty for the one being told. */
+	line: string;
+	phase: "approaching" | "greeting" | "returning";
+	/** When `greeting` is over. Only the greeting is on a clock; the two runs end when they land. */
+	until: number;
 };
 
 /** The floor band the cast lives on: one line above the Dock, inset from both edges. */
@@ -320,12 +363,145 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
 			// that walked left and then sat down at a desk would show the desk flipped
 			// to its other side, reading as the furniture teleporting.
-			facing: canWander(activity.status) ? prev.facing : ("front" as Facing),
+			// …unless it is mid-conversation, where the facing is what makes the two of
+			// them look at each other rather than past each other.
+			facing: prev.meeting || canWander(activity.status) ? prev.facing : ("front" as Facing),
 		};
 		placed.push(next);
 		return next;
 	});
 	return { ...world, pets };
+}
+
+/** True when this Proc is busy with something the engine must not interrupt. */
+function isBusy(pet: Pet): boolean {
+	return pet.motion.kind === "held" || pet.meeting !== undefined;
+}
+
+/**
+ * Stage the meeting for one `ao send` between two sessions.
+ *
+ * Both Procs leave what they are doing and run — faster than either of them ever
+ * strolls — to a spot between them, stand face to face, and go home afterwards.
+ * An ANCHORED Proc gets up from its desk or its bed for this, which is the one
+ * exception to "a Proc at a place cannot wander" and a deliberate one: the
+ * message is addressed to that session, so that session answers, and its place is
+ * where it lives rather than a cage it is stuck in.
+ *
+ * Returns the world unchanged when the meeting cannot honestly be staged: an end
+ * that is not on the desktop, an end in the human's hand, or another conversation
+ * already running.
+ */
+export function startConversation(
+	world: World,
+	{ from, to, line, now }: { from: string; to: string; line: string; now: number },
+): World {
+	if (from === to) return world;
+	if (world.pets.filter((pet) => pet.meeting).length >= MAX_CONCURRENT_MEETS * 2) return world;
+
+	const sender = world.pets.find((pet) => pet.id === from);
+	const receiver = world.pets.find((pet) => pet.id === to);
+	if (!sender || !receiver || isBusy(sender) || isBusy(receiver)) return world;
+
+	// They meet between where they are, so neither has to cross the whole desktop.
+	const half = MEET_GAP_PX / 2;
+	const centre = meetingCentre(world, (sender.x + receiver.x) / 2, [sender.id, receiver.id]);
+	const senderIsLeft = sender.x <= receiver.x;
+	const spots: Record<string, number> = {
+		[sender.id]: senderIsLeft ? centre - half : centre + half,
+		[receiver.id]: senderIsLeft ? centre + half : centre - half,
+	};
+
+	return {
+		...world,
+		pets: world.pets.map((pet) => {
+			if (pet.id !== from && pet.id !== to) return pet;
+			const meeting: Meeting = {
+				withId: pet.id === from ? to : from,
+				homeX: pet.x,
+				line: pet.id === from ? line : "",
+				phase: "approaching",
+				until: now + MEET_GREET_MS,
+			};
+			// Reduced motion keeps the meaning — they are talking — and drops only the
+			// travel. They say their piece where they stand.
+			if (world.reducedMotion || world.parked) {
+				return { ...pet, meeting: { ...meeting, phase: "greeting", until: now + MEET_GREET_MS } };
+			}
+			return {
+				...pet,
+				meeting,
+				facing: facingFor(pet.x, spots[pet.id]),
+				motion: runTo(pet.x, spots[pet.id], now),
+			};
+		}),
+	};
+}
+
+/**
+ * Where the pair actually meets.
+ *
+ * The midpoint is the intention, but a meeting is a STAGED scene — the whole
+ * point is that you can see two Procs talking — and landing it on top of a third
+ * Proc who happens to be standing there makes it unreadable. So the centre slides
+ * to the nearest place where both spots are clear, and falls back to the clamped
+ * midpoint when the band is too full to have one (overlapping is then honest, and
+ * still better than not staging the meeting at all).
+ */
+function meetingCentre(world: World, wanted: number, participants: string[]): number {
+	const half = MEET_GAP_PX / 2;
+	const minX = world.band.minX + half;
+	const maxX = world.band.maxX - half;
+	const bystanders = world.pets.filter((pet) => !participants.includes(pet.id));
+	const clear = (centre: number) => [centre - half, centre + half].every((x) => isFree(x, bystanders, world.spacing));
+
+	const start = Math.min(maxX, Math.max(minX, wanted));
+	if (clear(start)) return start;
+	const step = Math.max(8, world.spacing / 6);
+	for (let offset = step; offset <= maxX - minX; offset += step) {
+		for (const candidate of [start - offset, start + offset]) {
+			if (candidate < minX || candidate > maxX) continue;
+			if (clear(candidate)) return candidate;
+		}
+	}
+	return start;
+}
+
+/** A run: the same shape as a stroll, but on the event's clock rather than ambience's. */
+function runTo(fromX: number, toX: number, now: number): PetMotion {
+	const distance = Math.abs(toX - fromX);
+	const durationMs = Math.max(MEET_RUN_MIN_MS, Math.min(MEET_RUN_MAX_MS, distance * 2));
+	return { kind: "walking", fromX, toX, startedAt: now, endsAt: now + durationMs };
+}
+
+/**
+ * Move a conversation on by one beat.
+ *
+ * Only the greeting is timed; the two runs end when the Procs actually land, so
+ * the phases can never get ahead of the art. Runs even while parked, so a display
+ * that slept mid-conversation does not leave two Procs stranded together.
+ */
+function advanceMeeting(pet: Pet, now: number, rng: Rng): Pet {
+	const meeting = pet.meeting;
+	if (!meeting || pet.motion.kind !== "standing") return pet;
+
+	if (meeting.phase === "approaching") {
+		return { ...pet, meeting: { ...meeting, phase: "greeting", until: now + MEET_GREET_MS } };
+	}
+	if (meeting.phase === "greeting") {
+		if (now < meeting.until) return pet;
+		if (Math.abs(pet.x - meeting.homeX) < 1) {
+			return { ...pet, meeting: undefined, facing: "front", restUntil: pickRest(now, rng) };
+		}
+		return {
+			...pet,
+			meeting: { ...meeting, phase: "returning" },
+			facing: facingFor(pet.x, meeting.homeX),
+			motion: runTo(pet.x, meeting.homeX, now),
+		};
+	}
+	// Home again. Facing the human, as a Proc that is not travelling always does.
+	return { ...pet, meeting: undefined, facing: "front", restUntil: pickRest(now, rng) };
 }
 
 /**
@@ -392,14 +568,20 @@ export function tick(world: World, now: number, rng: Rng): World {
 	// 1. Settle every stroll that has finished (or that parking cut short).
 	let pets = world.pets.map((pet) => settle(pet, now, world, rng));
 
-	// 2. Rescue anyone left off the band (a display resize). Deliberately NOT a
+	// 2. Move any conversation on. Before the crowding rescue, so a Proc that has
+	//    just landed at a meeting spot is already in `greeting` rather than looking
+	//    like an ordinary Proc standing somewhere unexpected.
+	pets = pets.map((pet) => advanceMeeting(pet, now, rng));
+	pets = faceEachOther(pets);
+
+	// 3. Rescue anyone left off the band (a display resize). Deliberately NOT a
 	//    crowding sweep: re-flowing the row on every tick meant one Proc arriving
 	//    from a stroll slid every other Proc on the desktop, which is the surprise
 	//    motion this engine exists to avoid. Crowding is settled by whoever turns
 	//    up, at the moment they turn up — see `settle` and `placeNewPet`.
 	pets = pets.map((pet) => clampToBand(pet, world.band));
 
-	// 3. Consider new strolls, oldest-rested first so nobody is starved by the cap.
+	// 4. Consider new strolls, oldest-rested first so nobody is starved by the cap.
 	let slots = walkSlots({ ...world, pets });
 	const order = [...pets].sort((a, b) => a.restUntil - b.restUntil);
 	const started = new Map<string, Pet>();
@@ -421,6 +603,20 @@ export function tick(world: World, now: number, rng: Rng): World {
 	return { ...world, pets };
 }
 
+/** Two Procs mid-greeting turn to look at each other, whichever way round they stand. */
+function faceEachOther(pets: Pet[]): Pet[] {
+	const greeting = pets.filter((pet) => pet.meeting?.phase === "greeting" && pet.motion.kind === "standing");
+	if (greeting.length < 2) return pets;
+	const byId = new Map(pets.map((pet) => [pet.id, pet]));
+	return pets.map((pet) => {
+		if (pet.meeting?.phase !== "greeting" || pet.motion.kind !== "standing") return pet;
+		const other = byId.get(pet.meeting.withId);
+		if (!other) return pet;
+		const facing: Facing = other.x < pet.x ? "left" : "right";
+		return facing === pet.facing ? pet : { ...pet, facing };
+	});
+}
+
 // settle finishes a stroll: at the target, standing, with a fresh randomised rest.
 // Parking settles immediately rather than freezing a Proc mid-stride.
 function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
@@ -430,7 +626,10 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 	// The destination was clear when the walk was planned; if somebody has taken it
 	// since, the ARRIVING Proc steps aside. Never the one already standing there.
 	// A summoned Proc is exempt: its spot at the front is the alert.
-	const landed = summoned ? pet.motion.toX : nearestFreeX(pet.motion.toX, pet, world);
+	// A summon's spot at the front and a meeting spot are both DELIBERATE, so they
+	// are not nudged aside the way an ordinary stroll's destination is.
+	const deliberate = summoned || pet.meeting !== undefined;
+	const landed = deliberate ? pet.motion.toX : nearestFreeX(pet.motion.toX, pet, world);
 	return {
 		...pet,
 		x: landed,
@@ -448,8 +647,10 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 
 // consider decides whether a standing Proc starts moving on this tick.
 function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolean): Pet {
-	// A Proc in the user's hand does nothing of its own until it is let go.
+	// A Proc in the user's hand, or away meeting another one, does nothing of its
+	// own until it is let go / the conversation is over.
 	if (pet.motion.kind !== "standing") return pet;
+	if (pet.meeting) return pet;
 	if (world.parked) return pet;
 
 	const mode: CompanionMode = modeFor(pet.status);

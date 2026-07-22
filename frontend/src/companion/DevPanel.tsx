@@ -322,6 +322,37 @@ export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: Dev
 				</div>
 			</Section>
 
+			<Section title="Two of them talking (ao send)">
+				<p style={{ ...MUTED, margin: 0 }}>
+					Sends a real `message` frame from the coordinator to the selected Proc. They run to each other, hop, say their
+					piece and go home.
+				</p>
+				<div style={ROW_OF_BUTTONS}>
+					<button
+						type="button"
+						style={BUTTON}
+						onClick={() => {
+							const speaker = roster.find((entry) => entry.kind === "orchestrator") ?? roster[0];
+							const listener = roster.find(
+								(entry) => entry.sessionId !== speaker?.sessionId && targets.includes(entry.sessionId),
+							);
+							if (!speaker || !listener) return;
+							pushFrame({
+								sessionId: listener.sessionId,
+								kind: "message",
+								at: new Date().toISOString(),
+								// The stamp `ao send` puts on every message body. It is what
+								// names the sender, so the pairing is read rather than invented.
+								text: `[from @${speaker.sessionId}] ${say.trim() || "P1 is fixed and CI is green"}`,
+								ttlMs: 12_000,
+							});
+						}}
+					>
+						coordinator → this one
+					</button>
+				</div>
+			</Section>
+
 			<Section title="Motion">
 				<div style={ROW_OF_BUTTONS}>
 					<button
@@ -344,7 +375,13 @@ export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: Dev
 								...current,
 								pets: current.pets.map((pet, index) => ({
 									...pet,
-									x: current.band.minX + ((index * 37) % Math.max(1, current.band.maxX - current.band.minX)),
+									// Spread across the WHOLE band, so a big cast is laid out to be
+									// looked at rather than piled into the left-hand third.
+									x:
+										current.band.minX +
+										(current.pets.length < 2
+											? 0
+											: (index * (current.band.maxX - current.band.minX)) / (current.pets.length - 1)),
 									motion: { kind: "standing" },
 								})),
 							}))

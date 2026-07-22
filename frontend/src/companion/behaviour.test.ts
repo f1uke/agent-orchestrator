@@ -17,6 +17,8 @@ import {
 	dragPet,
 	grabPet,
 	releasePet,
+	startConversation,
+	MEET_GAP_PX,
 	syncActivities,
 	tick,
 	walkingCount,
@@ -991,3 +993,217 @@ describe("nothing moves a Proc that is standing still", () => {
 function positionsOf(w: World): number[] {
 	return w.pets.map((pet) => pet.x).sort((a, b) => a - b);
 }
+
+describe("two Procs meeting when their sessions talk", () => {
+	// `ao send` between two sessions is a real event with two ends, and it is the
+	// only thing on this desktop that is ABOUT a relationship rather than about one
+	// session. So it is the one time two Procs act together: they run to each other,
+	// hop, say their piece, and go back to where they were.
+	function pair(overrides: Partial<Pet> = {}): World {
+		const base = syncActivities(
+			{ ...world(), spacing: 136 },
+			[activity("sender", "pr_open"), activity("receiver", "working")],
+			T0,
+			half,
+		);
+		return {
+			...base,
+			pets: base.pets.map((p) => ({
+				...p,
+				x: p.id === "sender" ? 200 : 800,
+				restUntil: T0 + 10 * REST_MAX_MS,
+				...overrides,
+			})),
+		};
+	}
+
+	function talk(w: World, now = T0): World {
+		return startConversation(w, { from: "sender", to: "receiver", line: "P1 is fixed", now });
+	}
+
+	function run(w: World, seconds: number, from = T0): World {
+		let next = w;
+		for (let i = 1; i <= seconds * 4; i++) next = tick(next, from + i * 250, half);
+		return next;
+	}
+
+	it("sets both Procs running toward each other", () => {
+		const w = talk(pair());
+
+		for (const id of ["sender", "receiver"]) {
+			expect(petById(w, id).motion.kind, id).toBe("walking");
+		}
+		const [a, b] = ["sender", "receiver"].map((id) => petById(w, id).motion);
+		if (a.kind !== "walking" || b.kind !== "walking") throw new Error("expected both to run");
+		// Toward each other: the left one goes right, the right one goes left.
+		expect(a.toX).toBeGreaterThan(200);
+		expect(b.toX).toBeLessThan(800);
+	});
+
+	it("runs faster than it strolls, because this one is an event and not ambience", () => {
+		const w = talk(pair());
+		const motion = petById(w, "sender").motion;
+		if (motion.kind !== "walking") throw new Error("expected a run");
+
+		const distance = Math.abs(motion.toX - motion.fromX);
+		const strollPace = (WALK_MIN_PX + WALK_MAX_PX) / (WALK_MIN_MS + WALK_MAX_MS);
+		expect(distance / (motion.endsAt - motion.startedAt)).toBeGreaterThan(strollPace);
+	});
+
+	it("brings them face to face rather than on top of each other", () => {
+		const met = run(talk(pair()), 2);
+		const [a, b] = ["sender", "receiver"].map((id) => petById(met, id));
+
+		expect(a.meeting?.phase).toBe("greeting");
+		expect(Math.abs(a.x - b.x)).toBeCloseTo(MEET_GAP_PX, 0);
+		expect(a.facing).toBe("right");
+		expect(b.facing).toBe("left");
+	});
+
+	it("gives the sender the words and leaves the listener listening", () => {
+		const met = run(talk(pair()), 2);
+
+		expect(petById(met, "sender").meeting?.line).toBe("P1 is fixed");
+		expect(petById(met, "receiver").meeting?.line).toBe("");
+	});
+
+	it("sends both home afterwards, to exactly where they were standing", () => {
+		const done = run(talk(pair()), 30);
+
+		expect(petById(done, "sender").x).toBe(200);
+		expect(petById(done, "receiver").x).toBe(800);
+		expect(petById(done, "sender").meeting).toBeUndefined();
+		expect(petById(done, "receiver").meeting).toBeUndefined();
+	});
+
+	it("gets a Proc up from its desk or its bed for it, and puts it back", () => {
+		// The one exception to structural anchoring, and a deliberate one: a message
+		// is addressed to THIS session, so the Proc that owns it answers. Its place is
+		// where it lives, not a cage — it goes back to it.
+		let w = pair();
+		w = { ...w, pets: w.pets.map((p) => (p.id === "receiver" ? { ...p, status: "idle" as const } : p)) };
+		const met = run(talk(w), 2);
+		const done = run(talk(w), 30);
+
+		expect(petById(met, "receiver").meeting?.phase).toBe("greeting");
+		expect(petById(done, "receiver").x).toBe(800);
+	});
+
+	it("refuses when either end is not on the desktop", () => {
+		const w = pair();
+
+		expect(startConversation(w, { from: "sender", to: "ghost", line: "hi", now: T0 })).toBe(w);
+		expect(startConversation(w, { from: "ghost", to: "receiver", line: "hi", now: T0 })).toBe(w);
+	});
+
+	it("does not pull a Proc out of the human's hand", () => {
+		const held = grabPet(pair(), "receiver", T0);
+
+		expect(talk(held)).toBe(held);
+	});
+
+	it("stages one conversation at a time, and does not queue a stale one", () => {
+		// A meeting is a dramatisation of something that happened at a moment. Playing
+		// a queued one out fifteen seconds later would be staging an event that is
+		// already over — the same lie the bubble's TTL exists to prevent. The second
+		// message still reaches its Proc's bubble; only the performance is skipped.
+		let w = syncActivities(
+			{ ...world(), spacing: 136 },
+			["a", "b", "c", "d"].map((id) => activity(id, "pr_open")),
+			T0,
+			scripted(0.1, 0.35, 0.6, 0.85),
+		);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 + 10 * REST_MAX_MS })) };
+		w = startConversation(w, { from: "a", to: "b", line: "first", now: T0 });
+		const after = startConversation(w, { from: "c", to: "d", line: "second", now: T0 + 100 });
+
+		expect(after).toBe(w);
+		expect(petById(after, "c").meeting).toBeUndefined();
+	});
+
+	it("keeps them still when motion is reduced, and still lets them talk", () => {
+		// The meaning survives without the movement: they say their piece where they
+		// stand, which is a static equivalent rather than a silently missing state.
+		const w = startConversation(
+			{ ...pair(), reducedMotion: true },
+			{
+				from: "sender",
+				to: "receiver",
+				line: "P1 is fixed",
+				now: T0,
+			},
+		);
+
+		expect(walkingCount(w)).toBe(0);
+		expect(petById(w, "sender").x).toBe(200);
+		expect(petById(w, "receiver").x).toBe(800);
+		expect(petById(w, "sender").meeting?.phase).toBe("greeting");
+		expect(petById(w, "sender").meeting?.line).toBe("P1 is fixed");
+	});
+
+	it("ends the conversation even with motion reduced, rather than leaving them stuck", () => {
+		const done = run(
+			startConversation(
+				{ ...pair(), reducedMotion: true },
+				{
+					from: "sender",
+					to: "receiver",
+					line: "P1 is fixed",
+					now: T0,
+				},
+			),
+			30,
+		);
+
+		expect(petById(done, "sender").meeting).toBeUndefined();
+	});
+
+	it("does not let a meeting Proc wander off mid-conversation", () => {
+		let w = talk(pair());
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		w = run(w, 2);
+
+		expect(petById(w, "sender").meeting?.phase).toBe("greeting");
+		expect(walkingCount(w)).toBe(0);
+	});
+});
+
+describe("where a conversation is staged", () => {
+	// A meeting is a scene you are meant to be able to WATCH, so it must not be set
+	// down on top of a third Proc who happens to be standing at the midpoint. Caught
+	// by rendering it: the pair met exactly where a bystander was already standing
+	// and the whole thing read as one indistinct clump.
+	it("slides the meeting off a bystander standing at the midpoint", () => {
+		let w = syncActivities(
+			{ ...world(), spacing: 136 },
+			[activity("a", "pr_open"), activity("b", "pr_open"), activity("bystander", "merged")],
+			T0,
+			half,
+		);
+		const at: Record<string, number> = { a: 300, b: 700, bystander: 500 };
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 + 10 * REST_MAX_MS })) };
+		w = startConversation(w, { from: "a", to: "b", line: "hello", now: T0 });
+
+		for (const id of ["a", "b"]) {
+			const motion = petById(w, id).motion;
+			if (motion.kind !== "walking") throw new Error(`${id} should be running`);
+			expect(Math.abs(motion.toX - 500), id).toBeGreaterThanOrEqual(136);
+		}
+	});
+
+	it("still stages it when the band is too full to find a clear spot", () => {
+		// Overlapping is honest here, and better than silently not showing the one
+		// event on this desktop that is about two sessions at once.
+		let w = syncActivities(
+			{ ...world(), spacing: 136 },
+			["a", "b", ...Array.from({ length: 8 }, (_, i) => `p${i}`)].map((id) => activity(id, "pr_open")),
+			T0,
+			scripted(0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95),
+		);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 + 10 * REST_MAX_MS })) };
+		const talking = startConversation(w, { from: "a", to: "b", line: "hello", now: T0 });
+
+		expect(petById(talking, "a").meeting).toBeDefined();
+		expect(petById(talking, "b").meeting).toBeDefined();
+	});
+});

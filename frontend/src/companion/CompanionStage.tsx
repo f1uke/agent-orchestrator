@@ -4,6 +4,7 @@ import {
 	dragPet,
 	grabPet,
 	releasePet,
+	startConversation,
 	syncActivities,
 	tick,
 	type Band,
@@ -18,8 +19,9 @@ import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
+import { bubbleOpensLeft, figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
 import { Procs } from "./Procs";
+import { stackOrder } from "./stacking";
 
 // The stage: the only stateful part of the overlay renderer. It owns a World,
 // advances it on a slow tick, and paints each Proc with a `transform` — the engine
@@ -100,6 +102,15 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 	useEffect(() => {
 		return source.subscribe((activities) => {
 			setWorld((current) => syncActivities(current, activities, Date.now(), Math.random));
+		});
+	}, [source]);
+
+	// An `ao send` between two sessions is the one event on this desktop that is
+	// about a RELATIONSHIP rather than about one session, so it is the one time two
+	// Procs act together. The engine decides whether it can actually be staged.
+	useEffect(() => {
+		return source.conversations?.(({ from, to, line }) => {
+			setWorld((current) => startConversation(current, { from, to, line, now: Date.now() }));
 		});
 	}, [source]);
 
@@ -222,22 +233,116 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 		};
 	}, [onInteractiveChange]);
 
+	const painted = paintOrder(world.pets);
+
+	// TWO layers, deliberately. Every Proc carries a `transform`, and a transform
+	// makes an element a stacking context — so a bubble drawn INSIDE its Proc can
+	// never rise above the Proc next door however its z-index is set, and a
+	// neighbour standing to the right was painting straight over what it was
+	// saying. Characters below, the things they are SAYING above all of them.
 	return (
 		<div className="companion-stage">
-			{world.pets.map((pet) => (
-				<ProcOnStage
-					key={pet.id}
-					pet={pet}
-					tooltip={openTooltip === pet.id}
-					bubble={bubbleFor?.(pet.id) ?? null}
-					bubbleTick={bubbleTick}
-				/>
-			))}
+			<div className="companion-cast">
+				{painted.map((pet) => (
+					<ProcArt key={pet.id} pet={pet} />
+				))}
+			</div>
+			<div className="companion-chrome">
+				{painted.map((pet) => (
+					<ProcChrome
+						key={pet.id}
+						pet={pet}
+						tooltip={openTooltip === pet.id}
+						bubble={bubbleFor?.(pet.id) ?? null}
+						bubbleTick={bubbleTick}
+					/>
+				))}
+			</div>
 		</div>
 	);
 }
 
-function ProcOnStage({
+/**
+ * Right to left, so the LEFTMOST Proc is painted last and therefore on top.
+ *
+ * Only decides character-over-character now — the speech is in its own layer — but
+ * it still matters: a Proc's ground prop and cord hang to its right, so the one on
+ * the left is the one that should be in front of them.
+ */
+function paintOrder(pets: Pet[]): Pet[] {
+	return [...pets].sort((a, b) => b.x - a.x);
+}
+
+/** Everything about where a Proc IS: the same transform for its art and its chrome. */
+function placement(pet: Pet): React.CSSProperties {
+	// While walking, paint at the DESTINATION and let the transition carry the Proc
+	// there over exactly the walk's duration; the engine sets `x` to the same value
+	// when the walk ends, so there is never a jump at the hand-off.
+	const targetX = pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
+	// A held Proc must track the pointer exactly, so no transition on the drag.
+	const durationMs = pet.motion.kind === "walking" ? pet.motion.endsAt - pet.motion.startedAt : 0;
+	return {
+		transform: `translate3d(${targetX}px, 0px, 0px)`,
+		transitionProperty: "transform",
+		transitionTimingFunction: "linear",
+		transitionDuration: `${durationMs}ms`,
+		["--procs-offset-x" as string]: `${FRAME.offsetX}px`,
+		["--procs-figure-width" as string]: `${FRAME.figureWidth}px`,
+		// Mirroring the sprite to walk left moves the figure across its own frame, and
+		// the chrome pinned to it does not mirror — so it is told where the figure went.
+		["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
+		["--procs-name-room" as string]: `${NAME_TAG_ALLOWANCE}px`,
+		["--procs-frame-height" as string]: `${FRAME.height}px`,
+	};
+}
+
+/** What a Proc is saying right now, or null. A greeting overrides the feed. */
+function spokenLine(pet: Pet, bubble: ComposedBubble | null): ComposedBubble | null {
+	// While two Procs are together the SENDER says its piece and the other one
+	// listens. "…" invents nothing — it is the picture of being told something, not
+	// a claim about what the listening session is doing.
+	if (pet.meeting?.phase === "greeting") {
+		return { text: pet.meeting.line || "…", tone: "normal", decay: "fresh" };
+	}
+	return bubble;
+}
+
+function ProcArt({ pet }: { pet: Pet }) {
+	// The character is a stable function of the session ref, so the same worker is
+	// always the same Proc — that is what lets someone learn to recognise it.
+	const cast = castForSession(pet.id);
+	const walking = pet.motion.kind === "walking";
+	const held = pet.motion.kind === "held";
+	const greeting = pet.meeting?.phase === "greeting";
+	// A Proc on its way to (or back from) a meeting is running, not strolling.
+	const running = walking && pet.meeting !== undefined;
+
+	return (
+		<div
+			data-proc
+			data-session={pet.id}
+			className="companion-proc"
+			style={{ ...placement(pet), zIndex: stackOrder(pet) }}
+		>
+			<Procs
+				cast={cast}
+				status={pet.status}
+				facing={pet.facing}
+				walking={walking}
+				held={held}
+				running={running}
+				greeting={greeting}
+				size={PET_HEIGHT}
+				className="companion-proc-art"
+			/>
+			<div className="companion-proc-name">
+				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
+			</div>
+		</div>
+	);
+}
+
+function ProcChrome({
 	pet,
 	tooltip,
 	bubble,
@@ -248,42 +353,29 @@ function ProcOnStage({
 	/** Only here to re-render the bubble as its claim ages. */
 	bubbleTick: number;
 }) {
-	// The character is a stable function of the session ref, so the same worker is
-	// always the same Proc — that is what lets someone learn to recognise it.
-	const cast = castForSession(pet.id);
-	const walking = pet.motion.kind === "walking";
 	const held = pet.motion.kind === "held";
-	// While walking, paint at the DESTINATION and let the transition carry the Proc
-	// there over exactly the walk's duration; the engine sets `x` to the same value
-	// when the walk ends, so there is never a jump at the hand-off.
+	const greeting = pet.meeting?.phase === "greeting";
+	const said = spokenLine(pet, bubble);
+	if (!said && !tooltip) return null;
+
 	const targetX = pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
-	// A held Proc must track the pointer exactly, so no transition on the drag.
-	const durationMs = pet.motion.kind === "walking" ? pet.motion.endsAt - pet.motion.startedAt : 0;
+	// Face to face, the two cards would open the same way and the one on the left
+	// would be laid straight across the one on the right. Each opens AWAY from the
+	// Proc it is talking to instead — unless that would put it off the screen.
+	const opensLeft = bubbleOpensLeft({
+		figureX: targetX + figureLeft(pet.facing === "left"),
+		figureWidth: FRAME.figureWidth,
+		screenWidth: window.innerWidth,
+		preferLeft: greeting && pet.facing === "right",
+	});
 
 	return (
-		<div
-			data-proc
-			data-session={pet.id}
-			className="companion-proc"
-			style={{
-				transform: `translate3d(${targetX}px, 0px, 0px)`,
-				transitionProperty: "transform",
-				transitionTimingFunction: "linear",
-				transitionDuration: `${durationMs}ms`,
-				["--procs-offset-x" as string]: `${FRAME.offsetX}px`,
-				["--procs-figure-width" as string]: `${FRAME.figureWidth}px`,
-				// Mirroring the sprite to walk left moves the figure across its own
-				// frame, and the chrome pinned under it does not mirror — so it is told
-				// where the figure actually went.
-				["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
-				["--procs-name-room" as string]: `${NAME_TAG_ALLOWANCE}px`,
-			}}
-		>
+		<div className="companion-proc-chrome" style={placement(pet)}>
 			{/* The tooltip wins the space when it is open: it is a deliberate request
 			    for detail, and two cards over one Proc would collide. */}
-			{bubble && !held && !tooltip ? (
-				<div className="companion-proc-bubble">
-					<Bubble text={bubble.text} tone={bubble.tone} decay={bubble.decay} />
+			{said && !held && !tooltip ? (
+				<div className="companion-proc-bubble" data-opens={opensLeft ? "left" : undefined}>
+					<Bubble text={said.text} tone={said.tone} decay={said.decay} tail={opensLeft ? "right" : "left"} />
 				</div>
 			) : null}
 			{tooltip && !held ? (
@@ -297,18 +389,6 @@ function ProcOnStage({
 					/>
 				</div>
 			) : null}
-			<Procs
-				cast={cast}
-				status={pet.status}
-				facing={pet.facing}
-				walking={walking}
-				held={held}
-				size={PET_HEIGHT}
-				className="companion-proc-art"
-			/>
-			<div className="companion-proc-name">
-				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
-			</div>
 		</div>
 	);
 }

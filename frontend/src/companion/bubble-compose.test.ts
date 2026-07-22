@@ -56,12 +56,6 @@ describe("composing the bubble's words", () => {
 		expect(said?.text).toBe("Running the test suite — failed");
 	});
 
-	it("shows a message to the orchestrator as speech directed at it", () => {
-		const said = composeBubble(slots({ kind: "message", text: "please rebase onto main" }), T + 1);
-
-		expect(said?.text).toBe("→ orchestrator: please rebase onto main");
-	});
-
 	it("truncates anything long rather than letting it stretch across the desktop", () => {
 		const long = "x".repeat(400);
 		const said = composeBubble(slots({ kind: "message", text: long }), T + 1);
@@ -120,5 +114,29 @@ describe("composing the bubble's words", () => {
 
 		expect(fresh?.decay).toBe("fresh");
 		expect(stale?.decay).toBe("settled");
+	});
+});
+
+describe("a message names who actually sent it", () => {
+	// `→ orchestrator:` was a guess made when the sender was unknown, and it was
+	// printing the raw `[from @…]` stamp alongside it — so a real message read
+	// "→ orchestrator: [from @agent-orchestrator-105] P1 is fixed". The stamp IS
+	// the sender; using it is both tidier and more honest.
+	it("says the sender's handle, not a guess at one", () => {
+		const said = composeBubble(slots({ kind: "message", text: "[from @agent-orchestrator-105] P1 is fixed" }), T + 1);
+
+		expect(said?.text).toBe("@agent-orchestrator-105: P1 is fixed");
+	});
+
+	it("never leaves the raw stamp in the bubble", () => {
+		const said = composeBubble(slots({ kind: "message", text: "[from @demo-app-1] ping" }), T + 1);
+
+		expect(said?.text).not.toContain("[from");
+	});
+
+	it("shows an unstamped message as speech without inventing a sender", () => {
+		const said = composeBubble(slots({ kind: "message", text: "please rebase onto main" }), T + 1);
+
+		expect(said?.text).toBe("“please rebase onto main”");
 	});
 });

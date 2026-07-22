@@ -1,6 +1,7 @@
 import { applyEvent, emptySlots, type ActivityFrame, type ActivitySlots } from "./activity-decay";
 import { composeBubble, type ComposedBubble } from "./bubble-compose";
-import type { CompanionActivity, CompanionFeed } from "./feed";
+import { parseMessageFrom } from "./conversation";
+import type { CompanionActivity, CompanionConversation, CompanionFeed } from "./feed";
 
 // A hand-driven feed, for the dev playground on `companion.html`.
 //
@@ -23,6 +24,7 @@ export type ManualFeed = CompanionFeed & {
 
 export function createManualFeed(initial: CompanionActivity[] = []): ManualFeed {
 	const listeners = new Set<(activities: CompanionActivity[]) => void>();
+	const talkers = new Set<(conversation: CompanionConversation) => void>();
 	const slots = new Map<string, ActivitySlots>();
 	let roster = initial;
 
@@ -39,6 +41,14 @@ export function createManualFeed(initial: CompanionActivity[] = []): ManualFeed 
 		roster: () => roster,
 		push(frame) {
 			slots.set(frame.sessionId, applyEvent(slots.get(frame.sessionId) ?? emptySlots(), frame));
+			if (frame.kind !== "message") return;
+			const { sender, body } = parseMessageFrom(frame.text ?? "");
+			if (!sender || sender === frame.sessionId) return;
+			for (const listener of talkers) listener({ from: sender, to: frame.sessionId, line: body });
+		},
+		conversations(listener) {
+			talkers.add(listener);
+			return () => talkers.delete(listener);
 		},
 		hush(sessionId) {
 			slots.delete(sessionId);

@@ -1,6 +1,7 @@
 import { applyEvent, emptySlots, type ActivityFrame, type ActivitySlots } from "./activity-decay";
 import { composeBubble, type ComposedBubble } from "./bubble-compose";
-import type { CompanionActivity, CompanionFeed } from "./feed";
+import { parseMessageFrom } from "./conversation";
+import type { CompanionActivity, CompanionConversation, CompanionFeed } from "./feed";
 import { sessionsToActivities, type LiveSession } from "./live-roster";
 
 // The real feed: which Procs exist comes from the sessions API, what they SAY comes
@@ -39,6 +40,7 @@ function isFrame(value: unknown): value is ActivityFrame {
 
 export function createLiveFeed(deps: LiveFeedDeps): LiveFeed {
 	const listeners = new Set<(activities: CompanionActivity[]) => void>();
+	const talkers = new Set<(conversation: CompanionConversation) => void>();
 	const slots = new Map<string, ActivitySlots>();
 	// The last roster that actually arrived. A failed poll — a restarting daemon —
 	// keeps the Procs on screen rather than emptying the desktop and refilling it.
@@ -51,6 +53,17 @@ export function createLiveFeed(deps: LiveFeedDeps): LiveFeed {
 
 	const publish = () => {
 		for (const listener of listeners) listener(roster);
+	};
+
+	// A `message` frame names its RECIPIENT as the frame's session; the sender is
+	// stamped onto the body by `ao send`. Both ends present means two Procs can be
+	// brought together — a message a person typed into the app has no sender and is
+	// simply shown in the recipient's bubble, as every message already was.
+	const announceConversation = (frame: ActivityFrame) => {
+		if (frame.kind !== "message" || talkers.size === 0) return;
+		const { sender, body } = parseMessageFrom(frame.text ?? "");
+		if (!sender || sender === frame.sessionId) return;
+		for (const listener of talkers) listener({ from: sender, to: frame.sessionId, line: body });
 	};
 
 	const refreshNow = async () => {
@@ -69,6 +82,7 @@ export function createLiveFeed(deps: LiveFeedDeps): LiveFeed {
 			(value) => {
 				if (!isFrame(value)) return;
 				slots.set(value.sessionId, applyEvent(slots.get(value.sessionId) ?? emptySlots(), value));
+				announceConversation(value);
 			},
 			() => {
 				closeStream?.();
@@ -109,6 +123,10 @@ export function createLiveFeed(deps: LiveFeedDeps): LiveFeed {
 				listeners.delete(listener);
 				if (listeners.size === 0) stop();
 			};
+		},
+		conversations(listener) {
+			talkers.add(listener);
+			return () => talkers.delete(listener);
 		},
 		bubbleFor(sessionId) {
 			const found = slots.get(sessionId);
