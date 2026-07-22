@@ -36,10 +36,15 @@ describe("NameTag", () => {
 	});
 
 	it("truncates a long name instead of stretching across its neighbours", () => {
-		const { container } = render(<NameTag name={"a really quite extraordinarily long session name"} />);
+		const name = "a really quite extraordinarily long session name";
+		const { container } = render(<NameTag name={name} />);
 		const chip = container.querySelector("[data-name-tag]") as HTMLElement;
+		// The truncating box is the text itself, not the chip: the chip is a row that
+		// may also carry the coordinator's crown, and the crown must never be the part
+		// that gets ellipsized away.
+		const text = [...chip.children].find((child) => child.textContent === name) as HTMLElement;
 
-		expect(chip.style.textOverflow).toBe("ellipsis");
+		expect(text.style.textOverflow).toBe("ellipsis");
 		// Under the 155px crowding clearance, so it can never reach the Proc next door.
 		expect(parseInt(chip.style.maxWidth, 10)).toBeLessThan(155);
 	});
@@ -91,5 +96,73 @@ describe("what a name IS", () => {
 
 		expect(parseInt(chip.style.maxWidth, 10)).toBeGreaterThan(93);
 		expect(parseInt(chip.style.maxWidth, 10)).toBeLessThan(155);
+	});
+});
+
+describe("the tooltip's identifier lines", () => {
+	// "agent-orchestrator-105" was being broken at a hyphen — "agent-" on one line,
+	// "orchestrator-105" on the next — which reads as two different things. A
+	// hyphen inside an identifier is not a place a reader expects a break; a space
+	// inside a task name is.
+	function lines(name = "smoke to testiny") {
+		const { container } = render(
+			<PetTooltip name={name} sessionId="agent-orchestrator-105" project="agent-orchestrator" status="working" />,
+		);
+		return [...container.querySelectorAll("[data-tooltip] > *")] as HTMLElement[];
+	}
+
+	it("keeps the session id on one line instead of splitting it at a hyphen", () => {
+		const id = lines().find((line) => line.textContent === "@agent-orchestrator-105");
+
+		expect(id?.style.whiteSpace).toBe("nowrap");
+	});
+
+	it("keeps the project name on one line for the same reason", () => {
+		const project = lines().find((line) => line.textContent === "agent-orchestrator");
+
+		expect(project?.style.whiteSpace).toBe("nowrap");
+	});
+
+	it("still lets a long task name wrap, because its spaces ARE break points", () => {
+		const long = "rewrite the coupon search results ranking";
+		const heading = lines(long).find((line) => line.textContent === long);
+
+		expect(heading?.style.whiteSpace ?? "").not.toBe("nowrap");
+	});
+});
+
+describe("the orchestrator's name chip", () => {
+	// The human's call (2026-07-22): mark the coordinator on its LABEL, not on the
+	// character. The Proc keeps the hat that says which character it is, and the
+	// chip says what job it holds — two readings that stay separate.
+	it("wears a crown", () => {
+		const { container } = render(<NameTag name="orchestrating" lead />);
+
+		expect(container.querySelector("[data-lead-crown]")).not.toBeNull();
+	});
+
+	it("does not put a crown on an ordinary worker", () => {
+		const { container } = render(<NameTag name="login rate limit" />);
+
+		expect(container.querySelector("[data-lead-crown]")).toBeNull();
+	});
+
+	it("is a different colour from its peers' chips", () => {
+		const lead = render(<NameTag name="orchestrating" lead />).container.querySelector(
+			"[data-name-tag]",
+		) as HTMLElement;
+		const worker = render(<NameTag name="login rate limit" />).container.querySelector(
+			"[data-name-tag]",
+		) as HTMLElement;
+
+		expect(lead.style.background).not.toBe(worker.style.background);
+	});
+
+	it("keeps the ink rim, because the fill alone cannot carry a light wallpaper", () => {
+		const lead = render(<NameTag name="orchestrating" lead />).container.querySelector(
+			"[data-name-tag]",
+		) as HTMLElement;
+
+		expect(lead.style.borderColor.replace(/\s/g, "")).toBe("rgb(24,20,34)");
 	});
 });

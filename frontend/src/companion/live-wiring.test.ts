@@ -95,6 +95,7 @@ describe("the sessions payload the real daemon returns", () => {
 			id: REAL_ROW.id,
 			name: REAL_ROW.name ?? REAL_ROW.id,
 			projectName: REAL_ROW.projectName ?? undefined,
+			kind: "worker",
 			status: REAL_ROW.status as LiveSession["status"],
 			statusReason: REAL_ROW.statusReason as LiveSession["statusReason"],
 			isTerminated: REAL_ROW.isTerminated,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { BUBBLE_COARSE_TEXT, Bubble, looksLikeRawCommand } from "./Bubble";
-import { PROCS_INK, PROP_COLOURS, contrastRatio, worstSeparation } from "./palette";
+import { PROCS_INK, PROCS_RIM_PX, PROP_COLOURS, contrastRatio, worstSeparation } from "./palette";
 
 /** jsdom reports colours as `rgb(...)`, so compare like for like. */
 function rgb(hex: string): string {
@@ -19,13 +19,26 @@ describe("Bubble", () => {
 	it("is a self-contained card, not app chrome", () => {
 		// It floats on the user's wallpaper, so it cannot borrow a theme token for its
 		// background any more than a Proc can. Fill carries dark wallpapers, the ink
-		// rim carries light ones — the same two channels the pets use.
+		// rim carries light ones — the same two channels the pets use. Both live on
+		// the OUTLINE, which is one path around the card and its tail together.
 		const { container } = render(<Bubble text="Running the test suite" />);
+		const outline = container.querySelector("[data-bubble-tail] path") as SVGPathElement;
 		const card = container.querySelector("[data-bubble]") as HTMLElement;
 
-		expect(card.style.background).toBe(rgb(PROP_COLOURS.paper));
-		expect(card.style.borderColor).toBe(rgb(PROCS_INK));
+		expect(outline.getAttribute("fill")).toBe(PROP_COLOURS.paper);
+		expect(outline.getAttribute("stroke")).toBe(PROCS_INK);
+		expect(outline.getAttribute("stroke-width")).toBe(String(PROCS_RIM_PX));
 		expect(card.style.color).toBe(rgb(PROCS_INK));
+	});
+
+	it("draws the card and its tail as ONE path, so the two can never fail to meet", () => {
+		// They used to be a CSS border and a separate SVG wedge with a paper-coloured
+		// strip laid over the seam. It never joined cleanly and never could: a CSS
+		// border and an SVG stroke round their sub-pixels differently.
+		const { container } = render(<Bubble text="Running the test suite" />);
+
+		expect(container.querySelectorAll("[data-bubble-tail] path")).toHaveLength(1);
+		expect(container.querySelector("[data-bubble]")?.getAttribute("style")).toContain("transparent");
 	});
 
 	it("clears the wallpaper floor with both channels, like everything else on the desktop", () => {
@@ -42,9 +55,21 @@ describe("Bubble", () => {
 		const { container: fresh } = render(<Bubble text="Running the test suite" decay="fresh" />);
 		const { container: fading } = render(<Bubble text="Running the test suite" decay="fading" />);
 
-		const opacity = (c: HTMLElement) => Number((c.querySelector("[data-bubble]") as HTMLElement).style.opacity || 1);
+		const opacity = (c: HTMLElement) =>
+			Number((c.querySelector("[data-bubble-text]") as HTMLElement).style.opacity || 1);
 		expect(opacity(fading)).toBeLessThan(opacity(fresh));
 		expect(opacity(fading)).toBeGreaterThan(0);
+	});
+
+	it("fades only the WORDS, never the card under them", () => {
+		// A see-through card is a card whose legibility depends on a desktop we do not
+		// control, which is the one thing this whole palette exists to avoid.
+		const { container } = render(<Bubble text="Running the test suite" decay="settled" />);
+		const card = container.querySelector("[data-bubble]") as HTMLElement;
+		const tail = container.querySelector("[data-bubble-tail]") as HTMLElement;
+
+		expect(card.style.opacity === "" || card.style.opacity === "1").toBe(true);
+		expect(tail.style.opacity === "" || tail.style.opacity === "1").toBe(true);
 	});
 
 	it("collapses to the coarsest still-true thing rather than keep asserting a stale one", () => {
@@ -114,5 +139,34 @@ describe("looksLikeRawCommand", () => {
 
 		expect(screen.queryByText(/credentials/)).not.toBeInTheDocument();
 		expect(screen.getByText(BUBBLE_COARSE_TEXT)).toBeInTheDocument();
+	});
+});
+
+describe("how much a bubble is allowed to say", () => {
+	// One line cut at ~30 characters threw away most of what the agent was actually
+	// doing — which is the only thing the bubble is for. It wraps to three lines and
+	// truncates there, so a real sentence survives.
+	const LONG = "Rewriting the coupon search ranking so expired offers stop being promoted";
+
+	const cardOf = (container: HTMLElement) => container.querySelector("[data-bubble]") as HTMLElement;
+
+	it("wraps instead of cutting the sentence at the first line", () => {
+		const { container } = render(<Bubble text={LONG} />);
+		const card = cardOf(container);
+
+		expect(card.style.whiteSpace).not.toBe("nowrap");
+	});
+
+	it("stops at three lines, so a talkative Proc cannot grow a wall of text", () => {
+		const { container } = render(<Bubble text={LONG} />);
+
+		expect(cardOf(container).style.webkitLineClamp).toBe("3");
+		expect(cardOf(container).style.overflow).toBe("hidden");
+	});
+
+	it("stays narrower than it is tall-capable, so it does not sprawl over the neighbour", () => {
+		const { container } = render(<Bubble text={LONG} />);
+
+		expect(parseInt(cardOf(container).style.maxWidth, 10)).toBeLessThanOrEqual(200);
 	});
 });

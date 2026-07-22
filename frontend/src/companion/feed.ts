@@ -18,6 +18,7 @@
 // `CompanionActivity` with them rather than have the overlay guess at a shape.
 
 import type { SessionStatus } from "../renderer/types/workspace";
+import type { SessionKind } from "./live-roster";
 
 /** One session, as much as the overlay needs to know about it. */
 export type CompanionActivity = {
@@ -27,6 +28,18 @@ export type CompanionActivity = {
 	name?: string;
 	/** Which project it belongs to. Shown in the hover tooltip. */
 	project?: string;
+	/** The one coordinator per project is marked on its label. Absent = a worker. */
+	kind?: SessionKind;
+};
+
+/** One `ao send` between two sessions, as the overlay needs to stage it. */
+export type CompanionConversation = {
+	/** The sending session. `ao send` stamps it onto the message body itself. */
+	from: string;
+	/** The receiving session — the frame's own session id. */
+	to: string;
+	/** What was said, without the sender stamp. */
+	line: string;
 };
 
 export interface CompanionFeed {
@@ -36,4 +49,10 @@ export interface CompanionFeed {
 	 * waiting for a change), then on every update. Returns an unsubscribe.
 	 */
 	subscribe(listener: (activities: CompanionActivity[]) => void): () => void;
+	/**
+	 * Register for conversations — messages between two sessions, both of which are
+	 * named. Optional: a feed that cannot see them simply has none, and the overlay
+	 * goes on showing every message in the recipient's bubble as it always did.
+	 */
+	conversations?(listener: (conversation: CompanionConversation) => void): () => void;
 }

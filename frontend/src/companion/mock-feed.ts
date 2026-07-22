@@ -7,6 +7,7 @@
 
 import type { SessionStatus } from "../renderer/types/workspace";
 import type { CompanionActivity, CompanionFeed } from "./feed";
+import type { SessionKind } from "./live-roster";
 
 /** How long the mock holds each state. Long enough to watch, short enough to demo. */
 export const MOCK_FEED_STEP_MS = 20_000;
@@ -40,7 +41,13 @@ export const MOCK_FEED_STEP_MS = 20_000;
 // cheating: demonstrating the range is the mock's whole job, and mock-feed.test.ts
 // holds the roster to it so a later edit cannot quietly put five of eight sessions
 // on the same character again.
-const SCRIPTS: Array<{ sessionId: string; name: string; project: string; states: SessionStatus[] }> = [
+const SCRIPTS: Array<{
+	sessionId: string;
+	name: string;
+	project: string;
+	kind?: SessionKind;
+	states: SessionStatus[];
+}> = [
 	{
 		sessionId: "demo-app-59",
 		name: "login rate limit",
@@ -84,9 +91,12 @@ const SCRIPTS: Array<{ sessionId: string; name: string; project: string; states:
 		states: ["merged", "terminated", "todo", "working", "approved", "mergeable"],
 	},
 	{
+		// One coordinator, as a real project has: the mark is drawn on its label and
+		// there is no seeing it if the demo roster is all workers.
 		sessionId: "demo-app-10",
-		name: "onboarding tour",
+		name: "coordinating demo-app",
 		project: "demo-app",
+		kind: "orchestrator",
 		states: ["unknown", "draft", "review_pending", "changes_requested", "no_signal"],
 	},
 ];
@@ -103,10 +113,11 @@ function lcm(a: number, b: number): number {
 
 /** The roster at a given step. Pure, cyclic, stable session ids. */
 export function mockActivitiesAt(step: number): CompanionActivity[] {
-	return SCRIPTS.map(({ sessionId, name, project, states }) => ({
+	return SCRIPTS.map(({ sessionId, name, project, kind, states }) => ({
 		sessionId,
 		name,
 		project,
+		kind: kind ?? "worker",
 		status: states[((step % states.length) + states.length) % states.length],
 	}));
 }

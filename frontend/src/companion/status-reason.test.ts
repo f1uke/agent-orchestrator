@@ -6,6 +6,7 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
 		id: "demo-app-1",
 		name: "add login",
 		projectName: "demo-app",
+		kind: "worker",
 		status: "working",
 		isTerminated: false,
 		...over,
@@ -45,9 +46,15 @@ describe("sessionsToActivities", () => {
 		]);
 
 		expect(roster).toEqual([
-			{ sessionId: "demo-app-1", status: "working", name: "add login", project: "demo-app" },
-			{ sessionId: "demo-api-2", status: "idle", name: "fix retries", project: "demo-api" },
+			{ sessionId: "demo-app-1", status: "working", name: "add login", project: "demo-app", kind: "worker" },
+			{ sessionId: "demo-api-2", status: "idle", name: "fix retries", project: "demo-api", kind: "worker" },
 		]);
+	});
+
+	it("carries the coordinator through, so its Proc can be marked", () => {
+		const roster = sessionsToActivities([session({ id: "demo-app-9", kind: "orchestrator" })]);
+
+		expect(roster[0].kind).toBe("orchestrator");
 	});
 
 	it("drops terminated sessions, because a finished session is not on your desktop", () => {

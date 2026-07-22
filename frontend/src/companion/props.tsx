@@ -93,11 +93,32 @@ function Crate() {
 
 // ---------------------------------------------------------------- HELD
 
-export function HeldProp({ held }: { held: Held }) {
+/**
+ * The x-extent each held shape occupies in rig coordinates.
+ *
+ * Needed because the sprite turns around by mirroring on X, and a held prop's
+ * CONTENT means its direction — a `?`, a merge arrow, a tick, a clock. Mirrored,
+ * they read backwards. So the prop travels to the Proc's other hand with the rest
+ * of the sprite (a carried thing moves with its carrier) and flips its own content
+ * back about its own footprint, which is the one axis that leaves it in the hand
+ * it just moved to.
+ */
+const HELD_EXTENT = { sign: { min: 1, max: 30 }, page: { min: 4, max: 29 } } as const;
+
+/** `translate(t) scale(-1 1)` maps x to `t - x`; `t = min + max` sends a footprint back onto itself. */
+export function counterMirrorX(extent: { min: number; max: number }): string {
+	return `translate(${extent.min + extent.max} 0) scale(-1 1)`;
+}
+
+export function HeldProp({ held, mirrored = false }: { held: Held; mirrored?: boolean }) {
 	if (held === "none") return null;
 	const sign = held === "sign-question" || held === "sign-merge";
 	return (
-		<g data-slot="held" data-held={held}>
+		<g
+			data-slot="held"
+			data-held={held}
+			transform={mirrored ? counterMirrorX(sign ? HELD_EXTENT.sign : HELD_EXTENT.page) : undefined}
+		>
 			{sign ? <Sign kind={held} /> : <Page surface={held} />}
 		</g>
 	);
@@ -406,6 +427,56 @@ function CordSpark() {
 			<g style={{ animation: "procs-spark 700ms ease-in-out infinite" }}>
 				<path data-rim d="M0 -7 L2 -2 L7 0 L2 2 L0 7 L-2 2 L-7 0 L-2 -2 Z" fill={PROP_COLOURS.spark} {...RIM} />
 			</g>
+		</g>
+	);
+}
+
+// ---------------------------------------------------------------- DUST
+
+/** Where each puff of a landing goes: outward from the feet, and a little up. */
+const DUST_PUFFS = [
+	{ x: 28, dx: -24, r: 7, delay: 0 },
+	{ x: 48, dx: 0, r: 5, delay: 70 },
+	{ x: 68, dx: 24, r: 6.5, delay: 35 },
+];
+
+/**
+ * The puff a landing throws up.
+ *
+ * A Proc that hits the floor and simply carries on reads as weightless; this is
+ * the only thing that says it landed ON something. Same two channels as
+ * everything else out here — a self-contained fill plus the ink rim — because it
+ * is drawn over the wallpaper like the rest of the scene.
+ *
+ * `strength` runs 0-1 off the landing speed, so a Proc set down gently barely
+ * raises anything and one dropped from the top of the display raises a cloud.
+ */
+export function DustPuff({ strength }: { strength: number }) {
+	const spread = 0.5 + strength;
+	return (
+		<g data-slot="dust" data-dust-strength={strength.toFixed(2)}>
+			{DUST_PUFFS.map((puff) => (
+				<circle
+					key={puff.x}
+					data-rim
+					cx={puff.x}
+					cy={116}
+					r={puff.r * (0.6 + strength * 0.6)}
+					fill={PROP_COLOURS.quiet}
+					{...RIM}
+					style={{
+						// About the CIRCLE, not about the corner of the view box. An SVG
+						// element's transform origin defaults to the view box's own origin,
+						// so `scale(0.35)` at the start of the puff hauled it from the feet
+						// up to the Proc's head and then swept it back down — the dust
+						// appeared to come off its ears.
+						transformBox: "fill-box",
+						transformOrigin: "center",
+						animation: `procs-dust ${420 + strength * 220}ms ease-out ${puff.delay}ms both`,
+						["--procs-dust-dx" as string]: `${puff.dx * spread}px`,
+					}}
+				/>
+			))}
 		</g>
 	);
 }

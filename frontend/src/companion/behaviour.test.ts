@@ -12,11 +12,14 @@ import {
 	WALK_MAX_PX,
 	WALK_MIN_MS,
 	WALK_MIN_PX,
+	advanceFlight,
 	animatingCount,
 	createWorld,
 	dragPet,
 	grabPet,
 	releasePet,
+	startConversation,
+	MEET_GAP_PX,
 	syncActivities,
 	tick,
 	walkingCount,
@@ -124,6 +127,22 @@ describe("walking", () => {
 		const distance = Math.abs(pet.motion.toX - pet.motion.fromX);
 		expect(distance).toBeGreaterThanOrEqual(WALK_MIN_PX);
 		expect(distance).toBeLessThanOrEqual(WALK_MAX_PX);
+	});
+
+	it("gives a free Proc a stroll within the minute, not once every couple of minutes", () => {
+		// A whole minute could pass on a real desktop with nothing moving at all,
+		// which reads as broken rather than calm. This holds the rest window to the
+		// span a person will actually sit and watch.
+		let w = ready([["a", "pr_open"]]);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 + REST_MAX_MS })) };
+
+		let walked = false;
+		for (let i = 0; i <= 60 && !walked; i++) {
+			w = tick(w, T0 + i * 1_000, half);
+			walked = walkingCount(w) > 0;
+		}
+
+		expect(walked).toBe(true);
 	});
 
 	it("never walks a Proc whose scene has a ground", () => {
@@ -505,13 +524,17 @@ describe("crowding", () => {
 		}
 	});
 
-	it("separates Procs that are already overlapping", () => {
+	it("leaves Procs that something already stacked exactly where they are", () => {
+		// The engine used to pull these apart on the next tick. It no longer does:
+		// they are on one spot because a drop, a resize or a status change PUT them
+		// there, and a desktop that rearranges itself under your eyes was the worse
+		// of the two problems (the human's call, 2026-07-22).
 		const base = syncActivities(crowded(), [activity("a", "pr_open"), activity("b", "pr_open")], T0, half);
 		const stacked: World = { ...base, pets: base.pets.map((pet) => ({ ...pet, x: 500 })) };
 
 		const next = tick(stacked, T0 + 1, half);
 
-		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+		expect(positions(next)).toEqual([500, 500]);
 	});
 
 	it("leaves Procs that are already spaced exactly where they are", () => {
@@ -527,7 +550,7 @@ describe("crowding", () => {
 		expect(positions(next)).toEqual([200, 500]);
 	});
 
-	it("keeps everyone inside the band while separating them", () => {
+	it("keeps everyone inside the band", () => {
 		const base = syncActivities(
 			crowded(),
 			["a", "b", "c", "d", "e"].map((id) => activity(id, "pr_open")),
@@ -542,29 +565,22 @@ describe("crowding", () => {
 			expect(pet.x).toBeGreaterThanOrEqual(BAND.minX);
 			expect(pet.x).toBeLessThanOrEqual(BAND.maxX);
 		}
-		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
 	});
 
-	it("spreads evenly rather than stacking when the band is too small for everyone", () => {
-		// Ten Procs at 100px spacing need 900px of a 400px band. Nobody gets their
-		// full clearance, but sharing the shortfall equally still shows ten Procs;
-		// stacking them shows five.
-		const tight = { minX: 0, maxX: 400 };
+	it("spreads a cast that has just appeared across the band rather than stacking it", () => {
+		// Crowding is settled when a Proc TURNS UP, so this is where the spreading
+		// happens now: ten new sessions land clear of each other, and are not pulled
+		// about afterwards.
 		const base = syncActivities(
-			{ ...crowded(), band: tight },
+			crowded(),
 			Array.from({ length: 10 }, (_, i) => activity(`p${i}`, "pr_open")),
 			T0,
-			half,
+			scripted(0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95),
 		);
-		const next = tick({ ...base, pets: base.pets.map((pet) => ({ ...pet, x: 200 })) }, T0 + 1, half);
 
-		const xs = positions(next);
+		const xs = positions(base);
 		expect(new Set(xs).size).toBe(10);
-		for (let i = 1; i < xs.length; i++) {
-			expect(xs[i] - xs[i - 1]).toBeGreaterThan(0);
-		}
-		expect(xs[0]).toBeGreaterThanOrEqual(tight.minX);
-		expect(xs[xs.length - 1]).toBeLessThanOrEqual(tight.maxX);
+		expect(closestPair(base)).toBeGreaterThanOrEqual(SPACING);
 	});
 
 	it("does not separate a Proc that is mid-stroll", () => {
@@ -694,14 +710,19 @@ describe("dragging", () => {
 		expect(petById(w, "a").x).toBe(500);
 	});
 
-	it("does not land on top of another Proc when let go", () => {
+	it("lands exactly where it was let go, even on top of another Proc", () => {
+		// The crowding rule used to win here and slide the Proc off the drop point.
+		// The human chose the other way round (2026-07-22): a deliberate placement is
+		// not a mistake to be corrected, and an overlap you made yourself is one you
+		// can see and undo.
 		let w = dragWorld(["a", "b"]);
 		w = grabPet(w, "a", T0);
-		w = dragPet(w, "a", petById(w, "b").x + 5);
+		const onto = petById(w, "b").x + 5;
+		w = dragPet(w, "a", onto);
 		w = releasePet(w, "a", T0 + 2_000, half);
 		w = tick(w, T0 + 2_001, half);
 
-		expect(Math.abs(petById(w, "a").x - petById(w, "b").x)).toBeGreaterThanOrEqual(SPACING);
+		expect(petById(w, "a").x).toBe(onto);
 	});
 
 	it("only ever holds one Proc, because there is only one pointer", () => {
@@ -741,5 +762,667 @@ describe("dragging", () => {
 	it("ignores a grab for a Proc that is not there", () => {
 		expect(() => grabPet(dragWorld(), "ghost", T0)).not.toThrow();
 		expect(grabPet(dragWorld(), "ghost", T0).pets).toHaveLength(1);
+	});
+});
+
+describe("never walking in place forever", () => {
+	// The worst thing the overlay can draw is a Proc that walks and walks and never
+	// arrives: it asserts activity that is not happening, on a surface whose entire
+	// job is to be a truthful glance. So every arrangement that HAS a resting state
+	// must reach one and stay in it.
+	//
+	// The real spacing is the whole drawn frame, which is WIDER than a summon rank
+	// slot — and that is the trap. The rank pulls two alerts to 96px apart while
+	// separation pushes them to 136px, so each undoes the other for ever.
+	const REAL_SPACING = 136;
+
+	function ticked(start: World, ticks: number, from = T0): World {
+		let next = start;
+		for (let i = 0; i < ticks; i++) next = tick(next, from + i * 1_000, half);
+		return next;
+	}
+
+	function alerts(ids: string[], spacing = REAL_SPACING): World {
+		const base = syncActivities(
+			{ ...world(), spacing },
+			ids.map((id) => activity(id, "needs_input")),
+			T0,
+			half,
+		);
+		return { ...base, pets: base.pets.map((p, i) => ({ ...p, x: 50 + i * 5 })) };
+	}
+
+	it("settles a summoned cohort instead of oscillating between the rank and separation", () => {
+		let w = ticked(alerts(["a", "b"]), 400);
+
+		expect(walkingCount(w)).toBe(0);
+		// And STAYS settled: a state reached once but abandoned on the next tick is
+		// the bug, not the fix.
+		for (let i = 0; i < 100; i++) {
+			w = tick(w, T0 + (400 + i) * 1_000, half);
+			expect(walkingCount(w)).toBe(0);
+		}
+	});
+
+	it("settles a summoned Proc whose front spot a neighbour is standing on", () => {
+		const base = syncActivities(
+			{ ...world(), spacing: REAL_SPACING },
+			[activity("neighbour", "merged"), activity("a", "needs_input")],
+			T0,
+			half,
+		);
+		// The still Proc is parked right where the summon rank wants to be.
+		const centre = (BAND.minX + BAND.maxX) / 2;
+		let w = {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: p.id === "neighbour" ? centre - 20 : 60 })),
+		};
+		w = ticked(w, 400);
+
+		expect(walkingCount(w)).toBe(0);
+		for (let i = 0; i < 100; i++) {
+			w = tick(w, T0 + (400 + i) * 1_000, half);
+			expect(walkingCount(w)).toBe(0);
+		}
+	});
+
+	it("never starts a walk whose destination another Proc has already claimed this tick", () => {
+		// Two amble Procs due at the same moment, steered STRAIGHT AT EACH OTHER: a
+		// walks right 160px from 200, b walks left 160px from 560, and the two
+		// destinations land 40px apart. Deciding each walk against the roster as it
+		// was at the start of the tick, neither can see the other's claim, and both
+		// set off for a spot only one of them can stand on.
+		const collide = scripted(0.5, 0.5, 0.6, 0.5, 0.5, 0.2);
+		const base = syncActivities(
+			{ ...world(), spacing: REAL_SPACING },
+			[activity("a", "pr_open"), activity("b", "draft")],
+			T0,
+			half,
+		);
+		const due = {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: p.id === "a" ? 200 : 560, restUntil: T0 })),
+		};
+		const next = tick(due, T0 + 1, collide);
+
+		const targets = next.pets.map((p) => (p.motion.kind === "walking" ? p.motion.toX : p.x));
+		expect(Math.abs(targets[0] - targets[1])).toBeGreaterThanOrEqual(REAL_SPACING);
+	});
+});
+
+describe("a Proc you placed by hand", () => {
+	// Dropping a Proc onto an occupied spot used to set off a cascade: the drop
+	// point was overruled (the Proc slid 155px away from where it was let go) and a
+	// third Proc that had nothing to do with the gesture slid 120px as well. Direct
+	// manipulation has to mean what it says — where you let go IS where it goes —
+	// and the human chose to allow the overlap that follows from that.
+	function placedWorld(): World {
+		const base = syncActivities(
+			{ ...world(), spacing: 136 },
+			[activity("dragged", "pr_open"), activity("sitting", "pr_open"), activity("bystander", "draft")],
+			T0,
+			half,
+		);
+		const at: Record<string, number> = { dragged: 640, sitting: 190, bystander: 380 };
+		return { ...base, pets: base.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 + 10 * REST_MAX_MS })) };
+	}
+
+	function dropOn(target: number): World {
+		let w = grabPet(placedWorld(), "dragged", T0);
+		w = dragPet(w, "dragged", target);
+		w = releasePet(w, "dragged", T0 + 500, half);
+		for (let i = 0; i < 30; i++) w = tick(w, T0 + 1_000 + i * 1_000, half);
+		return w;
+	}
+
+	it("stays exactly where it was let go, even right on top of another Proc", () => {
+		expect(petById(dropOn(190), "dragged").x).toBe(190);
+	});
+
+	it("stays put when it is dropped BETWEEN two Procs, not just at the end of the row", () => {
+		// The old crowding sweep runs left to right, so the leftmost Proc happened to
+		// keep its spot whatever else happened. A drop in the middle is the case that
+		// actually moved.
+		expect(petById(dropOn(380), "dragged").x).toBe(380);
+	});
+
+	it("does not shove the Proc it landed on", () => {
+		expect(petById(dropOn(190), "sitting").x).toBe(190);
+	});
+
+	it("does not slide a bystander that had nothing to do with the gesture", () => {
+		expect(petById(dropOn(190), "bystander").x).toBe(380);
+	});
+
+	it("goes back to being ordinary once it strolls off under its own steam", () => {
+		// The hand placement is a fact about THIS position. A Proc that has since
+		// walked somewhere on its own is standing where the engine put it, and the
+		// crowding rules own that spot again.
+		let w = dropOn(190);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		let walked = false;
+		for (let i = 0; i < 200 && !walked; i++) {
+			w = tick(w, T0 + 40_000 + i * 1_000, half);
+			walked = petById(w, "dragged").motion.kind === "walking";
+		}
+		for (let i = 0; i < 60; i++) w = tick(w, T0 + 260_000 + i * 1_000, half);
+
+		expect(walked).toBe(true);
+		const [a, b] = ["dragged", "sitting"].map((id) => petById(w, id).x);
+		expect(Math.abs(a - b)).toBeGreaterThanOrEqual(136);
+	});
+});
+
+describe("nothing moves a Proc that is standing still", () => {
+	// Two separate reports, one day apart: dropping a Proc slid a bystander across
+	// the band, and a Proc ARRIVING from a stroll re-flowed the whole row. Both are
+	// the same per-tick crowding sweep, which recomputed everyone's position from
+	// scratch whenever anything anywhere changed.
+	//
+	// The rule that replaces it: crowding is resolved by the Proc that turns up, at
+	// the moment it turns up. Whoever is already standing there is left alone —
+	// always. A desktop that rearranges itself while you are looking at it is worse
+	// than two Procs standing a little close.
+	const SPACING = 136;
+
+	function standing(at: Record<string, number>, status: Pet["status"] = "pr_open"): World {
+		const base = syncActivities(
+			{ ...world(), spacing: SPACING },
+			Object.keys(at).map((id) => activity(id, status)),
+			T0,
+			half,
+		);
+		return {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 + 10 * REST_MAX_MS })),
+		};
+	}
+
+	it("leaves the neighbours where they are when a stroll finishes next to them", () => {
+		let w = standing({ walker: 300, near: 380, far: 700 });
+		// The walker arrives right beside `near`.
+		w = {
+			...w,
+			pets: w.pets.map((p) =>
+				p.id === "walker"
+					? { ...p, motion: { kind: "walking" as const, fromX: 300, toX: 390, startedAt: T0, endsAt: T0 + 1_000 } }
+					: p,
+			),
+		};
+		for (let i = 0; i < 20; i++) w = tick(w, T0 + 2_000 + i * 1_000, half);
+
+		expect(petById(w, "near").x).toBe(380);
+		expect(petById(w, "far").x).toBe(700);
+	});
+
+	it("makes the ARRIVING Proc step aside instead, so it is not hidden behind the one already there", () => {
+		let w = standing({ walker: 300, near: 380 });
+		w = {
+			...w,
+			pets: w.pets.map((p) =>
+				p.id === "walker"
+					? { ...p, motion: { kind: "walking" as const, fromX: 300, toX: 390, startedAt: T0, endsAt: T0 + 1_000 } }
+					: p,
+			),
+		};
+		w = tick(w, T0 + 2_000, half);
+
+		expect(Math.abs(petById(w, "walker").x - 380)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("leaves two Procs that are already overlapping exactly where they are", () => {
+		// They are only overlapping because something PUT them there — a drop, a
+		// resize, a status change. Shuffling them apart later is the surprise motion
+		// this whole rule exists to stop.
+		let w = standing({ a: 400, b: 405 });
+		for (let i = 0; i < 20; i++) w = tick(w, T0 + i * 1_000, half);
+
+		expect(positionsOf(w)).toEqual([400, 405]);
+	});
+
+	it("still rescues a Proc left outside the band when the display shrinks", () => {
+		// Not a rearrangement: a Proc off the band is a session you cannot see at all.
+		let w = standing({ a: 300, b: 900 });
+		w = { ...w, band: { minX: 0, maxX: 500 } };
+		w = tick(w, T0 + 1_000, half);
+
+		expect(petById(w, "b").x).toBeLessThanOrEqual(500);
+		expect(petById(w, "a").x).toBe(300);
+	});
+});
+
+function positionsOf(w: World): number[] {
+	return w.pets.map((pet) => pet.x).sort((a, b) => a - b);
+}
+
+describe("two Procs meeting when their sessions talk", () => {
+	// `ao send` between two sessions is a real event with two ends, and it is the
+	// only thing on this desktop that is ABOUT a relationship rather than about one
+	// session. So it is the one time two Procs act together: they run to each other,
+	// hop, say their piece, and go back to where they were.
+	function pair(overrides: Partial<Pet> = {}): World {
+		const base = syncActivities(
+			{ ...world(), spacing: 136 },
+			[activity("sender", "pr_open"), activity("receiver", "working")],
+			T0,
+			half,
+		);
+		return {
+			...base,
+			pets: base.pets.map((p) => ({
+				...p,
+				x: p.id === "sender" ? 200 : 800,
+				restUntil: T0 + 10 * REST_MAX_MS,
+				...overrides,
+			})),
+		};
+	}
+
+	function talk(w: World, now = T0): World {
+		return startConversation(w, { from: "sender", to: "receiver", line: "P1 is fixed", now });
+	}
+
+	function run(w: World, seconds: number, from = T0): World {
+		let next = w;
+		for (let i = 1; i <= seconds * 4; i++) next = tick(next, from + i * 250, half);
+		return next;
+	}
+
+	it("sets both Procs running toward each other", () => {
+		const w = talk(pair());
+
+		for (const id of ["sender", "receiver"]) {
+			expect(petById(w, id).motion.kind, id).toBe("walking");
+		}
+		const [a, b] = ["sender", "receiver"].map((id) => petById(w, id).motion);
+		if (a.kind !== "walking" || b.kind !== "walking") throw new Error("expected both to run");
+		// Toward each other: the left one goes right, the right one goes left.
+		expect(a.toX).toBeGreaterThan(200);
+		expect(b.toX).toBeLessThan(800);
+	});
+
+	it("runs faster than it strolls, because this one is an event and not ambience", () => {
+		const w = talk(pair());
+		const motion = petById(w, "sender").motion;
+		if (motion.kind !== "walking") throw new Error("expected a run");
+
+		const distance = Math.abs(motion.toX - motion.fromX);
+		const strollPace = (WALK_MIN_PX + WALK_MAX_PX) / (WALK_MIN_MS + WALK_MAX_MS);
+		expect(distance / (motion.endsAt - motion.startedAt)).toBeGreaterThan(strollPace);
+	});
+
+	it("brings them face to face rather than on top of each other", () => {
+		const met = run(talk(pair()), 2);
+		const [a, b] = ["sender", "receiver"].map((id) => petById(met, id));
+
+		expect(a.meeting?.phase).toBe("greeting");
+		expect(Math.abs(a.x - b.x)).toBeCloseTo(MEET_GAP_PX, 0);
+		expect(a.facing).toBe("right");
+		expect(b.facing).toBe("left");
+	});
+
+	it("gives the sender the words and leaves the listener listening", () => {
+		const met = run(talk(pair()), 2);
+
+		expect(petById(met, "sender").meeting?.line).toBe("P1 is fixed");
+		expect(petById(met, "receiver").meeting?.line).toBe("");
+	});
+
+	it("sends both home afterwards, to exactly where they were standing", () => {
+		const done = run(talk(pair()), 30);
+
+		expect(petById(done, "sender").x).toBe(200);
+		expect(petById(done, "receiver").x).toBe(800);
+		expect(petById(done, "sender").meeting).toBeUndefined();
+		expect(petById(done, "receiver").meeting).toBeUndefined();
+	});
+
+	it("gets a Proc up from its desk or its bed for it, and puts it back", () => {
+		// The one exception to structural anchoring, and a deliberate one: a message
+		// is addressed to THIS session, so the Proc that owns it answers. Its place is
+		// where it lives, not a cage — it goes back to it.
+		let w = pair();
+		w = { ...w, pets: w.pets.map((p) => (p.id === "receiver" ? { ...p, status: "idle" as const } : p)) };
+		const met = run(talk(w), 2);
+		const done = run(talk(w), 30);
+
+		expect(petById(met, "receiver").meeting?.phase).toBe("greeting");
+		expect(petById(done, "receiver").x).toBe(800);
+	});
+
+	it("refuses when either end is not on the desktop", () => {
+		const w = pair();
+
+		expect(startConversation(w, { from: "sender", to: "ghost", line: "hi", now: T0 })).toBe(w);
+		expect(startConversation(w, { from: "ghost", to: "receiver", line: "hi", now: T0 })).toBe(w);
+	});
+
+	it("does not pull a Proc out of the human's hand", () => {
+		const held = grabPet(pair(), "receiver", T0);
+
+		expect(talk(held)).toBe(held);
+	});
+
+	it("stages one conversation at a time, and does not queue a stale one", () => {
+		// A meeting is a dramatisation of something that happened at a moment. Playing
+		// a queued one out fifteen seconds later would be staging an event that is
+		// already over — the same lie the bubble's TTL exists to prevent. The second
+		// message still reaches its Proc's bubble; only the performance is skipped.
+		let w = syncActivities(
+			{ ...world(), spacing: 136 },
+			["a", "b", "c", "d"].map((id) => activity(id, "pr_open")),
+			T0,
+			scripted(0.1, 0.35, 0.6, 0.85),
+		);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 + 10 * REST_MAX_MS })) };
+		w = startConversation(w, { from: "a", to: "b", line: "first", now: T0 });
+		const after = startConversation(w, { from: "c", to: "d", line: "second", now: T0 + 100 });
+
+		expect(after).toBe(w);
+		expect(petById(after, "c").meeting).toBeUndefined();
+	});
+
+	it("keeps them still when motion is reduced, and still lets them talk", () => {
+		// The meaning survives without the movement: they say their piece where they
+		// stand, which is a static equivalent rather than a silently missing state.
+		const w = startConversation(
+			{ ...pair(), reducedMotion: true },
+			{
+				from: "sender",
+				to: "receiver",
+				line: "P1 is fixed",
+				now: T0,
+			},
+		);
+
+		expect(walkingCount(w)).toBe(0);
+		expect(petById(w, "sender").x).toBe(200);
+		expect(petById(w, "receiver").x).toBe(800);
+		expect(petById(w, "sender").meeting?.phase).toBe("greeting");
+		expect(petById(w, "sender").meeting?.line).toBe("P1 is fixed");
+	});
+
+	it("ends the conversation even with motion reduced, rather than leaving them stuck", () => {
+		const done = run(
+			startConversation(
+				{ ...pair(), reducedMotion: true },
+				{
+					from: "sender",
+					to: "receiver",
+					line: "P1 is fixed",
+					now: T0,
+				},
+			),
+			30,
+		);
+
+		expect(petById(done, "sender").meeting).toBeUndefined();
+	});
+
+	it("does not let a meeting Proc wander off mid-conversation", () => {
+		let w = talk(pair());
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		w = run(w, 2);
+
+		expect(petById(w, "sender").meeting?.phase).toBe("greeting");
+		expect(walkingCount(w)).toBe(0);
+	});
+});
+
+describe("where a conversation is staged", () => {
+	// A meeting is a scene you are meant to be able to WATCH, so it must not be set
+	// down on top of a third Proc who happens to be standing at the midpoint. Caught
+	// by rendering it: the pair met exactly where a bystander was already standing
+	// and the whole thing read as one indistinct clump.
+	it("slides the meeting off a bystander standing at the midpoint", () => {
+		let w = syncActivities(
+			{ ...world(), spacing: 136 },
+			[activity("a", "pr_open"), activity("b", "pr_open"), activity("bystander", "merged")],
+			T0,
+			half,
+		);
+		const at: Record<string, number> = { a: 300, b: 700, bystander: 500 };
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 + 10 * REST_MAX_MS })) };
+		w = startConversation(w, { from: "a", to: "b", line: "hello", now: T0 });
+
+		for (const id of ["a", "b"]) {
+			const motion = petById(w, id).motion;
+			if (motion.kind !== "walking") throw new Error(`${id} should be running`);
+			expect(Math.abs(motion.toX - 500), id).toBeGreaterThanOrEqual(136);
+		}
+	});
+
+	it("still stages it when the band is too full to find a clear spot", () => {
+		// Overlapping is honest here, and better than silently not showing the one
+		// event on this desktop that is about two sessions at once.
+		let w = syncActivities(
+			{ ...world(), spacing: 136 },
+			["a", "b", ...Array.from({ length: 8 }, (_, i) => `p${i}`)].map((id) => activity(id, "pr_open")),
+			T0,
+			scripted(0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95),
+		);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 + 10 * REST_MAX_MS })) };
+		const talking = startConversation(w, { from: "a", to: "b", line: "hello", now: T0 });
+
+		expect(petById(talking, "a").meeting).toBeDefined();
+		expect(petById(talking, "b").meeting).toBeDefined();
+	});
+});
+
+describe("a roster that repeats a session", () => {
+	// The feed's contract is that a snapshot is keyed by session id, so a repeated
+	// id is a broken snapshot. Rendering it as two Procs is the worst reading of it:
+	// two identical characters on one spot, with one name chip painted over the
+	// other, which is exactly what a crowded desktop should never look like.
+	it("shows one Proc per session, however many times the snapshot names it", () => {
+		const next = syncActivities(
+			world(),
+			[activity("a", "pr_open"), activity("a", "working"), activity("b", "idle")],
+			T0,
+			half,
+		);
+
+		expect(next.pets.map((pet) => pet.id)).toEqual(["a", "b"]);
+	});
+
+	it("keeps the FIRST reading of a repeated session, not the last", () => {
+		// Arbitrary, but it has to be one of them and first-wins is what a `Map`
+		// built from the snapshot would give. What matters is that it is stable.
+		const next = syncActivities(world(), [activity("a", "pr_open"), activity("a", "working")], T0, half);
+
+		expect(petById(next, "a").status).toBe("pr_open");
+	});
+});
+
+describe("picking a Proc up and throwing it", () => {
+	// The band was one horizontal line and a Proc had only an x. You could slide one
+	// along the floor and that was all. The human wants to lift one into the air and
+	// have it FALL back, and to fling it and have it carry.
+	function airborne(): World {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		return { ...base, pets: base.pets.map((p) => ({ ...p, x: 400, restUntil: T0 + 10 * REST_MAX_MS })) };
+	}
+
+	function fly(w: World, ms: number, step = 16): World {
+		let next = w;
+		for (let t = step; t <= ms; t += step) next = advanceFlight(next, step);
+		return next;
+	}
+
+	it("lifts a held Proc off the floor, following the pointer up", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 260);
+
+		expect(petById(w, "a").x).toBe(500);
+		expect(petById(w, "a").y).toBe(260);
+	});
+
+	it("drops it when you let go in mid-air instead of leaving it hanging", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 300);
+		w = releasePet(w, "a", T0 + 500, half);
+
+		expect(petById(w, "a").motion.kind).toBe("flying");
+		const midFall = fly(w, 200);
+		expect(petById(midFall, "a").y).toBeLessThan(300);
+		expect(petById(midFall, "a").y).toBeGreaterThan(0);
+	});
+
+	it("lands it back on the floor and leaves it standing there", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 300);
+		w = releasePet(w, "a", T0 + 500, half);
+		w = fly(w, 6_000);
+
+		expect(petById(w, "a").y).toBe(0);
+		expect(petById(w, "a").motion.kind).toBe("standing");
+	});
+
+	it("carries a flung Proc sideways in the direction it was thrown", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 200);
+		// A flick to the right: the renderer measures the pointer, the engine is told.
+		w = releasePet(w, "a", T0 + 500, half, { vx: 1.6, vy: 0.4 });
+		w = fly(w, 6_000);
+
+		expect(petById(w, "a").x).toBeGreaterThan(560);
+	});
+
+	it("throws it further the harder it is flung", () => {
+		// On a band wide enough that neither throw reaches a wall — off a wall the
+		// harder throw comes BACK further, which is right but measures nothing.
+		const wide = { minX: 0, maxX: 6000 };
+		const thrown = (vx: number) => {
+			let w = { ...airborne(), band: wide };
+			w = grabPet(w, "a", T0);
+			w = dragPet(w, "a", 500, 200);
+			w = releasePet(w, "a", T0 + 500, half, { vx, vy: 0.3 });
+			return petById(fly(w, 6_000), "a").x;
+		};
+
+		expect(thrown(1.8)).toBeGreaterThan(thrown(0.6) + 100);
+	});
+
+	it("keeps a thrown Proc on the band rather than off the side of the display", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 200);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 9, vy: 2 });
+		w = fly(w, 8_000);
+
+		expect(petById(w, "a").x).toBeLessThanOrEqual(BAND.maxX);
+		expect(petById(w, "a").x).toBeGreaterThanOrEqual(BAND.minX);
+	});
+
+	it("always comes to rest — a Proc must never bounce for ever", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 700);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 2, vy: 1.5 });
+		w = fly(w, 20_000);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").y).toBe(0);
+	});
+
+	it("marks where it lands as the human's placement, so nothing shoves it afterwards", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 200);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 0.8, vy: 0 });
+		w = fly(w, 6_000);
+
+		expect(petById(w, "a").placed).toBe(true);
+	});
+
+	it("just sets it down when motion is reduced, with no flight and no bounce", () => {
+		// The drag is the human's and stays. The physics is decoration, and decoration
+		// is the part reduced motion drops.
+		let w = { ...airborne(), reducedMotion: true };
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 500, 400);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 2, vy: 1 });
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").y).toBe(0);
+		expect(petById(w, "a").x).toBe(500);
+	});
+
+	it("does not walk off while it is in the air", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 600);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 0, vy: 0 });
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		w = tick(w, T0 + 1_000, half);
+
+		expect(petById(w, "a").motion.kind).toBe("flying");
+	});
+});
+
+describe("the dust a landing kicks up", () => {
+	// A Proc that hits the floor and simply carries on reads as weightless. The puff
+	// is the only thing that says it landed on something.
+	function dropped(fromHeight: number, vx = 0): World {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		let w = { ...base, pets: base.pets.map((p) => ({ ...p, x: 400, restUntil: T0 + 10 * REST_MAX_MS })) };
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 400, fromHeight);
+		return releasePet(w, "a", T0 + 100, half, { vx, vy: 0 });
+	}
+
+	function fly(w: World, ms: number, step = 16): World {
+		let next = w;
+		for (let t = step; t <= ms; t += step) next = advanceFlight(next, step);
+		return next;
+	}
+
+	it("kicks up nothing while a Proc is still in the air", () => {
+		expect(petById(fly(dropped(600), 100), "a").bounce).toBeUndefined();
+	});
+
+	it("kicks up dust the moment it hits the floor", () => {
+		expect(petById(fly(dropped(600), 3_000), "a").bounce).toBeDefined();
+	});
+
+	it("kicks up MORE dust from a bigger drop, because it hit harder", () => {
+		// The FIRST landing of each: by the third bounce every drop is landing softly,
+		// which is right and measures nothing.
+		const soft = petById(fly(dropped(80), 400), "a").bounce?.strength ?? 0;
+		const hard = petById(fly(dropped(900), 1_000), "a").bounce?.strength ?? 0;
+
+		expect(hard).toBeGreaterThan(soft);
+	});
+
+	it("counts each bounce separately, so a second one can be drawn as a second puff", () => {
+		// The count is what lets the renderer restart the animation: the same number
+		// twice is the same landing, a new number is a new one.
+		const first = petById(fly(dropped(900), 1_000), "a").bounce?.seq ?? 0;
+		const settled = petById(fly(dropped(900), 6_000), "a").bounce?.seq ?? 0;
+
+		expect(first).toBeGreaterThan(0);
+		expect(settled).toBeGreaterThan(first);
+	});
+
+	it("never re-kicks dust once it has come to rest", () => {
+		const landed = fly(dropped(600), 6_000);
+		const later = fly(landed, 4_000);
+
+		expect(petById(later, "a").bounce?.seq).toBe(petById(landed, "a").bounce?.seq);
+	});
+});
+
+describe("a Proc caught in mid-air when the desktop goes away", () => {
+	// A flight is drawn on animation frames, and animation frames stop when the
+	// window is occluded or the display sleeps. Without this a thrown Proc hangs in
+	// the air until somebody looks at the desktop again.
+	it("puts a flying Proc down as soon as it is parked", () => {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		let w = { ...base, pets: base.pets.map((p) => ({ ...p, x: 400 })) };
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 400, 500);
+		w = releasePet(w, "a", T0 + 100, half, { vx: 1, vy: 1 });
+		expect(petById(w, "a").motion.kind).toBe("flying");
+
+		w = tick({ ...w, parked: true }, T0 + 200, half);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").y).toBe(0);
 	});
 });

@@ -44,6 +44,16 @@ export const PROP_COLOURS = {
 	/** The muted "nothing is coming" dots. Deliberately low-energy, still legible. */
 	quiet: "#cfcad8",
 	/**
+	 * The orchestrator's gold: its name chip's fill and the crown on it.
+	 *
+	 * A wallpaper colour like any other prop, so it is swept the same way — 3.62:1
+	 * at its worst, which clears the bar on every grey between black and white.
+	 * It marks the ONE session on a project that coordinates the others; the
+	 * character keeps its own hat, so who a Proc is and what job it has stay two
+	 * separate readings.
+	 */
+	lead: "#ffd75e",
+	/**
 	 * Bubble text colours. Measured against the bubble's OWN `paper` fill, never
 	 * against the wallpaper — that is the point of it being a self-contained card.
 	 */

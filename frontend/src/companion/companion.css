@@ -24,6 +24,45 @@ body {
 	inset: 0;
 }
 
+/* The characters, and above them everything they are SAYING.
+
+   Two layers rather than one, because a Proc's `transform` makes it a stacking
+   context: a bubble drawn inside its own Proc cannot rise above the Proc standing
+   next to it, whatever its z-index says, so a neighbour to the right painted
+   straight over what it was saying. Speech is chrome ABOVE the scene. */
+.companion-cast,
+.companion-chrome {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+/* Both need a z-index of their OWN, and that is the whole point: a positioned
+   element with `z-index: auto` does not create a stacking context, so the Procs
+   inside kept their own z-indexes in the STAGE's context and a Proc ranked above
+   1 — a pair mid-conversation — climbed straight over the speech layer and
+   painted its hat across its own bubble. With a z-index here, nothing inside the
+   cast can ever escape it. */
+.companion-cast {
+	z-index: 0;
+}
+
+.companion-chrome {
+	z-index: 1;
+}
+
+/* Carries the same transform as its Proc, so a card travels with a walking Proc
+   instead of being left behind, and its height is the Proc's so the cards are
+   positioned off the same box they always were. */
+.companion-proc-chrome {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	height: calc(var(--procs-frame-height, 151px) + var(--procs-name-room, 0px));
+	will-change: transform;
+	pointer-events: none;
+}
+
 .companion-proc {
 	position: absolute;
 	bottom: 0;
@@ -43,6 +82,8 @@ body {
 .companion-proc-art {
 	display: block;
 	margin-left: var(--procs-offset-x, 0);
+	/* Lifts the whole cast clear of its own name chips. */
+	margin-bottom: var(--procs-name-room, 0);
 	pointer-events: none;
 }
 
@@ -88,7 +129,9 @@ body {
 }
 
 /* The name chip, centred under its Proc's own figure (not its drawn frame, which
-   hangs wider on the scenery side). */
+   hangs wider on the scenery side), in the strip reserved for it BELOW the art —
+   it used to be laid over the bottom of the drawing, where it covered the plug on
+   the end of the cord and so hid whether the session was still connected. */
 .companion-proc-name {
 	position: absolute;
 	bottom: 2px;
@@ -110,7 +153,22 @@ body {
 	position: absolute;
 	bottom: calc(100% - 26px);
 	left: var(--procs-figure-left, 0);
+	/* As for the tooltip: shrink-to-fit here is capped by this Proc's own ~150px
+	   frame, so the card's own max-width never got to decide its width. */
+	width: max-content;
 	pointer-events: none;
+}
+
+/* Lifted clear of the bubbles it would otherwise sit on top of. Both offsets ride
+   on ONE transform, because a second `transform` would replace the first —
+   opening leftward moves the card's right edge onto the figure's, and the lane
+   moves it up out of the way of its neighbours. */
+.companion-proc-bubble {
+	transform: translateY(calc(-1 * var(--procs-bubble-lane, 0px)));
+}
+
+.companion-proc-bubble[data-opens="left"] {
+	transform: translate(calc(-100% + var(--procs-figure-width, 96px)), calc(-1 * var(--procs-bubble-lane, 0px)));
 }
 
 /* The hover tooltip, above the Proc and out of the way of its own bubble. */
@@ -118,7 +176,48 @@ body {
 	position: absolute;
 	bottom: calc(100% - 18px);
 	left: var(--procs-figure-left, 0);
+	/* NOT the default shrink-to-fit, which is capped by this Proc's own ~150px
+	   frame — that cap, not the card's max-width, is what was folding
+	   "agent-orchestrator-105" onto two lines. The card's own max-width does the
+	   limiting now, as it was always meant to. */
+	width: max-content;
 	pointer-events: none;
+}
+
+/* Two hops when a Proc meets the one that just messaged it. Transform only, and
+   it runs twice rather than forever: a greeting is an event, not a state. */
+@keyframes procs-hop {
+	0% {
+		transform: translateY(0);
+	}
+	35% {
+		transform: translateY(-13px);
+	}
+	70% {
+		transform: translateY(0);
+	}
+	85% {
+		transform: translateY(-5px);
+	}
+	100% {
+		transform: translateY(0);
+	}
+}
+
+/* The puff a landing throws up: out, up a little, and gone. Transform and opacity
+   only, and it runs ONCE — a landing is an event, not a state. */
+@keyframes procs-dust {
+	0% {
+		opacity: 0;
+		transform: translate(0, 0) scale(0.35);
+	}
+	18% {
+		opacity: 0.95;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(var(--procs-dust-dx, 0), -7px) scale(1.25);
+	}
 }
 
 /* ---- Scene animations. transform/opacity only, so every one stays on the
