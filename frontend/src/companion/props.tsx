@@ -286,13 +286,17 @@ function Quiet({ cast }: { cast: CastMember }) {
 // itself, which read as a tangle and crossed the bed's pillow. The gap the cable
 // needs is what decides where the ground props sit, not the other way round.
 const CORD_TO_GROUND = "M67 92 C 73 99 74 110 86 112";
-// An attached cord with nothing on screen to plug into runs OFF the frame. It has
-// to: drawn ending in a plug on the floor it is indistinguishable from an unplugged
-// one, and "connected" vs "disconnected" is the single most load-bearing thing the
-// cord says.
-const CORD_OFF_FRAME = "M67 92 C 82 94 92 112 108 114 C 122 116 130 114 152 114";
-// Unplugged: a short droop that stops in mid-air, with the plug lying on its side
-// on the floor a clear gap away. The gap is the whole message.
+// Eight of the fifteen states have no ground prop, so their cord has nothing on
+// screen to terminate at — and that is the majority of the cast at any moment,
+// which is why "some of them have a long weird tail" was the human's experience of
+// it. Two earlier answers were worse: ending it in a plug lying on the floor was
+// indistinguishable from UNPLUGGED, and running it off the frame gave it no ending
+// at all, which is the tail.
+//
+// It now coils once and plugs into the floor. Short, finished, and still obviously
+// connected — the difference from unplugged is carried by the plug being at the
+// cord's end and standing up, rather than lying on its side a gap away.
+const CORD_TO_FLOOR = "M67 92 C 79 93 83 101 76 105 C 70 108 72 114 82 112";
 const CORD_LOOSE = "M67 92 C 77 96 83 104 85 115";
 const CORD_COILED = "M67 92 C 78 92 82 100 74 104 C 68 107 70 112 86 112";
 
@@ -305,7 +309,7 @@ const CORD_COILED = "M67 92 C 78 92 82 100 74 104 C 68 107 70 112 86 112";
 export function CordLayer({ cord, ground, cast }: { cord: Cord; ground: Ground; cast: CastMember }) {
 	const plugged = ground !== "none";
 	const unplugged = cord === "unplugged";
-	const d = unplugged ? CORD_LOOSE : plugged ? (cord === "coiled" ? CORD_COILED : CORD_TO_GROUND) : CORD_OFF_FRAME;
+	const d = unplugged ? CORD_LOOSE : plugged ? (cord === "coiled" ? CORD_COILED : CORD_TO_GROUND) : CORD_TO_FLOOR;
 
 	return (
 		<g
@@ -319,8 +323,13 @@ export function CordLayer({ cord, ground, cast }: { cord: Cord; ground: Ground; 
 					<Plug kind="ground" colour={cast.shade} />
 				</g>
 			)}
+			{!plugged && !unplugged && (
+				<g transform="translate(82 112)">
+					<Plug kind="floor" colour={cast.shade} />
+				</g>
+			)}
 			{unplugged && (
-				<g transform="translate(100 116) rotate(-90) scale(1.1)">
+				<g transform="translate(101 117) rotate(-90) scale(1.1)">
 					<Plug kind="loose" colour={cast.shade} />
 				</g>
 			)}

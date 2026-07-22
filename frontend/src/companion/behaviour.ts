@@ -40,6 +40,13 @@ export const WALK_CYCLE_MS = 520;
 /** Gap between two Procs summoned at the same time, so they never stack up. */
 export const SUMMON_SPACING_PX = 96;
 
+/**
+ * Default centre-to-centre clearance between two Procs standing on the band. The
+ * renderer overrides it with the real drawn width; this is the fallback for tests
+ * and for a world built before anything has been measured.
+ */
+export const DEFAULT_SPACING_PX = 100;
+
 export type Facing = "front" | "left" | "right";
 
 export type PetMotion =
@@ -62,6 +69,12 @@ export type Band = { minX: number; maxX: number };
 export type World = {
 	pets: Pet[];
 	band: Band;
+	/**
+	 * Minimum centre-to-centre distance between two Procs that are standing still.
+	 * Parked Procs stacking on one spot is worse than a clump: you cannot see that
+	 * there are two, so a session silently vanishes behind another.
+	 */
+	spacing: number;
 	/** `prefers-reduced-motion`: Procs stand at their positions, nothing walks. */
 	reducedMotion: boolean;
 	/** Occluded, another app is fullscreen, or the display slept: hold everything. */
@@ -71,7 +84,7 @@ export type World = {
 export type Rng = () => number;
 
 export function createWorld(band: Band): World {
-	return { pets: [], band, reducedMotion: false, parked: false };
+	return { pets: [], band, spacing: DEFAULT_SPACING_PX, reducedMotion: false, parked: false };
 }
 
 export function walkingCount(world: World): number {
@@ -94,6 +107,85 @@ export function walkSlots(world: World): number {
 	return Math.max(0, Math.min(MAX_CONCURRENT_WALKS - walkingCount(world), MAX_ANIMATING - animatingCount(world)));
 }
 
+/**
+ * Where a Proc occupies the band for crowding purposes: a walker is heading for its
+ * destination, so that — not the spot it has already left — is the space it claims.
+ */
+function claimedX(pet: Pet): number {
+	return pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
+}
+
+/** True when `x` is clear of every Proc except `exceptId`. */
+function isFree(x: number, pets: Pet[], spacing: number, exceptId?: string): boolean {
+	return pets.every((pet) => pet.id === exceptId || Math.abs(claimedX(pet) - x) >= spacing);
+}
+
+/**
+ * A spot for a Proc that has just appeared. Tries random places first so the cast
+ * does not line up in spawn order, then falls back to the middle of the widest gap
+ * — which always exists and is always the least bad answer.
+ */
+function placeNewPet(world: World, pets: Pet[], rng: Rng): number {
+	const { minX, maxX } = world.band;
+	const span = Math.max(0, maxX - minX);
+	for (let attempt = 0; attempt < 12; attempt++) {
+		const candidate = minX + rng() * span;
+		if (isFree(candidate, pets, world.spacing)) return candidate;
+	}
+	const occupied = pets.map(claimedX).sort((a, b) => a - b);
+	let best = (minX + maxX) / 2;
+	let widest = -1;
+	const edges = [minX, ...occupied, maxX];
+	for (let i = 1; i < edges.length; i++) {
+		const gap = edges[i] - edges[i - 1];
+		if (gap > widest) {
+			widest = gap;
+			best = (edges[i] + edges[i - 1]) / 2;
+		}
+	}
+	return Math.min(maxX, Math.max(minX, best));
+}
+
+/**
+ * Push standing Procs apart until none is closer than `spacing` to its neighbour.
+ *
+ * A left-to-right sweep, then a right-to-left one to pull the tail back inside the
+ * band. Walkers are left alone — they are already going somewhere — but they still
+ * count as obstacles, so nobody is separated into the path of an incoming stroll.
+ * When the band cannot fit everyone the shortfall is shared equally instead of
+ * letting the overflow stack: ten Procs squeezed together still shows ten Procs.
+ */
+function separate(pets: Pet[], band: Band, spacing: number): Pet[] {
+	const standing = pets.filter((pet) => pet.motion.kind === "standing");
+	if (standing.length < 2) return pets;
+
+	const order = [...standing].sort((a, b) => a.x - b.x);
+	const needed = (order.length - 1) * spacing;
+	const room = band.maxX - band.minX;
+	const step = needed <= room ? spacing : room / (order.length - 1);
+
+	const moved = new Map<string, number>();
+	let previous = Number.NEGATIVE_INFINITY;
+	for (const pet of order) {
+		const x = Math.max(pet.x, previous + step);
+		moved.set(pet.id, x);
+		previous = x;
+	}
+	// The forward sweep can push the last one past the edge; walk back to fix it.
+	let limit = band.maxX;
+	for (let i = order.length - 1; i >= 0; i--) {
+		const pet = order[i];
+		const x = Math.min(moved.get(pet.id) ?? pet.x, limit);
+		moved.set(pet.id, Math.max(band.minX, x));
+		limit = (moved.get(pet.id) ?? pet.x) - step;
+	}
+
+	return pets.map((pet) => {
+		const x = moved.get(pet.id);
+		return x === undefined || x === pet.x ? pet : { ...pet, x };
+	});
+}
+
 function pickRest(now: number, rng: Rng): number {
 	return now + REST_MIN_MS + rng() * (REST_MAX_MS - REST_MIN_MS);
 }
@@ -104,23 +196,37 @@ function pickRest(now: number, rng: Rng): number {
  * turns around rather than let a Proc half-exit the band. Returns null when the band
  * is too tight to move in at all.
  */
-function planWalk(x: number, band: Band, rng: Rng): { toX: number; durationMs: number } | null {
+function planWalk(
+	x: number,
+	band: Band,
+	rng: Rng,
+	isClear: (toX: number) => boolean,
+): { toX: number; durationMs: number } | null {
 	const durationMs = WALK_MIN_MS + rng() * (WALK_MAX_MS - WALK_MIN_MS);
 	const distance = WALK_MIN_PX + rng() * (WALK_MAX_PX - WALK_MIN_PX);
-	let direction = rng() < 0.5 ? -1 : 1;
+	const preferred = rng() < 0.5 ? -1 : 1;
 
-	let toX = x + direction * distance;
-	if (toX < band.minX || toX > band.maxX) {
-		direction = -direction;
-		toX = x + direction * distance;
+	// Try the direction the dice chose, then the other one. A stroll that would end
+	// on top of a Proc already standing there is not a stroll worth taking — and
+	// turning round is the same move the band edge already asks for.
+	for (const direction of [preferred, -preferred]) {
+		const raw = x + direction * distance;
+		if (raw < band.minX || raw > band.maxX) continue;
+		if (!isClear(raw)) continue;
+		if (Math.abs(raw - x) < 1) continue;
+		return { toX: raw, durationMs };
 	}
-	toX = Math.min(band.maxX, Math.max(band.minX, toX));
-	if (Math.abs(toX - x) < 1) return null;
-	return { toX, durationMs };
+	return null;
 }
 
 function facingFor(fromX: number, toX: number): Facing {
 	return toX < fromX ? "left" : "right";
+}
+
+/** True for the modes that can travel: everything else stands facing the human. */
+function canWander(status: SessionStatus): boolean {
+	const mode = modeFor(status);
+	return mode === "amble" || mode === "summon";
 }
 
 /**
@@ -130,21 +236,40 @@ function facingFor(fromX: number, toX: number): Facing {
  */
 export function syncActivities(world: World, activities: CompanionActivity[], now: number, rng: Rng): World {
 	const existing = new Map(world.pets.map((pet) => [pet.id, pet]));
+	// Grows as the roster is walked, so two Procs appearing in the same snapshot are
+	// placed clear of each other and not just of the ones already on screen.
+	const placed: Pet[] = [];
 	const pets = activities.map((activity) => {
 		const prev = existing.get(activity.sessionId);
 		if (!prev) {
-			return {
+			const born: Pet = {
 				id: activity.sessionId,
 				status: activity.status,
-				// Spread the cast across the band instead of stacking it on one spot.
-				x: world.band.minX + rng() * Math.max(0, world.band.maxX - world.band.minX),
-				facing: "front" as Facing,
-				motion: { kind: "standing" as const },
+				// Placed clear of everyone already standing there, so a Proc that joins
+				// the desktop never lands on top of one that is already on it.
+				x: placeNewPet(world, placed, rng),
+				facing: "front",
+				motion: { kind: "standing" },
 				restUntil: pickRest(now, rng),
 			};
+			placed.push(born);
+			return born;
 		}
-		if (prev.status === activity.status) return prev;
-		return { ...prev, status: activity.status };
+		if (prev.status === activity.status) {
+			placed.push(prev);
+			return prev;
+		}
+		const next = {
+			...prev,
+			status: activity.status,
+			// A Proc that cannot stroll faces YOU. `facing` otherwise persists from the
+			// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
+			// that walked left and then sat down at a desk would show the desk flipped
+			// to its other side, reading as the furniture teleporting.
+			facing: canWander(activity.status) ? prev.facing : ("front" as Facing),
+		};
+		placed.push(next);
+		return next;
 	});
 	return { ...world, pets };
 }
@@ -154,7 +279,11 @@ export function tick(world: World, now: number, rng: Rng): World {
 	// 1. Settle every stroll that has finished (or that parking cut short).
 	let pets = world.pets.map((pet) => settle(pet, now, world, rng));
 
-	// 2. Consider new strolls, oldest-rested first so nobody is starved by the cap.
+	// 2. Push apart anyone standing on top of anyone else. Idempotent once resolved,
+	//    so a settled cast is not nudged on every tick.
+	pets = separate(pets, world.band, world.spacing);
+
+	// 3. Consider new strolls, oldest-rested first so nobody is starved by the cap.
 	let slots = walkSlots({ ...world, pets });
 	const order = [...pets].sort((a, b) => a.restUntil - b.restUntil);
 	const started = new Map<string, Pet>();
@@ -197,7 +326,7 @@ function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolea
 	if (world.reducedMotion) return pet;
 	if (!hasSlot || now < pet.restUntil) return pet;
 
-	const plan = planWalk(pet.x, world.band, rng);
+	const plan = planWalk(pet.x, world.band, rng, (toX) => isFree(toX, world.pets, world.spacing, pet.id));
 	if (!plan) return { ...pet, restUntil: pickRest(now, rng) };
 	return {
 		...pet,

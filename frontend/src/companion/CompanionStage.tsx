@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createWorld, syncActivities, tick, type Band, type Pet, type World } from "./behaviour";
 import { castForSession } from "./cast";
+import { createInteractionTracker } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
 import { procsFrame, Procs } from "./Procs";
@@ -19,6 +20,8 @@ const FRAME = procsFrame(PET_HEIGHT);
  * than at the edge, so it never half-exits the display.
  */
 const EDGE_INSET = 28;
+/** Breathing room between two Procs standing on the band, on top of their drawn width. */
+const PET_GAP = 8;
 /**
  * The decision tick. Deliberately slow: walking is a rare event on a 45-150s
  * clock, so polling it faster would burn CPU to learn nothing. Between ticks the
@@ -51,7 +54,14 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
 	// rebuilt on every state change.
-	const [world, setWorld] = useState<World>(() => createWorld(bandFor(window.innerWidth)));
+	const [world, setWorld] = useState<World>(() => ({
+		...createWorld(bandFor(window.innerWidth)),
+		// Clearance is the whole DRAWN FRAME, not just the figure. Spacing them by the
+		// body alone still let one Proc's crate sit on the next Proc's face, and let a
+		// cord drape across a neighbour — the scenery is how a Proc says what it is
+		// doing, so it needs its own room as much as the body does.
+		spacing: FRAME.width + PET_GAP,
+	}));
 
 	useEffect(() => {
 		return source.subscribe((activities) => {
@@ -91,16 +101,38 @@ export function CompanionStage({ feed, onInteractiveChange }: CompanionStageProp
 		return () => window.removeEventListener("resize", onResize);
 	}, []);
 
+	// Click-through is decided per POINTER MOVE against what is actually under the
+	// pointer, not by enter/leave handlers on each Proc. Enter/leave can be missed
+	// entirely — flick the pointer off the bottom of the screen and no leave ever
+	// arrives — and a missed leave leaves the whole band swallowing clicks.
+	useEffect(() => {
+		if (!onInteractiveChange) return;
+		const tracker = createInteractionTracker(onInteractiveChange);
+		const onMove = (event: PointerEvent) => tracker.update(event.target);
+		const onOut = () => tracker.release();
+		document.addEventListener("pointermove", onMove, true);
+		document.addEventListener("pointerdown", onMove, true);
+		document.addEventListener("pointerleave", onOut, true);
+		window.addEventListener("blur", onOut);
+		return () => {
+			document.removeEventListener("pointermove", onMove, true);
+			document.removeEventListener("pointerdown", onMove, true);
+			document.removeEventListener("pointerleave", onOut, true);
+			window.removeEventListener("blur", onOut);
+			tracker.release();
+		};
+	}, [onInteractiveChange]);
+
 	return (
 		<div className="companion-stage">
 			{world.pets.map((pet) => (
-				<ProcOnStage key={pet.id} pet={pet} onInteractiveChange={onInteractiveChange} />
+				<ProcOnStage key={pet.id} pet={pet} />
 			))}
 		</div>
 	);
 }
 
-function ProcOnStage({ pet, onInteractiveChange }: { pet: Pet; onInteractiveChange?: (interactive: boolean) => void }) {
+function ProcOnStage({ pet }: { pet: Pet }) {
 	// The character is a stable function of the session ref, so the same worker is
 	// always the same Proc — that is what lets someone learn to recognise it.
 	const cast = castForSession(pet.id);
@@ -123,8 +155,6 @@ function ProcOnStage({ pet, onInteractiveChange }: { pet: Pet; onInteractiveChan
 				transitionDuration: `${durationMs}ms`,
 				["--procs-offset-x" as string]: `${FRAME.offsetX}px`,
 			}}
-			onPointerEnter={() => onInteractiveChange?.(true)}
-			onPointerLeave={() => onInteractiveChange?.(false)}
 		>
 			<Procs
 				cast={cast}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WALK_CYCLE_MS } from "./behaviour";
-import { CAST, castForSession, mirrorPathX } from "./cast";
+import { CAST, castForSession } from "./cast";
 import { PROCS_INK, PROCS_RIM_PX } from "./palette";
 import { ALL_COMPANION_STATUSES, sceneFor } from "./scene";
 import { Procs } from "./Procs";
@@ -40,14 +40,23 @@ describe("the character", () => {
 		expect(screen.getByRole("img", { name: /brack/i })).toHaveAttribute("aria-label", expect.stringMatching(/ci/i));
 	});
 
-	it("wears its own character's ears, mirrored into a pair", () => {
+	it("wears its own character's hat", () => {
 		for (const member of CAST) {
 			const { container, unmount } = renderProcs({ cast: member });
+			const worn = [...container.querySelectorAll("[data-hat-piece]")].map((p) => p.getAttribute("d"));
 
-			expect(container.querySelector('[data-core="ear-left"]')?.getAttribute("d")).toBe(member.ear);
-			expect(container.querySelector('[data-core="ear-right"]')?.getAttribute("d")).toBe(mirrorPathX(member.ear));
+			expect(worn, member.name).toEqual(member.hat.map((piece) => piece.d));
 			unmount();
 		}
+	});
+
+	it("draws the hat over the head, so no Proc is bald", () => {
+		const { container } = renderProcs();
+		const nodes = [...container.querySelectorAll("*")];
+		const head = nodes.indexOf(container.querySelector('[data-part="head"]')!);
+		const hat = nodes.indexOf(container.querySelector("[data-hat-piece]")!);
+
+		expect(hat).toBeGreaterThan(head);
 	});
 
 	it("wears its own character's colour", () => {
@@ -61,7 +70,7 @@ describe("the character", () => {
 		const a = renderProcs({ cast: CAST[0] });
 		const b = renderProcs({ cast: CAST[1] });
 
-		const ear = (c: HTMLElement) => c.querySelector('[data-core="ear-left"]')?.getAttribute("d");
+		const ear = (c: HTMLElement) => c.querySelector("[data-hat-piece]")?.getAttribute("d");
 		const head = (c: HTMLElement) => c.querySelector('[data-part="head"]')?.getAttribute("fill");
 		expect(ear(a.container)).not.toBe(ear(b.container));
 		expect(head(a.container)).not.toBe(head(b.container));
@@ -174,17 +183,29 @@ describe("the scene", () => {
 		const plug = container.querySelector('[data-plug="loose"]');
 
 		expect(plug).not.toBeNull();
-		// Lying on its side on the floor, not standing in a socket.
+		// Lying on its side on the floor, not standing in a socket…
 		expect(plug?.closest("g")?.getAttribute("transform")).toMatch(/rotate/);
+		// …and pulled clear of the cord's end. The GAP is what says "unplugged"; an
+		// attached cord now also ends in a plug, so the gap carries the whole message.
+		expect(gapToCordEnd(container)).toBeGreaterThan(8);
 	});
 
-	it("runs an attached cord off to something, with no plug lying about", () => {
+	it("ends an attached cord in a plug that is plugged IN, at the end of the cord", () => {
+		// Eight of the fifteen states have no ground prop, so their cord has nothing on
+		// screen to terminate at. Running it off the frame instead — the previous
+		// answer — is what the human saw as "a long weird tail", and it was the most
+		// common state, so most of the cast had one. It now coils and plugs into the
+		// floor: short, finished, and still obviously connected.
 		const { container } = renderProcs({ status: "pr_open" });
+		const cord = container.querySelector('[data-core="cord"]')!;
+		const plug = container.querySelector('[data-plug="floor"]')!;
 
-		expect(container.querySelector("[data-plug]")).toBeNull();
-		// It leaves the drawn frame, which is what "attached to something" looks like
-		// when the thing it is attached to is not on screen.
-		expect(extentX(container.querySelector('[data-core="cord"]')!).max).toBeGreaterThan(130);
+		expect(plug).not.toBeNull();
+		// Upright, i.e. inserted rather than dropped.
+		expect(plug.closest("g")?.getAttribute("transform") ?? "").not.toMatch(/rotate/);
+		expect(gapToCordEnd(container)).toBeLessThan(3);
+		// Short: a lead, not a leash.
+		expect(extentX(cord).max).toBeLessThan(96);
 	});
 
 	it("keeps the three quiet states telling themselves apart", () => {
@@ -287,12 +308,22 @@ describe("the scene", () => {
 	});
 });
 
+/** Distance from the cord's last point to the plug it is drawn with. */
+function gapToCordEnd(container: HTMLElement): number {
+	const d = container.querySelector('[data-core="cord"]')?.getAttribute("d") ?? "";
+	const points = d.match(/-?\d+(\.\d+)? -?\d+(\.\d+)?/g) ?? [];
+	const [endX, endY] = points[points.length - 1].split(" ").map(Number);
+	const transform = container.querySelector("[data-plug]")?.closest("g")?.getAttribute("transform") ?? "";
+	const [plugX, plugY] = (/translate\((-?[\d.]+) (-?[\d.]+)\)/.exec(transform) ?? ["", "0", "0"]).slice(1).map(Number);
+	return Math.hypot(plugX - endX, plugY - endY);
+}
+
 describe("a roster of Procs", () => {
 	it("is visibly varied — the all-identical look was the bug", () => {
 		const refs = ["ao-1", "ao-2", "ao-3", "ao-4", "ao-5", "ao-6", "ao-7", "ao-8"];
 		const looks = refs.map((ref) => {
 			const member = castForSession(ref);
-			return `${member.body}/${member.ear}`;
+			return `${member.body}/${member.hat.map((piece) => piece.d).join("")}`;
 		});
 
 		expect(new Set(looks).size).toBeGreaterThanOrEqual(4);

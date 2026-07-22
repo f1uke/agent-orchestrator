@@ -12,16 +12,70 @@ describe("the cast", () => {
 		expect(new Set(CAST.map((member) => member.shade)).size).toBe(CAST.length);
 	});
 
-	it("gives every character its own ear shape, which is what makes the silhouette differ", () => {
-		expect(new Set(CAST.map((member) => member.ear)).size).toBe(CAST.length);
+	it("gives every character its own hat, which is what makes the silhouette differ", () => {
+		const shapes = CAST.map((member) => member.hat.map((piece) => piece.d).join("|"));
+
+		expect(new Set(shapes).size).toBe(CAST.length);
 	});
 
-	it("keeps every ear inside the left margin, clear of the head", () => {
-		// The head spans x 14..82. An ear drawn over it stops reading as a bracket.
+	it("sits every hat ON the head rather than beside it", () => {
+		// The head spans x 14..82, y 6..78. A hat that misses it leaves the Proc bald,
+		// which is what the human reported; one that covers the eyes is worse.
 		for (const member of CAST) {
-			const xs = coordinates(member.ear).map(([x]) => x);
-			expect(Math.max(...xs)).toBeLessThanOrEqual(18);
-			expect(Math.min(...xs)).toBeGreaterThanOrEqual(0);
+			const points = member.hat.flatMap((piece) => coordinates(piece.d));
+			const ys = points.map(([, y]) => y);
+			const xs = points.map(([x]) => x);
+
+			// Rises above the head, and stops short of the eyes — whose tops are at
+			// y=43. A brim over the eyes costs the Proc its face, which is the one
+			// thing no amount of hat can be worth.
+			expect(Math.min(...ys), `${member.name} rises above the head`).toBeLessThan(6);
+			expect(Math.max(...ys), `${member.name} clears the eyes`).toBeLessThan(43);
+			// Inside the drawn frame, which starts at x=-8 and is clipped.
+			expect(Math.min(...xs), `${member.name} left`).toBeGreaterThan(-8);
+			expect(Math.max(...xs), `${member.name} right`).toBeLessThan(104);
+		}
+	});
+
+	it("draws every hat with absolute M/L/C only, so it can be measured and mirrored", () => {
+		for (const member of CAST) {
+			for (const piece of member.hat) {
+				expect(piece.d.replace(/[-\d.,\s]/g, ""), member.name).toMatch(/^[MLCZ]*$/);
+			}
+		}
+	});
+
+	it("makes every crown WIDER than the head, so no head pokes out beside its hat", () => {
+		// Reported twice by the human, and precisely: brack, glob and tilde had crowns
+		// narrower than the 68-unit head, so slivers of skull showed either side of the
+		// hat. "Bigger" is not the same rule as "wider" — the first pass raised the
+		// crowns and left three of them narrow.
+		const HEAD = { left: 14, right: 82 };
+		for (const member of CAST) {
+			const crown = coordinates(member.hat[0].d).map(([x]) => x);
+
+			expect(Math.min(...crown), `${member.name} left overhang`).toBeLessThan(HEAD.left - 2);
+			expect(Math.max(...crown), `${member.name} right overhang`).toBeGreaterThan(HEAD.right + 2);
+		}
+	});
+
+	it("covers enough of the head that no Proc reads as bald", () => {
+		// The human's words were "หัวมันดูโล้นๆ" — the heads look bald. A hat perched
+		// on top without covering the crown does not fix that, so this pins the cover
+		// rather than merely the presence of a hat.
+		//
+		// (Hats also retire a bug the brackets had: `<>` mirrored to `><` when a Proc
+		// turned to walk left. A hat is still a hat in a mirror, so that whole class of
+		// problem goes away instead of being papered over — nothing to assert, which is
+		// the point.)
+		const HEAD = { left: 14, right: 82, top: 6 };
+		for (const member of CAST) {
+			const points = member.hat.flatMap((piece) => coordinates(piece.d));
+			const xs = points.map(([x]) => x);
+			const width = Math.min(Math.max(...xs), HEAD.right) - Math.max(Math.min(...xs), HEAD.left);
+
+			expect(width, `${member.name} width`).toBeGreaterThan((HEAD.right - HEAD.left) * 0.6);
+			expect(Math.max(...points.map(([, y]) => y)), `${member.name} sits on the head`).toBeGreaterThan(HEAD.top);
 		}
 	});
 });
@@ -76,7 +130,9 @@ describe("mirrorPathX", () => {
 
 	it("is its own inverse", () => {
 		for (const member of CAST) {
-			expect(mirrorPathX(mirrorPathX(member.ear))).toBe(normalise(member.ear));
+			for (const piece of member.hat) {
+				expect(mirrorPathX(mirrorPathX(piece.d))).toBe(normalise(piece.d));
+			}
 		}
 	});
 });
