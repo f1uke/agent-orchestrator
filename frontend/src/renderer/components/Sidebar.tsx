@@ -74,6 +74,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { DaemonLoopsPopover } from "./DaemonLoopsPopover";
 import { OrchestratorIcon } from "./icons";
 import { SessionGlyph } from "./SessionGlyph";
+import { consumeSplitDragClick, startSplitDrag } from "../lib/split-drag";
 import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
@@ -928,7 +929,14 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					"hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring",
 					active && "text-foreground before:bg-accent",
 				)}
-				onClick={onOpen}
+				// Drag the row onto a pane to add/rearrange it in the split view; a
+				// plain click (no drag past the threshold) still opens the session.
+				// consumeSplitDragClick eats the click that a drag's pointerup emits.
+				onPointerDown={(event) => startSplitDrag({ kind: "session", sessionId: session.id }, session.title, event)}
+				onClick={() => {
+					if (consumeSplitDragClick()) return;
+					onOpen();
+				}}
 				type="button"
 			>
 				<SessionGlyph session={session} />

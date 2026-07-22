@@ -25,6 +25,7 @@ import { useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiClient } from "../lib/api-client";
 import {
 	addPane,
+	applyDrop,
 	containsSession,
 	eligibleSplitSessions,
 	leaf,
@@ -35,8 +36,12 @@ import {
 	removePane,
 	setRatioAtPath,
 	splitPane,
+	type DragSource,
+	type DropZone,
 	type SplitDirection,
 } from "../lib/split-layout";
+import { registerSplitDropHandler } from "../lib/split-drag";
+import { SplitDragLayer } from "./SplitDragLayer";
 import { isOrchestratorSession } from "../types/workspace";
 import type { TerminalTarget } from "../types/terminal";
 
@@ -344,6 +349,61 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		[projectId],
 	);
 
+	// Drop handler for pointer drag-and-drop (lib/split-drag). Registered once
+	// with a stable identity; it reads the latest context from a ref so pointer
+	// gestures in flight always see current state without re-registering.
+	const dropCtxRef = useRef({
+		projectId,
+		sessionId,
+		splitRoot,
+		sessions: workspace?.sessions ?? [],
+		setSplitLayout,
+		goToSession,
+		setSplitToast,
+	});
+	dropCtxRef.current = {
+		projectId,
+		sessionId,
+		splitRoot,
+		sessions: workspace?.sessions ?? [],
+		setSplitLayout,
+		goToSession,
+		setSplitToast,
+	};
+	useEffect(() => {
+		return registerSplitDropHandler((source: DragSource, targetSessionId: string, zone: DropZone) => {
+			const ctx = dropCtxRef.current;
+			if (!ctx.projectId) return;
+			// The target must be a pane in THIS project's view (one project per
+			// layout is structural — a cross-project target is simply not ours).
+			if (!ctx.sessions.some((s) => s.id === targetSessionId)) return;
+			if (source.kind === "session") {
+				const dragged = ctx.sessions.find((s) => s.id === source.sessionId);
+				// A session from another project, or one that cannot be shown, is refused
+				// with a clear reason rather than silently doing nothing.
+				if (!dragged) {
+					ctx.setSplitToast("Only sessions from this project can be added to the split.");
+					return;
+				}
+				if (dragged.isTerminated || dragged.status === "terminated" || dragged.isTodo) return;
+			}
+			// Base tree: the live split, or the lone session promoted to a leaf so a
+			// sidebar drop onto the single view creates the first split.
+			const base = ctx.splitRoot ?? leaf(ctx.sessionId);
+			if (!containsSession(base, targetSessionId)) return;
+			const result = applyDrop(base, source, targetSessionId, zone);
+			if (result.refused) {
+				ctx.setSplitToast(`Split view is full (${MAX_SPLIT_PANES} panes). Remove a pane before adding another.`);
+				return;
+			}
+			if (result.root === base) return; // no-op (dropped on itself, already on screen)
+			ctx.setSplitLayout(ctx.projectId, paneCount(result.root) > 1 ? result.root : null);
+			// A newly added session becomes the focused pane ("show me this one");
+			// a pane move/swap keeps focus where the user already was.
+			if (source.kind === "session") ctx.goToSession(source.sessionId);
+		});
+	}, []);
+
 	const eligibleForSplit = useMemo(
 		() => eligibleSplitSessions(workspace?.sessions ?? [], splitRoot ?? (session ? leaf(session.id) : null)),
 		[workspace, splitRoot, session],
@@ -641,6 +701,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
           `[data-panel]` column, so the native WebContentsView is not clamped
           and fills the entire window. */}
 			{splitToast ? <Toast text={splitToast} /> : null}
+			<SplitDragLayer />
 			{browserPoppedOut && hasWebUI && session
 				? createPortal(
 						<div className="browser-popout-overlay">

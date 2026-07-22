@@ -124,6 +124,52 @@ export function removePane(root: SplitNode, sessionId: string): SplitNode | null
 	return remove(root);
 }
 
+/**
+ * Exchange two leaves' sessions in place — the centre-drop of a pane drag.
+ * Structure and every divider ratio are untouched; only the two ids move, so
+ * this is always allowed (the pane count cannot change). No-op onto itself or
+ * when either session is absent.
+ */
+export function swapPanes(root: SplitNode, sessionA: string, sessionB: string): SplitNode {
+	if (sessionA === sessionB) return root;
+	if (!containsSession(root, sessionA) || !containsSession(root, sessionB)) return root;
+	const swap = (node: SplitNode): SplitNode => {
+		if (node.kind === "leaf") {
+			if (node.sessionId === sessionA) return leaf(sessionB);
+			if (node.sessionId === sessionB) return leaf(sessionA);
+			return node;
+		}
+		return { ...node, first: swap(node.first), second: swap(node.second) };
+	};
+	return swap(root);
+}
+
+/**
+ * Move an existing pane to a new position — the edge-drop of a pane drag.
+ * Detach the dragged leaf (collapsing its now-single-child parent, the same
+ * promotion `removePane` does), then re-split at the target in `direction`.
+ * The pane COUNT is unchanged, so a move is allowed even at the cap. No-op
+ * onto itself or when a session is missing. Reusing removePane+splitPane keeps
+ * the collapse rules identical to the rest of the tree surgery.
+ */
+export function movePane(
+	root: SplitNode,
+	draggedSessionId: string,
+	targetSessionId: string,
+	direction: SplitDirection,
+): SplitNode {
+	if (draggedSessionId === targetSessionId) return root;
+	if (!containsSession(root, draggedSessionId) || !containsSession(root, targetSessionId)) return root;
+	const detached = removePane(root, draggedSessionId);
+	// Removing one of >=2 leaves always leaves a tree; null would mean the
+	// dragged pane was the only one, impossible given the target differs.
+	if (detached === null) return root;
+	// The target survived the detach (we removed a different session), and the
+	// dragged id is gone, so splitPane's "already on screen" / cap guards both
+	// pass — the net count returns to the original, never above it.
+	return splitPane(detached, targetSessionId, direction, draggedSessionId);
+}
+
 /** Swap one session for another in place, preserving the split structure. */
 export function replaceSession(root: SplitNode, oldSessionId: string, newSessionId: string): SplitNode {
 	if (!containsSession(root, oldSessionId)) return root;
@@ -294,4 +340,61 @@ export function eligibleSplitSessions(
 	return sessions.filter(
 		(s) => !s.isTerminated && s.status !== "terminated" && !s.isTodo && !(root !== null && containsSession(root, s.id)),
 	);
+}
+
+// ---- drag-and-drop ----
+
+/** What is being dragged onto a pane: a not-yet-shown sidebar session, or an existing pane. */
+export type DragSource = { kind: "session"; sessionId: string } | { kind: "pane"; sessionId: string };
+/** The drop target region within a pane. `center` is a swap; `right`/`down` split or move. */
+export type DropZone = "center" | "right" | "down";
+
+// Pane-drag geometry: a right edge strip and a bottom edge strip carve out the
+// move zones; the rest is the central swap zone. The right strip owns the
+// bottom-right corner so the two strips never overlap (a point is in exactly
+// one zone). A sidebar session has no swap, so its whole pane is one diagonal
+// split into right (upper-right) and down (lower-left).
+const EDGE_STRIP = 0.3;
+
+/**
+ * Resolve which drop zone a pointer at (relX, relY) — pane-relative fractions
+ * in [0,1] — falls into. Pure so the overlay highlight and the drop handler
+ * agree by construction and the geometry is unit-tested.
+ */
+export function resolveDropZone(relX: number, relY: number, kind: DragSource["kind"]): DropZone {
+	if (kind === "session") {
+		// Distance to the right edge vs the bottom edge; the nearer edge wins.
+		// Ties (incl. the exact centre) resolve to right — sidebar has no centre.
+		return 1 - relX <= 1 - relY ? "right" : "down";
+	}
+	if (relX >= 1 - EDGE_STRIP) return "right"; // right strip, full height (owns the corner)
+	if (relY >= 1 - EDGE_STRIP) return "down"; // bottom strip, left of the right strip
+	return "center";
+}
+
+export type DropResult = { root: SplitNode; refused?: boolean };
+
+/**
+ * Apply a drop onto `targetSessionId`'s pane. Dispatches by source + zone:
+ * a sidebar session splits the target (right/down; centre never occurs for a
+ * session); an existing pane swaps on centre or moves on an edge. A sidebar
+ * split that the cap blocks is REFUSED (same signal the click path shows), not
+ * silently dropped; a pane move/swap never changes the count, so it is always
+ * allowed. Identity-stable when nothing changes.
+ */
+export function applyDrop(root: SplitNode, source: DragSource, targetSessionId: string, zone: DropZone): DropResult {
+	if (source.kind === "session") {
+		const direction: SplitDirection = zone === "down" ? "down" : "right";
+		const next = splitPane(root, targetSessionId, direction, source.sessionId);
+		// splitPane returns the same tree when refused; at the cap that is a
+		// refusal the caller must surface, otherwise it is just a no-op.
+		if (next === root && paneCount(root) >= MAX_SPLIT_PANES && !containsSession(root, source.sessionId)) {
+			return { root, refused: true };
+		}
+		return { root: next };
+	}
+	if (zone === "center") {
+		return { root: swapPanes(root, source.sessionId, targetSessionId) };
+	}
+	return { root: movePane(root, source.sessionId, targetSessionId, zone === "down" ? "down" : "right") };
 }
