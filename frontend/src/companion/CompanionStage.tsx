@@ -19,7 +19,9 @@ import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { bubbleOpensLeft, figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
+import { assignBubbleLanes, type BubbleSpan } from "./bubble-lanes";
+import { BUBBLE_MAX_WIDTH } from "./Bubble";
+import { BUBBLE_LANE_HEIGHT, bubbleOpensLeft, figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
 import { Procs } from "./Procs";
 import { stackOrder } from "./stacking";
 
@@ -234,6 +236,12 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 	}, [onInteractiveChange]);
 
 	const painted = paintOrder(world.pets);
+	// Which bubbles would collide, and how high each has to sit to clear the ones
+	// before it. Computed once for the whole band — a bubble cannot know on its own
+	// whether it is in anybody's way.
+	const lanes = assignBubbleLanes(
+		painted.filter((pet) => spokenLine(pet, bubbleFor?.(pet.id) ?? null) !== null).map((pet) => bubbleSpan(pet)),
+	);
 
 	// TWO layers, deliberately. Every Proc carries a `transform`, and a transform
 	// makes an element a stacking context — so a bubble drawn INSIDE its Proc can
@@ -254,6 +262,7 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 						pet={pet}
 						tooltip={openTooltip === pet.id}
 						bubble={bubbleFor?.(pet.id) ?? null}
+						lane={lanes.get(pet.id) ?? 0}
 						bubbleTick={bubbleTick}
 					/>
 				))}
@@ -296,14 +305,18 @@ function placement(pet: Pet): React.CSSProperties {
 	};
 }
 
-/** What a Proc is saying right now, or null. A greeting overrides the feed. */
+/**
+ * What a Proc is saying right now, or null.
+ *
+ * A Proc that is mid-greeting and HAS a line speaks it — that is the sender,
+ * dramatising the `ao send`. Everyone else, including the Proc being told, shows
+ * whatever the feed says it has, which for the recipient is the message itself,
+ * attributed to whoever sent it. Both ends keep a card; where two cards collide
+ * they stack (see `bubble-lanes.ts`) rather than one of them being hidden.
+ */
 function spokenLine(pet: Pet, bubble: ComposedBubble | null): ComposedBubble | null {
-	// While two Procs are together the SENDER says its piece and the other one
-	// simply listens — no card at all. A "…" card was tried first and read as the
-	// message having been truncated away to dots, which is worse than nothing: the
-	// listener has not said anything, and the honest picture of that is silence.
-	if (pet.meeting?.phase === "greeting") {
-		return pet.meeting.line ? { text: pet.meeting.line, tone: "normal", decay: "fresh" } : null;
+	if (pet.meeting?.phase === "greeting" && pet.meeting.line) {
+		return { text: pet.meeting.line, tone: "normal", decay: "fresh" };
 	}
 	return bubble;
 }
@@ -343,14 +356,30 @@ function ProcArt({ pet }: { pet: Pet }) {
 	);
 }
 
+/** Where this Proc's widest possible card would sit, in screen px. */
+function bubbleSpan(pet: Pet): BubbleSpan {
+	const figureX = (pet.motion.kind === "walking" ? pet.motion.toX : pet.x) + figureLeft(pet.facing === "left");
+	const opensLeft = bubbleOpensLeft({
+		figureX,
+		figureWidth: FRAME.figureWidth,
+		screenWidth: window.innerWidth,
+		preferLeft: pet.meeting?.phase === "greeting" && pet.facing === "right",
+	});
+	const left = opensLeft ? figureX + FRAME.figureWidth - BUBBLE_MAX_WIDTH : figureX;
+	return { id: pet.id, left, right: left + BUBBLE_MAX_WIDTH };
+}
+
 function ProcChrome({
 	pet,
 	tooltip,
 	bubble,
+	lane,
 }: {
 	pet: Pet;
 	tooltip: boolean;
 	bubble: ComposedBubble | null;
+	/** How many card-heights above its Proc this bubble sits, to clear the others. */
+	lane: number;
 	/** Only here to re-render the bubble as its claim ages. */
 	bubbleTick: number;
 }) {
@@ -380,7 +409,12 @@ function ProcChrome({
 			{/* The tooltip wins the space when it is open: it is a deliberate request
 			    for detail, and two cards over one Proc would collide. */}
 			{said && !held && !tooltip ? (
-				<div className="companion-proc-bubble" data-opens={opensLeft ? "left" : undefined}>
+				<div
+					className="companion-proc-bubble"
+					data-opens={opensLeft ? "left" : undefined}
+					data-lane={lane || undefined}
+					style={{ ["--procs-bubble-lane" as string]: `${lane * BUBBLE_LANE_HEIGHT}px` }}
+				>
 					<Bubble text={said.text} tone={said.tone} decay={said.decay} tail={opensLeft ? "right" : "left"} />
 				</div>
 			) : null}

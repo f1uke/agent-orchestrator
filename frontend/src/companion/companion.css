@@ -159,10 +159,16 @@ body {
 	pointer-events: none;
 }
 
-/* Opening the other way: the card's RIGHT edge lines up with the figure's, so it
-   grows away from whoever this Proc is facing instead of across them. */
+/* Lifted clear of the bubbles it would otherwise sit on top of. Both offsets ride
+   on ONE transform, because a second `transform` would replace the first —
+   opening leftward moves the card's right edge onto the figure's, and the lane
+   moves it up out of the way of its neighbours. */
+.companion-proc-bubble {
+	transform: translateY(calc(-1 * var(--procs-bubble-lane, 0px)));
+}
+
 .companion-proc-bubble[data-opens="left"] {
-	transform: translateX(calc(-100% + var(--procs-figure-width, 96px)));
+	transform: translate(calc(-100% + var(--procs-figure-width, 96px)), calc(-1 * var(--procs-bubble-lane, 0px)));
 }
 
 /* The hover tooltip, above the Proc and out of the way of its own bubble. */
