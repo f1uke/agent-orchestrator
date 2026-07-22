@@ -81,6 +81,20 @@ export type Pet = {
 	 * correctly goes again; a nudge from a neighbour does not.
 	 */
 	summonedTo?: number;
+	/**
+	 * The human put this Proc here, by hand.
+	 *
+	 * Which means the crowding pass does not get a vote on it: it is neither moved
+	 * nor treated as something to move away FROM. Dropping a Proc used to overrule
+	 * the drop point and cascade a third Proc across the band, and an app that
+	 * rearranges the desktop in answer to a deliberate gesture is fighting the
+	 * person doing it. Overlap is the accepted cost, chosen explicitly — you can
+	 * see exactly what you stacked, because you stacked it.
+	 *
+	 * Cleared the moment it walks somewhere under its own steam: it is then
+	 * standing where the ENGINE put it, and the crowding rules own that spot again.
+	 */
+	placed?: boolean;
 };
 
 /** The floor band the cast lives on: one line above the Dock, inset from both edges. */
@@ -176,9 +190,12 @@ function placeNewPet(world: World, pets: Pet[], rng: Rng): number {
  * letting the overflow stack: ten Procs squeezed together still shows ten Procs.
  */
 function separate(pets: Pet[], band: Band, spacing: number): Pet[] {
-	// Walkers are already going somewhere and a held Proc is under the user's
-	// pointer — moving either would be the app fighting for control of it.
-	const standing = pets.filter((pet) => pet.motion.kind === "standing");
+	// Walkers are already going somewhere, a held Proc is under the user's pointer,
+	// and a hand-placed one is where the user decided it goes — moving any of them
+	// would be the app fighting for control of it. A hand-placed Proc is excluded
+	// as an OBSTACLE too, not just as a mover: pushing its neighbours aside is the
+	// same cascade seen from the other end.
+	const standing = pets.filter((pet) => pet.motion.kind === "standing" && !pet.placed);
 	if (standing.length < 2) return pets;
 
 	const order = [...standing].sort((a, b) => a.x - b.x);
@@ -342,8 +359,10 @@ export function releasePet(world: World, petId: string, now: number, rng: Rng): 
 			if (pet.id !== petId || pet.motion.kind !== "held") return pet;
 			const landed = Math.min(world.band.maxX, Math.max(world.band.minX, pet.x));
 			if (landed === pet.x) {
-				return { ...pet, motion: { kind: "standing" }, restUntil: pickRest(now, rng) };
+				return { ...pet, placed: true, motion: { kind: "standing" }, restUntil: pickRest(now, rng) };
 			}
+			// Dropped off the end: the landing spot is the ENGINE's choice, not the
+			// human's, so it does not earn the hand-placed exemption.
 			// Dropped off the end: walk in from the edge to a spot clearly on the band.
 			const inward = landed === world.band.minX ? 1 : -1;
 			const toX = Math.min(
@@ -405,6 +424,9 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 		// is what marks the alert answered, so a later nudge does not restart it.
 		facing: summoned ? "front" : pet.facing,
 		summonedTo: summoned ? pet.motion.toX : pet.summonedTo,
+		// Wherever it has arrived, the ENGINE chose it — so any hand placement it was
+		// carrying is spent, and the crowding rules own this spot.
+		placed: false,
 		motion: { kind: "standing" },
 		restUntil: pickRest(now, rng),
 	};

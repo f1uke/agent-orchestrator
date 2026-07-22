@@ -694,14 +694,19 @@ describe("dragging", () => {
 		expect(petById(w, "a").x).toBe(500);
 	});
 
-	it("does not land on top of another Proc when let go", () => {
+	it("lands exactly where it was let go, even on top of another Proc", () => {
+		// The crowding rule used to win here and slide the Proc off the drop point.
+		// The human chose the other way round (2026-07-22): a deliberate placement is
+		// not a mistake to be corrected, and an overlap you made yourself is one you
+		// can see and undo.
 		let w = dragWorld(["a", "b"]);
 		w = grabPet(w, "a", T0);
-		w = dragPet(w, "a", petById(w, "b").x + 5);
+		const onto = petById(w, "b").x + 5;
+		w = dragPet(w, "a", onto);
 		w = releasePet(w, "a", T0 + 2_000, half);
 		w = tick(w, T0 + 2_001, half);
 
-		expect(Math.abs(petById(w, "a").x - petById(w, "b").x)).toBeGreaterThanOrEqual(SPACING);
+		expect(petById(w, "a").x).toBe(onto);
 	});
 
 	it("only ever holds one Proc, because there is only one pointer", () => {
@@ -826,5 +831,68 @@ describe("never walking in place forever", () => {
 
 		const targets = next.pets.map((p) => (p.motion.kind === "walking" ? p.motion.toX : p.x));
 		expect(Math.abs(targets[0] - targets[1])).toBeGreaterThanOrEqual(REAL_SPACING);
+	});
+});
+
+describe("a Proc you placed by hand", () => {
+	// Dropping a Proc onto an occupied spot used to set off a cascade: the drop
+	// point was overruled (the Proc slid 155px away from where it was let go) and a
+	// third Proc that had nothing to do with the gesture slid 120px as well. Direct
+	// manipulation has to mean what it says — where you let go IS where it goes —
+	// and the human chose to allow the overlap that follows from that.
+	function placedWorld(): World {
+		const base = syncActivities(
+			{ ...world(), spacing: 136 },
+			[activity("dragged", "pr_open"), activity("sitting", "pr_open"), activity("bystander", "draft")],
+			T0,
+			half,
+		);
+		const at: Record<string, number> = { dragged: 640, sitting: 190, bystander: 380 };
+		return { ...base, pets: base.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 + 10 * REST_MAX_MS })) };
+	}
+
+	function dropOn(target: number): World {
+		let w = grabPet(placedWorld(), "dragged", T0);
+		w = dragPet(w, "dragged", target);
+		w = releasePet(w, "dragged", T0 + 500, half);
+		for (let i = 0; i < 30; i++) w = tick(w, T0 + 1_000 + i * 1_000, half);
+		return w;
+	}
+
+	it("stays exactly where it was let go, even right on top of another Proc", () => {
+		expect(petById(dropOn(190), "dragged").x).toBe(190);
+	});
+
+	it("stays put when it is dropped BETWEEN two Procs, not just at the end of the row", () => {
+		// The old crowding sweep runs left to right, so the leftmost Proc happened to
+		// keep its spot whatever else happened. A drop in the middle is the case that
+		// actually moved.
+		expect(petById(dropOn(380), "dragged").x).toBe(380);
+	});
+
+	it("does not shove the Proc it landed on", () => {
+		expect(petById(dropOn(190), "sitting").x).toBe(190);
+	});
+
+	it("does not slide a bystander that had nothing to do with the gesture", () => {
+		expect(petById(dropOn(190), "bystander").x).toBe(380);
+	});
+
+	it("goes back to being ordinary once it strolls off under its own steam", () => {
+		// The hand placement is a fact about THIS position. A Proc that has since
+		// walked somewhere on its own is standing where the engine put it, and the
+		// crowding rules own that spot again.
+		let w = dropOn(190);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		let walked = false;
+		for (let i = 0; i < 200 && !walked; i++) {
+			w = tick(w, T0 + 40_000 + i * 1_000, half);
+			walked = petById(w, "dragged").motion.kind === "walking";
+		}
+		for (let i = 0; i < 60; i++) w = tick(w, T0 + 260_000 + i * 1_000, half);
+
+		expect(walked).toBe(true);
+		const [a, b] = ["dragged", "sitting"].map((id) => petById(w, id).x);
+		expect(Math.abs(a - b)).toBeGreaterThanOrEqual(136);
 	});
 });
