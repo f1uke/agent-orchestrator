@@ -77,8 +77,9 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		key: "system",
 		label: "System",
 		Icon: Monitor,
-		hint: "notifications, updates & migration",
-		keywords: "notifications test updates channel version check migration import legacy",
+		hint: "notifications, updates, companion & migration",
+		keywords:
+			"notifications test updates channel version check migration import legacy companion desktop pet overlay procs",
 	},
 ];
 

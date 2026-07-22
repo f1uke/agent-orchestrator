@@ -160,6 +160,10 @@ if (typeof window !== "undefined") {
 			get: async () => ({ enabled: false, channel: "latest", nightlyAck: false }),
 			set: async () => undefined,
 		},
+		companionSettings: {
+			get: async () => ({ enabled: false, asked: true }),
+			set: async () => undefined,
+		},
 		updates: {
 			getStatus: async () => ({ state: "idle" }),
 			check: async () => undefined,

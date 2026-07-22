@@ -115,6 +115,12 @@ export const aoBridge: AoBridge =
 			get: async () => ({ enabled: false, channel: "latest", nightlyAck: false }),
 			set: async () => undefined,
 		},
+		// asked: true in the browser-preview stub, so the first-run offer never
+		// appears outside Electron — there is no desktop to put a Proc on there.
+		companionSettings: {
+			get: async () => ({ enabled: false, asked: true }),
+			set: async () => undefined,
+		},
 		updates: {
 			getStatus: async () => ({ state: "idle" }),
 			check: async () => undefined,
