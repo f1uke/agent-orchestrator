@@ -14,17 +14,36 @@
 
 /** Rim + face ink. The second channel. */
 export const PROCS_INK = "#181422";
-/** Curly, the amber default of the cast. */
-export const PROCS_BODY = "#f7c15a";
-/** The body's shaded side, used for the lower body and the ear brackets. */
-export const PROCS_BODY_SHADE = "#e9a83c";
-/** Eye whites / highlights. */
+/** Eye whites / highlights. Never measured against the wallpaper — it sits on ink. */
 export const PROCS_LIGHT = "#fbfafd";
-/** Blush. */
-export const PROCS_BLUSH = "#ef8f7a";
 
 /** Rim width in the SVG's own user units, which is its px width at 1× scale. */
 export const PROCS_RIM_PX = 2.4;
+
+/**
+ * Every colour the PROP layers put against the wallpaper. Named rather than
+ * inlined in the art precisely so the sweep in palette.test.ts can enumerate them:
+ * a prop colour that was only ever written into a `fill=` would be invisible to the
+ * test, which is exactly how #157 shipped a 2.96:1 shade.
+ */
+export const PROP_COLOURS = {
+	/** Desk and crate. */
+	wood: "#dcb98c",
+	/** Bed frame, mattress, pillow. */
+	linen: "#ece8f0",
+	/** The blanket on the bed. */
+	blanket: "#a9bde4",
+	/** Held pages and signs. */
+	paper: "#fbfafd",
+	/** CI sparks. */
+	spark: "#ffd166",
+	/** The three confetti colours a merge throws. */
+	confettiA: "#f4c558",
+	confettiB: "#92d8dc",
+	confettiC: "#fabad1",
+	/** The muted "nothing is coming" dots. Deliberately low-energy, still legible. */
+	quiet: "#cfcad8",
+} as const;
 
 function channel(value: number): number {
 	const c = value / 255;
@@ -46,4 +65,26 @@ export function contrastRatio(a: string, b: string): number {
 	const lb = relativeLuminance(b);
 	const [hi, lo] = la > lb ? [la, lb] : [lb, la];
 	return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * The worst separation a fill achieves against ANY wallpaper, counting both
+ * channels: the fill itself (which carries dark wallpapers) and the ink rim beside
+ * it (which carries light ones). This is the number every drawn colour must clear,
+ * and the reason the palette sits in a narrow luminance band — a colour too dark
+ * loses BOTH channels at once against a dark desktop.
+ *
+ * Contrast depends only on relative luminance, so stepping the grey axis covers
+ * every possible wallpaper colour rather than sampling a few.
+ */
+export function worstSeparation(fill: string, steps = 400): number {
+	let worst = Number.POSITIVE_INFINITY;
+	for (let i = 0; i <= steps; i++) {
+		const level = Math.round((i / steps) * 255)
+			.toString(16)
+			.padStart(2, "0");
+		const wallpaper = `#${level}${level}${level}`;
+		worst = Math.min(worst, Math.max(contrastRatio(fill, wallpaper), contrastRatio(PROCS_INK, wallpaper)));
+	}
+	return worst;
 }

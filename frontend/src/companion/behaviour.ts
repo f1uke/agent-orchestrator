@@ -16,6 +16,7 @@
 import type { SessionStatus } from "../renderer/types/workspace";
 import type { CompanionActivity } from "./feed";
 import { modeFor, type CompanionMode } from "./mode";
+import { sceneAnimates } from "./scene";
 
 /** A stroll is 3-8 seconds long… */
 export const WALK_MIN_MS = 3_000;
@@ -78,12 +79,14 @@ export function walkingCount(world: World): number {
 }
 
 /**
- * Procs currently running an animation. Today that is exactly the walkers; the
- * EMIT-layer state animations (zzz, sparks) join this predicate when they land,
- * which is what the {@link MAX_ANIMATING} backstop is reserved for.
+ * Procs currently running an animation: a walker, or a Proc whose SCENE moves
+ * (sparks, zzz, confetti, a streaming or tugging cord). With the full art most of
+ * the motion on a desktop is scenes rather than walkers, which is what makes the
+ * {@link MAX_ANIMATING} backstop bite — a screen full of failing CI stops the
+ * strolling instead of adding to it.
  */
 export function animatingCount(world: World): number {
-	return world.pets.filter((pet) => pet.motion.kind === "walking").length;
+	return world.pets.filter((pet) => pet.motion.kind === "walking" || sceneAnimates(pet.status)).length;
 }
 
 /** How many more Procs may start a stroll right now. Never negative. */
