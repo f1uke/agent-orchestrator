@@ -578,10 +578,35 @@ export function grabPet(world: World, petId: string, now: number): World {
 	return {
 		...world,
 		pets: world.pets.map((pet) => {
-			if (pet.id === petId) return { ...pet, facing: "front", motion: { kind: "held", grabbedAt: now } };
+			if (pet.id === petId) {
+				return {
+					...pet,
+					// Picked up from where it has actually GOT to. A walker's `x` is the spot
+					// it set off from — the compositor is carrying the drawing towards the
+					// destination — so lifting one mid-stroll used to snap it back to the
+					// start of the walk before the pointer had moved at all.
+					x: drawnX(pet, now),
+					facing: "front",
+					motion: { kind: "held", grabbedAt: now },
+				};
+			}
 			return pet.motion.kind === "held" ? { ...pet, motion: { kind: "standing" } } : pet;
 		}),
 	};
+}
+
+/**
+ * Where a Proc is being DRAWN at `now`, which is not always where the engine
+ * keeps it: a walk hands the renderer a destination and a duration and lets the
+ * compositor interpolate, so between the two the engine's `x` is stale by design.
+ */
+export function drawnX(pet: Pet, now: number): number {
+	const motion = pet.motion;
+	if (motion.kind !== "walking") return pet.x;
+	const span = motion.endsAt - motion.startedAt;
+	if (span <= 0) return motion.toX;
+	const progress = Math.max(0, Math.min(1, (now - motion.startedAt) / span));
+	return motion.fromX + (motion.toX - motion.fromX) * progress;
 }
 
 /**
