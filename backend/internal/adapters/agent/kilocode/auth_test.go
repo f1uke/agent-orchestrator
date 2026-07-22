@@ -3,9 +3,11 @@ package kilocode
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
@@ -154,6 +156,57 @@ exit 1
 	}
 	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
 		t.Fatalf("interactive shell probe ran; marker stat error = %v", err)
+	}
+}
+
+func TestAuthStatusUnknownWhenProbeExceedsDeadline(t *testing.T) {
+	dir := t.TempDir()
+	kilocodePath := filepath.Join(dir, "kilocode")
+	if err := os.WriteFile(kilocodePath, []byte(`#!/bin/sh
+/bin/sleep 5
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", dir)
+	t.Setenv("KILO_DATA_DIR", filepath.Join(dir, "missing-kilo-data"))
+	for _, name := range kilocodeAPIKeyEnvVars {
+		t.Setenv(name, "")
+	}
+
+	previous := kilocodeAuthProbeTimeout
+	kilocodeAuthProbeTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { kilocodeAuthProbeTimeout = previous })
+
+	status, err := (&Plugin{resolvedBinary: kilocodePath}).AuthStatus(context.Background())
+	if err != nil {
+		t.Fatalf("AuthStatus() error = %v; a slow probe must report unknown, not fail", err)
+	}
+	if status != ports.AgentAuthStatusUnknown {
+		t.Fatalf("status = %q, want %q", status, ports.AgentAuthStatusUnknown)
+	}
+}
+
+func TestAuthStatusPropagatesCallerCancellation(t *testing.T) {
+	dir := t.TempDir()
+	kilocodePath := filepath.Join(dir, "kilocode")
+	if err := os.WriteFile(kilocodePath, []byte(`#!/bin/sh
+/bin/sleep 5
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", dir)
+	t.Setenv("KILO_DATA_DIR", filepath.Join(dir, "missing-kilo-data"))
+	for _, name := range kilocodeAPIKeyEnvVars {
+		t.Setenv(name, "")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if _, err := (&Plugin{resolvedBinary: kilocodePath}).AuthStatus(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AuthStatus() error = %v, want %v", err, context.DeadlineExceeded)
 	}
 }
 
