@@ -15,7 +15,7 @@ import {
 import { Bubble } from "./Bubble";
 import type { ComposedBubble } from "./bubble-compose";
 import { castForSession } from "./cast";
-import { hoverAt, idleHover, tooltipTarget, type HoverState } from "./hover";
+import { hoverAt, HOVER_TOOLTIP_DELAY_MS, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
@@ -122,7 +122,10 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 	const [hover, setHover] = useState<HoverState>(idleHover);
 	const [openTooltip, setOpenTooltip] = useState<string | null>(null);
 	useEffect(() => {
-		const timer = setInterval(() => setOpenTooltip(tooltipTarget(hover, Date.now())), 250);
+		// A quarter of the hover delay, so the card opens within a frame or two of the
+		// moment it is due rather than up to a poll late — at half a second's wait, a
+		// 250ms poll was half the delay again.
+		const timer = setInterval(() => setOpenTooltip(tooltipTarget(hover, Date.now())), HOVER_TOOLTIP_DELAY_MS / 4);
 		return () => clearInterval(timer);
 	}, [hover]);
 
