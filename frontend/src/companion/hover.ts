@@ -7,8 +7,15 @@
 // every Proc the pointer crosses on the way to something else, and the overlay
 // spans the width of the screen, so that is most journeys across the desktop.
 
-/** How long the pointer must rest on a Proc before it explains itself. */
-export const HOVER_TOOLTIP_DELAY_MS = 2_500;
+/**
+ * How long the pointer must rest on a Proc before it explains itself.
+ *
+ * Long enough that it does not fire at every Proc the pointer crosses on the way
+ * somewhere else — the overlay spans the whole width of the screen, so that is most
+ * journeys across the desktop — and short enough that deliberately pointing at one
+ * feels answered rather than waited on. Set by the human at a second.
+ */
+export const HOVER_TOOLTIP_DELAY_MS = 1_000;
 
 export type HoverState = {
 	/** The Proc under the pointer, or null. */

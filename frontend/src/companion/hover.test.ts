@@ -17,9 +17,12 @@ describe("hover", () => {
 		expect(tooltipTarget(state, T + HOVER_TOOLTIP_DELAY_MS)).toBe("a");
 	});
 
-	it("waits the two-to-three seconds the human asked for", () => {
-		expect(HOVER_TOOLTIP_DELAY_MS).toBeGreaterThanOrEqual(2_000);
-		expect(HOVER_TOOLTIP_DELAY_MS).toBeLessThanOrEqual(3_000);
+	it("waits about the second the human asked for", () => {
+		// Not zero: firing on contact would flash at every Proc the pointer crosses,
+		// and the overlay spans the whole screen. Not long: pointing at a Proc on
+		// purpose should feel answered rather than waited on.
+		expect(HOVER_TOOLTIP_DELAY_MS).toBeGreaterThanOrEqual(600);
+		expect(HOVER_TOOLTIP_DELAY_MS).toBeLessThanOrEqual(1_500);
 	});
 
 	it("starts the clock again when the pointer moves to a different Proc", () => {

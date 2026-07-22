@@ -92,7 +92,7 @@ body {
 .companion-proc-name {
 	position: absolute;
 	bottom: 2px;
-	left: 0;
+	left: var(--procs-figure-left, 0);
 	width: var(--procs-figure-width, 96px);
 	display: flex;
 	justify-content: center;
@@ -109,7 +109,7 @@ body {
 .companion-proc-tooltip {
 	position: absolute;
 	bottom: calc(100% - 18px);
-	left: 0;
+	left: var(--procs-figure-left, 0);
 	pointer-events: none;
 }
 

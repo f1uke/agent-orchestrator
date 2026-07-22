@@ -31,3 +31,19 @@ export const OVERHEAD_ALLOWANCE = 96;
 
 /** Everything the overlay ever draws, stacked. The window must be at least this tall. */
 export const COMPANION_CONTENT_HEIGHT = Math.ceil(petFrame().height + OVERHEAD_ALLOWANCE);
+
+/**
+ * Where the FIGURE's left edge sits inside the drawn frame, in px.
+ *
+ * The figure is not centred in its frame — the frame carries ~48 units of scenery
+ * room on the cord side — so mirroring the sprite to walk left moves the figure to
+ * the other side of that frame. Chrome pinned under the Proc (the name chip, the
+ * hover tooltip) is NOT part of the sprite and does not mirror, so it has to be
+ * told where the figure actually went. Measured: 39px, which is exactly what the
+ * off-centre name chip was out by.
+ */
+export function figureLeft(mirrored: boolean, size: number = PET_HEIGHT): number {
+	if (!mirrored) return 0;
+	const frame = petFrame(size);
+	return 2 * frame.offsetX + frame.width - frame.figureWidth;
+}

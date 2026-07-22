@@ -16,7 +16,7 @@ import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { PET_HEIGHT, petFrame } from "./layout";
+import { figureLeft, PET_HEIGHT, petFrame } from "./layout";
 import { Procs } from "./Procs";
 
 // The stage: the only stateful part of the overlay renderer. It owns a World,
@@ -230,6 +230,10 @@ function ProcOnStage({ pet, tooltip }: { pet: Pet; tooltip: boolean }) {
 				transitionDuration: `${durationMs}ms`,
 				["--procs-offset-x" as string]: `${FRAME.offsetX}px`,
 				["--procs-figure-width" as string]: `${FRAME.figureWidth}px`,
+				// Mirroring the sprite to walk left moves the figure across its own
+				// frame, and the chrome pinned under it does not mirror — so it is told
+				// where the figure actually went.
+				["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
 			}}
 		>
 			{tooltip && !held ? (

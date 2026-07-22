@@ -47,17 +47,18 @@ describe("NameTag", () => {
 
 describe("PetTooltip", () => {
 	it("answers the question the human actually asked — which session, which project", () => {
-		render(
-			<PetTooltip
-				name="fix gl note render"
-				sessionId="agent-orchestrator-154"
-				project="agent-orchestrator"
-				status="working"
-			/>,
-		);
+		render(<PetTooltip name="login rate limit" sessionId="demo-app-59" project="demo-app" status="working" />);
 
-		expect(screen.getByText("agent-orchestrator-154")).toBeInTheDocument();
-		expect(screen.getByText("agent-orchestrator")).toBeInTheDocument();
+		// The `@` sigil, as a session ref is written everywhere else in the product.
+		expect(screen.getByText("@demo-app-59")).toBeInTheDocument();
+		expect(screen.getByText("demo-app")).toBeInTheDocument();
+		expect(screen.getByText("login rate limit")).toBeInTheDocument();
+	});
+
+	it("does not double up the sigil if the feed already sent one", () => {
+		render(<PetTooltip name="n" sessionId="@demo-app-59" project="p" status="working" />);
+
+		expect(screen.getByText("@demo-app-59")).toBeInTheDocument();
 	});
 
 	it("says the status in words, not as an enum", () => {

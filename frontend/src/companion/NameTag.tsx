@@ -69,7 +69,7 @@ export function PetTooltip({ name, sessionId, project, status }: PetTooltipProps
 			<strong style={{ font: "600 12px/1.4 ui-sans-serif, system-ui, sans-serif" }}>{name || sessionId}</strong>
 			<span style={{ color: PROP_COLOURS.bubbleMuted }}>{STATUS_LABELS[status]}</span>
 			<span style={{ color: PROP_COLOURS.bubbleMuted, fontFamily: "ui-monospace, monospace", fontSize: "10px" }}>
-				{sessionId}
+				{sessionId.startsWith("@") ? sessionId : `@${sessionId}`}
 			</span>
 			<span style={{ color: PROP_COLOURS.bubbleMuted, fontFamily: "ui-monospace, monospace", fontSize: "10px" }}>
 				{project}

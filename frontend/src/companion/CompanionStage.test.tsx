@@ -289,10 +289,10 @@ describe("dragging and naming", () => {
 		const figure = container.querySelector("[data-figure] rect")!;
 
 		fireEvent.pointerMove(figure, { bubbles: true });
-		act(() => vi.advanceTimersByTime(800));
+		act(() => vi.advanceTimersByTime(400));
 		expect(container.querySelector("[data-tooltip]")).toBeNull();
 
-		act(() => vi.advanceTimersByTime(2_500));
+		act(() => vi.advanceTimersByTime(1_200));
 		expect(container.querySelector("[data-tooltip]")?.textContent).toContain("agent-orchestrator");
 
 		fireEvent.pointerMove(container.querySelector(".companion-stage")!, { bubbles: true });
