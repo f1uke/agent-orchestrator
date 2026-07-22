@@ -51,6 +51,40 @@ export const WALK_CYCLE_MS = 520;
 /** The same four beats, stepped faster, for a Proc running to meet another one. */
 export const RUN_CYCLE_MS = 260;
 
+/**
+ * Downward acceleration, in px per ms². About 2200 px/s²: a Proc dropped from
+ * the top of a laptop display is back on the floor in a little over half a second,
+ * which is fast enough to read as weight rather than as a feather.
+ */
+export const GRAVITY_PX_PER_MS2 = 0.0022;
+/** How much of its speed a bounce keeps. Two or three visible hops, then still. */
+export const BOUNCE_RESTITUTION = 0.42;
+/** Below this landing speed a bounce is not worth drawing, so it settles instead. */
+export const BOUNCE_MIN_SPEED = 0.28;
+/** Sideways speed bleeds off in the air, and much faster once it is skidding. */
+export const AIR_DRAG_PER_MS = 0.0006;
+export const GROUND_DRAG_PER_MS = 0.008;
+/** Below this it is no longer sliding, it is standing. */
+export const SLIDE_MIN_SPEED = 0.02;
+/** The landing speed that raises a full cloud. Anything faster raises the same. */
+export const DUST_FULL_SPEED = 1.4;
+/**
+ * A flick can only throw a Proc so hard, however violently the pointer moved.
+ *
+ * 3.2 px/ms was the first number and it was far too much — a Proc left the hand
+ * like something fired rather than something thrown. A pointer can cross a
+ * display in a few frames, and matching that speed one-for-one is not a throw.
+ */
+export const MAX_THROW_SPEED = 1.5;
+/**
+ * How much of the hand's speed the Proc actually leaves with.
+ *
+ * Under one on purpose: a thrown thing does not keep all of the speed of the
+ * hand that let it go, and reading the pointer literally made every flick feel
+ * violent.
+ */
+export const THROW_SCALE = 0.5;
+
 /** Gap between two Procs summoned at the same time, so they never stack up. */
 export const SUMMON_SPACING_PX = 96;
 
@@ -88,7 +122,9 @@ export type PetMotion =
 	| { kind: "standing" }
 	| { kind: "walking"; fromX: number; toX: number; startedAt: number; endsAt: number }
 	/** Picked up by the human. Follows the pointer and does nothing of its own. */
-	| { kind: "held"; grabbedAt: number };
+	| { kind: "held"; grabbedAt: number }
+	/** Let go in mid-air or thrown. Falls, bounces, and comes to rest. */
+	| { kind: "flying"; vx: number; vy: number };
 
 export type Pet = {
 	id: string;
@@ -100,6 +136,14 @@ export type Pet = {
 	kind: SessionKind;
 	/** Logical position along the floor band, in px from the band's left edge. */
 	x: number;
+	/**
+	 * Height above the floor line, in px. 0 is standing on the band.
+	 *
+	 * The band was one horizontal line and a Proc had only an x — you could slide
+	 * one along the floor and that was all. A Proc you can pick up and drop is a
+	 * Proc that has to be able to be somewhere other than the floor.
+	 */
+	y: number;
 	facing: Facing;
 	motion: PetMotion;
 	/** Earliest time this Proc may consider a stroll. Randomised per Proc. */
@@ -134,6 +178,16 @@ export type Pet = {
 	placed?: boolean;
 	/** Set while this Proc is away meeting another one. See {@link startConversation}. */
 	meeting?: Meeting;
+	/**
+	 * The last time this Proc hit the floor, and how hard.
+	 *
+	 * A Proc that lands and simply carries on reads as weightless — the puff of
+	 * dust is the only thing that says it landed ON something. `seq` counts the
+	 * landings rather than timestamping them, because that is what the renderer
+	 * needs: the same number twice is the same landing, a new number is a new one
+	 * and restarts the animation.
+	 */
+	bounce?: { seq: number; strength: number };
 };
 
 /**
@@ -320,56 +374,68 @@ function canWander(status: SessionStatus): boolean {
  */
 export function syncActivities(world: World, activities: CompanionActivity[], now: number, rng: Rng): World {
 	const existing = new Map(world.pets.map((pet) => [pet.id, pet]));
+	// A snapshot is keyed by session id, so a repeated id is a BROKEN snapshot — and
+	// the worst possible reading of it is two identical characters on one spot with
+	// one name chip painted over the other. First reading wins, which is what a Map
+	// built from the snapshot would give, and it is stable.
+	const seen = new Set<string>();
 	// Grows as the roster is walked, so two Procs appearing in the same snapshot are
 	// placed clear of each other and not just of the ones already on screen.
 	const placed: Pet[] = [];
-	const pets = activities.map((activity) => {
-		const prev = existing.get(activity.sessionId);
-		if (!prev) {
-			const born: Pet = {
-				id: activity.sessionId,
+	const pets = activities
+		.filter((activity) => {
+			if (seen.has(activity.sessionId)) return false;
+			seen.add(activity.sessionId);
+			return true;
+		})
+		.map((activity) => {
+			const prev = existing.get(activity.sessionId);
+			if (!prev) {
+				const born: Pet = {
+					id: activity.sessionId,
+					status: activity.status,
+					name: activity.name ?? "",
+					project: activity.project ?? "",
+					kind: activity.kind ?? "worker",
+					// Placed clear of everyone already standing there, so a Proc that joins
+					// the desktop never lands on top of one that is already on it.
+					x: placeNewPet(world, placed, rng),
+					y: 0,
+					facing: "front",
+					motion: { kind: "standing" },
+					restUntil: pickRest(now, rng),
+				};
+				placed.push(born);
+				return born;
+			}
+			const renamed =
+				(activity.name ?? "") !== prev.name ||
+				(activity.project ?? "") !== prev.project ||
+				(activity.kind ?? "worker") !== prev.kind;
+			if (prev.status === activity.status && !renamed) {
+				placed.push(prev);
+				return prev;
+			}
+			const next = {
+				...prev,
 				status: activity.status,
-				name: activity.name ?? "",
-				project: activity.project ?? "",
-				kind: activity.kind ?? "worker",
-				// Placed clear of everyone already standing there, so a Proc that joins
-				// the desktop never lands on top of one that is already on it.
-				x: placeNewPet(world, placed, rng),
-				facing: "front",
-				motion: { kind: "standing" },
-				restUntil: pickRest(now, rng),
+				name: activity.name ?? prev.name,
+				project: activity.project ?? prev.project,
+				kind: activity.kind ?? prev.kind,
+				// Leaving needs_input clears the answered-summon mark, so a session that
+				// asks again later is walked to the front again rather than staying put.
+				summonedTo: modeFor(activity.status) === "summon" ? prev.summonedTo : undefined,
+				// A Proc that cannot stroll faces YOU. `facing` otherwise persists from the
+				// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
+				// that walked left and then sat down at a desk would show the desk flipped
+				// to its other side, reading as the furniture teleporting.
+				// …unless it is mid-conversation, where the facing is what makes the two of
+				// them look at each other rather than past each other.
+				facing: prev.meeting || canWander(activity.status) ? prev.facing : ("front" as Facing),
 			};
-			placed.push(born);
-			return born;
-		}
-		const renamed =
-			(activity.name ?? "") !== prev.name ||
-			(activity.project ?? "") !== prev.project ||
-			(activity.kind ?? "worker") !== prev.kind;
-		if (prev.status === activity.status && !renamed) {
-			placed.push(prev);
-			return prev;
-		}
-		const next = {
-			...prev,
-			status: activity.status,
-			name: activity.name ?? prev.name,
-			project: activity.project ?? prev.project,
-			kind: activity.kind ?? prev.kind,
-			// Leaving needs_input clears the answered-summon mark, so a session that
-			// asks again later is walked to the front again rather than staying put.
-			summonedTo: modeFor(activity.status) === "summon" ? prev.summonedTo : undefined,
-			// A Proc that cannot stroll faces YOU. `facing` otherwise persists from the
-			// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
-			// that walked left and then sat down at a desk would show the desk flipped
-			// to its other side, reading as the furniture teleporting.
-			// …unless it is mid-conversation, where the facing is what makes the two of
-			// them look at each other rather than past each other.
-			facing: prev.meeting || canWander(activity.status) ? prev.facing : ("front" as Facing),
-		};
-		placed.push(next);
-		return next;
-	});
+			placed.push(next);
+			return next;
+		});
 	return { ...world, pets };
 }
 
@@ -523,10 +589,14 @@ export function grabPet(world: World, petId: string, now: number): World {
  * a drag that stops dead at the edge feels like the app grabbing back, so it goes
  * where the pointer goes and is brought home on release.
  */
-export function dragPet(world: World, petId: string, x: number): World {
+export function dragPet(world: World, petId: string, x: number, y = 0): World {
 	return {
 		...world,
-		pets: world.pets.map((pet) => (pet.id === petId && pet.motion.kind === "held" ? { ...pet, x } : pet)),
+		pets: world.pets.map((pet) =>
+			// Deliberately unclamped in BOTH axes: a drag that stops dead at an edge
+			// feels like the app grabbing back. It goes where the pointer goes.
+			pet.id === petId && pet.motion.kind === "held" ? { ...pet, x, y: Math.max(0, y) } : pet,
+		),
 	};
 }
 
@@ -535,18 +605,37 @@ export function dragPet(world: World, petId: string, x: number): World {
  * WALKS back on rather than snapping, so the user can see where it went. Either
  * way the next tick's separation pass keeps it off anybody already standing there.
  */
-export function releasePet(world: World, petId: string, now: number, rng: Rng): World {
+export function releasePet(
+	world: World,
+	petId: string,
+	now: number,
+	rng: Rng,
+	/** How fast the pointer was moving when it let go, in px/ms. Up is positive. */
+	throwSpeed: { vx: number; vy: number } = { vx: 0, vy: 0 },
+): World {
 	return {
 		...world,
 		pets: world.pets.map((pet) => {
 			if (pet.id !== petId || pet.motion.kind !== "held") return pet;
 			const landed = Math.min(world.band.maxX, Math.max(world.band.minX, pet.x));
+
+			// Reduced motion keeps the placement — that part is the human's — and drops
+			// the flight, which is decoration. It is simply set down where it was let go.
+			if (world.reducedMotion || world.parked) {
+				return { ...pet, y: 0, placed: true, motion: { kind: "standing" }, restUntil: pickRest(now, rng) };
+			}
+
+			const vx = clampSpeed(throwSpeed.vx);
+			const vy = clampSpeed(throwSpeed.vy);
+			if (pet.y > 0 || vx !== 0 || vy !== 0) {
+				return { ...pet, motion: { kind: "flying", vx, vy }, restUntil: pickRest(now, rng) };
+			}
+
 			if (landed === pet.x) {
 				return { ...pet, placed: true, motion: { kind: "standing" }, restUntil: pickRest(now, rng) };
 			}
-			// Dropped off the end: the landing spot is the ENGINE's choice, not the
-			// human's, so it does not earn the hand-placed exemption.
-			// Dropped off the end: walk in from the edge to a spot clearly on the band.
+			// Dropped off the end with no throw behind it: the landing spot is the
+			// ENGINE's choice, not the human's, so it does not earn the exemption.
 			const inward = landed === world.band.minX ? 1 : -1;
 			const toX = Math.min(
 				world.band.maxX,
@@ -563,10 +652,102 @@ export function releasePet(world: World, petId: string, now: number, rng: Rng): 
 	};
 }
 
+function clampSpeed(v: number): number {
+	const scaled = v * THROW_SCALE;
+	return Math.max(-MAX_THROW_SPEED, Math.min(MAX_THROW_SPEED, scaled));
+}
+
+/**
+ * Advance every Proc that is in the air by `dtMs`.
+ *
+ * Separate from {@link tick} and driven on animation frames rather than the slow
+ * decision tick, because a fall is the one thing on this desktop that CSS cannot
+ * interpolate for us: a transition draws a straight line between two points, and
+ * a thrown Proc travels an arc.
+ */
+export function advanceFlight(world: World, dtMs: number): World {
+	if (dtMs <= 0) return world;
+	return {
+		...world,
+		pets: world.pets.map((pet) => (pet.motion.kind === "flying" ? step(pet, dtMs, world) : pet)),
+	};
+}
+
+function step(pet: Pet, dtMs: number, world: World): Pet {
+	const motion = pet.motion;
+	if (motion.kind !== "flying") return pet;
+
+	let vx = motion.vx;
+	let vy = motion.vy - GRAVITY_PX_PER_MS2 * dtMs;
+	let x = pet.x + vx * dtMs;
+	let y = pet.y + vy * dtMs;
+
+	// The band's edges are walls, not cliffs: a thrown Proc bounces off them rather
+	// than disappearing off the side of the display.
+	if (x < world.band.minX) {
+		x = world.band.minX;
+		vx = Math.abs(vx) * BOUNCE_RESTITUTION;
+	} else if (x > world.band.maxX) {
+		x = world.band.maxX;
+		vx = -Math.abs(vx) * BOUNCE_RESTITUTION;
+	}
+
+	vx *= Math.max(0, 1 - (y > 0 ? AIR_DRAG_PER_MS : GROUND_DRAG_PER_MS) * dtMs);
+
+	if (y > 0) return { ...pet, x, y, motion: { kind: "flying", vx, vy } };
+
+	// On the floor. A fast landing bounces; a slow one has nothing left to show.
+	y = 0;
+	const landingSpeed = Math.abs(vy);
+	const hit = pet.y > 0 && landingSpeed > 0 ? kickUpDust(pet, landingSpeed) : pet.bounce;
+	if (landingSpeed > BOUNCE_MIN_SPEED || Math.abs(vx) > SLIDE_MIN_SPEED) {
+		return {
+			...pet,
+			x,
+			y,
+			bounce: hit,
+			motion: { kind: "flying", vx, vy: landingSpeed > BOUNCE_MIN_SPEED ? landingSpeed * BOUNCE_RESTITUTION : 0 },
+		};
+	}
+	// Come to rest. Where it lands is where the human put it, so nothing shoves it.
+	return { ...pet, x, y, bounce: hit, placed: true, facing: "front", motion: { kind: "standing" } };
+}
+
+/** Put a Proc down where it is. Used when animation frames have stopped coming. */
+function land(pet: Pet, now: number, rng: Rng): Pet {
+	if (pet.motion.kind !== "flying") return pet;
+	return {
+		...pet,
+		y: 0,
+		placed: true,
+		facing: "front",
+		motion: { kind: "standing" },
+		restUntil: pickRest(now, rng),
+	};
+}
+
+/**
+ * The puff a landing throws up: how big, and which landing it was.
+ *
+ * Strength runs 0-1 off the landing speed, so a Proc set down gently barely
+ * raises anything and one dropped from the top of the display raises a cloud.
+ */
+function kickUpDust(pet: Pet, landingSpeed: number): { seq: number; strength: number } {
+	return {
+		seq: (pet.bounce?.seq ?? 0) + 1,
+		strength: Math.max(0.25, Math.min(1, landingSpeed / DUST_FULL_SPEED)),
+	};
+}
+
 /** Advance the world to `now`. Pure: same inputs, same output. */
 export function tick(world: World, now: number, rng: Rng): World {
-	// 1. Settle every stroll that has finished (or that parking cut short).
+	// 1. Settle every stroll that has finished (or that parking cut short), and put
+	//    down anything still in the air if we have been parked. A flight is drawn on
+	//    animation frames, and animation frames STOP when the window is occluded or
+	//    the display sleeps — so without this a thrown Proc hangs in mid-air until
+	//    somebody looks at the desktop again.
 	let pets = world.pets.map((pet) => settle(pet, now, world, rng));
+	if (world.parked) pets = pets.map((pet) => land(pet, now, rng));
 
 	// 2. Move any conversation on. Before the crowding rescue, so a Proc that has
 	//    just landed at a meeting spot is already in `greeting` rather than looking

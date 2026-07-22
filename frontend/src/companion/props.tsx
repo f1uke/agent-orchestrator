@@ -430,3 +430,53 @@ function CordSpark() {
 		</g>
 	);
 }
+
+// ---------------------------------------------------------------- DUST
+
+/** Where each puff of a landing goes: outward from the feet, and a little up. */
+const DUST_PUFFS = [
+	{ x: 28, dx: -24, r: 7, delay: 0 },
+	{ x: 48, dx: 0, r: 5, delay: 70 },
+	{ x: 68, dx: 24, r: 6.5, delay: 35 },
+];
+
+/**
+ * The puff a landing throws up.
+ *
+ * A Proc that hits the floor and simply carries on reads as weightless; this is
+ * the only thing that says it landed ON something. Same two channels as
+ * everything else out here — a self-contained fill plus the ink rim — because it
+ * is drawn over the wallpaper like the rest of the scene.
+ *
+ * `strength` runs 0-1 off the landing speed, so a Proc set down gently barely
+ * raises anything and one dropped from the top of the display raises a cloud.
+ */
+export function DustPuff({ strength }: { strength: number }) {
+	const spread = 0.5 + strength;
+	return (
+		<g data-slot="dust" data-dust-strength={strength.toFixed(2)}>
+			{DUST_PUFFS.map((puff) => (
+				<circle
+					key={puff.x}
+					data-rim
+					cx={puff.x}
+					cy={116}
+					r={puff.r * (0.6 + strength * 0.6)}
+					fill={PROP_COLOURS.quiet}
+					{...RIM}
+					style={{
+						// About the CIRCLE, not about the corner of the view box. An SVG
+						// element's transform origin defaults to the view box's own origin,
+						// so `scale(0.35)` at the start of the puff hauled it from the feet
+						// up to the Proc's head and then swept it back down — the dust
+						// appeared to come off its ears.
+						transformBox: "fill-box",
+						transformOrigin: "center",
+						animation: `procs-dust ${420 + strength * 220}ms ease-out ${puff.delay}ms both`,
+						["--procs-dust-dx" as string]: `${puff.dx * spread}px`,
+					}}
+				/>
+			))}
+		</g>
+	);
+}

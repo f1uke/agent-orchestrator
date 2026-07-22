@@ -88,13 +88,22 @@ describe("OVERLAY_BAND_HEIGHT", () => {
 });
 
 describe("overlayBandBounds", () => {
-	it("is a band across the bottom of the work area, which already excludes the Dock", () => {
-		expect(overlayBandBounds(WORK_AREA)).toEqual({
-			x: 0,
-			y: 25 + 875 - OVERLAY_BAND_HEIGHT,
-			width: 1440,
-			height: OVERLAY_BAND_HEIGHT,
-		});
+	it("is flush with the bottom of the work area, which already excludes the Dock", () => {
+		const bounds = overlayBandBounds(WORK_AREA);
+
+		expect(bounds.x).toBe(0);
+		expect(bounds.width).toBe(1440);
+		expect(bounds.y + bounds.height).toBe(25 + 875);
+	});
+
+	it("gives a thrown Proc the whole work area to be thrown into", () => {
+		// A Proc can only go as high as the window is tall. The window is transparent
+		// and forwards every click that is not on a Proc, so the sky is free.
+		expect(overlayBandBounds(WORK_AREA).height).toBe(875);
+	});
+
+	it("is never shorter than the tallest thing drawn in it", () => {
+		expect(overlayBandBounds(WORK_AREA).height).toBeGreaterThanOrEqual(OVERLAY_BAND_HEIGHT);
 	});
 
 	it("never grows taller than the display it sits on", () => {

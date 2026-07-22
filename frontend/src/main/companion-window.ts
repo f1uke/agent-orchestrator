@@ -79,13 +79,24 @@ export type CompanionOverlay = {
 export const OVERLAY_BAND_HEIGHT = COMPANION_CONTENT_HEIGHT;
 
 /**
+ * How far above the band a Proc can be lifted, as a fraction of the work area.
+ *
+ * A Proc you can pick up and THROW needs sky to be thrown into, and the window is
+ * the sky: it can only go as high as the window is tall. The whole work area is
+ * the honest answer — the window is transparent and forwards every click that is
+ * not on a Proc, so a taller one costs a bigger compositor layer and nothing else.
+ */
+export const OVERLAY_THROW_HEADROOM = 1;
+
+/**
  * The band sits flush with the bottom of the WORK AREA rather than the display.
  * On macOS the work area already excludes the Dock and the menu bar, so "above
  * the Dock" comes out of the geometry instead of a guessed inset that would be
  * wrong for every Dock size, position and auto-hide setting.
  */
 export function overlayBandBounds(workArea: OverlayBounds): OverlayBounds {
-	const height = Math.min(OVERLAY_BAND_HEIGHT, workArea.height);
+	const wanted = Math.max(OVERLAY_BAND_HEIGHT, Math.round(workArea.height * OVERLAY_THROW_HEADROOM));
+	const height = Math.min(wanted, workArea.height);
 	return {
 		x: workArea.x,
 		y: workArea.y + workArea.height - height,

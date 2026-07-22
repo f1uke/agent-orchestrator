@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	createWorld,
 	dragPet,
 	grabPet,
 	releasePet,
 	startConversation,
+	advanceFlight,
 	syncActivities,
 	tick,
 	type Band,
@@ -19,9 +20,9 @@ import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { assignBubbleLanes, type BubbleSpan } from "./bubble-lanes";
-import { BUBBLE_MAX_WIDTH } from "./Bubble";
-import { BUBBLE_LANE_HEIGHT, bubbleOpensLeft, figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
+import { stackBubbles, type BubbleBox } from "./bubble-lanes";
+import { BUBBLE_MAX_HEIGHT, BUBBLE_MAX_WIDTH } from "./Bubble";
+import { bubbleOpensLeft, figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
 import { Procs } from "./Procs";
 import { stackOrder } from "./stacking";
 
@@ -133,6 +134,25 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 		return () => clearInterval(timer);
 	}, []);
 
+	// A thrown Proc travels an ARC, and a CSS transition draws a straight line
+	// between two points — so the one thing on this desktop the compositor cannot
+	// interpolate for us is drawn frame by frame instead. The loop runs only while
+	// something is actually in the air, so an idle desktop still costs nothing.
+	const flying = world.pets.some((pet) => pet.motion.kind === "flying");
+	useEffect(() => {
+		if (!flying) return;
+		let frame = 0;
+		let last = performance.now();
+		const advance = (now: number) => {
+			const dt = Math.min(48, now - last);
+			last = now;
+			setWorld((current) => advanceFlight(current, dt));
+			frame = requestAnimationFrame(advance);
+		};
+		frame = requestAnimationFrame(advance);
+		return () => cancelAnimationFrame(frame);
+	}, [flying]);
+
 	// Reduced motion and parking are inputs to the engine, not renderer special
 	// cases: that is what keeps "no walking" true rather than merely invisible.
 	useEffect(() => {
@@ -166,10 +186,17 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 	// arrives — and a missed leave leaves the whole band swallowing clicks.
 	useEffect(() => {
 		const tracker = createInteractionTracker(onInteractiveChange ?? (() => {}));
-		// The pointer's x in band coordinates: the stage fills the window, and a Proc's
-		// transform is its own left edge, so a grab keeps the offset it was grabbed at
-		// instead of snapping the Proc's corner to the cursor.
+		// The pointer's position in band coordinates: the stage fills the window, and a
+		// Proc's transform is its own left edge, so a grab keeps the offset it was
+		// grabbed at instead of snapping the Proc's corner to the cursor.
 		let grabOffset = 0;
+		let grabOffsetY = 0;
+		// The last couple of pointer samples, so letting go of a FLICK can throw the
+		// Proc at the speed the hand was actually moving.
+		let sample: { x: number; y: number; at: number } | null = null;
+		let throwSpeed = { vx: 0, vy: 0 };
+		/** Height above the floor line, which is the bottom of the window. */
+		const heightOf = (clientY: number) => window.innerHeight - clientY;
 
 		const petIdAt = (target: EventTarget | null): string | null => {
 			if (!(target instanceof Element)) return null;
@@ -180,8 +207,19 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 			tracker.update(event.target);
 			setWorld((current) => {
 				const holding = current.pets.find((pet) => pet.motion.kind === "held");
-				if (holding) return dragPet(current, holding.id, event.clientX - grabOffset);
-				return current;
+				if (!holding) return current;
+				const now = performance.now();
+				if (sample) {
+					const dt = Math.max(1, now - sample.at);
+					// Only a RECENT sample is a flick; an old one is where the hand paused.
+					const weight = dt > 120 ? 0 : 1;
+					throwSpeed = {
+						vx: (weight * (event.clientX - sample.x)) / dt,
+						vy: (weight * (sample.y - event.clientY)) / dt,
+					};
+				}
+				sample = { x: event.clientX, y: event.clientY, at: now };
+				return dragPet(current, holding.id, event.clientX - grabOffset, heightOf(event.clientY) - grabOffsetY);
 			});
 			const over = isOverPet(event.target) ? petIdAt(event.target) : null;
 			setHover((current) => hoverAt(current, over, Date.now()));
@@ -199,6 +237,9 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 			setWorld((current) => {
 				const pet = current.pets.find((entry) => entry.id === id);
 				grabOffset = pet ? event.clientX - pet.x : 0;
+				grabOffsetY = pet ? heightOf(event.clientY) - pet.y : 0;
+				sample = { x: event.clientX, y: event.clientY, at: performance.now() };
+				throwSpeed = { vx: 0, vy: 0 };
 				return grabPet(current, id, Date.now());
 			});
 			setHover(idleHover());
@@ -206,9 +247,11 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 
 		const onUp = (event: PointerEvent) => {
 			tracker.hold(false);
+			const thrown = sample && performance.now() - sample.at < 120 ? throwSpeed : { vx: 0, vy: 0 };
+			sample = null;
 			setWorld((current) => {
 				const holding = current.pets.find((pet) => pet.motion.kind === "held");
-				return holding ? releasePet(current, holding.id, Date.now(), Math.random) : current;
+				return holding ? releasePet(current, holding.id, Date.now(), Math.random, thrown) : current;
 			});
 			tracker.update(event.target);
 		};
@@ -236,11 +279,51 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 	}, [onInteractiveChange]);
 
 	const painted = paintOrder(world.pets);
-	// Which bubbles would collide, and how high each has to sit to clear the ones
-	// before it. Computed once for the whole band — a bubble cannot know on its own
-	// whether it is in anybody's way.
-	const lanes = assignBubbleLanes(
-		painted.filter((pet) => spokenLine(pet, bubbleFor?.(pet.id) ?? null) !== null).map((pet) => bubbleSpan(pet)),
+
+	// The cards' DRAWN sizes, read back off the layer after it renders.
+	//
+	// Guessing them from the maximum a card could be lifted a 145px card clear of a
+	// neighbour it never touched, and put three lines of air above a one-line card.
+	// The measurement is safe to feed back: a card's width and height are unaffected
+	// by the offset it produces, so this settles in one extra pass and cannot
+	// oscillate.
+	const chromeLayer = useRef<HTMLDivElement>(null);
+	const [cardSizes, setCardSizes] = useState<Record<string, CardBox>>({});
+	// On the TICK, deliberately — NOT after every render.
+	//
+	// A card's left edge is read from the live rect, which the compositor is moving
+	// continuously while a Proc walks. Measured after every render, each measurement
+	// returned a slightly later position, which set state, which rendered, which
+	// measured again: a synchronous loop that locked the page solid. Keyed to the
+	// tick, the re-render it causes cannot re-enter it.
+	useEffect(() => {
+		const layer = chromeLayer.current;
+		if (!layer) return;
+		const measured: Record<string, CardBox> = {};
+		for (const card of layer.querySelectorAll<HTMLElement>("[data-bubble-of]")) {
+			const id = card.dataset.bubbleOf;
+			if (!id) continue;
+			// SIZE in layout units — the transformed rect is multiplied by every
+			// transform above it. POSITION from the rect, because that is the only
+			// thing that knows where the card has got to: a walking Proc's `x` is
+			// still where it set off from, and the compositor is carrying its card
+			// across the screen. Reading the destination instead lifted bubbles that
+			// were nowhere near each other yet and left colliding ones flat.
+			measured[id] = {
+				width: card.offsetWidth,
+				height: card.offsetHeight,
+				left: Math.round(card.getBoundingClientRect().left),
+			};
+		}
+		setCardSizes((current) => (sameSizes(current, measured) ? current : measured));
+	}, [bubbleTick]);
+
+	// How high each bubble has to sit to clear the ones before it. Computed for the
+	// whole band at once — a bubble cannot know on its own whether it is in the way.
+	const offsets = stackBubbles(
+		painted
+			.filter((pet) => spokenLine(pet, bubbleFor?.(pet.id) ?? null) !== null)
+			.map((pet) => bubbleBox(pet, cardSizes[pet.id])),
 	);
 
 	// TWO layers, deliberately. Every Proc carries a `transform`, and a transform
@@ -255,14 +338,14 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 					<ProcArt key={pet.id} pet={pet} />
 				))}
 			</div>
-			<div className="companion-chrome">
+			<div className="companion-chrome" ref={chromeLayer}>
 				{painted.map((pet) => (
 					<ProcChrome
 						key={pet.id}
 						pet={pet}
 						tooltip={openTooltip === pet.id}
 						bubble={bubbleFor?.(pet.id) ?? null}
-						lane={lanes.get(pet.id) ?? 0}
+						offsetY={offsets.get(pet.id) ?? 0}
 						bubbleTick={bubbleTick}
 					/>
 				))}
@@ -288,10 +371,12 @@ function placement(pet: Pet): React.CSSProperties {
 	// there over exactly the walk's duration; the engine sets `x` to the same value
 	// when the walk ends, so there is never a jump at the hand-off.
 	const targetX = pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
-	// A held Proc must track the pointer exactly, so no transition on the drag.
+	// A held Proc must track the pointer exactly, and a thrown one is being drawn
+	// frame by frame — neither may have a transition smoothing over it.
 	const durationMs = pet.motion.kind === "walking" ? pet.motion.endsAt - pet.motion.startedAt : 0;
 	return {
-		transform: `translate3d(${targetX}px, 0px, 0px)`,
+		// Y is height above the floor, so up the screen is NEGATIVE.
+		transform: `translate3d(${targetX}px, ${-pet.y}px, 0px)`,
 		transitionProperty: "transform",
 		transitionTimingFunction: "linear",
 		transitionDuration: `${durationMs}ms`,
@@ -346,6 +431,7 @@ function ProcArt({ pet }: { pet: Pet }) {
 				held={held}
 				running={running}
 				greeting={greeting}
+				bounce={pet.bounce}
 				size={PET_HEIGHT}
 				className="companion-proc-art"
 			/>
@@ -356,30 +442,55 @@ function ProcArt({ pet }: { pet: Pet }) {
 	);
 }
 
-/** Where this Proc's widest possible card would sit, in screen px. */
-function bubbleSpan(pet: Pet): BubbleSpan {
-	const figureX = (pet.motion.kind === "walking" ? pet.motion.toX : pet.x) + figureLeft(pet.facing === "left");
+/** A card as it is actually drawn: its size in layout units, its left edge on screen. */
+type CardBox = { width: number; height: number; left: number };
+
+/** Two measurement maps are the same when every card in both is the same box. */
+function sameSizes(a: Record<string, CardBox>, b: Record<string, CardBox>): boolean {
+	const keys = Object.keys(a);
+	if (keys.length !== Object.keys(b).length) return false;
+	return keys.every(
+		(key) => b[key] && a[key].width === b[key].width && a[key].height === b[key].height && a[key].left === b[key].left,
+	);
+}
+
+/**
+ * Where this Proc's card actually sits, in screen px.
+ *
+ * `measured` is absent on the very first pass, before the layer has been read
+ * back. The widest and tallest a card can be is the safe assumption for one
+ * frame: it over-separates rather than letting two cards land on each other.
+ */
+function bubbleBox(pet: Pet, measured?: CardBox): BubbleBox {
+	const width = measured?.width ?? BUBBLE_MAX_WIDTH;
+	const height = measured?.height ?? BUBBLE_MAX_HEIGHT;
+	if (measured) return { id: pet.id, left: measured.left, right: measured.left + width, height };
+
+	// Nothing measured yet — the very first pass. Fall back to where the card would
+	// be if its Proc were standing still, at the widest and tallest it can be: it
+	// over-separates for one frame rather than letting two cards land on each other.
+	const figureX = pet.x + figureLeft(pet.facing === "left");
 	const opensLeft = bubbleOpensLeft({
 		figureX,
 		figureWidth: FRAME.figureWidth,
 		screenWidth: window.innerWidth,
 		preferLeft: pet.meeting?.phase === "greeting" && pet.facing === "right",
 	});
-	const left = opensLeft ? figureX + FRAME.figureWidth - BUBBLE_MAX_WIDTH : figureX;
-	return { id: pet.id, left, right: left + BUBBLE_MAX_WIDTH };
+	const left = opensLeft ? figureX + FRAME.figureWidth - width : figureX;
+	return { id: pet.id, left, right: left + width, height };
 }
 
 function ProcChrome({
 	pet,
 	tooltip,
 	bubble,
-	lane,
+	offsetY,
 }: {
 	pet: Pet;
 	tooltip: boolean;
 	bubble: ComposedBubble | null;
-	/** How many card-heights above its Proc this bubble sits, to clear the others. */
-	lane: number;
+	/** How far above its Proc this bubble sits, in px, to clear the others. */
+	offsetY: number;
 	/** Only here to re-render the bubble as its claim ages. */
 	bubbleTick: number;
 }) {
@@ -412,8 +523,9 @@ function ProcChrome({
 				<div
 					className="companion-proc-bubble"
 					data-opens={opensLeft ? "left" : undefined}
-					data-lane={lane || undefined}
-					style={{ ["--procs-bubble-lane" as string]: `${lane * BUBBLE_LANE_HEIGHT}px` }}
+					data-bubble-of={pet.id}
+					data-lifted={offsetY ? "" : undefined}
+					style={{ ["--procs-bubble-lane" as string]: `${offsetY}px` }}
 				>
 					<Bubble text={said.text} tone={said.tone} decay={said.decay} tail={opensLeft ? "right" : "left"} />
 				</div>

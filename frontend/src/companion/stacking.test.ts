@@ -10,6 +10,7 @@ function pet(over: Partial<Pet> = {}): Pet {
 		project: "demo-app",
 		kind: "worker",
 		x: 100,
+		y: 0,
 		facing: "front",
 		motion: { kind: "standing" },
 		restUntil: 0,

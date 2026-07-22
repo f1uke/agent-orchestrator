@@ -4,7 +4,7 @@ import { RUN_CYCLE_MS, WALK_CYCLE_MS, type Facing } from "./behaviour";
 import type { CastMember } from "./cast";
 import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX } from "./palette";
 import { FIGURE_ATTRIBUTE } from "./pointer-region";
-import { CordLayer, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
+import { CordLayer, DustPuff, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
 import { sceneFor } from "./scene";
 
 // Procs — a little running process. ONE rig, parameterised by a cast member and a
@@ -64,6 +64,8 @@ export type ProcsProps = {
 	running?: boolean;
 	/** Face to face with the Proc it came to meet: a couple of hops. */
 	greeting?: boolean;
+	/** The landing it has just made, if any: `seq` counts them, `strength` sizes the puff. */
+	bounce?: { seq: number; strength: number };
 	/** Drawn height of the FIGURE in px; props extend beyond it. */
 	size?: number;
 	className?: string;
@@ -77,6 +79,7 @@ export function Procs({
 	held = false,
 	running = false,
 	greeting = false,
+	bounce,
 	size = DEFAULT_SIZE,
 	className,
 }: ProcsProps) {
@@ -206,6 +209,12 @@ export function Procs({
 
 			{/* Emitted last so zzz and confetti sit in front of the head. */}
 			<EmitLayer emit={scene.emit} cast={cast} />
+
+			{/* Dust in FRONT of the feet — it is kicked up between you and the Proc, and
+			    behind the legs half of it was hidden by the Proc that raised it. Keyed by
+			    the landing COUNT so a second bounce is a second element and its animation
+			    starts again instead of being skipped as unchanged. */}
+			{bounce ? <DustPuff key={bounce.seq} strength={bounce.strength} /> : null}
 		</svg>
 	);
 }

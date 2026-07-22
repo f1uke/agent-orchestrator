@@ -204,6 +204,22 @@ body {
 	}
 }
 
+/* The puff a landing throws up: out, up a little, and gone. Transform and opacity
+   only, and it runs ONCE — a landing is an event, not a state. */
+@keyframes procs-dust {
+	0% {
+		opacity: 0;
+		transform: translate(0, 0) scale(0.35);
+	}
+	18% {
+		opacity: 0.95;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(var(--procs-dust-dx, 0), -7px) scale(1.25);
+	}
+}
+
 /* ---- Scene animations. transform/opacity only, so every one stays on the
    compositor and an idle desktop still costs ~0% CPU. ---- */
 

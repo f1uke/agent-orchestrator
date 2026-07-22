@@ -12,6 +12,7 @@ import {
 	WALK_MAX_PX,
 	WALK_MIN_MS,
 	WALK_MIN_PX,
+	advanceFlight,
 	animatingCount,
 	createWorld,
 	dragPet,
@@ -1205,5 +1206,223 @@ describe("where a conversation is staged", () => {
 
 		expect(petById(talking, "a").meeting).toBeDefined();
 		expect(petById(talking, "b").meeting).toBeDefined();
+	});
+});
+
+describe("a roster that repeats a session", () => {
+	// The feed's contract is that a snapshot is keyed by session id, so a repeated
+	// id is a broken snapshot. Rendering it as two Procs is the worst reading of it:
+	// two identical characters on one spot, with one name chip painted over the
+	// other, which is exactly what a crowded desktop should never look like.
+	it("shows one Proc per session, however many times the snapshot names it", () => {
+		const next = syncActivities(
+			world(),
+			[activity("a", "pr_open"), activity("a", "working"), activity("b", "idle")],
+			T0,
+			half,
+		);
+
+		expect(next.pets.map((pet) => pet.id)).toEqual(["a", "b"]);
+	});
+
+	it("keeps the FIRST reading of a repeated session, not the last", () => {
+		// Arbitrary, but it has to be one of them and first-wins is what a `Map`
+		// built from the snapshot would give. What matters is that it is stable.
+		const next = syncActivities(world(), [activity("a", "pr_open"), activity("a", "working")], T0, half);
+
+		expect(petById(next, "a").status).toBe("pr_open");
+	});
+});
+
+describe("picking a Proc up and throwing it", () => {
+	// The band was one horizontal line and a Proc had only an x. You could slide one
+	// along the floor and that was all. The human wants to lift one into the air and
+	// have it FALL back, and to fling it and have it carry.
+	function airborne(): World {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		return { ...base, pets: base.pets.map((p) => ({ ...p, x: 400, restUntil: T0 + 10 * REST_MAX_MS })) };
+	}
+
+	function fly(w: World, ms: number, step = 16): World {
+		let next = w;
+		for (let t = step; t <= ms; t += step) next = advanceFlight(next, step);
+		return next;
+	}
+
+	it("lifts a held Proc off the floor, following the pointer up", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 260);
+
+		expect(petById(w, "a").x).toBe(500);
+		expect(petById(w, "a").y).toBe(260);
+	});
+
+	it("drops it when you let go in mid-air instead of leaving it hanging", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 300);
+		w = releasePet(w, "a", T0 + 500, half);
+
+		expect(petById(w, "a").motion.kind).toBe("flying");
+		const midFall = fly(w, 200);
+		expect(petById(midFall, "a").y).toBeLessThan(300);
+		expect(petById(midFall, "a").y).toBeGreaterThan(0);
+	});
+
+	it("lands it back on the floor and leaves it standing there", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 300);
+		w = releasePet(w, "a", T0 + 500, half);
+		w = fly(w, 6_000);
+
+		expect(petById(w, "a").y).toBe(0);
+		expect(petById(w, "a").motion.kind).toBe("standing");
+	});
+
+	it("carries a flung Proc sideways in the direction it was thrown", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 200);
+		// A flick to the right: the renderer measures the pointer, the engine is told.
+		w = releasePet(w, "a", T0 + 500, half, { vx: 1.6, vy: 0.4 });
+		w = fly(w, 6_000);
+
+		expect(petById(w, "a").x).toBeGreaterThan(560);
+	});
+
+	it("throws it further the harder it is flung", () => {
+		// On a band wide enough that neither throw reaches a wall — off a wall the
+		// harder throw comes BACK further, which is right but measures nothing.
+		const wide = { minX: 0, maxX: 6000 };
+		const thrown = (vx: number) => {
+			let w = { ...airborne(), band: wide };
+			w = grabPet(w, "a", T0);
+			w = dragPet(w, "a", 500, 200);
+			w = releasePet(w, "a", T0 + 500, half, { vx, vy: 0.3 });
+			return petById(fly(w, 6_000), "a").x;
+		};
+
+		expect(thrown(1.8)).toBeGreaterThan(thrown(0.6) + 100);
+	});
+
+	it("keeps a thrown Proc on the band rather than off the side of the display", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 200);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 9, vy: 2 });
+		w = fly(w, 8_000);
+
+		expect(petById(w, "a").x).toBeLessThanOrEqual(BAND.maxX);
+		expect(petById(w, "a").x).toBeGreaterThanOrEqual(BAND.minX);
+	});
+
+	it("always comes to rest — a Proc must never bounce for ever", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 700);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 2, vy: 1.5 });
+		w = fly(w, 20_000);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").y).toBe(0);
+	});
+
+	it("marks where it lands as the human's placement, so nothing shoves it afterwards", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 200);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 0.8, vy: 0 });
+		w = fly(w, 6_000);
+
+		expect(petById(w, "a").placed).toBe(true);
+	});
+
+	it("just sets it down when motion is reduced, with no flight and no bounce", () => {
+		// The drag is the human's and stays. The physics is decoration, and decoration
+		// is the part reduced motion drops.
+		let w = { ...airborne(), reducedMotion: true };
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 500, 400);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 2, vy: 1 });
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").y).toBe(0);
+		expect(petById(w, "a").x).toBe(500);
+	});
+
+	it("does not walk off while it is in the air", () => {
+		let w = grabPet(airborne(), "a", T0);
+		w = dragPet(w, "a", 500, 600);
+		w = releasePet(w, "a", T0 + 500, half, { vx: 0, vy: 0 });
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		w = tick(w, T0 + 1_000, half);
+
+		expect(petById(w, "a").motion.kind).toBe("flying");
+	});
+});
+
+describe("the dust a landing kicks up", () => {
+	// A Proc that hits the floor and simply carries on reads as weightless. The puff
+	// is the only thing that says it landed on something.
+	function dropped(fromHeight: number, vx = 0): World {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		let w = { ...base, pets: base.pets.map((p) => ({ ...p, x: 400, restUntil: T0 + 10 * REST_MAX_MS })) };
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 400, fromHeight);
+		return releasePet(w, "a", T0 + 100, half, { vx, vy: 0 });
+	}
+
+	function fly(w: World, ms: number, step = 16): World {
+		let next = w;
+		for (let t = step; t <= ms; t += step) next = advanceFlight(next, step);
+		return next;
+	}
+
+	it("kicks up nothing while a Proc is still in the air", () => {
+		expect(petById(fly(dropped(600), 100), "a").bounce).toBeUndefined();
+	});
+
+	it("kicks up dust the moment it hits the floor", () => {
+		expect(petById(fly(dropped(600), 3_000), "a").bounce).toBeDefined();
+	});
+
+	it("kicks up MORE dust from a bigger drop, because it hit harder", () => {
+		// The FIRST landing of each: by the third bounce every drop is landing softly,
+		// which is right and measures nothing.
+		const soft = petById(fly(dropped(80), 400), "a").bounce?.strength ?? 0;
+		const hard = petById(fly(dropped(900), 1_000), "a").bounce?.strength ?? 0;
+
+		expect(hard).toBeGreaterThan(soft);
+	});
+
+	it("counts each bounce separately, so a second one can be drawn as a second puff", () => {
+		// The count is what lets the renderer restart the animation: the same number
+		// twice is the same landing, a new number is a new one.
+		const first = petById(fly(dropped(900), 1_000), "a").bounce?.seq ?? 0;
+		const settled = petById(fly(dropped(900), 6_000), "a").bounce?.seq ?? 0;
+
+		expect(first).toBeGreaterThan(0);
+		expect(settled).toBeGreaterThan(first);
+	});
+
+	it("never re-kicks dust once it has come to rest", () => {
+		const landed = fly(dropped(600), 6_000);
+		const later = fly(landed, 4_000);
+
+		expect(petById(later, "a").bounce?.seq).toBe(petById(landed, "a").bounce?.seq);
+	});
+});
+
+describe("a Proc caught in mid-air when the desktop goes away", () => {
+	// A flight is drawn on animation frames, and animation frames stop when the
+	// window is occluded or the display sleeps. Without this a thrown Proc hangs in
+	// the air until somebody looks at the desktop again.
+	it("puts a flying Proc down as soon as it is parked", () => {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		let w = { ...base, pets: base.pets.map((p) => ({ ...p, x: 400 })) };
+		w = grabPet(w, "a", T0);
+		w = dragPet(w, "a", 400, 500);
+		w = releasePet(w, "a", T0 + 100, half, { vx: 1, vy: 1 });
+		expect(petById(w, "a").motion.kind).toBe("flying");
+
+		w = tick({ ...w, parked: true }, T0 + 200, half);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").y).toBe(0);
 	});
 });
