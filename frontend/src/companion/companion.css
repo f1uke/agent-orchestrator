@@ -30,7 +30,11 @@ body {
 	left: 0;
 	/* The engine hands out destinations; this is the only property that moves. */
 	will-change: transform;
-	pointer-events: auto;
+	/* NOT auto. This wrapper is the whole drawn frame — figure plus the ground prop
+	   hanging off one side and the held prop off the other — and it is almost all
+	   transparent. Making it take the pointer laid ~150px of invisible dead zone
+	   across the band per Proc and swallowed clicks meant for the desktop. */
+	pointer-events: none;
 }
 
 /* The drawing is wider than the figure — a scene hangs a ground prop to the right
@@ -39,6 +43,14 @@ body {
 .companion-proc-art {
 	display: block;
 	margin-left: var(--procs-offset-x, 0);
+	pointer-events: none;
+}
+
+/* Only the character itself takes the pointer, and SVG hit-testing is per-pixel by
+   default, so even the gaps inside its own box fall through to the desktop. The
+   scenery — desk, bed, held page, cord — is decoration and stays click-through. */
+.companion-proc [data-figure] {
+	pointer-events: auto;
 }
 
 /* The four-beat leg strip. `steps(4, end)` steps the row of poses one cell at a

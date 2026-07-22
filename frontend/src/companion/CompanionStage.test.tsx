@@ -96,12 +96,66 @@ describe("CompanionStage", () => {
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
 		push([{ sessionId: "a", status: "working" }]);
-		const proc = container.querySelector("[data-proc]")!;
+		const figure = container.querySelector("[data-figure] rect")!;
+		const stage = container.querySelector(".companion-stage")!;
 
-		fireEvent.pointerEnter(proc);
-		fireEvent.pointerLeave(proc);
+		fireEvent.pointerMove(figure, { bubbles: true });
+		fireEvent.pointerMove(stage, { bubbles: true });
 
 		expect(onInteractiveChange.mock.calls).toEqual([[true], [false]]);
+	});
+
+	it("lets a click on a Proc's empty FRAME fall through to the desktop", () => {
+		// The reported bug: clicking the band where no Proc is drawn did not pass
+		// through. Each Proc's wrapper is the whole ~150px drawn frame — figure plus
+		// the scenery either side — and it was taking the pointer for all of it.
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "working" }]);
+
+		fireEvent.pointerMove(container.querySelector("[data-proc]")!, { bubbles: true });
+
+		expect(onInteractiveChange).not.toHaveBeenCalled();
+	});
+
+	it("lets a click on a Proc's scenery fall through — a desk is not a pet", () => {
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "working" }]);
+
+		fireEvent.pointerMove(container.querySelector('[data-slot="ground"] rect')!, { bubbles: true });
+
+		expect(onInteractiveChange).not.toHaveBeenCalled();
+	});
+
+	it("hands the pointer back when it leaves the overlay without crossing off a Proc", () => {
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "working" }]);
+
+		fireEvent.pointerMove(container.querySelector("[data-figure] rect")!, { bubbles: true });
+		fireEvent.blur(window);
+
+		expect(onInteractiveChange.mock.calls).toEqual([[true], [false]]);
+	});
+
+	it("keeps parked Procs off each other", () => {
+		vi.useFakeTimers();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+		push(["a", "b", "c", "d", "e"].map((id) => ({ sessionId: id, status: "working" as const })));
+
+		act(() => vi.advanceTimersByTime(5_000));
+
+		const xs = [...container.querySelectorAll<HTMLElement>("[data-proc]")]
+			.map((el) => Number(/translate3d\((-?[\d.]+)px/.exec(el.getAttribute("style") ?? "")?.[1] ?? 0))
+			.sort((a, b) => a - b);
+		for (let i = 1; i < xs.length; i++) {
+			expect(xs[i] - xs[i - 1]).toBeGreaterThan(40);
+		}
 	});
 
 	it("strolls when motion is allowed", () => {

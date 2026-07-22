@@ -432,3 +432,159 @@ describe("the walk cycle contract", () => {
 		expect(WALK_CYCLE_MS).toBeGreaterThan(0);
 	});
 });
+
+describe("crowding", () => {
+	// The human's report: stationary Procs stack on top of each other. Two parked
+	// pets sharing a spot are worse than a clump — you cannot tell there are two,
+	// so a session silently disappears behind another.
+	const SPACING = 100;
+
+	function crowded(overrides: Partial<World> = {}): World {
+		return world({ spacing: SPACING, ...overrides });
+	}
+
+	function positions(w: World): number[] {
+		return w.pets.map((pet) => pet.x).sort((a, b) => a - b);
+	}
+
+	function closestPair(w: World): number {
+		const xs = positions(w);
+		let closest = Number.POSITIVE_INFINITY;
+		for (let i = 1; i < xs.length; i++) closest = Math.min(closest, xs[i] - xs[i - 1]);
+		return closest;
+	}
+
+	it("never spawns two Procs on top of each other", () => {
+		const rng = scripted(0.5, 0.2, 0.5, 0.2, 0.5, 0.2, 0.51, 0.2);
+		const next = syncActivities(
+			crowded(),
+			["a", "b", "c", "d"].map((id) => activity(id, "pr_open")),
+			T0,
+			rng,
+		);
+
+		expect(next.pets).toHaveLength(4);
+		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("keeps a Proc that joins later clear of the ones already standing there", () => {
+		let next = crowded();
+		for (const id of ["a", "b", "c"]) {
+			next = syncActivities(
+				next,
+				[...next.pets.map((p) => activity(p.id, p.status)), activity(id, "pr_open")],
+				T0,
+				half,
+			);
+		}
+
+		expect(next.pets).toHaveLength(3);
+		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("never walks a Proc into the space another one is standing in", () => {
+		const base = syncActivities(crowded(), [activity("walker", "pr_open"), activity("parked", "pr_open")], T0, half);
+		const w: World = {
+			...base,
+			pets: base.pets.map((pet) =>
+				pet.id === "walker" ? { ...pet, x: 300, restUntil: T0 } : { ...pet, x: 420, restUntil: T0 + 10 * REST_MAX_MS },
+			),
+		};
+
+		// The rng asks for a walk of ~120px to the right, which would land the walker
+		// right on top of the parked Proc.
+		const next = tick(w, T0 + 1, scripted(0.5, 0.3, 0.9));
+		const walker = petById(next, "walker");
+
+		if (walker.motion.kind === "walking") {
+			expect(Math.abs(walker.motion.toX - 420)).toBeGreaterThanOrEqual(SPACING);
+		}
+	});
+
+	it("separates Procs that are already overlapping", () => {
+		const base = syncActivities(crowded(), [activity("a", "pr_open"), activity("b", "pr_open")], T0, half);
+		const stacked: World = { ...base, pets: base.pets.map((pet) => ({ ...pet, x: 500 })) };
+
+		const next = tick(stacked, T0 + 1, half);
+
+		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("leaves Procs that are already spaced exactly where they are", () => {
+		// Separation must not jitter a settled cast on every tick.
+		const base = syncActivities(crowded(), [activity("a", "pr_open"), activity("b", "pr_open")], T0, half);
+		const spaced: World = {
+			...base,
+			pets: base.pets.map((pet, i) => ({ ...pet, x: 200 + i * 300, restUntil: T0 + 10 * REST_MAX_MS })),
+		};
+
+		const next = tick(spaced, T0 + 1, half);
+
+		expect(positions(next)).toEqual([200, 500]);
+	});
+
+	it("keeps everyone inside the band while separating them", () => {
+		const base = syncActivities(
+			crowded(),
+			["a", "b", "c", "d", "e"].map((id) => activity(id, "pr_open")),
+			T0,
+			half,
+		);
+		const stacked: World = { ...base, pets: base.pets.map((pet) => ({ ...pet, x: BAND.maxX })) };
+
+		const next = tick(stacked, T0 + 1, half);
+
+		for (const pet of next.pets) {
+			expect(pet.x).toBeGreaterThanOrEqual(BAND.minX);
+			expect(pet.x).toBeLessThanOrEqual(BAND.maxX);
+		}
+		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("spreads evenly rather than stacking when the band is too small for everyone", () => {
+		// Ten Procs at 100px spacing need 900px of a 400px band. Nobody gets their
+		// full clearance, but sharing the shortfall equally still shows ten Procs;
+		// stacking them shows five.
+		const tight = { minX: 0, maxX: 400 };
+		const base = syncActivities(
+			{ ...crowded(), band: tight },
+			Array.from({ length: 10 }, (_, i) => activity(`p${i}`, "pr_open")),
+			T0,
+			half,
+		);
+		const next = tick({ ...base, pets: base.pets.map((pet) => ({ ...pet, x: 200 })) }, T0 + 1, half);
+
+		const xs = positions(next);
+		expect(new Set(xs).size).toBe(10);
+		for (let i = 1; i < xs.length; i++) {
+			expect(xs[i] - xs[i - 1]).toBeGreaterThan(0);
+		}
+		expect(xs[0]).toBeGreaterThanOrEqual(tight.minX);
+		expect(xs[xs.length - 1]).toBeLessThanOrEqual(tight.maxX);
+	});
+
+	it("does not separate a Proc that is mid-stroll", () => {
+		// The walker sits just to the RIGHT of the parked one, so a sweep that failed
+		// to exclude walkers would shove it along — and teleporting a Proc that is
+		// already animating towards somewhere else is a visible jump.
+		const base = syncActivities(crowded(), [activity("parked", "pr_open"), activity("walker", "pr_open")], T0, half);
+		const w: World = {
+			...base,
+			pets: [
+				{ ...base.pets[0], id: "parked", x: 500, restUntil: T0 + 10 * REST_MAX_MS },
+				{
+					...base.pets[1],
+					id: "walker",
+					x: 520,
+					motion: { kind: "walking", fromX: 520, toX: 700, startedAt: T0, endsAt: T0 + 5_000 },
+				},
+			],
+		};
+
+		const next = tick(w, T0 + 1, half);
+		const walker = petById(next, "walker");
+
+		expect(walker.motion.kind).toBe("walking");
+		expect(walker.x).toBe(520);
+	});
+});

@@ -3,6 +3,7 @@ import type { SessionStatus } from "../renderer/types/workspace";
 import { WALK_CYCLE_MS, type Facing } from "./behaviour";
 import { mirrorPathX, type CastMember } from "./cast";
 import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX } from "./palette";
+import { FIGURE_ATTRIBUTE } from "./pointer-region";
 import { CasedStroke, CordLayer, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
 import { sceneFor } from "./scene";
 
@@ -100,47 +101,51 @@ export function Procs({ cast, status, facing, walking, size = DEFAULT_SIZE, clas
 			<GroundProp ground={scene.ground} />
 			<CordLayer cord={scene.cord} ground={scene.ground} cast={cast} />
 
-			{/* Legs, drawn before the body so the body's rim covers where they meet it. */}
-			<g clipPath={`url(#${cellClip})`}>
-				<g
-					data-walk-strip
-					style={walking ? { animation: `procs-walk ${WALK_CYCLE_MS}ms steps(4, end) infinite` } : undefined}
-				>
-					{LEG_POSES.map((pose, index) => (
-						<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
-							<Leg x={38 + pose.left.dx} lift={pose.left.lift} colour={cast.shade} />
-							<Leg x={50 + pose.right.dx} lift={pose.right.lift} colour={cast.shade} />
-						</g>
-					))}
-				</g>
-			</g>
-
-			{/* Body + ears bob on their own eased track, separate from the leg steps. */}
-			<g style={walking ? { animation: `procs-bob ${WALK_CYCLE_MS}ms ease-in-out infinite alternate` } : undefined}>
-				<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
-
-				{/* The ears: this character's bracket pair, authored once and mirrored. */}
-				<CasedStroke part="ear-left" d={cast.ear} core={4} colour={cast.shade} />
-				<CasedStroke part="ear-right" d={mirrorPathX(cast.ear)} core={4} colour={cast.shade} />
-
-				<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />
-
-				{/* Blush, clipped to the head so it can never spill and read as a smudge. */}
-				<g clipPath={`url(#${headClip})`}>
-					<ellipse data-blush cx="26" cy="63" rx="7" ry="4.5" fill={cast.blush} />
-					<ellipse data-blush cx="70" cy="63" rx="7" ry="4.5" fill={cast.blush} />
+			{/* The character itself. Everything inside this group takes the pointer;
+			    everything outside it — the scenery — passes clicks to the desktop. */}
+			<g {...{ [FIGURE_ATTRIBUTE]: "" }}>
+				{/* Legs, drawn before the body so the body's rim covers where they meet it. */}
+				<g clipPath={`url(#${cellClip})`}>
+					<g
+						data-walk-strip
+						style={walking ? { animation: `procs-walk ${WALK_CYCLE_MS}ms steps(4, end) infinite` } : undefined}
+					>
+						{LEG_POSES.map((pose, index) => (
+							<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
+								<Leg x={38 + pose.left.dx} lift={pose.left.lift} colour={cast.shade} />
+								<Leg x={50 + pose.right.dx} lift={pose.right.lift} colour={cast.shade} />
+							</g>
+						))}
+					</g>
 				</g>
 
-				{/* Eyes: low, wide apart, each with a highlight. */}
-				<circle cx="33" cy="53" r="10" fill={PROCS_INK} />
-				<circle cx="63" cy="53" r="10" fill={PROCS_INK} />
-				<circle cx="29.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
-				<circle cx="59.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
+				{/* Body + ears bob on their own eased track, separate from the leg steps. */}
+				<g style={walking ? { animation: `procs-bob ${WALK_CYCLE_MS}ms ease-in-out infinite alternate` } : undefined}>
+					<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
 
-				<path d="M43 67 C 45 71 51 71 53 67" fill="none" stroke={PROCS_INK} strokeWidth="2.6" strokeLinecap="round" />
+					{/* The ears: this character's bracket pair, authored once and mirrored. */}
+					<CasedStroke part="ear-left" d={cast.ear} core={4} colour={cast.shade} />
+					<CasedStroke part="ear-right" d={mirrorPathX(cast.ear)} core={4} colour={cast.shade} />
 
-				{/* Held inside the bob group, because a carried thing moves with its carrier. */}
-				<HeldProp held={scene.held} />
+					<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />
+
+					{/* Blush, clipped to the head so it can never spill and read as a smudge. */}
+					<g clipPath={`url(#${headClip})`}>
+						<ellipse data-blush cx="26" cy="63" rx="7" ry="4.5" fill={cast.blush} />
+						<ellipse data-blush cx="70" cy="63" rx="7" ry="4.5" fill={cast.blush} />
+					</g>
+
+					{/* Eyes: low, wide apart, each with a highlight. */}
+					<circle cx="33" cy="53" r="10" fill={PROCS_INK} />
+					<circle cx="63" cy="53" r="10" fill={PROCS_INK} />
+					<circle cx="29.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
+					<circle cx="59.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
+
+					<path d="M43 67 C 45 71 51 71 53 67" fill="none" stroke={PROCS_INK} strokeWidth="2.6" strokeLinecap="round" />
+
+					{/* Held inside the bob group, because a carried thing moves with its carrier. */}
+					<HeldProp held={scene.held} />
+				</g>
 			</g>
 
 			{/* Emitted last so zzz and confetti sit in front of the head. */}
