@@ -1426,3 +1426,40 @@ describe("a Proc caught in mid-air when the desktop goes away", () => {
 		expect(petById(w, "a").y).toBe(0);
 	});
 });
+
+describe("grabbing a Proc that is on the move", () => {
+	// The engine holds a walker's `x` at the spot it SET OFF from — the compositor is
+	// carrying the drawing to the destination — so picking one up mid-stroll snapped
+	// it back to where the walk began. It has to be picked up from where it is.
+	function walking(): World {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		return {
+			...base,
+			pets: base.pets.map((p) => ({
+				...p,
+				x: 200,
+				motion: { kind: "walking" as const, fromX: 200, toX: 600, startedAt: T0, endsAt: T0 + 4_000 },
+			})),
+		};
+	}
+
+	it("picks it up from where it has actually got to, not where it set off", () => {
+		// Halfway through a 200→600 stroll.
+		expect(petById(grabPet(walking(), "a", T0 + 2_000), "a").x).toBeCloseTo(400, 0);
+	});
+
+	it("picks it up at the start of the stroll if that is where it still is", () => {
+		expect(petById(grabPet(walking(), "a", T0), "a").x).toBeCloseTo(200, 0);
+	});
+
+	it("picks it up at the destination once the stroll has run its time", () => {
+		expect(petById(grabPet(walking(), "a", T0 + 9_000), "a").x).toBeCloseTo(600, 0);
+	});
+
+	it("leaves a Proc that is standing exactly where it is", () => {
+		const still = syncActivities({ ...world() }, [activity("a", "pr_open")], T0, half);
+		const put = { ...still, pets: still.pets.map((p) => ({ ...p, x: 321 })) };
+
+		expect(petById(grabPet(put, "a", T0 + 5_000), "a").x).toBe(321);
+	});
+});
