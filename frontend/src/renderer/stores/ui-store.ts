@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { parseSplitLayouts, serializeSplitLayouts, type SplitNode } from "../lib/split-layout";
 
 export type Theme = "light" | "dark";
 /** Worker detail view toggles — Changes (Git rail) is the default. */
@@ -22,6 +23,12 @@ type UiState = {
 	 * `orderWorkspaces`). Set by drag-and-drop reorder in the sidebar.
 	 */
 	projectOrder: readonly string[];
+	/**
+	 * Multi-terminal split layout per project (lib/split-layout tree). A project
+	 * with no entry renders the single-session view. Focus is NOT stored here —
+	 * the focused pane is the session in the URL.
+	 */
+	splitLayouts: Readonly<Record<string, SplitNode>>;
 	orchestratorReplacementErrors: Record<string, string>;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
@@ -30,6 +37,8 @@ type UiState = {
 	toggleInspector: () => void;
 	toggleProjectCollapsed: (projectId: string) => void;
 	setProjectOrder: (orderedProjectIds: readonly string[]) => void;
+	/** Replace (or with null, remove) a project's split layout; persists the map. */
+	setSplitLayout: (projectId: string, root: SplitNode | null) => void;
 	setProjectRestarting: (projectId: string, restarting: boolean) => void;
 	setOrchestratorReplacementError: (projectId: string, message: string | null) => void;
 };
@@ -39,6 +48,7 @@ const inspectorStorageKey = "ao.inspector.open";
 const themeStorageKey = "ao.theme";
 const collapsedProjectsStorageKey = "ao.projects.collapsed";
 const projectOrderStorageKey = "ao.projects.order";
+const splitLayoutsStorageKey = "ao.split.layouts";
 
 function getLocalStorage() {
 	if (typeof window === "undefined" || !window.localStorage) return null;
@@ -99,6 +109,7 @@ export const useUiStore = create<UiState>((set) => ({
 	restartingProjectIds: new Set<string>(),
 	collapsedProjectIds: initialCollapsedProjectIds(),
 	projectOrder: initialProjectOrder(),
+	splitLayouts: parseSplitLayouts(getLocalStorage()?.getItem(splitLayoutsStorageKey) ?? null),
 	orchestratorReplacementErrors: {},
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setTheme: (theme) => {
@@ -139,6 +150,18 @@ export const useUiStore = create<UiState>((set) => ({
 		getLocalStorage()?.setItem(projectOrderStorageKey, JSON.stringify(projectOrder));
 		set({ projectOrder });
 	},
+	setSplitLayout: (projectId, root) =>
+		set((state) => {
+			if (root === null && !(projectId in state.splitLayouts)) return {};
+			const splitLayouts = { ...state.splitLayouts };
+			if (root === null) {
+				delete splitLayouts[projectId];
+			} else {
+				splitLayouts[projectId] = root;
+			}
+			getLocalStorage()?.setItem(splitLayoutsStorageKey, serializeSplitLayouts(splitLayouts));
+			return { splitLayouts };
+		}),
 	setProjectRestarting: (projectId, restarting) =>
 		set((state) => {
 			const restartingProjectIds = new Set(state.restartingProjectIds);

@@ -1,8 +1,9 @@
 import type { ReactNode, Ref } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SessionView } from "./SessionView";
 import { useUiStore } from "../stores/ui-store";
+import { leaf, paneSessionIds, splitPane, type SplitNode } from "../lib/split-layout";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 
 type FakePanelHandle = {
@@ -47,11 +48,31 @@ const { workspaces, panels } = vi.hoisted(() => {
 		prTarget: "main-fluke",
 		prompt: "do the queued thing",
 	} satisfies WorkspaceSession;
+	const worker2 = { ...worker, id: "sess-2", title: "second thing", branch: "ao/sess-2" } satisfies WorkspaceSession;
+	const worker3 = { ...worker, id: "sess-3", title: "third thing", branch: "ao/sess-3" } satisfies WorkspaceSession;
+	// Enough live sessions to build a layout at MAX_SPLIT_PANES (10).
+	const extraWorkers = Array.from(
+		{ length: 10 },
+		(_, i) => ({ ...worker, id: `sess-x${i}`, title: `extra ${i}` }) satisfies WorkspaceSession,
+	);
 	const workspaces: WorkspaceSummary[] = [
-		{ id: "proj-1", name: "my-app", path: "/p", type: "main", hasWebUI: true, sessions: [worker, orchestrator, todo] },
+		{
+			id: "proj-1",
+			name: "my-app",
+			path: "/p",
+			type: "main",
+			hasWebUI: true,
+			sessions: [worker, worker2, worker3, orchestrator, todo, ...extraWorkers],
+		},
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
 });
+
+const navigateMock = vi.hoisted(() => vi.fn());
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+	...(await importOriginal<object>()),
+	useNavigate: () => navigateMock,
+}));
 
 // Drives the reveal routing: what CenterPane hands back from a clicked terminal
 // file reference, and what the Files tab's changed-file list currently holds.
@@ -63,12 +84,23 @@ const { openFileArg, changesData } = vi.hoisted(() => ({
 // The terminal and inspector body pull in xterm/SSE machinery irrelevant to
 // the split under test. (The topbar is shell-owned — see ShellTopbar.)
 vi.mock("./CenterPane", () => ({
-	CenterPane: ({ onOpenWorkspaceFile }: { onOpenWorkspaceFile?: (f: unknown) => void }) => (
-		<div>
+	CenterPane: ({
+		onOpenWorkspaceFile,
+		splitControls,
+		pane,
+		session,
+	}: {
+		onOpenWorkspaceFile?: (f: unknown) => void;
+		splitControls?: ReactNode;
+		pane?: { focused: boolean };
+		session?: { id: string };
+	}) => (
+		<div data-pane-focused={pane ? String(pane.focused) : undefined} data-testid={`center-${session?.id ?? "none"}`}>
 			terminal center
 			<button type="button" onClick={() => onOpenWorkspaceFile?.(openFileArg.current)}>
 				open workspace file
 			</button>
+			{splitControls}
 		</div>
 	),
 }));
@@ -135,10 +167,15 @@ vi.mock("../hooks/useWorkspaceQuery", () => ({
 // The wake-on-open effect touches the daemon (POST /wake) and invalidates the
 // workspace query; both are stubbed so the effect is observable without a real
 // QueryClientProvider or daemon.
-const { wakeMock, invalidateMock } = vi.hoisted(() => ({ wakeMock: vi.fn(), invalidateMock: vi.fn() }));
+const { wakeMock, invalidateMock, queryClientMock } = vi.hoisted(() => {
+	const invalidateMock = vi.fn();
+	// Stable identity, like the real useQueryClient: a fresh object per render
+	// would re-fire every effect that lists the client in its deps.
+	return { wakeMock: vi.fn(), invalidateMock, queryClientMock: { invalidateQueries: invalidateMock } };
+});
 vi.mock("../lib/api-client", () => ({ apiClient: { POST: wakeMock } }));
 vi.mock("@tanstack/react-query", () => ({
-	useQueryClient: () => ({ invalidateQueries: invalidateMock }),
+	useQueryClient: () => queryClientMock,
 	useQuery: () => ({ data: changesData.current }),
 }));
 
@@ -215,9 +252,10 @@ function panelSizes(id: string): unknown[] {
 describe("SessionView", () => {
 	beforeEach(() => {
 		window.localStorage.clear();
-		useUiStore.setState({ isInspectorOpen: true });
+		useUiStore.setState({ isInspectorOpen: true, splitLayouts: {} });
 		panels.clear();
 		browserDestroy.mockReset();
+		navigateMock.mockReset();
 		wakeMock.mockReset().mockResolvedValue({ error: undefined });
 		invalidateMock.mockReset();
 		openFileArg.current = undefined;
@@ -577,5 +615,163 @@ describe("SessionView reveal precedence", () => {
 			fireEvent.click(screen.getByText("open workspace file"));
 		});
 		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
+	});
+});
+
+describe("SessionView split view", () => {
+	const removeLabel = "Remove from split (session keeps running)";
+	const splitEntryLabel = "Split — watch another running session";
+
+	function hsplit(first: SplitNode, second: SplitNode): SplitNode {
+		return { kind: "split", orientation: "horizontal", ratio: 0.5, first, second };
+	}
+
+	function chainLayout(ids: readonly string[]): SplitNode {
+		let root: SplitNode = leaf(ids[0]);
+		for (let i = 1; i < ids.length; i += 1) {
+			root = splitPane(root, ids[i - 1], "right", ids[i]);
+		}
+		return root;
+	}
+
+	function storedLayout(): SplitNode | undefined {
+		return useUiStore.getState().splitLayouts["proj-1"];
+	}
+
+	function wakeCallSessionIds(): string[] {
+		return wakeMock.mock.calls.map(
+			(call) => (call[1] as { params?: { path?: { sessionId?: string } } } | undefined)?.params?.path?.sessionId ?? "",
+		);
+	}
+
+	it("renders one pane per layout leaf, marks the focused pane, and wakes every pane session", () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("sess-2")));
+		render(<SessionView sessionId="sess-1" />);
+
+		expect(screen.getByTestId("center-sess-1")).toHaveAttribute("data-pane-focused", "true");
+		expect(screen.getByTestId("center-sess-2")).toHaveAttribute("data-pane-focused", "false");
+		expect(wakeCallSessionIds()).toContain("sess-2");
+		// The split view's only daemon traffic is wake — nothing else is touched.
+		for (const call of wakeMock.mock.calls) {
+			expect(call[0]).toBe("/api/v1/sessions/{sessionId}/wake");
+		}
+	});
+
+	it("removing a pane updates the layout only — no daemon call, no navigation, session untouched", () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("sess-2")));
+		render(<SessionView sessionId="sess-1" />);
+		wakeMock.mockClear();
+
+		fireEvent.click(within(screen.getByTestId("center-sess-2")).getByLabelText(removeLabel));
+
+		expect(storedLayout()).toBeUndefined();
+		expect(screen.queryByTestId("center-sess-2")).not.toBeInTheDocument();
+		expect(wakeMock).not.toHaveBeenCalled();
+		expect(navigateMock).not.toHaveBeenCalled();
+	});
+
+	it("removing the FOCUSED pane hands focus to the first remaining pane", () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), hsplit(leaf("sess-2"), leaf("sess-3"))));
+		render(<SessionView sessionId="sess-1" />);
+
+		fireEvent.click(within(screen.getByTestId("center-sess-1")).getByLabelText(removeLabel));
+
+		expect(navigateMock).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "sess-2" }, replace: true }),
+		);
+		expect(paneSessionIds(storedLayout()!)).toEqual(["sess-2", "sess-3"]);
+	});
+
+	it("navigating to a session outside the layout adds it as a pane beside the focused one", () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("sess-2")));
+		const { rerender } = render(<SessionView sessionId="sess-1" />);
+
+		rerender(<SessionView sessionId="sess-3" />);
+
+		expect(paneSessionIds(storedLayout()!)).toEqual(["sess-1", "sess-3", "sess-2"]);
+	});
+
+	it("at the pane cap, navigation swaps into the focused pane and announces it", () => {
+		const ids = Array.from({ length: 10 }, (_, i) => `sess-x${i}`);
+		useUiStore.getState().setSplitLayout("proj-1", chainLayout(ids));
+		const { rerender } = render(<SessionView sessionId="sess-x0" />);
+
+		rerender(<SessionView sessionId="sess-1" />);
+
+		const after = paneSessionIds(storedLayout()!);
+		expect(after).toHaveLength(10);
+		expect(after).toContain("sess-1");
+		expect(after).not.toContain("sess-x0");
+		expect(screen.getByText(/Split view is full/)).toBeInTheDocument();
+	});
+
+	it("prunes layout sessions that no longer exist, keeping the rest", async () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), hsplit(leaf("ghost"), leaf("sess-2"))));
+		render(<SessionView sessionId="sess-1" />);
+
+		await waitFor(() => expect(paneSessionIds(storedLayout()!)).toEqual(["sess-1", "sess-2"]));
+	});
+
+	it("drops the layout entirely when pruning leaves a single pane", async () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("ghost")));
+		render(<SessionView sessionId="sess-1" />);
+
+		await waitFor(() => expect(storedLayout()).toBeUndefined());
+		expect(screen.getByTestId("center-sess-1")).not.toHaveAttribute("data-pane-focused");
+	});
+
+	it("single view stays single: one pane, the split entry, no remove control", () => {
+		render(<SessionView sessionId="sess-1" />);
+
+		expect(screen.getByTestId("center-sess-1")).not.toHaveAttribute("data-pane-focused");
+		expect(screen.queryByTestId("center-sess-2")).not.toBeInTheDocument();
+		expect(screen.getByLabelText(splitEntryLabel)).toBeInTheDocument();
+		expect(screen.queryByLabelText(removeLabel)).not.toBeInTheDocument();
+	});
+
+	it("splitting from the single view creates the layout and wakes the added session", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		wakeMock.mockClear();
+
+		fireEvent.click(screen.getByLabelText(splitEntryLabel));
+		fireEvent.click(await screen.findByText("second thing"));
+
+		expect(paneSessionIds(storedLayout()!)).toEqual(["sess-1", "sess-2"]);
+		expect(wakeCallSessionIds()).toContain("sess-2");
+	});
+
+	it("offers only eligible sessions in the picker: no todos, no on-screen sessions", async () => {
+		useUiStore.getState().setSplitLayout("proj-1", hsplit(leaf("sess-1"), leaf("sess-2")));
+		render(<SessionView sessionId="sess-1" />);
+
+		fireEvent.click(within(screen.getByTestId("center-sess-1")).getByLabelText(splitEntryLabel));
+		await screen.findByText("third thing");
+
+		expect(screen.getByText("Orchestrator")).toBeInTheDocument();
+		expect(screen.queryByText("queued-task")).not.toBeInTheDocument();
+		// On-screen sessions are structurally absent from the list: "second
+		// thing" (sess-2) appears nowhere in the picker because its only other
+		// occurrence is its own pane toolbar, which the CenterPane stub elides.
+		expect(screen.queryByText("second thing")).not.toBeInTheDocument();
+	});
+});
+
+describe("SessionView unsplit", () => {
+	it("keeps the pane whose picker asked, not the focused one", async () => {
+		useUiStore
+			.getState()
+			.setSplitLayout("proj-1", { kind: "split", orientation: "horizontal", ratio: 0.5, first: leaf("sess-1"), second: leaf("sess-2") });
+		render(<SessionView sessionId="sess-1" />);
+
+		// Open the UNFOCUSED pane's picker (controls act without moving focus).
+		fireEvent.click(
+			within(screen.getByTestId("center-sess-2")).getByLabelText("Split — watch another running session"),
+		);
+		fireEvent.click(await screen.findByText(/Unsplit — keep only this pane/));
+
+		expect(navigateMock).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "sess-2" }, replace: true }),
+		);
+		expect(useUiStore.getState().splitLayouts["proj-1"]).toBeUndefined();
 	});
 });

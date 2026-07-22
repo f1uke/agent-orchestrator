@@ -1,11 +1,13 @@
 import { ChevronLeft, Maximize2, Minimize2, Shield } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent } from "react";
 import type { Theme } from "../stores/ui-store";
 import type { TerminalTarget } from "../types/terminal";
 import { isOrchestratorSession, sessionIsActive, type WorkspaceSession } from "../types/workspace";
+import { cn } from "../lib/utils";
 import { KillSessionButton } from "./KillSessionButton";
 import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
+import { SessionGlyph } from "./SessionGlyph";
 import { TerminalPane } from "./TerminalPane";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 
@@ -21,6 +23,22 @@ type CenterPaneProps = {
 	 * menu. Shared by the orchestrator and worker terminals.
 	 */
 	directory?: string;
+	/**
+	 * Rendered in the multi-terminal split view, where this pane is one of
+	 * several: the toolbar becomes the pane's header (status glyph + title +
+	 * branch instead of the TERMINAL eyebrow) and an unfocused pane slims down —
+	 * dimmed toolbar, split/remove controls only. Absent in the single view,
+	 * whose toolbar is unchanged.
+	 */
+	pane?: { focused: boolean };
+	/**
+	 * Split view controls appended to the toolbar (the split picker and, in the
+	 * split view, the remove-from-split button). In the single view this is the
+	 * split ENTRY point — the only piece of split UI a single-terminal user sees.
+	 */
+	splitControls?: ReactNode;
+	/** Whether this pane holds the caret (split view); see TerminalPane. */
+	active?: boolean;
 	/** Open a workspace file clicked in the terminal (worker terminals only). */
 	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 };
@@ -51,6 +69,9 @@ export function CenterPane({
 	terminalTarget,
 	onSelectWorkerTerminal,
 	directory,
+	pane,
+	splitControls,
+	active,
 	onOpenWorkspaceFile,
 }: CenterPaneProps) {
 	const paneRef = useRef<HTMLDivElement | null>(null);
@@ -116,15 +137,34 @@ export function CenterPane({
 			className="terminal-pane-frame flex h-full min-h-0 min-w-0 flex-col bg-background"
 			onWheelCapture={handleWheelZoom}
 		>
-			<div className="terminal-toolbar">
+			<div className={cn("terminal-toolbar", pane && !pane.focused && "opacity-60")}>
 				<div className="terminal-toolbar__label">
-					<span className="terminal-toolbar__eyebrow">TERMINAL</span>
+					{/* In the split view the toolbar doubles as the pane's header: the
+					    status glyph + branch identify the pane at a glance, replacing
+					    the TERMINAL eyebrow (redundant when every pane is a terminal). */}
+					{pane && session ? <SessionGlyph session={session} /> : null}
+					{pane ? null : <span className="terminal-toolbar__eyebrow">TERMINAL</span>}
 					<span className="terminal-toolbar__session">
 						{!session ? "No session" : isOrchestratorSession(session) ? "Orchestrator" : session.title}
 					</span>
+					{pane && session?.branch ? (
+						<span className="hidden min-w-0 truncate font-mono text-[10px] text-muted-foreground md:inline">
+							{session.branch}
+						</span>
+					) : null}
 				</div>
-				<div className="terminal-toolbar__controls">
-					<OpenInMenu directory={directory} />
+				{pane && !pane.focused ? (
+					// An unfocused pane keeps only the split controls: the working
+					// controls (font, fullscreen, Restart, Kill) belong to the pane
+					// being worked in, and one click on the pane focuses it anyway.
+					// data-split-pane-controls exempts presses here from the pane's
+					// focus-on-mousedown (SplitTreeView) so a control works first try.
+					<div className="terminal-toolbar__controls" data-split-pane-controls>
+						{splitControls}
+					</div>
+				) : (
+					<div className="terminal-toolbar__controls">
+						<OpenInMenu directory={directory} />
 					<button
 						aria-label="Decrease terminal font size"
 						className="terminal-toolbar__control"
@@ -174,7 +214,9 @@ export function CenterPane({
 					{session && target.kind !== "reviewer" && !isOrchestratorSession(session) && sessionIsActive(session) ? (
 						<KillSessionButton session={session} />
 					) : null}
-				</div>
+						{splitControls}
+					</div>
+				)}
 			</div>
 			{target.kind === "reviewer" ? (
 				<div className="reviewer-terminal-header">
@@ -196,6 +238,7 @@ export function CenterPane({
 			) : null}
 			<div className="min-h-0 flex-1">
 				<TerminalPane
+					active={active}
 					daemonReady={daemonReady}
 					fontSize={fontSize}
 					session={session}

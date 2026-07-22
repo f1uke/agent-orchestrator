@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { X } from "lucide-react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
@@ -11,6 +13,9 @@ import { WorkspaceFileView } from "./WorkspaceFileView";
 import { type ChangesFocus, WorkspaceChangesView } from "./WorkspaceChangesView";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
+import { SplitSessionPicker } from "./SplitSessionPicker";
+import { SplitTreeView } from "./SplitTreeView";
+import { Toast } from "./inbox-ui";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable";
 import { useUiStore } from "../stores/ui-store";
 import { useShell } from "../lib/shell-context";
@@ -18,6 +23,20 @@ import { useBrowserView } from "../hooks/useBrowserView";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiClient } from "../lib/api-client";
+import {
+	addPane,
+	containsSession,
+	eligibleSplitSessions,
+	leaf,
+	MAX_SPLIT_PANES,
+	paneCount,
+	paneSessionIds,
+	pruneToSessions,
+	removePane,
+	setRatioAtPath,
+	splitPane,
+	type SplitDirection,
+} from "../lib/split-layout";
 import { isOrchestratorSession } from "../types/workspace";
 import type { TerminalTarget } from "../types/terminal";
 
@@ -83,6 +102,17 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// did not report one (e.g. an orchestrator), fall back to the project root.
 	const workspace = session ? workspaces.find((w) => w.id === session.workspaceId) : undefined;
 	const directory = session?.workspacePath ?? workspace?.path;
+	const navigate = useNavigate();
+	const projectId = workspace?.id;
+	// Multi-terminal split: the project's layout tree, one session per pane, the
+	// FOCUSED pane being the session in the URL (this component's sessionId).
+	// A stored root can transiently hold a single leaf (pruning); anything that
+	// isn't a real multi-pane tree renders the unchanged single view.
+	const splitLayouts = useUiStore((state) => state.splitLayouts);
+	const setSplitLayout = useUiStore((state) => state.setSplitLayout);
+	const storedSplitRoot = projectId ? splitLayouts[projectId] : undefined;
+	const splitRoot = storedSplitRoot && paneCount(storedSplitRoot) > 1 ? storedSplitRoot : undefined;
+	const [splitToast, setSplitToast] = useState<string | null>(null);
 	const isOrchestrator = session ? isOrchestratorSession(session) : false;
 	// Orchestrator sessions are terminal-only; only worker sessions have the rail.
 	const hasInspector = !isOrchestrator;
@@ -179,6 +209,146 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			cancelled = true;
 		};
 	}, [sessionId, queryClient]);
+
+	// A restored layout may name sessions that no longer exist (cleaned up since
+	// the layout was saved): prune them, the sibling takes the space. Terminated
+	// sessions that still exist KEEP their pane — the terminal shows the ended
+	// strip with Restore, which beats a silently vanishing pane. Identity check
+	// makes this idempotent, so re-running on refetches costs nothing.
+	useEffect(() => {
+		if (!projectId || !workspace || !storedSplitRoot) return;
+		const alive = new Set(workspace.sessions.map((s) => s.id));
+		const pruned = pruneToSessions(storedSplitRoot, alive);
+		if (pruned === storedSplitRoot) return;
+		setSplitLayout(projectId, pruned && paneCount(pruned) > 1 ? pruned : null);
+	}, [projectId, workspace, storedSplitRoot, setSplitLayout]);
+
+	// While the split view is active, NAVIGATING to a project session that is
+	// not on screen adds it as a new pane — "let me see this one too" (explicit
+	// user decision; covers the sidebar, terminal @session links, deep links).
+	// At the pane cap it swaps into the focused pane instead, and says so — the
+	// fallback must never look like a silent replacement. Keyed on an actual
+	// sessionId TRANSITION: layout changes with the URL unchanged (removing a
+	// pane, pruning) must not re-add the routed session.
+	const previousRoutedRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		const previous = previousRoutedRef.current;
+		previousRoutedRef.current = sessionId;
+		if (sessionId === previous) return;
+		if (!projectId || !session || !splitRoot || containsSession(splitRoot, sessionId)) return;
+		const focusedBefore =
+			previous && containsSession(splitRoot, previous) ? previous : (paneSessionIds(splitRoot).at(-1) as string);
+		const { root, mode } = addPane(splitRoot, focusedBefore, sessionId);
+		if (mode === "noop") return;
+		setSplitLayout(projectId, root);
+		if (mode === "swapped") {
+			const replaced = workspace?.sessions.find((s) => s.id === focusedBefore);
+			const replacedName = replaced && isOrchestratorSession(replaced) ? "Orchestrator" : replaced?.title;
+			setSplitToast(
+				`Split view is full (${MAX_SPLIT_PANES} panes) — replaced ${replacedName ?? "the focused pane"}. The session keeps running.`,
+			);
+		}
+	}, [sessionId, projectId, session, splitRoot, workspace, setSplitLayout]);
+
+	useEffect(() => {
+		if (!splitToast) return undefined;
+		const timer = window.setTimeout(() => setSplitToast(null), 5000);
+		return () => window.clearTimeout(timer);
+	}, [splitToast]);
+
+	// Being placed in a pane counts as being watched: wake each pane's session
+	// once (resume if the idle sweep suspended it, else reset its idle
+	// countdown) — the same contract as the routed session's wake above.
+	const wokenPanesRef = useRef(new Set<string>());
+	useEffect(() => {
+		if (!splitRoot) return;
+		for (const paneSessionId of paneSessionIds(splitRoot)) {
+			if (wokenPanesRef.current.has(paneSessionId)) continue;
+			wokenPanesRef.current.add(paneSessionId);
+			void apiClient.POST("/api/v1/sessions/{sessionId}/wake", {
+				params: { path: { sessionId: paneSessionId } },
+			});
+		}
+	}, [splitRoot]);
+
+	// Focus movement IS navigation (replace, not push: moving focus between
+	// panes should not stack history entries the back button then replays).
+	const goToSession = useCallback(
+		(toSessionId: string) => {
+			if (!projectId) return;
+			void navigate({
+				to: "/projects/$projectId/sessions/$sessionId",
+				params: { projectId, sessionId: toSessionId },
+				replace: true,
+			});
+		},
+		[navigate, projectId],
+	);
+
+	// Split a pane: replace it with itself + the picked session, side by side.
+	// From the single view this CREATES the layout (base = the lone session).
+	const splitFromPane = useCallback(
+		(targetSessionId: string, direction: SplitDirection, newSessionId: string) => {
+			if (!projectId) return;
+			const base = splitRoot ?? leaf(targetSessionId);
+			const next = splitPane(base, targetSessionId, direction, newSessionId);
+			if (next === base) return;
+			setSplitLayout(projectId, next);
+			void apiClient.POST("/api/v1/sessions/{sessionId}/wake", {
+				params: { path: { sessionId: newSessionId } },
+			});
+		},
+		[projectId, splitRoot, setSplitLayout],
+	);
+
+	// Remove a pane FROM VIEW. Pure layout surgery: no API call, no lifecycle —
+	// the pane unmounts, its mux attachment closes, and the daemon-side session
+	// keeps running (backend terminal/attachment.go close() never touches the
+	// runtime session). Removing the focused pane hands focus to the first
+	// remaining pane before the tree shrinks.
+	const removeFromSplit = useCallback(
+		(paneSessionId: string) => {
+			if (!projectId || !splitRoot) return;
+			const next = removePane(splitRoot, paneSessionId);
+			if (next === splitRoot || next === null) return;
+			if (paneSessionId === sessionId) {
+				const fallback = paneSessionIds(next)[0];
+				if (fallback) goToSession(fallback);
+			}
+			setSplitLayout(projectId, paneCount(next) > 1 ? next : null);
+		},
+		[projectId, splitRoot, sessionId, goToSession, setSplitLayout],
+	);
+
+	// Collapse to ONE pane — the pane whose picker asked, which need not be the
+	// focused one (controls act without moving focus). Sessions keep running.
+	const unsplitTo = useCallback(
+		(surviving: string) => {
+			if (!projectId) return;
+			if (surviving !== sessionId) goToSession(surviving);
+			setSplitLayout(projectId, null);
+		},
+		[projectId, sessionId, goToSession, setSplitLayout],
+	);
+
+	// Persist a settled divider drag. Reads the live store (not the render's
+	// splitRoot) so the callback identity survives ratio updates — an unstable
+	// identity would re-register the rrp panels on every drag frame.
+	const handleSplitRatioChange = useCallback(
+		(path: string, ratio: number) => {
+			if (!projectId) return;
+			const current = useUiStore.getState().splitLayouts[projectId];
+			if (!current) return;
+			useUiStore.getState().setSplitLayout(projectId, setRatioAtPath(current, path, ratio));
+		},
+		[projectId],
+	);
+
+	const eligibleForSplit = useMemo(
+		() => eligibleSplitSessions(workspace?.sessions ?? [], splitRoot ?? (session ? leaf(session.id) : null)),
+		[workspace, splitRoot, session],
+	);
+	const splitAtCap = splitRoot !== undefined && paneCount(splitRoot) >= MAX_SPLIT_PANES;
 
 	// `ao preview` sets session.previewUrl and bumps previewRevision (streamed over
 	// CDC); surface a *live* preview in the inspector rail's Browser tab (opening
@@ -298,47 +468,125 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		);
 	}
 
+	// Toolbar tail shared by every pane AND the single view: the split picker
+	// (the single view's only piece of split UI — the entry point), plus, once a
+	// split exists, the remove-from-view button. Remove is a plain ghost control
+	// with no confirm — it is instantly reversible (add the session back) and
+	// must never resemble the destructive Kill beside it.
+	const paneSplitControls = (paneSessionId: string): ReactNode => (
+		<>
+			<SplitSessionPicker
+				atCap={splitAtCap}
+				eligible={eligibleForSplit}
+				onSplit={(direction, newSessionId) => splitFromPane(paneSessionId, direction, newSessionId)}
+				onUnsplit={splitRoot ? () => unsplitTo(paneSessionId) : undefined}
+			/>
+			{splitRoot ? (
+				<button
+					aria-label="Remove from split (session keeps running)"
+					className="terminal-toolbar__control terminal-toolbar__control--icon"
+					onClick={() => removeFromSplit(paneSessionId)}
+					title="Remove from split — session keeps running"
+					type="button"
+				>
+					<X aria-hidden="true" className="h-3.5 w-3.5" />
+				</button>
+			) : null}
+		</>
+	);
+
+	// The focused center content: identical branch chain in the single view and
+	// the focused split pane — a review comment expanded to a full file, a
+	// clicked terminal file reference, a Changes row, or the terminal. The
+	// takeover views follow the FOCUSED pane (they are driven by rail and
+	// terminal interactions, which are focused-session interactions), and are
+	// cleared on focus switch by the sessionId reset effect above.
+	const renderFocusedCenter = (split: boolean): ReactNode => {
+		if (workspaceFile) {
+			return (
+				<WorkspaceFileView
+					sessionId={sessionId}
+					path={workspaceFile.path}
+					line={workspaceFile.line}
+					onClose={() => setWorkspaceFile(null)}
+				/>
+			);
+		}
+		if (changesFocus) {
+			return (
+				<WorkspaceChangesView
+					sessionId={sessionId}
+					focus={changesFocus}
+					onActivePathChange={setActiveChangedPath}
+					onClose={() => {
+						setChangesFocus(null);
+						setActiveChangedPath(null);
+					}}
+				/>
+			);
+		}
+		if (fileView) {
+			return <FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />;
+		}
+		if (session?.isTodo) {
+			// A not-started TODO has no worktree/tmux/agent, so the terminal
+			// would sit forever on "Preparing the worker terminal". Show the
+			// editable WORKER SPEC instead; Start materializes in place and the
+			// refetch flips isTodo off, swapping in the terminal below.
+			return <TodoSessionPane session={session} />;
+		}
+		return (
+			<CenterPane
+				active
+				daemonReady={daemonStatus.state === "ready"}
+				directory={directory}
+				onSelectWorkerTerminal={() => setTerminalTarget({ kind: "worker" })}
+				onOpenWorkspaceFile={openWorkspaceFile}
+				pane={split ? { focused: true } : undefined}
+				session={session}
+				splitControls={session ? paneSplitControls(session.id) : undefined}
+				terminalTarget={terminalTarget}
+				theme={theme}
+			/>
+		);
+	};
+
+	// An unfocused pane: terminal only, streaming live, slim toolbar. No file
+	// linkification and no reviewer target — those are focused-pane
+	// interactions, and one click on the pane focuses it.
+	const renderSplitPane = (paneSessionId: string, focused: boolean): ReactNode => {
+		if (focused) return renderFocusedCenter(true);
+		const paneSession = workspace?.sessions.find((s) => s.id === paneSessionId);
+		if (paneSession?.isTodo) return <TodoSessionPane session={paneSession} />;
+		return (
+			<CenterPane
+				active={false}
+				daemonReady={daemonStatus.state === "ready"}
+				directory={paneSession?.workspacePath ?? workspace?.path}
+				pane={{ focused: false }}
+				session={paneSession}
+				splitControls={paneSplitControls(paneSessionId)}
+				theme={theme}
+			/>
+		);
+	};
+
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
 			<ResizablePanelGroup className="session-split min-h-0 flex-1" id="session-workspace" orientation="horizontal">
 				{/* react-resizable-panels v4: bare numbers are PIXELS; percentages must
             be strings. Numeric sizes here once clamped the inspector to 45px. */}
 				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
-					{workspaceFile ? (
-						<WorkspaceFileView
-							sessionId={sessionId}
-							path={workspaceFile.path}
-							line={workspaceFile.line}
-							onClose={() => setWorkspaceFile(null)}
+					{splitRoot ? (
+						<SplitTreeView
+							focusedSessionId={sessionId}
+							onFocusPane={goToSession}
+							onRatioChange={handleSplitRatioChange}
+							renderPane={renderSplitPane}
+							root={splitRoot}
 						/>
-					) : changesFocus ? (
-						<WorkspaceChangesView
-							sessionId={sessionId}
-							focus={changesFocus}
-							onActivePathChange={setActiveChangedPath}
-							onClose={() => {
-								setChangesFocus(null);
-								setActiveChangedPath(null);
-							}}
-						/>
-					) : fileView ? (
-						<FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />
-					) : session?.isTodo ? (
-						// A not-started TODO has no worktree/tmux/agent, so the terminal
-						// would sit forever on "Preparing the worker terminal". Show the
-						// editable WORKER SPEC instead; Start materializes in place and the
-						// refetch flips isTodo off, swapping in the terminal below.
-						<TodoSessionPane session={session} />
 					) : (
-						<CenterPane
-							daemonReady={daemonStatus.state === "ready"}
-							directory={directory}
-							onSelectWorkerTerminal={() => setTerminalTarget({ kind: "worker" })}
-							onOpenWorkspaceFile={openWorkspaceFile}
-							session={session}
-							terminalTarget={terminalTarget}
-							theme={theme}
-						/>
+						renderFocusedCenter(false)
 					)}
 				</ResizablePanel>
 				{hasInspector ? (
@@ -392,6 +640,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
           sidebar + topbar, not just the session area) and sits outside any
           `[data-panel]` column, so the native WebContentsView is not clamped
           and fills the entire window. */}
+			{splitToast ? <Toast text={splitToast} /> : null}
 			{browserPoppedOut && hasWebUI && session
 				? createPortal(
 						<div className="browser-popout-overlay">

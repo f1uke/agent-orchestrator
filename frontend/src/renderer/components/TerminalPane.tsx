@@ -24,6 +24,12 @@ type TerminalPaneProps = {
 	terminalTarget?: TerminalTarget;
 	fontSize: number;
 	/**
+	 * Whether this pane is the split view's focused pane (defaults to true; a
+	 * lone terminal is always focused). Unfocused panes keep streaming — they
+	 * only give up the caret: no mount autofocus, no terminal-focus slot.
+	 */
+	active?: boolean;
+	/**
 	 * Open a workspace file (resolved from a clicked terminal file reference) in
 	 * the center-pane code viewer. Provided by SessionView for worker terminals;
 	 * absent → terminal file references are not linkified.
@@ -37,6 +43,7 @@ export function TerminalPane({
 	daemonReady,
 	terminalTarget,
 	fontSize,
+	active,
 	onOpenWorkspaceFile,
 }: TerminalPaneProps) {
 	const terminalKey =
@@ -82,6 +89,7 @@ export function TerminalPane({
 			theme={theme}
 			daemonReady={daemonReady}
 			fontSize={fontSize}
+			active={active}
 			terminalTarget={terminalTarget}
 			onOpenWorkspaceFile={onOpenWorkspaceFile}
 		/>
@@ -163,8 +171,10 @@ function AttachedTerminal({
 	daemonReady,
 	terminalTarget,
 	fontSize,
+	active,
 	onOpenWorkspaceFile,
 }: TerminalPaneProps) {
+	const isActivePane = active !== false;
 	const attachSession =
 		session && terminalTarget?.kind === "reviewer"
 			? { ...session, terminalHandleId: terminalTarget.handleId }
@@ -372,7 +382,8 @@ function AttachedTerminal({
 			<div className="relative min-h-0 flex-1">
 				<XtermTerminal
 					ariaLabel="Session terminal"
-					autoFocus={!showEmptyState}
+					active={isActivePane}
+					autoFocus={isActivePane && !showEmptyState}
 					fontSize={fontSize}
 					externalRefResolver={externalRefResolver}
 					fileLinkResolver={fileLinkResolver}

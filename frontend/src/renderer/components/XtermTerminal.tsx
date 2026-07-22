@@ -48,6 +48,15 @@ export type XtermTerminalProps = {
 	 */
 	autoFocus?: boolean;
 	/**
+	 * Whether this terminal is the app's ACTIVE pane — the one that should
+	 * receive the caret when an overlay closes or focus is handed back
+	 * imperatively (lib/terminal-focus). Defaults to true: a lone terminal is
+	 * always the active one. The multi-terminal split view sets it on exactly
+	 * the focused pane, so the single registration slot always names the pane
+	 * the user is working in, not the most recently mounted one.
+	 */
+	active?: boolean;
+	/**
 	 * The pane app scrolls its transcript by keyboard (PageUp/PageDown) rather
 	 * than acting on SGR wheel reports — e.g. opencode, which enables mouse
 	 * tracking but never scrolls on wheel reports. Routes the wheel to page keys
@@ -472,7 +481,6 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		// surface (the New task dialog, a toolbar overlay) can hand the caret back
 		// here; and, when this pane is the one being switched to, grab focus on
 		// mount so the user can type immediately without a first click.
-		const unregisterFocus = registerTerminalFocus(focusTerminal);
 		if (callbacksRef.current.autoFocus) focusTerminal();
 		host.addEventListener("copy", copyInput);
 		window.addEventListener("keydown", copyShortcut, true);
@@ -802,7 +810,6 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			stabilizer.dispose();
 			window.removeEventListener("resize", fitTerminal);
 			host.removeEventListener("mousedown", focusTerminal);
-			unregisterFocus();
 			host.removeEventListener("copy", copyInput);
 			window.removeEventListener("keydown", copyShortcut, true);
 			selectionChange.dispose();
@@ -824,6 +831,18 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			}
 		};
 	}, []);
+
+	// Hold the terminal-focus slot only while this pane is the active one. With
+	// several panes mounted (split view), an unconditional register-at-mount
+	// would leave the slot on whichever pane mounted last; keying on `active`
+	// keeps it on the focused pane, so overlays hand the caret back to where
+	// the user was actually typing. Reads termRef at call time, so ordering
+	// against the mount effect does not matter.
+	const active = props.active ?? true;
+	useEffect(() => {
+		if (!active) return undefined;
+		return registerTerminalFocus(() => termRef.current?.focus());
+	}, [active]);
 
 	return (
 		<div

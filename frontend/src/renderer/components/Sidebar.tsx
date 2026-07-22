@@ -43,7 +43,6 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
 import { sessionRefLabel } from "../lib/session-ref";
 import { useEventsConnection } from "../hooks/useEventsConnection";
-import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { useResizable } from "../hooks/useResizable";
 import {
 	DropdownMenu,
@@ -74,6 +73,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { DaemonLoopsPopover } from "./DaemonLoopsPopover";
 import { OrchestratorIcon } from "./icons";
+import { SessionGlyph } from "./SessionGlyph";
 import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
@@ -172,32 +172,6 @@ function useSelection() {
 		goSession: (projectId: string, sessionId: string) =>
 			void navigate({ to: "/projects/$projectId/sessions/$sessionId", params: { projectId, sessionId } }),
 	};
-}
-
-// Session status glyph: a distinct lane shape (filled dot ● / ring ◎ / half ◐ /
-// check ✓) tinted by the lane hue with a soft glow, so the sidebar list is
-// scannable by shape AND colour without opening the board — the same 4-hue
-// semantic system the board uses (lib/lane-indicator, design handoff Board.dc.html).
-function SessionGlyph({ session }: { session: WorkspaceSession }) {
-	const lane = laneForZone(attentionZone(session));
-	const { Icon } = lane;
-	// The glyph gently breathes (opacity pulse, the shared 1.8s status-pulse) ONLY
-	// while the session is actively working, so a live worker is glanceable in the
-	// list; every other lane keeps a static glyph. Disabled under reduced-motion.
-	const prefersReducedMotion = usePrefersReducedMotion();
-	const breathe = lane.key === "working" && !prefersReducedMotion;
-	return (
-		<span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center" style={{ color: lane.dotVar }}>
-			<Icon
-				className={cn("h-[13px] w-[13px]", breathe && "animate-status-pulse")}
-				style={{
-					filter: `drop-shadow(0 0 5px color-mix(in srgb, ${lane.dotVar} 70%, transparent))`,
-					...(lane.filled ? { fill: "currentColor" } : {}),
-				}}
-				aria-hidden="true"
-			/>
-		</span>
-	);
 }
 
 // Sidebar session order mirrors the board flow (working → needs → review →

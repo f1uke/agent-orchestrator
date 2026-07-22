@@ -114,3 +114,48 @@ describe("CenterPane kill control", () => {
 		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
 	});
 });
+
+describe("CenterPane split chrome", () => {
+	it("single view: unchanged toolbar plus the provided split controls", () => {
+		render(<CenterPane session={worker} theme="dark" daemonReady splitControls={<div>split entry</div>} />);
+		expect(screen.getByText("TERMINAL")).toBeInTheDocument();
+		expect(screen.getByText("split entry")).toBeInTheDocument();
+		expect(screen.getByText("restart control")).toBeInTheDocument();
+		expect(screen.queryByText("ao/sess-1")).not.toBeInTheDocument();
+	});
+
+	it("focused pane: pane header (glyph + branch, no eyebrow) with the full control set", () => {
+		render(
+			<CenterPane
+				session={worker}
+				theme="dark"
+				daemonReady
+				pane={{ focused: true }}
+				splitControls={<div>split controls</div>}
+			/>,
+		);
+		expect(screen.queryByText("TERMINAL")).not.toBeInTheDocument();
+		expect(screen.getByText("ao/sess-1")).toBeInTheDocument();
+		expect(screen.getByText("split controls")).toBeInTheDocument();
+		expect(screen.getByText("restart control")).toBeInTheDocument();
+		expect(screen.getByText("kill control")).toBeInTheDocument();
+	});
+
+	it("unfocused pane: dimmed slim toolbar — split controls only, no working controls", () => {
+		render(
+			<CenterPane
+				session={worker}
+				theme="dark"
+				daemonReady
+				pane={{ focused: false }}
+				splitControls={<div>split controls</div>}
+			/>,
+		);
+		expect(screen.getByText("split controls")).toBeInTheDocument();
+		expect(screen.queryByText("restart control")).not.toBeInTheDocument();
+		expect(screen.queryByText("kill control")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Increase terminal font size")).not.toBeInTheDocument();
+		const toolbar = document.querySelector(".terminal-toolbar")!;
+		expect(toolbar.className).toContain("opacity-60");
+	});
+});
