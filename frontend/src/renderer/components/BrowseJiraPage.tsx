@@ -447,7 +447,7 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 								</span>
 								<input
 									value={advancedJql}
-									placeholder="project = STAR AND assignee = currentUser() ORDER BY updated DESC"
+									placeholder="project = PROJ AND assignee = currentUser() ORDER BY updated DESC"
 									autoComplete="off"
 									autoCapitalize="none"
 									spellCheck={false}

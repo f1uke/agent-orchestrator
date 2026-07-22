@@ -164,7 +164,7 @@ func TestApprovalRuleGatesReadyToMerge(t *testing.T) {
 		want domain.SessionStatus
 	}{
 		{
-			// The nter-ios-app !3028 bug: rule configured, not enough approvals,
+			// The demo-ios-app !3028 bug: rule configured, not enough approvals,
 			// yet mergeability says mergeable. Must not be Ready to merge.
 			"gitlab-rule-unmet-mergeable-not-ready",
 			domain.PRFacts{Mergeability: domain.MergeMergeable, ApprovalRuleConfigured: true, Review: domain.ReviewNone},
@@ -207,7 +207,7 @@ func TestApprovalRuleGatesReadyToMerge(t *testing.T) {
 }
 
 // TestEnabledApprovalRuleGatesApprovedWhenGitLabHasNoRuleOfItsOwn is the
-// approval-rule-aware derivation for the nter-ios-app !3028 shape (board: "gl
+// approval-rule-aware derivation for the demo-ios-app !3028 shape (board: "gl
 // mergeable stale and false nudge", defect 3). GitLab's own approval state has
 // ZERO rules (approvals_required=0, approved_by=[]) so its raw `approved` flag is
 // trivially true — but the project's AO approval rule is ENABLED with threshold 2.

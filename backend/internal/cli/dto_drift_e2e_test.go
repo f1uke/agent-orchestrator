@@ -400,7 +400,7 @@ func TestE2E_SpawnAndProjectAddDTORoundTrip(t *testing.T) {
 func TestE2E_PreviewRefusedWhenProjectHasNoWebUI(t *testing.T) {
 	sessions := &fakeSessionService{previewErr: apierr.Conflict(
 		"WEB_PREVIEW_DISABLED",
-		`Project "nter-ios-app" has no web UI, so there is nothing to preview and `+"`ao preview`"+` is disabled for it. Turn on "Web UI" in the project's settings if it does render in a browser.`,
+		`Project "demo-ios-app" has no web UI, so there is nothing to preview and `+"`ao preview`"+` is disabled for it. Turn on "Web UI" in the project's settings if it does render in a browser.`,
 		nil,
 	)}
 	startDriftTestDaemon(t, sessions, &fakeProjectManager{})

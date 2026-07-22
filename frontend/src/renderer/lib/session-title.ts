@@ -2,19 +2,19 @@
  * Resolve the human-facing NAME for a session row/card.
  *
  * A Jira-linked session carries its key in two independent derivations:
- *   - the branch/worktree name keeps the key (`feature/STAR-2272-…`) — untouched here;
+ *   - the branch/worktree name keeps the key (`feature/PROJ-2272-…`) — untouched here;
  *   - the DISPLAY name is the issue summary only, never the card number.
  *
  * The key already shows as its own badge (sidebar line 2 / board card), so it must
  * not also prefix the name. Every UI creation path already stores a key-free
  * summary as `displayName`, but this normalizer is the last line of defence for
  * names that arrive with a leading key anyway — legacy sessions, `ao spawn
- * --name "STAR-2272 …"`, or the raw `jira:<KEY>` binding surfacing when a session
+ * --name "PROJ-2272 …"`, or the raw `jira:<KEY>` binding surfacing when a session
  * has no display name. (Enhancement #5.)
  */
 
-// A leading Jira-key token — `STAR-2272`, `[STAR-2272]`, `#STAR-2272`, or a
-// `jira:STAR-2272` binding — followed by a separator (punctuation or whitespace)
+// A leading Jira-key token — `PROJ-2272`, `[PROJ-2272]`, `#PROJ-2272`, or a
+// `jira:PROJ-2272` binding — followed by a separator (punctuation or whitespace)
 // and MORE text. Anchored at the start and requiring trailing text so it only
 // strips a key that PREFIXES a real summary, never a bare-key name (which has no
 // summary to fall back to) or a key that merely appears mid-title.

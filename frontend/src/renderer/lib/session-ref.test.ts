@@ -30,7 +30,7 @@ describe("resolveSessionToken", () => {
 
 	it("returns null for an unknown id (false-positive gate)", () => {
 		expect(resolveSessionToken("agent-orchestrator-999", opts)).toBeNull();
-		expect(resolveSessionToken("star-2272", opts)).toBeNull();
+		expect(resolveSessionToken("proj-2272", opts)).toBeNull();
 	});
 });
 
@@ -81,7 +81,7 @@ describe("findSessionLinks", () => {
 	});
 
 	it("does not linkify an unknown hyphen-number token (Jira key, unknown session)", () => {
-		expect(findSessionLinks("blocked by STAR-2272 and issue-42", opts)).toHaveLength(0);
+		expect(findSessionLinks("blocked by PROJ-2272 and issue-42", opts)).toHaveLength(0);
 	});
 
 	it("does not linkify an id embedded in a longer word", () => {

@@ -472,8 +472,8 @@ func TestClaudeProjectDirName(t *testing.T) {
 	// yields the double dash "--ao"). If Claude changes this, resume detection
 	// silently breaks, so lock it down.
 	cases := map[string]string{
-		"/Users/fluke/.ao/data/worktrees/nter-ios-app/chore/MOBILITY-4546-guard-let-self":     "-Users-fluke--ao-data-worktrees-nter-ios-app-chore-MOBILITY-4546-guard-let-self",
-		"/Users/fluke/.ao/data/worktrees/nter-ios-app/orchestrator/nter-ios-app-orchestrator": "-Users-fluke--ao-data-worktrees-nter-ios-app-orchestrator-nter-ios-app-orchestrator",
+		"/Users/fluke/.ao/data/worktrees/demo-ios-app/chore/TEAM-4546-guard-let-self":         "-Users-fluke--ao-data-worktrees-demo-ios-app-chore-TEAM-4546-guard-let-self",
+		"/Users/fluke/.ao/data/worktrees/demo-ios-app/orchestrator/demo-ios-app-orchestrator": "-Users-fluke--ao-data-worktrees-demo-ios-app-orchestrator-demo-ios-app-orchestrator",
 		"/tmp/Weird_Dir.Name test": "-tmp-Weird-Dir-Name-test",
 	}
 	for in, want := range cases {
@@ -513,7 +513,7 @@ func TestGetRestoreCommandFreshWhenTranscriptMissing(t *testing.T) {
 
 	cmd, ok, err := (&Plugin{resolvedBinary: "claude"}).GetRestoreCommand(context.Background(), ports.RestoreConfig{
 		Permissions: ports.PermissionModeBypassPermissions,
-		Session:     ports.SessionRef{ID: "nter-ios-app-19", WorkspacePath: ws},
+		Session:     ports.SessionRef{ID: "demo-ios-app-19", WorkspacePath: ws},
 	})
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -529,12 +529,12 @@ func TestGetRestoreCommandResumesWhenTranscriptPresent(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
 	ws := t.TempDir()
-	uid := claudeSessionUUID("nter-ios-app-19")
+	uid := claudeSessionUUID("demo-ios-app-19")
 	writeClaudeTranscript(t, cfgDir, ws, uid)
 
 	cmd, ok, err := (&Plugin{resolvedBinary: "claude"}).GetRestoreCommand(context.Background(), ports.RestoreConfig{
 		Permissions: ports.PermissionModeBypassPermissions,
-		Session:     ports.SessionRef{ID: "nter-ios-app-19", WorkspacePath: ws},
+		Session:     ports.SessionRef{ID: "demo-ios-app-19", WorkspacePath: ws},
 	})
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)

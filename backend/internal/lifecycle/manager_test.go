@@ -1653,7 +1653,7 @@ func TestSCMObservation_NotReadyWhenUnresolvedCommentsPersisted(t *testing.T) {
 	// review, and — crucially — no review threads in the transient observation.
 	obs := ports.SCMObservation{
 		Fetched:      true,
-		PR:           ports.SCMPRObservation{URL: prURL, Number: 3028, Title: "STAR-2272 eligible"},
+		PR:           ports.SCMPRObservation{URL: prURL, Number: 3028, Title: "PROJ-2272 available"},
 		CI:           ports.SCMCIObservation{Summary: string(domain.CIPassing)},
 		Review:       ports.SCMReviewObservation{Decision: string(domain.ReviewNone)},
 		Mergeability: ports.SCMMergeabilityObservation{State: string(domain.MergeMergeable)},
@@ -1674,7 +1674,7 @@ func TestSCMObservation_NotReadyWhenUnresolvedCommentsPersisted(t *testing.T) {
 // edge marker. The marker records "the human has already been told"; a PR whose
 // notification was suppressed for session reasons was never announced, so the
 // marker must stay clear and the notification must still arrive once the session
-// becomes eligible. Recording readiness unconditionally would swallow it forever.
+// becomes available. Recording readiness unconditionally would swallow it forever.
 func TestSCMObservation_ReadyToMergeStillNotifiesAfterWaitingInputClears(t *testing.T) {
 	st := newFakeStore()
 	sink := &fakeNotificationSink{}
@@ -1704,7 +1704,7 @@ func TestSCMObservation_ReadyToMergeStillNotifiesAfterWaitingInputClears(t *test
 		t.Fatal(err)
 	}
 	if len(sink.intents) != 1 {
-		t.Fatalf("ready notification not delivered once the session became eligible: %+v", sink.intents)
+		t.Fatalf("ready notification not delivered once the session became available: %+v", sink.intents)
 	}
 
 	// Still ready, still unchanged: no second notification.

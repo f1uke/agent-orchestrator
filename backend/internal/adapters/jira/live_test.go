@@ -46,7 +46,7 @@ func TestLive_RealREST(t *testing.T) {
 // same way as TestLive_RealREST; pick an issue whose description references an
 // image attachment. Run locally with:
 //
-//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_KEY=STAR-2394 go test -run TestLive_DownloadAttachment ./internal/adapters/jira/ -v
+//	AO_JIRA_LIVE=1 AO_JIRA_LIVE_KEY=PROJ-2394 go test -run TestLive_DownloadAttachment ./internal/adapters/jira/ -v
 func TestLive_DownloadAttachment(t *testing.T) {
 	if os.Getenv("AO_JIRA_LIVE") != "1" {
 		t.Skip("set AO_JIRA_LIVE=1 to run the live Jira attachment-download test")

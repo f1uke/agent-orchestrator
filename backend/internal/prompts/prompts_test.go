@@ -234,8 +234,8 @@ func TestWorkerDefault_KnowledgeStore(t *testing.T) {
 		}
 	}
 	// The placeholder must resolve to a concrete per-project path at render time.
-	rendered := RenderBase(base, "nter-ios-app")
-	if !strings.Contains(rendered, "~/.ao/knowledge/nter-ios-app/") {
+	rendered := RenderBase(base, "demo-ios-app")
+	if !strings.Contains(rendered, "~/.ao/knowledge/demo-ios-app/") {
 		t.Fatalf("rendered worker base must carry the concrete project path:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "$AO_PROJECT_ID") {
@@ -261,8 +261,8 @@ func TestOrchestratorDefault_KnowledgeStore(t *testing.T) {
 		}
 	}
 	// The placeholder must resolve to a concrete per-project path at render time.
-	rendered := RenderBase(base, "nter-ios-app")
-	if !strings.Contains(rendered, "~/.ao/knowledge/nter-ios-app/") {
+	rendered := RenderBase(base, "demo-ios-app")
+	if !strings.Contains(rendered, "~/.ao/knowledge/demo-ios-app/") {
 		t.Fatalf("rendered orchestrator base must carry the concrete project path:\n%s", rendered)
 	}
 }
@@ -284,11 +284,11 @@ func TestRenderBase_WorkerDefaultExpandsProjectID(t *testing.T) {
 	if !strings.Contains(base, ProjectIDPlaceholder) {
 		t.Fatalf("worker default base must carry %q so it renders like the orchestrator base:\n%s", ProjectIDPlaceholder, base)
 	}
-	rendered := RenderBase(base, "nter-ios-app")
+	rendered := RenderBase(base, "demo-ios-app")
 	if strings.Contains(rendered, ProjectIDPlaceholder) {
 		t.Fatalf("worker base still carries an unexpanded placeholder after render:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "~/.ao/knowledge/nter-ios-app/") {
+	if !strings.Contains(rendered, "~/.ao/knowledge/demo-ios-app/") {
 		t.Fatalf("rendered worker base must carry the concrete project path:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "$AO_PROJECT_ID") {

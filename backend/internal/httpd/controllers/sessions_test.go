@@ -1014,12 +1014,12 @@ func TestSessionsAPI_SpawnDecodesBaseBranch(t *testing.T) {
 	svc := newFakeSessionService()
 	srv := newSessionTestServer(t, svc)
 
-	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","baseBranch":"STAR-2270"}`)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","baseBranch":"PROJ-2270"}`)
 	if status != http.StatusCreated {
 		t.Fatalf("POST session = %d, want 201; body=%s", status, body)
 	}
-	if svc.lastSpawnCfg.BaseBranch != "STAR-2270" {
-		t.Fatalf("SpawnConfig.BaseBranch = %q, want STAR-2270", svc.lastSpawnCfg.BaseBranch)
+	if svc.lastSpawnCfg.BaseBranch != "PROJ-2270" {
+		t.Fatalf("SpawnConfig.BaseBranch = %q, want PROJ-2270", svc.lastSpawnCfg.BaseBranch)
 	}
 }
 

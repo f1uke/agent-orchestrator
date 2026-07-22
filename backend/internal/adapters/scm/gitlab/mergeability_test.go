@@ -48,7 +48,7 @@ func TestMergeabilityNormalizesToDomainEnum(t *testing.T) {
 		// approval rule is unmet), it names the specific blocker. When present it
 		// takes precedence over merge_status.
 		{
-			// The real nter-ios-app !3028 shape: GitLab still says can_be_merged
+			// The real demo-ios-app !3028 shape: GitLab still says can_be_merged
 			// (conflicts/pipeline are fine) but the approval rule isn't satisfied.
 			// detailed_merge_status=not_approved must win, so AO does not call it
 			// mergeable / "Ready to merge".

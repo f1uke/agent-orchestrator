@@ -207,7 +207,7 @@ func TestReadyToMergeDoesNotRepeatWhenAnAlreadyReadyPRChangesUnrelatedly(t *test
 
 // TestReadyToMergeSurvivesDaemonRestart covers the restart-replay theory: the
 // human installs builds often, so a marker that lives only in memory would
-// replay every eligible PR at once on restart. Rebuilding lifecycle + observer
+// replay every available PR at once on restart. Rebuilding lifecycle + observer
 // over the SAME store is exactly that restart.
 func TestReadyToMergeSurvivesDaemonRestart(t *testing.T) {
 	ctx := context.Background()

@@ -106,14 +106,14 @@ func TestSpawnClaimPRWiring(t *testing.T) {
 
 func TestSpawnClaimGitLabMRWiring(t *testing.T) {
 	cfg := setConfigEnv(t)
-	const mrURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	const mrURL = "https://gitlab.example.com/group/sub/proj/-/merge_requests/42"
 	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		appendPrimaryRequest(&requests, r)
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
-			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"git@gitlab.finnomena.com:group/sub/proj.git","defaultBranch":"main"}}`)
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"git@gitlab.example.com:group/sub/proj.git","defaultBranch":"main"}}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/refresh":
 			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":

@@ -43,8 +43,8 @@ describe("providerFromOrigin", () => {
 	});
 
 	it("detects self-hosted GitLab by host, not by the whole URL", () => {
-		expect(providerFromOrigin("https://gitlab.finnomena.com/group/sub/proj.git")).toBe("gitlab");
-		expect(providerFromOrigin("git@gitlab.finnomena.com:group/sub/proj.git")).toBe("gitlab");
+		expect(providerFromOrigin("https://gitlab.example.com/group/sub/proj.git")).toBe("gitlab");
+		expect(providerFromOrigin("git@gitlab.example.com:group/sub/proj.git")).toBe("gitlab");
 	});
 
 	it("is not fooled by a GitHub repo whose name contains 'gitlab'", () => {
@@ -59,12 +59,12 @@ describe("providerFromOrigin", () => {
 
 describe("deriveGitLabRepo", () => {
 	it("preserves the full nested group path", () => {
-		expect(deriveGitLabRepo("https://gitlab.finnomena.com/group/sub/proj.git")).toBe("group/sub/proj");
-		expect(deriveGitLabRepo("git@gitlab.finnomena.com:group/sub/proj.git")).toBe("group/sub/proj");
+		expect(deriveGitLabRepo("https://gitlab.example.com/group/sub/proj.git")).toBe("group/sub/proj");
+		expect(deriveGitLabRepo("git@gitlab.example.com:group/sub/proj.git")).toBe("group/sub/proj");
 	});
 
 	it("returns undefined for a single-segment path", () => {
-		expect(deriveGitLabRepo("https://gitlab.finnomena.com/proj.git")).toBeUndefined();
+		expect(deriveGitLabRepo("https://gitlab.example.com/proj.git")).toBeUndefined();
 	});
 });
 
@@ -76,7 +76,7 @@ describe("deriveGitHubRepo", () => {
 
 describe("deriveTrackerRepo", () => {
 	it("dispatches on provider", () => {
-		expect(deriveTrackerRepo("https://gitlab.finnomena.com/group/sub/proj.git", "gitlab")).toBe("group/sub/proj");
+		expect(deriveTrackerRepo("https://gitlab.example.com/group/sub/proj.git", "gitlab")).toBe("group/sub/proj");
 		expect(deriveTrackerRepo("https://github.com/acme/repo.git", "github")).toBe("acme/repo");
 	});
 });
@@ -87,8 +87,8 @@ describe("deriveRepoWebURL", () => {
 	});
 
 	it("builds a self-hosted GitLab project web URL preserving nested groups", () => {
-		expect(deriveRepoWebURL("git@gitlab.finnomena.com:group/sub/proj.git")).toBe(
-			"https://gitlab.finnomena.com/group/sub/proj",
+		expect(deriveRepoWebURL("git@gitlab.example.com:group/sub/proj.git")).toBe(
+			"https://gitlab.example.com/group/sub/proj",
 		);
 	});
 

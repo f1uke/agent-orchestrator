@@ -161,12 +161,12 @@ func TestAOReviewerSingleGolden(t *testing.T) {
 // discussion threads, without referencing a non-existent "review <id>".
 func TestAOReviewerSingleGitLabResolvesThreadsWithoutReviewID(t *testing.T) {
 	out, err := Execute(Default(NameAOReviewerSingle), AOReviewerSingleData{
-		PRURL: "https://gitlab.finnomena.com/g/p/-/merge_requests/9", Verdict: "changes_requested", ReviewID: "", Body: "please fix",
+		PRURL: "https://gitlab.example.com/g/p/-/merge_requests/9", Verdict: "changes_requested", ReviewID: "", Body: "please fix",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: https://gitlab.finnomena.com/g/p/-/merge_requests/9\nVerdict: changes_requested" +
+	want := "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: https://gitlab.example.com/g/p/-/merge_requests/9\nVerdict: changes_requested" +
 		"\n\nOnce you have addressed it, resolve the review comment threads you addressed." +
 		"\n\nReview body:\nplease fix"
 	if out != want {

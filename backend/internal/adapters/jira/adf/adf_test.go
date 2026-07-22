@@ -120,7 +120,7 @@ func TestParse_Star2312_BugTable(t *testing.T) {
 	}
 }
 
-func TestParse_Mobility4532_PanelOrderedRule(t *testing.T) {
+func TestParse_Team4532_PanelOrderedRule(t *testing.T) {
 	c := collectFixture(t, "demo-301-desc.json")
 	for _, want := range []string{"panel", "orderedList", "rule"} {
 		if c.types[want] == 0 {

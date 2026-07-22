@@ -181,7 +181,7 @@ describe("NewTaskDialog", () => {
 				};
 			}
 			if (path === "/api/v1/projects/{id}/branches") {
-				return { data: { branches: ["main", "develop", "origin/STAR-2270"] }, error: undefined };
+				return { data: { branches: ["main", "develop", "origin/PROJ-2270"] }, error: undefined };
 			}
 			return {
 				data: {

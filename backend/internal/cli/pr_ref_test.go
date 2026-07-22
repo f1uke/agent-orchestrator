@@ -15,17 +15,17 @@ func TestResolvePRRefGitLabMRURL(t *testing.T) {
 	}{
 		{
 			name: "nested group MR url",
-			ref:  "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/123",
-			want: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/123",
+			ref:  "https://gitlab.example.com/group/sub/proj/-/merge_requests/123",
+			want: "https://gitlab.example.com/group/sub/proj/-/merge_requests/123",
 		},
 		{
 			name: "trailing sub-tab and query are normalized away",
-			ref:  "https://gitlab.finnomena.com/group/proj/-/merge_requests/7/diffs?tab=x",
-			want: "https://gitlab.finnomena.com/group/proj/-/merge_requests/7",
+			ref:  "https://gitlab.example.com/group/proj/-/merge_requests/7/diffs?tab=x",
+			want: "https://gitlab.example.com/group/proj/-/merge_requests/7",
 		},
 		{
 			name:    "missing iid is a usage error, not a github fallthrough",
-			ref:     "https://gitlab.finnomena.com/group/proj/-/merge_requests/",
+			ref:     "https://gitlab.example.com/group/proj/-/merge_requests/",
 			wantErr: true,
 		},
 	}

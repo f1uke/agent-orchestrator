@@ -128,7 +128,7 @@ func workLabel(intent Intent) string {
 	return "a session"
 }
 
-// prLocation renders "!3039 in nter-ios-app" from whichever of those facts are
+// prLocation renders "!3039 in demo-ios-app" from whichever of those facts are
 // present.
 func prLocation(intent Intent) string {
 	out := prRef(intent)
@@ -180,7 +180,7 @@ func isGitLab(intent Intent) bool {
 }
 
 // repoShort keeps the last path segment of a repo path, so the deeply nested
-// "finnomena/mobility/nter-ios-app" reads as "nter-ios-app".
+// "example-org/apps/demo-ios-app" reads as "demo-ios-app".
 func repoShort(repo string) string {
 	repo = strings.Trim(strings.TrimSpace(repo), "/")
 	if repo == "" {

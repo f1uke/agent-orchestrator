@@ -20,7 +20,7 @@ func newTestProvider(t *testing.T, apiBase string) *Provider {
 	t.Helper()
 	p, err := NewProvider(ProviderOptions{
 		Client:             NewClient(ClientOptions{APIBase: apiBase + "/api/v4", Token: StaticTokenSource("t")}),
-		Host:               "gitlab.finnomena.com",
+		Host:               "gitlab.example.com",
 		SkipTokenPreflight: true,
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func TestListOpenPRsByRepo(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL) // helper builds Provider with APIBase=srv.URL, Host set
-	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
 	prs, err := p.ListOpenPRsByRepo(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("ListOpenPRsByRepo: %v", err)
@@ -112,7 +112,7 @@ func TestListOpenPRsByRepoCarriesHeadRepo(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL)
-	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
 	prs, err := p.ListOpenPRsByRepo(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("ListOpenPRsByRepo: %v", err)
@@ -148,7 +148,7 @@ func TestBaseBranchGuardETag304(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL)
-	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
 
 	first, err := p.BaseBranchGuard(context.Background(), repo, "main", "")
 	if err != nil {

@@ -116,7 +116,7 @@
            "content": [
             {
              "type": "text",
-             "text": "Eligible list renders from the usable coupon.",
+             "text": "Available list renders from the usable item.",
              "marks": [
               {
                "type": "strong"
@@ -220,7 +220,7 @@
                "content": [
                 {
                  "type": "text",
-                 "text": "The summary totals stay accurate when a coupon is."
+                 "text": "The summary totals stay accurate when a item is."
                 }
                ],
                "attrs": {
@@ -256,7 +256,7 @@
             },
             {
              "type": "text",
-             "text": "Coupon is applied before checkout and verify the eligible list."
+             "text": "Item is applied before checkout and verify the available list."
             },
             {
              "type": "hardBreak"

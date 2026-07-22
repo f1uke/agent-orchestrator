@@ -24,11 +24,13 @@
 ### Task 1: `OneShotNamer` port + claude-code adapter
 
 **Files:**
+
 - Modify: `backend/internal/ports/agent.go`
 - Modify: `backend/internal/adapters/agent/claudecode/claudecode.go`
 - Test: `backend/internal/adapters/agent/claudecode/claudecode_test.go`
 
 **Interfaces:**
+
 - Produces: `ports.OneShotNamer` interface; `*claudecode.Provider` implements `OneShotArgv(ctx, prompt) (argv []string, ok bool, err error)`.
 
 - [ ] **Step 1: Write the failing test** in `claudecode_test.go`
@@ -100,6 +102,7 @@ Expected: PASS (or SKIP if no claude binary — the compile-time `var namer port
 - [ ] **Step 6: Build + commit**
 
 Run: `cd backend && go build ./...`
+
 ```bash
 git add backend/internal/ports/agent.go backend/internal/adapters/agent/claudecode/
 git commit -m "feat(agent): add OneShotNamer port and claude-code claude -p impl"
@@ -110,10 +113,12 @@ git commit -m "feat(agent): add OneShotNamer port and claude-code claude -p impl
 ### Task 2: Pure branch-name helpers
 
 **Files:**
+
 - Create: `backend/internal/session_manager/branchname.go`
 - Test: `backend/internal/session_manager/branchname_test.go`
 
 **Interfaces:**
+
 - Produces (all in `package session_manager`):
   - `func extractJiraKey(texts ...string) string`
   - `func buildNamingPrompt(title, brief, jiraKeyHint string) string`
@@ -133,10 +138,10 @@ func TestExtractJiraKey(t *testing.T) {
 		texts []string
 		want  string
 	}{
-		{"in title", []string{"STAR-2271 result UI", "brief"}, "STAR-2271"},
+		{"in title", []string{"PROJ-2271 result UI", "brief"}, "PROJ-2271"},
 		{"in brief url", []string{"E-Coupon", "see https://x.atlassian.net/browse/ABC-42 now"}, "ABC-42"},
 		{"none", []string{"no key here", "plain brief"}, ""},
-		{"lowercase not matched", []string{"star-2271", ""}, ""},
+		{"lowercase not matched", []string{"proj-2271", ""}, ""},
 		{"multi-letter project", []string{"PROJ12-9 thing", ""}, "PROJ12-9"},
 	}
 	for _, c := range cases {
@@ -155,13 +160,13 @@ func TestSanitizeBranchName(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		{"clean", "feature/STAR-2271-ecoupon-result", "feature/star-2271-ecoupon-result", true},
-		{"backticked with prose", "`feature/STAR-2271-x`\nSure, here you go!", "feature/star-2271-x", true},
+		{"clean", "feature/PROJ-2271-checkout-result", "feature/proj-2271-checkout-result", true},
+		{"backticked with prose", "`feature/PROJ-2271-x`\nSure, here you go!", "feature/proj-2271-x", true},
 		{"label prefix", "branch: bugfix/ABC-1-fix-crash", "bugfix/abc-1-fix-crash", true},
-		{"spaces and junk", "feature/STAR 2271  e coupon!!", "feature/star-2271-e-coupon", true},
-		{"no gitflow prefix", "star-2271-result", "", false},
-		{"bad type", "release/STAR-1-x", "", false},
-		{"dotdot", "feature/STAR..1", "", false},
+		{"spaces and junk", "feature/PROJ 2271  e coupon!!", "feature/proj-2271-checkout", true},
+		{"no gitflow prefix", "proj-2271-result", "", false},
+		{"bad type", "release/PROJ-1-x", "", false},
+		{"dotdot", "feature/PROJ..1", "", false},
 		{"empty", "", "", false},
 		{"trailing slash trimmed then ok", "chore/cleanup/", "chore/cleanup", true},
 	}
@@ -177,20 +182,20 @@ func TestSanitizeBranchName(t *testing.T) {
 
 func TestEnsureUniqueBranch(t *testing.T) {
 	existing := map[string]bool{
-		"feature/star-2271-x":   true,
-		"feature/star-2271-x-2": true,
+		"feature/proj-2271-x":   true,
+		"feature/proj-2271-x-2": true,
 	}
-	if got := ensureUniqueBranch(existing, "feature/star-2271-y"); got != "feature/star-2271-y" {
+	if got := ensureUniqueBranch(existing, "feature/proj-2271-y"); got != "feature/proj-2271-y" {
 		t.Fatalf("free candidate changed: %q", got)
 	}
-	if got := ensureUniqueBranch(existing, "feature/star-2271-x"); got != "feature/star-2271-x-3" {
+	if got := ensureUniqueBranch(existing, "feature/proj-2271-x"); got != "feature/proj-2271-x-3" {
 		t.Fatalf("collision suffix wrong: %q", got)
 	}
 }
 
 func TestBuildNamingPromptMentionsKeyAndRules(t *testing.T) {
-	p := buildNamingPrompt("E-Coupon Order Result", "make the UI", "STAR-2271")
-	for _, want := range []string{"STAR-2271", "feature", "bugfix", "hotfix", "chore", "E-Coupon Order Result"} {
+	p := buildNamingPrompt("E-Coupon Order Result", "make the UI", "PROJ-2271")
+	for _, want := range []string{"PROJ-2271", "feature", "bugfix", "hotfix", "chore", "E-Coupon Order Result"} {
 		if !contains(p, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, p)
 		}
@@ -231,7 +236,7 @@ var (
 	repeatedSlashDash = regexp.MustCompile(`[-]{2,}`)
 )
 
-// extractJiraKey returns the first Jira-style key (e.g. STAR-2271) found across
+// extractJiraKey returns the first Jira-style key (e.g. PROJ-2271) found across
 // the given texts, or "" when none is present.
 func extractJiraKey(texts ...string) string {
 	for _, t := range texts {
@@ -255,7 +260,7 @@ Format: <type>/<JIRA-KEY>-<short-desc>
 - %s
 - <short-desc>: 2 to 4 words, kebab-case, lowercase, abbreviated.
 - Total length <= 60 characters. Use only lowercase a-z, 0-9, hyphen and one slash.
-- Example: feature/STAR-2271-ecoupon-result
+- Example: feature/PROJ-2271-checkout-result
 
 Task title: %s
 
@@ -337,12 +342,14 @@ git commit -m "feat(session): add gitflow branch-name helpers (extract/sanitize/
 ### Task 3: Manager generation + wiring + `SpawnConfig.AutoNameBranch`
 
 **Files:**
+
 - Modify: `backend/internal/ports/session.go`
 - Modify: `backend/internal/session_manager/branchname.go` (add manager methods)
 - Modify: `backend/internal/session_manager/manager.go` (~L225-228)
 - Test: `backend/internal/session_manager/manager_test.go` (or a new `branchname_manager_test.go`)
 
 **Interfaces:**
+
 - Consumes: `ports.OneShotNamer` (Task 1); `extractJiraKey`, `buildNamingPrompt`, `sanitizeBranchName`, `ensureUniqueBranch` (Task 2).
 - Produces: `SpawnConfig.AutoNameBranch bool`; `(m *Manager) generateBranchName(ctx, agent ports.Agent, cfg ports.SpawnConfig, project domain.ProjectRecord) (string, bool)`; `(m *Manager) existingBranchNames(ctx, project domain.ProjectRecord) map[string]bool`.
 
@@ -355,6 +362,7 @@ git commit -m "feat(session): add gitflow branch-name helpers (extract/sanitize/
 	// back to the default name.
 	AutoNameBranch bool
 ```
+
 (Add inside the `SpawnConfig` struct, after `Branch`/`BaseBranch`.)
 
 - [ ] **Step 2: Write the failing manager test**
@@ -386,7 +394,7 @@ func TestSpawnBranchNaming(t *testing.T) {
 
 	t.Run("unsupported harness falls back", func(t *testing.T) {
 		h := newManagerHarness(t) // fake agent does NOT implement OneShotNamer
-		_, err := h.mgr.Spawn(ctx, ports.SpawnConfig{ProjectID: h.projectID, Kind: domain.KindWorker, Harness: h.harness, AutoNameBranch: true, IssueID: "STAR-1 thing"})
+		_, err := h.mgr.Spawn(ctx, ports.SpawnConfig{ProjectID: h.projectID, Kind: domain.KindWorker, Harness: h.harness, AutoNameBranch: true, IssueID: "PROJ-1 thing"})
 		if err != nil { t.Fatal(err) }
 		if !strings.HasPrefix(h.workspace.lastCfg.Branch, "ao/") {
 			t.Fatalf("want fallback ao/, got %q", h.workspace.lastCfg.Branch)
@@ -523,12 +531,14 @@ git commit -m "feat(session): generate gitflow branch name via session agent at 
 ### Task 4: HTTP request field + codegen
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go`
 - Modify: the create-session controller that maps the request DTO to `ports.SpawnConfig` (same file/handler that already maps `Branch`/`BaseBranch`)
 - Regenerate: `openapi.yaml`, `frontend/src/api/schema.ts`
 - Test: `backend/internal/httpd/controllers/*_test.go` (extend the existing create-session mapping test if present)
 
 **Interfaces:**
+
 - Consumes: `ports.SpawnConfig.AutoNameBranch` (Task 3).
 - Produces: request JSON field `autoNameBranch` mapped into `SpawnConfig`.
 
@@ -550,6 +560,7 @@ git commit -m "feat(session): generate gitflow branch name via session agent at 
 	// given a request body with "autoNameBranch": true, the SpawnConfig passed to
 	// the fake service has AutoNameBranch == true.
 ```
+
 If no such test exists, add a minimal one following the nearest existing create-session handler test.
 
 - [ ] **Step 4: Regenerate the API**
@@ -574,10 +585,12 @@ git commit -m "feat(api): add autoNameBranch to create-session request"
 ### Task 5: NewTaskDialog — full-width layout + opt-in flag
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/NewTaskDialog.tsx`
 - Test: `frontend/src/renderer/components/NewTaskDialog.test.tsx` (extend if present; else add)
 
 **Interfaces:**
+
 - Consumes: `autoNameBranch` request field (Task 4, via regenerated `schema.ts`).
 
 - [ ] **Step 1: Write/extend the failing test** in `NewTaskDialog.test.tsx`
@@ -587,6 +600,7 @@ git commit -m "feat(api): add autoNameBranch to create-session request"
 // 2. Typed new-branch-name → body has branch set and no autoNameBranch (or false/undefined).
 // 3. Renders three stacked fields in order: "Start from", "New branch name", "Agent".
 ```
+
 Follow the existing test's mocking of `apiClient.POST` to capture the request body. Assert on the captured `body.autoNameBranch` and `body.branch`, and on field order via `getAllByText`/label queries.
 
 - [ ] **Step 2: Run to verify it fails**
@@ -648,8 +662,11 @@ Order in the form: Title → Brief → Start from → New branch name → Agent.
 - [ ] **Step 5: Update the submit label** for the naming wait — where the button renders `"Starting..."`:
 
 ```tsx
-	{isSubmitting ? (branch.trim() === "" ? "Naming branch…" : "Starting…") : "Start task"}
+{
+	isSubmitting ? (branch.trim() === "" ? "Naming branch…" : "Starting…") : "Start task";
+}
 ```
+
 (Keep the existing spinner icon.)
 
 - [ ] **Step 6: Run test + typecheck**

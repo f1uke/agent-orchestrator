@@ -18,11 +18,11 @@ func TestReviewTexts_RendersProjectIDPlaceholder(t *testing.T) {
 		WorkerID:     "s",
 		PRURL:        "u",
 		RunID:        "r",
-		ProjectID:    "nter-ios-app",
+		ProjectID:    "demo-ios-app",
 		ReviewerBase: "Reviewer context lives at ~/.ao/knowledge/{{.ProjectID}}/plans/.",
 	}
 	_, sys := reviewTexts(spec)
-	if !strings.Contains(sys, "~/.ao/knowledge/nter-ios-app/plans/") {
+	if !strings.Contains(sys, "~/.ao/knowledge/demo-ios-app/plans/") {
 		t.Fatalf("reviewer base {{.ProjectID}} was not rendered to the project id:\n%s", sys)
 	}
 	if strings.Contains(sys, "{{.ProjectID}}") {
@@ -33,9 +33,9 @@ func TestReviewTexts_RendersProjectIDPlaceholder(t *testing.T) {
 // TestReviewLaunchSpec_CarriesProjectID: the launch spec must carry the worker's
 // project id so reviewTexts can render the reviewer base's {{.ProjectID}}.
 func TestReviewLaunchSpec_CarriesProjectID(t *testing.T) {
-	worker := domain.SessionRecord{ID: "mer-1", ProjectID: "nter-ios-app"}
+	worker := domain.SessionRecord{ID: "mer-1", ProjectID: "demo-ios-app"}
 	spec := reviewLaunchSpec(worker, domain.ReviewerClaudeCode, domain.ReviewRun{}, nil, 0)
-	if spec.ProjectID != "nter-ios-app" {
+	if spec.ProjectID != "demo-ios-app" {
 		t.Fatalf("reviewLaunchSpec must carry the worker's project id, got %q", spec.ProjectID)
 	}
 }
@@ -105,9 +105,9 @@ func TestReviewTexts_EnglishDefaultNoDirective(t *testing.T) {
 
 func TestReviewTextsGitLabUsesGlab(t *testing.T) {
 	spec := launchSpec()
-	spec.PRURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	spec.PRURL = "https://gitlab.example.com/group/sub/proj/-/merge_requests/42"
 	spec.ReviewQueue = []ports.ReviewTask{
-		{RunID: "run-1", PRURL: "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42", TargetSHA: "sha1"},
+		{RunID: "run-1", PRURL: "https://gitlab.example.com/group/sub/proj/-/merge_requests/42", TargetSHA: "sha1"},
 	}
 	prompt, _ := reviewTexts(spec)
 	for _, want := range []string{

@@ -23,6 +23,7 @@
 ### Task 1: Backend — list branches endpoint
 
 **Files:**
+
 - Modify: `backend/internal/service/project/` (add a `ListBranches` method following the existing git-exec + repo-path-resolution pattern used by workspace registration)
 - Modify: `backend/internal/httpd/controllers/projects.go` (add route `r.Get("/projects/{id}/branches", c.branches)` in `Register`, and the `branches` handler)
 - Modify: `backend/internal/httpd/controllers/dto.go` (add `ProjectBranchesResponse{ Branches []string }`)
@@ -30,8 +31,9 @@
 - Test: `backend/internal/service/project/*_test.go` (branch listing over a temp git repo), `backend/internal/httpd/controllers/projects_test.go` (route returns list / empty)
 
 **Interfaces:**
+
 - Produces: `projectsvc.Manager.ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error)` — returns deduped short branch names from `refs/heads` + `refs/remotes/origin`, with `origin/HEAD` removed; returns an empty slice (nil, no error) when the repo is unavailable/unregistered so the UI degrades gracefully.
-- Produces: `GET /api/v1/projects/{id}/branches` → `{"branches": ["develop","main","origin/STAR-2270", ...]}`.
+- Produces: `GET /api/v1/projects/{id}/branches` → `{"branches": ["develop","main","origin/PROJ-2270", ...]}`.
 
 - [ ] **Step 1: Write the failing service test** — over a temp git repo with a couple of branches (mirror the temp-repo setup in `service/project/service_test.go`, which does `exec.Command("git","init","-b","main",dir)` etc.):
 
@@ -56,7 +58,7 @@ Run: `cd backend && go test ./internal/service/project/ -run TestListBranches -v
 Expected: FAIL — `ListBranches` undefined.
 
 - [ ] **Step 3: Implement `ListBranches`** — resolve the project's repo path the same way workspace registration does, then run
-`git -C <repo> for-each-ref --format=%(refname:short) refs/heads refs/remotes/origin`, split lines, drop `origin/HEAD`, dedupe preserving order. On repo-not-available return `(nil, nil)`.
+      `git -C <repo> for-each-ref --format=%(refname:short) refs/heads refs/remotes/origin`, split lines, drop `origin/HEAD`, dedupe preserving order. On repo-not-available return `(nil, nil)`.
 
 - [ ] **Step 4: Add the controller route + handler** — in `projects.go` `Register`, add `r.Get("/projects/{id}/branches", c.branches)`. Handler reads `projectID(r)` (chi param helper already used by `c.get`), calls `c.Mgr.ListBranches`, writes `ProjectBranchesResponse{Branches: names}` via the shared JSON envelope (mirror `c.get`'s response writing). Nil `Mgr` → the existing 501 pattern.
 
@@ -79,6 +81,7 @@ git commit -m "feat(api): list project branches endpoint"
 ### Task 2: Backend — thread base branch through spawn
 
 **Files:**
+
 - Modify: `backend/internal/ports/session.go` (add `BaseBranch string` to `SpawnConfig`)
 - Modify: `backend/internal/httpd/controllers/dto.go` (add `BaseBranch string json:"baseBranch,omitempty"` to `SpawnSessionRequest`, near the existing `Branch` field ~line 129)
 - Modify: `backend/internal/httpd/controllers/sessions.go:137` (pass `BaseBranch: in.BaseBranch` into `ports.SpawnConfig`)
@@ -86,6 +89,7 @@ git commit -m "feat(api): list project branches endpoint"
 - Test: `backend/internal/session_manager/manager_test.go` (base threading), `backend/internal/httpd/controllers/sessions_test.go` (request decodes baseBranch)
 
 **Interfaces:**
+
 - Consumes: nothing from Task 1.
 - Produces: `ports.SpawnConfig.BaseBranch string`; `SpawnSessionRequest.BaseBranch string json:"baseBranch,omitempty"`.
 
@@ -95,9 +99,9 @@ git commit -m "feat(api): list project branches endpoint"
 func TestSpawnUsesBaseBranch(t *testing.T) {
 	fake := &captureWorkspace{} // records last WorkspaceConfig.BaseBranch
 	m := newManagerWithWorkspace(t, fake, projectWithDefaultBranch("develop"))
-	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: pid, Kind: domain.SessionKindWorker, Harness: "claude-code", BaseBranch: "STAR-2270"})
+	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: pid, Kind: domain.SessionKindWorker, Harness: "claude-code", BaseBranch: "PROJ-2270"})
 	if err != nil { t.Fatalf("spawn: %v", err) }
-	if fake.lastBase != "STAR-2270" { t.Fatalf("base = %q, want STAR-2270", fake.lastBase) }
+	if fake.lastBase != "PROJ-2270" { t.Fatalf("base = %q, want PROJ-2270", fake.lastBase) }
 
 	_, _ = m.Spawn(ctx, ports.SpawnConfig{ProjectID: pid, Kind: domain.SessionKindWorker, Harness: "claude-code"})
 	if fake.lastBase != "develop" { t.Fatalf("fallback base = %q, want develop", fake.lastBase) }
@@ -126,7 +130,7 @@ ws, err := m.workspace.Create(ctx, ports.WorkspaceConfig{
 
 Add `BaseBranch` to `SpawnSessionRequest` and pass `BaseBranch: in.BaseBranch` at sessions.go:137.
 
-- [ ] **Step 4: Add a controller decode test** — assert a POST body with `"baseBranch":"STAR-2270"` reaches `Svc.Spawn` with `BaseBranch=="STAR-2270"` (mirror the existing spawn handler test with a fake `Svc` capturing the `SpawnConfig`).
+- [ ] **Step 4: Add a controller decode test** — assert a POST body with `"baseBranch":"PROJ-2270"` reaches `Svc.Spawn` with `BaseBranch=="PROJ-2270"` (mirror the existing spawn handler test with a fake `Svc` capturing the `SpawnConfig`).
 
 - [ ] **Step 5: Run + regenerate**
 
@@ -145,12 +149,14 @@ git commit -m "feat: choose base branch when spawning a session"
 ### Task 3: Frontend — "Start from" combobox in New Task
 
 **Files:**
+
 - Create: `frontend/src/renderer/hooks/useProjectBranches.ts` (react-query fetch of the branches endpoint)
 - Create: `frontend/src/renderer/components/BranchCombobox.tsx` (searchable dropdown from `Input` + filtered list)
 - Modify: `frontend/src/renderer/components/NewTaskDialog.tsx` (add base state + combobox, relabel Branch → "New branch name", send `baseBranch`)
 - Test: `frontend/src/renderer/components/BranchCombobox.test.tsx`, extend `frontend/src/renderer/components/NewTaskDialog.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `GET /api/v1/projects/{projectId}/branches` → `{branches: string[]}` (Task 1).
 - Produces: POST `/api/v1/sessions` body now includes `baseBranch: cleanBase || undefined`.
 
@@ -163,11 +169,11 @@ import { BranchCombobox } from "./BranchCombobox";
 
 it("filters branches and selects one", async () => {
 	const onChange = vi.fn();
-	render(<BranchCombobox branches={["develop", "main", "origin/STAR-2270"]} value="develop" onChange={onChange} />);
+	render(<BranchCombobox branches={["develop", "main", "origin/PROJ-2270"]} value="develop" onChange={onChange} />);
 	await userEvent.click(screen.getByRole("textbox"));
 	await userEvent.type(screen.getByRole("textbox"), "2270");
-	await userEvent.click(screen.getByText("origin/STAR-2270"));
-	expect(onChange).toHaveBeenCalledWith("origin/STAR-2270");
+	await userEvent.click(screen.getByText("origin/PROJ-2270"));
+	expect(onChange).toHaveBeenCalledWith("origin/PROJ-2270");
 });
 ```
 

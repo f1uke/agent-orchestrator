@@ -16,13 +16,14 @@
 - Frontend gates (from `frontend/`): `npm run test` (vitest) and `npm run typecheck` (`tsc --noEmit`). There is no frontend lint script; formatting follows the repo `.prettierrc` — **use tabs**, matching surrounding code.
 - After any frontend build/test, revert incidental `routeTree.gen.ts` and `pnpm-lock.yaml` churn — do not commit it.
 - Nudge messages reach a worker's live terminal pane. Dynamic values injected into templates (comment bodies, CI log tails, PR fields) are attacker-influenceable and MUST be passed through `domain.SanitizeControlChars` **before** being placed in the template data — exactly as the current code does. Template text itself (built-in or operator-edited) is trusted.
-- Commit after each task (frequent commits). Branch: `bugfix/STAR-2272-gitlab-mr-detection` (PR #36).
+- Commit after each task (frequent commits). Branch: `bugfix/PROJ-2272-gitlab-mr-detection` (PR #36).
 
 ---
 
 ## File Structure
 
 Created:
+
 - `backend/internal/messagetemplates/templates.go` — `Name` enum, `KnownNames`, `Valid`, `Default`, `Placeholders`, the per-template data structs, and pure `Execute`.
 - `backend/internal/messagetemplates/templates_test.go` — defaults render, placeholder docs, golden output tests.
 - `backend/internal/messagetemplates/renderer.go` — `Renderer` (override-or-default + fallback).
@@ -31,6 +32,7 @@ Created:
 - `frontend/src/renderer/components/MessageTemplatesSection.test.tsx`.
 
 Modified:
+
 - `backend/internal/promptoverrides/store.go` — add `Templates map[string]string` + `GetTemplate`/`SetTemplate`/`ClearTemplate`; back-compat load.
 - `backend/internal/promptoverrides/store_test.go` — template round-trip + persistence.
 - `backend/internal/httpd/controllers/dto.go` — new message-template DTOs.
@@ -51,10 +53,12 @@ Modified:
 ## Task 1: `messagetemplates` package — names, defaults, placeholders, pure `Execute`
 
 **Files:**
+
 - Create: `backend/internal/messagetemplates/templates.go`
 - Test: `backend/internal/messagetemplates/templates_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `type Name string` with consts `NameReviewCommentDispatch`, `NameCIFailing`, `NameMergeConflict`, `NameTrackerBotComment`, `NameAOReviewerBatch`, `NameAOReviewerSingle`.
   - `func KnownNames() []Name`, `func (Name) Valid() bool`, `func Default(Name) string`, `func Placeholders(Name) []string`.
@@ -328,9 +332,11 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 2: Golden tests locking AO-reviewer template output to the current fmt code
 
 **Files:**
+
 - Test: `backend/internal/messagetemplates/templates_test.go` (append)
 
 **Interfaces:**
+
 - Consumes: `Execute`, `Default`, `AOReviewerBatchData`, `AOReviewItem`, `AOReviewerSingleData` from Task 1.
 
 **Why:** Task 6/7 replaces `fmt.Fprintf` message builders in `reactions.go` with these templates. A golden test proves the template output is byte-identical to today's message, so the refactor is provably behavior-preserving.
@@ -403,10 +409,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 3: `Renderer` — override-or-default with fallback
 
 **Files:**
+
 - Create: `backend/internal/messagetemplates/renderer.go`
 - Test: `backend/internal/messagetemplates/renderer_test.go`
 
 **Interfaces:**
+
 - Consumes: `Name`, `Default`, `Execute` from Task 1.
 - Produces:
   - `type Renderer struct { ... }`
@@ -552,10 +560,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 4: Persist template overrides in `promptoverrides`
 
 **Files:**
+
 - Modify: `backend/internal/promptoverrides/store.go`
 - Test: `backend/internal/promptoverrides/store_test.go`
 
 **Interfaces:**
+
 - Produces (on `*promptoverrides.Store`):
   - `Overrides.Templates map[string]string` (json `templates,omitempty`).
   - `func (s *Store) GetTemplate(name string) (string, bool)`
@@ -835,6 +845,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 5: Message-templates settings API (code-first)
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go`
 - Modify: `backend/internal/httpd/controllers/settings.go`
 - Modify: `backend/internal/httpd/apispec/specgen/build.go`
@@ -844,6 +855,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Regenerate: `backend/internal/httpd/apispec/openapi.yaml`, `frontend/src/api/schema.ts`
 
 **Interfaces:**
+
 - Consumes: `messagetemplates.KnownNames/Default/Placeholders/Name.Valid`, `*promptoverrides.Store` (`Get`, `SetTemplate`, `ClearTemplate`).
 - Produces (wire/API):
   - DTOs: `MessageTemplateItem{Name string; Default string; Placeholders []string; Override *string}`, `MessageTemplatesResponse{Templates []MessageTemplateItem}`, `SetMessageTemplateRequest{Template string}`, `MessageTemplateNameParam{Name string}`.
@@ -1139,13 +1151,17 @@ Expected: PASS.
 - [ ] **Step 4b: Regenerate the spec + frontend types, run the drift guard**
 
 Run (from repo root):
+
 ```bash
 npm run api
 ```
+
 Then:
+
 ```bash
 cd backend && go test ./internal/httpd/...
 ```
+
 Expected: PASS, including `TestBuild_MatchesEmbedded`. `git status` should show modified `backend/internal/httpd/apispec/openapi.yaml` and `frontend/src/api/schema.ts` containing the new `message-templates` paths + `MessageTemplateItem`/`MessageTemplatesResponse`/`SetMessageTemplateRequest` schemas.
 
 - [ ] **Step 5: Commit**
@@ -1162,12 +1178,14 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 6: Render simple nudges via the injected `Renderer`
 
 **Files:**
+
 - Modify: `backend/internal/lifecycle/manager.go`
 - Modify: `backend/internal/lifecycle/reactions.go`
 - Modify: `backend/internal/daemon/lifecycle_wiring.go`
 - Test: `backend/internal/lifecycle/reactions_test.go` (or `manager_test.go` — wherever the CI/merge-conflict/review nudge tests live)
 
 **Interfaces:**
+
 - Consumes: `messagetemplates.Renderer`, `messagetemplates.NewRenderer`, `messagetemplates.Name*`, data structs; `promptoverrides.Store.Get`.
 - Produces: `Manager.renderer *messagetemplates.Renderer`; `func WithMessageRenderer(*messagetemplates.Renderer) Option`. A nil renderer (tests that don't set it) must still work — reactions fall back to built-in defaults via a package-level default renderer.
 
@@ -1338,9 +1356,11 @@ Verify ordering: `promptOverrides` must be declared before this call. If relocat
 - [ ] **Step 4: Run tests**
 
 Run:
+
 ```bash
 cd backend && go test ./internal/lifecycle/ ./internal/daemon/
 ```
+
 Expected: PASS — the new override test passes; existing default-message tests pass unchanged (defaults reproduce the old text).
 
 - [ ] **Step 5: Commit**
@@ -1357,10 +1377,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 7: Render AO-internal-reviewer nudges via templates
 
 **Files:**
+
 - Modify: `backend/internal/lifecycle/reactions.go` (`ApplyReviewBatch`, `ApplyReviewResult`)
 - Test: `backend/internal/lifecycle/reactions_test.go` (existing AO-reviewer tests)
 
 **Interfaces:**
+
 - Consumes: `messagetemplates.NameAOReviewerBatch/Single`, `AOReviewerBatchData`, `AOReviewItem`, `AOReviewerSingleData`, `m.renderNudge`.
 
 - [ ] **Step 1: Write/adjust the failing test**
@@ -1467,11 +1489,13 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 8: Frontend — Message templates settings section
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/MessageTemplatesSection.tsx`
 - Create: `frontend/src/renderer/components/MessageTemplatesSection.test.tsx`
 - Modify: `frontend/src/renderer/components/GlobalSettingsForm.tsx`
 
 **Interfaces:**
+
 - Consumes: generated `apiClient` paths `/api/v1/settings/message-templates` (GET), `/api/v1/settings/message-templates/{name}` (PUT/DELETE) from Task 5's regen.
 
 - [ ] **Step 1: Write the failing test**
@@ -1484,7 +1508,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getMock, putMock, deleteMock } = vi.hoisted(() => ({ getMock: vi.fn(), putMock: vi.fn(), deleteMock: vi.fn() }));
+const { getMock, putMock, deleteMock } = vi.hoisted(() => ({
+	getMock: vi.fn(),
+	putMock: vi.fn(),
+	deleteMock: vi.fn(),
+}));
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock, PUT: putMock, DELETE: deleteMock },
 	apiErrorMessage: (e: unknown, fb = "Request failed") => (e instanceof Error ? e.message : fb),
@@ -1610,7 +1638,9 @@ export function MessageTemplatesSection() {
 	});
 	const reset = useMutation({
 		mutationFn: async (name: string) => {
-			const { error } = await apiClient.DELETE("/api/v1/settings/message-templates/{name}", { params: { path: { name } } });
+			const { error } = await apiClient.DELETE("/api/v1/settings/message-templates/{name}", {
+				params: { path: { name } },
+			});
 			if (error) throw new Error(apiErrorMessage(error));
 		},
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: messageTemplatesQueryKey }),
@@ -1698,9 +1728,11 @@ Render it in the section stack, right after `<SystemPromptsSection />`:
 - [ ] **Step 6: Typecheck + full frontend test**
 
 Run:
+
 ```bash
 cd frontend && npm run typecheck && npm run test
 ```
+
 Expected: PASS. Revert any `routeTree.gen.ts` churn: `git checkout -- src/renderer/routeTree.gen.ts` if modified.
 
 - [ ] **Step 7: Commit**
@@ -1719,17 +1751,21 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - [ ] **Step 1: Backend suite + lint**
 
 Run (repo root):
+
 ```bash
 npm run lint
 ```
+
 Expected: PASS (all `go test ./...` + golangci-lint).
 
 - [ ] **Step 2: Frontend suite + typecheck**
 
 Run:
+
 ```bash
 cd frontend && npm run typecheck && npm run test
 ```
+
 Expected: PASS.
 
 - [ ] **Step 3: Confirm no generated-file churn is uncommitted incorrectly**
@@ -1742,6 +1778,7 @@ Expected: clean, or only intended `openapi.yaml` / `schema.ts` already committed
 ## Self-Review
 
 **Spec coverage (Phase 1 slice):**
+
 - "Make all runtime nudge templates editable" → Tasks 1–8 (registry, renderer, store, API, UI, reactions refactor). ✅ All six templates (`review-comment-dispatch`, `ci-failing`, `merge-conflict`, `tracker-bot-comment`, `ao-reviewer-batch`, `ao-reviewer-single`) covered.
 - "Global Settings section mirroring System Prompts" → Task 8. ✅
 - "promptoverrides extended with Templates map" → Task 4. ✅

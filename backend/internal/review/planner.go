@@ -10,7 +10,7 @@ import (
 type StateStatus string
 
 const (
-	// ReviewStateNeedsReview means an eligible PR has no current AO approval or running pass.
+	// ReviewStateNeedsReview means an available PR has no current AO approval or running pass.
 	ReviewStateNeedsReview StateStatus = "needs_review"
 	// ReviewStateRunning means a review run is already active for the PR's current head.
 	ReviewStateRunning StateStatus = "running"
@@ -34,7 +34,7 @@ type PRReviewState struct {
 
 // Plan computes per-PR review work from the currently observed PRs and existing
 // review runs. It is pure so the trigger path and API list path share exactly
-// the same eligibility/status rules.
+// the same availability/status rules.
 func Plan(prs []domain.PullRequest, runs []domain.ReviewRun) []PRReviewState {
 	latest := latestRunsByPRAndSHA(runs)
 	reviews := make([]PRReviewState, 0, len(prs))

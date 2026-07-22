@@ -70,11 +70,11 @@ func (f *fakeProvider) FetchReviewThreads(context.Context, ports.SCMPRRef) (port
 }
 
 func TestParseRoutesByHost(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com", listN: 3}
 	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
-	repo, ok := c.ParseRepository("https://gitlab.finnomena.com/o/n.git")
+	repo, ok := c.ParseRepository("https://gitlab.example.com/o/n.git")
 	if !ok || repo.Provider != "gitlab" {
 		t.Fatalf("parse => %+v ok=%v", repo, ok)
 	}
@@ -90,7 +90,7 @@ func TestParseRoutesByHost(t *testing.T) {
 }
 
 func TestUnknownProviderRoutingErrors(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com", listN: 3}
 	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
@@ -123,11 +123,11 @@ func TestUnknownProviderRoutingErrors(t *testing.T) {
 // more than one provider is split so each ref reaches only its own child
 // provider, rather than the whole batch being routed by refs[0].Repo.Provider.
 func TestFetchPullRequestsSplitsByProvider(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com"}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com"}
 	gh := &fakeProvider{name: "github", host: "github.com"}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
-	glRef := ports.SCMPRRef{Repo: ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Repo: "o/n"}, Number: 1}
+	glRef := ports.SCMPRRef{Repo: ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Repo: "o/n"}, Number: 1}
 	ghRef := ports.SCMPRRef{Repo: ports.SCMRepo{Provider: "github", Host: "github.com", Repo: "o/n"}, Number: 2}
 
 	// Interleave gitlab then github so refs[0] is gitlab; under the old
@@ -164,7 +164,7 @@ func TestFetchPullRequestsSplitsByProvider(t *testing.T) {
 // batch: the valid ref is still fetched, and the unknown ref yields a single
 // Fetched:false observation instead of an error for the whole call.
 func TestFetchPullRequestsUnknownProviderInMixedBatch(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com"}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com"}
 	gh := &fakeProvider{name: "github", host: "github.com"}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
@@ -277,10 +277,10 @@ func TestReplyToThread_ChildWithoutWriterErrors(t *testing.T) {
 	// gl is a plain fakeProvider: it implements scmobserve.Provider but NOT
 	// scmobserve.ReviewThreadWriter, so routing must fail with a clear error
 	// rather than panicking on a bad type assertion.
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com"}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com"}
 	c := New(Entry{"gitlab", gl})
 
-	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Repo: "o/n"}, Number: 3}
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Repo: "o/n"}, Number: 3}
 
 	_, err := c.ReplyToThread(context.Background(), ref, "thread-1", "hello")
 	if err == nil {
@@ -312,7 +312,7 @@ func TestReplyToThread_ChildWithoutWriterErrors(t *testing.T) {
 }
 
 func TestParseRepositoryNoMatch(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com", listN: 3}
 	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
@@ -330,9 +330,9 @@ func TestParseRepositoryNoMatch(t *testing.T) {
 // assertion — and crucially must NOT satisfy ErrSCMInvalid, or the caller would
 // report a missing capability to the human as "your branch is invalid".
 func TestRetargetPR_ChildWithoutRetargeterErrors(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com"}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com"}
 	c := New(Entry{"gitlab", gl})
-	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Repo: "o/n"}
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Repo: "o/n"}
 	ref := ports.SCMPRRef{Repo: repo, Number: 3}
 
 	err := c.RetargetPR(context.Background(), ref, "develop")

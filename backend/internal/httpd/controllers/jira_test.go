@@ -378,11 +378,11 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 			Sprint: &jiraadapter.Sprint{Name: "Sprint 2026-14", State: "active"}},
 	}}
 	rec := serveJiraReq(t, stub, http.MethodGet,
-		"/jira/search?q=eligible&project=DEMO&assignee=acc-123&type=Story,Bug&hideDone=true&activeSprint=1", nil)
+		"/jira/search?q=available&project=DEMO&assignee=acc-123&type=Story,Bug&hideDone=true&activeSprint=1", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if stub.gotText != "eligible" || stub.gotProject != "DEMO" {
+	if stub.gotText != "available" || stub.gotProject != "DEMO" {
 		t.Errorf("service got text=%q project=%q", stub.gotText, stub.gotProject)
 	}
 	// The assignee (accountId) and comma-separated types are threaded into the
@@ -413,11 +413,11 @@ func TestJiraSearch_ReturnsRowsAndPassesQuery(t *testing.T) {
 func TestJiraSearch_AdvancedJQLPassthrough(t *testing.T) {
 	stub := &stubJira{}
 	rec := serveJiraReq(t, stub, http.MethodGet,
-		"/jira/search?jql="+url.QueryEscape(`project = STAR AND labels = urgent`), nil)
+		"/jira/search?jql="+url.QueryEscape(`project = PROJ AND labels = urgent`), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if stub.gotJQL != `project = STAR AND labels = urgent` {
+	if stub.gotJQL != `project = PROJ AND labels = urgent` {
 		t.Errorf("service got jql=%q, want the raw advanced query", stub.gotJQL)
 	}
 	// Structured params are absent, so the service must have received none of them.

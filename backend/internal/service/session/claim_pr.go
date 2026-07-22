@@ -445,7 +445,7 @@ func githubRepoFromURL(raw string) (string, string, error) {
 const gitlabMRPathMarker = "/-/merge_requests/"
 
 // isGitLabMRURL reports whether raw looks like a GitLab merge-request URL. It is
-// deliberately host-agnostic (Finnomena runs self-hosted GitLab, not
+// deliberately host-agnostic (Example Org runs self-hosted GitLab, not
 // gitlab.com), keying only on the "/-/merge_requests/" path marker. Structural
 // validity is left to parseGitLabMRURL.
 func isGitLabMRURL(raw string) bool {

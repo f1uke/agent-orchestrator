@@ -73,7 +73,7 @@ func TestDispatchCommentToWorker_RealTemplateCarriesFileLine(t *testing.T) {
 	fake.sessions["s1"] = domain.SessionRecord{ID: "s1", ProjectID: "p", Kind: domain.KindWorker}
 	stList := &multiPRFakeStore{fakeStore: fake, prs: []domain.PullRequest{{URL: "https://x/pr/9"}}}
 	stList.comments["https://x/pr/9"] = []domain.PullRequestComment{
-		{ThreadID: "T1", ID: "c1", File: "coupon.swift", Line: 75, Body: "knock out getTotalCount()"},
+		{ThreadID: "T1", ID: "c1", File: "item.swift", Line: 75, Body: "knock out getTotalCount()"},
 	}
 	fc := &fakeCommander{}
 	svc := &Service{store: stList, manager: fc, renderer: messagetemplates.NewRenderer(nil)}
@@ -82,7 +82,7 @@ func TestDispatchCommentToWorker_RealTemplateCarriesFileLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fc.lastMessage
-	if !strings.Contains(got, "coupon.swift:75") {
+	if !strings.Contains(got, "item.swift:75") {
 		t.Fatalf("dispatched message missing file:line: %q", got)
 	}
 	if !strings.Contains(got, "knock out getTotalCount()") {

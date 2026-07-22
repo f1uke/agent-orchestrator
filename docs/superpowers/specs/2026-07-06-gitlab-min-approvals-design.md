@@ -13,7 +13,7 @@ whenever `approvals_left == 0 && len(approved_by) > 0`. That value is derived fr
 GitLab's own configured **approval rules**.
 
 When a GitLab project has **no approval rule** (`approvals_required: 0`,
-`has_approval_rules: false` — e.g. `finnomena/mobility/nter-ios-app`), `approvals_left`
+`has_approval_rules: false` — e.g. `example-org/apps/demo-ios-app`), `approvals_left`
 is always `0`, so a **single** approval already reads as `approved` in AO. The team's
 real convention ("needs N human approvals") is invisible to AO.
 
@@ -34,10 +34,10 @@ SCM has no rule of its own, configurable **per project** in the UI.
 
 For a GitLab MR with **no approval rule**:
 
-| approvals_count | minApprovals | AO review decision | board zone |
-|---|---|---|---|
-| `>= minApprovals` | 3 | `approved` | Ready to merge |
-| `< minApprovals`  | 3 | `""` → `pr_open` | In review |
+| approvals_count   | minApprovals | AO review decision | board zone     |
+| ----------------- | ------------ | ------------------ | -------------- |
+| `>= minApprovals` | 3            | `approved`         | Ready to merge |
+| `< minApprovals`  | 3            | `""` → `pr_open`   | In review      |
 
 An MR that has an approval rule is unaffected — GitLab's `approved`/not decides, and
 the per-project `minApprovals` is ignored for it.
@@ -132,8 +132,8 @@ config (`ProjectConfig.ResolveMinApprovals()`).
   detected from the repo origin host (contains `gitlab`). GitHub projects hide it in
   this version. (Planning task: confirm whether the backend already exposes a typed
   provider/host on the project record to use instead of host-substring detection.)
-- Helper note under the field: *"Applies only when the GitLab repo has no approval
-  rule of its own."*
+- Helper note under the field: _"Applies only when the GitLab repo has no approval
+  rule of its own."_
 
 ## Open questions resolved
 

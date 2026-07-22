@@ -26,11 +26,13 @@
 ### Task 1: Domain — register the `gitlab` tracker provider
 
 **Files:**
+
 - Modify: `backend/internal/domain/tracker.go`
 - Modify: `backend/internal/domain/projectconfig.go` (only if it re-validates the provider; see step 3)
 - Test: `backend/internal/domain/tracker_test.go` (create if absent), `backend/internal/domain/projectconfig_test.go`
 
 **Interfaces:**
+
 - Produces: `domain.TrackerProviderGitLab domain.TrackerProvider = "gitlab"`; `TrackerIntakeConfig.Validate()` accepts `github` and `gitlab`.
 
 - [ ] **Step 1: Write the failing test** — add to `backend/internal/domain/projectconfig_test.go` the table cases:
@@ -106,11 +108,13 @@ git commit -m "feat(domain): register gitlab tracker provider"
 ### Task 2: GitLab REST v4 client
 
 **Files:**
+
 - Create: `backend/internal/adapters/scm/gitlab/client.go`
 - Create: `backend/internal/adapters/scm/gitlab/doc.go`
 - Test: `backend/internal/adapters/scm/gitlab/client_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `type ClientOptions struct { HTTPClient *http.Client; Token TokenSource; APIBase string; UserAgent string }`
   - `func NewClient(opts ClientOptions) *Client`
@@ -205,10 +209,12 @@ git commit -m "feat(scm/gitlab): REST v4 client with ETag + private-token auth"
 ### Task 3: GitLab token sources (env + `glab` fallback)
 
 **Files:**
+
 - Create: `backend/internal/adapters/scm/gitlab/auth.go`
 - Test: `backend/internal/adapters/scm/gitlab/auth_test.go`
 
 **Interfaces:**
+
 - Produces (mirror `github/auth.go` names/semantics):
   - `type TokenSource interface { Token(ctx context.Context) (string, error) }`
   - `type tokenInvalidator interface { InvalidateToken() }`
@@ -230,9 +236,9 @@ import (
 )
 
 func TestParseGlabToken(t *testing.T) {
-	sample := `gitlab.finnomena.com
-  ✓ Logged in to gitlab.finnomena.com as fluke.s (config.yml)
-  ✓ Git operations for gitlab.finnomena.com configured to use https protocol.
+	sample := `gitlab.example.com
+  ✓ Logged in to gitlab.example.com as fluke.s (config.yml)
+  ✓ Git operations for gitlab.example.com configured to use https protocol.
   ✓ Token: glpat-abc123DEF
 `
 	got, err := parseGlabToken(sample)
@@ -254,7 +260,7 @@ func TestEnvTokenSourcePrecedence(t *testing.T) {
 }
 
 func TestGlabTokenSourceUsesInjectedHook(t *testing.T) {
-	src := &GlabTokenSource{Host: "gitlab.finnomena.com", Glab: func(ctx context.Context, host string) (string, error) {
+	src := &GlabTokenSource{Host: "gitlab.example.com", Glab: func(ctx context.Context, host string) (string, error) {
 		return "  ✓ Token: glpat-XYZ\n", nil
 	}}
 	tok, err := src.Token(context.Background())
@@ -311,11 +317,13 @@ git commit -m "feat(scm/gitlab): env + glab token sources"
 ### Task 4: Provider constructor + `ParseRepository` (nested groups)
 
 **Files:**
+
 - Create: `backend/internal/adapters/scm/gitlab/provider.go`
 - Create: `backend/internal/adapters/scm/gitlab/observer_provider.go` (ParseRepository only in this task)
 - Test: `backend/internal/adapters/scm/gitlab/provider_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `type ProviderOptions struct { Client *Client; HTTPClient *http.Client; Token TokenSource; SkipTokenPreflight bool; APIBase string; Host string; UserAgent string; Logger *slog.Logger }`
   - `func NewProvider(opts ProviderOptions) (*Provider, error)`
@@ -326,18 +334,18 @@ git commit -m "feat(scm/gitlab): env + glab token sources"
 
 ```go
 func TestParseRepositoryNestedGroup(t *testing.T) {
-	p, _ := NewProvider(ProviderOptions{Host: "gitlab.finnomena.com", APIBase: "https://gitlab.finnomena.com/api/v4", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
+	p, _ := NewProvider(ProviderOptions{Host: "gitlab.example.com", APIBase: "https://gitlab.example.com/api/v4", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
 	cases := []string{
-		"git@gitlab.finnomena.com:group/sub/proj.git",
-		"https://gitlab.finnomena.com/group/sub/proj.git",
-		"https://gitlab.finnomena.com/group/sub/proj",
+		"git@gitlab.example.com:group/sub/proj.git",
+		"https://gitlab.example.com/group/sub/proj.git",
+		"https://gitlab.example.com/group/sub/proj",
 	}
 	for _, remote := range cases {
 		repo, ok := p.ParseRepository(remote)
 		if !ok {
 			t.Fatalf("%s: not parsed", remote)
 		}
-		if repo.Provider != "gitlab" || repo.Host != "gitlab.finnomena.com" {
+		if repo.Provider != "gitlab" || repo.Host != "gitlab.example.com" {
 			t.Fatalf("%s: provider/host = %q/%q", remote, repo.Provider, repo.Host)
 		}
 		if repo.Repo != "group/sub/proj" || repo.Owner != "group/sub" || repo.Name != "proj" {
@@ -347,7 +355,7 @@ func TestParseRepositoryNestedGroup(t *testing.T) {
 }
 
 func TestParseRepositoryRejectsOtherHost(t *testing.T) {
-	p, _ := NewProvider(ProviderOptions{Host: "gitlab.finnomena.com", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
+	p, _ := NewProvider(ProviderOptions{Host: "gitlab.example.com", Token: StaticTokenSource("t"), SkipTokenPreflight: true})
 	if _, ok := p.ParseRepository("git@github.com:acme/demo.git"); ok {
 		t.Fatalf("github.com remote should not be claimed by gitlab provider")
 	}
@@ -382,10 +390,12 @@ git commit -m "feat(scm/gitlab): provider constructor + nested-group ParseReposi
 ### Task 5: MR listing + guards (`ListOpenPRsByRepo`, `RepoPRListGuard`, `CommitChecksGuard`)
 
 **Files:**
+
 - Modify: `backend/internal/adapters/scm/gitlab/observer_provider.go`
 - Test: `backend/internal/adapters/scm/gitlab/observer_provider_test.go`
 
 **Interfaces:**
+
 - Produces on `*Provider`:
   - `ListOpenPRsByRepo(ctx, repo ports.SCMRepo) ([]ports.SCMPRObservation, error)`
   - `RepoPRListGuard(ctx, repo ports.SCMRepo, etag string) (ports.SCMGuardResult, error)`
@@ -407,7 +417,7 @@ func TestListOpenPRsByRepo(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL) // helper builds Provider with APIBase=srv.URL, Host set
-	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.finnomena.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
+	repo := ports.SCMRepo{Provider: "gitlab", Host: "gitlab.example.com", Owner: "group/sub", Name: "proj", Repo: "group/sub/proj"}
 	prs, err := p.ListOpenPRsByRepo(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("ListOpenPRsByRepo: %v", err)
@@ -439,7 +449,7 @@ func TestRepoPRListGuard304(t *testing.T) {
 }
 ```
 
-Add a `newTestProvider(t, apiBase string) *Provider` helper in the test file (builds `ProviderOptions{Client: NewClient(ClientOptions{APIBase: apiBase, Token: StaticTokenSource("t")}), Host: "gitlab.finnomena.com", SkipTokenPreflight: true}`).
+Add a `newTestProvider(t, apiBase string) *Provider` helper in the test file (builds `ProviderOptions{Client: NewClient(ClientOptions{APIBase: apiBase, Token: StaticTokenSource("t")}), Host: "gitlab.example.com", SkipTokenPreflight: true}`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -467,10 +477,12 @@ git commit -m "feat(scm/gitlab): MR listing + ETag guards"
 ### Task 6: `FetchPullRequests` — MR detail + pipeline → mergeability + CI summary
 
 **Files:**
+
 - Modify: `backend/internal/adapters/scm/gitlab/observer_provider.go`
 - Test: `backend/internal/adapters/scm/gitlab/fetch_test.go`
 
 **Interfaces:**
+
 - Produces: `FetchPullRequests(ctx, refs []ports.SCMPRRef) ([]ports.SCMObservation, error)`; helpers `normalizeCIStatus(pipelineStatus string) string` (`success`→passing, `failed`→failing, `running`/`pending`/`created`/`scheduled`→pending, else unknown) and `mergeability(mr restMR) ports.SCMMergeabilityObservation` (`merge_status=="can_be_merged"` → Mergeable; `has_conflicts` → Conflict + blocker "merge conflict").
 
 - [ ] **Step 1: Write the failing test** — fake server serves MR detail + its pipelines + jobs:
@@ -490,7 +502,7 @@ func TestFetchPullRequestsMergeabilityAndCI(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	p := newTestProvider(t, srv.URL)
-	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.finnomena.com", Provider: "gitlab"}, Number: 7}
+	ref := ports.SCMPRRef{Repo: ports.SCMRepo{Repo: "group/proj", Host: "gitlab.example.com", Provider: "gitlab"}, Number: 7}
 	obs, err := p.FetchPullRequests(context.Background(), []ports.SCMPRRef{ref})
 	if err != nil {
 		t.Fatalf("FetchPullRequests: %v", err)
@@ -540,10 +552,12 @@ git commit -m "feat(scm/gitlab): FetchPullRequests with mergeability + CI"
 ### Task 7: `FetchFailedCheckLogTail` — job trace tail
 
 **Files:**
+
 - Modify: `backend/internal/adapters/scm/gitlab/observer_provider.go`
 - Test: `backend/internal/adapters/scm/gitlab/logtail_test.go`
 
 **Interfaces:**
+
 - Produces: `FetchFailedCheckLogTail(ctx, repo ports.SCMRepo, check ports.SCMCheckObservation) (string, error)` — GETs `projects/<esc>/jobs/<check.ProviderID>/trace` (plain text), returns last 20 lines. Reuse a `lastNLines(s string, n int) string` helper (create in this package; 20 = `ciFailureLogTailLines` const mirroring github).
 
 - [ ] **Step 1: Write the failing test**
@@ -596,10 +610,12 @@ git commit -m "feat(scm/gitlab): failed job log tail"
 ### Task 8: `FetchReviewThreads` — discussions + approvals
 
 **Files:**
+
 - Modify: `backend/internal/adapters/scm/gitlab/observer_provider.go`
 - Test: `backend/internal/adapters/scm/gitlab/review_test.go`
 
 **Interfaces:**
+
 - Produces: `FetchReviewThreads(ctx, ref ports.SCMPRRef) (ports.SCMReviewObservation, error)` — GETs `.../merge_requests/<iid>/discussions` and `.../merge_requests/<iid>/approvals`. Maps each discussion → `ports.SCMReviewThreadObservation` (ID=discussion id, Path/Line from note `position.new_path`/`new_line`, Resolved from note `resolved`, `IsBot` from author). Notes → `SCMReviewCommentObservation`. Decision from approvals: `approved` when `approvals_left == 0` and `approved_by` non-empty, else empty.
 
 - [ ] **Step 1: Write the failing test**
@@ -665,11 +681,13 @@ git commit -m "feat(scm/gitlab): review discussions + approvals decision"
 ### Task 9: Composite SCM dispatcher
 
 **Files:**
+
 - Create: `backend/internal/adapters/scm/composite/provider.go`
 - Create: `backend/internal/adapters/scm/composite/doc.go`
 - Test: `backend/internal/adapters/scm/composite/provider_test.go`
 
 **Interfaces:**
+
 - Consumes: `scmobserve.Provider` (the 7-method interface).
 - Produces:
   - `func New(providers ...scmobserve.Provider) *Provider` — ordered; first whose `ParseRepository` returns ok claims a remote.
@@ -722,11 +740,11 @@ func (f *fakeProvider) FetchFailedCheckLogTail(context.Context, ports.SCMRepo, p
 func (f *fakeProvider) FetchReviewThreads(context.Context, ports.SCMPRRef) (ports.SCMReviewObservation, error) { return ports.SCMReviewObservation{}, nil }
 
 func TestParseRoutesByHost(t *testing.T) {
-	gl := &fakeProvider{name: "gitlab", host: "gitlab.finnomena.com", listN: 3}
+	gl := &fakeProvider{name: "gitlab", host: "gitlab.example.com", listN: 3}
 	gh := &fakeProvider{name: "github", host: "github.com", listN: 1}
 	c := New(Entry{"gitlab", gl}, Entry{"github", gh})
 
-	repo, ok := c.ParseRepository("https://gitlab.finnomena.com/o/n.git")
+	repo, ok := c.ParseRepository("https://gitlab.example.com/o/n.git")
 	if !ok || repo.Provider != "gitlab" {
 		t.Fatalf("parse => %+v ok=%v", repo, ok)
 	}
@@ -768,12 +786,14 @@ git commit -m "feat(scm/composite): deterministic per-repo provider dispatcher"
 ### Task 10: GitLab issue tracker adapter
 
 **Files:**
+
 - Create: `backend/internal/adapters/tracker/gitlab/tracker.go`
 - Create: `backend/internal/adapters/tracker/gitlab/auth.go` (reuse the same token-source pattern; may import the scm/gitlab auth or duplicate the small pattern — prefer a local `Options{Token, APIBase, HTTPClient}` mirroring `tracker/github/Options`)
 - Create: `backend/internal/adapters/tracker/gitlab/doc.go`
 - Test: `backend/internal/adapters/tracker/gitlab/tracker_test.go`
 
 **Interfaces:**
+
 - Produces: `func New(opts Options) (*Tracker, error)`; `*Tracker` implements `ports.Tracker` (`Get`, `List`, `Preflight`). `TrackerID.Native` form for GitLab = `"group/sub/proj#<iid>"`; `parseID` splits on last `#`. Issue state map: `opened`→`IssueOpen`, `closed`→`IssueDone` (round 1; GitLab has no native in-progress/review without board columns).
 
 - [ ] **Step 1: Write the failing test**
@@ -825,10 +845,12 @@ git commit -m "feat(tracker/gitlab): GitLab issue adapter"
 ### Task 11: Multi-provider tracker resolver
 
 **Files:**
+
 - Modify: `backend/internal/observe/trackerintake/observer.go` (add `MultiTrackerResolver`; keep `SingleTrackerResolver` for existing tests)
 - Test: `backend/internal/observe/trackerintake/observer_test.go`
 
 **Interfaces:**
+
 - Produces: `type MultiTrackerResolver struct { Adapters map[domain.TrackerProvider]ports.Tracker }` with `Resolve(provider domain.TrackerProvider) (ports.Tracker, error)` — returns the mapped adapter or `fmt.Errorf("tracker intake: no adapter for provider %q", provider)`. Empty provider defaults to `domain.TrackerProviderGitHub`.
 
 - [ ] **Step 1: Write the failing test**
@@ -877,11 +899,13 @@ git commit -m "feat(trackerintake): multi-provider tracker resolver"
 ### Task 12: Daemon wiring — SCM composite + tracker multi-resolver
 
 **Files:**
+
 - Modify: `backend/internal/daemon/scm_wiring.go`
 - Modify: `backend/internal/daemon/tracker_intake_wiring.go`
 - Test: `backend/internal/daemon/scm_wiring_test.go` (create), extend existing tracker wiring test if present
 
 **Interfaces:**
+
 - Consumes: `composite.New`, `composite.Entry`, `scmgitlab.NewProvider`, `trackergitlab.New`, `MultiTrackerResolver`.
 - Produces: `func gitlabHosts() []string` (reads `AO_GITLAB_HOST`, comma-split, trims); GitLab wired only when non-empty.
 
@@ -889,9 +913,9 @@ git commit -m "feat(trackerintake): multi-provider tracker resolver"
 
 ```go
 func TestGitlabHostsParsing(t *testing.T) {
-	t.Setenv("AO_GITLAB_HOST", " gitlab.finnomena.com , gl.example.com ")
+	t.Setenv("AO_GITLAB_HOST", " gitlab.example.com , gl.example.com ")
 	got := gitlabHosts()
-	if len(got) != 2 || got[0] != "gitlab.finnomena.com" || got[1] != "gl.example.com" {
+	if len(got) != 2 || got[0] != "gitlab.example.com" || got[1] != "gl.example.com" {
 		t.Fatalf("hosts=%v", got)
 	}
 	t.Setenv("AO_GITLAB_HOST", "")
@@ -929,6 +953,7 @@ git commit -m "feat(daemon): wire GitLab SCM + tracker behind AO_GITLAB_HOST"
 ### Task 13: Docs + full verification
 
 **Files:**
+
 - Modify: `README.md` (config section) and/or `docs/` — document `AO_GITLAB_HOST`, `AO_GITLAB_TOKEN`, glab-login fallback, and that absence of `AO_GITLAB_HOST` keeps behavior unchanged.
 
 - [ ] **Step 1: Add a short "GitLab (self-hosted)" subsection** to the config docs listing the three env behaviors and the single-host round-1 limitation.
@@ -939,7 +964,7 @@ Run: `npm run lint && npm run frontend:typecheck`
 Also: `cd backend && go test -race ./internal/adapters/... ./internal/observe/... ./internal/daemon/... ./internal/domain/...`
 Expected: PASS.
 
-- [ ] **Step 3: Manual smoke (optional, requires glab login)** — with `AO_GITLAB_HOST=gitlab.finnomena.com`, start the daemon and confirm the SCM observer logs no credential warning and picks up a GitLab MR for a session whose origin is on that host. Do not commit any run state.
+- [ ] **Step 3: Manual smoke (optional, requires glab login)** — with `AO_GITLAB_HOST=gitlab.example.com`, start the daemon and confirm the SCM observer logs no credential warning and picks up a GitLab MR for a session whose origin is on that host. Do not commit any run state.
 
 - [ ] **Step 4: Commit**
 

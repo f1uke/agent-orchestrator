@@ -551,14 +551,14 @@ func escapeJQL(s string) string {
 //
 // The operand of `~` is not a string — Jira hands it to a Lucene-style text
 // parser where `+ - && || ! ( ) { } [ ] ^ " ~ * ? : \ /` are all operators. So
-// `e-coupon` parses as "e AND NOT coupon" and matches nothing, which is why a
+// `checkout` parses as "e AND NOT item" and matches nothing, which is why a
 // large share of real searches silently returned zero rows.
 //
 // Splitting on every non-letter/digit rune neutralises the whole operator set at
-// once, and it matches how Jira indexes text: "E-Coupon" is tokenized to `e` +
-// `coupon`, so terms are what the index can actually match. Backslash-escaping
-// instead (`e\-coupon`) is the tempting fix and is WRONG once a wildcard is
-// involved — a wildcard term bypasses the analyzer, so `e\-coupon*` looks for a
+// once, and it matches how Jira indexes text: "E-Item" is tokenized to `e` +
+// `item`, so terms are what the index can actually match. Backslash-escaping
+// instead (`e\-item`) is the tempting fix and is WRONG once a wildcard is
+// involved — a wildcard term bypasses the analyzer, so `e\-item*` looks for a
 // single token that the index never contains. Verified against the real Jira.
 //
 // Terms are lowercased so an uppercase AND/OR/NOT is a plain word rather than a

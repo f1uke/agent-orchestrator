@@ -616,7 +616,7 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 		}
 
 		// Poll 2: both PRs now report merge conflicts. Only the bottom of the
-		// stack (the root, targeting main) is eligible for the rebase nudge; the
+		// stack (the root, targeting main) is available for the rebase nudge; the
 		// child targets feat/x, the still-open root's source branch, so it is
 		// expected to conflict against its parent until the parent merges and is
 		// suppressed.

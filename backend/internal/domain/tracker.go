@@ -85,7 +85,7 @@ type ListFilter struct {
 }
 
 // TrackerIntakeConfig controls issue-driven worker spawning for a project.
-// Enabled requires an explicit assignee eligibility rule so turning intake on
+// Enabled requires an explicit assignee availability rule so turning intake on
 // cannot accidentally drain an entire issue backlog.
 type TrackerIntakeConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
@@ -95,7 +95,7 @@ type TrackerIntakeConfig struct {
 	// GitLab nested "group/sub/proj" path. When empty, the intake loop derives
 	// it from the project's repo origin URL.
 	Repo string `json:"repo,omitempty"`
-	// Assignee narrows eligible issues to one assignee. Provider-specific values
+	// Assignee narrows available issues to one assignee. Provider-specific values
 	// such as "*" are passed through unchanged.
 	Assignee string `json:"assignee,omitempty"`
 }

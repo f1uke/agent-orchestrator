@@ -31,7 +31,7 @@ func startTrackerIntake(ctx context.Context, store *sqlite.Store, sessions *sess
 	rec := reg.Register(looptelemetry.Spec{
 		Name:        "tracker-intake",
 		Display:     "Issue polling",
-		Description: "Scans intake-enabled projects for eligible issues and spawns sessions for them.",
+		Description: "Scans intake-enabled projects for available issues and spawns sessions for them.",
 		Interval:    trackerintake.DefaultTickInterval,
 	})
 	adapters := map[domain.TrackerProvider]ports.Tracker{

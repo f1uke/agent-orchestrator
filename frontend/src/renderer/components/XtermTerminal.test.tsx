@@ -803,7 +803,7 @@ describe("XtermTerminal", () => {
 		it("returns undefined for a line with no known session reference", () => {
 			render(<XtermTerminal theme="dark" sessionLinkResolver={resolver} onSessionLinkActivate={vi.fn()} />);
 			// Unknown hyphen-number token (Jira key) must not linkify.
-			expect(provideLinksFor("blocked by STAR-2272")).toBeUndefined();
+			expect(provideLinksFor("blocked by PROJ-2272")).toBeUndefined();
 		});
 
 		it("returns undefined when no resolver is supplied", () => {

@@ -214,7 +214,7 @@ func TestPollAppliesLocalEligibilityFilter(t *testing.T) {
 	tracker := &fakeTracker{issues: []domain.Issue{
 		{ID: domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: "acme/demo#1"}, Title: "unassigned", State: domain.IssueOpen},
 		{ID: domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: "acme/demo#2"}, Title: "wrong assignee", State: domain.IssueOpen, Assignees: []string{"bob"}},
-		{ID: domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: "acme/demo#3"}, Title: "eligible", State: domain.IssueOpen, Labels: []string{"Agent-Ready"}, Assignees: []string{"Alice"}},
+		{ID: domain.TrackerID{Provider: domain.TrackerProviderGitHub, Native: "acme/demo#3"}, Title: "available", State: domain.IssueOpen, Labels: []string{"Agent-Ready"}, Assignees: []string{"Alice"}},
 	}}
 	spawner := &fakeSpawner{}
 
@@ -222,7 +222,7 @@ func TestPollAppliesLocalEligibilityFilter(t *testing.T) {
 		t.Fatalf("Poll() error = %v", err)
 	}
 	if len(spawner.calls) != 1 || spawner.calls[0].IssueID != "github:acme/demo#3" {
-		t.Fatalf("spawn calls = %+v, want only eligible issue #3", spawner.calls)
+		t.Fatalf("spawn calls = %+v, want only available issue #3", spawner.calls)
 	}
 }
 
@@ -286,7 +286,7 @@ func TestTrackerRepoUsesConfiguredRepo(t *testing.T) {
 func TestTrackerRepoResolvesGitLabFromOrigin(t *testing.T) {
 	project := domain.ProjectRecord{
 		ID:            "demo",
-		RepoOriginURL: "git@gitlab.finnomena.com:group/sub/proj.git",
+		RepoOriginURL: "git@gitlab.example.com:group/sub/proj.git",
 		Config: domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{
 			Enabled:  true,
 			Provider: domain.TrackerProviderGitLab,
@@ -308,7 +308,7 @@ func TestTrackerRepoResolvesGitLabFromOrigin(t *testing.T) {
 func TestTrackerRepoUsesConfiguredRepoForGitLab(t *testing.T) {
 	project := domain.ProjectRecord{
 		ID:            "demo",
-		RepoOriginURL: "git@gitlab.finnomena.com:wrong/repo.git",
+		RepoOriginURL: "git@gitlab.example.com:wrong/repo.git",
 		Config: domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{
 			Enabled:  true,
 			Provider: domain.TrackerProviderGitLab,
@@ -364,9 +364,9 @@ func TestParseGitLabRepoNative(t *testing.T) {
 		remote string
 		want   string
 	}{
-		{"ssh nested", "git@gitlab.finnomena.com:group/sub/proj.git", "group/sub/proj"},
-		{"https nested", "https://gitlab.finnomena.com/group/sub/proj", "group/sub/proj"},
-		{"https nested with git suffix", "https://gitlab.finnomena.com/group/sub/proj.git", "group/sub/proj"},
+		{"ssh nested", "git@gitlab.example.com:group/sub/proj.git", "group/sub/proj"},
+		{"https nested", "https://gitlab.example.com/group/sub/proj", "group/sub/proj"},
+		{"https nested with git suffix", "https://gitlab.example.com/group/sub/proj.git", "group/sub/proj"},
 		{"bare path", "group/sub/proj", "group/sub/proj"},
 		{"empty", "", ""},
 		{"invalid single segment", "onlyone", ""},

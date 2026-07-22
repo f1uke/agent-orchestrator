@@ -225,7 +225,7 @@ function AttachedTerminal({
 	// worker linkifies `#`/`!` even before it opens its own PR). Provider gating
 	// falls out: a base — and thus its sigil — exists only when that remote has
 	// been observed. Same provider split the Reviews/Comments UI uses.
-	// Jira-key linkification (`STAR-2272` → the issue's browse URL). Gated on a
+	// Jira-key linkification (`PROJ-2272` → the issue's browse URL). Gated on a
 	// known browse base, derived from THIS session's linked-issue URL (Slice 1's
 	// display-only Jira context), so an unlinked session — or a non-Jira project —
 	// leaves hyphen-number tokens as plain text. The fetch is disabled unless the

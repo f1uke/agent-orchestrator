@@ -116,7 +116,7 @@
          "content": [
           {
            "type": "text",
-           "text": "Eligible list renders from the usable coupon."
+           "text": "Available list renders from the usable item."
           }
          ],
          "attrs": {
@@ -161,7 +161,7 @@
      "content": [
       {
        "type": "text",
-       "text": "The summary totals stay accurate when a coupon is.",
+       "text": "The summary totals stay accurate when a item is.",
        "marks": [
         {
          "type": "strong"
@@ -187,7 +187,7 @@
          "content": [
           {
            "type": "text",
-           "text": "Coupon is applied before checkout and verify the eligible list."
+           "text": "Item is applied before checkout and verify the available list."
           }
          ],
          "attrs": {
@@ -207,7 +207,7 @@
          "content": [
           {
            "type": "text",
-           "text": "The eligible list renders from the usable coupon response. Configure the."
+           "text": "The available list renders from the usable item response. Configure the."
           }
          ],
          "attrs": {
@@ -228,7 +228,7 @@
              "content": [
               {
                "type": "text",
-               "text": "Coupon response. Configure the."
+               "text": "Item response. Configure the."
               }
              ],
              "attrs": {
@@ -268,7 +268,7 @@
              "content": [
               {
                "type": "text",
-               "text": "A coupon is applied before checkout."
+               "text": "A item is applied before checkout."
               }
              ],
              "attrs": {
@@ -323,7 +323,7 @@
      "content": [
       {
        "type": "text",
-       "text": "Verify the eligible list renders from the.",
+       "text": "Verify the available list renders from the.",
        "marks": [
         {
          "type": "strong"
@@ -349,7 +349,7 @@
          "content": [
           {
            "type": "text",
-           "text": "Usable coupon response. Configure the participating funds panel."
+           "text": "Usable item response. Configure the participating funds panel."
           },
           {
            "type": "inlineCard",
@@ -402,7 +402,7 @@
      "content": [
       {
        "type": "text",
-       "text": "When a coupon is applied before checkout and verify the.",
+       "text": "When a item is applied before checkout and verify the.",
        "marks": [
         {
          "type": "strong"
@@ -428,7 +428,7 @@
          "content": [
           {
            "type": "text",
-           "text": "And verify the eligible list renders from the usable coupon response.."
+           "text": "And verify the available list renders from the usable item response.."
           },
           {
            "type": "inlineCard",
@@ -455,7 +455,7 @@
          "content": [
           {
            "type": "text",
-           "text": "The usable coupon response.."
+           "text": "The usable item response.."
           },
           {
            "type": "inlineCard",
@@ -486,7 +486,7 @@
          "content": [
           {
            "type": "text",
-           "text": "Accurate when a coupon is applied."
+           "text": "Accurate when a item is applied."
           },
           {
            "type": "inlineCard",
@@ -497,7 +497,7 @@
           },
           {
            "type": "text",
-           "text": "Checkout and verify the eligible list renders."
+           "text": "Checkout and verify the available list renders."
           }
          ],
          "attrs": {
@@ -517,7 +517,7 @@
          "content": [
           {
            "type": "text",
-           "text": "From the usable coupon response. Configure the participating."
+           "text": "From the usable item response. Configure the participating."
           },
           {
            "type": "inlineCard",
@@ -553,7 +553,7 @@
      "content": [
       {
        "type": "text",
-       "text": "Stay accurate when a coupon is applied before checkout and.",
+       "text": "Stay accurate when a item is applied before checkout and.",
        "marks": [
         {
          "type": "strong"
@@ -573,7 +573,7 @@
        "content": [
         {
          "type": "text",
-         "text": "Before checkout and verify the eligible list renders from the usable."
+         "text": "Before checkout and verify the available list renders from the usable."
         }
        ],
        "attrs": {

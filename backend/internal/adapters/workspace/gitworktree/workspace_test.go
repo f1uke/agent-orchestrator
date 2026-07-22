@@ -102,11 +102,11 @@ func TestManagedPathSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "sess", Branch: "feature/STAR-2271-x"})
+	path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "sess", Branch: "feature/PROJ-2271-x"})
 	if err != nil {
 		t.Fatalf("managed path: %v", err)
 	}
-	if want := filepath.Join(ws.managedRoot, "proj", "feature", "STAR-2271-x"); path != want {
+	if want := filepath.Join(ws.managedRoot, "proj", "feature", "PROJ-2271-x"); path != want {
 		t.Fatalf("path = %q, want %q", path, want)
 	}
 	if _, err := ws.validateManagedPath(filepath.Join(root, "..", "outside")); !errors.Is(err, ErrUnsafePath) {
@@ -125,11 +125,11 @@ func TestWorkerManagedPathMirrorsBranch(t *testing.T) {
 	}
 
 	t.Run("nested gitflow branch", func(t *testing.T) {
-		path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "proj-1", Branch: "feature/STAR-2271-ecoupon-result"})
+		path, err := ws.managedPath(ports.WorkspaceConfig{ProjectID: "proj", SessionID: "proj-1", Branch: "feature/PROJ-2271-checkout-result"})
 		if err != nil {
 			t.Fatalf("managed path: %v", err)
 		}
-		if want := filepath.Join(ws.managedRoot, "proj", "feature", "STAR-2271-ecoupon-result"); path != want {
+		if want := filepath.Join(ws.managedRoot, "proj", "feature", "PROJ-2271-checkout-result"); path != want {
 			t.Fatalf("path = %q, want %q", path, want)
 		}
 	})

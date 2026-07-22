@@ -380,11 +380,11 @@ describe("BrowseJiraPage", () => {
 		expect(screen.queryByRole("button", { name: "Bug" })).toBeNull();
 		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
 		fireEvent.change(screen.getByLabelText("Advanced JQL query"), {
-			target: { value: "project = STAR AND labels = urgent" },
+			target: { value: "project = PROJ AND labels = urgent" },
 		});
 
 		const sawJql = searchMock.mock.calls.some(
-			(c: unknown[]) => (c[3] as { jql?: string } | undefined)?.jql === "project = STAR AND labels = urgent",
+			(c: unknown[]) => (c[3] as { jql?: string } | undefined)?.jql === "project = PROJ AND labels = urgent",
 		);
 		expect(sawJql).toBe(true);
 
@@ -559,14 +559,14 @@ describe("BrowseJiraPage", () => {
 				hideDone: false,
 				activeSprintOnly: false,
 				advancedMode: true,
-				advancedJql: "project = STAR",
+				advancedJql: "project = PROJ",
 			}),
 		);
 		setSearch({ data: richData });
 		renderPage();
 
 		const jql = screen.getByLabelText("Advanced JQL query") as HTMLInputElement;
-		expect(jql.value).toBe("project = STAR");
+		expect(jql.value).toBe("project = PROJ");
 		expect(screen.queryByLabelText("Filter by assignee")).toBeNull();
 	});
 });

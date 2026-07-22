@@ -1685,7 +1685,7 @@ function mockPRComments(session: WorkspaceSession): Group[] {
 	});
 	const gl = prs[1];
 	if (gl) {
-		const glUrl = `https://gitlab.com/finnomena/agent-orchestrator/-/merge_requests/${gl.number}`;
+		const glUrl = `https://gitlab.com/example-org/agent-orchestrator/-/merge_requests/${gl.number}`;
 		groups.push({
 			prUrl: glUrl,
 			htmlUrl: glUrl,
@@ -1704,7 +1704,7 @@ function mockPRComments(session: WorkspaceSession): Group[] {
 						c(
 							`${gl.number}-c2`,
 							"fluke.s",
-							`changed this line in [version 4 of the diff](/finnomena/agent-orchestrator/-/merge_requests/${gl.number}/diffs?diff_id=177522)`,
+							`changed this line in [version 4 of the diff](/example-org/agent-orchestrator/-/merge_requests/${gl.number}/diffs?diff_id=177522)`,
 							false,
 							true,
 						),

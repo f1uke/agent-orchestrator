@@ -546,7 +546,7 @@ func TestSessionClaimPR_GHFallbackWhenProjectRepoMissing(t *testing.T) {
 
 func TestSessionClaimGitLabMR(t *testing.T) {
 	cfg := setConfigEnv(t)
-	const mrURL = "https://gitlab.finnomena.com/group/sub/proj/-/merge_requests/42"
+	const mrURL = "https://gitlab.example.com/group/sub/proj/-/merge_requests/42"
 	var gotPR string
 	log := &sessionRequestLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -556,7 +556,7 @@ func TestSessionClaimGitLabMR(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions/demo-1":
 			_, _ = io.WriteString(w, `{"session":`+sessionJSON("demo-1", "demo", "worker", "working", false)+`}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
-			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"git@gitlab.finnomena.com:group/sub/proj.git","defaultBranch":"main"}}`)
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"git@gitlab.example.com:group/sub/proj.git","defaultBranch":"main"}}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/pr/claim":
 			var req claimPRRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)

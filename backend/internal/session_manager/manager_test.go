@@ -592,11 +592,11 @@ func TestSpawn_UsesBaseBranch(t *testing.T) {
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
 	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
-	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, BaseBranch: "STAR-2270"}); err != nil {
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, BaseBranch: "PROJ-2270"}); err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	if ws.lastCfg.BaseBranch != "STAR-2270" {
-		t.Fatalf("base = %q, want STAR-2270", ws.lastCfg.BaseBranch)
+	if ws.lastCfg.BaseBranch != "PROJ-2270" {
+		t.Fatalf("base = %q, want PROJ-2270", ws.lastCfg.BaseBranch)
 	}
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {
@@ -643,7 +643,7 @@ func TestSpawn_PersistsResolvedTargetAndBaseBranch(t *testing.T) {
 	m, st = newMgr()
 	rec, err = m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker,
-		BaseBranch: "STAR-2270", PRTarget: "release/2.1",
+		BaseBranch: "PROJ-2270", PRTarget: "release/2.1",
 	})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -651,8 +651,8 @@ func TestSpawn_PersistsResolvedTargetAndBaseBranch(t *testing.T) {
 	if got := st.sessions[rec.ID].PRTarget; got != "release/2.1" {
 		t.Fatalf("explicit PRTarget = %q, want release/2.1", got)
 	}
-	if got := st.sessions[rec.ID].BaseBranch; got != "STAR-2270" {
-		t.Fatalf("explicit BaseBranch = %q, want STAR-2270", got)
+	if got := st.sessions[rec.ID].BaseBranch; got != "PROJ-2270" {
+		t.Fatalf("explicit BaseBranch = %q, want PROJ-2270", got)
 	}
 
 	// An explicit base with no target merges back into that base, NOT into the
@@ -4245,7 +4245,7 @@ func TestSpawnBranchNaming(t *testing.T) {
 		// implement ports.OneShotNamer, so this exercises the fallback path
 		// without executing any subprocess.
 		m, _, _, ws := newManager()
-		_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true, IssueID: "STAR-1 thing"})
+		_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true, IssueID: "PROJ-1 thing"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -4312,13 +4312,13 @@ func TestSpawn_GitConventionEndToEnd(t *testing.T) {
 		// Stand in for the AI namer: it emits a gitflow-typed name; the custom
 		// convention must rewrite the type segment to the fixed prefix.
 		m.genBranchName = func(context.Context, ports.Agent, ports.SpawnConfig, domain.ProjectRecord) (string, bool) {
-			return "feature/STAR-1-add-login", true
+			return "feature/PROJ-1-add-login", true
 		}
 		if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true}); err != nil {
 			t.Fatal(err)
 		}
-		if ws.lastCfg.Branch != "feat/STAR-1-add-login" {
-			t.Fatalf("auto-named branch = %q, want feat/STAR-1-add-login", ws.lastCfg.Branch)
+		if ws.lastCfg.Branch != "feat/PROJ-1-add-login" {
+			t.Fatalf("auto-named branch = %q, want feat/PROJ-1-add-login", ws.lastCfg.Branch)
 		}
 		if !strings.Contains(agent.lastLaunch.SystemPrompt, "prefixes branches with `feat/`") {
 			t.Fatalf("worker launch prompt missing convention:\n%s", agent.lastLaunch.SystemPrompt)
@@ -4482,13 +4482,13 @@ func TestSpawn_AutoLinksJiraIssueFromBranch(t *testing.T) {
 	rec, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer",
 		Kind:      domain.KindWorker,
-		Branch:    "bugfix/STAR-2394-noti-hub",
+		Branch:    "bugfix/PROJ-2394-noti-hub",
 		Prompt:    "Please start work on the noti hub defects.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(rec.IssueID), "jira:STAR-2394"; got != want {
+	if got, want := string(rec.IssueID), "jira:PROJ-2394"; got != want {
 		t.Fatalf("issue_id = %q, want %q (a Jira-keyed branch must auto-link the issue)", got, want)
 	}
 }
@@ -4504,7 +4504,7 @@ func TestSpawn_DoesNotBindJiraKeyMentionedOnlyInPrompt(t *testing.T) {
 	rec, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer",
 		Kind:      domain.KindWorker,
-		Prompt:    "Refactor the exporter. Do NOT touch docs/archive/STAR-2273-notes.md - it belongs to another team.",
+		Prompt:    "Refactor the exporter. Do NOT touch docs/archive/PROJ-2273-notes.md - it belongs to another team.",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -4523,17 +4523,17 @@ func TestEffectiveIssueID(t *testing.T) {
 		cfg  ports.SpawnConfig
 		want domain.IssueID
 	}{
-		{"explicit issue wins over prompt key", ports.SpawnConfig{IssueID: "jira:DEMO-1", Prompt: "about STAR-9"}, "jira:DEMO-1"},
-		{"key from branch", ports.SpawnConfig{Branch: "bugfix/STAR-2394-noti-hub"}, "jira:STAR-2394"},
+		{"explicit issue wins over prompt key", ports.SpawnConfig{IssueID: "jira:DEMO-1", Prompt: "about PROJ-9"}, "jira:DEMO-1"},
+		{"key from branch", ports.SpawnConfig{Branch: "bugfix/PROJ-2394-noti-hub"}, "jira:PROJ-2394"},
 		{"branch wins; prompt key is ignored", ports.SpawnConfig{Branch: "feature/PROJ-12-x", Prompt: "also mentions OTHER-3"}, "jira:PROJ-12"},
 		{"no jira signal stays unbound", ports.SpawnConfig{Prompt: "just refactor the parser", Branch: "chore/cleanup"}, ""},
 		{"non-jira issue id preserved verbatim", ports.SpawnConfig{IssueID: "github:owner/repo#7"}, "github:owner/repo#7"},
-		{"orchestrator is never auto-linked", ports.SpawnConfig{Kind: domain.KindOrchestrator, Prompt: "dispatch STAR-2394 work"}, ""},
+		{"orchestrator is never auto-linked", ports.SpawnConfig{Kind: domain.KindOrchestrator, Prompt: "dispatch PROJ-2394 work"}, ""},
 		// The prompt is never scraped: a key in prose must not bind. Each of these
 		// carries a key-shaped token in the brief and no branch, so each stays unbound.
-		{"prompt key alone does not bind", ports.SpawnConfig{Prompt: "Please start work on STAR-2394 (noti hub)"}, ""},
-		{"key in an example path does not bind", ports.SpawnConfig{Prompt: "Do NOT touch docs/archive/STAR-2273-notes.md - it belongs to another team."}, ""},
-		{"key in a quoted branch name in prose does not bind", ports.SpawnConfig{Prompt: `the old branch was "feature/MOBILITY-4612-x"`}, ""},
+		{"prompt key alone does not bind", ports.SpawnConfig{Prompt: "Please start work on PROJ-2394 (noti hub)"}, ""},
+		{"key in an example path does not bind", ports.SpawnConfig{Prompt: "Do NOT touch docs/archive/PROJ-2273-notes.md - it belongs to another team."}, ""},
+		{"key in a quoted branch name in prose does not bind", ports.SpawnConfig{Prompt: `the old branch was "feature/TEAM-4612-x"`}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

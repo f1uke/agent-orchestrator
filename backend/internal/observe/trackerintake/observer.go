@@ -1,5 +1,5 @@
 // Package trackerintake implements the opt-in issue-intake observer. It polls a
-// project's configured tracker for eligible issues and starts one worker session
+// project's configured tracker for available issues and starts one worker session
 // per issue, leaving PR/lifecycle handling to the existing observers.
 package trackerintake
 
@@ -99,7 +99,7 @@ type Config struct {
 	OnTick func()
 }
 
-// Observer polls configured projects and starts sessions for eligible issues.
+// Observer polls configured projects and starts sessions for available issues.
 type Observer struct {
 	resolver       TrackerResolver
 	store          Store

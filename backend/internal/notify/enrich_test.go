@@ -15,17 +15,17 @@ var testClock = time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
 func gitlabIntent(t domain.NotificationType) Intent {
 	return Intent{
 		Type:               t,
-		ProjectID:          "nter-ios-app",
+		ProjectID:          "demo-ios-app",
 		CreatedAt:          testClock,
-		SessionID:          "nter-ios-app-30",
+		SessionID:          "demo-ios-app-30",
 		SessionKind:        domain.KindWorker,
 		SessionDisplayName: "cta http proto",
-		PRURL:              "https://gitlab.finnomena.com/finnomena/mobility/nter-ios-app/-/merge_requests/3039",
+		PRURL:              "https://gitlab.example.com/example-org/apps/demo-ios-app/-/merge_requests/3039",
 		PRNumber:           3039,
-		PRTitle:            "MOBILITY-4600 | CTA http prototype",
+		PRTitle:            "TEAM-4600 | CTA http prototype",
 		PRTargetBranch:     "develop",
 		Provider:           "gitlab",
-		Repo:               "finnomena/mobility/nter-ios-app",
+		Repo:               "example-org/apps/demo-ios-app",
 	}
 }
 
@@ -121,7 +121,7 @@ func TestTitleNamesTheWorkAndOmitsTheNumber(t *testing.T) {
 // as a spelling error, so it must survive verbatim - including labels that would
 // be mangled by naive capitalisation.
 func TestBoardLabelIsShownVerbatim(t *testing.T) {
-	for _, label := range []string{"gl approval gate", "pr conflict recheck", "macos noti fix", "e coupon #4", "STAR-2271 verify"} {
+	for _, label := range []string{"gl approval gate", "pr conflict recheck", "macos noti fix", "e item #4", "PROJ-2271 verify"} {
 		in := gitlabIntent(domain.NotificationReadyToMerge)
 		in.SessionDisplayName = label
 		rec, err := enrich(in)
@@ -143,7 +143,7 @@ func TestReadyToMergeBodyDropsTheHedgeAndCarriesTheLocation(t *testing.T) {
 	if strings.Contains(rec.Body, "no known") {
 		t.Errorf("body = %q, must not hedge with \"no known\"", rec.Body)
 	}
-	want := "!3039 in nter-ios-app, targeting develop. CI passed, no unresolved review comments."
+	want := "!3039 in demo-ios-app, targeting develop. CI passed, no unresolved review comments."
 	if rec.Body != want {
 		t.Errorf("body = %q, want %q", rec.Body, want)
 	}
@@ -157,7 +157,7 @@ func TestBodyDoesNotRestateTheTitle(t *testing.T) {
 		gitlabIntent(domain.NotificationPRMerged),
 		gitlabIntent(domain.NotificationPRClosedUnmerged),
 		githubIntent(domain.NotificationPRMerged),
-		{Type: domain.NotificationNeedsInput, ProjectID: "nter-ios-app", CreatedAt: testClock, SessionID: "nter-ios-app-30", SessionKind: domain.KindWorker, SessionDisplayName: "cta http proto"},
+		{Type: domain.NotificationNeedsInput, ProjectID: "demo-ios-app", CreatedAt: testClock, SessionID: "demo-ios-app-30", SessionKind: domain.KindWorker, SessionDisplayName: "cta http proto"},
 	} {
 		rec, err := enrich(in)
 		if err != nil {
@@ -213,9 +213,9 @@ func TestOnlyReadyToMergeCarriesTheTargetBranch(t *testing.T) {
 func TestOrchestratorSessionIsNamedRatherThanShowingABareID(t *testing.T) {
 	rec, err := enrich(Intent{
 		Type:        domain.NotificationNeedsInput,
-		ProjectID:   "nter-ios-app",
+		ProjectID:   "demo-ios-app",
 		CreatedAt:   testClock,
-		SessionID:   "nter-ios-app-23",
+		SessionID:   "demo-ios-app-23",
 		SessionKind: domain.KindOrchestrator,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestOrchestratorSessionIsNamedRatherThanShowingABareID(t *testing.T) {
 	}
 	// The id still has to be reachable - it is the handle the human addresses -
 	// but demoted to the body and carrying its sigil.
-	if rec.Body != "Paused until you reply. (@nter-ios-app-23)" {
+	if rec.Body != "Paused until you reply. (@demo-ios-app-23)" {
 		t.Errorf("body = %q, want the sigil-qualified session id", rec.Body)
 	}
 }
@@ -262,19 +262,19 @@ func TestUnlabelledWorkerFallsBackToPRTitleBeforeSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enrich: %v", err)
 	}
-	if rec.Title != "Merged: MOBILITY-4600 | CTA http prototype" {
+	if rec.Title != "Merged: TEAM-4600 | CTA http prototype" {
 		t.Errorf("title = %q, want the PR title as the label", rec.Title)
 	}
 }
 
 func TestRepoShortKeepsTheLastSegment(t *testing.T) {
 	for in, want := range map[string]string{
-		"finnomena/mobility/nter-ios-app": "nter-ios-app",
-		"f1uke/agent-orchestrator":        "agent-orchestrator",
-		"solo":                            "solo",
-		"trailing/slash/":                 "slash",
-		"":                                "",
-		"   ":                             "",
+		"example-org/apps/demo-ios-app": "demo-ios-app",
+		"f1uke/agent-orchestrator":      "agent-orchestrator",
+		"solo":                          "solo",
+		"trailing/slash/":               "slash",
+		"":                              "",
+		"   ":                           "",
 	} {
 		if got := repoShort(in); got != want {
 			t.Errorf("repoShort(%q) = %q, want %q", in, got, want)

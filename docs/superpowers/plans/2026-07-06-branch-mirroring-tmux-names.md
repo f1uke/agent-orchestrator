@@ -21,10 +21,12 @@
 ### Task 1: tmux branch-based naming helper
 
 **Files:**
+
 - Modify: `backend/internal/adapters/runtime/tmux/tmux.go` (session-name helpers, ~lines 287–321)
 - Test: `backend/internal/adapters/runtime/tmux/tmux_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `func SessionNameFor(projectID, branch, sessionID string) (string, error)` — branch-based name when `projectID` and `branch` are both non-empty; otherwise falls back to `tmuxSessionName(domain.SessionID(sessionID))` (which errors on an empty session id).
   - `func sanitizeName(raw string, maxLen int) string` — collapses `raw` to `[A-Za-z0-9_-]`, other runs → single `-`, trims dashes, empty → `"session"`, caps at `maxLen`.
@@ -44,7 +46,7 @@ func TestSessionNameForMirrorsBranch(t *testing.T) {
 		sessionID string
 		want      string
 	}{
-		{"gitflow branch", "mer", "feature/STAR-2271-x", "mer-1", "mer-feature-STAR-2271-x"},
+		{"gitflow branch", "mer", "feature/PROJ-2271-x", "mer-1", "mer-feature-PROJ-2271-x"},
 		{"default ao branch", "mer", "ao/mer-1/root", "mer-1", "mer-ao-mer-1-root"},
 		{"orchestrator branch", "mer", "ao/mer12-orchestrator", "mer-1", "mer-ao-mer12-orchestrator"},
 		{"unsafe chars collapse to dashes", "mer", "feature/foo bar@baz.1", "mer-1", "mer-feature-foo-bar-baz-1"},
@@ -179,6 +181,7 @@ git commit -m "feat(tmux): derive branch-mirroring session name via SessionNameF
 ### Task 2: Carry ProjectID/Branch through RuntimeConfig and name the tmux session with them
 
 **Files:**
+
 - Modify: `backend/internal/ports/outbound.go` (`RuntimeConfig`, ~lines 90–95)
 - Modify: `backend/internal/adapters/runtime/tmux/tmux.go` (`Create`, ~line 105)
 - Modify: `backend/internal/session_manager/manager.go` (two `RuntimeConfig{}` sites, ~lines 323 and 629)
@@ -186,6 +189,7 @@ git commit -m "feat(tmux): derive branch-mirroring session name via SessionNameF
 - Test: `backend/internal/session_manager/manager_test.go`
 
 **Interfaces:**
+
 - Consumes: `SessionNameFor` from Task 1.
 - Produces: `ports.RuntimeConfig` now has `ProjectID domain.ProjectID` and `Branch string`. `tmux.Runtime.Create` names the session via `SessionNameFor(string(cfg.ProjectID), cfg.Branch, string(cfg.SessionID))`.
 
@@ -216,17 +220,17 @@ func TestCreateNamesSessionAfterBranch(t *testing.T) {
 	h, err := r.Create(context.Background(), ports.RuntimeConfig{
 		SessionID:     "mer-1",
 		ProjectID:     "mer",
-		Branch:        "feature/STAR-2271-x",
+		Branch:        "feature/PROJ-2271-x",
 		WorkspacePath: "/tmp/ws",
 		Argv:          []string{"echo", "hi"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if h.ID != "mer-feature-STAR-2271-x" {
-		t.Fatalf("handle ID = %q, want mer-feature-STAR-2271-x", h.ID)
+	if h.ID != "mer-feature-PROJ-2271-x" {
+		t.Fatalf("handle ID = %q, want mer-feature-PROJ-2271-x", h.ID)
 	}
-	if joined := strings.Join(fr.calls[0].args, " "); !strings.Contains(joined, "-s mer-feature-STAR-2271-x") {
+	if joined := strings.Join(fr.calls[0].args, " "); !strings.Contains(joined, "-s mer-feature-PROJ-2271-x") {
 		t.Fatalf("new-session args missing branch-based -s: %v", fr.calls[0].args)
 	}
 }
@@ -331,9 +335,11 @@ git commit -m "feat(session): name tmux sessions after their branch"
 ### Task 3: Fix the `ao spawn` attach hint to reuse the branch-based name
 
 **Files:**
+
 - Modify: `backend/internal/cli/spawn.go` (`spawnResult`, ~lines 49–54; attach hint, ~lines 140–145)
 
 **Interfaces:**
+
 - Consumes: `tmux.SessionNameFor` from Task 1; `projectId` and `branch` fields already serialized on the session read model (`domain.SessionRecord.ProjectID`, `SessionView.Branch`).
 - Produces: nothing new.
 

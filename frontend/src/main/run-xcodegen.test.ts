@@ -35,7 +35,7 @@ describe("shouldSkipDir", () => {
 
 describe("findProjectSpecDirs", () => {
 	it("finds a nested project.yml and ignores noise directories", async () => {
-		// Mirrors the real nter-ios-app: the spec is one level down in NterApp/,
+		// Mirrors the real demo-ios-app: the spec is one level down in NterApp/,
 		// with copies buried in .git/.claude/node_modules/Pods that must be skipped.
 		const readdir = fakeReaddir({
 			"/root": [
