@@ -163,17 +163,17 @@ describe("the scene", () => {
 	});
 
 	it("keeps the ground beside the Proc rather than across its face", () => {
-		// The design hit this: a desk drawn behind a Proc crosses its face, because a
+		// The design hit this: a bed drawn behind a Proc crosses its face, because a
 		// Proc is nearly all head. The ground lives clear of the figure's box.
-		const { container } = renderProcs({ status: "working" });
+		const { container } = renderProcs({ status: "todo" });
 
 		expect(extentX(container.querySelector('[data-slot="ground"]')!).min).toBeGreaterThan(67);
 	});
 
 	it("plugs the cord into the ground when the scene has one", () => {
-		// This is what marries the two layers instead of letting them compete: the
-		// desk is where it works AND what it is plugged into.
-		const { container } = renderProcs({ status: "working" });
+		// This is what marries the two layers instead of letting them compete: the bed
+		// is where it sleeps AND what it is plugged into.
+		const { container } = renderProcs({ status: "todo" });
 
 		expect(container.querySelector('[data-plug="ground"]')).not.toBeNull();
 	});

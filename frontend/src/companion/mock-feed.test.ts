@@ -56,13 +56,15 @@ describe("mockActivitiesAt", () => {
 		expect([...seen].sort()).toEqual([...ALL_COMPANION_STATUSES].sort());
 	});
 
-	it("exercises all four behaviour modes within one cycle", () => {
+	it("exercises every behaviour mode there is within one cycle", () => {
 		const modes = new Set<string>();
 		for (let step = 0; step < MOCK_FEED_CYCLE_STEPS; step++) {
 			for (const activity of mockActivitiesAt(step)) modes.add(modeFor(activity.status));
 		}
 
-		expect([...modes].sort()).toEqual(["amble", "anchor", "still", "summon"]);
+		// `still` is no longer reachable from a status — only reduced motion and
+		// parking produce it — so the modes a roster can show are these three.
+		expect([...modes].sort()).toEqual(["amble", "anchor", "summon"]);
 	});
 
 	it("keeps the roster small enough to fit a screen", () => {
