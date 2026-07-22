@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WALK_CYCLE_MS } from "./behaviour";
-import { CAST, castForSession } from "./cast";
+import { ALL_LOOKS, castForSession, composeCast, HATS, PALETTES } from "./cast";
 import { PROCS_INK, PROCS_RIM_PX } from "./palette";
 import { ALL_COMPANION_STATUSES, sceneFor } from "./scene";
 import { Procs } from "./Procs";
 
-const CURLY = CAST[0];
+const CURLY = ALL_LOOKS[0];
 
 function renderProcs(overrides: Partial<React.ComponentProps<typeof Procs>> = {}) {
 	return render(<Procs cast={CURLY} status="pr_open" facing="front" walking={false} {...overrides} />);
@@ -35,13 +35,17 @@ function extentX(root: Element): { min: number; max: number } {
 
 describe("the character", () => {
 	it("says who it is and what it is doing, for assistive tech and for tests", () => {
-		renderProcs({ cast: CAST[2], status: "ci_failed" });
+		const look = composeCast(PALETTES[2], HATS[2]);
+		renderProcs({ cast: look, status: "ci_failed" });
 
-		expect(screen.getByRole("img", { name: /brack/i })).toHaveAttribute("aria-label", expect.stringMatching(/ci/i));
+		// The name now carries BOTH axes, which is more than it used to say.
+		const label = screen.getByRole("img", { name: new RegExp(PALETTES[2].name, "i") });
+		expect(label).toHaveAttribute("aria-label", expect.stringMatching(/ci/i));
+		expect(label.getAttribute("aria-label")).toContain(HATS[2].name);
 	});
 
 	it("wears its own character's hat", () => {
-		for (const member of CAST) {
+		for (const member of ALL_LOOKS) {
 			const { container, unmount } = renderProcs({ cast: member });
 			const worn = [...container.querySelectorAll("[data-hat-piece]")].map((p) => p.getAttribute("d"));
 
@@ -60,15 +64,15 @@ describe("the character", () => {
 	});
 
 	it("wears its own character's colour", () => {
-		const { container } = renderProcs({ cast: CAST[3] });
+		const { container } = renderProcs({ cast: ALL_LOOKS[3] });
 		const head = container.querySelector('[data-part="head"]');
 
-		expect(head?.getAttribute("fill")).toBe(CAST[3].body);
+		expect(head?.getAttribute("fill")).toBe(ALL_LOOKS[3].body);
 	});
 
-	it("looks different from the next character in both silhouette and colour", () => {
-		const a = renderProcs({ cast: CAST[0] });
-		const b = renderProcs({ cast: CAST[1] });
+	it("looks different from a look that differs on both axes, in silhouette and colour", () => {
+		const a = renderProcs({ cast: composeCast(PALETTES[0], HATS[0]) });
+		const b = renderProcs({ cast: composeCast(PALETTES[1], HATS[1]) });
 
 		const ear = (c: HTMLElement) => c.querySelector("[data-hat-piece]")?.getAttribute("d");
 		const head = (c: HTMLElement) => c.querySelector('[data-part="head"]')?.getAttribute("fill");

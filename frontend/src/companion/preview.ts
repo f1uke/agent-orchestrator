@@ -1,6 +1,6 @@
 import type { SessionStatus } from "../renderer/types/workspace";
 import type { BubbleDecay, BubbleTone } from "./Bubble";
-import { CAST, type CastMember } from "./cast";
+import { composeCast, HATS, PALETTES, type CastMember } from "./cast";
 import { ALL_COMPANION_STATUSES } from "./scene";
 
 // The data behind the Settings gallery: every state a Proc can be in, with a
@@ -60,7 +60,9 @@ const BUBBLES: Partial<Record<SessionStatus, PreviewBubble>> = {
 export function previewRoster(): PreviewEntry[] {
 	return ALL_COMPANION_STATUSES.map((status, index) => ({
 		status,
-		cast: CAST[index % CAST.length],
+		// Both axes stepped, at rates coprime with their lengths, so a gallery of
+		// fifteen states shows all six colours AND all six hats rather than six pairs.
+		cast: composeCast(PALETTES[index % PALETTES.length], HATS[(index * 5) % HATS.length]),
 		label: STATUS_LABELS[status],
 		bubble: BUBBLES[status],
 	}));

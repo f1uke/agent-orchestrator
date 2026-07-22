@@ -1,23 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { CAST, castForSession, mirrorPathX } from "./cast";
+import { ALL_LOOKS, castForSession, composeCast, HATS, mirrorPathX, PALETTES } from "./cast";
+
+const CAST = ALL_LOOKS;
+
+describe("the two axes", () => {
+	it("keeps colour and hat as SEPARATE lists, not six bundled characters", () => {
+		// The bundle was the problem: six fixed (hat, colour) pairs meant every colour
+		// had exactly one hat and there were six looks in the world. Separate lists
+		// multiply instead of adding.
+		expect(ALL_LOOKS).toHaveLength(PALETTES.length * HATS.length);
+		expect(ALL_LOOKS.length).toBeGreaterThan(PALETTES.length + HATS.length);
+	});
+
+	it("gives every colour its own tints", () => {
+		expect(new Set(PALETTES.map((p) => p.body)).size).toBe(PALETTES.length);
+		expect(new Set(PALETTES.map((p) => p.shade)).size).toBe(PALETTES.length);
+	});
+
+	it("gives every hat its own shape, which is what makes the silhouette differ", () => {
+		const shapes = HATS.map((hat) => hat.pieces.map((piece) => piece.d).join("|"));
+
+		expect(new Set(shapes).size).toBe(HATS.length);
+	});
+
+	it("names a look after both of its axes, so it can be said out loud", () => {
+		const look = composeCast(PALETTES[0], HATS[0]);
+
+		expect(look.id).toBe(`${PALETTES[0].id}-${HATS[0].id}`);
+		expect(look.name).toContain(PALETTES[0].name);
+		expect(look.name).toContain(HATS[0].name);
+	});
+});
 
 describe("the cast", () => {
-	it("is the six characters the design names", () => {
-		expect(CAST.map((member) => member.id)).toEqual(["curly", "angle", "brack", "glob", "hash", "tilde"]);
-		expect(CAST.map((member) => member.glyph)).toEqual(["{}", "<>", "[]", "**", "##", "~~"]);
-	});
-
-	it("gives every character its own colour", () => {
-		expect(new Set(CAST.map((member) => member.body)).size).toBe(CAST.length);
-		expect(new Set(CAST.map((member) => member.shade)).size).toBe(CAST.length);
-	});
-
-	it("gives every character its own hat, which is what makes the silhouette differ", () => {
-		const shapes = CAST.map((member) => member.hat.map((piece) => piece.d).join("|"));
-
-		expect(new Set(shapes).size).toBe(CAST.length);
-	});
-
 	it("sits every hat ON the head rather than beside it", () => {
 		// The head spans x 14..82, y 6..78. A hat that misses it leaves the Proc bald,
 		// which is what the human reported; one that covers the eyes is worse.
@@ -81,41 +96,70 @@ describe("the cast", () => {
 });
 
 describe("castForSession", () => {
-	it("always gives the same session the same character, so a worker is recognisable", () => {
+	it("always gives the same session the same look, so a worker is recognisable", () => {
+		// The whole reason the assignment is a hash rather than a shuffle: someone
+		// learns which Proc is which, and re-rolling on every launch would take that
+		// away for nothing.
 		const ref = "agent-orchestrator-157";
 		const first = castForSession(ref);
 
-		for (let i = 0; i < 20; i++) expect(castForSession(ref)).toBe(first);
+		for (let i = 0; i < 20; i++) expect(castForSession(ref)).toEqual(first);
 	});
 
-	it("spreads sessions across the whole cast", () => {
-		const counts = new Map<string, number>();
-		for (let i = 0; i < 600; i++) {
-			const id = castForSession(`session-${i}`).id;
-			counts.set(id, (counts.get(id) ?? 0) + 1);
+	it("picks the hat INDEPENDENTLY of the colour", () => {
+		// The bug this replaces: hat bound to colour meant every amber Proc wore the
+		// same hat, for ever. Independence is the claim, so it is what is measured —
+		// every colour must be seen in more than one hat across a realistic roster.
+		const hatsByPalette = new Map<string, Set<string>>();
+		for (let i = 0; i < 900; i++) {
+			const look = castForSession(`session-${i}`);
+			const seen = hatsByPalette.get(look.palette) ?? new Set<string>();
+			seen.add(look.hatId);
+			hatsByPalette.set(look.palette, seen);
 		}
 
-		expect(counts.size).toBe(CAST.length);
-		// An even split is 100 each. Anything under half of that is a bad hash, not
+		expect(hatsByPalette.size).toBe(PALETTES.length);
+		for (const [palette, hats] of hatsByPalette) {
+			expect(hats.size, `${palette} is worn with several hats`).toBe(HATS.length);
+		}
+	});
+
+	it("spreads sessions across every colour AND every hat", () => {
+		const palettes = new Map<string, number>();
+		const hats = new Map<string, number>();
+		for (let i = 0; i < 900; i++) {
+			const look = castForSession(`session-${i}`);
+			palettes.set(look.palette, (palettes.get(look.palette) ?? 0) + 1);
+			hats.set(look.hatId, (hats.get(look.hatId) ?? 0) + 1);
+		}
+
+		// An even split is 150 each. Anything under half of that is a bad hash, not
 		// luck — the whole point is that a board of sessions looks varied.
-		for (const member of CAST) {
-			expect(counts.get(member.id) ?? 0).toBeGreaterThan(50);
-		}
+		for (const palette of PALETTES) expect(palettes.get(palette.id) ?? 0, palette.id).toBeGreaterThan(75);
+		for (const hat of HATS) expect(hats.get(hat.id) ?? 0, hat.id).toBeGreaterThan(75);
 	});
 
-	it("does not put neighbouring session ids on the same character", () => {
+	it("does not put neighbouring session ids on the same look", () => {
 		// Sessions are created in sequence, so ids that differ by one are exactly the
 		// ones a user sees side by side. A hash that keeps them together would look
 		// broken however well it spreads overall.
 		const runs = Array.from({ length: 12 }, (_, i) => castForSession(`agent-orchestrator-${i}`).id);
 
-		expect(new Set(runs).size).toBeGreaterThanOrEqual(4);
+		expect(new Set(runs).size).toBeGreaterThanOrEqual(8);
 	});
 
-	it("still returns a character for an empty or odd ref", () => {
-		expect(CAST).toContain(castForSession(""));
-		expect(CAST).toContain(castForSession("   "));
-		expect(CAST).toContain(castForSession("🙂"));
+	it("still returns a look for an empty or odd ref", () => {
+		for (const ref of ["", "   ", "🙂"]) {
+			const look = castForSession(ref);
+			expect(
+				PALETTES.some((p) => p.id === look.palette),
+				ref,
+			).toBe(true);
+			expect(
+				HATS.some((h) => h.id === look.hatId),
+				ref,
+			).toBe(true);
+		}
 	});
 });
 

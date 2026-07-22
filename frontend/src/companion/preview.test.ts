@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAST } from "./cast";
+import { HATS, PALETTES } from "./cast";
 import { ALL_COMPANION_STATUSES, sceneFor } from "./scene";
 import { PREVIEW_BUBBLES, previewRoster } from "./preview";
 
@@ -8,10 +8,14 @@ describe("previewRoster", () => {
 		expect(previewRoster().map((entry) => entry.status)).toEqual(ALL_COMPANION_STATUSES);
 	});
 
-	it("shows every character across the set, so the gallery is a cast list too", () => {
-		const used = new Set(previewRoster().map((entry) => entry.cast.id));
+	it("shows every colour and every hat across the set, so the gallery is a cast list too", () => {
+		// It cannot show every LOOK any more — colour and hat are independent axes and
+		// there are six times as many pairs as there are states to show them in. What
+		// it can still do, and what the gallery is for, is show every value of each.
+		const roster = previewRoster();
 
-		expect(used.size).toBe(CAST.length);
+		expect(new Set(roster.map((entry) => entry.cast.palette)).size).toBe(PALETTES.length);
+		expect(new Set(roster.map((entry) => entry.cast.hatId)).size).toBe(HATS.length);
 	});
 
 	it("gives each state a plain-English line, because a status id is not an explanation", () => {

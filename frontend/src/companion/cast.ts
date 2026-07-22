@@ -1,14 +1,20 @@
-// The cast: six Procs, and the rule that decides which one a session gets.
+// What a Proc looks like: two INDEPENDENT axes on one rig.
 //
-// A Proc is PARAMETERS ON ONE RIG, not six drawings — so a seventh cast member is
-// a data row here, never a new component. What varies is exactly two things, and
-// both of them are doing work:
+// A Proc is PARAMETERS ON ONE RIG, not a set of drawings — so a new colour or a
+// new hat is a data row here, never a new component. What varies is exactly two
+// things, and both of them are doing work:
 //
 //   1. the HAT, which is what makes the SILHOUETTE differ. Six tints of one face
 //      would still read as one character; a beanie next to a hard hat next to a
 //      party cone reads as three, even in peripheral vision — which is the whole
 //      point on a desktop you are not looking straight at.
 //   2. the COLOUR, which carries at a glance what the hat carries up close.
+//
+// They used to be BUNDLED: six fixed characters, each a (hat, colour) pair, so
+// every colour had exactly one hat and there were six looks in the world. They are
+// now drawn from SEPARATE hash dimensions of the session ref, which multiplies the
+// looks (6 × 6) instead of adding them — the human could not tell sessions apart
+// on a busy desktop, and six was not enough to.
 //
 // Hats replaced code-bracket ears, for two reasons the human found by living with
 // it. The heads read as bald, and — the bug — an asymmetric glyph pair MIRRORS: a
@@ -17,65 +23,86 @@
 //
 // ⚠ The identity stays in the BODY and the CORD. A Proc is a running process with a
 // power lead, and that is what makes it ours rather than a ghost with accessories.
-// Hats are variety ON a character, never the character itself — the moment the hat
-// is doing the identifying, this has drifted into a blob in a costume.
+// Hats and colours are variety ON a character, never the character itself — the
+// moment the hat is doing the identifying, this has drifted into a blob in a
+// costume.
 //
-// Assignment is a stable hash of the session ref, per the design. The human asked
+// Both axes are a stable hash of the session ref, per the design. The human asked
 // for "random" faces and colours; stable-per-session gives the same visible
-// variety on a board of many sessions AND lets someone learn that the teal `<>` is
-// the worker fixing the flaky test. Re-randomising every launch would throw that
-// away for nothing — the pets would stop being anybody.
+// variety on a board of many sessions AND lets someone learn that the teal one in
+// the bucket hat is the worker fixing the flaky test. Re-randomising every launch
+// would throw that away for nothing — the pets would stop being anybody.
 
 /** Ear paths are authored for the LEFT side and mirrored, so the rig owns symmetry. */
 const EAR_MIRROR_AXIS = 48;
 
-export type CastId = "curly" | "angle" | "brack" | "glob" | "hash" | "tilde";
-
-export type CastMember = {
-	id: CastId;
-	name: string;
-	/** The punctuation pair this character is named for. */
-	glyph: string;
-	/** Head fill. */
-	body: string;
-	/** Lower body, legs, and the ear/cord stroke cores. */
-	shade: string;
-	/** Cheeks. Sits on `body`, never on the wallpaper. */
-	blush: string;
-	/** Hat fill. Measured against the wallpaper like every other exposed colour. */
-	hatFill: string;
-	/** The hat's band, brim or trim. */
-	hatTrim: string;
-	/** The hat itself, as filled shapes in rig coordinates, drawn back to front. */
-	hat: HatPiece[];
-};
+export type PaletteId = "amber" | "teal" | "violet" | "rose" | "mint" | "sky";
+export type HatId = "beanie" | "cap" | "hardhat" | "cone" | "flatcap" | "bucket";
 
 /** One filled piece of a hat. `trim` picks the accent colour instead of the main one. */
 export type HatPiece = { d: string; role?: "trim" };
 
-// Hat colours sit in the same narrow luminance band as the bodies, and for the same
-// reason: a hat's crown rises ABOVE the head, so its outline is against the
-// wallpaper, and a dark hat on a dark desktop loses both channels at once and the
-// Proc appears to have a flat top. Hat and head are told apart by their own ink
-// rims, exactly as the body and the head already are.
-//
-// Colours are not eyeballed: every `body` and `shade` here is checked by
-// palette.test.ts across the entire wallpaper luminance range, and the worst case
-// is ~3.1:1 — above the 3:1 decorative floor. They sit at a deliberately narrow
-// luminance band (~0.50-0.60) because that is what the two-channel rule costs: too
-// dark and the ink rim stops separating them from a dark wallpaper, since both
-// channels would be dark at once.
-export const CAST: readonly CastMember[] = [
+/** The COLOUR axis: everything a Proc's own body is tinted with. */
+export type Palette = {
+	id: PaletteId;
+	name: string;
+	/** Head fill. */
+	body: string;
+	/** Lower body, legs, and the cord's stroke core. */
+	shade: string;
+	/** Cheeks. Sits on `body`, never on the wallpaper. */
+	blush: string;
+};
+
+/** The SILHOUETTE axis: the shape on top, and the two colours it is drawn in. */
+export type Hat = {
+	id: HatId;
+	name: string;
+	/** Hat fill. Measured against the wallpaper like every other exposed colour. */
+	fill: string;
+	/** The hat's band, brim or trim. */
+	trim: string;
+	/** The hat itself, as filled shapes in rig coordinates, drawn back to front. */
+	pieces: HatPiece[];
+};
+
+/**
+ * One Proc's whole appearance: a palette and a hat, chosen independently.
+ *
+ * Flattened rather than nested because the rig draws it — `Procs.tsx` should not
+ * have to know that a look is assembled from two axes, only what to paint.
+ */
+export type CastMember = {
+	/** `<palette>-<hat>`, e.g. `teal-bucket`. Stable, and unique to the pair. */
+	id: string;
+	/** Human-readable, for the accessible label: "Teal bucket hat". */
+	name: string;
+	palette: PaletteId;
+	hatId: HatId;
+	body: string;
+	shade: string;
+	blush: string;
+	hatFill: string;
+	hatTrim: string;
+	hat: HatPiece[];
+};
+
+export const PALETTES: readonly Palette[] = [
+	{ id: "amber", name: "Amber", body: "#f4c558", shade: "#ecb22a", blush: "#e8735c" },
+	{ id: "teal", name: "Teal", body: "#92d8dc", shade: "#71c9d0", blush: "#e8735c" },
+	{ id: "violet", name: "Violet", body: "#dcc1f1", shade: "#d1aeeb", blush: "#e8735c" },
+	{ id: "rose", name: "Rose", body: "#fabad1", shade: "#f6a3c2", blush: "#d95f7a" },
+	{ id: "mint", name: "Mint", body: "#9fd9aa", shade: "#82cc91", blush: "#e8735c" },
+	{ id: "sky", name: "Sky", body: "#b1cef5", shade: "#99bef0", blush: "#e8735c" },
+];
+
+export const HATS: readonly Hat[] = [
 	{
-		id: "curly",
-		name: "Curly",
-		glyph: "{}",
-		body: "#f4c558",
-		shade: "#ecb22a",
-		blush: "#e8735c",
-		hatFill: "#f6b6ac",
-		hatTrim: "#dcdcdc",
-		hat: [
+		id: "beanie",
+		name: "beanie",
+		fill: "#f6b6ac",
+		trim: "#dcdcdc",
+		pieces: [
 			// A slouchy beanie, deliberately wider than the head — an oversize hat reads
 			// as a hat, while one cut to the skull just reads as a differently shaped head.
 			{ d: "M10 28 C 10 -16 86 -16 86 28 L 10 28 Z" },
@@ -83,30 +110,22 @@ export const CAST: readonly CastMember[] = [
 		],
 	},
 	{
-		id: "angle",
-		name: "Angle",
-		glyph: "<>",
-		body: "#92d8dc",
-		shade: "#71c9d0",
-		blush: "#e8735c",
-		hatFill: "#d6c499",
-		hatTrim: "#e2d9c8",
-		hat: [
+		id: "cap",
+		name: "cap",
+		fill: "#d6c499",
+		trim: "#e2d9c8",
+		pieces: [
 			// A cap. The peak reads as a peak whichever way the sprite is facing.
 			{ d: "M7 29 C 7 -12 89 -12 89 29 L 7 29 Z" },
 			{ d: "M9 29 C -1 29 -6 36 -2 41 C 8 36 14 34 22 34 L 9 29 Z", role: "trim" },
 		],
 	},
 	{
-		id: "brack",
-		name: "Brack",
-		glyph: "[]",
-		body: "#dcc1f1",
-		shade: "#d1aeeb",
-		blush: "#e8735c",
-		hatFill: "#eec41e",
-		hatTrim: "#e9ddbc",
-		hat: [
+		id: "hardhat",
+		name: "hard hat",
+		fill: "#eec41e",
+		trim: "#e9ddbc",
+		pieces: [
 			// A site hard hat: high crown, wide brim, one ridge.
 			{ d: "M7 30 C 7 -12 89 -12 89 30 L 7 30 Z" },
 			{ d: "M8 30 L 88 30 C 96 30 96 40 88 40 L 8 40 C 0 40 0 30 8 30 Z", role: "trim" },
@@ -114,45 +133,33 @@ export const CAST: readonly CastMember[] = [
 		],
 	},
 	{
-		id: "glob",
-		name: "Glob",
-		glyph: "**",
-		body: "#fabad1",
-		shade: "#f6a3c2",
-		blush: "#d95f7a",
-		hatFill: "#d4beec",
-		hatTrim: "#f2db63",
-		hat: [
-			// A party cone, because Glob is the odd one of the six.
+		id: "cone",
+		name: "party cone",
+		fill: "#d4beec",
+		trim: "#f2db63",
+		pieces: [
+			// A party cone, for the odd one out.
 			{ d: "M48 -30 L 89 31 L 7 31 Z" },
 			{ d: "M12 31 C 34 38 62 38 84 31 L 84 36 C 62 42 34 42 12 36 Z", role: "trim" },
 		],
 	},
 	{
-		id: "hash",
-		name: "Hash",
-		glyph: "##",
-		body: "#9fd9aa",
-		shade: "#82cc91",
-		blush: "#e8735c",
-		hatFill: "#adcabc",
-		hatTrim: "#d0ddd6",
-		hat: [
+		id: "flatcap",
+		name: "flat cap",
+		fill: "#adcabc",
+		trim: "#d0ddd6",
+		pieces: [
 			// A flat cap, brim forward.
 			{ d: "M10 31 C 6 -12 90 -16 84 31 L 10 31 Z" },
 			{ d: "M10 31 C -2 32 -5 39 0 42 C 10 37 16 35 22 35 L 10 31 Z", role: "trim" },
 		],
 	},
 	{
-		id: "tilde",
-		name: "Tilde",
-		glyph: "~~",
-		body: "#b1cef5",
-		shade: "#99bef0",
-		blush: "#e8735c",
-		hatFill: "#efbd9b",
-		hatTrim: "#efd8c7",
-		hat: [
+		id: "bucket",
+		name: "bucket hat",
+		fill: "#efbd9b",
+		trim: "#efd8c7",
+		pieces: [
 			// A bucket hat. The brim is drawn AFTER the crown and overlaps its base, or
 			// the two read as a box balanced on a wire rather than as one hat.
 			{ d: "M7 29 L 24 -12 L 72 -12 L 89 29 Z" },
@@ -203,7 +210,38 @@ function hash(ref: string): number {
 	return value >>> 0;
 }
 
-/** The character a session always gets. Pure, stable across restarts. */
+/**
+ * Salt for the hat's hash.
+ *
+ * The two axes MUST be drawn from independent bits, or they are not two axes: one
+ * hash used twice would tie hat to colour again, just less obviously — every amber
+ * Proc in a beanie, for ever. Hashing a salted ref gives a genuinely separate
+ * dimension while staying a pure function of the session.
+ */
+const HAT_SALT = "\u0000hat";
+
+/** The look a session always gets. Pure, stable across restarts, both axes. */
 export function castForSession(sessionRef: string): CastMember {
-	return CAST[hash(sessionRef) % CAST.length];
+	return composeCast(PALETTES[hash(sessionRef) % PALETTES.length], HATS[hash(sessionRef + HAT_SALT) % HATS.length]);
 }
+
+/** Assemble a look from a chosen colour and a chosen hat. */
+export function composeCast(palette: Palette, hat: Hat): CastMember {
+	return {
+		id: `${palette.id}-${hat.id}`,
+		name: `${palette.name} ${hat.name}`,
+		palette: palette.id,
+		hatId: hat.id,
+		body: palette.body,
+		shade: palette.shade,
+		blush: palette.blush,
+		hatFill: hat.fill,
+		hatTrim: hat.trim,
+		hat: hat.pieces,
+	};
+}
+
+/** Every look there is: one per (colour, hat) pair. Used by tests and the demo roster. */
+export const ALL_LOOKS: readonly CastMember[] = PALETTES.flatMap((palette) =>
+	HATS.map((hat) => composeCast(palette, hat)),
+);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appendActivity, demoRoster, everyStatus } from "./dev-roster";
-import { CAST, castForSession } from "./cast";
+import { castForSession, HATS, PALETTES } from "./cast";
 import { ALL_COMPANION_STATUSES } from "./scene";
 
 describe("the playground's invented roster", () => {
@@ -27,10 +27,11 @@ describe("the playground's invented roster", () => {
 		expect(new Set(roster.map((entry) => entry.sessionId)).size).toBe(roster.length);
 	});
 
-	it("still spreads across the whole cast, which is why the search exists at all", () => {
-		const faces = new Set(everyStatus().map((entry) => castForSession(entry.sessionId).id));
+	it("still spreads across every colour and every hat, which is why the search exists", () => {
+		const looks = everyStatus().map((entry) => castForSession(entry.sessionId));
 
-		expect(faces.size).toBe(CAST.length);
+		expect(new Set(looks.map((look) => look.palette)).size).toBe(PALETTES.length);
+		expect(new Set(looks.map((look) => look.hatId)).size).toBe(HATS.length);
 	});
 
 	it("shows every status exactly once", () => {
