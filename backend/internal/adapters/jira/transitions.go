@@ -57,7 +57,9 @@ type ConfigSource func() (restConfig, error)
 type HTTPDoer func(*http.Request) (*http.Response, error)
 
 // WithHTTPDoer injects the HTTP transport (tests pass an httptest client's Do).
-func WithHTTPDoer(d HTTPDoer) Option { return func(c *Client) { c.httpDo = d } }
+// It sets the transfer doer too: a test that injects a server must see the file
+// calls as well, and a caller substituting the transport means all of it.
+func WithHTTPDoer(d HTTPDoer) Option { return func(c *Client) { c.httpDo, c.transferDo = d, d } }
 
 // WithConfigSource injects the REST config resolver (tests inject a static one).
 func WithConfigSource(s ConfigSource) Option { return func(c *Client) { c.config = s } }
@@ -67,6 +69,15 @@ var transitionIDPattern = regexp.MustCompile(`^\d+$`)
 // defaultHTTPClient bounds every transition call so a hung Jira never wedges the
 // daemon request.
 var defaultHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
+// defaultTransferHTTPClient backs the calls that move a whole file rather than a
+// JSON document: uploading smoke-test evidence, resolving its media id (which
+// follows a redirect into media services), and streaming an attachment back for
+// inline display. Evidence is routinely multiple megabytes — a screen recording
+// is tens — so the 15s budget that suits a read is simply the wrong unit here:
+// it aborts an upload that was progressing fine, and a resolve that times out
+// silently costs the file its inline preview in the posted comment.
+var defaultTransferHTTPClient = &http.Client{Timeout: 5 * time.Minute}
 
 // Transitions returns the issue's available status transitions, read live.
 func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, error) {

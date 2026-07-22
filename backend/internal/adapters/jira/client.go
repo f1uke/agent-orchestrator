@@ -67,7 +67,11 @@ type Client struct {
 	// httpDo + config back every REST call (display, transitions, search); both are
 	// seams so tests drive an httptest server with a static identity.
 	httpDo HTTPDoer
-	config ConfigSource
+	// transferDo backs the file-moving calls (evidence upload, media-id resolve,
+	// attachment download), which need a far larger time budget than a JSON read.
+	// WithHTTPDoer sets both, so an injected test doer still sees every call.
+	transferDo HTTPDoer
+	config     ConfigSource
 }
 
 // Option configures a Client.
@@ -82,7 +86,7 @@ func WithSprintField(id string) Option {
 // from env then jira-cli's config file (see defaultConfigSource); a missing token
 // surfaces as ErrAuthFailed at call time, never a panic.
 func NewClient(opts ...Option) *Client {
-	c := &Client{httpDo: defaultHTTPClient.Do, config: defaultConfigSource}
+	c := &Client{httpDo: defaultHTTPClient.Do, transferDo: defaultTransferHTTPClient.Do, config: defaultConfigSource}
 	for _, opt := range opts {
 		opt(c)
 	}

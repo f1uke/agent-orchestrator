@@ -384,7 +384,16 @@ function PromptsSection({ form }: { form: ProjectForm }) {
 }
 
 function AutomationSection({ form }: { form: ProjectForm }) {
-	const { form: draft, setField, isGitLabProject, intakeForm, patchIntake, effectiveIntakeRepo, intakeRepoURL } = form;
+	const {
+		form: draft,
+		setField,
+		isGitLabProject,
+		hasKnownRemote,
+		intakeForm,
+		patchIntake,
+		effectiveIntakeRepo,
+		intakeRepoURL,
+	} = form;
 	return (
 		<>
 			<SectionTitle title="Automation" hint="things AO does on its own for this project" />
@@ -425,6 +434,16 @@ function AutomationSection({ form }: { form: ProjectForm }) {
 							/>
 						</SettingsField>
 					)}
+				</SettingsGroup>
+			)}
+
+			{!hasKnownRemote && (
+				<SettingsGroup title="Approval rule">
+					<p className="text-[11px] text-passive">
+						AO couldn&apos;t detect a git remote for this project, so it can&apos;t tell which forge it lives on and
+						forge-specific settings (like the GitLab approval rule) stay hidden. Add a remote to the repository, then
+						reopen this page.
+					</p>
 				</SettingsGroup>
 			)}
 		</>

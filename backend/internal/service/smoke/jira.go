@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -46,14 +47,21 @@ type JiraPoster interface {
 
 // JiraPostOutcome describes a completed Post-to-Jira: the issue it landed on, a
 // deep link to the created comment, how many evidence files were attached, how
-// many result rows the comment carried, and whether the inline media survived
-// (false = the media-free fallback was used).
+// many result rows the comment carried, whether the inline media survived
+// (false = the media-free fallback was used), and how many uploaded evidence
+// files ended up as download links instead of inline previews.
+//
+// EvidenceLinked exists so a degraded post can never look like a clean one. The
+// post still succeeds when media can't be embedded — the evidence is there, just
+// as links — but the caller must be able to say so, otherwise the only way to
+// find out is to open the issue and notice the previews are missing.
 type JiraPostOutcome struct {
 	Key                 string `json:"key"`
 	CommentURL          string `json:"commentUrl"`
 	AttachmentsUploaded int    `json:"attachmentsUploaded"`
 	RowsPosted          int    `json:"rowsPosted"`
 	EmbeddedMedia       bool   `json:"embeddedMedia"`
+	EvidenceLinked      int    `json:"evidenceLinked"`
 }
 
 // uploadedEvidence is one evidence file as Jira recorded it. Both images and
@@ -122,7 +130,7 @@ func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (J
 			// link). A resolution failure is non-fatal — the file still renders as a
 			// link to its attachment content URL.
 			ue := uploadedEvidence{att: att}
-			if mediaID, mErr := s.jira.ResolveMediaID(ctx, att.ID); mErr == nil {
+			if mediaID, mErr := s.resolveMediaID(ctx, att.ID); mErr == nil {
 				ue.mediaID = mediaID
 			}
 			uploads[c.ID] = append(uploads[c.ID], ue)
@@ -142,7 +150,63 @@ func (s *Service) PostToJira(ctx context.Context, sessionID domain.SessionID) (J
 		AttachmentsUploaded: total,
 		RowsPosted:          len(run),
 		EmbeddedMedia:       embedded,
+		EvidenceLinked:      countLinkedEvidence(uploads, embedded),
 	}, nil
+}
+
+// defaultMediaResolveBackoff is the wait before each retry of a media-id
+// resolution (so three attempts in total). Jira ingests an upload
+// asynchronously, so the id an inline media node needs is not always available
+// the instant the upload returns; a transient network blip has the same shape.
+// One attempt was enough to bake a permanently link-only comment, and re-posting
+// is the only way to correct one — so it is worth waiting a couple of seconds.
+var defaultMediaResolveBackoff = []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond}
+
+// resolveMediaID resolves an attachment's media-services id, retrying a
+// transient failure. It gives up quietly: the caller degrades that one file to a
+// link, which is still a correct comment.
+func (s *Service) resolveMediaID(ctx context.Context, attachmentID string) (string, error) {
+	backoff := s.mediaResolveBackoff
+	var err error
+	for attempt := 0; attempt <= len(backoff); attempt++ {
+		var mediaID string
+		mediaID, err = s.jira.ResolveMediaID(ctx, attachmentID)
+		if err == nil {
+			return mediaID, nil
+		}
+		// A rejected id will be rejected again; only wait out the transient ones.
+		if errors.Is(err, jiraadapter.ErrAuthFailed) || errors.Is(err, jiraadapter.ErrBadRequest) {
+			return "", err
+		}
+		if attempt < len(backoff) {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(backoff[attempt]):
+			}
+		}
+	}
+	return "", err
+}
+
+// countLinkedEvidence reports how many successfully uploaded evidence files
+// render as a download link rather than an inline preview: every one of them
+// when the media-free fallback was used, otherwise just those whose media id
+// never resolved. Files whose upload failed are excluded — they are already
+// reported as a noted gap in the comment.
+func countLinkedEvidence(uploads map[string][]uploadedEvidence, embedded bool) int {
+	linked := 0
+	for _, evs := range uploads {
+		for _, e := range evs {
+			if e.failed {
+				continue
+			}
+			if !embedded || strings.TrimSpace(e.mediaID) == "" {
+				linked++
+			}
+		}
+	}
+	return linked
 }
 
 // postResultsComment posts the comment, embedding evidence media first and

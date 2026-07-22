@@ -135,6 +135,7 @@ func (m *Service) Get(ctx context.Context, id domain.ProjectID) (GetResult, erro
 	if !ok || !row.ArchivedAt.IsZero() {
 		return GetResult{}, apierr.NotFound("PROJECT_NOT_FOUND", "Unknown project")
 	}
+	m.backfillRepoOriginURL(ctx, &row)
 	p := m.projectFromRow(row)
 	if row.Kind.WithDefault() == domain.ProjectKindWorkspace {
 		repos, err := m.store.ListWorkspaceRepos(ctx, row.ID)
@@ -144,6 +145,32 @@ func (m *Service) Get(ctx context.Context, id domain.ProjectID) (GetResult, erro
 		p.WorkspaceRepos = workspaceReposFromRecords(repos)
 	}
 	return GetResult{Status: "ok", Project: &p}, nil
+}
+
+// backfillRepoOriginURL re-detects and persists the repo URL of a project that
+// was registered without one. The URL is written only at `project add`, so a
+// project registered while detection could not see its remote (it was named
+// something other than `origin`) stayed blank forever — and a blank URL reads as
+// "not a GitLab project", which hides the approval-rule setting with no way for
+// the user to correct it short of re-adding the project.
+//
+// Runs on the single-project read (the Settings page), not on List: opening a
+// project's settings is exactly when the value is needed, and it is not a hot
+// path. A repo that genuinely has no usable remote stays blank and simply
+// re-checks next time; a failed write is ignored, since the caller is better
+// served by the freshly detected value than by an error.
+func (m *Service) backfillRepoOriginURL(ctx context.Context, row *domain.ProjectRecord) {
+	if row.RepoOriginURL != "" || row.Path == "" {
+		return
+	}
+	url := resolveGitOriginURL(row.Path)
+	if url == "" {
+		return
+	}
+	row.RepoOriginURL = url
+	if err := m.store.UpsertProject(ctx, *row); err != nil {
+		return
+	}
 }
 
 // ListBranches returns the deduped short branch names for a project's repo,
@@ -354,16 +381,80 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	return m.projectFromRow(row), nil
 }
 
-// resolveGitOriginURL returns the project's `origin` remote URL via
-// `git -C path remote get-url origin`. A missing remote, missing repo, or any
-// other git error returns an empty string — `project add` must not fail just
-// because no origin is configured (the SCM observer skips such projects).
+// resolveGitOriginURL returns the URL of the remote this project pushes to.
+//
+// `origin` is the convention and stays the first choice, but it is only a
+// convention: a checkout whose remotes are named after the apps they point at
+// (advisor-ios-app has `Advisor` and `Nter`) has no `origin` at all. Keying only
+// off that name recorded an empty repo URL for a perfectly ordinary GitLab
+// project, which silently hid every GitLab-gated setting in the UI. So, in order:
+//
+//  1. `origin`, when it exists;
+//  2. the remote the checked-out branch tracks (`branch.<HEAD>.remote`) — the
+//     remote this repo actually pushes to, and the only safe pick when several
+//     remotes point at different projects;
+//  3. the sole remote, when there is exactly one.
+//
+// Anything else — no remote, several remotes and no tracking branch, a missing
+// repo, any git error — returns an empty string. `project add` must not fail
+// just because no remote is configured (the SCM observer skips such projects),
+// and guessing between remotes that point at different repos would be worse than
+// recording nothing.
 func resolveGitOriginURL(path string) string {
-	out, err := aoprocess.Command("git", "-C", path, "remote", "get-url", "origin").Output()
+	if url := gitRemoteURL(path, "origin"); url != "" {
+		return url
+	}
+	if name := gitTrackedRemoteName(path); name != "" {
+		if url := gitRemoteURL(path, name); url != "" {
+			return url
+		}
+	}
+	if remotes := gitRemoteNames(path); len(remotes) == 1 {
+		return gitRemoteURL(path, remotes[0])
+	}
+	return ""
+}
+
+// gitRemoteURL returns one remote's fetch URL, or "" when it is not configured.
+func gitRemoteURL(path, remote string) string {
+	out, err := aoprocess.Command("git", "-C", path, "remote", "get-url", remote).Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// gitTrackedRemoteName returns the remote the checked-out branch tracks, or ""
+// for a detached HEAD, an untracked branch, or an unreadable repo.
+func gitTrackedRemoteName(path string) string {
+	head, err := aoprocess.Command("git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(head))
+	if branch == "" {
+		return ""
+	}
+	out, err := aoprocess.Command("git", "-C", path, "config", "--get", "branch."+branch+".remote").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitRemoteNames lists the repo's configured remotes.
+func gitRemoteNames(path string) []string {
+	out, err := aoprocess.Command("git", "-C", path, "remote").Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // resolveDefaultBranch returns the repo's default branch, preferring the

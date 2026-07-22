@@ -333,6 +333,33 @@ describe("SmokeTestView", () => {
 		expect(await screen.findByText(/Posted 1 result to DEMO-101/)).toBeInTheDocument();
 	});
 
+	// Evidence that lands as a download link instead of an inline preview is the
+	// one failure of this flow the user cannot see from the app: the toast used to
+	// read exactly like a clean post, so the only way to find out was to open the
+	// issue and notice the screenshots were missing.
+	it("says so when evidence lands as links instead of inline previews", async () => {
+		checks = [check({ verdict: "pass", decidedAt: "2026-07-11T10:05:00Z" })];
+		postMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/smoke-checks/jira") {
+				return {
+					data: {
+						key: "DEMO-101",
+						commentUrl: "",
+						attachmentsUploaded: 2,
+						rowsPosted: 1,
+						embeddedMedia: false,
+						evidenceLinked: 2,
+					},
+					error: undefined,
+				};
+			}
+			return { data: { delivered: true, target: "worker", summary: "1 pass" }, error: undefined };
+		});
+		renderView("s1", "jira:DEMO-101");
+		await userEvent.click(await screen.findByRole("button", { name: /Post to Jira/ }));
+		expect(await screen.findByText(/2 evidence files posted as links, not previews/)).toBeInTheDocument();
+	});
+
 	it("guides an unlinked session to the link flow instead of posting", async () => {
 		checks = [check({ verdict: "pass", decidedAt: "2026-07-11T10:05:00Z" })];
 		renderView("s1"); // no issueId → not Jira-linked

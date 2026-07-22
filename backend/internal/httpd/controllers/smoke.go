@@ -85,6 +85,7 @@ type PostSmokeToJiraResponse struct {
 	AttachmentsUploaded int    `json:"attachmentsUploaded" description:"Number of evidence files uploaded as Jira attachments."`
 	RowsPosted          int    `json:"rowsPosted" description:"Number of run rows (verdict set) posted in the table."`
 	EmbeddedMedia       bool   `json:"embeddedMedia" description:"Whether image evidence embedded inline (false = attachment-link fallback)."`
+	EvidenceLinked      int    `json:"evidenceLinked" description:"Number of uploaded evidence files that landed as download links instead of inline previews."`
 }
 
 // SmokeController owns the session-scoped /smoke-checks routes. A nil Svc
@@ -275,6 +276,7 @@ func (c *SmokeController) postJira(w http.ResponseWriter, r *http.Request) {
 		AttachmentsUploaded: out.AttachmentsUploaded,
 		RowsPosted:          out.RowsPosted,
 		EmbeddedMedia:       out.EmbeddedMedia,
+		EvidenceLinked:      out.EvidenceLinked,
 	})
 }
 

@@ -523,6 +523,31 @@ func gitRepoWithOrigin(t *testing.T, originURL string) string {
 	return dir
 }
 
+// gitRepoWithRemotes creates a repo with the given remotes (name → URL) and, when
+// trackedRemote is non-empty, makes the checked-out branch track it. This is the
+// shape of a real checkout whose remote is NOT called `origin` (e.g.
+// advisor-ios-app, whose remotes are `Advisor` and `Nter`).
+func gitRepoWithRemotes(t *testing.T, trackedRemote string, remotes map[string]string) string {
+	t.Helper()
+	dir := gitRepo(t)
+	run := func(args ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "test")
+	run("commit", "--allow-empty", "-m", "init")
+	for name, url := range remotes {
+		run("remote", "add", name, url)
+	}
+	if trackedRemote != "" {
+		run("config", "branch.main.remote", trackedRemote)
+		run("config", "branch.main.merge", "refs/heads/main")
+	}
+	return dir
+}
+
 func TestManager_AddPopulatesRepoOriginURL(t *testing.T) {
 	ctx := context.Background()
 
@@ -541,6 +566,46 @@ func TestManager_AddPopulatesRepoOriginURL(t *testing.T) {
 			setup:   func(t *testing.T) string { return gitRepo(t) },
 			wantURL: "",
 		},
+		{
+			// advisor-ios-app: remotes are `Advisor` + `Nter`, HEAD tracks `Advisor`.
+			// Keying only off `origin` recorded an empty repo URL, which hid every
+			// GitLab-gated setting (the approval rule) for a real GitLab project.
+			name: "tracked remote is used when there is no origin",
+			setup: func(t *testing.T) string {
+				return gitRepoWithRemotes(t, "Advisor", map[string]string{
+					"Advisor": "https://gitlab.example.com/g/advisor.git",
+					"Nter":    "https://gitlab.example.com/g/nter.git",
+				})
+			},
+			wantURL: "https://gitlab.example.com/g/advisor.git",
+		},
+		{
+			name: "sole remote is used when nothing is tracked",
+			setup: func(t *testing.T) string {
+				return gitRepoWithRemotes(t, "", map[string]string{"upstream": "https://gitlab.example.com/g/only.git"})
+			},
+			wantURL: "https://gitlab.example.com/g/only.git",
+		},
+		{
+			name: "origin still wins over other remotes",
+			setup: func(t *testing.T) string {
+				return gitRepoWithRemotes(t, "Advisor", map[string]string{
+					"origin":  "https://github.com/o/r.git",
+					"Advisor": "https://gitlab.example.com/g/advisor.git",
+				})
+			},
+			wantURL: "https://github.com/o/r.git",
+		},
+		{
+			name: "ambiguous remotes with no tracking stay empty",
+			setup: func(t *testing.T) string {
+				return gitRepoWithRemotes(t, "", map[string]string{
+					"a": "https://gitlab.example.com/g/a.git",
+					"b": "https://gitlab.example.com/g/b.git",
+				})
+			},
+			wantURL: "",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newManager(t)
@@ -553,6 +618,53 @@ func TestManager_AddPopulatesRepoOriginURL(t *testing.T) {
 				t.Fatalf("Repo = %q, want %q", proj.Repo, tc.wantURL)
 			}
 		})
+	}
+}
+
+// A project registered before remote detection understood non-`origin` remotes
+// carries an empty repo URL forever — nothing ever rewrites it, so the renderer
+// keeps hiding every GitLab-gated setting. Reading the project re-detects and
+// persists it, so opening its Settings heals the record.
+func TestManager_GetBackfillsMissingRepoOriginURL(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	m := project.New(store)
+	path := gitRepoWithRemotes(t, "Advisor", map[string]string{
+		"Advisor": "https://gitlab.example.com/g/advisor.git",
+		"Nter":    "https://gitlab.example.com/g/nter.git",
+	})
+	if _, err := m.Add(ctx, project.AddInput{Path: path, ProjectID: ptr("p")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	// Simulate the stored state the origin-only detection produced.
+	row, ok, err := store.GetProject(ctx, "p")
+	if err != nil || !ok {
+		t.Fatalf("GetProject: %v ok=%v", err, ok)
+	}
+	row.RepoOriginURL = ""
+	if err := store.UpsertProject(ctx, row); err != nil {
+		t.Fatalf("UpsertProject: %v", err)
+	}
+
+	got, err := m.Get(ctx, domain.ProjectID("p"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	const want = "https://gitlab.example.com/g/advisor.git"
+	if got.Project.Repo != want {
+		t.Fatalf("Get Repo = %q, want %q", got.Project.Repo, want)
+	}
+	// Healed in the store, not just patched into the response.
+	row, _, err = store.GetProject(ctx, "p")
+	if err != nil {
+		t.Fatalf("GetProject after heal: %v", err)
+	}
+	if row.RepoOriginURL != want {
+		t.Fatalf("stored RepoOriginURL = %q, want %q", row.RepoOriginURL, want)
 	}
 }
 

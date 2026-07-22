@@ -1910,6 +1910,8 @@ export interface components {
             commentUrl: string;
             /** @description Whether image evidence embedded inline (false = attachment-link fallback). */
             embeddedMedia: boolean;
+            /** @description Number of uploaded evidence files that landed as download links instead of inline previews. */
+            evidenceLinked: number;
             /** @description The Jira issue key the results were posted to. */
             key: string;
             /** @description Number of run rows (verdict set) posted in the table. */

@@ -124,6 +124,11 @@ export function useProjectSettingsForm({
 	const config = project.config ?? {};
 	const projectProvider = providerFromOrigin(project.repo);
 	const isGitLabProject = projectProvider === "gitlab";
+	// No recorded remote means AO cannot tell which forge this project is on, so
+	// every forge-gated setting disappears. Distinguish that from a project that
+	// is simply on another forge: the first is a detection gap worth explaining,
+	// the second is by design.
+	const hasKnownRemote = (project.repo ?? "").trim() !== "";
 	const workspace = workspaceQuery.data?.find((item) => item.id === projectId);
 	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
 
@@ -283,6 +288,7 @@ export function useProjectSettingsForm({
 		dirty,
 		isFieldDirty,
 		isGitLabProject,
+		hasKnownRemote,
 		agentCatalog,
 		agentsQuery,
 		refreshAgentsMutation,
