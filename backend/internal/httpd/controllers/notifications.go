@@ -103,35 +103,12 @@ func (c *NotificationsController) stream(w http.ResponseWriter, r *http.Request)
 		apispec.NotImplemented(w, r, "GET", "/api/v1/notifications/stream")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SSE_UNSUPPORTED", "Streaming is not supported by this server", nil)
-		return
-	}
-	ch, unsubscribe := c.Stream.Subscribe(domain.ProjectID(r.URL.Query().Get("projectId")))
-	defer unsubscribe()
-
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream; charset=utf-8")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("Connection", "keep-alive")
-	h.Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case rec, ok := <-ch:
-			if !ok {
-				return
-			}
-			if err := writeNotificationSSE(w, flusher, rec); err != nil {
-				return
-			}
-		}
-	}
+	streamSSE(w, r,
+		func() (<-chan domain.NotificationRecord, func()) {
+			return c.Stream.Subscribe(domain.ProjectID(r.URL.Query().Get("projectId")))
+		},
+		writeNotificationSSE,
+	)
 }
 
 func writeNotificationSSE(w http.ResponseWriter, flusher http.Flusher, rec domain.NotificationRecord) error {

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
@@ -125,6 +126,11 @@ func Run() error {
 	// through the gated runtime so delivery waits for a typing gap.
 	messenger := newSessionMessenger(store, gatedRuntime, log)
 	notificationHub := notify.NewHub()
+	// The activity feed is an in-memory, lossy push path for ephemeral per-tool
+	// agent activity. It sits OUTSIDE the CDC pipeline on purpose: CDC carries
+	// durable changes and fires only when activity_state actually changes, so it
+	// cannot carry per-tool ticks. See internal/activity for the reasoning.
+	activityHub := activity.NewHub()
 	notifier := notificationsvc.New(notificationsvc.Deps{Store: store})
 	notificationWriter := notify.New(notify.Deps{Store: store, Publisher: notificationHub})
 
@@ -275,6 +281,8 @@ func Run() error {
 		Smoke:              smokeSvc,
 		Notifications:      notifier,
 		NotificationStream: notificationHub,
+		ActivityFeed:       activityHub,
+		ActivityStream:     activityHub,
 		Import:             importsvc.New(importsvc.Deps{Store: store}),
 		CDC:                store,
 		Events:             cdcPipe.Broadcaster,

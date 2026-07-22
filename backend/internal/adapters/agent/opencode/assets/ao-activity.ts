@@ -1,10 +1,20 @@
 // agent-orchestrator: managed opencode activity plugin (do not edit)
 //
-// It maps opencode's native lifecycle events onto AO's three normalized
-// activity events:
-//   session.created                       -> `ao hooks opencode session-start`
+// It maps opencode's native lifecycle events onto AO's normalized activity
+// events:
+//   session.created                        -> `ao hooks opencode session-start`
 //   message.updated / message.part.updated -> `ao hooks opencode user-prompt-submit`
+//   message.part.updated (tool part)       -> `ao hooks opencode tool-start`
+//                                             `ao hooks opencode tool-end`
+//                                             `ao hooks opencode tool-failed`
 //   session.status (status.type == idle)   -> `ao hooks opencode stop`
+//
+// SAFETY. A tool part carries state.input, state.output and state.title — a
+// command with an inline token, a file body, raw command output. AO has not
+// verified the shape of any of it, and none of it may reach a desktop overlay,
+// so ONLY the tool NAME is reported. AO's Go side then maps that name through
+// its own per-tool whitelist (adapters/agent/toolcurate) and drops anything it
+// does not recognise.
 //
 // The opencode-native session id (and prompt/model where known) is piped to the
 // hook command as JSON on stdin, run with cwd set to the worktree so AO can
@@ -26,6 +36,11 @@ export const aoActivity: Plugin = async ({ directory, client }) => {
   // early empty report, then an upgrade carrying the prompt text. Maps a message
   // id to whether the report we already sent included the prompt text.
   const promptReports = new Map<string, boolean>()
+  // A tool part is re-emitted on every streaming update, so remember the last
+  // hook reported per tool call and fire only on a status TRANSITION. Bounded so
+  // a long session cannot grow it without limit.
+  const toolReports = new Map<string, string>()
+  const MAX_TOOL_REPORTS = 500
   // message.* events don't carry the session id, so track it from events that do.
   let currentSessionID: string | null = null
   // The model of the most recent assistant message, forwarded for context.
@@ -86,6 +101,7 @@ export const aoActivity: Plugin = async ({ directory, client }) => {
   function switchedSession(sessionID: string): boolean {
     if (currentSessionID === sessionID) return false
     promptReports.clear()
+    toolReports.clear()
     messageStore.clear()
     currentModel = null
     currentSessionID = sessionID
@@ -105,6 +121,25 @@ export const aoActivity: Plugin = async ({ directory, client }) => {
     if (reportedWithText === false && !hasText) return // already reported empty; no new info
     promptReports.set(messageID, hasText)
     callHookSync("user-prompt-submit", { session_id: sessionID, prompt, model: currentModel ?? "" })
+  }
+
+  // Report a tool call's lifecycle. ONLY the tool name crosses the boundary:
+  // state.input / state.output / state.title are deliberately never read (see
+  // the SAFETY note at the top of this file).
+  function reportToolPart(part: any) {
+    const sessionID = part.sessionID ?? currentSessionID
+    if (!sessionID) return
+    const callID = part.callID ?? part.id
+    if (!callID) return
+    const status = part.state?.status
+    const hook =
+      status === "running" ? "tool-start" : status === "completed" ? "tool-end" : status === "error" ? "tool-failed" : null
+    // "pending" is queued, not running — it carries no truthful "doing it now".
+    if (!hook) return
+    if (toolReports.get(callID) === hook) return
+    if (toolReports.size >= MAX_TOOL_REPORTS) toolReports.clear()
+    toolReports.set(callID, hook)
+    callHookSync(hook, { session_id: sessionID, tool: typeof part.tool === "string" ? part.tool : "" })
   }
 
   return {
@@ -140,6 +175,12 @@ export const aoActivity: Plugin = async ({ directory, client }) => {
           case "message.part.updated": {
             const part = (event as any).properties?.part
             if (!part?.messageID) break
+            // A tool part belongs to the assistant message, so it is handled
+            // before (and independently of) the user-prompt lookup below.
+            if (part.type === "tool") {
+              reportToolPart(part)
+              break
+            }
             const msg = messageStore.get(part.messageID)
             if (msg?.role === "user" && part.type === "text") {
               const sessionID = msg.sessionID ?? currentSessionID

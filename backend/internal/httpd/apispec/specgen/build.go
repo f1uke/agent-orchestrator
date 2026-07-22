@@ -15,6 +15,7 @@ import (
 	openapi "github.com/swaggest/openapi-go"
 	"github.com/swaggest/openapi-go/openapi31"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
@@ -232,6 +233,9 @@ var schemaNames = map[string]string{
 	"ControllersChangedFileDTO":                   "ChangedFileDTO",
 	"ControllersWorkspaceFileDiffParams":          "WorkspaceFileDiffParams",
 	"ControllersSetActivityRequest":               "SetActivityRequest",
+	"DomainActivityDetail":                        "ActivityDetail",
+	"DomainActivityEvent":                         "ActivityEvent",
+	"ControllersActivityStreamQuery":              "ActivityStreamQuery",
 	"ControllersSetActivityResponse":              "SetActivityResponse",
 	"ControllersSpawnOrchestratorRequest":         "SpawnOrchestratorRequest",
 	"ControllersSpawnOrchestratorResponse":        "SpawnOrchestratorResponse",
@@ -391,6 +395,7 @@ func operations() []operation {
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, smokeOperations()...)
 	ops = append(ops, notificationOperations()...)
+	ops = append(ops, activityOperations()...)
 	ops = append(ops, importOperations()...)
 	ops = append(ops, daemonOperations()...)
 	return ops
@@ -512,6 +517,28 @@ func notificationOperations() []operation {
 			pathParams: []any{controllers.NotificationStreamQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, ""},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+			contentTypes: map[int]string{http.StatusOK: "text/event-stream"},
+		},
+	}
+}
+
+// activityOperations declares the ephemeral activity-feed stream. Must stay 1:1
+// with the routes ActivityController.RegisterStream mounts (enforced by the
+// parity test).
+func activityOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/activity/stream", id: "streamActivity", tag: "activity",
+			summary:    "Stream curated per-session agent activity",
+			pathParams: []any{controllers.ActivityStreamQuery{}},
+			resps: []respUnit{
+				// The body is an SSE stream; each `event: activity` frame's data
+				// is one ActivityEvent. Naming the frame type here is what gives
+				// consumers a generated type for the feed contract.
+				{http.StatusOK, domain.ActivityEvent{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

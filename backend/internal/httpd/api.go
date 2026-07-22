@@ -30,19 +30,23 @@ type APIDeps struct {
 	Smoke              smokesvc.Manager
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
-	Import             controllers.ImportService
-	Settings           controllers.SettingsService
-	SpawnConfirm       controllers.SpawnConfirmService
-	AutoNudge          controllers.AutoNudgeService
-	ResponseLanguage   controllers.ResponseLanguageService
-	EvidenceRetention  controllers.EvidenceRetentionService
-	EvidenceSweeper    controllers.EvidenceSweeper
-	SystemPrompts      controllers.SystemPromptsService
-	MessageTemplates   controllers.MessageTemplatesService
-	CDC                cdc.Source
-	Events             cdcSubscriber
-	Telemetry          ports.EventSink
-	LoopTelemetry      controllers.LoopTelemetrySource
+	// ActivityFeed publishes curated per-session activity events; ActivityStream
+	// is the SSE subscription side. Both are satisfied by *activity.Hub.
+	ActivityFeed      controllers.ActivityFeed
+	ActivityStream    controllers.ActivityStream
+	Import            controllers.ImportService
+	Settings          controllers.SettingsService
+	SpawnConfirm      controllers.SpawnConfirmService
+	AutoNudge         controllers.AutoNudgeService
+	ResponseLanguage  controllers.ResponseLanguageService
+	EvidenceRetention controllers.EvidenceRetentionService
+	EvidenceSweeper   controllers.EvidenceSweeper
+	SystemPrompts     controllers.SystemPromptsService
+	MessageTemplates  controllers.MessageTemplatesService
+	CDC               cdc.Source
+	Events            cdcSubscriber
+	Telemetry         ports.EventSink
+	LoopTelemetry     controllers.LoopTelemetrySource
 }
 
 // API owns one controller per resource and is the single Register call the
@@ -57,6 +61,7 @@ type API struct {
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
 	notifications *controllers.NotificationsController
+	activity      *controllers.ActivityController
 	imports       *controllers.ImportController
 	settings      *controllers.SettingsController
 	daemon        *controllers.DaemonController
@@ -78,12 +83,14 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		sessions: &controllers.SessionsController{
 			Svc:      deps.Sessions,
 			Activity: deps.Activity,
+			Feed:     deps.ActivityFeed,
 		},
 		jira:          &controllers.JiraController{Svc: deps.Jira},
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
+		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
 		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
@@ -120,6 +127,7 @@ func (a *API) Register(root chi.Router) {
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.
 		a.notifications.RegisterStream(r)
+		a.activity.RegisterStream(r)
 		a.events.Register(r)
 	})
 }

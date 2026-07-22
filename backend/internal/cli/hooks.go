@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/activitydispatch"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // sessionIDPattern bounds the AO_SESSION_ID we will place in a request path to
@@ -35,8 +36,15 @@ const (
 // setActivityAPIRequest mirrors the daemon's SetActivityRequest body for
 // POST /api/v1/sessions/{id}/activity. The CLI keeps its own copy so it need
 // not import httpd.
+//
+// Detail is the optional CURATED description of the action that produced this
+// signal. It is built here, in the hook process, by a per-tool whitelist
+// (adapters/agent/toolcurate) — the raw agent payload is never forwarded, so a
+// file body or an inline token cannot cross this boundary. A harness with no
+// per-tool hook simply omits it and the session stays status-only.
 type setActivityAPIRequest struct {
-	State string `json:"state"`
+	State  string                 `json:"state"`
+	Detail *domain.ActivityDetail `json:"detail,omitempty"`
 }
 
 // newHooksCommand builds the hidden `ao hooks <agent> <event>` command that
@@ -81,8 +89,17 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		return nil
 	}
 
+	req := setActivityAPIRequest{State: string(state)}
+	// Curate the payload into the small, whitelisted detail the activity feed
+	// may carry. This must happen HERE, before the loopback POST, so the raw
+	// payload never reaches the daemon, the store, or a log. A harness with no
+	// detail deriver degrades silently to a bare state.
+	if detail, hasDetail := activitydispatch.DeriveDetail(agent, event, payload); hasDetail && !detail.IsZero() {
+		req.Detail = &detail
+	}
+
 	path := "sessions/" + url.PathEscape(sessionID) + "/activity"
-	if err := c.postJSON(ctx, path, setActivityAPIRequest{State: string(state)}, nil); err != nil {
+	if err := c.postJSON(ctx, path, req, nil); err != nil {
 		// Surface the failure for diagnosis, but exit 0: a failed activity
 		// report must not disrupt the agent.
 		c.reportHookFailure(agent, event, sessionID, err)

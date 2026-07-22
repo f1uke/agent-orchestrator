@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/activity/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream curated per-session agent activity */
+        get: operations["streamActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents": {
         parameters: {
             query?: never;
@@ -1380,6 +1397,44 @@ export interface components {
             message: string;
             requestId?: string;
         };
+        ActivityDetail: {
+            /**
+             * @description What the detail reports.
+             * @enum {string}
+             */
+            kind: "tool_start" | "tool_end" | "tool_failed" | "message";
+            /** @description Curated target noun (file base name, pattern, URL host). */
+            target?: string;
+            /** @description Curated one-line description of the action. */
+            text?: string;
+            /** @description Whitelisted tool name; empty for a tool AO does not curate. */
+            tool?: string;
+        };
+        ActivityEvent: {
+            /**
+             * Format: date-time
+             * @description Daemon clock, UTC. The consumer runs on the same host over loopback.
+             */
+            at: string;
+            /** @enum {string} */
+            coarse?: "working" | "waiting" | "idle" | "exited";
+            /**
+             * Format: int64
+             * @description Milliseconds after 'at' that 'coarse' stays true. 0 means sticky (never decays).
+             */
+            coarseTtlMs: number;
+            /** @enum {string} */
+            kind: "tool_start" | "tool_end" | "tool_failed" | "activity" | "message";
+            sessionId: string;
+            target?: string;
+            text?: string;
+            tool?: string;
+            /**
+             * Format: int64
+             * @description Milliseconds after 'at' that the detail may be shown as currently true. 0 means no detail.
+             */
+            ttlMs: number;
+        };
         AddProjectInput: {
             asWorkspace?: boolean;
             config?: components["schemas"]["ProjectConfig"];
@@ -2159,6 +2214,8 @@ export interface components {
             updatedAt: string;
         };
         SetActivityRequest: {
+            /** @description Optional curated detail of the action behind this signal. */
+            detail?: components["schemas"]["ActivityDetail"];
             /**
              * @description Agent activity state reported by an agent hook.
              * @enum {string}
@@ -2397,6 +2454,47 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    streamActivity: {
+        parameters: {
+            query?: {
+                /** @description Optional session id filter. Omit to receive every session, which is what a desktop overlay wants. */
+                sessionId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["ActivityEvent"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listAgents: {
         parameters: {
             query?: never;
