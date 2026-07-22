@@ -4,14 +4,20 @@ import "github.com/aoagents/agent-orchestrator/backend/internal/domain"
 
 // DeriveActivityState maps an opencode plugin hook event onto an AO activity
 // state. The opencode plugin (assets/ao-activity.ts) normalizes opencode's
-// native events to "session-start" / "user-prompt-submit" / "stop" before
-// invoking `ao hooks opencode <event>`. The bool is false when the event
-// carries no activity signal.
+// native events to "session-start" / "user-prompt-submit" / "stop" /
+// "tool-start" / "tool-end" / "tool-failed" before invoking
+// `ao hooks opencode <event>`. The bool is false when the event carries no
+// activity signal.
 func DeriveActivityState(event string, _ []byte) (domain.ActivityState, bool) {
 	switch event {
 	case "session-start":
 		return domain.ActivityActive, true
 	case "user-prompt-submit":
+		return domain.ActivityActive, true
+	case "tool-start", "tool-end", "tool-failed":
+		// A tool is about to run / just ran, so the agent is demonstrably busy.
+		// As with claude-code's tool hooks, both completion variants must report
+		// active: a failed tool is still liveness.
 		return domain.ActivityActive, true
 	case "stop":
 		return domain.ActivityIdle, true

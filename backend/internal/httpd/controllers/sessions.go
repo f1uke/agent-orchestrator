@@ -98,6 +98,10 @@ type ActivityRecorder interface {
 type SessionsController struct {
 	Svc      SessionService
 	Activity ActivityRecorder
+	// Feed is the ephemeral activity feed the desktop companion subscribes to.
+	// Optional: a nil feed simply publishes nothing, so the durable paths below
+	// behave identically with or without a live consumer.
+	Feed ActivityFeed
 }
 
 // Register mounts the session routes on the supplied router.
@@ -804,6 +808,7 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, err)
 		return
 	}
+	c.publishActivity(r.Context(), activityEventFromMessage(sessionID(r), message))
 	envelope.WriteJSON(w, http.StatusOK, SendSessionMessageResponse{OK: true, SessionID: sessionID(r), Message: message})
 }
 
@@ -934,6 +939,9 @@ func (c *SessionsController) activity(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, err)
 		return
 	}
+	// Publish only AFTER the signal is accepted: the feed reports facts, and a
+	// rejected signal is not one. Publishing is lossy and never fails a request.
+	c.publishActivity(r.Context(), activityEventFromSignal(sessionID(r), state, in.Detail))
 	envelope.WriteJSON(w, http.StatusOK, SetActivityResponse{OK: true, SessionID: sessionID(r), State: in.State})
 }
 
@@ -1222,4 +1230,15 @@ func nonNilSessionIDs(ids []domain.SessionID) []domain.SessionID {
 		return []domain.SessionID{}
 	}
 	return ids
+}
+
+// publishActivity fans an accepted fact out to the ephemeral activity feed. It
+// is best-effort by construction: the hub drops rather than blocks, so this can
+// never slow the hook path of a tool call, and a publish failure never affects
+// the response the caller already earned.
+func (c *SessionsController) publishActivity(ctx context.Context, ev domain.ActivityEvent) {
+	if c.Feed == nil {
+		return
+	}
+	_ = c.Feed.Publish(ctx, ev)
 }

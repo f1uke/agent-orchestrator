@@ -8,6 +8,40 @@ servers:
 - description: Local daemon (loopback only)
   url: http://127.0.0.1:3001
 paths:
+  /api/v1/activity/stream:
+    get:
+      operationId: streamActivity
+      parameters:
+      - description: Optional session id filter. Omit to receive every session, which
+          is what a desktop overlay wants.
+        in: query
+        name: sessionId
+        schema:
+          description: Optional session id filter. Omit to receive every session,
+            which is what a desktop overlay wants.
+          type: string
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ActivityEvent'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stream curated per-session agent activity
+      tags:
+      - activity
   /api/v1/agents:
     get:
       operationId: listAgents
@@ -4002,6 +4036,75 @@ components:
       - code
       - message
       type: object
+    ActivityDetail:
+      properties:
+        kind:
+          description: What the detail reports.
+          enum:
+          - tool_start
+          - tool_end
+          - tool_failed
+          - message
+          type: string
+        target:
+          description: Curated target noun (file base name, pattern, URL host).
+          type: string
+        text:
+          description: Curated one-line description of the action.
+          type: string
+        tool:
+          description: Whitelisted tool name; empty for a tool AO does not curate.
+          type: string
+      required:
+      - kind
+      type: object
+    ActivityEvent:
+      properties:
+        at:
+          description: Daemon clock, UTC. The consumer runs on the same host over
+            loopback.
+          format: date-time
+          type: string
+        coarse:
+          enum:
+          - working
+          - waiting
+          - idle
+          - exited
+          type: string
+        coarseTtlMs:
+          description: Milliseconds after 'at' that 'coarse' stays true. 0 means sticky
+            (never decays).
+          format: int64
+          type: integer
+        kind:
+          enum:
+          - tool_start
+          - tool_end
+          - tool_failed
+          - activity
+          - message
+          type: string
+        sessionId:
+          type: string
+        target:
+          type: string
+        text:
+          type: string
+        tool:
+          type: string
+        ttlMs:
+          description: Milliseconds after 'at' that the detail may be shown as currently
+            true. 0 means no detail.
+          format: int64
+          type: integer
+      required:
+      - sessionId
+      - kind
+      - at
+      - ttlMs
+      - coarseTtlMs
+      type: object
     AddProjectInput:
       properties:
         asWorkspace:
@@ -5984,6 +6087,9 @@ components:
       type: object
     SetActivityRequest:
       properties:
+        detail:
+          $ref: '#/components/schemas/ActivityDetail'
+          description: Optional curated detail of the action behind this signal.
         state:
           description: Agent activity state reported by an agent hook.
           enum:

@@ -350,3 +350,188 @@ func TestHooks_DaemonErrorIsSwallowed(t *testing.T) {
 		t.Errorf("expected the failure surfaced to stderr, got %q", errOut)
 	}
 }
+
+func capturedDetail(t *testing.T, capture *activityCapture) map[string]any {
+	t.Helper()
+	var req struct {
+		Detail map[string]any `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
+	}
+	return req.Detail
+}
+
+// The whole point of the feed: a tool hook must carry the curated detail to the
+// daemon in the SAME post that reports the activity state, so the bubble learns
+// what the agent is doing without a second round trip.
+func TestHooks_ToolHookCarriesCuratedDetail(t *testing.T) {
+	cases := []struct {
+		event   string
+		payload string
+		want    map[string]any
+	}{
+		{
+			event:   "pre-tool-use",
+			payload: `{"tool_name":"Bash","tool_input":{"command":"pnpm test","description":"Running the test suite"}}`,
+			want:    map[string]any{"kind": "tool_start", "tool": "Bash", "text": "Running the test suite"},
+		},
+		{
+			event:   "post-tool-use",
+			payload: `{"tool_name":"Read","tool_input":{"file_path":"/Users/someone/x/hooks.go"}}`,
+			want:    map[string]any{"kind": "tool_end", "tool": "Read", "target": "hooks.go"},
+		},
+		{
+			event:   "post-tool-use-failure",
+			payload: `{"tool_name":"Bash","tool_input":{"command":"pnpm test","description":"Running the test suite"}}`,
+			want:    map[string]any{"kind": "tool_failed", "tool": "Bash", "text": "Running the test suite"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.event, func(t *testing.T) {
+			t.Setenv("AO_SESSION_ID", "ao-7")
+			cfg := setConfigEnv(t)
+			srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+			writeRunFileFor(t, cfg, srv)
+
+			_, _, err := executeCLI(t, Deps{
+				In:           strings.NewReader(tc.payload),
+				ProcessAlive: func(int) bool { return true },
+			}, "hooks", "claude-code", tc.event)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := capturedState(t, capture); got != "active" {
+				t.Errorf("state = %q, want active", got)
+			}
+			got := capturedDetail(t, capture)
+			for k, want := range tc.want {
+				if got[k] != want {
+					t.Errorf("detail[%q] = %v, want %v (body=%s)", k, got[k], want, capture.body)
+				}
+			}
+		})
+	}
+}
+
+// TestHooks_RawPayloadNeverLeavesTheHookProcess is the end-to-end secret-leak
+// guard. A Write's tool_input is the ENTIRE file body and the PostToolUse
+// payload also carries tool_response; the curated POST must contain neither.
+// Curation happens inside `ao hooks`, so the raw payload never crosses a process
+// boundary at all.
+//
+// Mutation check: forward the raw payload (or widen the per-tool whitelist) and
+// this goes red.
+func TestHooks_RawPayloadNeverLeavesTheHookProcess(t *testing.T) {
+	const secret = "CANARY-E2E-FILE-BODY-b17e"
+	payload := `{
+		"session_id":"native-1","transcript_path":"/Users/someone/.claude/projects/p/t.jsonl",
+		"hook_event_name":"PostToolUse","tool_name":"Write",
+		"tool_input":{"file_path":"/Users/someone/private/.env","content":"OPENAI_KEY=` + secret + `"},
+		"tool_response":{"filePath":"/Users/someone/private/.env","content":"OPENAI_KEY=` + secret + `"}
+	}`
+
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{
+		In:           strings.NewReader(payload),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "claude-code", "post-tool-use")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capture.hits != 1 {
+		t.Fatalf("hits = %d, want 1", capture.hits)
+	}
+	if strings.Contains(capture.body, secret) {
+		t.Fatalf("SECRET LEAK: the file body reached the daemon:\n%s", capture.body)
+	}
+	for _, forbidden := range []string{"/Users/someone", "tool_response", "transcript_path", "OPENAI_KEY"} {
+		if strings.Contains(capture.body, forbidden) {
+			t.Errorf("posted body contains %q, which must never leave the hook process:\n%s", forbidden, capture.body)
+		}
+	}
+	if got := capturedDetail(t, capture); got["target"] != ".env" || got["tool"] != "Write" {
+		t.Errorf("detail = %v, want the base name only", got)
+	}
+}
+
+// A tool AO does not curate still reports that something is happening, with no
+// detail whatsoever — degrade by saying less, never by leaking.
+func TestHooks_UncuratedToolPostsNoDetail(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{
+		In:           strings.NewReader(`{"tool_name":"mcp__private__deploy","tool_input":{"description":"Deploying","token":"s3cr3t"}}`),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "claude-code", "pre-tool-use")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(capture.body, "s3cr3t") || strings.Contains(capture.body, "Deploying") {
+		t.Fatalf("uncurated tool leaked its input:\n%s", capture.body)
+	}
+	got := capturedDetail(t, capture)
+	if got["kind"] != "tool_start" {
+		t.Errorf("kind = %v, want tool_start", got["kind"])
+	}
+	if got["tool"] != nil || got["target"] != nil || got["text"] != nil {
+		t.Errorf("detail = %v, want no fields beyond the kind", got)
+	}
+}
+
+// A harness with no per-tool hook (codex and ~9 others) reports its activity
+// state and nothing else. No "unsupported" flag rides along.
+func TestHooks_HooklessHarnessStaysStatusOnly(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{
+		In:           strings.NewReader(`{"tool_name":"Bash"}`),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "codex", "permission-request")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := capturedState(t, capture); got != "waiting_input" {
+		t.Errorf("state = %q, want waiting_input", got)
+	}
+	if strings.Contains(capture.body, "detail") || strings.Contains(capture.body, "unsupported") {
+		t.Errorf("a hook-less harness must post a bare state:\n%s", capture.body)
+	}
+}
+
+// opencode's plugin ships tool events after the part-filter fix; they carry the
+// tool NAME only.
+func TestHooks_OpenCodeToolEventCarriesNameOnlyDetail(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{
+		In:           strings.NewReader(`{"session_id":"ses-1","tool":"bash"}`),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "opencode", "tool-start")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := capturedState(t, capture); got != "active" {
+		t.Errorf("state = %q, want active", got)
+	}
+	got := capturedDetail(t, capture)
+	if got["kind"] != "tool_start" || got["tool"] != "Bash" {
+		t.Errorf("detail = %v, want a name-only Bash tool_start", got)
+	}
+	if got["text"] != nil || got["target"] != nil {
+		t.Errorf("opencode detail must be name-only, got %v", got)
+	}
+}

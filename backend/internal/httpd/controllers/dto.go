@@ -1105,8 +1105,16 @@ type ClaimPRResponse struct {
 }
 
 // SetActivityRequest is the body of POST /api/v1/sessions/{sessionId}/activity.
+//
+// Detail is optional and additive: it carries the CURATED description of the
+// action behind the signal, for the ephemeral activity feed
+// (GET /api/v1/activity/stream). It is produced by a per-tool whitelist inside
+// `ao hooks` before this request is sent, so a raw agent payload — a file body,
+// a command with an inline token, a tool response — never reaches the daemon.
+// Harnesses with no per-tool hook simply omit it.
 type SetActivityRequest struct {
-	State string `json:"state" enum:"active,idle,waiting_input,exited" description:"Agent activity state reported by an agent hook."`
+	State  string                 `json:"state" enum:"active,idle,waiting_input,exited" description:"Agent activity state reported by an agent hook."`
+	Detail *domain.ActivityDetail `json:"detail,omitempty" description:"Optional curated detail of the action behind this signal."`
 }
 
 // SetActivityResponse is the body of POST /api/v1/sessions/{sessionId}/activity.
@@ -1155,6 +1163,11 @@ type AgentInfo = agentsvc.Info
 type ListNotificationsQuery struct {
 	Status string `query:"status,omitempty" enum:"unread" description:"Notification status filter. V1 supports only unread."`
 	Limit  int    `query:"limit,omitempty" minimum:"1" maximum:"100" description:"Maximum notifications to return. Defaults to 50; capped at 100."`
+}
+
+// ActivityStreamQuery is the query string accepted by GET /api/v1/activity/stream.
+type ActivityStreamQuery struct {
+	SessionID string `query:"sessionId,omitempty" description:"Optional session id filter. Omit to receive every session, which is what a desktop overlay wants."`
 }
 
 // NotificationStreamQuery is the query string accepted by GET /api/v1/notifications/stream.

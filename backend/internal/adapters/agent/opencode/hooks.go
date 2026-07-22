@@ -51,10 +51,12 @@ const (
 //go:embed assets/ao-activity.ts
 var opencodePluginSource string
 
-// opencodeManagedEvents are the three normalized activity events the embedded
-// plugin reports. They are defined here (not parsed from the file) so tests can
-// assert the plugin wires every one via the `ao hooks opencode <event>` command.
-var opencodeManagedEvents = []string{"session-start", "user-prompt-submit", "stop"}
+// opencodeManagedEvents are the normalized activity events the embedded plugin
+// reports. They are defined here (not parsed from the file) so tests can assert
+// the plugin wires every one via the `ao hooks opencode <event>` command. The
+// tool trio mirrors claude-code's PreToolUse/PostToolUse/PostToolUseFailure and
+// carries the tool NAME only.
+var opencodeManagedEvents = []string{"session-start", "user-prompt-submit", "stop", "tool-start", "tool-end", "tool-failed"}
 
 // GetAgentHooks installs AO's opencode activity plugin into the worktree-local
 // .opencode/plugins/ directory. Unlike Claude Code and Codex, opencode has no

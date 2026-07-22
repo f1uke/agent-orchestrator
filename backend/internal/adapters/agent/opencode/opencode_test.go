@@ -718,3 +718,40 @@ func TestSupportedModelsListsOpencodeTiers(t *testing.T) {
 		}
 	}
 }
+
+// The plugin's tool-part path is the second harness with real tool bubbles. It
+// must report the tool NAME only: opencode's tool part also carries
+// state.input / state.output / state.title (a command with an inline token, a
+// file body, raw output), whose shape AO has not verified and none of which may
+// reach a desktop overlay.
+func TestOpenCodePlugin_ReportsToolPartsByNameOnly(t *testing.T) {
+	body := opencodePluginSource
+
+	if !strings.Contains(body, `part.type === "tool"`) {
+		t.Fatalf("plugin does not subscribe to tool parts:\n%s", body)
+	}
+	for _, status := range []string{`"running"`, `"completed"`, `"error"`} {
+		if !strings.Contains(body, status) {
+			t.Errorf("plugin does not map the %s tool status", status)
+		}
+	}
+	// The whole safety property of this path, asserted structurally against the
+	// CODE (comments name these fields precisely to say they are never read).
+	for i, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		for _, forbidden := range []string{"state.input", "state.output", "state.title", ".input", ".output", ".title"} {
+			if strings.Contains(line, forbidden) {
+				t.Errorf("line %d reads %s; only the tool name may cross the boundary:\n%s", i+1, forbidden, line)
+			}
+		}
+	}
+	if !strings.Contains(body, `tool: typeof part.tool === "string" ? part.tool : ""`) {
+		t.Errorf("plugin must ship the tool name only:\n%s", body)
+	}
+	// A streaming part is re-emitted constantly; only status transitions fire.
+	if !strings.Contains(body, "toolReports") {
+		t.Errorf("plugin must dedup tool reports per call id:\n%s", body)
+	}
+}
