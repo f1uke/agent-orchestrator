@@ -1240,15 +1240,16 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	return m.getRecord(ctx, rec.ID)
 }
 
-// Restart tears a session down and relaunches it in place, keeping the same
-// session id and native agent transcript. It exists so a running agent can pick
-// up a freshly recomputed system prompt (e.g. after the orchestrator/worker
-// prompt changed) without losing its conversation: the Restore leg recomputes
-// the system prompt and resumes via the harness's native --resume.
+// Restart relaunches a session's agent in place, keeping the same session id,
+// worktree, branch and native agent transcript. It exists so a running agent can
+// pick up a freshly recomputed system prompt or a newly installed agent binary
+// (e.g. a new Claude Code version) without losing its conversation: the relaunch
+// recomputes the system prompt and resumes via the harness's native --resume.
 //
-// A live session is killed first (Kill preserves a dirty worktree and recreates
-// a clean one from the branch on restore, so no committed or uncommitted work is
-// lost); an already-terminated session skips the kill and restores directly.
+// A LIVE session is a runtime-only recycle (restartInPlace): the worktree is
+// never torn down, so a dirty one — which every real worker has — is simply not
+// a question Restart can fail on. An already-terminated session goes through
+// Restore, which must recreate the worktree a previous Kill may have removed.
 func (m *Manager) Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
@@ -1257,12 +1258,65 @@ func (m *Manager) Restart(ctx context.Context, id domain.SessionID) (domain.Sess
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", id, ErrNotFound)
 	}
-	if !rec.IsTerminated {
-		if _, err := m.Kill(ctx, id); err != nil {
-			return domain.SessionRecord{}, err
+	if rec.IsTerminated {
+		return m.Restore(ctx, id)
+	}
+	return m.restartInPlace(ctx, rec)
+}
+
+// restartInPlace recycles ONLY the runtime of a live session: destroy the agent
+// process, record that it is gone, relaunch it on the same workspace.
+//
+// It deliberately does none of Kill's teardown. Kill destroys the WORKSPACE, and
+// refuses (ErrWorkspaceDirty) when the worktree holds uncommitted work — that
+// guard is right for a teardown and stays exactly where it is, but routing
+// Restart through it was the bug: Kill destroyed the runtime first and returned
+// on the dirty refusal BEFORE marking the session terminated, so the agent was
+// already dead while Restore still saw a live record and refused with
+// ErrNotRestorable (HTTP 409). Nothing flips such a session to terminated later
+// (Reconcile only runs at daemon boot), so the first click left the session
+// permanently unrestartable with a dead terminal.
+//
+// Restart wants none of what that guard protects. It does not change the branch,
+// does not sync to base, and does not clean anything: the same agent comes back
+// to the same tree seconds later, and its uncommitted work is the whole point of
+// that tree. The other teardown steps are skipped for the same reason — the
+// restore markers still describe a live session, the reviewer pane belongs to a
+// worker that is coming right back, and there is no worktree removal to rescue
+// stray planning docs from.
+//
+// The workspace is resolved through the same non-destructive restore path Restore
+// uses: it re-attaches to the existing worktree without disturbing its contents,
+// and only re-adds one that has gone missing underneath us.
+func (m *Manager) restartInPlace(ctx context.Context, rec domain.SessionRecord) (domain.SessionRecord, error) {
+	// Mirror Restore's guard: a session whose spawn failed before the workspace
+	// landed has nowhere to relaunch into. Refuse BEFORE touching the runtime, so
+	// an impossible restart costs the user nothing instead of killing their agent.
+	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, ErrIncompleteHandle)
+	}
+	// Fallible reads run before the runtime is destroyed, so a failure here leaves
+	// the running agent untouched.
+	project, err := m.loadProject(ctx, rec.ProjectID)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
+	}
+	if handle := runtimeHandle(rec.Metadata); handle.ID != "" {
+		if err := m.runtime.Destroy(ctx, handle); err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("restart %s: runtime: %w", rec.ID, err)
 		}
 	}
-	return m.Restore(ctx, id)
+	// The agent is gone the moment Destroy returns, so record that before the
+	// relaunch: if anything below fails, the session is honestly terminated and
+	// stays restorable, rather than a live-looking row with a dead terminal.
+	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
+	}
+	ws, err := m.restoreSessionWorkspace(ctx, project, rec)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: workspace: %w", rec.ID, err)
+	}
+	return m.relaunchRestoredSession(ctx, rec, project, ws)
 }
 
 func (m *Manager) getRecord(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {

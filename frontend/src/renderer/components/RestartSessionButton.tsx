@@ -10,9 +10,10 @@ import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
 
 // Terminal-toolbar control that restarts the current session in place. The
-// daemon kills then restores the session (POST /sessions/{id}/restart), which
-// keeps the same session id and native transcript but relaunches the agent with
-// a freshly recomputed system prompt via --resume. Primary use: reload a live
+// daemon recycles only the agent's runtime (POST /sessions/{id}/restart): the
+// worktree is left untouched — uncommitted work and all — while the agent
+// relaunches under the same session id with a freshly recomputed system prompt
+// and resumes the native transcript via --resume. Primary use: reload a live
 // session's prompt after the orchestrator/worker prompt changed, without losing
 // the conversation. Restarting drops the terminal briefly, so the action arms a
 // confirmation first; the terminal reattaches automatically once the session is
