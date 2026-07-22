@@ -1,5 +1,5 @@
-import { BUBBLE_MAX_WIDTH } from "./Bubble";
-import { MAX_BUBBLE_LANES } from "./bubble-lanes";
+import { BUBBLE_MAX_HEIGHT, BUBBLE_MAX_WIDTH } from "./Bubble";
+import { BUBBLE_STACK_GAP, MAX_BUBBLE_LANES } from "./bubble-lanes";
 import { PROCS_BOX, PROCS_VIEW } from "./Procs";
 
 // Sizes shared by the overlay WINDOW (main process) and the stage that draws into
@@ -26,21 +26,11 @@ export function petFrame(size: number = PET_HEIGHT) {
 }
 
 /**
- * One step up the bubble stack: a three-line card plus a little air.
- *
- * Bubbles that would collide are stacked upward rather than one of them being
- * hidden (see `bubble-lanes.ts`), so the window has to have somewhere to put
- * them. Fixed rather than measured, so a sentence growing a line cannot make the
- * whole stack jump.
- */
-export const BUBBLE_LANE_HEIGHT = 72;
-
-/**
  * Headroom above a Proc for the things that sit over it: the hover tooltip (the
  * tallest at four lines), a speech bubble, and the lanes a crowded band stacks
  * its bubbles into.
  */
-export const OVERHEAD_ALLOWANCE = 96 + BUBBLE_LANE_HEIGHT * (MAX_BUBBLE_LANES - 1);
+export const OVERHEAD_ALLOWANCE = 96 + (BUBBLE_MAX_HEIGHT + BUBBLE_STACK_GAP) * (MAX_BUBBLE_LANES - 1);
 
 /** The name chip's drawn height: 10px text at 1.4, inside 1px padding and the 2.4px rim. */
 export const NAME_TAG_HEIGHT = 20;

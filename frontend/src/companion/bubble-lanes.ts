@@ -7,45 +7,62 @@
 // is horizontal and crowded and the sky above it is empty, so the answer is to
 // use the sky.
 //
-// Deterministic and stable by construction: bubbles are placed left to right,
-// each takes the LOWEST lane it fits in, and the span used is the widest a card
-// can ever be rather than the width of the words currently in it — so a sentence
-// growing a line cannot make the whole stack jump about.
+// It works off the cards' MEASURED sizes, not the widest and tallest a card could
+// ever be. Sized by the maximum, a 145px card was treated as 200px and lifted
+// clear of a neighbour it never touched, and every step up the stack was a
+// three-line card tall whatever was actually in it. Both were visible as soon as
+// anyone looked at a real band.
 
-export type BubbleSpan = {
+export type BubbleBox = {
 	id: string;
-	/** Left edge of the widest card this Proc could show, in screen px. */
+	/** Left edge of the card as it is actually drawn, in screen px. */
 	left: number;
 	/** Right edge of the same. */
 	right: number;
+	/** Drawn height of the card. */
+	height: number;
 };
 
 /** How many bubbles may stack before the rest share the top lane. */
 export const MAX_BUBBLE_LANES = 3;
+/** Air between a card and the one it is sitting on top of. */
+export const BUBBLE_STACK_GAP = 6;
 
 /**
- * Lane per bubble: 0 sits at its Proc's head, 1 is one card-height above it, and
- * so on. Bubbles that do not overlap anything all stay at 0.
+ * How far above its Proc each bubble sits, in px. Zero for a bubble that is in
+ * nobody's way, which on a quiet desktop is all of them.
+ *
+ * Deterministic and stable by construction: cards are placed left to right, ties
+ * broken by id, and each takes the LOWEST lane it fits in.
  */
-export function assignBubbleLanes(spans: BubbleSpan[]): Map<string, number> {
-	// Left to right, ties by id, so the same set of Procs always produces the same
-	// arrangement whatever order they arrived in.
-	const ordered = [...spans].sort((a, b) => a.left - b.left || a.id.localeCompare(b.id));
-	const lanes: BubbleSpan[][] = [];
-	const placed = new Map<string, number>();
+export function stackBubbles(boxes: BubbleBox[]): Map<string, number> {
+	const ordered = [...boxes].sort((a, b) => a.left - b.left || a.id.localeCompare(b.id));
+	const lanes: BubbleBox[][] = [];
+	const lane = new Map<string, number>();
 
-	for (const span of ordered) {
-		let lane = lanes.findIndex((occupants) => occupants.every((other) => other.right <= span.left));
-		if (lane === -1) {
-			// A card wider than every free lane goes up one — until the top lane, which
-			// takes the overflow. Stacking without limit would walk off the display,
-			// and a card off the display is worse than two that touch.
-			lane = Math.min(lanes.length, MAX_BUBBLE_LANES - 1);
+	for (const box of ordered) {
+		let index = lanes.findIndex((occupants) => occupants.every((other) => other.right <= box.left));
+		if (index === -1) {
+			// Nothing free below: go up one — until the top lane, which takes the
+			// overflow. Stacking without limit walks a card off the display, and a card
+			// off the display is worse than two that touch.
+			index = Math.min(lanes.length, MAX_BUBBLE_LANES - 1);
 		}
-		if (!lanes[lane]) lanes[lane] = [];
-		lanes[lane].push(span);
-		placed.set(span.id, lane);
+		if (!lanes[index]) lanes[index] = [];
+		lanes[index].push(box);
+		lane.set(box.id, index);
 	}
 
-	return placed;
+	// A lane sits clear of the TALLEST card in the lane below it, not of the tallest
+	// card a bubble could ever be — three lines' worth of air above a one-line card
+	// reads as two unrelated things rather than a stack.
+	const offsets: number[] = [];
+	let running = 0;
+	for (let index = 0; index < lanes.length; index++) {
+		offsets[index] = running;
+		const tallest = Math.max(0, ...(lanes[index] ?? []).map((box) => box.height));
+		running += tallest + BUBBLE_STACK_GAP;
+	}
+
+	return new Map([...lane].map(([id, index]) => [id, offsets[index] ?? 0]));
 }
