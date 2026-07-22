@@ -32,7 +32,16 @@ export type Ground = "desk" | "bed" | "crate" | "none";
  * overlay cannot tell you apart — the exact complaint this PR exists to fix.
  */
 export type Held =
-	"page-blank" | "page-lines" | "page-clock" | "page-check" | "page-cross" | "sign-question" | "sign-merge" | "none";
+	| "page-blank"
+	| "page-lines"
+	| "page-clock"
+	| "page-check"
+	| "page-cross"
+	| "sign-question"
+	| "sign-merge"
+	/** An open laptop. What a working Proc CARRIES, now that it has no desk to sit at. */
+	| "laptop"
+	| "none";
 
 /** The EMIT slot: what is coming off the Proc. */
 export type Emit = "zzz" | "sparks" | "confetti" | "quiet" | "none";
@@ -66,14 +75,26 @@ export const ALL_COMPANION_STATUSES: SessionStatus[] = [
 	"unknown",
 ];
 
-// Only the states that genuinely denote a PLACE get a ground. `no_signal` is
-// deliberately absent: continuing to draw a Proc typing at a desk for a session we
-// have lost contact with is exactly the lie the bubble's TTL exists to prevent.
+// Only the states that genuinely denote a PLACE get a ground — and a ground is what
+// stops a Proc wandering, so this table IS the list of states that stay put.
+//
+// It used to hold four. The human wanted everything except `todo` and `idle` free to
+// walk, which meant the desk had to go: a ground prop is drawn in the same SVG as
+// the figure, so a working Proc allowed to stroll would have taken its desk with it.
+// Working and failing hold a LAPTOP instead — what it is doing travels with it,
+// which a desk cannot.
 const GROUNDS: Partial<Record<SessionStatus, Ground>> = {
-	working: "desk",
-	ci_failed: "desk",
-	idle: "bed",
-	todo: "crate",
+	// ASLEEP is `todo`, not `idle`. The human liked the sleeping Proc and its zzz and
+	// asked for it here, and the reason it was never seen is measurable: `idle` is a
+	// 45-second window between an agent finishing a turn and AO promoting it to
+	// needs_input, while `todo` is a state a task can sit in for hours. "Prepared but
+	// not woken up yet" is also the better reading of the two.
+	//
+	// They cannot BOTH be the sleeper — two states drawn the same are two states the
+	// overlay cannot tell you apart, which is the complaint this art exists to fix —
+	// so `idle` takes the crate: at rest between jobs with its kit packed.
+	todo: "bed",
+	idle: "crate",
 };
 
 /** The GROUND prop for a status. */
@@ -95,14 +116,14 @@ export function isAnchored(status: SessionStatus): boolean {
 // the locomotion rule, and a working Proc could be drawn at a desk and still be
 // allowed to wander off it.
 const SCENES: Record<SessionStatus, Omit<Scene, "ground">> = {
-	// Prepared, not started: a crate of work, cord neatly coiled, nothing coming off it.
-	todo: { held: "none", emit: "none", cord: "coiled" },
-	// At the desk with a written page; the cord carries data while the agent runs.
-	working: { held: "page-lines", emit: "none", cord: "streaming" },
-	// At the desk, but the run failed: sparks off the cord instead of data.
-	ci_failed: { held: "none", emit: "sparks", cord: "sparking" },
-	// Asleep in bed. The one state that is supposed to look like nothing happening.
-	idle: { held: "none", emit: "zzz", cord: "coiled" },
+	// Prepared, not started: asleep in bed with its cord coiled, waiting to be woken.
+	todo: { held: "none", emit: "zzz", cord: "coiled" },
+	// Carrying an open laptop; the cord carries data while the agent runs.
+	working: { held: "laptop", emit: "none", cord: "streaming" },
+	// Same laptop, but the run failed: sparks off the cord instead of data.
+	ci_failed: { held: "laptop", emit: "sparks", cord: "sparking" },
+	// At rest between jobs: sitting by its crate, kit packed, nothing coming off it.
+	idle: { held: "none", emit: "none", cord: "coiled" },
 	// A PR is up and waiting on the world.
 	pr_open: { held: "page-lines", emit: "none", cord: "attached" },
 	// A draft: the page exists but nothing is written on it yet.

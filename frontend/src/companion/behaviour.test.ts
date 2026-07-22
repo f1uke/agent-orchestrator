@@ -610,23 +610,14 @@ describe("crowding", () => {
 });
 
 describe("facing", () => {
-	it("turns a Proc back to face you when its scene gains a ground", () => {
+	it("turns a Proc back to face you when its scene gains a place to be", () => {
 		// `facing` persists after a stroll, and the whole sprite mirrors — scenery and
 		// all. A Proc that walked left and then sat down at a desk would show the desk
 		// flipped to its other side, which reads as the furniture teleporting.
 		let w = syncActivities(world(), [activity("a", "pr_open")], T0, half);
 		w = { ...w, pets: w.pets.map((pet) => ({ ...pet, facing: "left" as const })) };
 
-		w = syncActivities(w, [activity("a", "working")], T0 + 1_000, half);
-
-		expect(petById(w, "a").facing).toBe("front");
-	});
-
-	it("turns a Proc back to face you when it goes quiet", () => {
-		let w = syncActivities(world(), [activity("a", "pr_open")], T0, half);
-		w = { ...w, pets: w.pets.map((pet) => ({ ...pet, facing: "left" as const })) };
-
-		w = syncActivities(w, [activity("a", "terminated")], T0 + 1_000, half);
+		w = syncActivities(w, [activity("a", "idle")], T0 + 1_000, half);
 
 		expect(petById(w, "a").facing).toBe("front");
 	});
@@ -742,7 +733,7 @@ describe("dragging", () => {
 	it("can be dragged even when it is anchored to a desk", () => {
 		// Anchoring says a working Proc cannot WANDER. Being picked up by the human is
 		// not wandering, and refusing to move would just feel broken.
-		const base = syncActivities({ ...world(), spacing: SPACING }, [activity("a", "working")], T0, half);
+		const base = syncActivities({ ...world(), spacing: SPACING }, [activity("a", "idle")], T0, half);
 		let w = grabPet(base, "a", T0);
 		w = dragPet(w, "a", 700);
 		w = releasePet(w, "a", T0 + 2_000, half);
@@ -807,7 +798,10 @@ describe("never walking in place forever", () => {
 	it("settles a summoned Proc whose front spot a neighbour is standing on", () => {
 		const base = syncActivities(
 			{ ...world(), spacing: REAL_SPACING },
-			[activity("neighbour", "merged"), activity("a", "needs_input")],
+			// The neighbour is `idle` — one of the two states that stay put — so the
+			// only thing that can be walking in this test is the summoned Proc, which
+			// is what it is about.
+			[activity("neighbour", "idle"), activity("a", "needs_input")],
 			T0,
 			half,
 		);
@@ -1217,7 +1211,7 @@ describe("a roster that repeats a session", () => {
 	it("shows one Proc per session, however many times the snapshot names it", () => {
 		const next = syncActivities(
 			world(),
-			[activity("a", "pr_open"), activity("a", "working"), activity("b", "idle")],
+			[activity("a", "pr_open"), activity("a", "idle"), activity("b", "idle")],
 			T0,
 			half,
 		);
@@ -1228,7 +1222,7 @@ describe("a roster that repeats a session", () => {
 	it("keeps the FIRST reading of a repeated session, not the last", () => {
 		// Arbitrary, but it has to be one of them and first-wins is what a `Map`
 		// built from the snapshot would give. What matters is that it is stable.
-		const next = syncActivities(world(), [activity("a", "pr_open"), activity("a", "working")], T0, half);
+		const next = syncActivities(world(), [activity("a", "pr_open"), activity("a", "idle")], T0, half);
 
 		expect(petById(next, "a").status).toBe("pr_open");
 	});
@@ -1424,5 +1418,42 @@ describe("a Proc caught in mid-air when the desktop goes away", () => {
 
 		expect(petById(w, "a").motion.kind).toBe("standing");
 		expect(petById(w, "a").y).toBe(0);
+	});
+});
+
+describe("grabbing a Proc that is on the move", () => {
+	// The engine holds a walker's `x` at the spot it SET OFF from — the compositor is
+	// carrying the drawing to the destination — so picking one up mid-stroll snapped
+	// it back to where the walk began. It has to be picked up from where it is.
+	function walking(): World {
+		const base = syncActivities({ ...world(), spacing: 136 }, [activity("a", "pr_open")], T0, half);
+		return {
+			...base,
+			pets: base.pets.map((p) => ({
+				...p,
+				x: 200,
+				motion: { kind: "walking" as const, fromX: 200, toX: 600, startedAt: T0, endsAt: T0 + 4_000 },
+			})),
+		};
+	}
+
+	it("picks it up from where it has actually got to, not where it set off", () => {
+		// Halfway through a 200→600 stroll.
+		expect(petById(grabPet(walking(), "a", T0 + 2_000), "a").x).toBeCloseTo(400, 0);
+	});
+
+	it("picks it up at the start of the stroll if that is where it still is", () => {
+		expect(petById(grabPet(walking(), "a", T0), "a").x).toBeCloseTo(200, 0);
+	});
+
+	it("picks it up at the destination once the stroll has run its time", () => {
+		expect(petById(grabPet(walking(), "a", T0 + 9_000), "a").x).toBeCloseTo(600, 0);
+	});
+
+	it("leaves a Proc that is standing exactly where it is", () => {
+		const still = syncActivities({ ...world() }, [activity("a", "pr_open")], T0, half);
+		const put = { ...still, pets: still.pets.map((p) => ({ ...p, x: 321 })) };
+
+		expect(petById(grabPet(put, "a", T0 + 5_000), "a").x).toBe(321);
 	});
 });

@@ -1,5 +1,6 @@
 import type { SessionStatus } from "../renderer/types/workspace";
 import { PROCS_INK, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
+import { markerForProject, markerPath } from "./project-marker";
 import { STATUS_LABELS } from "./preview";
 
 // The name under a Proc, and the tooltip behind it.
@@ -43,7 +44,45 @@ function LeadCrown() {
 	);
 }
 
-export function NameTag({ name, lead = false }: { name: string; lead?: boolean }) {
+/**
+ * The project's mark: a small shape in the project's colour, before the name.
+ *
+ * The human looked at a full overlay and could not tell which pet belonged to
+ * which project — the look is assigned per SESSION, so it carries no project
+ * signal at all, and the only project information on screen was inside a hover
+ * card you have to ask for.
+ *
+ * SHAPE as well as colour, which is what the human picked over a plain dot after
+ * seeing both: with six colours and no shapes, two of the seven projects in the
+ * sample already collided. Shape also survives a greyscale screenshot, 12px, and
+ * a colour-vision difference — colour alone survives none of the three.
+ */
+function ProjectMark({ project }: { project: string }) {
+	const mark = markerForProject(project);
+	return (
+		<svg
+			data-project-mark={mark.id}
+			width="12"
+			height="12"
+			viewBox="0 0 12 12"
+			style={{ flex: "0 0 auto", display: "block" }}
+			aria-hidden
+		>
+			<path d={markerPath(mark.shape)} fill={mark.fill} stroke={PROCS_INK} strokeWidth="1.4" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+export function NameTag({
+	name,
+	lead = false,
+	project,
+}: {
+	name: string;
+	lead?: boolean;
+	/** Which project this session belongs to. No project, no mark. */
+	project?: string;
+}) {
 	const trimmed = name.trim();
 	// Nothing rather than an empty chip: a Proc with no name is just a Proc.
 	if (!trimmed) return null;
@@ -72,6 +111,10 @@ export function NameTag({ name, lead = false }: { name: string; lead?: boolean }
 		>
 			{lead ? <LeadCrown /> : null}
 			<span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{trimmed}</span>
+			{/* AFTER the name, not before it. In front, the mark and the coordinator's
+			    crown crowd each other and read as one cluttered badge — the human's
+			    call once both were on the same chip. */}
+			{project ? <ProjectMark project={project} /> : null}
 		</div>
 	);
 }

@@ -187,7 +187,7 @@ export function Procs({
 
 						{/* The hat, over the head so it sits ON it rather than behind it. Drawn
 				    after the face so a low brim shades the eyes rather than the reverse. */}
-						<g data-slot="hat" data-hat={cast.id}>
+						<g data-slot="hat" data-hat={cast.hatId} data-palette={cast.palette}>
 							{cast.hat.map((piece) => (
 								<path
 									key={piece.d}

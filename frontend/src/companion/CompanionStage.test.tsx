@@ -125,11 +125,11 @@ describe("CompanionStage", () => {
 		expect(onInteractiveChange).not.toHaveBeenCalled();
 	});
 
-	it("lets a click on a Proc's scenery fall through — a desk is not a pet", () => {
+	it("lets a click on a Proc's scenery fall through — a bed is not a pet", () => {
 		const onInteractiveChange = vi.fn();
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
-		push([{ sessionId: "a", status: "working" }]);
+		push([{ sessionId: "a", status: "todo" }]);
 
 		fireEvent.pointerMove(container.querySelector('[data-slot="ground"] rect')!, { bubbles: true });
 

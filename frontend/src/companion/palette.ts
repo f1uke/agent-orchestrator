@@ -61,6 +61,35 @@ export const PROP_COLOURS = {
 	bubbleAlert: "#a3341f",
 } as const;
 
+/**
+ * The per-project marker's colours.
+ *
+ * NOT swept against the wallpaper, and that is not an omission: the marker is
+ * drawn INSIDE the name chip, so the chip is what faces the desktop and the chip
+ * is already swept (`paper`, plus the ink rim). Sweeping the marker too would
+ * force it into the same mid-luminance band the Procs live in — where it would
+ * measure under 2:1 against the chip's own near-white fill, i.e. a mark you
+ * cannot see, in the name of a wallpaper it never touches.
+ *
+ * What IS measured, in project-marker.test.ts: against the chip's paper fill,
+ * against the coordinator's GOLD fill (the same marker has to work on both), and
+ * against the ink rim it is drawn with. Deliberately dark rather than pastel —
+ * these are the only colours on the overlay that must read at 12px on a light
+ * card, which is the opposite constraint to everything else here.
+ *
+ * Deliberately NOT gold-adjacent either. Gold means "this one coordinates" and is
+ * already on that chip; a gold-ish project marker beside it reads as a second
+ * crown.
+ */
+export const PROJECT_MARKER_COLOURS: readonly string[] = [
+	"#c2185b",
+	"#1565c0",
+	"#558b2f",
+	"#7d3fa8",
+	"#b4651a",
+	"#00695c",
+];
+
 function channel(value: number): number {
 	const c = value / 255;
 	return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;

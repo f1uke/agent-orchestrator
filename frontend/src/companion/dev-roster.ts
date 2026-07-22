@@ -1,5 +1,5 @@
 import type { SessionStatus } from "../renderer/types/workspace";
-import { CAST, castForSession } from "./cast";
+import { castForSession, HATS, PALETTES } from "./cast";
 import type { CompanionActivity } from "./feed";
 import { ALL_COMPANION_STATUSES } from "./scene";
 
@@ -29,7 +29,9 @@ const NAMES = [
 	"receipt pdf layout",
 ];
 
-const PROJECTS = ["demo-app", "demo-api"];
+// Several, because a single project makes the per-project marker untestable by eye
+// — the whole point of it is telling two apart.
+const PROJECTS = ["demo-app", "demo-api", "demo-web", "demo-infra", "demo-tools"];
 
 /**
  * A session ref that lands on a CHOSEN character and has not been used yet.
@@ -43,15 +45,22 @@ const PROJECTS = ["demo-app", "demo-api"];
  * bubbles.
  */
 function refForCharacter(index: number, project: string, taken: Set<string>): string {
-	const wanted = index % CAST.length;
-	for (let n = 10 + index; n < 900; n += 1) {
+	// Both axes wanted, stepped at different rates, so a demo roster covers all the
+	// colours AND all the hats rather than six pairs of them.
+	const wantPalette = PALETTES[index % PALETTES.length].id;
+	// Advanced by the ROW as well as the column, so the pairing shifts each time the
+	// colours come round. Stepping both off `index` alone repeats the same six pairs
+	// for ever, which is the bundled cast again wearing a different hat.
+	const wantHat = HATS[(index + Math.floor(index / PALETTES.length)) % HATS.length].id;
+	for (let n = 10 + index; n < 4000; n += 1) {
 		const ref = `${project}-${n}`;
 		if (taken.has(ref)) continue;
-		if (CAST.indexOf(castForSession(ref)) === wanted) return ref;
+		const look = castForSession(ref);
+		if (look.palette === wantPalette && look.hatId === wantHat) return ref;
 	}
 	// No ref left that hashes where we wanted. A duplicate would be far worse than
-	// a repeated character, so take the first free ref of any character at all.
-	for (let n = 10 + index; n < 900; n += 1) {
+	// a repeated look, so take the first free ref of any look at all.
+	for (let n = 10 + index; n < 4000; n += 1) {
 		const ref = `${project}-${n}`;
 		if (!taken.has(ref)) return ref;
 	}

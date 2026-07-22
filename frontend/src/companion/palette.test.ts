@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAST } from "./cast";
+import { ALL_LOOKS, PALETTES } from "./cast";
 import { PROP_COLOURS, PROCS_INK, PROCS_RIM_PX, contrastRatio, relativeLuminance, worstSeparation } from "./palette";
 
 // Contrast is a pure function of relative luminance, so sweeping the grey axis
@@ -15,7 +15,7 @@ function wallpapers(steps = 200): string[] {
 
 /** Every colour that is ever drawn against the wallpaper rather than against the pet. */
 function exposedColours(): Array<{ what: string; colour: string }> {
-	const fromCast = CAST.flatMap((member) => [
+	const fromCast = ALL_LOOKS.flatMap((member) => [
 		{ what: `${member.name} body`, colour: member.body },
 		{ what: `${member.name} shade`, colour: member.shade },
 		{ what: `${member.name} hat`, colour: member.hatFill },
@@ -40,7 +40,7 @@ describe("relativeLuminance", () => {
 describe("contrastRatio", () => {
 	it("is 21:1 for black on white and 1:1 for a colour on itself", () => {
 		expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 2);
-		expect(contrastRatio(CAST[0].body, CAST[0].body)).toBeCloseTo(1, 5);
+		expect(contrastRatio(PALETTES[0].body, PALETTES[0].body)).toBeCloseTo(1, 5);
 	});
 });
 
@@ -65,14 +65,14 @@ describe("wallpaper legibility", () => {
 	});
 
 	it("keeps the face readable on every character's head and body", () => {
-		for (const member of CAST) {
+		for (const member of ALL_LOOKS) {
 			expect(contrastRatio(PROCS_INK, member.body), member.name).toBeGreaterThanOrEqual(4.5);
 			expect(contrastRatio(PROCS_INK, member.shade), member.name).toBeGreaterThanOrEqual(4.5);
 		}
 	});
 
 	it("keeps each character's blush visible on its own head without shouting", () => {
-		for (const member of CAST) {
+		for (const member of ALL_LOOKS) {
 			const against = contrastRatio(member.blush, member.body);
 
 			expect(against, member.name).toBeGreaterThan(1.35);
@@ -86,11 +86,11 @@ describe("wallpaper legibility", () => {
 });
 
 describe("telling the cast apart", () => {
-	it("gives no two characters near-identical head colours", () => {
+	it("gives no two colours near-identical head tints", () => {
 		// Six pale tints that measure the same are six of the same character as far
 		// as a glance across the room is concerned.
-		for (const a of CAST) {
-			for (const b of CAST) {
+		for (const a of PALETTES) {
+			for (const b of PALETTES) {
 				if (a.id === b.id) continue;
 				expect(distance(a.body, b.body), `${a.name} vs ${b.name}`).toBeGreaterThan(40);
 			}

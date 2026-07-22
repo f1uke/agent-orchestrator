@@ -103,7 +103,11 @@ function Crate() {
  * back about its own footprint, which is the one axis that leaves it in the hand
  * it just moved to.
  */
-const HELD_EXTENT = { sign: { min: 1, max: 30 }, page: { min: 4, max: 29 } } as const;
+const HELD_EXTENT = {
+	sign: { min: 1, max: 30 },
+	page: { min: 4, max: 29 },
+	laptop: { min: -5, max: 37 },
+} as const;
 
 /** `translate(t) scale(-1 1)` maps x to `t - x`; `t = min + max` sends a footprint back onto itself. */
 export function counterMirrorX(extent: { min: number; max: number }): string {
@@ -113,14 +117,32 @@ export function counterMirrorX(extent: { min: number; max: number }): string {
 export function HeldProp({ held, mirrored = false }: { held: Held; mirrored?: boolean }) {
 	if (held === "none") return null;
 	const sign = held === "sign-question" || held === "sign-merge";
+	const extent = held === "laptop" ? HELD_EXTENT.laptop : sign ? HELD_EXTENT.sign : HELD_EXTENT.page;
 	return (
-		<g
-			data-slot="held"
-			data-held={held}
-			transform={mirrored ? counterMirrorX(sign ? HELD_EXTENT.sign : HELD_EXTENT.page) : undefined}
-		>
-			{sign ? <Sign kind={held} /> : <Page surface={held} />}
+		<g data-slot="held" data-held={held} transform={mirrored ? counterMirrorX(extent) : undefined}>
+			{held === "laptop" ? <Laptop /> : sign ? <Sign kind={held} /> : <Page surface={held} />}
 		</g>
+	);
+}
+
+// The open laptop a working Proc CARRIES. It replaced the desk when the human
+// asked for everything but `todo` and `idle` to be free to walk: a ground prop is
+// drawn in the same SVG as the figure, so a working Proc allowed to stroll would
+// have dragged its desk along with it. What it is doing travels with it now.
+function Laptop() {
+	// Two shapes and no cleverness: an UPRIGHT screen with a dark panel in it, and a
+	// keyboard deck that is clearly WIDER than the screen and angled towards you. The
+	// first attempt drew both as tilted parallelograms — technically an open laptop
+	// in perspective, and at 30px it read as a grey blob. What says "laptop" at this
+	// size is the L-shaped silhouette plus the dark rectangle.
+	return (
+		<>
+			<rect data-rim x="3" y="68" width="26" height="22" rx="1.5" fill={PROP_COLOURS.linen} {...RIM} />
+			<rect x="6.5" y="71.5" width="19" height="15" fill={PROCS_INK} />
+			<path data-rim d="M-1 90 L33 90 L37 100 L-5 100 Z" fill={PROP_COLOURS.quiet} {...RIM} strokeLinejoin="round" />
+			{/* One stroke of keys. Enough to say deck rather than plinth. */}
+			<path d="M3 95 L29 95" stroke={PROCS_INK} strokeWidth="1.6" strokeLinecap="round" opacity="0.5" />
+		</>
 	);
 }
 

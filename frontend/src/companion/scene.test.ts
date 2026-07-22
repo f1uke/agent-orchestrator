@@ -4,14 +4,22 @@ import { ALL_COMPANION_STATUSES, groundFor, isAnchored, sceneAnimates, sceneFor 
 import { modeFor } from "./mode";
 
 describe("groundFor", () => {
-	it("puts the working states at a desk", () => {
-		expect(groundFor("working")).toBe("desk");
-		expect(groundFor("ci_failed")).toBe("desk");
+	it("gives a place ONLY to the two states that are somewhere", () => {
+		// A ground is what stops a Proc wandering, so this table is also the list of
+		// states that stay put — and the human wanted everything else free to walk.
+		expect(groundFor("todo")).toBe("bed");
+		expect(groundFor("idle")).toBe("crate");
+		for (const status of ALL_COMPANION_STATUSES) {
+			if (status === "todo" || status === "idle") continue;
+			expect(groundFor(status), status).toBe("none");
+		}
 	});
 
-	it("puts idle in a bed and todo in a crate", () => {
-		expect(groundFor("idle")).toBe("bed");
-		expect(groundFor("todo")).toBe("crate");
+	it("gives the working states a laptop to carry instead of a desk to sit at", () => {
+		// The desk had to go when they were freed to walk: a ground prop is drawn in
+		// the same SVG as the figure, so a walking Proc would have dragged it along.
+		expect(sceneFor("working")).toMatchObject({ ground: "none", held: "laptop" });
+		expect(sceneFor("ci_failed")).toMatchObject({ ground: "none", held: "laptop" });
 	});
 
 	it("gives no_signal no ground, because we must not depict work we cannot see", () => {
@@ -51,9 +59,9 @@ describe("sceneFor", () => {
 	});
 
 	it("shows each state the design named by its prop", () => {
-		expect(sceneFor("idle")).toMatchObject({ ground: "bed", emit: "zzz" });
-		expect(sceneFor("working")).toMatchObject({ ground: "desk", cord: "streaming" });
-		expect(sceneFor("todo")).toMatchObject({ ground: "crate" });
+		expect(sceneFor("todo")).toMatchObject({ ground: "bed", emit: "zzz" });
+		expect(sceneFor("working")).toMatchObject({ held: "laptop", cord: "streaming" });
+		expect(sceneFor("idle")).toMatchObject({ ground: "crate" });
 		expect(sceneFor("ci_failed")).toMatchObject({ emit: "sparks", cord: "sparking" });
 		expect(sceneFor("merged")).toMatchObject({ emit: "confetti", cord: "unplugged" });
 		expect(sceneFor("terminated")).toMatchObject({ cord: "unplugged" });
@@ -101,7 +109,7 @@ describe("sceneFor", () => {
 
 describe("sceneAnimates", () => {
 	it("is true only for the states whose scene actually moves", () => {
-		expect(sceneAnimates("idle")).toBe(true);
+		expect(sceneAnimates("todo")).toBe(true);
 		expect(sceneAnimates("working")).toBe(true);
 		expect(sceneAnimates("ci_failed")).toBe(true);
 		expect(sceneAnimates("merged")).toBe(true);

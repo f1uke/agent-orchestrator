@@ -13,9 +13,10 @@
  * Long enough that it does not fire at every Proc the pointer crosses on the way
  * somewhere else — the overlay spans the whole width of the screen, so that is most
  * journeys across the desktop — and short enough that deliberately pointing at one
- * feels answered rather than waited on. Set by the human at a second.
+ * feels answered rather than waited on. Set by the human: a second first, then half
+ * of one (2026-07-22).
  */
-export const HOVER_TOOLTIP_DELAY_MS = 1_000;
+export const HOVER_TOOLTIP_DELAY_MS = 500;
 
 export type HoverState = {
 	/** The Proc under the pointer, or null. */
