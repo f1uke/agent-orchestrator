@@ -1,8 +1,11 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
+import { castForSession } from "./cast";
 import { CompanionStage } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
+import { LOOKS_STORAGE_KEY, serializeLookOverrides } from "./look-store";
+import { storeLookChoice } from "./look-store-live";
 
 afterEach(() => {
 	cleanup();
@@ -343,5 +346,110 @@ describe("a bubble travels with the Proc that is saying it", () => {
 		await waitFor(() => expect(container.querySelectorAll("[data-proc]")).toHaveLength(2));
 		expect(container.querySelectorAll(".companion-proc-chrome")).toHaveLength(2);
 		expect(container.querySelectorAll("[data-bubble]")).toHaveLength(0);
+	});
+});
+
+describe("asking for a different look", () => {
+	function pushOne() {
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} onRequestLook={onRequestLook} />);
+		push([{ sessionId: "a", status: "pr_open", name: "fix the flaky test", project: "agent-orchestrator" }]);
+		return { ...view, push };
+	}
+
+	const onRequestLook = vi.fn();
+
+	afterEach(() => {
+		onRequestLook.mockReset();
+		window.localStorage.clear();
+		window.dispatchEvent(new StorageEvent("storage", { key: null }));
+	});
+
+	it("opens the library for the Proc that was right-clicked", () => {
+		const { container } = pushOne();
+
+		fireEvent.contextMenu(container.querySelector("[data-figure] rect")!, { bubbles: true });
+
+		expect(onRequestLook).toHaveBeenCalledWith("a");
+	});
+
+	it("does NOT pick the Proc up, which is what press-drag is for", () => {
+		// The reason the gesture is a different BUTTON. If a right-press still grabbed,
+		// the pet would be flung across the band while its library opened.
+		const { container } = pushOne();
+
+		fireEvent.pointerDown(container.querySelector("[data-figure] rect")!, { bubbles: true, button: 2, clientX: 400 });
+
+		expect(container.querySelector("[data-teased]")).toBeNull();
+	});
+
+	it("leaves the desktop's own menu alone anywhere but on a Proc", () => {
+		// The band is 150px of mostly-transparent frame per pet. Eating the context
+		// menu across all of it would be the click-through bug again, in another form.
+		const { container } = pushOne();
+		const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+		container.querySelector(".companion-stage")!.dispatchEvent(event);
+
+		expect(onRequestLook).not.toHaveBeenCalled();
+		expect(event.defaultPrevented).toBe(false);
+	});
+});
+
+describe("the look a Proc wears", () => {
+	afterEach(() => {
+		window.localStorage.clear();
+		window.dispatchEvent(new StorageEvent("storage", { key: null }));
+	});
+
+	function pushTwo() {
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} />);
+		push([
+			{ sessionId: "a", status: "pr_open", name: "one", project: "p" },
+			{ sessionId: "b", status: "pr_open", name: "two", project: "p" },
+		]);
+		return { ...view, push };
+	}
+
+	const hatOf = (container: HTMLElement, session: string) =>
+		container.querySelector(`[data-session="${session}"] [data-hat]`)?.getAttribute("data-hat");
+	const paletteOf = (container: HTMLElement, session: string) =>
+		container.querySelector(`[data-session="${session}"] [data-hat]`)?.getAttribute("data-palette");
+
+	it("wears the hash look when nobody has chosen one", () => {
+		const { container } = pushTwo();
+
+		expect(hatOf(container, "a")).toBe(castForSession("a").hatId);
+		expect(paletteOf(container, "a")).toBe(castForSession("a").palette);
+	});
+
+	it("wears a chosen hat, and keeps the hash COLOUR", () => {
+		storeLookChoice("a", "hat", "cone");
+		const { container } = pushTwo();
+
+		expect(hatOf(container, "a")).toBe("cone");
+		expect(paletteOf(container, "a")).toBe(castForSession("a").palette);
+	});
+
+	it("repaints when the OTHER window changes it, which is the whole cross-window path", () => {
+		const { container } = pushTwo();
+
+		act(() => {
+			const value = serializeLookOverrides({ a: { palette: "mint" } });
+			window.localStorage.setItem(LOOKS_STORAGE_KEY, value);
+			window.dispatchEvent(new StorageEvent("storage", { key: LOOKS_STORAGE_KEY, newValue: value }));
+		});
+
+		expect(paletteOf(container, "a")).toBe("mint");
+	});
+
+	it("leaves every other session exactly as it was", () => {
+		// Recognisability: redecorating one pet must not move anybody else's.
+		storeLookChoice("a", "hat", "cone");
+		const { container } = pushTwo();
+
+		expect(hatOf(container, "b")).toBe(castForSession("b").hatId);
+		expect(paletteOf(container, "b")).toBe(castForSession("b").palette);
 	});
 });

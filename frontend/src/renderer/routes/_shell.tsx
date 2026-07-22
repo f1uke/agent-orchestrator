@@ -8,6 +8,7 @@ import { SidebarProvider } from "../components/ui/sidebar";
 import { TitlebarNav } from "../components/TitlebarNav";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
 import { useDaemonStatus } from "../hooks/useDaemonStatus";
+import { usePetLibraryDeepLink } from "../hooks/usePetLibraryDeepLink";
 import { useWorkspaceQuery, workspaceQueryKey, workspaceQueryOptions } from "../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { refreshDaemonStatus } from "../lib/daemon-status";
@@ -55,6 +56,8 @@ function ShellLayout() {
 	// project shortcut read this, so a reordered sidebar and its shortcuts agree.
 	const orderedWorkspaces = useMemo(() => orderWorkspaces(workspaces, projectOrder), [workspaces, projectOrder]);
 	const daemonStatus = useDaemonStatus(queryClient);
+	// Right-clicking a Proc on the desktop opens its Pet library in Settings.
+	usePetLibraryDeepLink();
 	const agentCatalogPortRef = useRef<number | undefined>(undefined);
 	const { theme, setTheme, isSidebarOpen, toggleSidebar } = useUiStore();
 	const setProjectRestarting = useUiStore((state) => state.setProjectRestarting);

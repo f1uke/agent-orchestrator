@@ -30,6 +30,12 @@ type UiState = {
 	 */
 	splitLayouts: Readonly<Record<string, SplitNode>>;
 	orchestratorReplacementErrors: Record<string, string>;
+	/**
+	 * A session the Pet library should open on, set by right-clicking its Proc on
+	 * the desktop. Ephemeral and deliberately NOT persisted: it is a single
+	 * navigation, and the Settings pane clears it the moment it has been honoured.
+	 */
+	petLibraryRequest: string | null;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
 	toggleTheme: () => void;
@@ -41,6 +47,8 @@ type UiState = {
 	setSplitLayout: (projectId: string, root: SplitNode | null) => void;
 	setProjectRestarting: (projectId: string, restarting: boolean) => void;
 	setOrchestratorReplacementError: (projectId: string, message: string | null) => void;
+	/** Ask the Pet library to open on a session, or with null, forget the request. */
+	requestPetLibrary: (sessionRef: string | null) => void;
 };
 
 const sidebarStorageKey = "ao.sidebar.open";
@@ -111,6 +119,7 @@ export const useUiStore = create<UiState>((set) => ({
 	projectOrder: initialProjectOrder(),
 	splitLayouts: parseSplitLayouts(getLocalStorage()?.getItem(splitLayoutsStorageKey) ?? null),
 	orchestratorReplacementErrors: {},
+	petLibraryRequest: null,
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setTheme: (theme) => {
 		getLocalStorage()?.setItem(themeStorageKey, theme);
@@ -182,4 +191,5 @@ export const useUiStore = create<UiState>((set) => ({
 			}
 			return { orchestratorReplacementErrors };
 		}),
+	requestPetLibrary: (sessionRef) => set({ petLibraryRequest: sessionRef }),
 }));

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { ALL_LOOKS, castForSession, composeCast, HATS, mirrorPathX, PALETTES } from "./cast";
+import {
+	ALL_LOOKS,
+	APPEARANCE_AXES,
+	castForSession,
+	castFromLook,
+	composeCast,
+	defaultLook,
+	HATS,
+	mirrorPathX,
+	optionsOf,
+	PALETTES,
+} from "./cast";
 
 const CAST = ALL_LOOKS;
 
@@ -92,6 +103,67 @@ describe("the cast", () => {
 			expect(width, `${member.name} width`).toBeGreaterThan((HEAD.right - HEAD.left) * 0.6);
 			expect(Math.max(...points.map(([, y]) => y)), `${member.name} sits on the head`).toBeGreaterThan(HEAD.top);
 		}
+	});
+});
+
+describe("the axis registry", () => {
+	it("describes every axis as DATA, so a picker never names one in code", () => {
+		// The library iterates this list. If it ever hardcoded "colour, then hat", a
+		// third axis — the new character types the human wants next — would mean
+		// rewriting the picker instead of adding a row here.
+		expect(APPEARANCE_AXES.length).toBeGreaterThanOrEqual(2);
+		for (const axis of APPEARANCE_AXES) {
+			expect(axis.options.length, `${axis.id} has options`).toBeGreaterThan(0);
+			expect(axis.name.length, `${axis.id} is named for a human`).toBeGreaterThan(0);
+			expect(new Set(axis.options.map((option) => option.id)).size, `${axis.id} ids are unique`).toBe(
+				axis.options.length,
+			);
+		}
+	});
+
+	it("carries the colour and hat lists themselves, not copies that can drift", () => {
+		expect(optionsOf("palette").map((option) => option.id)).toEqual(PALETTES.map((p) => p.id));
+		expect(optionsOf("hat").map((option) => option.id)).toEqual(HATS.map((h) => h.id));
+	});
+
+	it("gives every axis its own hash salt, which is what keeps the axes independent", () => {
+		// One salt used twice is one axis wearing two names: every amber Proc would be
+		// in the same hat again, just less obviously. This is the invariant that the
+		// 900-session independence test measures the CONSEQUENCE of.
+		const salts = APPEARANCE_AXES.map((axis) => axis.salt);
+
+		expect(new Set(salts).size).toBe(APPEARANCE_AXES.length);
+	});
+
+	it("resolves a default for every axis, for any ref", () => {
+		for (const ref of ["", "   ", "🙂", "agent-orchestrator-168"]) {
+			const look = defaultLook(ref);
+			for (const axis of APPEARANCE_AXES) {
+				expect(
+					axis.options.some((option) => option.id === look[axis.id]),
+					`${ref} / ${axis.id}`,
+				).toBe(true);
+			}
+		}
+	});
+
+	it("IS the hash assignment — the default look is exactly what castForSession gives", () => {
+		// castForSession is the promise that a worker keeps its face. Routing it
+		// through the axes must not move a single session, so this walks a realistic
+		// roster rather than spot-checking one ref.
+		for (let i = 0; i < 200; i++) {
+			const ref = `agent-orchestrator-${i}`;
+			expect(castFromLook(defaultLook(ref)), ref).toEqual(castForSession(ref));
+		}
+	});
+
+	it("builds the look it is asked for, whichever pair that is", () => {
+		expect(castFromLook({ palette: "mint", hat: "cone" })).toEqual(
+			composeCast(
+				PALETTES.find((p) => p.id === "mint")!,
+				HATS.find((h) => h.id === "cone")!,
+			),
+		);
 	});
 });
 

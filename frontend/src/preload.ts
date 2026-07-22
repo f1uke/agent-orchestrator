@@ -123,6 +123,19 @@ const api = {
 		get: () => ipcRenderer.invoke("companionSettings:get") as Promise<CompanionSettings>,
 		set: (settings: CompanionSettings) => ipcRenderer.invoke("companionSettings:set", settings) as Promise<void>,
 	},
+	companion: {
+		// Right-clicking a Proc on the desktop asks for THIS window, on that session.
+		onOpenPetLibrary: (listener: (sessionId: string) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string) => listener(sessionId);
+			ipcRenderer.on("companion:openPetLibrary", wrapped);
+			return () => {
+				ipcRenderer.off("companion:openPetLibrary", wrapped);
+			};
+		},
+		// A look was chosen here. The value is already in the localStorage both
+		// windows share; this only asks the overlay to go and read it.
+		looksChanged: () => ipcRenderer.send("companion:looksChanged"),
+	},
 	updates: {
 		getStatus: () => ipcRenderer.invoke("updates:getStatus") as Promise<UpdateStatus>,
 		check: () => ipcRenderer.invoke("updates:check") as Promise<void>,

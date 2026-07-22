@@ -1314,6 +1314,30 @@ ipcMain.on("companion:setInteractive", (_event, interactive: unknown) => {
 	companionOverlay?.setInteractive(interactive === true);
 });
 
+// Right-click on a Proc: open the Pet library on that session.
+//
+// The overlay does NOT draw the picker itself. It is a transparent always-on-top
+// band whose click-through is decided per pointer move, and a popover living on it
+// would have to pin the window interactive for as long as it stayed open - one
+// missed close and the bottom of the user's screen stops taking clicks. So the
+// gesture brings the real window forward instead, which is also where the user can
+// see the session it belongs to.
+ipcMain.on("companion:requestLook", (_event, sessionId: unknown) => {
+	if (typeof sessionId !== "string" || sessionId === "") return;
+	if (!mainWindow || mainWindow.isDestroyed()) return;
+	if (mainWindow.isMinimized()) mainWindow.restore();
+	mainWindow.show();
+	mainWindow.focus();
+	mainWindow.webContents.send("companion:openPetLibrary", sessionId);
+});
+
+// The app renderer changed a chosen look. Both windows share one origin and one
+// localStorage, so the value has already moved; this only tells the overlay to go
+// and read it, and carries nothing that could disagree with what it finds.
+ipcMain.on("companion:looksChanged", () => {
+	companionOverlay?.notifyLooksChanged();
+});
+
 // The overlay page has no daemon connection of its own and the port is discovered,
 // so it asks for the base URL rather than assuming one. Null while the daemon is
 // not running; the overlay retries and stays on its mock until it answers.
@@ -1489,6 +1513,7 @@ function initCompanionOverlay(): void {
 				setVisibleOnAllWorkspaces: (visible, opts) => win.setVisibleOnAllWorkspaces(visible, opts),
 				setAlwaysOnTop: (flag, level) => win.setAlwaysOnTop(flag, level as Parameters<typeof win.setAlwaysOnTop>[1]),
 				loadURL: (url) => win.loadURL(url),
+				send: (channel, ...args) => win.webContents.send(channel, ...args),
 				onClosed: (listener) => win.on("closed", listener),
 				destroy: () => win.destroy(),
 				isDestroyed: () => win.isDestroyed(),

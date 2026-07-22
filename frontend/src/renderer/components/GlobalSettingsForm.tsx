@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useUiStore } from "../stores/ui-store";
 import { GlobalSettingsContent } from "./settings/GlobalSettingsContent";
 import { GLOBAL_SECTIONS } from "./settings/settings-sections";
 import { SettingsSaveBar } from "./settings/SettingsSaveBar";
@@ -17,6 +18,13 @@ export function GlobalSettingsForm() {
 	const form = useGlobalSettingsForm();
 	const [activeSection, setActiveSection] = useState<string>("prompts");
 	const [search, setSearch] = useState("");
+	// Right-clicking a Proc on the desktop lands here asking for the Pet library,
+	// which lives in System. The request is left standing for the library itself to
+	// consume and clear: it is what knows whether the session is one it can show.
+	const petLibraryRequest = useUiStore((state) => state.petLibraryRequest);
+	useEffect(() => {
+		if (petLibraryRequest) setActiveSection("system");
+	}, [petLibraryRequest]);
 	const { dirty, mutation, savedAt, save, discard } = form;
 
 	const status = (
