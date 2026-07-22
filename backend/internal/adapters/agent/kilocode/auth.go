@@ -18,6 +18,10 @@ import (
 
 var _ ports.AgentAuthChecker = (*Plugin)(nil)
 
+// kilocodeAuthProbeTimeout bounds the `kilocode auth list` probe. It is a var so
+// tests can drive the deadline path without waiting the full timeout.
+var kilocodeAuthProbeTimeout = 3 * time.Second
+
 // AuthStatus returns the plugin's local authentication status.
 func (p *Plugin) AuthStatus(ctx context.Context) (ports.AgentAuthStatus, error) {
 	binary, err := p.ResolveBinary(ctx)
@@ -30,18 +34,17 @@ func (p *Plugin) AuthStatus(ctx context.Context) (ports.AgentAuthStatus, error) 
 		return status, nil
 	}
 
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	probeCtx, cancel := context.WithTimeout(ctx, kilocodeAuthProbeTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(probeCtx, binary, "auth", "list").CombinedOutput()
-	if probeCtx.Err() != nil {
-		return ports.AgentAuthStatusUnknown, probeCtx.Err()
+	out, _ := exec.CommandContext(probeCtx, binary, "auth", "list").CombinedOutput()
+	if ctx.Err() != nil {
+		return ports.AgentAuthStatusUnknown, ctx.Err()
 	}
+	// A probe that outruns its own deadline is not a failure: report unknown like
+	// every other inconclusive case rather than erroring on a slow machine.
 	status, ok := kilocodeAuthListStatus(string(out))
 	if ok {
 		return status, nil
-	}
-	if err != nil {
-		return ports.AgentAuthStatusUnknown, nil
 	}
 	return ports.AgentAuthStatusUnknown, nil
 }
