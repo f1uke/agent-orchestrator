@@ -7,4 +7,9 @@ import { contextBridge, ipcRenderer } from "electron";
 // a decorative surface the whole daemon API for no reason.
 contextBridge.exposeInMainWorld("aoCompanion", {
 	setInteractive: (interactive: boolean) => ipcRenderer.send("companion:setInteractive", interactive === true),
+	// The overlay is its own page with no daemon connection of its own, and the
+	// daemon's port is discovered rather than fixed — so the main process, which
+	// already knows it, hands it over. Null until the daemon is up, which is why the
+	// overlay retries rather than assuming a port.
+	daemonUrl: () => ipcRenderer.invoke("companion:daemonUrl") as Promise<string | null>,
 });
