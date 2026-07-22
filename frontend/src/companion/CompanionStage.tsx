@@ -16,17 +16,16 @@ import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { procsFrame, Procs } from "./Procs";
+import { PET_HEIGHT, petFrame } from "./layout";
+import { Procs } from "./Procs";
 
 // The stage: the only stateful part of the overlay renderer. It owns a World,
 // advances it on a slow tick, and paints each Proc with a `transform` — the engine
 // hands out destinations, CSS interpolates between them on the compositor. Nothing
 // here re-implements a behaviour rule; every decision comes from behaviour.ts.
 
-/** Drawn Proc height. `full` tier from the design's size rules. */
-const PET_HEIGHT = 128;
 /** The drawn frame: the figure's own width plus whatever its scene hangs either side. */
-const FRAME = procsFrame(PET_HEIGHT);
+const FRAME = petFrame(PET_HEIGHT);
 /**
  * How far the turnaround sits in from the screen edge. A Proc turns here rather
  * than at the edge, so it never half-exits the display.

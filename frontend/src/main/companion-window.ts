@@ -9,6 +9,8 @@
 // What CANNOT be proven from here is that macOS honours the flags; that is what
 // the human smoke checklist is for.
 
+import { COMPANION_CONTENT_HEIGHT } from "../companion/layout";
+
 export type OverlayBounds = { x: number; y: number; width: number; height: number };
 
 /** The BrowserWindow constructor options the overlay needs. Asserted in the tests. */
@@ -66,11 +68,15 @@ export type CompanionOverlay = {
 };
 
 /**
- * Height of the floor band. Tall enough for a `full`-tier Proc (≥120px) with
- * headroom for the bubble the later PR adds, and no taller: every pixel of the
- * band is a pixel of the desktop the overlay has to forward clicks through.
+ * Height of the floor band, taken from the art rather than guessed.
+ *
+ * It WAS guessed once, at 190px, and it was too short: a Proc's hover tooltip
+ * reaches 218px above the floor, so it was clipped off the top of the window and
+ * hovering a Proc appeared to do nothing at all. Every pixel of the band is a pixel
+ * of desktop the overlay must forward clicks through, so it is exactly as tall as
+ * the tallest thing drawn in it and no taller.
  */
-export const OVERLAY_BAND_HEIGHT = 190;
+export const OVERLAY_BAND_HEIGHT = COMPANION_CONTENT_HEIGHT;
 
 /**
  * The band sits flush with the bottom of the WORK AREA rather than the display.

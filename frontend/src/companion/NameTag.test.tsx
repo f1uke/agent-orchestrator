@@ -40,7 +40,8 @@ describe("NameTag", () => {
 		const chip = container.querySelector("[data-name-tag]") as HTMLElement;
 
 		expect(chip.style.textOverflow).toBe("ellipsis");
-		expect(parseInt(chip.style.maxWidth, 10)).toBeLessThanOrEqual(140);
+		// Under the 155px crowding clearance, so it can never reach the Proc next door.
+		expect(parseInt(chip.style.maxWidth, 10)).toBeLessThan(155);
 	});
 });
 
@@ -76,5 +77,18 @@ describe("PetTooltip", () => {
 
 	it("keeps its secondary text readable against its own fill", () => {
 		expect(contrastRatio(PROP_COLOURS.bubbleMuted, PROP_COLOURS.paper)).toBeGreaterThanOrEqual(4.5);
+	});
+});
+
+describe("what a name IS", () => {
+	it("is not squeezed to the width of the Proc it sits under", () => {
+		// The chip lives in a container the width of the FIGURE (93px), which was
+		// truncating almost every real name. It may be wider than the Proc — it just
+		// may not be wide enough to reach the neighbour it would be mistaken for.
+		const { container } = render(<NameTag name="feature/parser-rewrite" />);
+		const chip = container.querySelector("[data-name-tag]") as HTMLElement;
+
+		expect(parseInt(chip.style.maxWidth, 10)).toBeGreaterThan(93);
+		expect(parseInt(chip.style.maxWidth, 10)).toBeLessThan(155);
 	});
 });

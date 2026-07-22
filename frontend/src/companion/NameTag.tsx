@@ -32,9 +32,10 @@ export function NameTag({ name }: { name: string }) {
 				...CHIP,
 				padding: "1px 6px",
 				font: "600 10px/1.4 ui-sans-serif, system-ui, sans-serif",
-				// Narrower than the Proc's own clearance, so a long name never reaches
-				// the neighbour it would otherwise be mistaken for.
-				maxWidth: "132px",
+				// Wider than the figure — it was being squeezed to the 93px figure width
+				// and truncating almost every name — but still inside the crowding
+				// clearance, so it can never reach the neighbour it would be mistaken for.
+				maxWidth: "148px",
 				whiteSpace: "nowrap",
 				overflow: "hidden",
 				textOverflow: "ellipsis",

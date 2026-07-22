@@ -99,6 +99,12 @@ body {
 	pointer-events: none;
 }
 
+/* Centred ON the figure but allowed to be wider than it: the chip was being
+   squeezed to the 93px figure width and truncating almost every name. */
+.companion-proc-name > * {
+	flex: 0 0 auto;
+}
+
 /* The hover tooltip, above the Proc and out of the way of its own bubble. */
 .companion-proc-tooltip {
 	position: absolute;

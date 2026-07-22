@@ -21,6 +21,11 @@ export const MOCK_FEED_STEP_MS = 20_000;
 // it was driven by was mostly one state, and correct art looks broken when every
 // figure on screen is doing the same thing.
 //
+// The NAMES are branch-style on purpose. The first set read as "refactor the
+// parser", "bump the deps" — which is what a session is DOING, and that is the
+// bubble's job. A name has to be an identity you can learn and point at, or the
+// chip and the bubble end up saying the same kind of thing twice.
+//
 // The ids are deliberately varied strings, not `mock-1..8`: the character comes
 // from a stable hash of the ref, so the ids ARE the demo's casting decision. They
 // were chosen to spread across the cast, which is not cheating — demonstrating the
@@ -29,49 +34,49 @@ export const MOCK_FEED_STEP_MS = 20_000;
 const SCRIPTS: Array<{ sessionId: string; name: string; project: string; states: SessionStatus[] }> = [
 	{
 		sessionId: "worker-refactor-parser",
-		name: "refactor the parser",
+		name: "feature/parser-rewrite",
 		project: "agent-orchestrator",
 		states: ["working", "working", "pr_open", "review_pending", "approved"],
 	},
 	{
 		sessionId: "worker-flaky-test",
-		name: "fix the flaky test",
+		name: "fix/flaky-spawn-test",
 		project: "agent-orchestrator",
 		states: ["ci_failed", "working", "ci_failed", "changes_requested"],
 	},
 	{
 		sessionId: "worker-ask-the-human",
-		name: "rename the board columns",
+		name: "feature/board-columns",
 		project: "design-system",
 		states: ["needs_input", "needs_input", "working", "mergeable", "merged"],
 	},
 	{
 		sessionId: "worker-nap-time",
-		name: "bump the deps",
+		name: "chore/dep-bump",
 		project: "agent-orchestrator",
 		states: ["idle", "idle", "working"],
 	},
 	{
 		sessionId: "worker-backlog-item",
-		name: "add the export button",
+		name: "feature/export-button",
 		project: "design-system",
 		states: ["todo", "todo", "working", "draft", "pr_open", "mergeable", "merged"],
 	},
 	{
 		sessionId: "worker-lost-contact",
-		name: "migrate the old configs",
+		name: "chore/config-migration",
 		project: "infra-tools",
 		states: ["no_signal", "no_signal", "working", "idle"],
 	},
 	{
 		sessionId: "worker-shipped-it",
-		name: "tidy the changelog",
+		name: "docs/changelog",
 		project: "infra-tools",
 		states: ["merged", "terminated", "todo", "working", "approved", "mergeable"],
 	},
 	{
 		sessionId: "worker-odd-one-out",
-		name: "investigate the slow query",
+		name: "investigate/slow-query",
 		project: "agent-orchestrator",
 		states: ["unknown", "draft", "review_pending", "changes_requested", "no_signal"],
 	},
