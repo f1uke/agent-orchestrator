@@ -1,10 +1,10 @@
 import { useId } from "react";
 import type { SessionStatus } from "../renderer/types/workspace";
 import { WALK_CYCLE_MS, type Facing } from "./behaviour";
-import { mirrorPathX, type CastMember } from "./cast";
+import type { CastMember } from "./cast";
 import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX } from "./palette";
 import { FIGURE_ATTRIBUTE } from "./pointer-region";
-import { CasedStroke, CordLayer, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
+import { CordLayer, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
 import { sceneFor } from "./scene";
 
 // Procs — a little running process. ONE rig, parameterised by a cast member and a
@@ -119,13 +119,9 @@ export function Procs({ cast, status, facing, walking, size = DEFAULT_SIZE, clas
 					</g>
 				</g>
 
-				{/* Body + ears bob on their own eased track, separate from the leg steps. */}
+				{/* Body and hat bob on their own eased track, separate from the leg steps. */}
 				<g style={walking ? { animation: `procs-bob ${WALK_CYCLE_MS}ms ease-in-out infinite alternate` } : undefined}>
 					<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
-
-					{/* The ears: this character's bracket pair, authored once and mirrored. */}
-					<CasedStroke part="ear-left" d={cast.ear} core={4} colour={cast.shade} />
-					<CasedStroke part="ear-right" d={mirrorPathX(cast.ear)} core={4} colour={cast.shade} />
 
 					<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />
 
@@ -142,6 +138,22 @@ export function Procs({ cast, status, facing, walking, size = DEFAULT_SIZE, clas
 					<circle cx="59.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
 
 					<path d="M43 67 C 45 71 51 71 53 67" fill="none" stroke={PROCS_INK} strokeWidth="2.6" strokeLinecap="round" />
+
+					{/* The hat, over the head so it sits ON it rather than behind it. Drawn
+				    after the face so a low brim shades the eyes rather than the reverse. */}
+					<g data-slot="hat" data-hat={cast.id}>
+						{cast.hat.map((piece) => (
+							<path
+								key={piece.d}
+								data-rim
+								data-hat-piece
+								d={piece.d}
+								fill={piece.role === "trim" ? cast.hatTrim : cast.hatFill}
+								strokeLinejoin="round"
+								{...RIM}
+							/>
+						))}
+					</g>
 
 					{/* Held inside the bob group, because a carried thing moves with its carrier. */}
 					<HeldProp held={scene.held} />

@@ -55,6 +55,11 @@ const AMBLING: CompanionActivity[] = [
 	{ sessionId: "c", status: "review_pending" },
 ];
 
+// Crowding means a stroll is declined when its target is too near another Proc, so
+// a roster of three in a jsdom-sized band makes "did anything walk?" a coin flip.
+// The walking assertions use a lone Proc, which has nobody to be blocked by.
+const LONE_AMBLER: CompanionActivity[] = [{ sessionId: "solo", status: "pr_open" }];
+
 describe("CompanionStage", () => {
 	it("shows one Proc per session in the feed", () => {
 		const { feed, push } = stubFeed();
@@ -163,7 +168,7 @@ describe("CompanionStage", () => {
 		prefersReducedMotion(false);
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} />);
-		push(AMBLING);
+		push(LONE_AMBLER);
 
 		act(() => vi.advanceTimersByTime(400_000));
 
@@ -188,7 +193,7 @@ describe("CompanionStage", () => {
 		prefersReducedMotion(false);
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} />);
-		push(AMBLING);
+		push(LONE_AMBLER);
 
 		act(() => {
 			Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });

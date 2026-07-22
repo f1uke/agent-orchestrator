@@ -4,12 +4,21 @@
 // a data row here, never a new component. What varies is exactly two things, and
 // both of them are doing work:
 //
-//   1. the EARS, a code-punctuation bracket pair, which is what makes the
-//      SILHOUETTE differ. Six tints of one face would still read as one character;
-//      a `{}` next to a `<>` next to a `##` reads as three characters even in
-//      peripheral vision, which is the whole point on a desktop you are not
-//      looking straight at.
-//   2. the COLOUR, which carries at a glance what the ears carry up close.
+//   1. the HAT, which is what makes the SILHOUETTE differ. Six tints of one face
+//      would still read as one character; a beanie next to a hard hat next to a
+//      party cone reads as three, even in peripheral vision — which is the whole
+//      point on a desktop you are not looking straight at.
+//   2. the COLOUR, which carries at a glance what the hat carries up close.
+//
+// Hats replaced code-bracket ears, for two reasons the human found by living with
+// it. The heads read as bald, and — the bug — an asymmetric glyph pair MIRRORS: a
+// Proc that turned to walk left wore `><` instead of `<>`, which just reads as
+// broken. A hat is still a hat in a mirror.
+//
+// ⚠ The identity stays in the BODY and the CORD. A Proc is a running process with a
+// power lead, and that is what makes it ours rather than a ghost with accessories.
+// Hats are variety ON a character, never the character itself — the moment the hat
+// is doing the identifying, this has drifted into a blob in a costume.
 //
 // Assignment is a stable hash of the session ref, per the design. The human asked
 // for "random" faces and colours; stable-per-session gives the same visible
@@ -33,10 +42,23 @@ export type CastMember = {
 	shade: string;
 	/** Cheeks. Sits on `body`, never on the wallpaper. */
 	blush: string;
-	/** The LEFT ear, in rig coordinates. The right one is this, mirrored. */
-	ear: string;
+	/** Hat fill. Measured against the wallpaper like every other exposed colour. */
+	hatFill: string;
+	/** The hat's band, brim or trim. */
+	hatTrim: string;
+	/** The hat itself, as filled shapes in rig coordinates, drawn back to front. */
+	hat: HatPiece[];
 };
 
+/** One filled piece of a hat. `trim` picks the accent colour instead of the main one. */
+export type HatPiece = { d: string; role?: "trim" };
+
+// Hat colours sit in the same narrow luminance band as the bodies, and for the same
+// reason: a hat's crown rises ABOVE the head, so its outline is against the
+// wallpaper, and a dark hat on a dark desktop loses both channels at once and the
+// Proc appears to have a flat top. Hat and head are told apart by their own ink
+// rims, exactly as the body and the head already are.
+//
 // Colours are not eyeballed: every `body` and `shade` here is checked by
 // palette.test.ts across the entire wallpaper luminance range, and the worst case
 // is ~3.1:1 — above the 3:1 decorative floor. They sit at a deliberately narrow
@@ -51,7 +73,14 @@ export const CAST: readonly CastMember[] = [
 		body: "#f4c558",
 		shade: "#ecb22a",
 		blush: "#e8735c",
-		ear: "M18 26 C 6 28 14 40 2 42 C 14 44 6 56 18 58",
+		hatFill: "#f6b6ac",
+		hatTrim: "#dcdcdc",
+		hat: [
+			// A slouchy beanie, deliberately wider than the head — an oversize hat reads
+			// as a hat, while one cut to the skull just reads as a differently shaped head.
+			{ d: "M10 28 C 10 -16 86 -16 86 28 L 10 28 Z" },
+			{ d: "M14 26 L 82 26 C 90 26 90 40 82 40 L 14 40 C 6 40 6 26 14 26 Z", role: "trim" },
+		],
 	},
 	{
 		id: "angle",
@@ -60,7 +89,13 @@ export const CAST: readonly CastMember[] = [
 		body: "#92d8dc",
 		shade: "#71c9d0",
 		blush: "#e8735c",
-		ear: "M18 26 L 3 42 L 18 58",
+		hatFill: "#d6c499",
+		hatTrim: "#e2d9c8",
+		hat: [
+			// A cap. The peak reads as a peak whichever way the sprite is facing.
+			{ d: "M12 29 C 12 -12 84 -12 84 29 L 12 29 Z" },
+			{ d: "M12 29 C 0 29 -6 36 -2 41 C 8 36 14 34 22 34 L 12 29 Z", role: "trim" },
+		],
 	},
 	{
 		id: "brack",
@@ -69,7 +104,14 @@ export const CAST: readonly CastMember[] = [
 		body: "#dcc1f1",
 		shade: "#d1aeeb",
 		blush: "#e8735c",
-		ear: "M18 26 L 5 26 L 5 58 L 18 58",
+		hatFill: "#eec41e",
+		hatTrim: "#e9ddbc",
+		hat: [
+			// A site hard hat: high crown, wide brim, one ridge.
+			{ d: "M16 30 C 16 -12 78 -12 78 30 L 16 30 Z" },
+			{ d: "M10 30 L 84 30 C 92 30 92 40 84 40 L 10 40 C 2 40 2 30 10 30 Z", role: "trim" },
+			{ d: "M43 -10 L 51 -10 L 51 30 L 43 30 Z", role: "trim" },
+		],
 	},
 	{
 		id: "glob",
@@ -78,9 +120,13 @@ export const CAST: readonly CastMember[] = [
 		body: "#fabad1",
 		shade: "#f6a3c2",
 		blush: "#d95f7a",
-		// An asterisk: three crossing strokes rather than a bracket, which is what
-		// makes Glob the odd silhouette of the six.
-		ear: "M4 33 L 15 51 M4 51 L 15 33 M1 42 L 18 42",
+		hatFill: "#d4beec",
+		hatTrim: "#f2db63",
+		hat: [
+			// A party cone, because Glob is the odd one of the six.
+			{ d: "M48 -30 L 82 31 L 14 31 Z" },
+			{ d: "M18 31 C 36 38 60 38 78 31 L 78 36 C 60 42 36 42 18 36 Z", role: "trim" },
+		],
 	},
 	{
 		id: "hash",
@@ -89,7 +135,13 @@ export const CAST: readonly CastMember[] = [
 		body: "#9fd9aa",
 		shade: "#82cc91",
 		blush: "#e8735c",
-		ear: "M8 28 L 5 56 M15 28 L 12 56 M2 37 L 18 37 M1 47 L 17 47",
+		hatFill: "#adcabc",
+		hatTrim: "#d0ddd6",
+		hat: [
+			// A flat cap, brim forward.
+			{ d: "M10 31 C 6 -12 90 -16 84 31 L 10 31 Z" },
+			{ d: "M10 31 C -2 32 -5 39 0 42 C 10 37 16 35 22 35 L 10 31 Z", role: "trim" },
+		],
 	},
 	{
 		id: "tilde",
@@ -98,7 +150,14 @@ export const CAST: readonly CastMember[] = [
 		body: "#b1cef5",
 		shade: "#99bef0",
 		blush: "#e8735c",
-		ear: "M2 36 C 6 30 11 42 16 36 M2 50 C 6 44 11 56 16 50",
+		hatFill: "#efbd9b",
+		hatTrim: "#efd8c7",
+		hat: [
+			// A bucket hat. The brim is drawn AFTER the crown and overlaps its base, or
+			// the two read as a box balanced on a wire rather than as one hat.
+			{ d: "M18 29 L 26 -12 L 70 -12 L 78 29 Z" },
+			{ d: "M2 24 C 18 42 78 42 94 24 C 78 33 18 33 2 24 Z", role: "trim" },
+		],
 	},
 ];
 

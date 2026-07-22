@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WALK_CYCLE_MS } from "./behaviour";
-import { CAST, castForSession, mirrorPathX } from "./cast";
+import { CAST, castForSession } from "./cast";
 import { PROCS_INK, PROCS_RIM_PX } from "./palette";
 import { ALL_COMPANION_STATUSES, sceneFor } from "./scene";
 import { Procs } from "./Procs";
@@ -40,14 +40,23 @@ describe("the character", () => {
 		expect(screen.getByRole("img", { name: /brack/i })).toHaveAttribute("aria-label", expect.stringMatching(/ci/i));
 	});
 
-	it("wears its own character's ears, mirrored into a pair", () => {
+	it("wears its own character's hat", () => {
 		for (const member of CAST) {
 			const { container, unmount } = renderProcs({ cast: member });
+			const worn = [...container.querySelectorAll("[data-hat-piece]")].map((p) => p.getAttribute("d"));
 
-			expect(container.querySelector('[data-core="ear-left"]')?.getAttribute("d")).toBe(member.ear);
-			expect(container.querySelector('[data-core="ear-right"]')?.getAttribute("d")).toBe(mirrorPathX(member.ear));
+			expect(worn, member.name).toEqual(member.hat.map((piece) => piece.d));
 			unmount();
 		}
+	});
+
+	it("draws the hat over the head, so no Proc is bald", () => {
+		const { container } = renderProcs();
+		const nodes = [...container.querySelectorAll("*")];
+		const head = nodes.indexOf(container.querySelector('[data-part="head"]')!);
+		const hat = nodes.indexOf(container.querySelector("[data-hat-piece]")!);
+
+		expect(hat).toBeGreaterThan(head);
 	});
 
 	it("wears its own character's colour", () => {
@@ -61,7 +70,7 @@ describe("the character", () => {
 		const a = renderProcs({ cast: CAST[0] });
 		const b = renderProcs({ cast: CAST[1] });
 
-		const ear = (c: HTMLElement) => c.querySelector('[data-core="ear-left"]')?.getAttribute("d");
+		const ear = (c: HTMLElement) => c.querySelector("[data-hat-piece]")?.getAttribute("d");
 		const head = (c: HTMLElement) => c.querySelector('[data-part="head"]')?.getAttribute("fill");
 		expect(ear(a.container)).not.toBe(ear(b.container));
 		expect(head(a.container)).not.toBe(head(b.container));
@@ -180,11 +189,17 @@ describe("the scene", () => {
 
 	it("runs an attached cord off to something, with no plug lying about", () => {
 		const { container } = renderProcs({ status: "pr_open" });
+		const cord = container.querySelector('[data-core="cord"]')!;
+		const points = (cord.getAttribute("d") ?? "").match(/-?\d+(\.\d+)? -?\d+(\.\d+)?/g) ?? [];
+		const lowest = Math.max(...points.map((p) => Number(p.split(" ")[1])));
 
 		expect(container.querySelector("[data-plug]")).toBeNull();
-		// It leaves the drawn frame, which is what "attached to something" looks like
-		// when the thing it is attached to is not on screen.
-		expect(extentX(container.querySelector('[data-core="cord"]')!).max).toBeGreaterThan(130);
+		// It leaves through the FLOOR — the frame's bottom edge is y=132 — which is
+		// what "attached to something off screen" looks like for a cable. Running it
+		// level across the frame instead read as a long tail.
+		expect(lowest).toBeGreaterThanOrEqual(132);
+		// And it stays short: a lead, not a leash.
+		expect(extentX(cord).max).toBeLessThan(96);
 	});
 
 	it("keeps the three quiet states telling themselves apart", () => {
@@ -292,7 +307,7 @@ describe("a roster of Procs", () => {
 		const refs = ["ao-1", "ao-2", "ao-3", "ao-4", "ao-5", "ao-6", "ao-7", "ao-8"];
 		const looks = refs.map((ref) => {
 			const member = castForSession(ref);
-			return `${member.body}/${member.ear}`;
+			return `${member.body}/${member.hat.map((piece) => piece.d).join("")}`;
 		});
 
 		expect(new Set(looks).size).toBeGreaterThanOrEqual(4);

@@ -588,3 +588,35 @@ describe("crowding", () => {
 		expect(walker.x).toBe(520);
 	});
 });
+
+describe("facing", () => {
+	it("turns a Proc back to face you when its scene gains a ground", () => {
+		// `facing` persists after a stroll, and the whole sprite mirrors — scenery and
+		// all. A Proc that walked left and then sat down at a desk would show the desk
+		// flipped to its other side, which reads as the furniture teleporting.
+		let w = syncActivities(world(), [activity("a", "pr_open")], T0, half);
+		w = { ...w, pets: w.pets.map((pet) => ({ ...pet, facing: "left" as const })) };
+
+		w = syncActivities(w, [activity("a", "working")], T0 + 1_000, half);
+
+		expect(petById(w, "a").facing).toBe("front");
+	});
+
+	it("turns a Proc back to face you when it goes quiet", () => {
+		let w = syncActivities(world(), [activity("a", "pr_open")], T0, half);
+		w = { ...w, pets: w.pets.map((pet) => ({ ...pet, facing: "left" as const })) };
+
+		w = syncActivities(w, [activity("a", "terminated")], T0 + 1_000, half);
+
+		expect(petById(w, "a").facing).toBe("front");
+	});
+
+	it("leaves a Proc that can still stroll facing the way it was going", () => {
+		let w = syncActivities(world(), [activity("a", "pr_open")], T0, half);
+		w = { ...w, pets: w.pets.map((pet) => ({ ...pet, facing: "left" as const })) };
+
+		w = syncActivities(w, [activity("a", "draft")], T0 + 1_000, half);
+
+		expect(petById(w, "a").facing).toBe("left");
+	});
+});

@@ -290,7 +290,13 @@ const CORD_TO_GROUND = "M67 92 C 73 99 74 110 86 112";
 // to: drawn ending in a plug on the floor it is indistinguishable from an unplugged
 // one, and "connected" vs "disconnected" is the single most load-bearing thing the
 // cord says.
-const CORD_OFF_FRAME = "M67 92 C 82 94 92 112 108 114 C 122 116 130 114 152 114";
+//
+// It DROPS straight to the floor and leaves through the bottom edge, and it is kept
+// SHORT. The first version ran level across the whole frame and read as "a long
+// weird tail" — the human's words — because a line held at hip height for 80-odd
+// units is a tail; a short lead that falls to the ground and disappears under it is
+// a cable. Shortening it also stops it reaching anywhere near a neighbour.
+const CORD_OFF_FRAME = "M67 92 C 76 96 81 108 86 132";
 // Unplugged: a short droop that stops in mid-air, with the plug lying on its side
 // on the floor a clear gap away. The gap is the whole message.
 const CORD_LOOSE = "M67 92 C 77 96 83 104 85 115";

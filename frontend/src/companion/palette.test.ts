@@ -18,6 +18,8 @@ function exposedColours(): Array<{ what: string; colour: string }> {
 	const fromCast = CAST.flatMap((member) => [
 		{ what: `${member.name} body`, colour: member.body },
 		{ what: `${member.name} shade`, colour: member.shade },
+		{ what: `${member.name} hat`, colour: member.hatFill },
+		{ what: `${member.name} hat trim`, colour: member.hatTrim },
 	]);
 	const fromProps = Object.entries(PROP_COLOURS).map(([what, colour]) => ({ what: `prop ${what}`, colour }));
 	return [...fromCast, ...fromProps];

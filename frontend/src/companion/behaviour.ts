@@ -223,6 +223,12 @@ function facingFor(fromX: number, toX: number): Facing {
 	return toX < fromX ? "left" : "right";
 }
 
+/** True for the modes that can travel: everything else stands facing the human. */
+function canWander(status: SessionStatus): boolean {
+	const mode = modeFor(status);
+	return mode === "amble" || mode === "summon";
+}
+
 /**
  * Reconcile the cast against the activity source: add Procs for new sessions, drop
  * Procs whose session is gone, and carry position/timers through a status change so
@@ -253,7 +259,15 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			placed.push(prev);
 			return prev;
 		}
-		const next = { ...prev, status: activity.status };
+		const next = {
+			...prev,
+			status: activity.status,
+			// A Proc that cannot stroll faces YOU. `facing` otherwise persists from the
+			// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
+			// that walked left and then sat down at a desk would show the desk flipped
+			// to its other side, reading as the furniture teleporting.
+			facing: canWander(activity.status) ? prev.facing : ("front" as Facing),
+		};
 		placed.push(next);
 		return next;
 	});
