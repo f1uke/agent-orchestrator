@@ -18,10 +18,15 @@ export type LiveSession = {
 	id: string;
 	name: string;
 	projectName?: string;
+	/** Which job this session holds. The one coordinator is marked on its label. */
+	kind: SessionKind;
 	status: SessionView["status"];
 	statusReason?: SessionView["statusReason"];
 	isTerminated: boolean;
 };
+
+/** Only the distinction the overlay draws. Everything that is not the coordinator works. */
+export type SessionKind = "orchestrator" | "worker";
 
 /**
  * More Procs than this and the band stops being readable — they crowd, the names
@@ -78,5 +83,6 @@ export function sessionsToActivities(sessions: LiveSession[]): CompanionActivity
 		status,
 		name: session.name,
 		project: session.projectName ?? "",
+		kind: session.kind,
 	}));
 }

@@ -94,3 +94,24 @@ describe("reading the roster off the real sessions endpoint", () => {
 		await expect(createHttpTransport("http://localhost:4021").fetchSessions()).rejects.toThrow(/404/);
 	});
 });
+
+describe("telling the coordinator apart", () => {
+	// One session on a project runs the others. Its `kind` is right there in the
+	// session row — no inference, no name matching — and the overlay marks it so a
+	// glance can tell who is coordinating from who is doing the work.
+	it("carries the orchestrator kind through", async () => {
+		serve({ "/api/v1/sessions": { sessions: [{ ...SESSION, kind: "orchestrator" }] }, "/api/v1/projects": PROJECTS });
+
+		const [session] = await createHttpTransport("http://localhost:4021").fetchSessions();
+
+		expect(session.kind).toBe("orchestrator");
+	});
+
+	it("treats anything that is not an orchestrator as an ordinary worker", async () => {
+		serve({ "/api/v1/sessions": { sessions: [{ ...SESSION, kind: "reviewer" }] }, "/api/v1/projects": PROJECTS });
+
+		const [session] = await createHttpTransport("http://localhost:4021").fetchSessions();
+
+		expect(session.kind).toBe("worker");
+	});
+});

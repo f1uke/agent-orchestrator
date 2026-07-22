@@ -134,7 +134,7 @@ describe("how much a bubble is allowed to say", () => {
 		render(<Bubble text={LONG} />);
 		const card = screen.getByText(LONG);
 
-		expect(card.style.WebkitLineClamp).toBe("3");
+		expect(card.style.webkitLineClamp).toBe("3");
 		expect(card.style.overflow).toBe("hidden");
 	});
 

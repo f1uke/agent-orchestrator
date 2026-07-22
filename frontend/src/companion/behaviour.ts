@@ -15,6 +15,7 @@
 
 import type { SessionStatus } from "../renderer/types/workspace";
 import type { CompanionActivity } from "./feed";
+import type { SessionKind } from "./live-roster";
 import { modeFor, type CompanionMode } from "./mode";
 import { sceneAnimates } from "./scene";
 
@@ -72,6 +73,8 @@ export type Pet = {
 	/** The session's board name and project, straight from the feed. */
 	name: string;
 	project: string;
+	/** Whether this session coordinates the others. Marked on its label, not its art. */
+	kind: SessionKind;
 	/** Logical position along the floor band, in px from the band's left edge. */
 	x: number;
 	facing: Facing;
@@ -192,48 +195,36 @@ function placeNewPet(world: World, pets: Pet[], rng: Rng): number {
 }
 
 /**
- * Push standing Procs apart until none is closer than `spacing` to its neighbour.
- *
- * A left-to-right sweep, then a right-to-left one to pull the tail back inside the
- * band. Walkers are left alone — they are already going somewhere — but they still
- * count as obstacles, so nobody is separated into the path of an incoming stroll.
- * When the band cannot fit everyone the shortfall is shared equally instead of
- * letting the overflow stack: ten Procs squeezed together still shows ten Procs.
+ * The nearest x to `from` that is clear of everyone else, or `from` itself when
+ * the band has no room left. Searched outward in both directions so an arriving
+ * Proc steps the SHORTEST way off whoever is already standing there.
  */
-function separate(pets: Pet[], band: Band, spacing: number): Pet[] {
-	// Walkers are already going somewhere, a held Proc is under the user's pointer,
-	// and a hand-placed one is where the user decided it goes — moving any of them
-	// would be the app fighting for control of it. A hand-placed Proc is excluded
-	// as an OBSTACLE too, not just as a mover: pushing its neighbours aside is the
-	// same cascade seen from the other end.
-	const standing = pets.filter((pet) => pet.motion.kind === "standing" && !pet.placed);
-	if (standing.length < 2) return pets;
-
-	const order = [...standing].sort((a, b) => a.x - b.x);
-	const needed = (order.length - 1) * spacing;
-	const room = band.maxX - band.minX;
-	const step = needed <= room ? spacing : room / (order.length - 1);
-
-	const moved = new Map<string, number>();
-	let previous = Number.NEGATIVE_INFINITY;
-	for (const pet of order) {
-		const x = Math.max(pet.x, previous + step);
-		moved.set(pet.id, x);
-		previous = x;
+function nearestFreeX(from: number, pet: Pet, world: World): number {
+	if (isFree(from, world.pets, world.spacing, pet.id)) return from;
+	const { minX, maxX } = world.band;
+	const step = Math.max(8, world.spacing / 8);
+	for (let offset = step; offset <= maxX - minX; offset += step) {
+		for (const candidate of [from - offset, from + offset]) {
+			if (candidate < minX || candidate > maxX) continue;
+			if (isFree(candidate, world.pets, world.spacing, pet.id)) return candidate;
+		}
 	}
-	// The forward sweep can push the last one past the edge; walk back to fix it.
-	let limit = band.maxX;
-	for (let i = order.length - 1; i >= 0; i--) {
-		const pet = order[i];
-		const x = Math.min(moved.get(pet.id) ?? pet.x, limit);
-		moved.set(pet.id, Math.max(band.minX, x));
-		limit = (moved.get(pet.id) ?? pet.x) - step;
-	}
+	// Nowhere left. Overlapping is then the honest outcome, and the human chose it
+	// over a band that reshuffles itself.
+	return Math.min(maxX, Math.max(minX, from));
+}
 
-	return pets.map((pet) => {
-		const x = moved.get(pet.id);
-		return x === undefined || x === pet.x ? pet : { ...pet, x };
-	});
+/**
+ * Bring a Proc back inside the band.
+ *
+ * This is the ONLY thing that moves a Proc which is standing still, and it is a
+ * rescue rather than a rearrangement: a Proc off the band is a session you cannot
+ * see at all, which is a different order of problem from two standing close.
+ */
+function clampToBand(pet: Pet, band: Band): Pet {
+	if (pet.motion.kind !== "standing") return pet;
+	const x = Math.min(band.maxX, Math.max(band.minX, pet.x));
+	return x === pet.x ? pet : { ...pet, x };
 }
 
 function pickRest(now: number, rng: Rng): number {
@@ -297,6 +288,7 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 				status: activity.status,
 				name: activity.name ?? "",
 				project: activity.project ?? "",
+				kind: activity.kind ?? "worker",
 				// Placed clear of everyone already standing there, so a Proc that joins
 				// the desktop never lands on top of one that is already on it.
 				x: placeNewPet(world, placed, rng),
@@ -307,7 +299,10 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			placed.push(born);
 			return born;
 		}
-		const renamed = (activity.name ?? "") !== prev.name || (activity.project ?? "") !== prev.project;
+		const renamed =
+			(activity.name ?? "") !== prev.name ||
+			(activity.project ?? "") !== prev.project ||
+			(activity.kind ?? "worker") !== prev.kind;
 		if (prev.status === activity.status && !renamed) {
 			placed.push(prev);
 			return prev;
@@ -317,6 +312,7 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			status: activity.status,
 			name: activity.name ?? prev.name,
 			project: activity.project ?? prev.project,
+			kind: activity.kind ?? prev.kind,
 			// Leaving needs_input clears the answered-summon mark, so a session that
 			// asks again later is walked to the front again rather than staying put.
 			summonedTo: modeFor(activity.status) === "summon" ? prev.summonedTo : undefined,
@@ -396,16 +392,19 @@ export function tick(world: World, now: number, rng: Rng): World {
 	// 1. Settle every stroll that has finished (or that parking cut short).
 	let pets = world.pets.map((pet) => settle(pet, now, world, rng));
 
-	// 2. Push apart anyone standing on top of anyone else. Idempotent once resolved,
-	//    so a settled cast is not nudged on every tick.
-	pets = separate(pets, world.band, world.spacing);
+	// 2. Rescue anyone left off the band (a display resize). Deliberately NOT a
+	//    crowding sweep: re-flowing the row on every tick meant one Proc arriving
+	//    from a stroll slid every other Proc on the desktop, which is the surprise
+	//    motion this engine exists to avoid. Crowding is settled by whoever turns
+	//    up, at the moment they turn up — see `settle` and `placeNewPet`.
+	pets = pets.map((pet) => clampToBand(pet, world.band));
 
 	// 3. Consider new strolls, oldest-rested first so nobody is starved by the cap.
 	let slots = walkSlots({ ...world, pets });
 	const order = [...pets].sort((a, b) => a.restUntil - b.restUntil);
 	const started = new Map<string, Pet>();
-	// Each decision sees the ones already taken THIS tick — both the separated
-	// positions and any destination just claimed. Deciding against `world.pets`
+	// Each decision sees the ones already taken THIS tick — any destination just
+	// claimed, and any rescue just applied. Deciding against `world.pets`
 	// instead let two Procs pick the same empty spot in one pass and walk into each
 	// other, which is a destination neither of them can actually stand on.
 	let live = pets;
@@ -428,13 +427,17 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 	if (pet.motion.kind !== "walking") return pet;
 	if (!world.parked && now < pet.motion.endsAt) return pet;
 	const summoned = modeFor(pet.status) === "summon";
+	// The destination was clear when the walk was planned; if somebody has taken it
+	// since, the ARRIVING Proc steps aside. Never the one already standing there.
+	// A summoned Proc is exempt: its spot at the front is the alert.
+	const landed = summoned ? pet.motion.toX : nearestFreeX(pet.motion.toX, pet, world);
 	return {
 		...pet,
-		x: pet.motion.toX,
+		x: landed,
 		// A summoned Proc turns to face you the moment it arrives — and this arrival
 		// is what marks the alert answered, so a later nudge does not restart it.
 		facing: summoned ? "front" : pet.facing,
-		summonedTo: summoned ? pet.motion.toX : pet.summonedTo,
+		summonedTo: summoned ? landed : pet.summonedTo,
 		// Wherever it has arrived, the ENGINE chose it — so any hand placement it was
 		// carrying is spent, and the crowding rules own this spot.
 		placed: false,
@@ -527,11 +530,10 @@ export function summonTargetX(pet: Pet, world: World): number {
 /**
  * Slot width for the summon rank.
  *
- * At least {@link SUMMON_SPACING_PX}, but never tighter than the crowding
- * clearance: a rank laid out closer than Procs are allowed to STAND is a rank the
- * crowding pass immediately pulls apart, and the alerts would arrive only to be
- * shoved off their own spots. Squeezed to fit the band when the cohort is large,
- * for the same reason `separate` shares a shortfall rather than stacking.
+ * At least {@link SUMMON_SPACING_PX}, but never tighter than the standing
+ * clearance, so a rank of alerts arrives already clear of each other rather than
+ * landing on top of one another at the front. Squeezed to fit the band when the
+ * cohort is large, so a big rank stays on screen instead of stacking at the edge.
  */
 function summonPitch(rankSize: number, world: World): number {
 	const wanted = Math.max(SUMMON_SPACING_PX, world.spacing);

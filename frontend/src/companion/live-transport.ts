@@ -29,6 +29,9 @@ function toLiveSession(raw: Record<string, unknown>, projects: Map<string, strin
 		id,
 		name: displaySessionName({ displayName: text(raw.displayName), issueId: text(raw.issueId), id }),
 		projectName: projects.get(text(raw.projectId) ?? ""),
+		// Anything that is not the coordinator is doing the work, whatever it calls
+		// itself — the overlay draws exactly one distinction here.
+		kind: raw.kind === "orchestrator" ? "orchestrator" : "worker",
 		status: status as LiveSession["status"],
 		statusReason: text(raw.statusReason) as LiveSession["statusReason"] | undefined,
 		isTerminated: raw.isTerminated === true,

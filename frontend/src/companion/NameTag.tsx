@@ -20,7 +20,30 @@ const CHIP: React.CSSProperties = {
 	borderRadius: "8px",
 };
 
-export function NameTag({ name }: { name: string }) {
+/**
+ * The coordinator's crown, drawn on the LABEL rather than on the character.
+ *
+ * The human's call (2026-07-22), and the better one: the hat is how you recognise
+ * WHICH Proc this is, and taking it away to say what job it holds would have
+ * collapsed two readings into one. The chip already answers "what work is this",
+ * so the crown belongs there — and the chip's fill changes with it, so the mark
+ * is visible before you have read a word of the name.
+ */
+function LeadCrown() {
+	return (
+		<svg data-lead-crown width="12" height="9" viewBox="0 0 12 9" style={{ flex: "0 0 auto", display: "block" }}>
+			<path
+				d="M0.9 8.1 L0.9 1.4 L3.6 4.6 L6 0.9 L8.4 4.6 L11.1 1.4 L11.1 8.1 Z"
+				fill={PROP_COLOURS.lead}
+				stroke={PROCS_INK}
+				strokeWidth="1.4"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	);
+}
+
+export function NameTag({ name, lead = false }: { name: string; lead?: boolean }) {
 	const trimmed = name.trim();
 	// Nothing rather than an empty chip: a Proc with no name is just a Proc.
 	if (!trimmed) return null;
@@ -28,8 +51,16 @@ export function NameTag({ name }: { name: string }) {
 	return (
 		<div
 			data-name-tag
+			data-lead={lead || undefined}
 			style={{
 				...CHIP,
+				// A different fill, not a different rim: the ink rim is what carries the
+				// chip on a LIGHT wallpaper, and swapping it out for gold would trade a
+				// readable mark for an unreadable label on half the desktops out there.
+				background: lead ? PROP_COLOURS.lead : CHIP.background,
+				display: "flex",
+				alignItems: "center",
+				gap: "4px",
 				padding: "1px 6px",
 				font: "600 10px/1.4 ui-sans-serif, system-ui, sans-serif",
 				// Wider than the figure — it was being squeezed to the 93px figure width
@@ -37,11 +68,10 @@ export function NameTag({ name }: { name: string }) {
 				// clearance, so it can never reach the neighbour it would be mistaken for.
 				maxWidth: "148px",
 				whiteSpace: "nowrap",
-				overflow: "hidden",
-				textOverflow: "ellipsis",
 			}}
 		>
-			{trimmed}
+			{lead ? <LeadCrown /> : null}
+			<span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{trimmed}</span>
 		</div>
 	);
 }
@@ -51,6 +81,7 @@ export type PetTooltipProps = {
 	sessionId: string;
 	project: string;
 	status: SessionStatus;
+	lead?: boolean;
 };
 
 /**
@@ -71,7 +102,7 @@ const IDENTIFIER: React.CSSProperties = {
 	textOverflow: "ellipsis",
 };
 
-export function PetTooltip({ name, sessionId, project, status }: PetTooltipProps) {
+export function PetTooltip({ name, sessionId, project, status, lead = false }: PetTooltipProps) {
 	return (
 		<div
 			data-tooltip
@@ -88,8 +119,20 @@ export function PetTooltip({ name, sessionId, project, status }: PetTooltipProps
 				gap: "1px",
 			}}
 		>
-			<strong style={{ font: "600 12px/1.4 ui-sans-serif, system-ui, sans-serif" }}>{name || sessionId}</strong>
-			<span style={{ color: PROP_COLOURS.bubbleMuted }}>{STATUS_LABELS[status]}</span>
+			<strong
+				style={{
+					font: "600 12px/1.4 ui-sans-serif, system-ui, sans-serif",
+					display: "flex",
+					alignItems: "center",
+					gap: "5px",
+				}}
+			>
+				{lead ? <LeadCrown /> : null}
+				{name || sessionId}
+			</strong>
+			<span style={{ color: PROP_COLOURS.bubbleMuted }}>
+				{lead ? `Orchestrator · ${STATUS_LABELS[status]}` : STATUS_LABELS[status]}
+			</span>
 			<span style={IDENTIFIER}>{sessionId.startsWith("@") ? sessionId : `@${sessionId}`}</span>
 			<span style={IDENTIFIER}>{project}</span>
 		</div>

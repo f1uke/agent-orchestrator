@@ -29,8 +29,44 @@ export function petFrame(size: number = PET_HEIGHT) {
  */
 export const OVERHEAD_ALLOWANCE = 96;
 
+/** The name chip's drawn height: 10px text at 1.4, inside 1px padding and the 2.4px rim. */
+export const NAME_TAG_HEIGHT = 20;
+/** Air below the chip, so it does not sit flush on the screen edge. */
+const NAME_TAG_AIR = 2;
+/** Air between the chip and the Proc's lowest ink. Small: the chip labels THIS Proc. */
+const NAME_TAG_CLEARANCE = 3;
+
+/**
+ * The rig's lowest PAINTED y, across all fifteen scenes.
+ *
+ * Not the frame bottom, which is 132. Nothing is drawn below 125 — the cord's
+ * plug is the lowest thing there is — and that seven-unit tail of empty box is
+ * what made the chip look adrift the moment the art was lifted off it. Measured
+ * in the browser over every state, and pinned by a test.
+ */
+export const LOWEST_INK_Y = 125;
+
+/** Empty box below the lowest ink, in px. The chip is allowed to sit in it. */
+export function inkFloorGap(size: number = PET_HEIGHT): number {
+	const scale = size / PROCS_BOX.height;
+	return (PROCS_VIEW.y + PROCS_VIEW.height - LOWEST_INK_Y) * scale;
+}
+
+/**
+ * Room UNDER a Proc for its name chip.
+ *
+ * The chip used to be laid over the bottom of the drawing, where it covered the
+ * plug on the end of the cord — and the cord is how a Proc says whether its
+ * session is still connected, so the label was hiding a state. The whole cast
+ * stands this much higher instead: reserve the space rather than overlap into it.
+ *
+ * Reduced by the empty tail of the frame, because reserving the full chip height
+ * BELOW the box put nine pixels of nothing between a Proc and its own label.
+ */
+export const NAME_TAG_ALLOWANCE = Math.round(NAME_TAG_HEIGHT + NAME_TAG_AIR + NAME_TAG_CLEARANCE - inkFloorGap());
+
 /** Everything the overlay ever draws, stacked. The window must be at least this tall. */
-export const COMPANION_CONTENT_HEIGHT = Math.ceil(petFrame().height + OVERHEAD_ALLOWANCE);
+export const COMPANION_CONTENT_HEIGHT = Math.ceil(petFrame().height + OVERHEAD_ALLOWANCE + NAME_TAG_ALLOWANCE);
 
 /**
  * Where the FIGURE's left edge sits inside the drawn frame, in px.

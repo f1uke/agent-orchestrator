@@ -43,6 +43,8 @@ body {
 .companion-proc-art {
 	display: block;
 	margin-left: var(--procs-offset-x, 0);
+	/* Lifts the whole cast clear of its own name chips. */
+	margin-bottom: var(--procs-name-room, 0);
 	pointer-events: none;
 }
 
@@ -88,7 +90,9 @@ body {
 }
 
 /* The name chip, centred under its Proc's own figure (not its drawn frame, which
-   hangs wider on the scenery side). */
+   hangs wider on the scenery side), in the strip reserved for it BELOW the art —
+   it used to be laid over the bottom of the drawing, where it covered the plug on
+   the end of the cord and so hid whether the session was still connected. */
 .companion-proc-name {
 	position: absolute;
 	bottom: 2px;

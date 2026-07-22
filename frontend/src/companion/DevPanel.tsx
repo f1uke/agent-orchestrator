@@ -61,6 +61,8 @@ function makeActivity(index: number, status: SessionStatus): CompanionActivity {
 		sessionId: refForCharacter(index, project),
 		name: NAMES[index % NAMES.length],
 		project,
+		// One coordinator, like a real project, so the mark on its label is visible.
+		kind: index === 0 ? "orchestrator" : "worker",
 		status,
 	};
 }
@@ -239,6 +241,21 @@ export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: Dev
 					</button>
 					<button type="button" style={BUTTON} onClick={() => commit([makeActivity(0, "working")])}>
 						just one
+					</button>
+					<button
+						type="button"
+						style={BUTTON}
+						onClick={() =>
+							commit(
+								roster.map((entry) =>
+									targets.includes(entry.sessionId)
+										? { ...entry, kind: entry.kind === "orchestrator" ? "worker" : "orchestrator" }
+										: entry,
+								),
+							)
+						}
+					>
+						orchestrator?
 					</button>
 				</div>
 				<label style={CHECK}>

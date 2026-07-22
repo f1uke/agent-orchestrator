@@ -521,13 +521,17 @@ describe("crowding", () => {
 		}
 	});
 
-	it("separates Procs that are already overlapping", () => {
+	it("leaves Procs that something already stacked exactly where they are", () => {
+		// The engine used to pull these apart on the next tick. It no longer does:
+		// they are on one spot because a drop, a resize or a status change PUT them
+		// there, and a desktop that rearranges itself under your eyes was the worse
+		// of the two problems (the human's call, 2026-07-22).
 		const base = syncActivities(crowded(), [activity("a", "pr_open"), activity("b", "pr_open")], T0, half);
 		const stacked: World = { ...base, pets: base.pets.map((pet) => ({ ...pet, x: 500 })) };
 
 		const next = tick(stacked, T0 + 1, half);
 
-		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+		expect(positions(next)).toEqual([500, 500]);
 	});
 
 	it("leaves Procs that are already spaced exactly where they are", () => {
@@ -543,7 +547,7 @@ describe("crowding", () => {
 		expect(positions(next)).toEqual([200, 500]);
 	});
 
-	it("keeps everyone inside the band while separating them", () => {
+	it("keeps everyone inside the band", () => {
 		const base = syncActivities(
 			crowded(),
 			["a", "b", "c", "d", "e"].map((id) => activity(id, "pr_open")),
@@ -558,29 +562,22 @@ describe("crowding", () => {
 			expect(pet.x).toBeGreaterThanOrEqual(BAND.minX);
 			expect(pet.x).toBeLessThanOrEqual(BAND.maxX);
 		}
-		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
 	});
 
-	it("spreads evenly rather than stacking when the band is too small for everyone", () => {
-		// Ten Procs at 100px spacing need 900px of a 400px band. Nobody gets their
-		// full clearance, but sharing the shortfall equally still shows ten Procs;
-		// stacking them shows five.
-		const tight = { minX: 0, maxX: 400 };
+	it("spreads a cast that has just appeared across the band rather than stacking it", () => {
+		// Crowding is settled when a Proc TURNS UP, so this is where the spreading
+		// happens now: ten new sessions land clear of each other, and are not pulled
+		// about afterwards.
 		const base = syncActivities(
-			{ ...crowded(), band: tight },
+			crowded(),
 			Array.from({ length: 10 }, (_, i) => activity(`p${i}`, "pr_open")),
 			T0,
-			half,
+			scripted(0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95),
 		);
-		const next = tick({ ...base, pets: base.pets.map((pet) => ({ ...pet, x: 200 })) }, T0 + 1, half);
 
-		const xs = positions(next);
+		const xs = positions(base);
 		expect(new Set(xs).size).toBe(10);
-		for (let i = 1; i < xs.length; i++) {
-			expect(xs[i] - xs[i - 1]).toBeGreaterThan(0);
-		}
-		expect(xs[0]).toBeGreaterThanOrEqual(tight.minX);
-		expect(xs[xs.length - 1]).toBeLessThanOrEqual(tight.maxX);
+		expect(closestPair(base)).toBeGreaterThanOrEqual(SPACING);
 	});
 
 	it("does not separate a Proc that is mid-stroll", () => {
@@ -912,3 +909,85 @@ describe("a Proc you placed by hand", () => {
 		expect(Math.abs(a - b)).toBeGreaterThanOrEqual(136);
 	});
 });
+
+describe("nothing moves a Proc that is standing still", () => {
+	// Two separate reports, one day apart: dropping a Proc slid a bystander across
+	// the band, and a Proc ARRIVING from a stroll re-flowed the whole row. Both are
+	// the same per-tick crowding sweep, which recomputed everyone's position from
+	// scratch whenever anything anywhere changed.
+	//
+	// The rule that replaces it: crowding is resolved by the Proc that turns up, at
+	// the moment it turns up. Whoever is already standing there is left alone —
+	// always. A desktop that rearranges itself while you are looking at it is worse
+	// than two Procs standing a little close.
+	const SPACING = 136;
+
+	function standing(at: Record<string, number>, status: Pet["status"] = "pr_open"): World {
+		const base = syncActivities(
+			{ ...world(), spacing: SPACING },
+			Object.keys(at).map((id) => activity(id, status)),
+			T0,
+			half,
+		);
+		return {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 + 10 * REST_MAX_MS })),
+		};
+	}
+
+	it("leaves the neighbours where they are when a stroll finishes next to them", () => {
+		let w = standing({ walker: 300, near: 380, far: 700 });
+		// The walker arrives right beside `near`.
+		w = {
+			...w,
+			pets: w.pets.map((p) =>
+				p.id === "walker"
+					? { ...p, motion: { kind: "walking" as const, fromX: 300, toX: 390, startedAt: T0, endsAt: T0 + 1_000 } }
+					: p,
+			),
+		};
+		for (let i = 0; i < 20; i++) w = tick(w, T0 + 2_000 + i * 1_000, half);
+
+		expect(petById(w, "near").x).toBe(380);
+		expect(petById(w, "far").x).toBe(700);
+	});
+
+	it("makes the ARRIVING Proc step aside instead, so it is not hidden behind the one already there", () => {
+		let w = standing({ walker: 300, near: 380 });
+		w = {
+			...w,
+			pets: w.pets.map((p) =>
+				p.id === "walker"
+					? { ...p, motion: { kind: "walking" as const, fromX: 300, toX: 390, startedAt: T0, endsAt: T0 + 1_000 } }
+					: p,
+			),
+		};
+		w = tick(w, T0 + 2_000, half);
+
+		expect(Math.abs(petById(w, "walker").x - 380)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("leaves two Procs that are already overlapping exactly where they are", () => {
+		// They are only overlapping because something PUT them there — a drop, a
+		// resize, a status change. Shuffling them apart later is the surprise motion
+		// this whole rule exists to stop.
+		let w = standing({ a: 400, b: 405 });
+		for (let i = 0; i < 20; i++) w = tick(w, T0 + i * 1_000, half);
+
+		expect(positionsOf(w)).toEqual([400, 405]);
+	});
+
+	it("still rescues a Proc left outside the band when the display shrinks", () => {
+		// Not a rearrangement: a Proc off the band is a session you cannot see at all.
+		let w = standing({ a: 300, b: 900 });
+		w = { ...w, band: { minX: 0, maxX: 500 } };
+		w = tick(w, T0 + 1_000, half);
+
+		expect(petById(w, "b").x).toBeLessThanOrEqual(500);
+		expect(petById(w, "a").x).toBe(300);
+	});
+});
+
+function positionsOf(w: World): number[] {
+	return w.pets.map((pet) => pet.x).sort((a, b) => a - b);
+}

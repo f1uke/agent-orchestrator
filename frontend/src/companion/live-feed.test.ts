@@ -9,6 +9,7 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
 		id: "demo-app-1",
 		name: "add login",
 		projectName: "demo-app",
+		kind: "worker",
 		status: "working",
 		isTerminated: false,
 		...over,

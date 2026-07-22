@@ -18,7 +18,7 @@ import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
-import { figureLeft, PET_HEIGHT, petFrame } from "./layout";
+import { figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
 import { Procs } from "./Procs";
 
 // The stage: the only stateful part of the overlay renderer. It owns a World,
@@ -276,6 +276,7 @@ function ProcOnStage({
 				// frame, and the chrome pinned under it does not mirror — so it is told
 				// where the figure actually went.
 				["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
+				["--procs-name-room" as string]: `${NAME_TAG_ALLOWANCE}px`,
 			}}
 		>
 			{/* The tooltip wins the space when it is open: it is a deliberate request
@@ -287,7 +288,13 @@ function ProcOnStage({
 			) : null}
 			{tooltip && !held ? (
 				<div className="companion-proc-tooltip">
-					<PetTooltip name={pet.name} sessionId={pet.id} project={pet.project} status={pet.status} />
+					<PetTooltip
+						name={pet.name}
+						sessionId={pet.id}
+						project={pet.project}
+						status={pet.status}
+						lead={pet.kind === "orchestrator"}
+					/>
 				</div>
 			) : null}
 			<Procs
@@ -300,7 +307,7 @@ function ProcOnStage({
 				className="companion-proc-art"
 			/>
 			<div className="companion-proc-name">
-				<NameTag name={pet.name} />
+				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
 			</div>
 		</div>
 	);

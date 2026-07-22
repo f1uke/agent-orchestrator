@@ -18,6 +18,7 @@
 // `CompanionActivity` with them rather than have the overlay guess at a shape.
 
 import type { SessionStatus } from "../renderer/types/workspace";
+import type { SessionKind } from "./live-roster";
 
 /** One session, as much as the overlay needs to know about it. */
 export type CompanionActivity = {
@@ -27,6 +28,8 @@ export type CompanionActivity = {
 	name?: string;
 	/** Which project it belongs to. Shown in the hover tooltip. */
 	project?: string;
+	/** The one coordinator per project is marked on its label. Absent = a worker. */
+	kind?: SessionKind;
 };
 
 export interface CompanionFeed {
