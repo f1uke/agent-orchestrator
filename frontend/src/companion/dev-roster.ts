@@ -29,7 +29,9 @@ const NAMES = [
 	"receipt pdf layout",
 ];
 
-const PROJECTS = ["demo-app", "demo-api"];
+// Several, because a single project makes the per-project marker untestable by eye
+// — the whole point of it is telling two apart.
+const PROJECTS = ["demo-app", "demo-api", "demo-web", "demo-infra", "demo-tools"];
 
 /**
  * A session ref that lands on a CHOSEN character and has not been used yet.
@@ -46,7 +48,10 @@ function refForCharacter(index: number, project: string, taken: Set<string>): st
 	// Both axes wanted, stepped at different rates, so a demo roster covers all the
 	// colours AND all the hats rather than six pairs of them.
 	const wantPalette = PALETTES[index % PALETTES.length].id;
-	const wantHat = HATS[(index * 5) % HATS.length].id;
+	// Advanced by the ROW as well as the column, so the pairing shifts each time the
+	// colours come round. Stepping both off `index` alone repeats the same six pairs
+	// for ever, which is the bundled cast again wearing a different hat.
+	const wantHat = HATS[(index + Math.floor(index / PALETTES.length)) % HATS.length].id;
 	for (let n = 10 + index; n < 4000; n += 1) {
 		const ref = `${project}-${n}`;
 		if (taken.has(ref)) continue;

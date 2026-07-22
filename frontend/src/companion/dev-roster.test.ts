@@ -42,3 +42,26 @@ describe("the playground's invented roster", () => {
 		expect(everyStatus().filter((entry) => entry.kind === "orchestrator")).toHaveLength(1);
 	});
 });
+
+describe("the demo roster's variety", () => {
+	// It exists to be LOOKED at, so it has to actually exercise what it is showing.
+	it("pairs a colour with different hats as the roster goes on", () => {
+		// Stepping both axes off the index alone repeats the same six pairs for ever,
+		// which is the bundled cast again wearing a different hat.
+		const byPalette = new Map<string, Set<string>>();
+		for (const entry of demoRoster(24)) {
+			const look = castForSession(entry.sessionId);
+			const hats = byPalette.get(look.palette) ?? new Set<string>();
+			hats.add(look.hatId);
+			byPalette.set(look.palette, hats);
+		}
+
+		for (const [palette, hats] of byPalette) {
+			expect(hats.size, `${palette} wears more than one hat`).toBeGreaterThan(1);
+		}
+	});
+
+	it("spans several projects, or the per-project marker has nothing to tell apart", () => {
+		expect(new Set(demoRoster(12).map((entry) => entry.project)).size).toBeGreaterThanOrEqual(3);
+	});
+});

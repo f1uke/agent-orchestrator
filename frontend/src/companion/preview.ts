@@ -62,7 +62,10 @@ export function previewRoster(): PreviewEntry[] {
 		status,
 		// Both axes stepped, at rates coprime with their lengths, so a gallery of
 		// fifteen states shows all six colours AND all six hats rather than six pairs.
-		cast: composeCast(PALETTES[index % PALETTES.length], HATS[(index * 5) % HATS.length]),
+		cast: composeCast(
+			PALETTES[index % PALETTES.length],
+			HATS[(index + Math.floor(index / PALETTES.length)) % HATS.length],
+		),
 		label: STATUS_LABELS[status],
 		bubble: BUBBLES[status],
 	}));

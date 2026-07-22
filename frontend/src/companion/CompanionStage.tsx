@@ -439,7 +439,7 @@ function ProcArt({ pet }: { pet: Pet }) {
 				className="companion-proc-art"
 			/>
 			<div className="companion-proc-name">
-				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
+				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} project={pet.project} />
 			</div>
 		</div>
 	);
