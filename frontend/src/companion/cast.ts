@@ -93,8 +93,8 @@ export const CAST: readonly CastMember[] = [
 		hatTrim: "#e2d9c8",
 		hat: [
 			// A cap. The peak reads as a peak whichever way the sprite is facing.
-			{ d: "M12 29 C 12 -12 84 -12 84 29 L 12 29 Z" },
-			{ d: "M12 29 C 0 29 -6 36 -2 41 C 8 36 14 34 22 34 L 12 29 Z", role: "trim" },
+			{ d: "M7 29 C 7 -12 89 -12 89 29 L 7 29 Z" },
+			{ d: "M9 29 C -1 29 -6 36 -2 41 C 8 36 14 34 22 34 L 9 29 Z", role: "trim" },
 		],
 	},
 	{
@@ -108,8 +108,8 @@ export const CAST: readonly CastMember[] = [
 		hatTrim: "#e9ddbc",
 		hat: [
 			// A site hard hat: high crown, wide brim, one ridge.
-			{ d: "M16 30 C 16 -12 78 -12 78 30 L 16 30 Z" },
-			{ d: "M10 30 L 84 30 C 92 30 92 40 84 40 L 10 40 C 2 40 2 30 10 30 Z", role: "trim" },
+			{ d: "M7 30 C 7 -12 89 -12 89 30 L 7 30 Z" },
+			{ d: "M8 30 L 88 30 C 96 30 96 40 88 40 L 8 40 C 0 40 0 30 8 30 Z", role: "trim" },
 			{ d: "M43 -10 L 51 -10 L 51 30 L 43 30 Z", role: "trim" },
 		],
 	},
@@ -124,8 +124,8 @@ export const CAST: readonly CastMember[] = [
 		hatTrim: "#f2db63",
 		hat: [
 			// A party cone, because Glob is the odd one of the six.
-			{ d: "M48 -30 L 82 31 L 14 31 Z" },
-			{ d: "M18 31 C 36 38 60 38 78 31 L 78 36 C 60 42 36 42 18 36 Z", role: "trim" },
+			{ d: "M48 -30 L 89 31 L 7 31 Z" },
+			{ d: "M12 31 C 34 38 62 38 84 31 L 84 36 C 62 42 34 42 12 36 Z", role: "trim" },
 		],
 	},
 	{
@@ -155,8 +155,8 @@ export const CAST: readonly CastMember[] = [
 		hat: [
 			// A bucket hat. The brim is drawn AFTER the crown and overlaps its base, or
 			// the two read as a box balanced on a wire rather than as one hat.
-			{ d: "M18 29 L 26 -12 L 70 -12 L 78 29 Z" },
-			{ d: "M2 24 C 18 42 78 42 94 24 C 78 33 18 33 2 24 Z", role: "trim" },
+			{ d: "M7 29 L 24 -12 L 72 -12 L 89 29 Z" },
+			{ d: "M0 24 C 18 42 78 42 96 24 C 78 33 18 33 0 24 Z", role: "trim" },
 		],
 	},
 ];

@@ -45,6 +45,20 @@ describe("the cast", () => {
 		}
 	});
 
+	it("makes every crown WIDER than the head, so no head pokes out beside its hat", () => {
+		// Reported twice by the human, and precisely: brack, glob and tilde had crowns
+		// narrower than the 68-unit head, so slivers of skull showed either side of the
+		// hat. "Bigger" is not the same rule as "wider" — the first pass raised the
+		// crowns and left three of them narrow.
+		const HEAD = { left: 14, right: 82 };
+		for (const member of CAST) {
+			const crown = coordinates(member.hat[0].d).map(([x]) => x);
+
+			expect(Math.min(...crown), `${member.name} left overhang`).toBeLessThan(HEAD.left - 2);
+			expect(Math.max(...crown), `${member.name} right overhang`).toBeGreaterThan(HEAD.right + 2);
+		}
+	});
+
 	it("covers enough of the head that no Proc reads as bald", () => {
 		// The human's words were "หัวมันดูโล้นๆ" — the heads look bald. A hat perched
 		// on top without covering the crown does not fix that, so this pins the cover

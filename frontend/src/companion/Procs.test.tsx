@@ -183,22 +183,28 @@ describe("the scene", () => {
 		const plug = container.querySelector('[data-plug="loose"]');
 
 		expect(plug).not.toBeNull();
-		// Lying on its side on the floor, not standing in a socket.
+		// Lying on its side on the floor, not standing in a socket…
 		expect(plug?.closest("g")?.getAttribute("transform")).toMatch(/rotate/);
+		// …and pulled clear of the cord's end. The GAP is what says "unplugged"; an
+		// attached cord now also ends in a plug, so the gap carries the whole message.
+		expect(gapToCordEnd(container)).toBeGreaterThan(8);
 	});
 
-	it("runs an attached cord off to something, with no plug lying about", () => {
+	it("ends an attached cord in a plug that is plugged IN, at the end of the cord", () => {
+		// Eight of the fifteen states have no ground prop, so their cord has nothing on
+		// screen to terminate at. Running it off the frame instead — the previous
+		// answer — is what the human saw as "a long weird tail", and it was the most
+		// common state, so most of the cast had one. It now coils and plugs into the
+		// floor: short, finished, and still obviously connected.
 		const { container } = renderProcs({ status: "pr_open" });
 		const cord = container.querySelector('[data-core="cord"]')!;
-		const points = (cord.getAttribute("d") ?? "").match(/-?\d+(\.\d+)? -?\d+(\.\d+)?/g) ?? [];
-		const lowest = Math.max(...points.map((p) => Number(p.split(" ")[1])));
+		const plug = container.querySelector('[data-plug="floor"]')!;
 
-		expect(container.querySelector("[data-plug]")).toBeNull();
-		// It leaves through the FLOOR — the frame's bottom edge is y=132 — which is
-		// what "attached to something off screen" looks like for a cable. Running it
-		// level across the frame instead read as a long tail.
-		expect(lowest).toBeGreaterThanOrEqual(132);
-		// And it stays short: a lead, not a leash.
+		expect(plug).not.toBeNull();
+		// Upright, i.e. inserted rather than dropped.
+		expect(plug.closest("g")?.getAttribute("transform") ?? "").not.toMatch(/rotate/);
+		expect(gapToCordEnd(container)).toBeLessThan(3);
+		// Short: a lead, not a leash.
 		expect(extentX(cord).max).toBeLessThan(96);
 	});
 
@@ -301,6 +307,16 @@ describe("the scene", () => {
 		}
 	});
 });
+
+/** Distance from the cord's last point to the plug it is drawn with. */
+function gapToCordEnd(container: HTMLElement): number {
+	const d = container.querySelector('[data-core="cord"]')?.getAttribute("d") ?? "";
+	const points = d.match(/-?\d+(\.\d+)? -?\d+(\.\d+)?/g) ?? [];
+	const [endX, endY] = points[points.length - 1].split(" ").map(Number);
+	const transform = container.querySelector("[data-plug]")?.closest("g")?.getAttribute("transform") ?? "";
+	const [plugX, plugY] = (/translate\((-?[\d.]+) (-?[\d.]+)\)/.exec(transform) ?? ["", "0", "0"]).slice(1).map(Number);
+	return Math.hypot(plugX - endX, plugY - endY);
+}
 
 describe("a roster of Procs", () => {
 	it("is visibly varied — the all-identical look was the bug", () => {
