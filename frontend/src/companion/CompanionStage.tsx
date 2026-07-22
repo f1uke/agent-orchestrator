@@ -299,10 +299,11 @@ function placement(pet: Pet): React.CSSProperties {
 /** What a Proc is saying right now, or null. A greeting overrides the feed. */
 function spokenLine(pet: Pet, bubble: ComposedBubble | null): ComposedBubble | null {
 	// While two Procs are together the SENDER says its piece and the other one
-	// listens. "…" invents nothing — it is the picture of being told something, not
-	// a claim about what the listening session is doing.
+	// simply listens — no card at all. A "…" card was tried first and read as the
+	// message having been truncated away to dots, which is worse than nothing: the
+	// listener has not said anything, and the honest picture of that is silence.
 	if (pet.meeting?.phase === "greeting") {
-		return { text: pet.meeting.line || "…", tone: "normal", decay: "fresh" };
+		return pet.meeting.line ? { text: pet.meeting.line, tone: "normal", decay: "fresh" } : null;
 	}
 	return bubble;
 }
@@ -356,7 +357,6 @@ function ProcChrome({
 	const held = pet.motion.kind === "held";
 	const greeting = pet.meeting?.phase === "greeting";
 	const said = spokenLine(pet, bubble);
-	if (!said && !tooltip) return null;
 
 	const targetX = pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
 	// Face to face, the two cards would open the same way and the one on the left
@@ -369,6 +369,12 @@ function ProcChrome({
 		preferLeft: greeting && pet.facing === "right",
 	});
 
+	// The wrapper is ALWAYS mounted, even with nothing in it. Mounting it only when
+	// there is something to say meant it appeared already at the destination of a
+	// walk already in progress — no previous transform to transition FROM — so a
+	// bubble hung in the air at the meeting spot while its Proc was still running
+	// towards it. Always mounted, it carries exactly the same transform history as
+	// the art and travels with it.
 	return (
 		<div className="companion-proc-chrome" style={placement(pet)}>
 			{/* The tooltip wins the space when it is open: it is a deliberate request

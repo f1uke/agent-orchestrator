@@ -37,6 +37,16 @@ body {
 	pointer-events: none;
 }
 
+/* Both need a z-index of their OWN, and that is the whole point: a positioned
+   element with `z-index: auto` does not create a stacking context, so the Procs
+   inside kept their own z-indexes in the STAGE's context and a Proc ranked above
+   1 — a pair mid-conversation — climbed straight over the speech layer and
+   painted its hat across its own bubble. With a z-index here, nothing inside the
+   cast can ever escape it. */
+.companion-cast {
+	z-index: 0;
+}
+
 .companion-chrome {
 	z-index: 1;
 }

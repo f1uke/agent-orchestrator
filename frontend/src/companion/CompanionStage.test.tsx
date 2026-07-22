@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
 import { CompanionStage } from "./CompanionStage";
+import { createManualFeed } from "./dev-feed";
 
 afterEach(() => {
 	cleanup();
@@ -298,5 +299,49 @@ describe("dragging and naming", () => {
 		fireEvent.pointerMove(container.querySelector(".companion-stage")!, { bubbles: true });
 		act(() => vi.advanceTimersByTime(400));
 		expect(container.querySelector("[data-tooltip]")).toBeNull();
+	});
+});
+
+describe("while two Procs are talking", () => {
+	// The listener said "…", which read as the message having been truncated away
+	// to dots rather than as somebody listening. It says nothing at all now: it has
+	// not spoken, and silence is the honest picture of that.
+	it("gives the card to the one that is speaking and none to the one being told", async () => {
+		const feed = createManualFeed([
+			{ sessionId: "demo-app-1", status: "pr_open", name: "one" },
+			{ sessionId: "demo-app-2", status: "pr_open", name: "two" },
+		]);
+		render(<CompanionStage feed={feed} bubbleFor={(id) => feed.bubbleFor(id)} reducedMotion />);
+		await act(async () => {
+			feed.push({
+				sessionId: "demo-app-2",
+				kind: "message",
+				at: new Date().toISOString(),
+				text: "[from @demo-app-1] P1 is fixed",
+				ttlMs: 12_000,
+			} as never);
+			await Promise.resolve();
+		});
+
+		await waitFor(() => expect(screen.getAllByText("P1 is fixed")).toHaveLength(1));
+		expect(screen.queryByText("…")).toBeNull();
+	});
+});
+
+describe("a bubble travels with the Proc that is saying it", () => {
+	// It used to be mounted only when there was something to say — so it appeared
+	// already at the DESTINATION of a walk that was still in progress, with no
+	// previous transform to animate from, and hung in the air while its Proc ran to
+	// catch up. The wrapper is always there; only its contents come and go.
+	it("keeps a wrapper over every Proc, whether or not it is speaking", async () => {
+		const feed = createManualFeed([
+			{ sessionId: "demo-app-1", status: "pr_open", name: "one" },
+			{ sessionId: "demo-app-2", status: "pr_open", name: "two" },
+		]);
+		const { container } = render(<CompanionStage feed={feed} bubbleFor={(id) => feed.bubbleFor(id)} />);
+
+		await waitFor(() => expect(container.querySelectorAll("[data-proc]")).toHaveLength(2));
+		expect(container.querySelectorAll(".companion-proc-chrome")).toHaveLength(2);
+		expect(container.querySelectorAll("[data-bubble]")).toHaveLength(0);
 	});
 });
