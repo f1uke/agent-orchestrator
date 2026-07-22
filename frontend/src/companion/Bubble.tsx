@@ -80,10 +80,21 @@ export function Bubble({ text, tone = "normal", decay = "fresh", className }: Bu
 					color: colour,
 					padding: "6px 10px",
 					font: "500 12px/1.35 ui-sans-serif, system-ui, sans-serif",
-					maxWidth: "220px",
-					whiteSpace: "nowrap",
+					// NARROWER but up to three lines TALL. One 220px line held about
+					// thirty characters and threw the rest of the sentence away, which is
+					// the only thing the bubble is for. Three narrower lines hold roughly
+					// twice as much AND lean less far over the Proc beside it — the bubble
+					// grows upward, into empty sky, rather than sideways into a neighbour.
+					boxSizing: "border-box",
+					maxWidth: "200px",
+					display: "-webkit-box",
+					WebkitBoxOrient: "vertical",
+					WebkitLineClamp: 3,
 					overflow: "hidden",
-					textOverflow: "ellipsis",
+					// Wrapping at spaces, but a single unbroken token — a long path or
+					// identifier that slipped past the whitelist — must not push the card
+					// wider than its own limit.
+					overflowWrap: "anywhere",
 					// Decay animates opacity ONLY, so a fading bubble stays on the
 					// compositor like everything else on the overlay.
 					opacity: DECAY_OPACITY[decay],

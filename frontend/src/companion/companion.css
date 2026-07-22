@@ -110,6 +110,9 @@ body {
 	position: absolute;
 	bottom: calc(100% - 26px);
 	left: var(--procs-figure-left, 0);
+	/* As for the tooltip: shrink-to-fit here is capped by this Proc's own ~150px
+	   frame, so the card's own max-width never got to decide its width. */
+	width: max-content;
 	pointer-events: none;
 }
 

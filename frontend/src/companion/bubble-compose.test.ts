@@ -66,8 +66,18 @@ describe("composing the bubble's words", () => {
 		const long = "x".repeat(400);
 		const said = composeBubble(slots({ kind: "message", text: long }), T + 1);
 
-		expect(said!.text.length).toBeLessThanOrEqual(90);
+		// The bubble clamps to three lines, so this is the hard bound on what is laid
+		// out at all — comfortably past three lines' worth, so what a reader sees end
+		// the sentence is the CLAMP, not a cut in the middle of line one.
+		expect(said!.text.length).toBeLessThanOrEqual(160);
 		expect(said!.text.endsWith("…")).toBe(true);
+	});
+
+	it("keeps a real three-line sentence whole", () => {
+		const sentence = "Rewriting the coupon search ranking so expired offers stop being promoted to the top";
+		const said = composeBubble(slots({ text: sentence }), T + 1);
+
+		expect(said?.text).toBe(sentence);
 	});
 
 	it("drops to the coarse truth when the detail has expired", () => {

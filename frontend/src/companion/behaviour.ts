@@ -24,9 +24,20 @@ export const WALK_MAX_MS = 8_000;
 /** …covers 60-260px… */
 export const WALK_MIN_PX = 60;
 export const WALK_MAX_PX = 260;
-/** …and is followed by 45-150s of standing still. */
-export const REST_MIN_MS = 45_000;
-export const REST_MAX_MS = 150_000;
+/**
+ * …and is followed by 15-60s of standing still.
+ *
+ * Was 45-150s. On a real desktop that read as a still picture: watch the band for
+ * a minute and quite possibly nothing moves at all, which makes the whole thing
+ * look broken rather than calm. Shortened on the human's ask (2026-07-22).
+ *
+ * This does NOT make more of the cast mobile. Which Procs may walk is structural —
+ * a Proc at a desk or in a bed is at a PLACE and cannot wander, whatever this
+ * number says — and {@link MAX_CONCURRENT_WALKS} still holds the screen to two
+ * movers. All this changes is how long a free Proc waits between strolls.
+ */
+export const REST_MIN_MS = 15_000;
+export const REST_MAX_MS = 60_000;
 
 /** Synchronised strolling reads as a screensaver, so only two Procs may move at once. */
 export const MAX_CONCURRENT_WALKS = 2;

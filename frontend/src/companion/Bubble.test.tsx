@@ -116,3 +116,31 @@ describe("looksLikeRawCommand", () => {
 		expect(screen.getByText(BUBBLE_COARSE_TEXT)).toBeInTheDocument();
 	});
 });
+
+describe("how much a bubble is allowed to say", () => {
+	// One line cut at ~30 characters threw away most of what the agent was actually
+	// doing — which is the only thing the bubble is for. It wraps to three lines and
+	// truncates there, so a real sentence survives.
+	const LONG = "Rewriting the coupon search ranking so expired offers stop being promoted";
+
+	it("wraps instead of cutting the sentence at the first line", () => {
+		render(<Bubble text={LONG} />);
+		const card = screen.getByText(LONG);
+
+		expect(card.style.whiteSpace).not.toBe("nowrap");
+	});
+
+	it("stops at three lines, so a talkative Proc cannot grow a wall of text", () => {
+		render(<Bubble text={LONG} />);
+		const card = screen.getByText(LONG);
+
+		expect(card.style.WebkitLineClamp).toBe("3");
+		expect(card.style.overflow).toBe("hidden");
+	});
+
+	it("stays narrower than it is tall-capable, so it does not sprawl over the neighbour", () => {
+		render(<Bubble text={LONG} />);
+
+		expect(parseInt(screen.getByText(LONG).style.maxWidth, 10)).toBeLessThanOrEqual(200);
+	});
+});

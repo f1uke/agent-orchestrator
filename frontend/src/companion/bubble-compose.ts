@@ -15,8 +15,16 @@ import { BUBBLE_COARSE_TEXT, type BubbleDecay, type BubbleTone } from "./Bubble"
 //      reach the wire, so this renders what it is given and truncates it — it never
 //      reaches for anything else.
 
-/** Wider than this and a bubble starts spanning the desktop. */
-const MAX_BUBBLE_CHARS = 90;
+/**
+ * The hard bound on a sentence, in characters.
+ *
+ * The bubble wraps to three lines and clamps there, so this is not the visual
+ * limit — it is the guard against a pathologically long string being laid out at
+ * all. Sized to comfortably outlast three lines (~40 characters each) so the
+ * CLAMP is what a reader sees ending the sentence, not a hard cut in the middle of
+ * line one, which is what 90 characters was doing.
+ */
+const MAX_BUBBLE_CHARS = 160;
 
 export type ComposedBubble = {
 	text: string;

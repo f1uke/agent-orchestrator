@@ -126,6 +126,22 @@ describe("walking", () => {
 		expect(distance).toBeLessThanOrEqual(WALK_MAX_PX);
 	});
 
+	it("gives a free Proc a stroll within the minute, not once every couple of minutes", () => {
+		// A whole minute could pass on a real desktop with nothing moving at all,
+		// which reads as broken rather than calm. This holds the rest window to the
+		// span a person will actually sit and watch.
+		let w = ready([["a", "pr_open"]]);
+		w = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: T0 + REST_MAX_MS })) };
+
+		let walked = false;
+		for (let i = 0; i <= 60 && !walked; i++) {
+			w = tick(w, T0 + i * 1_000, half);
+			walked = walkingCount(w) > 0;
+		}
+
+		expect(walked).toBe(true);
+	});
+
 	it("never walks a Proc whose scene has a ground", () => {
 		for (const status of ALL_COMPANION_STATUSES) {
 			if (!isAnchored(status)) continue;
