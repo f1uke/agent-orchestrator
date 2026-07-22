@@ -58,12 +58,14 @@ export type ProcsProps = {
 	status: SessionStatus;
 	facing: Facing;
 	walking: boolean;
+	/** Picked up by the human: dangling, startled, and flailing a bit. */
+	held?: boolean;
 	/** Drawn height of the FIGURE in px; props extend beyond it. */
 	size?: number;
 	className?: string;
 };
 
-export function Procs({ cast, status, facing, walking, size = DEFAULT_SIZE, className }: ProcsProps) {
+export function Procs({ cast, status, facing, walking, held = false, size = DEFAULT_SIZE, className }: ProcsProps) {
 	const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
 	const headClip = `procs-head-${uid}`;
 	const cellClip = `procs-cell-${uid}`;
@@ -73,7 +75,7 @@ export function Procs({ cast, status, facing, walking, size = DEFAULT_SIZE, clas
 	return (
 		<svg
 			role="img"
-			aria-label={`${cast.name}, ${status.replace(/_/g, " ")}`}
+			aria-label={`${cast.name}, ${held ? "being picked up" : status.replace(/_/g, " ")}`}
 			className={className}
 			width={frame.width}
 			height={frame.height}
@@ -104,59 +106,81 @@ export function Procs({ cast, status, facing, walking, size = DEFAULT_SIZE, clas
 			{/* The character itself. Everything inside this group takes the pointer;
 			    everything outside it — the scenery — passes clicks to the desktop. */}
 			<g {...{ [FIGURE_ATTRIBUTE]: "" }}>
-				{/* Legs, drawn before the body so the body's rim covers where they meet it. */}
-				<g clipPath={`url(#${cellClip})`}>
-					<g
-						data-walk-strip
-						style={walking ? { animation: `procs-walk ${WALK_CYCLE_MS}ms steps(4, end) infinite` } : undefined}
-					>
-						{LEG_POSES.map((pose, index) => (
-							<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
-								<Leg x={38 + pose.left.dx} lift={pose.left.lift} colour={cast.shade} />
-								<Leg x={50 + pose.right.dx} lift={pose.right.lift} colour={cast.shade} />
-							</g>
-						))}
-					</g>
-				</g>
-
-				{/* Body and hat bob on their own eased track, separate from the leg steps. */}
-				<g style={walking ? { animation: `procs-bob ${WALK_CYCLE_MS}ms ease-in-out infinite alternate` } : undefined}>
-					<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
-
-					<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />
-
-					{/* Blush, clipped to the head so it can never spill and read as a smudge. */}
-					<g clipPath={`url(#${headClip})`}>
-						<ellipse data-blush cx="26" cy="63" rx="7" ry="4.5" fill={cast.blush} />
-						<ellipse data-blush cx="70" cy="63" rx="7" ry="4.5" fill={cast.blush} />
+				<g
+					data-teased={held || undefined}
+					style={
+						held
+							? { animation: "procs-flail 620ms ease-in-out infinite alternate", transformOrigin: "48px 8px" }
+							: undefined
+					}
+				>
+					{/* Legs, drawn before the body so the body's rim covers where they meet it. */}
+					<g clipPath={`url(#${cellClip})`}>
+						<g
+							data-walk-strip
+							style={walking ? { animation: `procs-walk ${WALK_CYCLE_MS}ms steps(4, end) infinite` } : undefined}
+						>
+							{(held ? DANGLE_POSES : LEG_POSES).map((pose, index) => (
+								<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
+									<Leg x={38 + pose.left.dx} lift={pose.left.lift} colour={cast.shade} />
+									<Leg x={50 + pose.right.dx} lift={pose.right.lift} colour={cast.shade} />
+								</g>
+							))}
+						</g>
 					</g>
 
-					{/* Eyes: low, wide apart, each with a highlight. */}
-					<circle cx="33" cy="53" r="10" fill={PROCS_INK} />
-					<circle cx="63" cy="53" r="10" fill={PROCS_INK} />
-					<circle cx="29.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
-					<circle cx="59.5" cy="49" r="3.4" fill={PROCS_LIGHT} />
+					{/* Body and hat bob on their own eased track, separate from the leg steps. */}
+					<g style={walking ? { animation: `procs-bob ${WALK_CYCLE_MS}ms ease-in-out infinite alternate` } : undefined}>
+						<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
 
-					<path d="M43 67 C 45 71 51 71 53 67" fill="none" stroke={PROCS_INK} strokeWidth="2.6" strokeLinecap="round" />
+						<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />
 
-					{/* The hat, over the head so it sits ON it rather than behind it. Drawn
-				    after the face so a low brim shades the eyes rather than the reverse. */}
-					<g data-slot="hat" data-hat={cast.id}>
-						{cast.hat.map((piece) => (
+						{/* Blush, clipped to the head so it can never spill and read as a smudge. */}
+						<g clipPath={`url(#${headClip})`}>
+							<ellipse data-blush cx="26" cy="63" rx="7" ry="4.5" fill={cast.blush} />
+							<ellipse data-blush cx="70" cy="63" rx="7" ry="4.5" fill={cast.blush} />
+						</g>
+
+						{/* Eyes: low, wide apart, each with a highlight. Startled when held —
+					    wider, with the highlight ridden up, which is the whole tell. */}
+						<circle data-eye cx="33" cy="53" r={held ? 11.5 : 10} fill={PROCS_INK} />
+						<circle data-eye cx="63" cy="53" r={held ? 11.5 : 10} fill={PROCS_INK} />
+						<circle cx={held ? 30 : 29.5} cy={held ? 47 : 49} r={held ? 4.2 : 3.4} fill={PROCS_LIGHT} />
+						<circle cx={held ? 60 : 59.5} cy={held ? 47 : 49} r={held ? 4.2 : 3.4} fill={PROCS_LIGHT} />
+
+						{held ? (
+							// An open, surprised mouth rather than the usual small smile.
+							<ellipse data-mouth cx="48" cy="69" rx="4.6" ry="5.4" fill={PROCS_INK} />
+						) : (
 							<path
-								key={piece.d}
-								data-rim
-								data-hat-piece
-								d={piece.d}
-								fill={piece.role === "trim" ? cast.hatTrim : cast.hatFill}
-								strokeLinejoin="round"
-								{...RIM}
+								data-mouth
+								d="M43 67 C 45 71 51 71 53 67"
+								fill="none"
+								stroke={PROCS_INK}
+								strokeWidth="2.6"
+								strokeLinecap="round"
 							/>
-						))}
-					</g>
+						)}
 
-					{/* Held inside the bob group, because a carried thing moves with its carrier. */}
-					<HeldProp held={scene.held} />
+						{/* The hat, over the head so it sits ON it rather than behind it. Drawn
+				    after the face so a low brim shades the eyes rather than the reverse. */}
+						<g data-slot="hat" data-hat={cast.id}>
+							{cast.hat.map((piece) => (
+								<path
+									key={piece.d}
+									data-rim
+									data-hat-piece
+									d={piece.d}
+									fill={piece.role === "trim" ? cast.hatTrim : cast.hatFill}
+									strokeLinejoin="round"
+									{...RIM}
+								/>
+							))}
+						</g>
+
+						{/* Held inside the bob group, because a carried thing moves with its carrier. */}
+						<HeldProp held={scene.held} />
+					</g>
 				</g>
 			</g>
 
@@ -177,6 +201,16 @@ function Leg({ x, lift, colour }: { x: number; lift: number; colour: string }) {
 // frame. The cycle reads as a waddle, which is also the right register for the
 // character. Pose 0 doubles as the rest pose, so a standing Proc shows cell 0 and
 // never freezes mid-stride.
+// Held: both legs hang, slightly apart and uneven, which is what "dangling" looks
+// like. Four identical-shaped entries keep the strip machinery unchanged; the flail
+// comes from the swing above, not from the legs.
+const DANGLE_POSES = [
+	{ key: "dangle-a", left: { dx: -3, lift: -4 }, right: { dx: 3, lift: -6 } },
+	{ key: "dangle-b", left: { dx: -3, lift: -5 }, right: { dx: 3, lift: -4 } },
+	{ key: "dangle-c", left: { dx: -3, lift: -6 }, right: { dx: 3, lift: -5 } },
+	{ key: "dangle-d", left: { dx: -3, lift: -4 }, right: { dx: 3, lift: -6 } },
+] as const;
+
 const LEG_POSES = [
 	{ key: "contact-a", left: { dx: -4, lift: 0 }, right: { dx: 4, lift: 0 } },
 	{ key: "passing-a", left: { dx: -1, lift: 5 }, right: { dx: 2, lift: 0 } },

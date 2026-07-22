@@ -27,7 +27,7 @@ export type PreviewEntry = {
 
 // Wording is the user's-eye view, not the enum's. "no_signal" is a fact about our
 // connection; "we have lost contact" is what it means to the person reading it.
-const LABELS: Record<SessionStatus, string> = {
+export const STATUS_LABELS: Record<SessionStatus, string> = {
 	todo: "Queued up, not started yet",
 	working: "At the desk, running",
 	pr_open: "Pull request is up",
@@ -61,7 +61,7 @@ export function previewRoster(): PreviewEntry[] {
 	return ALL_COMPANION_STATUSES.map((status, index) => ({
 		status,
 		cast: CAST[index % CAST.length],
-		label: LABELS[status],
+		label: STATUS_LABELS[status],
 		bubble: BUBBLES[status],
 	}));
 }

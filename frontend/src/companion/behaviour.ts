@@ -50,11 +50,17 @@ export const DEFAULT_SPACING_PX = 100;
 export type Facing = "front" | "left" | "right";
 
 export type PetMotion =
-	{ kind: "standing" } | { kind: "walking"; fromX: number; toX: number; startedAt: number; endsAt: number };
+	| { kind: "standing" }
+	| { kind: "walking"; fromX: number; toX: number; startedAt: number; endsAt: number }
+	/** Picked up by the human. Follows the pointer and does nothing of its own. */
+	| { kind: "held"; grabbedAt: number };
 
 export type Pet = {
 	id: string;
 	status: SessionStatus;
+	/** The session's board name and project, straight from the feed. */
+	name: string;
+	project: string;
 	/** Logical position along the floor band, in px from the band's left edge. */
 	x: number;
 	facing: Facing;
@@ -99,7 +105,7 @@ export function walkingCount(world: World): number {
  * strolling instead of adding to it.
  */
 export function animatingCount(world: World): number {
-	return world.pets.filter((pet) => pet.motion.kind === "walking" || sceneAnimates(pet.status)).length;
+	return world.pets.filter((pet) => pet.motion.kind !== "standing" || sceneAnimates(pet.status)).length;
 }
 
 /** How many more Procs may start a stroll right now. Never negative. */
@@ -156,6 +162,8 @@ function placeNewPet(world: World, pets: Pet[], rng: Rng): number {
  * letting the overflow stack: ten Procs squeezed together still shows ten Procs.
  */
 function separate(pets: Pet[], band: Band, spacing: number): Pet[] {
+	// Walkers are already going somewhere and a held Proc is under the user's
+	// pointer — moving either would be the app fighting for control of it.
 	const standing = pets.filter((pet) => pet.motion.kind === "standing");
 	if (standing.length < 2) return pets;
 
@@ -245,6 +253,8 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			const born: Pet = {
 				id: activity.sessionId,
 				status: activity.status,
+				name: activity.name ?? "",
+				project: activity.project ?? "",
 				// Placed clear of everyone already standing there, so a Proc that joins
 				// the desktop never lands on top of one that is already on it.
 				x: placeNewPet(world, placed, rng),
@@ -255,13 +265,16 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			placed.push(born);
 			return born;
 		}
-		if (prev.status === activity.status) {
+		const renamed = (activity.name ?? "") !== prev.name || (activity.project ?? "") !== prev.project;
+		if (prev.status === activity.status && !renamed) {
 			placed.push(prev);
 			return prev;
 		}
 		const next = {
 			...prev,
 			status: activity.status,
+			name: activity.name ?? prev.name,
+			project: activity.project ?? prev.project,
 			// A Proc that cannot stroll faces YOU. `facing` otherwise persists from the
 			// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
 			// that walked left and then sat down at a desk would show the desk flipped
@@ -272,6 +285,63 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 		return next;
 	});
 	return { ...world, pets };
+}
+
+/**
+ * Pick a Proc up. Only one can be held at a time — there is only one pointer — so
+ * this puts down whatever was already in hand.
+ */
+export function grabPet(world: World, petId: string, now: number): World {
+	return {
+		...world,
+		pets: world.pets.map((pet) => {
+			if (pet.id === petId) return { ...pet, facing: "front", motion: { kind: "held", grabbedAt: now } };
+			return pet.motion.kind === "held" ? { ...pet, motion: { kind: "standing" } } : pet;
+		}),
+	};
+}
+
+/**
+ * Move the held Proc to follow the pointer. Deliberately NOT clamped to the band:
+ * a drag that stops dead at the edge feels like the app grabbing back, so it goes
+ * where the pointer goes and is brought home on release.
+ */
+export function dragPet(world: World, petId: string, x: number): World {
+	return {
+		...world,
+		pets: world.pets.map((pet) => (pet.id === petId && pet.motion.kind === "held" ? { ...pet, x } : pet)),
+	};
+}
+
+/**
+ * Let go. Inside the band it simply stands where it was dropped; beyond it, it
+ * WALKS back on rather than snapping, so the user can see where it went. Either
+ * way the next tick's separation pass keeps it off anybody already standing there.
+ */
+export function releasePet(world: World, petId: string, now: number, rng: Rng): World {
+	return {
+		...world,
+		pets: world.pets.map((pet) => {
+			if (pet.id !== petId || pet.motion.kind !== "held") return pet;
+			const landed = Math.min(world.band.maxX, Math.max(world.band.minX, pet.x));
+			if (landed === pet.x) {
+				return { ...pet, motion: { kind: "standing" }, restUntil: pickRest(now, rng) };
+			}
+			// Dropped off the end: walk in from the edge to a spot clearly on the band.
+			const inward = landed === world.band.minX ? 1 : -1;
+			const toX = Math.min(
+				world.band.maxX,
+				Math.max(world.band.minX, landed + inward * Math.min(WALK_MIN_PX, world.band.maxX - world.band.minX)),
+			);
+			return {
+				...pet,
+				x: landed,
+				facing: facingFor(landed, toX),
+				motion: { kind: "walking", fromX: landed, toX, startedAt: now, endsAt: now + WALK_MIN_MS },
+				restUntil: pickRest(now, rng),
+			};
+		}),
+	};
 }
 
 /** Advance the world to `now`. Pure: same inputs, same output. */
@@ -316,7 +386,8 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 
 // consider decides whether a standing Proc starts moving on this tick.
 function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolean): Pet {
-	if (pet.motion.kind === "walking") return pet;
+	// A Proc in the user's hand does nothing of its own until it is let go.
+	if (pet.motion.kind !== "standing") return pet;
 	if (world.parked) return pet;
 
 	const mode: CompanionMode = modeFor(pet.status);

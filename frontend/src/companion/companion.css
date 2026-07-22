@@ -87,6 +87,26 @@ body {
 	}
 }
 
+/* The name chip, centred under its Proc's own figure (not its drawn frame, which
+   hangs wider on the scenery side). */
+.companion-proc-name {
+	position: absolute;
+	bottom: 2px;
+	left: 0;
+	width: var(--procs-figure-width, 96px);
+	display: flex;
+	justify-content: center;
+	pointer-events: none;
+}
+
+/* The hover tooltip, above the Proc and out of the way of its own bubble. */
+.companion-proc-tooltip {
+	position: absolute;
+	bottom: calc(100% - 18px);
+	left: 0;
+	pointer-events: none;
+}
+
 /* ---- Scene animations. transform/opacity only, so every one stays on the
    compositor and an idle desktop still costs ~0% CPU. ---- */
 
@@ -144,6 +164,17 @@ body {
 	}
 	50% {
 		opacity: 1;
+	}
+}
+
+/* Being picked up: a small swing from where the hand has it. Small on purpose —
+   a Proc thrashing about would be unpleasant to hold rather than funny. */
+@keyframes procs-flail {
+	from {
+		transform: rotate(-5deg);
+	}
+	to {
+		transform: rotate(5deg);
 	}
 }
 
