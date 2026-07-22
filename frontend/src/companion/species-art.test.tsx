@@ -18,6 +18,38 @@ function renderSpecies(species: SpeciesId, status: SessionStatus = "working", ha
 	);
 }
 
+/**
+ * Every colour something already measures against a WALLPAPER: the cast's own fills
+ * and hats (swept via ALL_LOOKS) plus every named prop colour (swept directly), both
+ * in `palette.test.ts`, plus the ink that is the second channel itself.
+ */
+function sweptColours(): Set<string> {
+	return new Set([
+		...PALETTES.flatMap((palette) => [palette.body, palette.shade]),
+		...HATS.flatMap((hat) => [hat.fill, hat.trim]),
+		...Object.values(PROP_COLOURS),
+		PROCS_INK,
+	]);
+}
+
+/** The three vertices of an M/L/L/Z triangle, in rig coordinates. */
+function triangle(node: Element): Array<[number, number]> {
+	const numbers = (node.getAttribute("d") ?? "").match(/-?\d+(\.\d+)?/g)!.map(Number);
+	return [
+		[numbers[0], numbers[1]],
+		[numbers[2], numbers[3]],
+		[numbers[4], numbers[5]],
+	];
+}
+
+/** Point in triangle, by the sign of the three edge cross-products. */
+function inside(point: [number, number], corners: Array<[number, number]>): boolean {
+	const side = (a: [number, number], b: [number, number]) =>
+		(b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+	const signs = [side(corners[0], corners[1]), side(corners[1], corners[2]), side(corners[2], corners[0])];
+	return signs.every((value) => value >= 0) || signs.every((value) => value <= 0);
+}
+
 /** Everything drawn, as a comparable string. Two states that produce the same one are one state. */
 function drawn(container: HTMLElement): string {
 	return container.querySelector("svg")?.innerHTML ?? "";
@@ -101,13 +133,10 @@ describe("every character on the one rig", () => {
 		// the allowed set is spelled out instead.
 		const allowed = new Set([
 			// Faces the wallpaper, and is swept against every one of them.
-			...PALETTES.flatMap((palette) => [palette.body, palette.shade]),
-			...HATS.flatMap((hat) => [hat.fill, hat.trim]),
-			...Object.values(PROP_COLOURS),
-			PROCS_INK,
+			...sweptColours(),
 			// Sits on the character, never on the desktop, and is measured against what
 			// it sits on instead: blush and iris in `species.test.ts`, and the lamp both
-			// there and by the geometry test below.
+			// there and by the geometry tests below.
 			...PALETTES.map((palette) => palette.blush),
 			...Object.values(IRIS_BY_PALETTE),
 			...ALL_CORDS.map(lampColour),
@@ -131,6 +160,91 @@ describe("every character on the one rig", () => {
 					unmount();
 				}
 			}
+		}
+	});
+
+	it("only lets an on-body colour be used where something proves it stays on the body", () => {
+		// ⚠ The hole @agent-orchestrator-159 found in the test above: its allowed set is
+		// "colours that may be used ANYWHERE", not "colours that may be used HERE". Blush,
+		// iris and lamp are exempt from the wallpaper sweep on the claim that they sit on
+		// the character — and if a future body drew a blush-coloured tail tip past the
+		// silhouette, the sweep test would still pass on a colour that genuinely faces the
+		// desktop and has never been measured against one.
+		//
+		// It is not hypothetical: the ear LINING is blush, and an ear sticks out past the
+		// head. What contains it is the ear's own rimmed outline, and until this test that
+		// was an argument rather than a measurement.
+		//
+		// So each on-body colour gets a closed list of places it may appear, and each
+		// place carries its own containment proof. A new shape reaching for one of these
+		// colours fails here until somebody writes down why it is safe.
+		// Only the colours that are ON THE BODY AND NOWHERE ELSE need placing. The lamp
+		// is a blend, and at full glow and at zero it lands exactly on `spark` and
+		// `quiet` — both swept prop colours used all over the scenery, so restricting
+		// them here would ban the dust and the quiet dots from being themselves.
+		const swept = sweptColours();
+		const onBody = new Map<string, string>();
+		for (const palette of PALETTES) onBody.set(palette.blush, "blush");
+		for (const iris of Object.values(IRIS_BY_PALETTE)) onBody.set(iris, "iris");
+		for (const cord of ALL_CORDS) onBody.set(lampColour(cord), "lamp");
+		for (const colour of swept) onBody.delete(colour);
+		const PERMITTED: Record<string, string> = {
+			blush: "[data-blush], [data-ear-lining]",
+			iris: "[data-anime-eye] *",
+			lamp: "[data-core-lamp]",
+		};
+
+		for (const species of SPECIES) {
+			for (const palette of PALETTES) {
+				const { container, unmount } = render(
+					<Procs cast={composeCast(palette, HATS[0], species.id)} status="working" facing="front" walking={false} />,
+				);
+				for (const node of container.querySelectorAll("svg *")) {
+					for (const attribute of ["fill", "stroke"] as const) {
+						const kind = onBody.get(node.getAttribute(attribute) ?? "");
+
+						if (kind)
+							expect(node.matches(PERMITTED[kind]), `${species.id}: stray ${kind} on <${node.tagName}>`).toBe(true);
+					}
+				}
+				unmount();
+			}
+		}
+	});
+
+	it("proves each of those places actually contains what it draws", () => {
+		// The blush ticks are held by the head's clip path — structural, not positional.
+		const { container: kitsu, unmount } = renderSpecies("kitsu");
+
+		for (const tick of kitsu.querySelectorAll("[data-blush]")) {
+			expect(tick.closest("g[clip-path]"), "a blush tick outside the head clip").not.toBeNull();
+		}
+
+		// The ear LINING is the one that leaves the head, so it is measured against the
+		// ear rather than the head: every vertex of the lining inside the ear's outline.
+		const outer = triangle(kitsu.querySelector("[data-ear]")!);
+		for (const vertex of triangle(kitsu.querySelector("[data-ear-lining]")!)) {
+			expect(inside(vertex, outer), `ear lining vertex ${vertex} outside the ear`).toBe(true);
+		}
+		unmount();
+
+		// The iris and its highlights never leave the head box the hats were cut for.
+		for (const species of ["kitsu", "sprite", "unit"] as SpeciesId[]) {
+			const { container, unmount: close } = renderSpecies(species);
+			const head = SPECIES_ART[species].head;
+			for (const part of container.querySelectorAll("[data-anime-eye] *")) {
+				const cx = Number(part.getAttribute("cx"));
+				const cy = Number(part.getAttribute("cy"));
+				const rx = Number(part.getAttribute("rx") ?? part.getAttribute("r") ?? 0);
+				const ry = Number(part.getAttribute("ry") ?? part.getAttribute("r") ?? 0);
+
+				if (!Number.isFinite(cx) || !part.hasAttribute("cx")) continue;
+				expect(cx - rx, `${species} eye`).toBeGreaterThanOrEqual(head.x);
+				expect(cx + rx, `${species} eye`).toBeLessThanOrEqual(head.x + head.width);
+				expect(cy - ry, `${species} eye`).toBeGreaterThanOrEqual(head.y);
+				expect(cy + ry, `${species} eye`).toBeLessThanOrEqual(head.y + head.height);
+			}
+			close();
 		}
 	});
 
