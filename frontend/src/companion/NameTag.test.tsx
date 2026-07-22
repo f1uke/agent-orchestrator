@@ -93,3 +93,35 @@ describe("what a name IS", () => {
 		expect(parseInt(chip.style.maxWidth, 10)).toBeLessThan(155);
 	});
 });
+
+describe("the tooltip's identifier lines", () => {
+	// "agent-orchestrator-105" was being broken at a hyphen — "agent-" on one line,
+	// "orchestrator-105" on the next — which reads as two different things. A
+	// hyphen inside an identifier is not a place a reader expects a break; a space
+	// inside a task name is.
+	function lines(name = "smoke to testiny") {
+		const { container } = render(
+			<PetTooltip name={name} sessionId="agent-orchestrator-105" project="agent-orchestrator" status="working" />,
+		);
+		return [...container.querySelectorAll("[data-tooltip] > *")] as HTMLElement[];
+	}
+
+	it("keeps the session id on one line instead of splitting it at a hyphen", () => {
+		const id = lines().find((line) => line.textContent === "@agent-orchestrator-105");
+
+		expect(id?.style.whiteSpace).toBe("nowrap");
+	});
+
+	it("keeps the project name on one line for the same reason", () => {
+		const project = lines().find((line) => line.textContent === "agent-orchestrator");
+
+		expect(project?.style.whiteSpace).toBe("nowrap");
+	});
+
+	it("still lets a long task name wrap, because its spaces ARE break points", () => {
+		const long = "rewrite the coupon search results ranking";
+		const heading = lines(long).find((line) => line.textContent === long);
+
+		expect(heading?.style.whiteSpace ?? "").not.toBe("nowrap");
+	});
+});

@@ -67,6 +67,20 @@ export type Pet = {
 	motion: PetMotion;
 	/** Earliest time this Proc may consider a stroll. Randomised per Proc. */
 	restUntil: number;
+	/**
+	 * The front-of-band spot this Proc has ALREADY answered a summon to, if any.
+	 *
+	 * "It walks to the front once" was originally left implicit — it arrives at the
+	 * spot, so the next tick sees it already there and has nothing to do. That
+	 * premise is false: the crowding pass moves standing Procs, so the arrival is
+	 * undone a tick later and the Proc sets off for the same spot again, for ever.
+	 * That is the "walks in place and never arrives" bug.
+	 *
+	 * This is not a second copy of the position — it is WHICH summon has been
+	 * answered. A later alert re-lays the rank out, the target changes, and the Proc
+	 * correctly goes again; a nudge from a neighbour does not.
+	 */
+	summonedTo?: number;
 };
 
 /** The floor band the cast lives on: one line above the Dock, inset from both edges. */
@@ -275,6 +289,9 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			status: activity.status,
 			name: activity.name ?? prev.name,
 			project: activity.project ?? prev.project,
+			// Leaving needs_input clears the answered-summon mark, so a session that
+			// asks again later is walked to the front again rather than staying put.
+			summonedTo: modeFor(activity.status) === "summon" ? prev.summonedTo : undefined,
 			// A Proc that cannot stroll faces YOU. `facing` otherwise persists from the
 			// last stroll, and the whole sprite mirrors — scenery and all — so a Proc
 			// that walked left and then sat down at a desk would show the desk flipped
@@ -357,10 +374,16 @@ export function tick(world: World, now: number, rng: Rng): World {
 	let slots = walkSlots({ ...world, pets });
 	const order = [...pets].sort((a, b) => a.restUntil - b.restUntil);
 	const started = new Map<string, Pet>();
+	// Each decision sees the ones already taken THIS tick — both the separated
+	// positions and any destination just claimed. Deciding against `world.pets`
+	// instead let two Procs pick the same empty spot in one pass and walk into each
+	// other, which is a destination neither of them can actually stand on.
+	let live = pets;
 	for (const pet of order) {
-		const next = consider(pet, now, world, rng, slots > 0);
+		const next = consider(pet, now, { ...world, pets: live }, rng, slots > 0);
 		if (next !== pet) {
 			started.set(pet.id, next);
+			live = live.map((entry) => (entry.id === pet.id ? next : entry));
 			if (next.motion.kind === "walking") slots -= 1;
 		}
 	}
@@ -374,11 +397,14 @@ export function tick(world: World, now: number, rng: Rng): World {
 function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 	if (pet.motion.kind !== "walking") return pet;
 	if (!world.parked && now < pet.motion.endsAt) return pet;
+	const summoned = modeFor(pet.status) === "summon";
 	return {
 		...pet,
 		x: pet.motion.toX,
-		// A summoned Proc turns to face you the moment it arrives.
-		facing: modeFor(pet.status) === "summon" ? "front" : pet.facing,
+		// A summoned Proc turns to face you the moment it arrives — and this arrival
+		// is what marks the alert answered, so a later nudge does not restart it.
+		facing: summoned ? "front" : pet.facing,
+		summonedTo: summoned ? pet.motion.toX : pet.summonedTo,
 		motion: { kind: "standing" },
 		restUntil: pickRest(now, rng),
 	};
@@ -415,12 +441,18 @@ function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolea
 // arrived would only be a second, driftable copy of that fact.
 function summon(pet: Pet, now: number, world: World): Pet {
 	const target = summonTargetX(pet, world);
+	// Already answered THIS summon. It came to the front, and the crowding pass has
+	// since nudged it a little — that is not a reason to walk to the front again,
+	// and treating it as one is an endless walk that never arrives.
+	if (pet.summonedTo === target) return pet;
 	// Reduced motion keeps the meaning (it IS at the front, facing you) and drops
 	// only the travel: a static equivalent, not a silently missing state.
 	// Standing at the spot already is the same terminal state, reached by walking.
 	if (world.reducedMotion || world.parked || Math.abs(target - pet.x) < 1) {
-		return { ...pet, x: target, facing: "front", motion: { kind: "standing" } };
+		return { ...pet, x: target, facing: "front", motion: { kind: "standing" }, summonedTo: target };
 	}
+	// `summonedTo` is recorded on ARRIVAL, not here: a walk cut short by parking must
+	// still count as unanswered, or the Proc would silently give up on the alert.
 	return {
 		...pet,
 		facing: facingFor(pet.x, target),
@@ -455,6 +487,21 @@ export function summonTargetX(pet: Pet, world: World): number {
 		.sort();
 	const slot = Math.max(0, rank.indexOf(pet.id));
 	const centre = (world.band.minX + world.band.maxX) / 2;
-	const offset = (slot - (rank.length - 1) / 2) * SUMMON_SPACING_PX;
+	const offset = (slot - (rank.length - 1) / 2) * summonPitch(rank.length, world);
 	return Math.min(world.band.maxX, Math.max(world.band.minX, centre + offset));
+}
+
+/**
+ * Slot width for the summon rank.
+ *
+ * At least {@link SUMMON_SPACING_PX}, but never tighter than the crowding
+ * clearance: a rank laid out closer than Procs are allowed to STAND is a rank the
+ * crowding pass immediately pulls apart, and the alerts would arrive only to be
+ * shoved off their own spots. Squeezed to fit the band when the cohort is large,
+ * for the same reason `separate` shares a shortfall rather than stacking.
+ */
+function summonPitch(rankSize: number, world: World): number {
+	const wanted = Math.max(SUMMON_SPACING_PX, world.spacing);
+	if (rankSize < 2) return wanted;
+	return Math.min(wanted, (world.band.maxX - world.band.minX) / (rankSize - 1));
 }

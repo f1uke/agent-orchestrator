@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./companion.css";
+import type { World } from "./behaviour";
 import { CompanionStage } from "./CompanionStage";
+import { createManualFeed, type ManualFeed } from "./dev-feed";
+import { DevPanel } from "./DevPanel";
 import type { CompanionFeed } from "./feed";
 import { createLiveFeed, type LiveFeed } from "./live-feed";
 import { createHttpTransport } from "./live-transport";
-import { createMockFeed } from "./mock-feed";
+import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 
 // Entry point for the overlay window. Deliberately tiny and separate from the main
 // renderer: the overlay has no router, no query client, no daemon connection and no
@@ -64,7 +67,39 @@ function Overlay() {
 	);
 }
 
+/**
+ * The playground: `companion.html` opened in a plain browser during development.
+ *
+ * Guarded by BOTH conditions, and it has to be both. There is no bridge in a
+ * browser, so that alone would let a packaged overlay that failed to preload show
+ * a debug panel on the user's desktop; `import.meta.env.DEV` alone would put it on
+ * a developer's real overlay window. Together they mean exactly "a browser tab
+ * pointed at the dev server", which is the only place it belongs.
+ */
+const IS_LAB = import.meta.env.DEV && !bridge;
+
+function Lab() {
+	const [feed] = useState<ManualFeed>(() => createManualFeed(mockActivitiesAt(0)));
+	const [setWorld, setSetWorld] = useState<React.Dispatch<React.SetStateAction<World>> | null>(null);
+	const [reducedMotion, setReducedMotion] = useState(false);
+	const onStage = useCallback((api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => {
+		setSetWorld(() => api.setWorld);
+	}, []);
+
+	return (
+		<>
+			<CompanionStage
+				feed={feed}
+				bubbleFor={(id) => feed.bubbleFor(id)}
+				reducedMotion={reducedMotion}
+				onStage={onStage}
+			/>
+			<DevPanel feed={feed} setWorld={setWorld} reducedMotion={reducedMotion} onReducedMotion={setReducedMotion} />
+		</>
+	);
+}
+
 const container = document.getElementById("companion-root");
 if (container) {
-	createRoot(container).render(<Overlay />);
+	createRoot(container).render(IS_LAB ? <Lab /> : <Overlay />);
 }

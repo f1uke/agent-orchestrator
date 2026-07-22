@@ -52,6 +52,18 @@ export type CompanionStageProps = {
 	bubbleFor?: (sessionId: string) => ComposedBubble | null;
 	/** Called with true while the pointer is over a Proc, so the shell can take clicks. */
 	onInteractiveChange?: (interactive: boolean) => void;
+	/**
+	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
+	 * reduced-motion path is a real behaviour with its own rules, and it is not
+	 * reachable by eye without changing an OS setting mid-session.
+	 */
+	reducedMotion?: boolean;
+	/**
+	 * Hands the world setter out once, for the dev playground. The overlay itself
+	 * never passes this — nothing outside the engine may move a Proc in production,
+	 * which is exactly why the seam is explicit rather than a mutable export.
+	 */
+	onStage?: (api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => void;
 };
 
 // The band is inset by the SCENE's overhang, not just the figure's: a Proc parked
@@ -68,7 +80,7 @@ function prefersReducedMotion(): boolean {
 	return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function CompanionStage({ feed, bubbleFor, onInteractiveChange }: CompanionStageProps) {
+export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMotion, onStage }: CompanionStageProps) {
 	const source = useMemo(() => feed ?? createMockFeed(), [feed]);
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
@@ -114,7 +126,7 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange }: Compani
 		const apply = () =>
 			setWorld((current) => ({
 				...current,
-				reducedMotion: prefersReducedMotion(),
+				reducedMotion: reducedMotion ?? prefersReducedMotion(),
 				parked: document.visibilityState === "hidden",
 			}));
 		apply();
@@ -125,7 +137,9 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange }: Compani
 			media?.removeEventListener?.("change", apply);
 			document.removeEventListener("visibilitychange", apply);
 		};
-	}, []);
+	}, [reducedMotion]);
+
+	useEffect(() => onStage?.({ setWorld }), [onStage]);
 
 	useEffect(() => {
 		const onResize = () => setWorld((current) => ({ ...current, band: bandFor(window.innerWidth) }));

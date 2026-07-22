@@ -118,6 +118,11 @@ body {
 	position: absolute;
 	bottom: calc(100% - 18px);
 	left: var(--procs-figure-left, 0);
+	/* NOT the default shrink-to-fit, which is capped by this Proc's own ~150px
+	   frame — that cap, not the card's max-width, is what was folding
+	   "agent-orchestrator-105" onto two lines. The card's own max-width does the
+	   limiting now, as it was always meant to. */
+	width: max-content;
 	pointer-events: none;
 }
 

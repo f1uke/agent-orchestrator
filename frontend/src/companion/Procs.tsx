@@ -179,7 +179,7 @@ export function Procs({ cast, status, facing, walking, held = false, size = DEFA
 						</g>
 
 						{/* Held inside the bob group, because a carried thing moves with its carrier. */}
-						<HeldProp held={scene.held} />
+						<HeldProp held={scene.held} mirrored={facing === "left"} />
 					</g>
 				</g>
 			</g>

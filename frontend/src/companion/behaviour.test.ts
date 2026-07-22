@@ -743,3 +743,88 @@ describe("dragging", () => {
 		expect(grabPet(dragWorld(), "ghost", T0).pets).toHaveLength(1);
 	});
 });
+
+describe("never walking in place forever", () => {
+	// The worst thing the overlay can draw is a Proc that walks and walks and never
+	// arrives: it asserts activity that is not happening, on a surface whose entire
+	// job is to be a truthful glance. So every arrangement that HAS a resting state
+	// must reach one and stay in it.
+	//
+	// The real spacing is the whole drawn frame, which is WIDER than a summon rank
+	// slot — and that is the trap. The rank pulls two alerts to 96px apart while
+	// separation pushes them to 136px, so each undoes the other for ever.
+	const REAL_SPACING = 136;
+
+	function ticked(start: World, ticks: number, from = T0): World {
+		let next = start;
+		for (let i = 0; i < ticks; i++) next = tick(next, from + i * 1_000, half);
+		return next;
+	}
+
+	function alerts(ids: string[], spacing = REAL_SPACING): World {
+		const base = syncActivities(
+			{ ...world(), spacing },
+			ids.map((id) => activity(id, "needs_input")),
+			T0,
+			half,
+		);
+		return { ...base, pets: base.pets.map((p, i) => ({ ...p, x: 50 + i * 5 })) };
+	}
+
+	it("settles a summoned cohort instead of oscillating between the rank and separation", () => {
+		let w = ticked(alerts(["a", "b"]), 400);
+
+		expect(walkingCount(w)).toBe(0);
+		// And STAYS settled: a state reached once but abandoned on the next tick is
+		// the bug, not the fix.
+		for (let i = 0; i < 100; i++) {
+			w = tick(w, T0 + (400 + i) * 1_000, half);
+			expect(walkingCount(w)).toBe(0);
+		}
+	});
+
+	it("settles a summoned Proc whose front spot a neighbour is standing on", () => {
+		const base = syncActivities(
+			{ ...world(), spacing: REAL_SPACING },
+			[activity("neighbour", "merged"), activity("a", "needs_input")],
+			T0,
+			half,
+		);
+		// The still Proc is parked right where the summon rank wants to be.
+		const centre = (BAND.minX + BAND.maxX) / 2;
+		let w = {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: p.id === "neighbour" ? centre - 20 : 60 })),
+		};
+		w = ticked(w, 400);
+
+		expect(walkingCount(w)).toBe(0);
+		for (let i = 0; i < 100; i++) {
+			w = tick(w, T0 + (400 + i) * 1_000, half);
+			expect(walkingCount(w)).toBe(0);
+		}
+	});
+
+	it("never starts a walk whose destination another Proc has already claimed this tick", () => {
+		// Two amble Procs due at the same moment, steered STRAIGHT AT EACH OTHER: a
+		// walks right 160px from 200, b walks left 160px from 560, and the two
+		// destinations land 40px apart. Deciding each walk against the roster as it
+		// was at the start of the tick, neither can see the other's claim, and both
+		// set off for a spot only one of them can stand on.
+		const collide = scripted(0.5, 0.5, 0.6, 0.5, 0.5, 0.2);
+		const base = syncActivities(
+			{ ...world(), spacing: REAL_SPACING },
+			[activity("a", "pr_open"), activity("b", "draft")],
+			T0,
+			half,
+		);
+		const due = {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: p.id === "a" ? 200 : 560, restUntil: T0 })),
+		};
+		const next = tick(due, T0 + 1, collide);
+
+		const targets = next.pets.map((p) => (p.motion.kind === "walking" ? p.motion.toX : p.x));
+		expect(Math.abs(targets[0] - targets[1])).toBeGreaterThanOrEqual(REAL_SPACING);
+	});
+});

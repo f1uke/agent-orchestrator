@@ -53,6 +53,24 @@ export type PetTooltipProps = {
 	status: SessionStatus;
 };
 
+/**
+ * The monospace lines: a session id and a project name.
+ *
+ * Both are IDENTIFIERS, and CSS treats a hyphen inside one as a break opportunity
+ * — which turned "agent-orchestrator-105" into "agent-" above "orchestrator-105"
+ * and read as two separate things. An identifier stays on one line and ellipsizes
+ * if it must; only the human-written name above it wraps, at its spaces, which is
+ * where a reader expects a name to break.
+ */
+const IDENTIFIER: React.CSSProperties = {
+	color: PROP_COLOURS.bubbleMuted,
+	fontFamily: "ui-monospace, monospace",
+	fontSize: "10px",
+	whiteSpace: "nowrap",
+	overflow: "hidden",
+	textOverflow: "ellipsis",
+};
+
 export function PetTooltip({ name, sessionId, project, status }: PetTooltipProps) {
 	return (
 		<div
@@ -61,19 +79,19 @@ export function PetTooltip({ name, sessionId, project, status }: PetTooltipProps
 				...CHIP,
 				padding: "7px 10px",
 				font: "500 11px/1.5 ui-sans-serif, system-ui, sans-serif",
-				maxWidth: "230px",
+				// Wide enough for the longest identifier it has to hold on one line —
+				// "@agent-orchestrator-105" measures 246px — rather than the width that
+				// made it wrap. Border-box so this number is the card, not its innards.
+				boxSizing: "border-box",
+				maxWidth: "292px",
 				display: "grid",
 				gap: "1px",
 			}}
 		>
 			<strong style={{ font: "600 12px/1.4 ui-sans-serif, system-ui, sans-serif" }}>{name || sessionId}</strong>
 			<span style={{ color: PROP_COLOURS.bubbleMuted }}>{STATUS_LABELS[status]}</span>
-			<span style={{ color: PROP_COLOURS.bubbleMuted, fontFamily: "ui-monospace, monospace", fontSize: "10px" }}>
-				{sessionId.startsWith("@") ? sessionId : `@${sessionId}`}
-			</span>
-			<span style={{ color: PROP_COLOURS.bubbleMuted, fontFamily: "ui-monospace, monospace", fontSize: "10px" }}>
-				{project}
-			</span>
+			<span style={IDENTIFIER}>{sessionId.startsWith("@") ? sessionId : `@${sessionId}`}</span>
+			<span style={IDENTIFIER}>{project}</span>
 		</div>
 	);
 }

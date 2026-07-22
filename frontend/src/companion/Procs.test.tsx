@@ -329,3 +329,39 @@ describe("a roster of Procs", () => {
 		expect(new Set(looks).size).toBeGreaterThanOrEqual(4);
 	});
 });
+
+describe("held props read the right way round whichever way the Proc faces", () => {
+	// The whole sprite mirrors on X to turn around — that is what makes one drawing
+	// walk both ways. But a `?` sign, a merge arrow, a tick and a clock all MEAN
+	// their direction, so mirroring turns them into nonsense the human has to
+	// decode. The prop still travels to the Proc's other hand; only its content
+	// flips back.
+	const HELD_STATUSES = ALL_COMPANION_STATUSES.filter((status) => sceneFor(status).held !== "none");
+
+	function heldSlot(root: Element): Element {
+		const slot = root.querySelector('[data-slot="held"]');
+		if (!slot) throw new Error("no held slot");
+		return slot;
+	}
+
+	it.each(HELD_STATUSES)("leaves the %s prop alone when the Proc faces you", (status) => {
+		expect(heldSlot(renderProcs({ status, facing: "front" }).container).getAttribute("transform")).toBeNull();
+	});
+
+	it.each(HELD_STATUSES)("flips the %s prop's content back when the sprite mirrors", (status) => {
+		expect(heldSlot(renderProcs({ status, facing: "left" }).container).getAttribute("transform")).toMatch(
+			/scale\(-1 1\)/,
+		);
+	});
+
+	it.each(HELD_STATUSES)("counter-mirrors the %s prop about its own centre, so it does not shift", (status) => {
+		const { min, max } = extentX(heldSlot(renderProcs({ status, facing: "front" }).container));
+		const transform = heldSlot(renderProcs({ status, facing: "left" }).container).getAttribute("transform") ?? "";
+		const translate = Number(/translate\((-?[\d.]+)/.exec(transform)?.[1]);
+
+		// `translate(t) scale(-1 1)` maps x to t - x, so the footprint [min,max]
+		// lands back on itself exactly when t is min+max. Any other centre slides
+		// the prop sideways out of the Proc's hand.
+		expect(translate).toBeCloseTo(min + max, 6);
+	});
+});

@@ -1,3 +1,4 @@
+import { displaySessionName } from "../renderer/lib/session-title";
 import type { LiveFeedDeps } from "./live-feed";
 import type { LiveSession } from "./live-roster";
 
@@ -6,31 +7,64 @@ import type { LiveSession } from "./live-roster";
 // Kept apart from `live-feed.ts` so the feed's logic — decay, composition, the
 // reconnect policy — is testable without a socket, and so this file has nothing in
 // it but transport.
+//
+// A session row carries NO human name and NO project name: the board derives both,
+// from `displayName`/`issueId` and from a join on the projects list. The overlay
+// derives them the SAME way — through the board's own `displaySessionName` — so a
+// Proc is labelled with exactly the words on the card it stands for, and the
+// session id stays what it is on the board: the last resort.
 
 type SessionsResponse = { sessions?: Array<Record<string, unknown>> };
+type ProjectsResponse = { projects?: Array<Record<string, unknown>> };
 
-function toLiveSession(raw: Record<string, unknown>): LiveSession | null {
-	const id = typeof raw.id === "string" ? raw.id : null;
-	const status = typeof raw.status === "string" ? raw.status : null;
+function text(value: unknown): string | undefined {
+	return typeof value === "string" ? value : undefined;
+}
+
+function toLiveSession(raw: Record<string, unknown>, projects: Map<string, string>): LiveSession | null {
+	const id = text(raw.id);
+	const status = text(raw.status);
 	if (!id || !status) return null;
 	return {
 		id,
-		name: typeof raw.name === "string" ? raw.name : id,
-		projectName: typeof raw.projectName === "string" ? raw.projectName : undefined,
+		name: displaySessionName({ displayName: text(raw.displayName), issueId: text(raw.issueId), id }),
+		projectName: projects.get(text(raw.projectId) ?? ""),
 		status: status as LiveSession["status"],
-		statusReason: typeof raw.statusReason === "string" ? (raw.statusReason as LiveSession["statusReason"]) : undefined,
+		statusReason: text(raw.statusReason) as LiveSession["statusReason"] | undefined,
 		isTerminated: raw.isTerminated === true,
 	};
 }
 
 /** REST + SSE against a daemon base URL, as the deps `createLiveFeed` expects. */
 export function createHttpTransport(baseUrl: string): Omit<LiveFeedDeps, "now"> {
+	// A project's name never changes under us often enough to be worth re-reading on
+	// every 4s roster poll, but it is cheap and self-healing to refresh alongside it.
+	const fetchProjects = async (): Promise<Map<string, string>> => {
+		try {
+			const response = await fetch(`${baseUrl}/api/v1/projects`);
+			if (!response.ok) return new Map();
+			const body = (await response.json()) as ProjectsResponse;
+			return new Map(
+				(body.projects ?? [])
+					.map((raw) => [text(raw.id), text(raw.name)] as const)
+					.filter((pair): pair is readonly [string, string] => Boolean(pair[0] && pair[1])),
+			);
+		} catch {
+			// A project we cannot name is a Proc with a blank tooltip line. A Proc we
+			// cannot show at all is a session that has vanished off the desktop — so
+			// this failure must never take the roster down with it.
+			return new Map();
+		}
+	};
+
 	return {
 		async fetchSessions() {
-			const response = await fetch(`${baseUrl}/api/v1/sessions`);
+			const [response, projects] = await Promise.all([fetch(`${baseUrl}/api/v1/sessions`), fetchProjects()]);
 			if (!response.ok) throw new Error(`sessions ${response.status}`);
 			const body = (await response.json()) as SessionsResponse;
-			return (body.sessions ?? []).map(toLiveSession).filter((s): s is LiveSession => s !== null);
+			return (body.sessions ?? [])
+				.map((raw) => toLiveSession(raw, projects))
+				.filter((session): session is LiveSession => session !== null);
 		},
 		openStream(onFrame, onError) {
 			// The activity Hub's SSE — NOT the CDC `/events` stream, which fires only on
