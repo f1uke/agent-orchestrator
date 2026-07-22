@@ -44,6 +44,15 @@ export const PROP_COLOURS = {
 	/** The muted "nothing is coming" dots. Deliberately low-energy, still legible. */
 	quiet: "#cfcad8",
 	/**
+	 * The soft inside of a Kitsu's ear.
+	 *
+	 * Swept like every other exposed fill, and it has to be: an ear sticks out past
+	 * the head, so unlike the blush it sits over the WALLPAPER. The obvious choice —
+	 * reusing a character's blush — measures 2.45:1 at its worst and would have been
+	 * an invisible ear on a dark-grey desktop.
+	 */
+	inner: "#f4bbae",
+	/**
 	 * The orchestrator's gold: its name chip's fill and the crown on it.
 	 *
 	 * A wallpaper colour like any other prop, so it is swept the same way — 3.62:1

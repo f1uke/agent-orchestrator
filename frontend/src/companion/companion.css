@@ -291,6 +291,103 @@ body {
 	}
 }
 
+/* ---- Species tells. Each new character says what the LINK is doing with a part
+   of its own body — Kitsu's ears, Sprite's wings, Unit's chest lamp — driven by
+   the very same `Cord` value the cord itself is drawn from, so the two can never
+   disagree. Only the three live states move at all: nothing that has lost its
+   link may twitch, because motion asserts liveness we do not have.
+
+   Every pose is legible with the animation OFF. The angle and the glow carry the
+   reading; these keyframes are the garnish, which is exactly what reduced motion
+   should be able to take away. ---- */
+
+/* Data flowing: a slow, contented sway. */
+@keyframes procs-swing-live {
+	0%,
+	100% {
+		transform: rotate(0deg);
+	}
+
+	50% {
+		transform: rotate(5deg);
+	}
+}
+
+/* Asking for you: a sharper flick, the way an ear turns towards a sound. */
+@keyframes procs-swing-urgent {
+	0%,
+	100% {
+		transform: rotate(0deg);
+	}
+
+	18% {
+		transform: rotate(-9deg);
+	}
+
+	44% {
+		transform: rotate(4deg);
+	}
+}
+
+/* A failed run: a shiver rather than a swing — it is a fright, not a mood. */
+@keyframes procs-swing-alarm {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+
+	25% {
+		transform: translateX(-1.5px);
+	}
+
+	75% {
+		transform: translateX(1.5px);
+	}
+}
+
+/* The same three registers for a lamp, which cannot swing: rotating a circle does
+   nothing at all, so brightness and size carry them instead. */
+@keyframes procs-lamp-live {
+	0%,
+	100% {
+		opacity: 0.72;
+		transform: scale(0.88);
+	}
+
+	50% {
+		opacity: 1;
+		transform: scale(1.12);
+	}
+}
+
+@keyframes procs-lamp-urgent {
+	0%,
+	100% {
+		opacity: 0.6;
+		transform: scale(0.82);
+	}
+
+	35% {
+		opacity: 1;
+		transform: scale(1.18);
+	}
+}
+
+@keyframes procs-lamp-alarm {
+	0%,
+	60%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+
+	20%,
+	80% {
+		opacity: 0.35;
+		transform: scale(0.9);
+	}
+}
+
 /* The cord tugging at you. Small on purpose: it should catch the eye at the edge
    of vision without becoming something you have to look away from. */
 @keyframes procs-tug {

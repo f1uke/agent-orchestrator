@@ -277,7 +277,7 @@ describe("the scene", () => {
 			const { container, unmount } = renderProcs({ status });
 			for (const node of container.querySelectorAll("[style*='animation']")) {
 				const style = node.getAttribute("style") ?? "";
-				const animatesTransform = /procs-(zzz|spark|confetti|tug|bob|walk)/.test(style);
+				const animatesTransform = /procs-(zzz|spark|confetti|tug|bob|walk|swing|lamp)/.test(style);
 
 				if (animatesTransform) expect(node.getAttribute("transform"), `${status}`).toBeNull();
 			}

@@ -33,6 +33,8 @@
 // the bucket hat is the worker fixing the flaky test. Re-randomising every launch
 // would throw that away for nothing — the pets would stop being anybody.
 
+import { speciesById, type SpeciesId } from "./species";
+
 /** Ear paths are authored for the LEFT side and mirrored, so the rig owns symmetry. */
 const EAR_MIRROR_AXIS = 48;
 
@@ -73,12 +75,17 @@ export type Hat = {
  * have to know that a look is assembled from two axes, only what to paint.
  */
 export type CastMember = {
-	/** `<palette>-<hat>`, e.g. `teal-bucket`. Stable, and unique to the pair. */
+	/** `<palette>-<hat>`, e.g. `teal-bucket`, prefixed by the species when it is not a Proc. */
 	id: string;
-	/** Human-readable, for the accessible label: "Teal bucket hat". */
+	/** Human-readable, for the accessible label: "Teal bucket hat", "Teal Kitsu, bucket hat". */
 	name: string;
 	palette: PaletteId;
 	hatId: HatId;
+	/**
+	 * Which CHARACTER this is. Defaults to `proc` everywhere the caller does not say,
+	 * so every session in existence keeps the body it already had.
+	 */
+	species: SpeciesId;
 	body: string;
 	shade: string;
 	blush: string;
@@ -225,13 +232,22 @@ export function castForSession(sessionRef: string): CastMember {
 	return composeCast(PALETTES[hash(sessionRef) % PALETTES.length], HATS[hash(sessionRef + HAT_SALT) % HATS.length]);
 }
 
-/** Assemble a look from a chosen colour and a chosen hat. */
-export function composeCast(palette: Palette, hat: Hat): CastMember {
+/**
+ * Assemble a look from a chosen colour, a chosen hat and — once the human has picked
+ * them — a chosen character.
+ *
+ * The species argument is OPTIONAL and defaults to the Proc, which is what keeps the
+ * three new bodies out of the live cast until they are registered as an axis: every
+ * existing caller composes exactly the Proc it composed before, down to the id.
+ */
+export function composeCast(palette: Palette, hat: Hat, species: SpeciesId = "proc"): CastMember {
+	const name = speciesById(species).name;
 	return {
-		id: `${palette.id}-${hat.id}`,
-		name: `${palette.name} ${hat.name}`,
+		id: species === "proc" ? `${palette.id}-${hat.id}` : `${species}-${palette.id}-${hat.id}`,
+		name: species === "proc" ? `${palette.name} ${hat.name}` : `${palette.name} ${name}, ${hat.name}`,
 		palette: palette.id,
 		hatId: hat.id,
+		species,
 		body: palette.body,
 		shade: palette.shade,
 		blush: palette.blush,
@@ -239,6 +255,21 @@ export function composeCast(palette: Palette, hat: Hat): CastMember {
 		hatTrim: hat.trim,
 		hat: hat.pieces,
 	};
+}
+
+/**
+ * The same look, on a different character.
+ *
+ * What the Procs lab drives its species switcher with, and the shape the third axis
+ * will resolve to once the Pet library registers one: the colour and the hat are
+ * already decided per session and are not this axis' business to re-roll.
+ */
+export function withSpecies(cast: CastMember, species: SpeciesId): CastMember {
+	return composeCast(
+		PALETTES.find((palette) => palette.id === cast.palette) ?? PALETTES[0],
+		HATS.find((hat) => hat.id === cast.hatId) ?? HATS[0],
+		species,
+	);
 }
 
 /** Every look there is: one per (colour, hat) pair. Used by tests and the demo roster. */

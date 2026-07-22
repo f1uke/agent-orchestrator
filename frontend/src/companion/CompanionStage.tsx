@@ -14,7 +14,7 @@ import {
 } from "./behaviour";
 import { Bubble } from "./Bubble";
 import type { ComposedBubble } from "./bubble-compose";
-import { castForSession } from "./cast";
+import { castForSession, type CastMember } from "./cast";
 import { hoverAt, HOVER_TOOLTIP_DELAY_MS, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
@@ -69,6 +69,16 @@ export type CompanionStageProps = {
 	 * which is exactly why the seam is explicit rather than a mutable export.
 	 */
 	onStage?: (api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => void;
+	/**
+	 * What a session LOOKS like. Defaults to `castForSession`, which is the hash, and
+	 * is the whole story until something is allowed to override it per session.
+	 *
+	 * The seam exists for two callers that both need exactly this and nothing more:
+	 * the Procs lab, which switches the cast between character types so the three new
+	 * ones can be looked at alive, and — next — the Pet library, whose stored per-axis
+	 * overrides resolve to precisely a `(sessionId) => CastMember`.
+	 */
+	castFor?: (sessionId: string) => CastMember;
 };
 
 // The band is inset by the SCENE's overhang, not just the figure's: a Proc parked
@@ -85,7 +95,14 @@ function prefersReducedMotion(): boolean {
 	return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMotion, onStage }: CompanionStageProps) {
+export function CompanionStage({
+	feed,
+	bubbleFor,
+	onInteractiveChange,
+	reducedMotion,
+	onStage,
+	castFor = castForSession,
+}: CompanionStageProps) {
 	const source = useMemo(() => feed ?? createMockFeed(), [feed]);
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
@@ -338,7 +355,7 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 		<div className="companion-stage">
 			<div className="companion-cast">
 				{painted.map((pet) => (
-					<ProcArt key={pet.id} pet={pet} />
+					<ProcArt key={pet.id} pet={pet} cast={castFor(pet.id)} />
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>
@@ -409,10 +426,11 @@ function spokenLine(pet: Pet, bubble: ComposedBubble | null): ComposedBubble | n
 	return bubble;
 }
 
-function ProcArt({ pet }: { pet: Pet }) {
+function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 	// The character is a stable function of the session ref, so the same worker is
-	// always the same Proc — that is what lets someone learn to recognise it.
-	const cast = castForSession(pet.id);
+	// always the same Proc — that is what lets someone learn to recognise it. The
+	// stage resolves it (see `castFor`) rather than this doing it, because who
+	// decides a look is about to stop being "the hash and only the hash".
 	const walking = pet.motion.kind === "walking";
 	const held = pet.motion.kind === "held";
 	const greeting = pet.meeting?.phase === "greeting";

@@ -2,10 +2,11 @@ import { useId } from "react";
 import type { SessionStatus } from "../renderer/types/workspace";
 import { RUN_CYCLE_MS, WALK_CYCLE_MS, type Facing } from "./behaviour";
 import type { CastMember } from "./cast";
-import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX } from "./palette";
+import { PROCS_RIM_PX } from "./palette";
 import { FIGURE_ATTRIBUTE } from "./pointer-region";
 import { CordLayer, DustPuff, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
 import { sceneFor } from "./scene";
+import { SPECIES_ART, type SpeciesParts } from "./species-art";
 
 // Procs — a little running process. ONE rig, parameterised by a cast member and a
 // scene, which is why a seventh character is a row in cast.ts and a sixteenth
@@ -91,6 +92,13 @@ export function Procs({
 	const cellClip = `procs-cell-${uid}`;
 	const scene = sceneFor(status);
 	const frame = procsFrame(size);
+	// Which CHARACTER. A species is a head shape, a face and up to three extra
+	// layers slotted into this one rig — never a second component, which is why the
+	// legs, the walk, the cord, the props and the pointer region below know nothing
+	// about it. The species' own tell reads `scene.cord` and nothing else, so it can
+	// never disagree with the cord it is drawn beside.
+	const art = SPECIES_ART[cast.species];
+	const parts: SpeciesParts = { cast, cord: scene.cord, held, headClip };
 
 	return (
 		<svg
@@ -112,7 +120,7 @@ export function Procs({
 		>
 			<defs>
 				<clipPath id={headClip}>
-					<rect x="14" y="6" width="68" height="72" rx="26" />
+					<rect {...art.head} />
 				</clipPath>
 				{/* Shows exactly one cell of the leg strip. */}
 				<clipPath id={cellClip}>
@@ -154,36 +162,19 @@ export function Procs({
 
 					{/* Body and hat bob on their own eased track, separate from the leg steps. */}
 					<g style={walking ? { animation: `procs-bob ${cycleMs}ms ease-in-out infinite alternate` } : undefined}>
+						{/* BEHIND everything: a Sprite's wings. Nothing else uses this slot. */}
+						{art.Back?.(parts)}
+
 						<rect data-rim data-part="body" x="29" y="74" width="38" height="30" rx="14" fill={cast.shade} {...RIM} />
 
-						<rect data-rim data-part="head" x="14" y="6" width="68" height="72" rx="26" fill={cast.body} {...RIM} />
+						{/* On the body: a Kitsu's ruff, a Unit's link lamp. */}
+						{art.Chest?.(parts)}
 
-						{/* Blush, clipped to the head so it can never spill and read as a smudge. */}
-						<g clipPath={`url(#${headClip})`}>
-							<ellipse data-blush cx="26" cy="63" rx="7" ry="4.5" fill={cast.blush} />
-							<ellipse data-blush cx="70" cy="63" rx="7" ry="4.5" fill={cast.blush} />
-						</g>
+						<rect data-rim data-part="head" {...art.head} fill={cast.body} {...RIM} />
 
-						{/* Eyes: low, wide apart, each with a highlight. Startled when held —
-					    wider, with the highlight ridden up, which is the whole tell. */}
-						<circle data-eye cx="33" cy="53" r={held ? 11.5 : 10} fill={PROCS_INK} />
-						<circle data-eye cx="63" cy="53" r={held ? 11.5 : 10} fill={PROCS_INK} />
-						<circle cx={held ? 30 : 29.5} cy={held ? 47 : 49} r={held ? 4.2 : 3.4} fill={PROCS_LIGHT} />
-						<circle cx={held ? 60 : 59.5} cy={held ? 47 : 49} r={held ? 4.2 : 3.4} fill={PROCS_LIGHT} />
-
-						{held ? (
-							// An open, surprised mouth rather than the usual small smile.
-							<ellipse data-mouth cx="48" cy="69" rx="4.6" ry="5.4" fill={PROCS_INK} />
-						) : (
-							<path
-								data-mouth
-								d="M43 67 C 45 71 51 71 53 67"
-								fill="none"
-								stroke={PROCS_INK}
-								strokeWidth="2.6"
-								strokeLinecap="round"
-							/>
-						)}
+						{/* Blush, eyes and mouth — the blush clipped to the head so it can never
+						    spill and read as a smudge. */}
+						{art.Face(parts)}
 
 						{/* The hat, over the head so it sits ON it rather than behind it. Drawn
 				    after the face so a low brim shades the eyes rather than the reverse. */}
@@ -200,6 +191,10 @@ export function Procs({
 								/>
 							))}
 						</g>
+
+						{/* OVER the hat: ears and an ahoge. The only way a species stays itself
+						    while wearing one of the six hats — and it is the anime look anyway. */}
+						{art.Crown?.(parts)}
 
 						{/* Held inside the bob group, because a carried thing moves with its carrier. */}
 						<HeldProp held={scene.held} mirrored={facing === "left"} />
