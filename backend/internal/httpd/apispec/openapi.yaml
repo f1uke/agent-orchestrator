@@ -5291,6 +5291,10 @@ components:
           description: Whether image evidence embedded inline (false = attachment-link
             fallback).
           type: boolean
+        evidenceLinked:
+          description: Number of uploaded evidence files that landed as download links
+            instead of inline previews.
+          type: integer
         key:
           description: The Jira issue key the results were posted to.
           type: string
@@ -5303,6 +5307,7 @@ components:
       - attachmentsUploaded
       - rowsPosted
       - embeddedMedia
+      - evidenceLinked
       type: object
     ProbeAgentResponse:
       properties:

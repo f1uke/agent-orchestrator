@@ -135,6 +135,9 @@ type Service struct {
 	jira         JiraPoster
 	evidenceRoot string
 	clock        func() time.Time
+	// mediaResolveBackoff is the retry schedule for resolving an evidence file's
+	// Jira media id (see resolveMediaID); tests shorten it.
+	mediaResolveBackoff []time.Duration
 }
 
 var _ Manager = (*Service)(nil)
@@ -159,10 +162,11 @@ func WithJiraPoster(poster JiraPoster) Option {
 // (report-back then degrades to persist-only).
 func New(store Store, dataDir string, messenger Messenger, opts ...Option) *Service {
 	s := &Service{
-		store:        store,
-		messenger:    messenger,
-		evidenceRoot: filepath.Join(dataDir, "evidence"),
-		clock:        func() time.Time { return time.Now().UTC() },
+		store:               store,
+		messenger:           messenger,
+		evidenceRoot:        filepath.Join(dataDir, "evidence"),
+		clock:               func() time.Time { return time.Now().UTC() },
+		mediaResolveBackoff: defaultMediaResolveBackoff,
 	}
 	for _, opt := range opts {
 		opt(s)

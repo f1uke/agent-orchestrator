@@ -135,6 +135,7 @@ export function SmokeTestView({
 					attachmentsUploaded: 0,
 					rowsPosted: progress.checked,
 					embeddedMedia: false,
+					evidenceLinked: 0,
 				};
 			}
 			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/smoke-checks/jira", {
@@ -146,7 +147,15 @@ export function SmokeTestView({
 		onSuccess: (data) => {
 			invalidate();
 			const rows = data.rowsPosted;
-			showToast(`Posted ${rows} result${rows === 1 ? "" : "s"} to ${data.key}`);
+			// Jira ingests an upload asynchronously, so evidence can end up as a
+			// download link rather than an inline preview. The comment is still
+			// correct, but the difference is invisible from here — say it, otherwise
+			// a degraded post reads exactly like a clean one and the only way to find
+			// out is to open the issue.
+			const linked = data.evidenceLinked ?? 0;
+			const degraded =
+				linked > 0 ? ` — ${linked} evidence file${linked === 1 ? "" : "s"} posted as links, not previews` : "";
+			showToast(`Posted ${rows} result${rows === 1 ? "" : "s"} to ${data.key}${degraded}`);
 			if (data.commentUrl) window.open(data.commentUrl, "_blank", "noopener,noreferrer");
 		},
 		onError: (err) => showToast(apiErrorMessage(err, "Couldn't post to Jira")),

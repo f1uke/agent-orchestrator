@@ -19,12 +19,13 @@ type attachCall struct {
 }
 
 type fakePoster struct {
-	attachErr   error
-	resolveErr  error   // when set, ResolveMediaID fails (→ link fallback)
-	commentErr  []error // per-call error, indexed by AddComment call count
-	attachments []attachCall
-	comments    []map[string]any
-	resolved    []string // attachment ids ResolveMediaID was called with
+	attachErr       error
+	resolveErr      error   // when set, ResolveMediaID always fails (→ link fallback)
+	resolveFailures int     // when set, the first N ResolveMediaID calls fail, then succeed
+	commentErr      []error // per-call error, indexed by AddComment call count
+	attachments     []attachCall
+	comments        []map[string]any
+	resolved        []string // attachment ids ResolveMediaID was called with
 }
 
 // ResolveMediaID mimics the real media-id lookup: a distinct id derived from the
@@ -34,6 +35,10 @@ func (p *fakePoster) ResolveMediaID(_ context.Context, attachmentID string) (str
 	p.resolved = append(p.resolved, attachmentID)
 	if p.resolveErr != nil {
 		return "", p.resolveErr
+	}
+	if p.resolveFailures > 0 {
+		p.resolveFailures--
+		return "", fmt.Errorf("%w: media not ingested yet", jiraadapter.ErrUnavailable)
 	}
 	return "media-" + attachmentID, nil
 }
@@ -65,7 +70,12 @@ func (p *fakePoster) AddComment(_ context.Context, key string, body any) (jiraad
 
 func newJiraTestService(t *testing.T, store Store, poster JiraPoster) *Service {
 	t.Helper()
-	return New(store, t.TempDir(), nil, WithClock(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }), WithJiraPoster(poster))
+	svc := New(store, t.TempDir(), nil, WithClock(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }), WithJiraPoster(poster))
+	// Keep the media-id retry schedule (production: 0.4s + 1.2s) from making the
+	// unit tests wait; the retry COUNT, which is what the tests assert, is
+	// unchanged.
+	svc.mediaResolveBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	return svc
 }
 
 // seedRunCheck creates a check, attaches one evidence blob to disk, marks the
@@ -252,6 +262,90 @@ func TestPostToJira_MediaIDResolutionFailureFallsBackToLink(t *testing.T) {
 	}
 	if !strings.Contains(doc, "/secure/attachment/1/") {
 		t.Errorf("doc must link the attachment as a fallback: %s", doc)
+	}
+}
+
+// A media id that is not resolvable on the FIRST try is the normal case, not an
+// error: Jira ingests an upload asynchronously. Giving up after one attempt bakes
+// a download-link-only comment that never heals, which is exactly the bug the
+// human hit (evidence posted as filenames instead of previews).
+func TestPostToJira_RetriesTransientMediaIDResolution(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", IssueID: "jira:DEMO-101"}
+	poster := &fakePoster{resolveFailures: 2} // fails twice, then resolves
+	svc := newJiraTestService(t, store, poster)
+	seedRunCheck(t, svc, store, "c1", 1, domain.SmokePass, "ok", "image/png", "PNG")
+
+	out, err := svc.PostToJira(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("PostToJira: %v", err)
+	}
+	if !out.EmbeddedMedia {
+		t.Errorf("EmbeddedMedia = false, want true (the retry resolved the media id)")
+	}
+	if out.EvidenceLinked != 0 {
+		t.Errorf("EvidenceLinked = %d, want 0 (nothing degraded to a link)", out.EvidenceLinked)
+	}
+	if len(poster.resolved) != 3 {
+		t.Errorf("ResolveMediaID calls = %d, want 3 (two transient failures then success)", len(poster.resolved))
+	}
+	if !strings.Contains(mustJSON(t, poster.comments[0]), `"mediaSingle"`) {
+		t.Errorf("comment must embed the resolved media: %s", mustJSON(t, poster.comments[0]))
+	}
+}
+
+// When evidence does land as a link, the outcome has to say so — the Tests tab
+// reported a plain success, so a comment full of download links looked exactly
+// like a comment full of previews and the degradation went unnoticed.
+func TestPostToJira_ReportsEvidenceThatLandedAsLinks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		poster *fakePoster
+		want   int
+	}{
+		{
+			name:   "media id never resolves",
+			poster: &fakePoster{resolveErr: fmt.Errorf("%w: no media id", jiraadapter.ErrUnavailable)},
+			want:   2,
+		},
+		{
+			name:   "jira rejects the media doc",
+			poster: &fakePoster{commentErr: []error{jiraadapter.ErrBadRequest, nil}},
+			want:   2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", IssueID: "jira:DEMO-101"}
+			svc := newJiraTestService(t, store, tc.poster)
+			seedRunCheck(t, svc, store, "c1", 1, domain.SmokePass, "ok", "image/png", "PNG")
+			seedRunCheck(t, svc, store, "c2", 2, domain.SmokeFail, "bad", "video/mp4", "MP4")
+
+			out, err := svc.PostToJira(context.Background(), "w1")
+			if err != nil {
+				t.Fatalf("PostToJira: %v", err)
+			}
+			if out.EvidenceLinked != tc.want {
+				t.Errorf("EvidenceLinked = %d, want %d", out.EvidenceLinked, tc.want)
+			}
+		})
+	}
+}
+
+// A successful, fully-embedded post reports nothing degraded.
+func TestPostToJira_ReportsNoLinkedEvidenceOnCleanPost(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", IssueID: "jira:DEMO-101"}
+	poster := &fakePoster{}
+	svc := newJiraTestService(t, store, poster)
+	seedRunCheck(t, svc, store, "c1", 1, domain.SmokePass, "ok", "image/png", "PNG")
+
+	out, err := svc.PostToJira(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("PostToJira: %v", err)
+	}
+	if out.EvidenceLinked != 0 {
+		t.Errorf("EvidenceLinked = %d, want 0", out.EvidenceLinked)
 	}
 }
 

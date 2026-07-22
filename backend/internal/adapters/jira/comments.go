@@ -80,7 +80,7 @@ func (c *Client) AddAttachment(ctx context.Context, key, filename, mimeType stri
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("X-Atlassian-Token", "no-check")
 	req.Header.Set("Authorization", basicAuth(cfg))
-	resp, err := c.httpDo(req)
+	resp, err := c.transferDo(req)
 	if err != nil {
 		return Attachment{}, fmt.Errorf("%w: upload attachment %s: %w", ErrUnavailable, key, err)
 	}
@@ -136,7 +136,7 @@ func (c *Client) ResolveMediaID(ctx context.Context, attachmentID string) (strin
 	// We only need the redirect target, not the file — cap the body if a client
 	// follows the redirect all the way to the media binary.
 	req.Header.Set("Range", "bytes=0-0")
-	resp, err := c.httpDo(req)
+	resp, err := c.transferDo(req)
 	if err != nil {
 		return "", fmt.Errorf("%w: resolve media id %s: %w", ErrUnavailable, attachmentID, err)
 	}
@@ -183,7 +183,7 @@ func (c *Client) DownloadAttachment(ctx context.Context, attachmentID string) (i
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := c.httpDo(req)
+	resp, err := c.transferDo(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: download attachment %s: %w", ErrUnavailable, attachmentID, err)
 	}

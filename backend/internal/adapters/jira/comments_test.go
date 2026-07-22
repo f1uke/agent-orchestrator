@@ -10,6 +10,38 @@ import (
 	"testing"
 )
 
+// Evidence transfers are megabytes over whatever link the user is on; the 15s
+// budget that suits a JSON read aborts a screen recording mid-upload, which
+// fails the whole Post-to-Jira (or silently drops the file's inline preview).
+func TestTransferClientGetsALongerBudgetThanReads(t *testing.T) {
+	if defaultTransferHTTPClient.Timeout <= defaultHTTPClient.Timeout {
+		t.Fatalf("transfer timeout = %s, want more than the read timeout %s",
+			defaultTransferHTTPClient.Timeout, defaultHTTPClient.Timeout)
+	}
+}
+
+// One injected doer must still capture every call, transfers included, or a test
+// server silently stops seeing the uploads it is asserting on.
+func TestWithHTTPDoerAlsoCapturesTransfers(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[{"id":"1","filename":"a.png","mimeType":"image/png","content":"https://x/1/a.png"}]`)
+	}))
+	defer srv.Close()
+	doer := func(req *http.Request) (*http.Response, error) {
+		calls++
+		return srv.Client().Do(req)
+	}
+
+	c := NewClient(WithHTTPDoer(doer), WithConfigSource(staticConfig(srv.URL)))
+	if _, err := c.AddAttachment(context.Background(), "DEMO-101", "a.png", "image/png", strings.NewReader("x")); err != nil {
+		t.Fatalf("AddAttachment: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("injected doer calls = %d, want 1", calls)
+	}
+}
+
 func TestAddAttachment_UploadsMultipart(t *testing.T) {
 	var gotMethod, gotPath, gotXsrf, gotAuth, gotCT, gotFilename, gotFileBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

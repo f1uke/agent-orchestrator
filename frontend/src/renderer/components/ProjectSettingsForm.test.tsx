@@ -584,6 +584,48 @@ describe("ProjectSettingsForm", () => {
 		expect(screen.queryByLabelText("Require approvals before Ready to merge")).not.toBeInTheDocument();
 	});
 
+	it("explains the missing approval rule when no git remote was detected", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "develop",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+		await goToSection("Automation");
+		// The card still cannot be offered (provider unknown), but its absence is
+		// no longer silent — that silence is what made a GitLab project look like
+		// it simply had no approval-rule setting.
+		expect(screen.queryByLabelText("Require approvals before Ready to merge")).not.toBeInTheDocument();
+		expect(await screen.findByText(/couldn't detect a git remote/i)).toBeInTheDocument();
+	});
+
+	it("stays quiet about the approval rule for a detected non-GitLab project", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+		await goToSection("Automation");
+		expect(screen.queryByText(/couldn't detect a git remote/i)).not.toBeInTheDocument();
+	});
+
 	it("shows the daemon validation message when save fails", async () => {
 		mockProject({
 			id: "proj-1",
