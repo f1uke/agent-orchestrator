@@ -41,6 +41,18 @@ const injectCspMeta: Plugin = {
 };
 
 export default defineConfig({
+	// Two pages come out of this build: the app itself, and the desktop-companion
+	// overlay. The overlay is a separate HTML entry rather than a route, so the
+	// transparent always-on-top window loads a bare page with no router, no query
+	// client and no daemon connection — it must cost nothing to have on screen.
+	build: {
+		rollupOptions: {
+			input: {
+				index: fileURLToPath(new URL("./index.html", import.meta.url)),
+				companion: fileURLToPath(new URL("./companion.html", import.meta.url)),
+			},
+		},
+	},
 	// "@/" → the renderer root (src/renderer), the shadcn/ui import convention.
 	resolve: {
 		alias: {

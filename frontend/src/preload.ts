@@ -7,6 +7,7 @@ import type { NativeNotificationClickPayload, NativeNotificationInput } from "./
 import type { OpenInTargets } from "./main/open-in-targets";
 import type { RunXcodegenResult } from "./main/run-xcodegen";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
+import type { CompanionSettings } from "./main/companion-settings";
 
 export type BrowserBoundsInput = {
 	viewId: string;
@@ -117,6 +118,10 @@ const api = {
 	updateSettings: {
 		get: () => ipcRenderer.invoke("updateSettings:get") as Promise<UpdateSettings>,
 		set: (settings: UpdateSettings) => ipcRenderer.invoke("updateSettings:set", settings) as Promise<void>,
+	},
+	companionSettings: {
+		get: () => ipcRenderer.invoke("companionSettings:get") as Promise<CompanionSettings>,
+		set: (settings: CompanionSettings) => ipcRenderer.invoke("companionSettings:set", settings) as Promise<void>,
 	},
 	updates: {
 		getStatus: () => ipcRenderer.invoke("updates:getStatus") as Promise<UpdateStatus>,

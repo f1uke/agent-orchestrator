@@ -9,6 +9,7 @@ import { Switch } from "../ui/switch";
 import { SettingsGroup } from "./SettingsGroup";
 import { SettingsField } from "./SettingsField";
 import { SettingEditorRow } from "./SettingEditorRow";
+import { CompanionControls } from "./CompanionControls";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import type { PromptKind } from "./useGlobalSettingsForm";
@@ -301,7 +302,7 @@ function SystemSection({ form }: { form: GlobalForm }) {
 	const { draft, setField, isFieldDirty } = form;
 	return (
 		<>
-			<SectionTitle title="System" hint="notifications, updates & migration" />
+			<SectionTitle title="System" hint="notifications, updates, companion & migration" />
 
 			<SettingsGroup title="Updates">
 				<SettingsField label="Automatic updates" htmlFor="updatesEnabled" modified={isFieldDirty("updatesEnabled")}>
@@ -347,6 +348,14 @@ function SystemSection({ form }: { form: GlobalForm }) {
 					Agent Orchestrator window is focused.
 				</p>
 				<NotificationsControls />
+			</SettingsGroup>
+
+			<SettingsGroup title="Desktop companion">
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					Shows one small character per session along the bottom of your screen — working, waiting on you, or done. It
+					sits above the Dock and clicks pass straight through it, except on a character itself.
+				</p>
+				<CompanionControls />
 			</SettingsGroup>
 
 			<SettingsGroup title="Migration">

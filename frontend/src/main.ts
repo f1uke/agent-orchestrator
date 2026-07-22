@@ -49,6 +49,8 @@ import { buildDaemonEnv, resolveShellEnv, type ShellRunner, withFallbackPath } f
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/posthog-config";
 import { buildTelemetryBootstrap } from "./shared/telemetry";
 import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view-host";
+import { createCompanionOverlay, type CompanionOverlay } from "./main/companion-window";
+import { readCompanionSettings, writeCompanionSettings, type CompanionSettings } from "./main/companion-settings";
 import { connectSupervisor, type SupervisorLinkHandle } from "./main/supervisor-link";
 import { shouldLinkOnAttach } from "./main/daemon-owner";
 import { readMigrationState, updateMigration, writeAppStateMarker, type MigrationState } from "./main/app-state";
@@ -106,6 +108,9 @@ let daemonStartPromise: Promise<DaemonStatus> | null = null;
 let daemonStartEpoch = 0;
 let daemonStatus: DaemonStatus = { state: "stopped" };
 let browserViewHost: BrowserViewHost | null = null;
+// The desktop-companion overlay. A SECOND window in this app, never a second app
+// instance, and off until the user says otherwise.
+let companionOverlay: CompanionOverlay | null = null;
 // Held for the app lifetime. Dropping it (on any exit) triggers daemon self-stop.
 let supervisorLink: SupervisorLinkHandle | null = null;
 
@@ -207,6 +212,20 @@ function preloadPath(): string {
 
 function annotatePreloadPath(): string {
 	return path.join(__dirname, "annotate-preload.js");
+}
+
+function companionPreloadPath(): string {
+	return path.join(__dirname, "companion-preload.js");
+}
+
+// The overlay is its own page, not a route of the app: a transparent window that
+// sits on the desktop has no business booting the router, the query client or the
+// daemon connection.
+function companionUrl(): string {
+	if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+		return new URL("companion.html", MAIN_WINDOW_VITE_DEV_SERVER_URL).toString();
+	}
+	return `${RENDERER_ORIGIN}/companion.html`;
 }
 
 // Runtime window/taskbar icon for Linux and Windows. macOS ignores this and
@@ -422,6 +441,12 @@ function createWindow(): void {
 		browserViewHost?.dispose();
 		browserViewHost = null;
 		mainWindow = null;
+		// Off macOS, closing the app window means quitting — but 'window-all-closed'
+		// only fires when NO window is left, and the overlay is a window. Drop it
+		// here so the app still exits instead of lingering with only pets on screen.
+		if (process.platform !== "darwin") {
+			companionOverlay?.dispose();
+		}
 	});
 }
 
@@ -1268,6 +1293,27 @@ ipcMain.handle("updateSettings:set", async (_event, settings: UpdateSettings) =>
 	await writeUpdateSettings(path.dirname(runFile), settings);
 });
 
+// The desktop companion. `enabled` drives the overlay window directly, so the
+// toggle in Settings and the first-run offer both take effect without a restart.
+ipcMain.handle("companionSettings:get", async (): Promise<CompanionSettings> => {
+	const runFile = runFilePath();
+	if (!runFile) return { enabled: false, asked: false };
+	return readCompanionSettings(path.dirname(runFile));
+});
+ipcMain.handle("companionSettings:set", async (_event, settings: CompanionSettings) => {
+	const runFile = runFilePath();
+	if (!runFile) return;
+	await writeCompanionSettings(path.dirname(runFile), settings);
+	companionOverlay?.setEnabled(settings.enabled === true);
+});
+
+// Sent by the overlay renderer as the pointer crosses a Proc. `send`, not
+// `invoke`: this fires on every enter/leave and must never make the overlay wait
+// on the main process to hand a click back to the desktop.
+ipcMain.on("companion:setInteractive", (_event, interactive: unknown) => {
+	companionOverlay?.setInteractive(interactive === true);
+});
+
 ipcMain.handle("updates:getStatus", (): UpdateStatus => getUpdateStatus());
 ipcMain.handle("updates:check", async () => {
 	const runFile = runFilePath();
@@ -1410,13 +1456,56 @@ app.whenReady().then(async () => {
 	createWindow();
 	void startDaemon();
 	initAutoUpdates();
+	initCompanionOverlay();
 
 	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) {
+		// Keyed on the MAIN window, not the window count: the companion overlay is
+		// also a BrowserWindow, and counting it would leave a dock click doing
+		// nothing after the user closed the app window.
+		if (!mainWindow) {
 			createWindow();
 		}
 	});
 });
+
+// Bring the overlay up if the user has it switched on. Everything about it is
+// opt-in: a first run reads `{ enabled: false, asked: false }`, so nothing is
+// created and nothing appears on the desktop until the renderer's first-run offer
+// or the Settings toggle says so.
+function initCompanionOverlay(): void {
+	companionOverlay = createCompanionOverlay({
+		createWindow: (options) => {
+			const win = new BrowserWindow({ ...options, show: true });
+			return {
+				setBounds: (bounds) => win.setBounds(bounds),
+				setIgnoreMouseEvents: (ignore, opts) => win.setIgnoreMouseEvents(ignore, opts),
+				setVisibleOnAllWorkspaces: (visible, opts) => win.setVisibleOnAllWorkspaces(visible, opts),
+				setAlwaysOnTop: (flag, level) => win.setAlwaysOnTop(flag, level as Parameters<typeof win.setAlwaysOnTop>[1]),
+				loadURL: (url) => win.loadURL(url),
+				onClosed: (listener) => win.on("closed", listener),
+				destroy: () => win.destroy(),
+				isDestroyed: () => win.isDestroyed(),
+			};
+		},
+		// The primary display's WORK AREA, which already excludes the Dock and the
+		// menu bar. Multi-display support is deliberately not in this first cut.
+		workArea: () => screen.getPrimaryDisplay().workArea,
+		overlayUrl: companionUrl,
+		preloadPath: companionPreloadPath,
+		logError: (message, error) => console.error(message, error),
+	});
+
+	const relayout = () => companionOverlay?.relayout();
+	screen.on("display-metrics-changed", relayout);
+	screen.on("display-added", relayout);
+	screen.on("display-removed", relayout);
+
+	const runFile = runFilePath();
+	if (!runFile) return;
+	void readCompanionSettings(path.dirname(runFile))
+		.then((settings) => companionOverlay?.setEnabled(settings.enabled))
+		.catch((err) => console.error("AO: failed to read the companion settings:", err));
+}
 
 // Daemon teardown is now handled via the OS-native supervisor socket: the daemon
 // self-stops ~5s after the last client (this process) drops its connection.
@@ -1425,6 +1514,8 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => {
 	browserViewHost?.dispose();
 	browserViewHost = null;
+	companionOverlay?.dispose();
+	companionOverlay = null;
 });
 
 // Last resort: if the OS-native supervisor link is not actually connected

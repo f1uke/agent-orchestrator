@@ -1,0 +1,68 @@
+/* The overlay page. It is a hole in the screen with Procs in it: the page itself
+   must paint nothing, or the transparent window becomes a grey slab over the
+   desktop. Every animation below touches only `transform` — no layout, no paint —
+   so a strolling Proc stays on the compositor. */
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background: transparent;
+	/* Belt and braces with the main process's setIgnoreMouseEvents: nothing on this
+	   page takes the pointer except a Proc, which turns it back on for itself. */
+	pointer-events: none;
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: default;
+}
+
+.companion-stage {
+	position: absolute;
+	inset: 0;
+}
+
+.companion-proc {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	/* The engine hands out destinations; this is the only property that moves. */
+	will-change: transform;
+	pointer-events: auto;
+}
+
+/* The four-beat leg strip. `steps(4, end)` steps the row of poses one cell at a
+   time, which is why the frames genuinely differ instead of the Proc being nudged. */
+@keyframes procs-walk {
+	from {
+		transform: translateX(0px);
+	}
+	to {
+		transform: translateX(-384px);
+	}
+}
+
+/* Body + ears bob on their own eased track, deliberately not locked to the steps. */
+@keyframes procs-bob {
+	from {
+		transform: translateY(0px);
+	}
+	to {
+		transform: translateY(-1.6px);
+	}
+}
+
+/* The static equivalent. The engine already refuses to start a stroll under
+   reduced motion, so this is the belt to that braces: even a Proc that was
+   mid-stroll when the setting changed comes to rest instead of stepping. */
+@media (prefers-reduced-motion: reduce) {
+	.companion-proc {
+		transition: none !important;
+	}
+
+	.companion-proc * {
+		animation: none !important;
+	}
+}
