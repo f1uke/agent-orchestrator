@@ -118,8 +118,8 @@ export function ConceptSheet({ onClose }: { onClose: () => void }) {
 				<table style={TABLE}>
 					<tbody>
 						<tr>
-							<th style={TH}>Kitsu ear lining on any wallpaper</th>
-							<td style={TD}>{worstSeparation(PROP_COLOURS.inner).toFixed(2)}:1</td>
+							<th style={TH}>Kitsu ear lining, on its own head</th>
+							<td style={TD}>the character's own blush — 1.35…4.5:1 by construction</td>
 						</tr>
 						<tr>
 							<th style={TH}>Sprite wing plate on any wallpaper</th>

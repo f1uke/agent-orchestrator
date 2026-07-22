@@ -1,7 +1,8 @@
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { composeCast, HATS, PALETTES } from "./cast";
 import { contrastRatio, PROCS_INK } from "./palette";
-import type { Cord } from "./scene";
+import { ALL_CORDS, type Cord } from "./scene";
 import {
 	ANIME_SPECIES,
 	CORE_GLOW,
@@ -13,10 +14,13 @@ import {
 	TELL_MOTION,
 	WING_POSE,
 } from "./species";
+import { Procs } from "./Procs";
+import { lampColour } from "./species-art";
 
-// Every cord state there is. Written out rather than derived, deliberately: a new
-// cord value must FAIL these tests until somebody decides what each character does
-// with it, which is the whole point of a tell that cannot drift from the cord.
+// Every cord state there is, written out a SECOND time on purpose. `ALL_CORDS` is
+// what the tell tables are walked with; this list is what says `ALL_CORDS` itself is
+// complete. Derive both from one place and a new cord value quietly acquires no pose
+// on any character and nothing goes red.
 const CORDS: Cord[] = ["attached", "streaming", "tugging", "sparking", "coiled", "unplugged"];
 
 /** Plain RGB distance. Crude on purpose: a "these are not the same swatch" guard. */
@@ -92,6 +96,10 @@ describe("composing a look with a character on it", () => {
 });
 
 describe("the tell — what a character says the LINK is doing", () => {
+	it("knows about every cord state the scene layer has", () => {
+		expect([...ALL_CORDS].sort()).toEqual([...CORDS].sort());
+	});
+
 	it("has a pose for every cord state, on every character that has one", () => {
 		for (const cord of CORDS) {
 			expect(EAR_POSE[cord], cord).toBeDefined();
@@ -155,6 +163,39 @@ describe("the tell — what a character says the LINK is doing", () => {
 	it("puts the lamp out completely when the cord is out", () => {
 		expect(CORE_GLOW.unplugged).toBe(0);
 		expect(CORE_GLOW.streaming).toBe(1);
+	});
+});
+
+describe("what sits ON a character rather than on the wallpaper", () => {
+	it("lines a Kitsu's ear with the character's OWN blush, not a colour of its own", () => {
+		// ⚠ Found by measuring, after the eye had signed it off on one character. A
+		// fixed warm lining (#f4bbae) sat at 1.03:1 on the amber head — an ear with no
+		// inside at all — and looked fine on the rose one it was drawn against. The
+		// blush is the colour already guaranteed to read on its own head and nowhere
+		// else (1.35…4.5:1, pinned in `palette.test.ts`), which is exactly the property
+		// an ear lining needs, so the lining IS the blush and inherits that guarantee.
+		const { container } = render(
+			<Procs cast={composeCast(PALETTES[0], HATS[0], "kitsu")} status="working" facing="front" walking={false} />,
+		);
+
+		expect(container.querySelector("[data-ear-lining]")?.getAttribute("fill")).toBe(PALETTES[0].blush);
+	});
+
+	it("makes a Unit's lamp obviously lit or obviously out", () => {
+		// ⚠ Measured by HUE, not by luminance, and the difference is the finding: a gold
+		// lamp and the grey it dims to are 124 apart in RGB and only 1.11:1 in contrast,
+		// because gold and light grey have nearly the same luminance. Contrast is the
+		// wrong instrument here — both sit inside an ink bezel, so neither is being read
+		// against the other, they are being TOLD APART. Which is also why "off" does not
+		// rest on the colour alone: it gets the slash as well, pinned in `species-art`.
+		expect(distance(lampColour("streaming"), lampColour("unplugged"))).toBeGreaterThan(60);
+		expect(distance(lampColour("sparking"), lampColour("attached"))).toBeGreaterThan(40);
+	});
+
+	it("gives the lamp a colour of its own on every body it is mounted on", () => {
+		for (const palette of PALETTES) {
+			expect(distance(lampColour("streaming"), palette.shade), palette.name).toBeGreaterThan(40);
+		}
 	});
 });
 

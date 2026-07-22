@@ -120,6 +120,18 @@ function cellLine(root: readonly [number, number], tip: readonly [number, number
 	return `M${round(cx - nx)} ${round(cy - ny)} L${round(cx + nx)} ${round(cy + ny)}`;
 }
 
+/**
+ * The Unit's chest lamp, for a cord state.
+ *
+ * A BLEND rather than an opacity, so an unlit lamp dims to the same grey the quiet
+ * dots use instead of fading the body through it. Exported because it is the one
+ * colour on these bodies that is computed, and a computed colour is one nothing can
+ * enumerate — `species-art.test.tsx` enumerates it through here.
+ */
+export function lampColour(cord: Cord): string {
+	return mix(PROP_COLOURS.quiet, coreColour(cord), CORE_GLOW[cord]);
+}
+
 /** Blend two `#rrggbb` colours. Used so a lamp DIMS to grey rather than fading out. */
 function mix(from: string, to: string, amount: number): string {
 	const parse = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -333,7 +345,7 @@ const KITSU: SpeciesArt = {
 								}
 							>
 								<path data-rim data-ear d={EAR_OUTER} fill={cast.body} strokeLinejoin="round" {...RIM} />
-								<path d={EAR_INNER} fill={PROP_COLOURS.inner} />
+								<path data-ear-lining d={EAR_INNER} fill={cast.blush} />
 							</g>
 						</g>
 					</g>
@@ -474,7 +486,7 @@ const UNIT: SpeciesArt = {
 	Chest: ({ cord }) => {
 		const glow = CORE_GLOW[cord];
 		const motion = TELL_MOTION[cord];
-		const lit = mix(PROP_COLOURS.quiet, coreColour(cord), glow);
+		const lit = lampColour(cord);
 		return (
 			<g data-slot="tell" data-tell="core" data-cord={cord}>
 				<path
@@ -498,6 +510,7 @@ const UNIT: SpeciesArt = {
 					// Dark is not a reading on its own at 30px — a pale lamp and an unlit one
 					// measure the same. The slash is what says OFF.
 					<path
+						data-core-off
 						d={`M${UNIT_CORE[0] - 5.6} ${UNIT_CORE[1] - 5.6} L${UNIT_CORE[0] + 5.6} ${UNIT_CORE[1] + 5.6}`}
 						stroke={PROCS_INK}
 						strokeWidth="2.2"

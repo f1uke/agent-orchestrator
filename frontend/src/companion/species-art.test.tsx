@@ -1,12 +1,12 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { composeCast, HATS, PALETTES } from "./cast";
-import { PROCS_INK, PROCS_RIM_PX } from "./palette";
+import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
 import { Procs, PROCS_VIEW } from "./Procs";
-import { ALL_COMPANION_STATUSES, sceneFor } from "./scene";
+import { ALL_COMPANION_STATUSES, ALL_CORDS, sceneFor } from "./scene";
 import type { SessionStatus } from "../renderer/types/workspace";
-import { EAR_POSE, SPECIES, type SpeciesId } from "./species";
-import { earTip, SPECIES_ART, tellOrigin } from "./species-art";
+import { EAR_POSE, IRIS_BY_PALETTE, SPECIES, type SpeciesId } from "./species";
+import { earTip, lampColour, SPECIES_ART, tellOrigin } from "./species-art";
 
 // What the three new bodies have to prove, and it is the same list the Proc had to:
 // they read differently in every state, they carry both wallpaper channels, they fit
@@ -81,6 +81,75 @@ describe("every character on the one rig", () => {
 				unmount();
 			}
 		}
+	});
+
+	it("exposes no colour to the wallpaper that has never been measured against one", () => {
+		// ⚠ The gap this closes, raised by @agent-orchestrator-159 while merging: the
+		// wallpaper sweep in `palette.test.ts` enumerates ALL_LOOKS and PROP_COLOURS, and
+		// ALL_LOOKS is Procs. A new body that invented a fill of its own would face the
+		// desktop having never been measured against one, and nothing would have said so.
+		//
+		// Rather than widen the sweep to 4× the looks, this asserts the stronger thing:
+		// every colour these bodies put OUTSIDE themselves is already one of the colours
+		// that sweep covers. Reach for a new one and this fails until it is named in
+		// PROP_COLOURS, which is what puts it in the sweep.
+		//
+		// EVERY fill and stroke, not just the rimmed ones — a first pass only checked
+		// `[data-rim]` shapes, and a deliberately-wrong ear lining sailed straight
+		// through it because the lining sits inside the ear and carries no rim of its
+		// own. The point is to catch a hand-typed hex ANYWHERE, so the net is total and
+		// the allowed set is spelled out instead.
+		const allowed = new Set([
+			// Faces the wallpaper, and is swept against every one of them.
+			...PALETTES.flatMap((palette) => [palette.body, palette.shade]),
+			...HATS.flatMap((hat) => [hat.fill, hat.trim]),
+			...Object.values(PROP_COLOURS),
+			PROCS_INK,
+			// Sits on the character, never on the desktop, and is measured against what
+			// it sits on instead: blush and iris in `species.test.ts`, and the lamp both
+			// there and by the geometry test below.
+			...PALETTES.map((palette) => palette.blush),
+			...Object.values(IRIS_BY_PALETTE),
+			...ALL_CORDS.map(lampColour),
+			PROCS_LIGHT,
+			"none",
+		]);
+
+		for (const species of SPECIES) {
+			for (const palette of PALETTES) {
+				for (const status of ALL_COMPANION_STATUSES) {
+					const { container, unmount } = render(
+						<Procs cast={composeCast(palette, HATS[0], species.id)} status={status} facing="front" walking={false} />,
+					);
+					for (const node of container.querySelectorAll("svg *")) {
+						for (const attribute of ["fill", "stroke"] as const) {
+							const colour = node.getAttribute(attribute);
+
+							if (colour) expect(allowed, `${species.id}/${palette.id}/${status} ${attribute}`).toContain(colour);
+						}
+					}
+					unmount();
+				}
+			}
+		}
+	});
+
+	it("keeps the Unit's lamp off the wallpaper entirely, and lets it be measured on the body", () => {
+		// The one colour here that is NOT swept, deliberately: the lamp is a mix, and it
+		// sits inside an ink bezel inside the body rect, so what it faces is the body —
+		// the same argument that keeps the blush and the project marker out of the sweep.
+		// This pins the geometry that argument rests on.
+		const body = { left: 29, right: 67, top: 74, bottom: 104 };
+		const { container } = renderSpecies("unit");
+		const bezel = container.querySelector("[data-core-bezel]")!;
+		const numbers = (bezel.getAttribute("d") ?? "").match(/-?\d+(\.\d+)?/g)!.map(Number);
+		const xs = numbers.filter((_, index) => index % 2 === 0);
+		const ys = numbers.filter((_, index) => index % 2 === 1);
+
+		expect(Math.min(...xs)).toBeGreaterThanOrEqual(body.left);
+		expect(Math.max(...xs)).toBeLessThanOrEqual(body.right);
+		expect(Math.min(...ys)).toBeGreaterThanOrEqual(body.top);
+		expect(Math.max(...ys)).toBeLessThanOrEqual(body.bottom);
 	});
 
 	it("writes every path in M/L/C/Z, so the mirror and the measuring tests can read it", () => {
