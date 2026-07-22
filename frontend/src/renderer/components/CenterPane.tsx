@@ -165,55 +165,55 @@ export function CenterPane({
 				) : (
 					<div className="terminal-toolbar__controls">
 						<OpenInMenu directory={directory} />
-					<button
-						aria-label="Decrease terminal font size"
-						className="terminal-toolbar__control"
-						disabled={fontSize <= MIN_TERMINAL_FONT_SIZE}
-						onClick={() => updateFontSize(-1)}
-						title="Decrease terminal font size"
-						type="button"
-					>
-						-
-					</button>
-					<span className="terminal-toolbar__font-size">{fontSize}px</span>
-					<button
-						aria-label="Increase terminal font size"
-						className="terminal-toolbar__control"
-						disabled={fontSize >= MAX_TERMINAL_FONT_SIZE}
-						onClick={() => updateFontSize(1)}
-						title="Increase terminal font size"
-						type="button"
-					>
-						+
-					</button>
-					<button
-						aria-label={isFullscreen ? "Exit terminal fullscreen" : "Open terminal fullscreen"}
-						aria-pressed={isFullscreen}
-						className="terminal-toolbar__control terminal-toolbar__control--icon"
-						onClick={() => void toggleFullscreen()}
-						title={isFullscreen ? "Exit fullscreen" : "Fullscreen terminal"}
-						type="button"
-					>
-						{isFullscreen ? (
-							<Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
-						) : (
-							<Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-						)}
-					</button>
-					{/* Restart the live session in place: reloads the system prompt while
+						<button
+							aria-label="Decrease terminal font size"
+							className="terminal-toolbar__control"
+							disabled={fontSize <= MIN_TERMINAL_FONT_SIZE}
+							onClick={() => updateFontSize(-1)}
+							title="Decrease terminal font size"
+							type="button"
+						>
+							-
+						</button>
+						<span className="terminal-toolbar__font-size">{fontSize}px</span>
+						<button
+							aria-label="Increase terminal font size"
+							className="terminal-toolbar__control"
+							disabled={fontSize >= MAX_TERMINAL_FONT_SIZE}
+							onClick={() => updateFontSize(1)}
+							title="Increase terminal font size"
+							type="button"
+						>
+							+
+						</button>
+						<button
+							aria-label={isFullscreen ? "Exit terminal fullscreen" : "Open terminal fullscreen"}
+							aria-pressed={isFullscreen}
+							className="terminal-toolbar__control terminal-toolbar__control--icon"
+							onClick={() => void toggleFullscreen()}
+							title={isFullscreen ? "Exit fullscreen" : "Fullscreen terminal"}
+							type="button"
+						>
+							{isFullscreen ? (
+								<Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+							) : (
+								<Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+							)}
+						</button>
+						{/* Restart the live session in place: reloads the system prompt while
 					    resuming the conversation. Shown for both orchestrator and worker
 					    terminals, never on the reviewer terminal or a terminated session
 					    (which has its own Restore control). */}
-					{session && target.kind !== "reviewer" && sessionIsActive(session) ? (
-						<RestartSessionButton session={session} />
-					) : null}
-					{/* Kill the worker in place — moved here from the session header as an
+						{session && target.kind !== "reviewer" && sessionIsActive(session) ? (
+							<RestartSessionButton session={session} />
+						) : null}
+						{/* Kill the worker in place — moved here from the session header as an
 					    icon-only destructive control beside Restart. Worker-only (the
 					    orchestrator has no toolbar Kill) and never on the reviewer terminal
 					    or a terminated session. */}
-					{session && target.kind !== "reviewer" && !isOrchestratorSession(session) && sessionIsActive(session) ? (
-						<KillSessionButton session={session} />
-					) : null}
+						{session && target.kind !== "reviewer" && !isOrchestratorSession(session) && sessionIsActive(session) ? (
+							<KillSessionButton session={session} />
+						) : null}
 						{splitControls}
 					</div>
 				)}

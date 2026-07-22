@@ -97,9 +97,7 @@ export type AddPaneResult = { root: SplitNode; mode: "split" | "swapped" | "noop
  */
 export function addPane(root: SplitNode, focusedSessionId: string, newSessionId: string): AddPaneResult {
 	if (containsSession(root, newSessionId)) return { root, mode: "noop" };
-	const target = containsSession(root, focusedSessionId)
-		? focusedSessionId
-		: (paneSessionIds(root).at(-1) as string);
+	const target = containsSession(root, focusedSessionId) ? focusedSessionId : (paneSessionIds(root).at(-1) as string);
 	if (paneCount(root) >= MAX_SPLIT_PANES) {
 		return { root: replaceSession(root, target, newSessionId), mode: "swapped" };
 	}
@@ -256,7 +254,11 @@ export type FocusDirection = "left" | "right" | "up" | "down";
  * axis; the nearest wins, with cross-axis offset penalised so an aligned pane
  * beats a diagonal one. Null at an edge.
  */
-export function nearestPaneInDirection(panes: readonly PaneRect[], fromId: string, direction: FocusDirection): string | null {
+export function nearestPaneInDirection(
+	panes: readonly PaneRect[],
+	fromId: string,
+	direction: FocusDirection,
+): string | null {
 	const from = panes.find((p) => p.sessionId === fromId);
 	if (!from) return null;
 	const centre = (r: PaneRect["rect"]) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -267,8 +269,7 @@ export function nearestPaneInDirection(panes: readonly PaneRect[], fromId: strin
 		const c = centre(pane.rect);
 		const dx = c.x - fromCentre.x;
 		const dy = c.y - fromCentre.y;
-		const forward =
-			direction === "right" ? dx : direction === "left" ? -dx : direction === "down" ? dy : -dy;
+		const forward = direction === "right" ? dx : direction === "left" ? -dx : direction === "down" ? dy : -dy;
 		if (forward <= 0) continue;
 		const sideways = direction === "left" || direction === "right" ? Math.abs(dy) : Math.abs(dx);
 		const score = forward + sideways * 2;
@@ -291,10 +292,6 @@ export function eligibleSplitSessions(
 	root: SplitNode | null,
 ): WorkspaceSession[] {
 	return sessions.filter(
-		(s) =>
-			!s.isTerminated &&
-			s.status !== "terminated" &&
-			!s.isTodo &&
-			!(root !== null && containsSession(root, s.id)),
+		(s) => !s.isTerminated && s.status !== "terminated" && !s.isTodo && !(root !== null && containsSession(root, s.id)),
 	);
 }

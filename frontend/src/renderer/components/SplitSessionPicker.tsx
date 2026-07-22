@@ -41,8 +41,8 @@ export function SplitSessionPicker({ eligible, atCap, onSplit, onUnsplit }: Spli
 			<PopoverContent align="end" className="w-72 p-2">
 				{atCap ? (
 					<div className="px-2 py-3 text-[12px] leading-relaxed text-muted-foreground">
-						Split view is full ({MAX_SPLIT_PANES} panes). Remove a pane to add another session — opening a session
-						from the sidebar will replace the focused pane.
+						Split view is full ({MAX_SPLIT_PANES} panes). Remove a pane to add another session — opening a session from
+						the sidebar will replace the focused pane.
 					</div>
 				) : (
 					<>
