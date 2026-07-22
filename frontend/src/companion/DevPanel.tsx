@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { SessionStatus } from "../renderer/types/workspace";
 import { tick, type World } from "./behaviour";
-import { CAST, castForSession } from "./cast";
 import type { CompanionActivity } from "./feed";
 import type { ManualFeed } from "./dev-feed";
 import { STATUS_LABELS } from "./preview";
+import { appendActivity, everyStatus, makeActivity } from "./dev-roster";
 import { ALL_COMPANION_STATUSES } from "./scene";
 
 // The playground, mounted on `companion.html` in dev only (see main.tsx).
@@ -15,62 +15,6 @@ import { ALL_COMPANION_STATUSES } from "./scene";
 // nothing here is a second implementation — so any state is one click away and can
 // actually be LOOKED at, which is how every render-only bug in this feature so far
 // has been found.
-
-/** Invented demo work, never lifted from a real board. */
-const NAMES = [
-	"login rate limit",
-	"banner cta",
-	"search filters",
-	"cache warmup",
-	"invoice export",
-	"webhook retries",
-	"onboarding tour",
-	"lint rules",
-	"coupon search ui",
-	"smoke to testiny",
-	"dark mode audit",
-	"session replay",
-	"csv import limits",
-	"password reset flow",
-	"stale branch sweep",
-	"receipt pdf layout",
-];
-
-const PROJECTS = ["demo-app", "demo-api"];
-
-/**
- * A session ref that lands on a CHOSEN character.
- *
- * The character is a hash of the ref, so a run of consecutive demo refs puts half
- * the cast on one face — which is the "why do they all look the same" complaint,
- * reproduced by the demo data rather than by the art. Searching for a ref that
- * hashes where we want it means the playground always shows the whole cast.
- */
-function refForCharacter(index: number, project: string): string {
-	const wanted = index % CAST.length;
-	for (let n = 10 + index; n < 600; n += 1) {
-		const ref = `${project}-${n}`;
-		if (CAST.indexOf(castForSession(ref)) === wanted) return ref;
-	}
-	return `${project}-${10 + index}`;
-}
-
-function makeActivity(index: number, status: SessionStatus): CompanionActivity {
-	const project = PROJECTS[index % PROJECTS.length];
-	return {
-		sessionId: refForCharacter(index, project),
-		name: NAMES[index % NAMES.length],
-		project,
-		// One coordinator, like a real project, so the mark on its label is visible.
-		kind: index === 0 ? "orchestrator" : "worker",
-		status,
-	};
-}
-
-/** One Proc per status: the whole vocabulary on screen at once. */
-function everyStatus(): CompanionActivity[] {
-	return ALL_COMPANION_STATUSES.map((status, index) => makeActivity(index, status));
-}
 
 // Frames in the shape the SSE really delivers them, so the panel exercises the
 // decay ladder rather than setting a string on a bubble.
@@ -226,11 +170,7 @@ export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: Dev
 					))}
 				</div>
 				<div style={ROW_OF_BUTTONS}>
-					<button
-						type="button"
-						style={BUTTON}
-						onClick={() => commit([...roster, makeActivity(roster.length, "working")])}
-					>
+					<button type="button" style={BUTTON} onClick={() => commit(appendActivity(roster))}>
 						+ session
 					</button>
 					<button type="button" style={BUTTON} onClick={() => commit(roster.slice(0, -1))}>
@@ -239,7 +179,7 @@ export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: Dev
 					<button type="button" style={BUTTON} onClick={() => commit(everyStatus())}>
 						all 15 states
 					</button>
-					<button type="button" style={BUTTON} onClick={() => commit([makeActivity(0, "working")])}>
+					<button type="button" style={BUTTON} onClick={() => commit([makeActivity(0, "working", new Set())])}>
 						just one
 					</button>
 					<button
