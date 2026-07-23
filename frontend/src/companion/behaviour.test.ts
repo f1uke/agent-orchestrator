@@ -33,7 +33,7 @@ import {
 	type World,
 } from "./behaviour";
 import type { SessionKind } from "./live-roster";
-import { PORTAL_IN_MS, PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
+import { beginTransit, PORTAL_IN_MS, PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
 
 const BAND = { minX: 0, maxX: 1000 };
 const T0 = 1_000_000;
@@ -2247,6 +2247,43 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 
 		expect(startRally(unknown, "lead", T0)).toBe(unknown);
 		expect(startRally(w, "nobody", T0)).toBe(w);
+	});
+
+	it("does not stand a Proc in the photo that is halfway through a portal", () => {
+		// The two lifecycle transitions have to be able to run at once without fighting
+		// over a Proc. A Proc on its way OUT has no session left to be in a team photo,
+		// and one on its way IN is not on the desktop yet — so neither is called, and
+		// neither joins late: the row is laid out once, at the moment of the shake.
+		const w = band();
+		const mid = {
+			...w,
+			pets: w.pets.map((pet) =>
+				pet.id === "a1"
+					? { ...pet, transit: beginTransit("leaving", T0, false) }
+					: pet.id === "a2"
+						? { ...pet, transit: beginTransit("arriving", T0, false) }
+						: pet,
+			),
+		};
+		const called = startRally(mid, "lead", T0 + 10);
+
+		for (const id of ["a1", "a2"]) {
+			expect(petById(called, id).rally, id).toBeUndefined();
+			expect(petById(called, id).motion.kind, id).toBe("standing");
+			expect(petById(called, id).x, id).toBe(petById(mid, id).x);
+		}
+		// The gesture still registered — the leader carries its call, and its cue plays.
+		expect(petById(called, "lead").rally?.leaderId).toBe("lead");
+	});
+
+	it("cannot be called by an Orchestrator that is itself halfway through a portal", () => {
+		const w = band();
+		const going = {
+			...w,
+			pets: w.pets.map((pet) => (pet.id === "lead" ? { ...pet, transit: beginTransit("leaving", T0, false) } : pet)),
+		};
+
+		expect(startRally(going, "lead", T0 + 10)).toBe(going);
 	});
 
 	it("does not pull a Proc out of the human's hand, or out of a conversation", () => {
