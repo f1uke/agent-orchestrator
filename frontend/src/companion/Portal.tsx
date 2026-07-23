@@ -1,4 +1,5 @@
 import { PROCS_INK, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
+import { portalDurationMs, type PortalPhase } from "./portal-transit";
 
 // The portal a session arrives through and leaves by.
 //
@@ -22,34 +23,6 @@ import { PROCS_INK, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
 //   - The RESTING style is the portal fully OPEN. `prefers-reduced-motion` kills every
 //     animation inside a pet, and what is left has to be a portal rather than the
 //     first frame of one — the same rule the rally ring is drawn under.
-
-/**
- * How long the whole entrance runs: the ring opens, the pet leaps out, it collapses.
- *
- * It was 900ms and the human's note on it was that the ring "appears and is gone too
- * fast" — which it was: the leap took the middle half of it and left the ring itself
- * barely a quarter of a second at full size either side. The extra time is spent
- * HOLDING it open, not on a slower jump: the leap is still about 600ms.
- */
-export const PORTAL_IN_MS = 1500;
-/** The exit. A shade quicker — the pet is already on its way out. */
-export const PORTAL_OUT_MS = 1400;
-/**
- * Both, under `prefers-reduced-motion`.
- *
- * The gesture is unchanged — a portal still opens and the session still arrives
- * through it — but nothing leaps, spins or overshoots, so there is nothing left to
- * stretch over 900ms. What remains is a portal and a pet fading through it.
- */
-export const PORTAL_REDUCED_MS = 260;
-
-/** Whether this portal is letting a pet out or taking one in. */
-export type PortalPhase = "arriving" | "leaving";
-
-/** The default envelope for a phase, when the caller has nothing else to say. */
-export function portalDurationMs(phase: PortalPhase): number {
-	return phase === "arriving" ? PORTAL_IN_MS : PORTAL_OUT_MS;
-}
 
 const CORE = PROP_COLOURS.portalCore;
 const GLOW = PROP_COLOURS.portalGlow;
@@ -285,17 +258,4 @@ export function PortalLabel({
 			{children}
 		</div>
 	);
-}
-
-/**
- * How visible a pet is this far through its transition, for the reduced-motion path.
- *
- * A fade rather than a cut, and quick: at {@link PORTAL_REDUCED_MS} the whole
- * transition is a quarter of a second, so this is the pet appearing or leaving rather
- * than a long dissolve.
- */
-export function transitOpacity(phase: PortalPhase, elapsedMs: number, durationMs: number): number {
-	const fade = Math.max(1, durationMs * 0.6);
-	const progress = Math.max(0, Math.min(1, elapsedMs / fade));
-	return phase === "arriving" ? progress : 1 - progress;
 }

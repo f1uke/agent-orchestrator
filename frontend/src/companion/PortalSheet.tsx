@@ -2,17 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { composeCast, HATS, palettesFor, accessoriesFor, type CastMember } from "./cast";
 import { figureLeft, NAME_TAG_ALLOWANCE, PET_HEIGHT, petFrame } from "./layout";
 import { NameTag } from "./NameTag";
+import { Portal, PortalLabel, PortalTransit } from "./Portal";
 import {
 	PORTAL_IN_MS,
 	PORTAL_OUT_MS,
 	PORTAL_REDUCED_MS,
-	Portal,
-	PortalLabel,
-	PortalTransit,
 	portalDurationMs,
 	transitOpacity,
 	type PortalPhase,
-} from "./Portal";
+} from "./portal-transit";
 import { Procs } from "./Procs";
 import type { SessionStatus } from "../renderer/types/workspace";
 import type { SpeciesId } from "./species";

@@ -6,6 +6,7 @@ import { MEET_RUN_MAX_MS } from "./behaviour";
 import { CompanionStage } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
 import { LOOKS_STORAGE_KEY, serializeProjectLooks } from "./look-store";
+import { PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
 import { storeProjectSpecies } from "./look-store-live";
 import { speciesForProject } from "./species";
 
@@ -22,7 +23,12 @@ function stubFeed() {
 	const feed: CompanionFeed = {
 		subscribe(next) {
 			listener = next;
-			next([]);
+			// NOT an empty snapshot first. The real feed's first listener is called with
+			// the roster it actually fetched (`live-feed.ts` starts the poll and publishes
+			// once), and that first snapshot is the BASELINE — the sessions that were
+			// already running. Handing the stage an empty one and the roster second says
+			// something different and untrue: that every session on the machine started
+			// the moment the overlay opened, which is a screenful of portals.
 			return () => {
 				unsubscribed += 1;
 				listener = null;
@@ -79,7 +85,8 @@ describe("CompanionStage", () => {
 		expect(container.querySelectorAll("[data-proc]")).toHaveLength(2);
 	});
 
-	it("removes a Proc when its session leaves the feed", () => {
+	it("keeps a Proc on the band while it leaves through its portal, and removes it after", () => {
+		vi.useFakeTimers();
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} />);
 
@@ -89,7 +96,117 @@ describe("CompanionStage", () => {
 		]);
 		push([{ sessionId: "b", status: "idle" }]);
 
+		// Still two. The one whose session ended is on its way out, not gone — that
+		// instant vanish is the whole thing the portal replaces.
+		expect(container.querySelectorAll("[data-proc]")).toHaveLength(2);
+		expect(container.querySelector('[data-session="a"] .companion-proc-portal')).not.toBeNull();
+
+		act(() => void vi.advanceTimersByTime(PORTAL_OUT_MS + 1_000));
+
 		expect(container.querySelectorAll("[data-proc]")).toHaveLength(1);
+	});
+
+	// The correctness crux. An overlay that reloads, or one that swaps its mock cast for
+	// the real roster, must not celebrate a spawn for every session already running.
+	it("does not portal in the roster it starts with — only sessions that appear later", () => {
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+
+		push([
+			{ sessionId: "a", status: "working" },
+			{ sessionId: "b", status: "idle" },
+		]);
+
+		expect(container.querySelectorAll(".companion-proc-portal")).toHaveLength(0);
+
+		push([
+			{ sessionId: "a", status: "working" },
+			{ sessionId: "b", status: "idle" },
+			{ sessionId: "c", status: "working" },
+		]);
+
+		expect(container.querySelectorAll(".companion-proc-portal")).toHaveLength(1);
+		expect(container.querySelector('[data-session="c"] .companion-proc-portal')).not.toBeNull();
+	});
+
+	it("does not portal anything when the same roster is polled again", () => {
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+
+		push([{ sessionId: "a", status: "working" }]);
+		push([{ sessionId: "a", status: "working" }]);
+		push([{ sessionId: "a", status: "needs_input" }]);
+
+		expect(container.querySelectorAll(".companion-proc-portal")).toHaveLength(0);
+	});
+
+	// The mock cast is swapped for the live one by handing the stage a different feed.
+	// That is a new feed's FIRST snapshot, not a dozen sessions starting at once.
+	it("treats a new feed's first snapshot as a baseline, not as a dozen spawns", () => {
+		const first = stubFeed();
+		const { container, rerender } = render(<CompanionStage feed={first.feed} />);
+		first.push([{ sessionId: "mock-1", status: "working" }]);
+
+		const second = stubFeed();
+		rerender(<CompanionStage feed={second.feed} />);
+		second.push([
+			{ sessionId: "real-1", status: "working" },
+			{ sessionId: "real-2", status: "idle" },
+		]);
+
+		expect(container.querySelectorAll("[data-proc]")).toHaveLength(2);
+		expect(container.querySelectorAll(".companion-proc-portal")).toHaveLength(0);
+	});
+
+	// The portal is a lifecycle flourish, not a status channel. A pet on its way out
+	// narrating something would be the animation inventing a claim about a session that
+	// has already ended — the one thing the bubbles' whole TTL model exists to prevent.
+	it("says nothing while a pet is mid-portal", () => {
+		const { feed, push } = stubFeed();
+		const bubbleFor = () => ({ text: "Running the test suite", tone: "normal" as const, decay: "fresh" as const });
+		const { container } = render(<CompanionStage feed={feed} bubbleFor={bubbleFor} />);
+
+		push([
+			{ sessionId: "a", status: "working" },
+			{ sessionId: "b", status: "working" },
+		]);
+		expect(container.querySelectorAll(".companion-proc-bubble")).toHaveLength(2);
+
+		push([{ sessionId: "b", status: "working" }]);
+
+		expect(container.querySelectorAll(".companion-proc-bubble")).toHaveLength(1);
+		expect(container.querySelector('[data-session="a"] .companion-proc-portal')).not.toBeNull();
+	});
+
+	it("cannot be picked up while it is leaving", () => {
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+		push([{ sessionId: "a", status: "pr_open" }]);
+		push([]);
+
+		fireEvent.pointerDown(container.querySelector("[data-figure] rect")!, { bubbles: true, clientX: 400 });
+
+		expect(container.querySelector("[data-teased]")).toBeNull();
+	});
+
+	it("keeps the portal under reduced motion, and fades the pet through it instead", () => {
+		prefersReducedMotion(true);
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+
+		push([{ sessionId: "a", status: "working" }]);
+		push([
+			{ sessionId: "a", status: "working" },
+			{ sessionId: "b", status: "working" },
+		]);
+
+		const portal = container.querySelector<HTMLElement>('[data-session="b"] .companion-proc-portal');
+		const leap = container.querySelector<HTMLElement>('[data-session="b"] .companion-proc-transit');
+		// The ring still opens — the event is not hidden from anyone. It is simply over
+		// in a quarter of a second, and the pet's own visibility comes from an inline
+		// opacity rather than from a keyframe the media query has killed.
+		expect(portal?.style.animationDuration).toBe(`${PORTAL_REDUCED_MS}ms`);
+		expect(leap?.style.opacity).toBeTruthy();
 	});
 
 	it("places each Proc along the band with a composited transform", () => {
