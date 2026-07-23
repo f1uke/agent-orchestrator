@@ -64,6 +64,15 @@ export type ProcsProps = {
 	running?: boolean;
 	/** Face to face with the Proc it came to meet: a couple of hops. */
 	greeting?: boolean;
+	/**
+	 * In the air between a portal and the floor: drawn WITHOUT its ground prop.
+	 *
+	 * A ground is a PLACE — a bed for `todo`, a crate for `idle` — and a place is the
+	 * one thing a Proc cannot take with it. Left in, a session that ended while idle
+	 * leapt into its portal carrying the crate it had been sitting on. What it is
+	 * DOING still travels with it, laptop and all, exactly as it does on a stroll.
+	 */
+	travelling?: boolean;
 	/** The landing it has just made, if any: `seq` counts them, `strength` sizes the puff. */
 	bounce?: { seq: number; strength: number };
 	/** Drawn height of the FIGURE in px; props extend beyond it. */
@@ -79,6 +88,7 @@ export function Procs({
 	held = false,
 	running = false,
 	greeting = false,
+	travelling = false,
 	bounce,
 	size = DEFAULT_SIZE,
 	className,
@@ -87,7 +97,8 @@ export function Procs({
 	// the legs can never disagree with themselves about which pose comes next.
 	const cycleMs = running ? RUN_CYCLE_MS : WALK_CYCLE_MS;
 	const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
-	const scene = sceneFor(status);
+	const base = sceneFor(status);
+	const scene = travelling && base.ground !== "none" ? { ...base, ground: "none" as const } : base;
 	const frame = procsFrame(size);
 	const species = speciesById(cast.species);
 	const Rig = RIGS[cast.species];
