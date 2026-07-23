@@ -512,19 +512,24 @@ function CatLeg({
 	colour: string;
 	shade: string;
 }) {
-	const top = 92 - lift;
+	// ⚠ The top is well INSIDE the body, not level with its underside. A leg that starts
+	// where the body ends has nothing above it and reads as a stick propped against the
+	// animal — which was the human's word for the first two passes, that the legs looked
+	// detached. Sixteen units of overlap is what makes a leg part of the cat; the body's
+	// own ink rim, drawn after, is what hides the join.
+	const top = 80 - lift;
 	const foot = 118 - lift;
 	return (
 		<g data-cat-leg={back ? "back" : "front"}>
-			{back && <ellipse data-rim cx={round(x + 4)} cy={round(top + 7)} rx="9.5" ry="10" fill={shade} {...RIM} />}
+			{back && <ellipse data-rim cx={round(x + 4.5)} cy={round(top + 14)} rx="10.5" ry="12" fill={shade} {...RIM} />}
 			<path
 				data-rim
-				d={`M${round(x)} ${round(top)} L${round(x + 8)} ${round(top)} L${round(x + 6.6)} ${round(foot - 4)} L${round(x + 1.4)} ${round(foot - 4)} Z`}
+				d={`M${round(x)} ${round(top)} L${round(x + 9)} ${round(top)} L${round(x + 7.4)} ${round(foot - 4)} L${round(x + 1.6)} ${round(foot - 4)} Z`}
 				fill={colour}
 				strokeLinejoin="round"
 				{...RIM}
 			/>
-			<ellipse data-rim data-paw cx={round(x + 4)} cy={round(foot - 3)} rx="6" ry="4.4" fill={colour} {...RIM} />
+			<ellipse data-rim data-paw cx={round(x + 4.5)} cy={round(foot - 3)} rx="6.2" ry="4.2" fill={colour} {...RIM} />
 		</g>
 	);
 }
@@ -709,7 +714,7 @@ const CAT_EAR_ROOT = [24, 29] as const;
 /** Where the tail leaves the body and the cord takes over. */
 // A short thick stub where the tail leaves the body, which the CORD then continues.
 // The join is the whole idea: the lead is part of the animal rather than clipped to it.
-const CAT_TAIL = "M66 88 C 74 88 79 84 82 76 L 74 72 C 71 79 70 81 64 82 Z";
+const CAT_TAIL = "M68 90 C 76 90 80 85 83 76 L 75 72 C 72 80 71 82 66 84 Z";
 
 function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: RigProps) {
 	const headClip = `procs-head-${uid}`;
@@ -721,22 +726,22 @@ function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: Rig
 				</clipPath>
 			</defs>
 
-			<Strip uid={uid} top={88} walking={walking} cycleMs={cycleMs}>
+			<Strip uid={uid} top={78} walking={walking} cycleMs={cycleMs}>
 				{CAT_POSES.map((pose, index) => (
 					<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
 						{/* Back legs first: they are behind the body, and the body's rim should
 						    cover where they meet it. */}
 						<CatLeg x={57} lift={held ? -5 : pose.back[0]} back colour={cast.body} shade={cast.shade} />
-						<CatLeg x={69} lift={held ? -6 : pose.back[1]} back colour={cast.body} shade={cast.shade} />
-						<CatLeg x={20} lift={held ? -4 : pose.front[0]} back={false} colour={cast.body} shade={cast.shade} />
-						<CatLeg x={32} lift={held ? -6 : pose.front[1]} back={false} colour={cast.body} shade={cast.shade} />
+						<CatLeg x={68} lift={held ? -6 : pose.back[1]} back colour={cast.body} shade={cast.shade} />
+						<CatLeg x={24} lift={held ? -4 : pose.front[0]} back={false} colour={cast.body} shade={cast.shade} />
+						<CatLeg x={36} lift={held ? -6 : pose.front[1]} back={false} colour={cast.body} shade={cast.shade} />
 					</g>
 				))}
 			</Strip>
 
 			<g style={walking ? { animation: `procs-bob ${cycleMs}ms ease-in-out infinite alternate` } : undefined}>
 				<path data-rim data-part="tail" d={CAT_TAIL} fill={cast.shade} strokeLinejoin="round" {...RIM} />
-				<rect data-rim data-part="body" x="26" y="66" width="54" height="34" rx="17" fill={cast.shade} {...RIM} />
+				<rect data-rim data-part="body" x="17" y="62" width="63" height="32" rx="16" fill={cast.shade} {...RIM} />
 				<rect data-rim data-part="head" {...CAT_HEAD} fill={cast.body} {...RIM} />
 				<Blush
 					at={[
