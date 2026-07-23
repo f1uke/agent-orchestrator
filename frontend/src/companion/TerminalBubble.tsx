@@ -37,8 +37,6 @@ export type TerminalBubbleProps = {
 	title: string;
 	/** Daemon base URL from the main process (`http://127.0.0.1:<port>`). */
 	daemonUrl: string;
-	/** Where the card sits, in window coordinates: the Proc's own x, and the floor. */
-	anchorX: number;
 	onClose(): void;
 };
 
@@ -49,7 +47,7 @@ const STATE_TEXT: Record<BubbleAttachState, string> = {
 	error: "Could not attach to this session.",
 };
 
-export function TerminalBubble({ handleId, title, daemonUrl, anchorX, onClose }: TerminalBubbleProps) {
+export function TerminalBubble({ handleId, title, daemonUrl, onClose }: TerminalBubbleProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const [state, setState] = useState<BubbleAttachState>("connecting");
 	const [detail, setDetail] = useState<string | undefined>(undefined);
@@ -149,10 +147,6 @@ export function TerminalBubble({ handleId, title, daemonUrl, anchorX, onClose }:
 		return () => window.removeEventListener("keydown", onKeyDown, true);
 	}, [onClose]);
 
-	const left = Math.max(
-		12,
-		Math.min(anchorX - BUBBLE_TERMINAL_WIDTH / 2, window.innerWidth - BUBBLE_TERMINAL_WIDTH - 12),
-	);
 	const status = STATE_TEXT[state];
 
 	return (
@@ -162,9 +156,8 @@ export function TerminalBubble({ handleId, title, daemonUrl, anchorX, onClose }:
 			// attribute, so the window stays click-through everywhere else.
 			data-companion-interactive="true"
 			style={{
-				position: "absolute",
-				left,
-				bottom: 132,
+				// Position belongs to the stage, which is the only thing that knows where
+				// this card's Proc has walked to. The card only says how big it is.
 				width: BUBBLE_TERMINAL_WIDTH,
 				height: BUBBLE_TERMINAL_HEIGHT,
 				background: CARD_FILL,

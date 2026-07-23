@@ -887,3 +887,28 @@ body {
 	width: 0;
 	height: 0;
 }
+
+/* PROTOTYPE (terminal bubble). The open terminal is pinned to its Proc: it sits
+   inside the same transformed wrapper the Proc's chrome uses, so the transition
+   that carries a walking Proc across the band carries its terminal too. Which way
+   it opens is a discrete choice (see `attachmentSide`) rather than a per-frame
+   clamp, because a card that slides relative to its own Proc reads as one that
+   has come loose from it. */
+.companion-attachment {
+	position: absolute;
+	bottom: 132px;
+	pointer-events: auto;
+}
+
+.companion-attachment--centre {
+	left: calc(var(--procs-figure-left, 0px) + var(--procs-figure-width, 60px) / 2);
+	transform: translateX(-50%);
+}
+
+.companion-attachment--left {
+	left: calc(var(--procs-figure-left, 0px) - 12px);
+}
+
+.companion-attachment--right {
+	right: calc(100% - var(--procs-figure-left, 0px) - var(--procs-figure-width, 60px) - 12px);
+}

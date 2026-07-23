@@ -1603,12 +1603,28 @@ function initCompanionOverlay(): void {
 	companionOverlay = createCompanionOverlay({
 		createWindow: (options) => {
 			const win = new BrowserWindow({ ...options, show: true });
+			// PROTOTYPE instrumentation: every call that crosses into Electron, in order.
+			const trace = (what: string) => {
+				if (process.env.AO_COMPANION_PROTO_DEBUG_PORT) console.log(`[proto-main] ${Date.now() % 100000} ${what}`);
+			};
 			return {
 				setBounds: (bounds) => win.setBounds(bounds),
-				setIgnoreMouseEvents: (ignore, opts) => win.setIgnoreMouseEvents(ignore, opts),
-				setFocusable: (focusable) => win.setFocusable(focusable),
-				focus: () => win.focus(),
-				blur: () => win.blur(),
+				setIgnoreMouseEvents: (ignore, opts) => {
+					trace(`setIgnoreMouseEvents ignore=${ignore} forward=${opts?.forward === true}`);
+					win.setIgnoreMouseEvents(ignore, opts);
+				},
+				setFocusable: (focusable) => {
+					trace(`setFocusable ${focusable}`);
+					win.setFocusable(focusable);
+				},
+				focus: () => {
+					trace("focus");
+					win.focus();
+				},
+				blur: () => {
+					trace("blur");
+					win.blur();
+				},
 				setVisibleOnAllWorkspaces: (visible, opts) => win.setVisibleOnAllWorkspaces(visible, opts),
 				setAlwaysOnTop: (flag, level) => win.setAlwaysOnTop(flag, level as Parameters<typeof win.setAlwaysOnTop>[1]),
 				loadURL: (url) => win.loadURL(url),

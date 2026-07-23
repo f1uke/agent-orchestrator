@@ -2,8 +2,8 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
 import { castForSession, withSpecies } from "./cast";
-import { MEET_RUN_MAX_MS } from "./behaviour";
-import { CompanionStage } from "./CompanionStage";
+import { MEET_RUN_MAX_MS, type Pet } from "./behaviour";
+import { attachmentSide, CompanionStage, POINTER_REVALIDATE_MS } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
 import { LOOKS_STORAGE_KEY, serializeProjectLooks } from "./look-store";
 import { PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
@@ -283,13 +283,20 @@ describe("CompanionStage", () => {
 	});
 
 	it("hands the pointer back when it leaves the overlay without crossing off a Proc", () => {
+		// The pointer leaving the window is the release. It used to be released on the
+		// window losing FOCUS as well, as a second chance to notice a missed leave —
+		// but a focus change says nothing about where the mouse is, and once a
+		// terminal bubble borrows the keyboard and gives it back, `blur` fires in the
+		// middle of ordinary use with the pointer still on a Proc. The clock-based
+		// re-check (POINTER_REVALIDATE_MS) is the second chance now, and it asks the
+		// question a focus change cannot answer: what is under the pointer.
 		const onInteractiveChange = vi.fn();
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
 		push([{ sessionId: "a", status: "working" }]);
 
 		fireEvent.pointerMove(container.querySelector("[data-figure] rect")!, { bubbles: true });
-		fireEvent.blur(window);
+		fireEvent.pointerLeave(document, { bubbles: true });
 
 		expect(onInteractiveChange.mock.calls).toEqual([[true], [false]]);
 	});
@@ -866,5 +873,121 @@ describe("clicking a Proc to talk to its session", () => {
 		fireEvent.pointerUp(band, { bubbles: true, clientX: 100, clientY: 900 });
 
 		expect(onActivate).not.toHaveBeenCalled();
+	});
+});
+
+// PROTOTYPE (terminal bubble): the window's click-through state must survive the
+// two things that move WITHOUT the pointer moving — losing the keyboard, and the
+// scene changing under a resting cursor.
+describe("who owns the pointer when the pointer is not the thing that moved", () => {
+	function staged() {
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+		return { ...view, onInteractiveChange };
+	}
+	const figure = (container: HTMLElement) => container.querySelector("[data-figure] rect")!;
+
+	it("does NOT give the pointer back just because the window lost the keyboard", () => {
+		// The regression this exists for: a terminal bubble borrows the keyboard and
+		// gives it back when it closes, which fires `blur` with the pointer still
+		// sitting on a Proc. Releasing there made the window click-through under the
+		// cursor, so the next click went to the desktop behind instead of the pet —
+		// "I have to click twice".
+		const { container, onInteractiveChange } = staged();
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		expect(onInteractiveChange).toHaveBeenLastCalledWith(true);
+		onInteractiveChange.mockClear();
+		// jsdom has no layout, so elementFromPoint answers null; the point of the test
+		// is that blur does not blindly release, so pin it to "no release happened".
+		document.elementFromPoint = () => figure(container) as unknown as Element;
+
+		fireEvent.blur(window);
+
+		expect(onInteractiveChange).not.toHaveBeenCalledWith(false);
+	});
+
+	it("still gives the pointer back when the pointer genuinely leaves the window", () => {
+		const { container, onInteractiveChange } = staged();
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		onInteractiveChange.mockClear();
+
+		fireEvent.pointerLeave(document, { bubbles: true });
+
+		expect(onInteractiveChange).toHaveBeenLastCalledWith(false);
+	});
+
+	it("re-decides on a clock, so a Proc that walked under a resting cursor is clickable", () => {
+		vi.useFakeTimers();
+		try {
+			const onInteractiveChange = vi.fn();
+			const { feed, push } = stubFeed();
+			const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+			push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+			// The pointer rests on empty band…
+			document.elementFromPoint = () => document.body;
+			fireEvent.pointerMove(container.querySelector(".companion-stage")!, { bubbles: true, clientX: 10, clientY: 900 });
+			onInteractiveChange.mockClear();
+
+			// …and a Proc walks under it without the pointer moving at all.
+			document.elementFromPoint = () => figure(container) as unknown as Element;
+			act(() => vi.advanceTimersByTime(POINTER_REVALIDATE_MS * 2));
+
+			expect(onInteractiveChange).toHaveBeenLastCalledWith(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+// PROTOTYPE (terminal bubble): an open terminal belongs to one Proc and travels with it.
+describe("a terminal pinned to a Proc", () => {
+	it("is drawn inside its own Proc's frame, so it moves when the Proc moves", () => {
+		const { feed, push } = stubFeed();
+		const { container } = render(
+			<CompanionStage feed={feed} attachment={{ sessionId: "a", node: <div data-testid="card">terminal</div> }} />,
+		);
+		push([
+			{ sessionId: "a", status: "working", name: "one", project: "p" },
+			{ sessionId: "b", status: "working", name: "two", project: "p" },
+		]);
+
+		const holder = container.querySelector("[data-attachment-of='a']");
+		expect(holder).not.toBeNull();
+		expect(holder!.querySelector("[data-testid='card']")).not.toBeNull();
+		// The same transform the Proc itself carries — not a position of its own.
+		expect(holder!.getAttribute("style")).toContain("translate3d");
+	});
+
+	it("draws nothing when the session it belongs to has left the band", () => {
+		const { feed, push } = stubFeed();
+		const { container } = render(
+			<CompanionStage feed={feed} attachment={{ sessionId: "gone", node: <div data-testid="card" /> }} />,
+		);
+		push([{ sessionId: "a", status: "working", name: "one", project: "p" }]);
+
+		expect(container.querySelector("[data-testid='card']")).toBeNull();
+	});
+});
+
+describe("attachmentSide", () => {
+	const band = { minX: 0, maxX: 1000 };
+	const at = (x: number) => ({ x }) as Pet;
+
+	it("opens a card centred on its Proc in the middle of the band", () => {
+		expect(attachmentSide(at(500), band)).toBe("centre");
+	});
+
+	it("opens it rightwards from a Proc near the left edge, and leftwards near the right", () => {
+		// A card is far wider than a Proc; centred, it would hang off the screen.
+		expect(attachmentSide(at(40), band)).toBe("left");
+		expect(attachmentSide(at(960), band)).toBe("right");
+	});
+
+	it("never divides by zero on a band with no width", () => {
+		// A band with no width has no middle to be in; any answer will do as long as
+		// it is a finite one and the card still opens.
+		expect(attachmentSide(at(0), { minX: 0, maxX: 0 })).toBe("left");
 	});
 });

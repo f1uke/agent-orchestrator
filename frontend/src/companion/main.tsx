@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./companion.css";
 import type { World } from "./behaviour";
@@ -56,7 +56,7 @@ const DAEMON_WAIT_MS = 5_000;
 const PROTO_HANDLE = new URLSearchParams(window.location.search).get("protoHandle");
 
 /** The open bubble, or nothing. Exactly one at a time — one terminal, one keyboard. */
-type OpenBubble = { sessionId: string; handleId: string; title: string; anchorX: number };
+type OpenBubble = { sessionId: string; handleId: string; title: string };
 
 async function terminalHandleFor(daemonUrl: string, sessionId: string): Promise<string | null> {
 	if (PROTO_HANDLE) return PROTO_HANDLE;
@@ -115,7 +115,7 @@ function Overlay() {
 	useEffect(() => bridge?.onMainWindowOpened?.(() => closeBubble()), [closeBubble]);
 
 	const onActivate = useCallback(
-		(sessionId: string, at: { x: number; y: number }) => {
+		(sessionId: string) => {
 			void (async () => {
 				// Ask the main process where this click is answered. It is the only one
 				// that knows whether the board window exists, and the only one that can
@@ -130,35 +130,50 @@ function Overlay() {
 					bridge?.releaseKeyboard?.();
 					return;
 				}
-				setBubble({ sessionId, handleId, title: sessionId, anchorX: at.x });
+				setBubble({ sessionId, handleId, title: sessionId });
 			})();
 		},
 		[daemonUrl],
 	);
 
-	const onInteractiveChange = useCallback((interactive: boolean) => bridge?.setInteractive(interactive), []);
+	const onInteractiveChange = useCallback((interactive: boolean) => {
+		console.log("[proto] setInteractive", interactive, Date.now() % 100000);
+		bridge?.setInteractive(interactive);
+	}, []);
 	const onRequestLook = useCallback((sessionId: string) => bridge?.requestLook?.(sessionId), []);
 
+	// The card is handed to the stage rather than drawn beside it: it belongs to ONE
+	// Proc and has to travel with it. Memoised so a stage re-render (which happens
+	// on every animation frame) does not rebuild the terminal's element and make
+	// React reconcile the xterm underneath it.
+	const attachment = useMemo(
+		() =>
+			bubble && daemonUrl
+				? {
+						sessionId: bubble.sessionId,
+						node: (
+							<TerminalBubble
+								key={bubble.sessionId}
+								handleId={bubble.handleId}
+								title={bubble.title}
+								daemonUrl={daemonUrl}
+								onClose={closeBubble}
+							/>
+						),
+					}
+				: undefined,
+		[bubble, daemonUrl, closeBubble],
+	);
+
 	return (
-		<>
-			<CompanionStage
-				feed={live ?? mock}
-				bubbleFor={live ? (id) => live.bubbleFor(id) : undefined}
-				onInteractiveChange={onInteractiveChange}
-				onRequestLook={onRequestLook}
-				onActivate={onActivate}
-			/>
-			{bubble && daemonUrl ? (
-				<TerminalBubble
-					key={bubble.sessionId}
-					handleId={bubble.handleId}
-					title={bubble.title}
-					daemonUrl={daemonUrl}
-					anchorX={bubble.anchorX}
-					onClose={closeBubble}
-				/>
-			) : null}
-		</>
+		<CompanionStage
+			feed={live ?? mock}
+			bubbleFor={live ? (id) => live.bubbleFor(id) : undefined}
+			onInteractiveChange={onInteractiveChange}
+			onRequestLook={onRequestLook}
+			onActivate={onActivate}
+			attachment={attachment}
+		/>
 	);
 }
 

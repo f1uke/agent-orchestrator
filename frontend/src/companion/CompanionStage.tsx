@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	createWorld,
 	dragPet,
+	drawnX,
 	grabPet,
 	releasePet,
 	startConversation,
@@ -74,6 +75,15 @@ export const CLICK_SLOP_PX = 5;
  */
 export const CLICK_HOLD_MS = 400;
 
+/**
+ * How often the overlay re-asks who owns the pointer while the pointer is still.
+ *
+ * Ten times a second: a hit test is cheap, the answer only crosses IPC when it
+ * changes, and a Proc that has walked under a resting cursor becomes clickable
+ * within a frame or two rather than "when you jiggle the mouse".
+ */
+export const POINTER_REVALIDATE_MS = 100;
+
 export type CompanionStageProps = {
 	feed?: CompanionFeed;
 	/**
@@ -110,6 +120,16 @@ export type CompanionStageProps = {
 	 * never end in a click either.
 	 */
 	onActivate?: (sessionId: string, at: { x: number; y: number }) => void;
+	/**
+	 * PROTOTYPE (terminal bubble): something pinned to ONE Proc — its open terminal.
+	 *
+	 * It is drawn here rather than by the caller because only the stage knows where
+	 * a Proc actually IS: a walking Proc's `x` is where it set off from, and the
+	 * compositor is carrying it across the screen on a transition. The card rides
+	 * that same transition, so it stays over its own Proc to the pixel instead of
+	 * being left standing where the Proc used to be.
+	 */
+	attachment?: { sessionId: string; node: React.ReactNode };
 	/**
 	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
 	 * reduced-motion path is a real behaviour with its own rules, and it is not
@@ -153,6 +173,7 @@ export function CompanionStage({
 	onInteractiveChange,
 	onRequestLook,
 	onActivate,
+	attachment,
 	reducedMotion,
 	onStage,
 	castFor: castForOverride,
@@ -322,6 +343,18 @@ export function CompanionStage({
 		let grabbed: string | null = null;
 		let shake = newShakeTrack();
 		/**
+		 * Where the pointer was last seen, so the window's click-through state can be
+		 * re-decided WITHOUT a pointer event.
+		 *
+		 * It has to be re-decidable, because the pointer is not the only thing that
+		 * moves: a Proc walks under a resting cursor, and a card closes out from under
+		 * one. Deciding only on pointer events leaves the window in whatever state the
+		 * last MOVE left it in — which is how a click after closing a terminal fell
+		 * straight through to the desktop, and how a Proc that walked under a still
+		 * cursor could not be clicked at all.
+		 */
+		let lastPointer: { x: number; y: number } | null = null;
+		/**
 		 * The press that is still eligible to be a CLICK, and stops being one the
 		 * moment the hand moves past the slop. Kept beside `grabbed` rather than
 		 * inside it because a press that has become a drag must still finish its
@@ -336,7 +369,16 @@ export function CompanionStage({
 			return target.closest("[data-proc]")?.getAttribute("data-session") ?? null;
 		};
 
+		/** Re-decide who owns the pointer from where it actually is right now. */
+		const revalidate = () => {
+			// jsdom has no layout and so no hit testing; there is nothing to re-decide
+			// there, and the pointer-event paths above are what its tests drive.
+			if (!lastPointer || typeof document.elementFromPoint !== "function") return;
+			tracker.update(document.elementFromPoint(lastPointer.x, lastPointer.y));
+		};
+
 		const onMove = (event: PointerEvent) => {
+			lastPointer = { x: event.clientX, y: event.clientY };
 			tracker.update(event.target);
 			// Press-and-shake is a COMMAND laid over the drag rather than instead of it:
 			// the Proc goes on following the pointer throughout, because taking it out of
@@ -375,6 +417,13 @@ export function CompanionStage({
 		};
 
 		const onDown = (event: PointerEvent) => {
+			console.log(
+				"[proto] pointerdown overPet=",
+				isOverPet(event.target),
+				"target=",
+				(event.target as Element)?.tagName,
+				Date.now() % 100000,
+			);
 			tracker.update(event.target);
 			if (!isOverPet(event.target)) return;
 			// LEFT button only. A right-press was never meant to pick a Proc up, and it
@@ -431,9 +480,27 @@ export function CompanionStage({
 			tracker.update(event.target);
 		};
 
+		/** The pointer genuinely left the window: nothing here owns it any more. */
 		const onOut = () => {
+			lastPointer = null;
 			tracker.release();
 			setHover(idleHover());
+		};
+
+		/**
+		 * The WINDOW lost the keyboard — which says nothing about where the mouse is.
+		 *
+		 * This used to release the pointer outright, which was harmless while the
+		 * overlay could never be focused at all. Now that a terminal borrows the
+		 * keyboard and gives it back, `blur` fires in the middle of ordinary use, with
+		 * the pointer sitting on a Proc — and releasing there made the window
+		 * click-through under the cursor, so the next click went to the desktop behind
+		 * instead of to the pet. Close the tooltip (it asserts a hover we can no longer
+		 * be sure of) and re-decide the pointer from where the pointer actually is.
+		 */
+		const onWindowBlur = () => {
+			setHover(idleHover());
+			revalidate();
 		};
 
 		// The look gesture. It opens the library in the MAIN WINDOW rather than drawing
@@ -452,21 +519,27 @@ export function CompanionStage({
 			onRequestLook?.(id);
 		};
 
+		// The scene moves on its own — Procs walk, cards open and close — so the
+		// question "is the pointer on something of ours" has to be asked on a clock as
+		// well as on pointer events. It only crosses IPC when the ANSWER changes.
+		const revalidateTimer = setInterval(revalidate, POINTER_REVALIDATE_MS);
+
 		document.addEventListener("pointermove", onMove, true);
 		document.addEventListener("pointerdown", onDown, true);
 		document.addEventListener("pointerup", onUp, true);
 		document.addEventListener("pointercancel", onUp, true);
 		document.addEventListener("pointerleave", onOut, true);
 		document.addEventListener("contextmenu", onMenu, true);
-		window.addEventListener("blur", onOut);
+		window.addEventListener("blur", onWindowBlur);
 		return () => {
+			clearInterval(revalidateTimer);
 			document.removeEventListener("pointermove", onMove, true);
 			document.removeEventListener("pointerdown", onDown, true);
 			document.removeEventListener("pointerup", onUp, true);
 			document.removeEventListener("pointercancel", onUp, true);
 			document.removeEventListener("pointerleave", onOut, true);
 			document.removeEventListener("contextmenu", onMenu, true);
-			window.removeEventListener("blur", onOut);
+			window.removeEventListener("blur", onWindowBlur);
 			tracker.release();
 		};
 	}, [onInteractiveChange, onRequestLook, onActivate]);
@@ -520,6 +593,41 @@ export function CompanionStage({
 		setCardSizes((current) => (sameSizes(current, measured) ? current : measured));
 	}, [bubbleTick]);
 
+	// The Proc whose terminal is open, if it is still on the band. A session that
+	// ended while its terminal was up simply has no Proc to pin the card to.
+	const attachedPet = attachment ? (world.pets.find((pet) => pet.id === attachment.sessionId) ?? null) : null;
+
+	// A Proc you are TALKING to stands still.
+	//
+	// The card rides its Proc, so it would otherwise slide across the desktop mid
+	// sentence while you were typing into it — and a terminal that wanders is a
+	// terminal you cannot use. It stops where it is (`drawnX`, so there is no jump
+	// from wherever the walk had actually got to) and holds off on strolling until
+	// the terminal closes. It can still be picked up and thrown; the card follows.
+	const attachedId = attachment?.sessionId;
+	useEffect(() => {
+		if (!attachedId) return;
+		const stop = (current: World): World => ({
+			...current,
+			pets: current.pets.map((pet) =>
+				pet.id !== attachedId || pet.motion.kind !== "walking"
+					? pet
+					: { ...pet, x: drawnX(pet, Date.now()), motion: { kind: "standing" }, restUntil: Number.MAX_SAFE_INTEGER },
+			),
+		});
+		setWorld(stop);
+		// A walk can begin between renders; hold the Proc for as long as its terminal
+		// is open rather than only at the moment it opened.
+		const timer = setInterval(() => setWorld(stop), TICK_MS);
+		return () => {
+			clearInterval(timer);
+			setWorld((current) => ({
+				...current,
+				pets: current.pets.map((pet) => (pet.id === attachedId ? { ...pet, restUntil: Date.now() } : pet)),
+			}));
+		};
+	}, [attachedId]);
+
 	// How high each bubble has to sit to clear the ones before it. Computed for the
 	// whole band at once — a bubble cannot know on its own whether it is in the way.
 	const offsets = stackBubbles(
@@ -541,6 +649,13 @@ export function CompanionStage({
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>
+				{attachedPet ? (
+					<div className="companion-proc" style={placement(attachedPet)} data-attachment-of={attachedPet.id}>
+						<div className={`companion-attachment companion-attachment--${attachmentSide(attachedPet, world.band)}`}>
+							{attachment?.node}
+						</div>
+					</div>
+				) : null}
 				{speaking.map((pet) => (
 					<ProcChrome
 						key={pet.id}
@@ -568,6 +683,23 @@ function paintOrder(pets: Pet[]): Pet[] {
 }
 
 /** Everything about where a Proc IS: the same transform for its art and its chrome. */
+/**
+ * Which way an attached card opens from its Proc.
+ *
+ * The card is far wider than a Proc, so a card that always centred itself would
+ * hang off the screen for every Proc near an edge. Three discrete answers rather
+ * than a per-frame clamp: clamping would fight the transition that carries the
+ * card along with a walking Proc, and a card that slides sideways relative to its
+ * own Proc reads as a card that has come loose from it.
+ */
+export function attachmentSide(pet: Pet, band: Band): "left" | "centre" | "right" {
+	const span = Math.max(1, band.maxX - band.minX);
+	const position = (pet.x - band.minX) / span;
+	if (position < 0.25) return "left";
+	if (position > 0.75) return "right";
+	return "centre";
+}
+
 function placement(pet: Pet): React.CSSProperties {
 	// While walking, paint at the DESTINATION and let the transition carry the Proc
 	// there over exactly the walk's duration; the engine sets `x` to the same value
