@@ -24,6 +24,7 @@ import {
 	syncActivities,
 	tick,
 	walkingCount,
+	walkSlots,
 	type Pet,
 	type World,
 } from "./behaviour";
@@ -201,7 +202,13 @@ describe("walking", () => {
 	it("counts an animated SCENE against the budget, not just a walker", () => {
 		// With the full art most of the motion on screen is scenes — sparks, zzz,
 		// confetti, a streaming cord — so the backstop only means anything if those
-		// count. A deskful of busy sessions must stop the strolling, not add to it.
+		// count. A deskful of busy sessions THINS the strolling to a single walker.
+		//
+		// It used to stop it dead, and that was the bug: the scenes are a status tell
+		// the session has no say in, so charging them against walking banned strolling
+		// on any ordinary working desktop (measured: eight `working` Procs with the
+		// whole band to themselves started nothing at all in two minutes). See "a busy
+		// screen still has a living band".
 		const busy = ready([
 			["a", "ci_failed"],
 			["b", "ci_failed"],
@@ -212,10 +219,11 @@ describe("walking", () => {
 			["g", "ci_failed"],
 			["h", "ci_failed"],
 			["walker", "pr_open"],
+			["second", "pr_open"],
 		]);
 		const next = tick(busy, T0 + 1, half);
 
-		expect(petById(next, "walker").motion.kind).toBe("standing");
+		expect(walkingCount(next)).toBe(1);
 	});
 
 	it("still lets a Proc stroll when only a few scenes are animating", () => {
@@ -608,6 +616,200 @@ describe("crowding", () => {
 
 		expect(walker.motion.kind).toBe("walking");
 		expect(walker.x).toBe(520);
+	});
+});
+
+describe("a crowd is not a cage", () => {
+	// The human's report (2026-07-23): "when the characters stand close to each
+	// other, they barely walk at all". Reproduced on the real overlay and measured
+	// over two minutes of ticks: a lone Proc with the band to itself starts three
+	// strolls; a Proc standing 165px from its neighbours starts NONE, ever; a band
+	// of twelve does not move one pixel.
+	//
+	// A stroll was planned by SAMPLING. `planWalk` drew ONE distance, tried it
+	// either side of the Proc, and if both spots were within a clearance of somebody
+	// it abandoned the whole stroll for another 15-60s rest. The real clearance is
+	// the drawn frame — 155px — and Procs settle about 165px apart, so the free
+	// window around one is ~14px while the shortest stroll is 60px. Every draw is
+	// rejected, for ever. A crowd was an ABSORBING state: a Proc that wandered into
+	// one never wandered out, and the band silted up into the row of statues the
+	// human was looking at.
+	//
+	// Crowding is a REPULSION, not a veto. The dice say where a Proc would like to
+	// go; if somebody is standing there it goes to the roomiest spot within a
+	// stroll's reach that it can actually stand on, and only stands still when the
+	// band really has nowhere left to put it.
+	const SPACING = 155;
+
+	function crowd(at: Record<string, number>, status: Pet["status"] = "pr_open"): World {
+		const base = syncActivities(
+			{ ...world(), spacing: SPACING },
+			Object.keys(at).map((id) => activity(id, status)),
+			T0,
+			half,
+		);
+		return { ...base, pets: base.pets.map((p) => ({ ...p, x: at[p.id], restUntil: T0 })) };
+	}
+
+	/** A long deterministic run, so "over time" is a fact rather than a hope. */
+	function minutes(start: World, count: number): { world: World; strolled: Set<string> } {
+		let seed = 7;
+		const rng = () => {
+			seed = (seed * 1103515245 + 12345) % 2147483648;
+			return seed / 2147483648;
+		};
+		let next = start;
+		const strolled = new Set<string>();
+		for (let i = 0; i < count * 60; i++) {
+			next = tick(next, T0 + i * 1_000, rng);
+			for (const pet of next.pets) if (pet.motion.kind === "walking") strolled.add(pet.id);
+		}
+		return { world: next, strolled };
+	}
+
+	it("sets off for a spot it can stand on when the one the dice picked is taken", () => {
+		// `a` is at the closed end of a row: the spot the dice offer 160px to its
+		// right is where `b` stands, and 160px to its left is off the band. There is
+		// open floor behind it, so standing still is not the honest answer.
+		const next = tick(crowd({ a: 100, b: 265, c: 430 }), T0 + 1, half);
+		const a = petById(next, "a");
+
+		expect(a.motion.kind).toBe("walking");
+		if (a.motion.kind !== "walking") return;
+		for (const neighbour of [265, 430]) {
+			expect(Math.abs(a.motion.toX - neighbour)).toBeGreaterThanOrEqual(SPACING);
+		}
+	});
+
+	it("keeps a stroll a stroll: no further than one, and no shorter", () => {
+		// The way OUT of a crowd must not become a sprint across the desktop, nor a
+		// twitch on the spot. Whatever the search finds, it is still one stroll.
+		const next = tick(crowd({ a: 100, b: 265, c: 430 }), T0 + 1, half);
+		const a = petById(next, "a");
+
+		if (a.motion.kind !== "walking") throw new Error("expected a walk");
+		const distance = Math.abs(a.motion.toX - a.motion.fromX);
+		expect(distance).toBeGreaterThanOrEqual(WALK_MIN_PX);
+		expect(distance).toBeLessThanOrEqual(WALK_MAX_PX);
+	});
+
+	it("does not pin a dense row to standing for ever", () => {
+		// Five Procs a clearance-and-a-bit apart. Before the fix only the one at the
+		// open end ever moved: the rest were pinned for as long as the row held.
+		const { strolled } = minutes(crowd({ a: 20, b: 185, c: 350, d: 515, e: 680 }), 2);
+
+		expect([...strolled].sort()).toEqual(["a", "b", "c", "d", "e"]);
+	});
+
+	it("loosens a dense row instead of leaving it a row", () => {
+		const start = crowd({ a: 20, b: 185, c: 350, d: 515, e: 680 });
+		const tightestBefore = tightestGap(start);
+		const { world: after } = minutes(start, 2);
+
+		expect(tightestGap(after)).toBeGreaterThan(tightestBefore);
+	});
+
+	it("never stands a Proc on top of another, however tight the band is", () => {
+		// The repulsion may not buy its liveliness with overlap: every destination
+		// the engine picks is still a clearance clear of everybody else's.
+		const { world: after } = minutes(crowd({ a: 20, b: 185, c: 350, d: 515, e: 680 }), 2);
+
+		expect(tightestGap(after)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	it("leaves a Proc with nowhere to go standing, rather than shuffling it on the spot", () => {
+		// A band packed to its clearance, edge to edge: there is no spot left that is
+		// not already somebody's. Standing is then the truthful answer, and it must
+		// KEEP being the answer — a Proc edging back and forth for ever, because each
+		// spot looks better from the other one, is the worse bug.
+		const row = { a: 0, b: 155, c: 310, d: 465, e: 620, f: 775, g: 930 };
+		const packed = { ...crowd(row), band: { minX: 0, maxX: 930 } };
+		const before = positionsOf(packed);
+		const { world: after } = minutes(packed, 2);
+
+		expect(walkingCount(after)).toBe(0);
+		expect(positionsOf(after)).toEqual(before);
+	});
+
+	it("spends the slack at the end of a tight row and then settles", () => {
+		// The same row with a little band left over. It spreads into what there is —
+		// and then STOPS, rather than trading the gap back and forth for ever.
+		const row = { a: 0, b: 155, c: 310, d: 465, e: 620, f: 775, g: 930 };
+		const { world: spread } = minutes({ ...crowd(row), band: { minX: 0, maxX: 1000 } }, 2);
+		const settled = positionsOf(spread);
+		const { world: later } = minutes(spread, 2);
+
+		expect(tightestGap(spread)).toBeGreaterThanOrEqual(SPACING);
+		expect(positionsOf(later)).toEqual(settled);
+	});
+});
+
+/** The closest two Procs on the band stand to each other. */
+function tightestGap(w: World): number {
+	const xs = positionsOf(w);
+	let closest = Number.POSITIVE_INFINITY;
+	for (let i = 1; i < xs.length; i++) closest = Math.min(closest, xs[i] - xs[i - 1]);
+	return closest;
+}
+
+describe("a busy screen still has a living band", () => {
+	// The second half of the same report, and a separate cause. Measured on the
+	// engine: EIGHT `working` Procs spread 230px apart — all the room in the world —
+	// started NOT ONE stroll in two minutes, while seven of them started thirteen.
+	// The cliff sits exactly at MAX_ANIMATING.
+	//
+	// `working` streams its cord, which counts as an animating scene, and the walk
+	// budget was `MAX_ANIMATING - animatingCount`. So a status tell the session has
+	// no say in — five of the fifteen scenes animate, `working` among them — was
+	// charged against the optional, transform-only, compositor-cheap business of
+	// walking, and an ordinary day's worth of running sessions banned strolling
+	// outright.
+	//
+	// The backstop keeps its job: a busy screen still moves LESS than a quiet one.
+	// It may not stop moving altogether, because a band where nothing can ever move
+	// is not a calmer desktop, it is a broken one.
+
+	function busy(count: number, status: Pet["status"]): World {
+		const base = syncActivities(
+			{ ...world(), spacing: 155 },
+			Array.from({ length: count }, (_, i) => activity(`p${i}`, status)),
+			T0,
+			half,
+		);
+		// Spread across the whole band, so crowding cannot be what stops them.
+		return {
+			...base,
+			pets: base.pets.map((p, i) => ({ ...p, x: BAND.minX + (i * (BAND.maxX - BAND.minX)) / count, restUntil: T0 })),
+		};
+	}
+
+	it("still strolls when every Proc on the band has an animating scene", () => {
+		let w = busy(MAX_ANIMATING, "working");
+		let strolled = false;
+		for (let i = 0; i < 120 && !strolled; i++) {
+			w = tick(w, T0 + i * 1_000, half);
+			strolled = walkingCount(w) > 0;
+		}
+
+		expect(strolled).toBe(true);
+	});
+
+	it("holds a busy screen to fewer strollers than a quiet one", () => {
+		// The backstop, stated as the fact it is meant to be rather than as the
+		// accident it had become.
+		const loud = busy(MAX_ANIMATING, "working");
+		const quiet = busy(MAX_ANIMATING, "pr_open");
+
+		expect(walkSlots(loud)).toBeLessThan(walkSlots(quiet));
+		expect(walkSlots(loud)).toBeGreaterThan(0);
+	});
+
+	it("never lets more than the ceiling stroll at once, whatever else is animating", () => {
+		let w = busy(12, "working");
+		for (let i = 0; i < 240; i++) {
+			w = tick(w, T0 + i * 1_000, half);
+			expect(walkingCount(w)).toBeLessThanOrEqual(MAX_CONCURRENT_WALKS);
+		}
 	});
 });
 

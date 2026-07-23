@@ -44,6 +44,24 @@ export const REST_MAX_MS = 60_000;
 export const MAX_CONCURRENT_WALKS = 2;
 /** Total animating Procs. A backstop above the walker cap, not the binding constraint. */
 export const MAX_ANIMATING = 8;
+/**
+ * The band never goes completely dead, however busy the screen is.
+ *
+ * {@link MAX_ANIMATING} was written as a backstop ABOVE the walker cap, and with
+ * the full art it quietly became an absolute ban instead: five of the fifteen
+ * scenes animate, `working` (a streaming cord) among them, so eight running
+ * sessions used up the whole budget on scenery and left nothing for walking.
+ * Measured on the engine — eight `working` Procs spread 230px apart, with all the
+ * room in the world, started not one stroll in two minutes; seven of them started
+ * thirteen.
+ *
+ * A Proc's scene is a status tell it has no say in. Charging it against the
+ * optional, transform-only, compositor-cheap business of strolling turned an
+ * ordinary working desktop into a still picture — which is the thing the whole
+ * cast exists not to be. So a busy screen still strolls LESS (two movers become
+ * one), and never strolls not at all.
+ */
+export const MIN_CONCURRENT_WALKS = 1;
 
 /** The walk cycle is four beats driven by `steps(4, end)` in the renderer. */
 export const WALK_CYCLE_STEPS = 4;
@@ -289,9 +307,19 @@ export function animatingCount(world: World): number {
 	return world.pets.filter((pet) => pet.motion.kind !== "standing" || sceneAnimates(pet.status)).length;
 }
 
-/** How many more Procs may start a stroll right now. Never negative. */
+/**
+ * How many more Procs may start a stroll right now. Never negative.
+ *
+ * The animation budget decides how many walkers the screen will bear — the
+ * walkers it is already carrying are part of `animatingCount`, so they are added
+ * back to turn headroom into a ceiling — and that ceiling is then held between
+ * {@link MIN_CONCURRENT_WALKS} and {@link MAX_CONCURRENT_WALKS}.
+ */
 export function walkSlots(world: World): number {
-	return Math.max(0, Math.min(MAX_CONCURRENT_WALKS - walkingCount(world), MAX_ANIMATING - animatingCount(world)));
+	const walking = walkingCount(world);
+	const headroom = MAX_ANIMATING - animatingCount(world) + walking;
+	const ceiling = Math.max(MIN_CONCURRENT_WALKS, Math.min(MAX_CONCURRENT_WALKS, headroom));
+	return Math.max(0, ceiling - walking);
 }
 
 /**
@@ -302,9 +330,27 @@ function claimedX(pet: Pet): number {
 	return pet.motion.kind === "walking" ? pet.motion.toX : pet.x;
 }
 
+/**
+ * How much space a Proc standing at `x` would have to itself: the distance to the
+ * nearest OTHER Proc's claimed spot, or Infinity when it has the band to itself.
+ *
+ * The one measure of crowding in the engine. "Is this spot free?" and "which of
+ * these spots has the most room?" are the same question asked twice, and asking
+ * them of one function is what keeps a stroll's destination and the standing
+ * clearance from ever drifting apart.
+ */
+function roomAt(x: number, pets: Pet[], exceptId?: string): number {
+	let closest = Number.POSITIVE_INFINITY;
+	for (const pet of pets) {
+		if (pet.id === exceptId) continue;
+		closest = Math.min(closest, Math.abs(claimedX(pet) - x));
+	}
+	return closest;
+}
+
 /** True when `x` is clear of every Proc except `exceptId`. */
 function isFree(x: number, pets: Pet[], spacing: number, exceptId?: string): boolean {
-	return pets.every((pet) => pet.id === exceptId || Math.abs(claimedX(pet) - x) >= spacing);
+	return roomAt(x, pets, exceptId) >= spacing;
 }
 
 /**
@@ -371,6 +417,13 @@ function pickRest(now: number, rng: Rng): number {
 }
 
 /**
+ * How finely the search below looks for somewhere to stand. Small enough to find
+ * the gap between two Procs, coarse enough that the whole scan is a few dozen
+ * comparisons on a tick that already only runs twice a second.
+ */
+const PLAN_STEP_PX = 8;
+
+/**
  * Where the next stroll goes. Draws duration, distance and direction (always three
  * rng reads, whatever the outcome, so a caller can reason about the sequence), then
  * turns around rather than let a Proc half-exit the band. Returns null when the band
@@ -380,7 +433,8 @@ function planWalk(
 	x: number,
 	band: Band,
 	rng: Rng,
-	isClear: (toX: number) => boolean,
+	room: (toX: number) => number,
+	spacing: number,
 ): { toX: number; durationMs: number } | null {
 	const durationMs = WALK_MIN_MS + rng() * (WALK_MAX_MS - WALK_MIN_MS);
 	const distance = WALK_MIN_PX + rng() * (WALK_MAX_PX - WALK_MIN_PX);
@@ -392,11 +446,73 @@ function planWalk(
 	for (const direction of [preferred, -preferred]) {
 		const raw = x + direction * distance;
 		if (raw < band.minX || raw > band.maxX) continue;
-		if (!isClear(raw)) continue;
+		if (room(raw) < spacing) continue;
 		if (Math.abs(raw - x) < 1) continue;
 		return { toX: raw, durationMs };
 	}
-	return null;
+
+	// Both spots the dice offered belong to somebody else. That is a reason to walk
+	// SOMEWHERE ELSE, not a reason to stand still — and taking it as a reason to
+	// stand still is what froze the band.
+	//
+	// The real clearance is the whole drawn frame, and Procs settle a little over
+	// one of those apart, so the free window around a Proc in company is a dozen or
+	// so pixels while the shortest stroll is sixty. Every draw was rejected, every
+	// time, and a crowd became a place a Proc could wander into and never out of.
+	const escape = escapeTo(x, x + preferred * distance, band, room, spacing);
+	return escape === null ? null : { toX: escape, durationMs };
+}
+
+/**
+ * The roomiest spot within a stroll's reach that this Proc could actually stand on.
+ *
+ * Crowding as a REPULSION rather than a veto: a Proc that cannot go where the dice
+ * pointed heads for whatever open ground it can reach instead, which is what makes
+ * a huddle loosen on its own instead of setting like concrete. Searched outward
+ * from the spot the dice asked for, so the dice still steer a tie.
+ *
+ * It moves only for MORE room than it already has, which is what makes this a
+ * repulsion and not a fidget. Room can then only go up, so there is no pair of
+ * spots a Proc can swing between: one that took any clear spot going ping-ponged a
+ * Proc at the end of a row back and forth across the last gap on the band for ever.
+ * That also stops it landing hard up against the neighbour it has just stepped
+ * over, which would pack the band tighter on every stroll.
+ *
+ * The result is still one ordinary stroll: never shorter than {@link WALK_MIN_PX},
+ * so a boxed-in Proc settles rather than twitching on the spot, and never longer
+ * than {@link WALK_MAX_PX}, so leaving a crowd never becomes a sprint across the
+ * desktop. Null when the band has nowhere better to put it, which on a band packed
+ * to its clearance is the honest answer.
+ */
+function escapeTo(
+	x: number,
+	wanted: number,
+	band: Band,
+	room: (toX: number) => number,
+	spacing: number,
+): number | null {
+	let best: number | null = null;
+	// The room it has standing where it is. Nothing that does not beat this is worth
+	// crossing the band for.
+	let bestRoom = room(x);
+
+	const weigh = (candidate: number) => {
+		if (candidate < band.minX || candidate > band.maxX) return;
+		const travelled = Math.abs(candidate - x);
+		if (travelled < WALK_MIN_PX || travelled > WALK_MAX_PX) return;
+		const space = room(candidate);
+		if (space < spacing || space <= bestRoom) return;
+		best = candidate;
+		bestRoom = space;
+	};
+
+	weigh(wanted);
+	// Far enough either way to cover the whole reach from wherever the dice pointed.
+	for (let offset = PLAN_STEP_PX; offset <= 2 * WALK_MAX_PX; offset += PLAN_STEP_PX) {
+		weigh(wanted - offset);
+		weigh(wanted + offset);
+	}
+	return best;
 }
 
 function facingFor(fromX: number, toX: number): Facing {
@@ -1068,7 +1184,7 @@ function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolea
 	if (world.reducedMotion) return pet;
 	if (!hasSlot || now < pet.restUntil) return pet;
 
-	const plan = planWalk(pet.x, world.band, rng, (toX) => isFree(toX, world.pets, world.spacing, pet.id));
+	const plan = planWalk(pet.x, world.band, rng, (toX) => roomAt(toX, world.pets, pet.id), world.spacing);
 	if (!plan) return { ...pet, restUntil: pickRest(now, rng) };
 	return {
 		...pet,
