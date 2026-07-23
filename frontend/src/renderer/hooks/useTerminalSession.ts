@@ -7,13 +7,11 @@
 // `exited`/`error` it invalidates the workspaces query and lets the daemon's
 // derived status flow back (docs/architecture.md).
 
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiBaseUrl } from "../lib/api-client";
 import { captureRendererEvent } from "../lib/telemetry";
 import { createTerminalMux, muxUrlFromApiBase, type TerminalMux } from "../lib/terminal-mux";
-import type { WorkspaceSession } from "../types/workspace";
-import { workspaceQueryKey } from "./useWorkspaceQuery";
+import type { SessionStatus } from "../types/workspace";
 
 /**
  * The slice of xterm's Terminal the attachment needs. Structural, so tests can
@@ -45,9 +43,30 @@ export type TerminalSessionState =
 	| "exited" // PTY process ended; terminal kept for scrollback
 	| "error"; // server reported a pane error; no automatic retry
 
+/**
+ * The two things an attachment needs to know about a session.
+ *
+ * Narrow on purpose. The board passes its full `WorkspaceSession` and it fits
+ * structurally; the desktop companion's terminal window knows only an id and a
+ * pane, and it fits too. Asking for the whole session type would have made this
+ * hook the board's alone, which is exactly what stopped the two surfaces sharing
+ * one attachment in the first place.
+ */
+export type AttachableSession = {
+	terminalHandleId?: string;
+	status?: SessionStatus;
+};
+
 export type UseTerminalSessionOptions = {
 	/** Gates auto-reattach: when false, a dropped socket waits instead of retrying. */
 	daemonReady: boolean;
+	/**
+	 * The session's runtime state changed under us — the PTY exited, or the pane
+	 * errored. The frontend never writes a display status (docs/architecture.md), so
+	 * this is "go and re-read it", not "here is what it is now". The board re-fetches
+	 * its workspace query; a surface with no query client simply does nothing.
+	 */
+	onSessionChanged?: () => void;
 	/** Test seam: build the mux client. Defaults to a fresh socket against the current API base. */
 	createMux?: () => TerminalMux;
 };
@@ -74,8 +93,7 @@ function defaultCreateMux(): TerminalMux {
 	return createTerminalMux(muxUrlFromApiBase(getApiBaseUrl()));
 }
 
-export function useTerminalSession(session: WorkspaceSession | undefined, options: UseTerminalSessionOptions) {
-	const queryClient = useQueryClient();
+export function useTerminalSession(session: AttachableSession | undefined, options: UseTerminalSessionOptions) {
 	const [state, setState] = useState<TerminalSessionState>("idle");
 	const [error, setError] = useState<string | undefined>(undefined);
 
@@ -108,8 +126,8 @@ export function useTerminalSession(session: WorkspaceSession | undefined, option
 	}, []);
 
 	const invalidateWorkspaces = useCallback(() => {
-		void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
-	}, [queryClient]);
+		optionsRef.current.onSessionChanged?.();
+	}, []);
 
 	const teardownMux = useCallback(() => {
 		const r = runtime.current;

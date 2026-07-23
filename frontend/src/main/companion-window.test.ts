@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { COMPANION_CONTENT_HEIGHT, petFrame } from "../companion/layout";
 import {
 	LOOKS_CHANGED_CHANNEL,
+	MAIN_WINDOW_OPENED_CHANNEL,
 	OVERLAY_BAND_HEIGHT,
 	createCompanionOverlay,
 	overlayBandBounds,
@@ -287,5 +288,23 @@ describe("telling the overlay the looks moved", () => {
 		const { overlay } = harness();
 
 		expect(() => overlay.notifyLooksChanged()).not.toThrow();
+	});
+});
+
+//
+describe("the board window coming up", () => {
+	it("tells an open overlay when the board window comes up, so a live bubble lets go", () => {
+		const { overlay, created } = harness();
+		overlay.setEnabled(true);
+
+		overlay.notifyMainWindowOpened();
+
+		expect(created[0].sent).toEqual([MAIN_WINDOW_OPENED_CHANNEL]);
+	});
+
+	it("says nothing to a closed overlay about the board window", () => {
+		const { overlay } = harness();
+
+		expect(() => overlay.notifyMainWindowOpened()).not.toThrow();
 	});
 });

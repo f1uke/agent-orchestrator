@@ -190,7 +190,15 @@ function AttachedTerminal({
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
 	const { data: workspaces } = useWorkspaceQuery();
-	const { attach, state, error } = useTerminalSession(attachSession, { daemonReady });
+	// The board's answer to "the session changed under us": re-read the workspace
+	// query and let the daemon's derived status flow back. The hook itself no longer
+	// knows what a query client is, so the desktop companion's terminal window can
+	// run the very same attachment.
+	const onSessionChanged = useCallback(
+		() => void queryClient.invalidateQueries({ queryKey: workspaceQueryKey }),
+		[queryClient],
+	);
+	const { attach, state, error } = useTerminalSession(attachSession, { daemonReady, onSessionChanged });
 	const handleId = attachSession?.terminalHandleId;
 	const provider = terminalTarget?.kind === "reviewer" ? terminalTarget.harness : session?.provider;
 

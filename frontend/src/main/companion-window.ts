@@ -53,6 +53,23 @@ export interface OverlayWindow {
 /** "Go and re-read the chosen looks." Carries nothing; see `notifyLooksChanged`. */
 export const LOOKS_CHANGED_CHANNEL = "companion:looksChanged";
 
+/**
+ * "the board window is up — let go of the terminal."
+ *
+ * Carries nothing either. The overlay's only correct response is to detach, and
+ * a payload would invite it to decide whether to.
+ */
+export const MAIN_WINDOW_OPENED_CHANNEL = "companion:mainWindowOpened";
+
+/**
+ * "the terminal window has gone."
+ *
+ * However it went — its own ✕, Escape, the board window coming up, a crash — the
+ * band is the thing that has to know, because a Proc whose terminal is open stands
+ * still and stops strolling until it is told otherwise.
+ */
+export const TERMINAL_CLOSED_CHANNEL = "companion:terminalClosed";
+
 export type CompanionOverlayDeps = {
 	createWindow(options: OverlayWindowOptions): OverlayWindow;
 	/** The work area of the display the band lives on. Excludes the Dock and menu bar. */
@@ -76,6 +93,10 @@ export type CompanionOverlay = {
 	 * finds the work already done.
 	 */
 	notifyLooksChanged(): void;
+	/** the board window came up; any live bubble terminal must detach. */
+	notifyMainWindowOpened(): void;
+	/** the terminal window closed, so its Proc is free to wander again. */
+	notifyTerminalClosed(): void;
 	/** Re-band after a display change. */
 	relayout(): void;
 	isOpen(): boolean;
@@ -140,6 +161,15 @@ export function createCompanionOverlay(deps: CompanionOverlayDeps): CompanionOve
 				fullscreenable: false,
 				// The overlay must never steal the keyboard from the app you are
 				// working in — it is scenery you can occasionally poke, not a window.
+				//
+				// And it must never be made focusable LATER either. A terminal that
+				// borrowed the keyboard this way was measured doing two things to the
+				// desktop: every Proc vanished for a beat as the window blinked out of
+				// existence (`visibilitychange` on the page), and the overlay then
+				// stopped receiving mouse events entirely, so clicks fell through to the
+				// desktop and the pets could not be touched until another app was
+				// clicked twice. A terminal gets its own window instead — see
+				// main/terminal-window.ts.
 				focusable: false,
 				skipTaskbar: true,
 				// Fully transparent: on a transparent window an opaque backgroundColor
@@ -202,6 +232,20 @@ export function createCompanionOverlay(deps: CompanionOverlayDeps): CompanionOve
 				live()?.send(LOOKS_CHANGED_CHANNEL);
 			} catch (err) {
 				deps.logError("AO: failed to tell the companion overlay about a look change", err);
+			}
+		},
+		notifyMainWindowOpened() {
+			try {
+				live()?.send(MAIN_WINDOW_OPENED_CHANNEL);
+			} catch (err) {
+				deps.logError("AO: failed to tell the companion overlay the board window opened", err);
+			}
+		},
+		notifyTerminalClosed() {
+			try {
+				live()?.send(TERMINAL_CLOSED_CHANNEL);
+			} catch (err) {
+				deps.logError("AO: failed to tell the companion overlay its terminal closed", err);
 			}
 		},
 		relayout() {

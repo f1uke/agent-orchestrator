@@ -13,6 +13,7 @@ import { refreshProjectLooks } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 import { speciesForProject, type SpeciesId } from "./species";
+import { TerminalWindowApp } from "./TerminalWindowApp";
 
 // Entry point for the overlay window. Deliberately tiny and separate from the main
 // renderer: the overlay has no router, no query client, no daemon connection and no
@@ -24,12 +25,37 @@ type CompanionBridge = {
 	daemonUrl?(): Promise<string | null>;
 	requestLook?(sessionId: string): void;
 	onLooksChanged?(listener: () => void): () => void;
+	//
+	activateSession?(input: {
+		sessionId: string;
+		handleId: string;
+		anchor: { x: number; y: number };
+	}): Promise<"app" | "bubble" | "unavailable">;
+	moveTerminal?(anchor: { x: number; y: number }): void;
+	closeTerminal?(): void;
+	onTerminalClosed?(listener: () => void): () => void;
+	onMainWindowOpened?(listener: () => void): () => void;
 };
 
 const bridge = (window as unknown as { aoCompanion?: CompanionBridge }).aoCompanion;
 
 /** How often to re-ask for the daemon URL while it is not up yet. */
 const DAEMON_WAIT_MS = 5_000;
+
+/** Whose terminal window is up. The window itself lives in the main process. */
+type OpenTerminal = { sessionId: string };
+
+/** The pane behind a session, asked for at the moment it is needed rather than cached. */
+async function terminalHandleFor(daemonUrl: string, sessionId: string): Promise<string | null> {
+	try {
+		const response = await fetch(`${daemonUrl}/api/v1/sessions`);
+		if (!response.ok) return null;
+		const body = (await response.json()) as { sessions?: Array<{ id?: string; terminalHandleId?: string }> };
+		return body.sessions?.find((session) => session.id === sessionId)?.terminalHandleId ?? null;
+	} catch {
+		return null;
+	}
+}
 
 /**
  * Waits for the daemon, then runs on real sessions.
@@ -42,6 +68,8 @@ const DAEMON_WAIT_MS = 5_000;
 function Overlay() {
 	const [live, setLive] = useState<LiveFeed | null>(null);
 	const [mock] = useState<CompanionFeed>(() => createMockFeed());
+	const [daemonUrl, setDaemonUrl] = useState<string | null>(null);
+	const [terminal, setTerminal] = useState<OpenTerminal | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -54,6 +82,7 @@ function Overlay() {
 				timer = setTimeout(attach, DAEMON_WAIT_MS);
 				return;
 			}
+			setDaemonUrl(url);
 			setLive(createLiveFeed({ ...createHttpTransport(url), now: () => Date.now() }));
 		};
 
@@ -69,12 +98,54 @@ function Overlay() {
 	// event never does; both paths do nothing but re-read localStorage.
 	useEffect(() => bridge?.onLooksChanged?.(() => refreshProjectLooks()), []);
 
+	// However the terminal went — its own ✕, Escape, the board window coming up —
+	// the band hears about it from the one place that knows: the process that owns
+	// the window. The Proc it belonged to is free to wander again.
+	useEffect(() => bridge?.onTerminalClosed?.(() => setTerminal(null)), []);
+
+	const onActivate = useCallback(
+		(sessionId: string, at: { x: number; y: number }) => {
+			void (async () => {
+				if (!daemonUrl) return;
+				const handleId = await terminalHandleFor(daemonUrl, sessionId);
+				if (!handleId) return;
+				// Screen coordinates, because the window that has to be placed is not
+				// this page: this page just happens to know where the Proc is.
+				const anchor = { x: window.screenX + at.x, y: window.screenY + at.y };
+				const where = (await bridge?.activateSession?.({ sessionId, handleId, anchor })) ?? "unavailable";
+				setTerminal(where === "bubble" ? { sessionId } : null);
+			})();
+		},
+		[daemonUrl],
+	);
+
+	// The Proc carries its terminal with it: the card is a window now, so "riding
+	// the Proc" means moving that window as the Proc moves. It only moves when the
+	// Proc is picked up and thrown — a Proc with an open terminal stands still.
+	const onAnchorMove = useCallback((anchor: { x: number; y: number }) => {
+		bridge?.moveTerminal?.({ x: window.screenX + anchor.x, y: window.screenY + anchor.y });
+	}, []);
+
+	// The session ended while its terminal was open: close it rather than leave a
+	// window pointing at a Proc that has walked out through its portal.
+	const onAttachedGone = useCallback(() => {
+		setTerminal(null);
+		bridge?.closeTerminal?.();
+	}, []);
+
+	const onInteractiveChange = useCallback((interactive: boolean) => bridge?.setInteractive(interactive), []);
+	const onRequestLook = useCallback((sessionId: string) => bridge?.requestLook?.(sessionId), []);
+
 	return (
 		<CompanionStage
 			feed={live ?? mock}
 			bubbleFor={live ? (id) => live.bubbleFor(id) : undefined}
-			onInteractiveChange={(interactive) => bridge?.setInteractive(interactive)}
-			onRequestLook={(sessionId) => bridge?.requestLook?.(sessionId)}
+			onInteractiveChange={onInteractiveChange}
+			onRequestLook={onRequestLook}
+			onActivate={onActivate}
+			attachedSession={terminal?.sessionId}
+			onAttachedAnchorMove={onAnchorMove}
+			onAttachedGone={onAttachedGone}
 		/>
 	);
 }
@@ -138,7 +209,20 @@ function Lab() {
 	);
 }
 
+const params = new URLSearchParams(window.location.search);
+const TERMINAL_FOR = params.get("terminalFor");
+const TERMINAL_HANDLE = params.get("handle");
+
 const container = document.getElementById("companion-root");
 if (container) {
-	createRoot(container).render(IS_LAB ? <Lab /> : <Overlay />);
+	// One bundle, two windows: the band, or one session's terminal.
+	const page =
+		TERMINAL_FOR && TERMINAL_HANDLE ? (
+			<TerminalWindowApp sessionId={TERMINAL_FOR} handleId={TERMINAL_HANDLE} />
+		) : IS_LAB ? (
+			<Lab />
+		) : (
+			<Overlay />
+		);
+	createRoot(container).render(page);
 }

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { CompanionActivity, CompanionFeed } from "./feed";
 import { castForSession, withSpecies } from "./cast";
 import { MEET_RUN_MAX_MS } from "./behaviour";
-import { CompanionStage } from "./CompanionStage";
+import { CompanionStage, POINTER_REVALIDATE_MS } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
 import { LOOKS_STORAGE_KEY, serializeProjectLooks } from "./look-store";
 import { PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
@@ -283,13 +283,20 @@ describe("CompanionStage", () => {
 	});
 
 	it("hands the pointer back when it leaves the overlay without crossing off a Proc", () => {
+		// The pointer leaving the window is the release. It used to be released on the
+		// window losing FOCUS as well, as a second chance to notice a missed leave —
+		// but a focus change says nothing about where the mouse is, and once a
+		// terminal bubble borrows the keyboard and gives it back, `blur` fires in the
+		// middle of ordinary use with the pointer still on a Proc. The clock-based
+		// re-check (POINTER_REVALIDATE_MS) is the second chance now, and it asks the
+		// question a focus change cannot answer: what is under the pointer.
 		const onInteractiveChange = vi.fn();
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
 		push([{ sessionId: "a", status: "working" }]);
 
 		fireEvent.pointerMove(container.querySelector("[data-figure] rect")!, { bubbles: true });
-		fireEvent.blur(window);
+		fireEvent.pointerLeave(document);
 
 		expect(onInteractiveChange.mock.calls).toEqual([[true], [false]]);
 	});
@@ -778,5 +785,233 @@ describe("shaking the Orchestrator to call its project in", () => {
 		// Gathered, not run in: it is simply already standing at its place in the ring.
 		expect(moveMs(procOf(container, "a1"))).toBe(0);
 		expect(atX(procOf(container, "a1"))).not.toBe(before);
+	});
+});
+
+// the click/drag split.
+describe("clicking a Proc to talk to its session", () => {
+	function staged(onActivate: (sessionId: string, at: { x: number; y: number }) => void) {
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} onActivate={onActivate} />);
+		push([{ sessionId: "a", status: "pr_open", name: "fix the flaky test", project: "agent-orchestrator" }]);
+		return view;
+	}
+	// Re-queried every time: picking a Proc up swaps its pose, so the node changes.
+	const figure = (container: HTMLElement) => container.querySelector("[data-figure] rect")!;
+
+	it("a press that never moved is a click", () => {
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+
+		expect(onActivate).toHaveBeenCalledWith("a", { x: 400, y: 900 });
+	});
+
+	it("a hand's wobble is still a click", () => {
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 403, clientY: 901 });
+		fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 403, clientY: 901 });
+
+		expect(onActivate).toHaveBeenCalledTimes(1);
+	});
+
+	it("a DRAG throws the Proc and opens nothing", () => {
+		// The two gestures start identically, so the split has to be made on what the
+		// hand did — not on which handler fired.
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 520, clientY: 840 });
+		fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 520, clientY: 840 });
+
+		expect(onActivate).not.toHaveBeenCalled();
+	});
+
+	it("a Proc that was picked up and HELD is put down, not opened", () => {
+		vi.useFakeTimers();
+		try {
+			const onActivate = vi.fn();
+			const { container } = staged(onActivate);
+
+			fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+			act(() => vi.advanceTimersByTime(1_500));
+			fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+
+			expect(onActivate).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("a right-click asks for the look, never for a terminal", () => {
+		const onActivate = vi.fn();
+		const onRequestLook = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onActivate={onActivate} onRequestLook={onRequestLook} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, button: 2, clientX: 400, clientY: 900 });
+		fireEvent.contextMenu(figure(container), { bubbles: true });
+		fireEvent.pointerUp(figure(container), { bubbles: true, button: 2, clientX: 400, clientY: 900 });
+
+		expect(onRequestLook).toHaveBeenCalledWith("a");
+		expect(onActivate).not.toHaveBeenCalled();
+	});
+
+	it("a press on empty band is nobody's click", () => {
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+		const band = container.querySelector(".companion-stage")!;
+
+		fireEvent.pointerDown(band, { bubbles: true, clientX: 100, clientY: 900 });
+		fireEvent.pointerUp(band, { bubbles: true, clientX: 100, clientY: 900 });
+
+		expect(onActivate).not.toHaveBeenCalled();
+	});
+});
+
+// the window's click-through state must survive the
+// two things that move WITHOUT the pointer moving — losing the keyboard, and the
+// scene changing under a resting cursor.
+describe("who owns the pointer when the pointer is not the thing that moved", () => {
+	function staged() {
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+		return { ...view, onInteractiveChange };
+	}
+	const figure = (container: HTMLElement) => container.querySelector("[data-figure] rect")!;
+
+	it("does NOT give the pointer back just because the window lost the keyboard", () => {
+		// The regression this exists for: a terminal bubble borrows the keyboard and
+		// gives it back when it closes, which fires `blur` with the pointer still
+		// sitting on a Proc. Releasing there made the window click-through under the
+		// cursor, so the next click went to the desktop behind instead of the pet —
+		// "I have to click twice".
+		const { container, onInteractiveChange } = staged();
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		expect(onInteractiveChange).toHaveBeenLastCalledWith(true);
+		onInteractiveChange.mockClear();
+		// jsdom has no layout, so elementFromPoint answers null; the point of the test
+		// is that blur does not blindly release, so pin it to "no release happened".
+		document.elementFromPoint = () => figure(container) as unknown as Element;
+
+		fireEvent.blur(window);
+
+		expect(onInteractiveChange).not.toHaveBeenCalledWith(false);
+	});
+
+	it("still gives the pointer back when the pointer genuinely leaves the window", () => {
+		const { container, onInteractiveChange } = staged();
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		onInteractiveChange.mockClear();
+
+		fireEvent.pointerLeave(document);
+
+		expect(onInteractiveChange).toHaveBeenLastCalledWith(false);
+	});
+
+	it("does not hand the desktop back every time a Proc walks out from under the cursor", () => {
+		// With `capture: true` this listener caught the leave of EVERY element in the
+		// page, hundreds a minute as the band animates, and each one said "the pointer
+		// is gone". The window's click-through state flapped, and a click that landed
+		// in the wrong half of a flap went to the desktop instead of the pet.
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+		const figure = container.querySelector("[data-figure] rect")!;
+		fireEvent.pointerMove(figure, { bubbles: true, clientX: 400, clientY: 900 });
+		onInteractiveChange.mockClear();
+
+		// A leave from something INSIDE the page, which is not the pointer leaving.
+		fireEvent.pointerLeave(figure, { bubbles: false });
+
+		expect(onInteractiveChange).not.toHaveBeenCalled();
+	});
+
+	it("re-decides on a clock, so a Proc that walked under a resting cursor is clickable", () => {
+		vi.useFakeTimers();
+		try {
+			const onInteractiveChange = vi.fn();
+			const { feed, push } = stubFeed();
+			const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+			push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+			// The pointer rests on empty band…
+			document.elementFromPoint = () => document.body;
+			fireEvent.pointerMove(container.querySelector(".companion-stage")!, { bubbles: true, clientX: 10, clientY: 900 });
+			onInteractiveChange.mockClear();
+
+			// …and a Proc walks under it without the pointer moving at all.
+			document.elementFromPoint = () => figure(container) as unknown as Element;
+			act(() => vi.advanceTimersByTime(POINTER_REVALIDATE_MS * 2));
+
+			expect(onInteractiveChange).toHaveBeenLastCalledWith(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+// the terminal is a WINDOW, and the stage's job is to
+// tell the shell where its Proc is so the window can travel with it.
+describe("a terminal pinned to a Proc", () => {
+	it("reports where its Proc is, so the terminal window can follow", () => {
+		const onAttachedAnchorMove = vi.fn();
+		const { feed, push } = stubFeed();
+		render(<CompanionStage feed={feed} attachedSession="a" onAttachedAnchorMove={onAttachedAnchorMove} />);
+		push([
+			{ sessionId: "a", status: "working", name: "one", project: "p" },
+			{ sessionId: "b", status: "working", name: "two", project: "p" },
+		]);
+
+		expect(onAttachedAnchorMove).toHaveBeenCalled();
+		const anchor = onAttachedAnchorMove.mock.calls.at(-1)![0];
+		expect(Number.isFinite(anchor.x)).toBe(true);
+		expect(Number.isFinite(anchor.y)).toBe(true);
+	});
+
+	it("says the Proc has gone when its session ends, so the terminal can close", () => {
+		// A terminal floating over nobody points at a session that is not there.
+		vi.useFakeTimers();
+		const onAttachedGone = vi.fn();
+		const { feed, push } = stubFeed();
+		render(<CompanionStage feed={feed} attachedSession="a" onAttachedGone={onAttachedGone} />);
+		push([
+			{ sessionId: "a", status: "working", name: "one", project: "p" },
+			{ sessionId: "b", status: "working", name: "two", project: "p" },
+		]);
+		expect(onAttachedGone).not.toHaveBeenCalled();
+
+		// "a" ends: it leaves through its portal and is off the band afterwards.
+		push([{ sessionId: "b", status: "working", name: "two", project: "p" }]);
+		act(() => void vi.advanceTimersByTime(PORTAL_OUT_MS + 1_000));
+
+		expect(onAttachedGone).toHaveBeenCalled();
+	});
+
+	it("does not call it before the band has anybody on it at all", () => {
+		// An empty world at mount is "nothing has arrived yet", not "your session ended".
+		const onAttachedGone = vi.fn();
+		const { feed } = stubFeed();
+		render(<CompanionStage feed={feed} attachedSession="a" onAttachedGone={onAttachedGone} />);
+
+		expect(onAttachedGone).not.toHaveBeenCalled();
+	});
+
+	it("says nothing when the session it belongs to has left the band", () => {
+		const onAttachedAnchorMove = vi.fn();
+		const { feed, push } = stubFeed();
+		render(<CompanionStage feed={feed} attachedSession="gone" onAttachedAnchorMove={onAttachedAnchorMove} />);
+		push([{ sessionId: "a", status: "working", name: "one", project: "p" }]);
+
+		expect(onAttachedAnchorMove).not.toHaveBeenCalled();
 	});
 });

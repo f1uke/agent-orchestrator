@@ -1,5 +1,12 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { FIGURE_ATTRIBUTE, createInteractionTracker, isOverPet } from "./pointer-region";
+import {
+	FIGURE_ATTRIBUTE,
+	SURFACE_ATTRIBUTE,
+	createInteractionTracker,
+	isOverPet,
+	isOverSurface,
+	ownsPointer,
+} from "./pointer-region";
 
 function build(html: string): HTMLElement {
 	document.body.innerHTML = html;
@@ -109,6 +116,55 @@ describe("createInteractionTracker", () => {
 
 		tracker.hold(false);
 		tracker.update(body.querySelector("#gap"));
+
+		expect(onChange.mock.calls).toEqual([[true], [false]]);
+	});
+});
+
+describe("isOverSurface", () => {
+	it("is true anywhere on a surface, including the gaps between its controls", () => {
+		// The opposite rule to a Proc: a Proc takes the pointer per painted pixel, a
+		// card takes every pixel it covers. A terminal you could click THROUGH would
+		// put keystrokes into whatever was behind it.
+		const body = build(
+			`<div ${SURFACE_ATTRIBUTE}="true" id="card"><div id="gap"></div><button id="close"></button></div>`,
+		);
+
+		expect(isOverSurface(body.querySelector("#card"))).toBe(true);
+		expect(isOverSurface(body.querySelector("#gap"))).toBe(true);
+		expect(isOverSurface(body.querySelector("#close"))).toBe(true);
+	});
+
+	it("is false everywhere else, so the desktop keeps working around the card", () => {
+		const body = build(`<div class="companion-stage" id="band"></div>`);
+
+		expect(isOverSurface(body.querySelector("#band"))).toBe(false);
+		expect(isOverSurface(null)).toBe(false);
+	});
+});
+
+describe("ownsPointer", () => {
+	it("covers both things on the overlay that are not scenery", () => {
+		const body = build(
+			`<div id="band"></div><svg ${FIGURE_ATTRIBUTE}><rect id="pet" /></svg><div ${SURFACE_ATTRIBUTE}="true" id="card"></div>`,
+		);
+
+		expect(ownsPointer(body.querySelector("#pet"))).toBe(true);
+		expect(ownsPointer(body.querySelector("#card"))).toBe(true);
+		expect(ownsPointer(body.querySelector("#band"))).toBe(false);
+	});
+});
+
+describe("the tracker, with a terminal open", () => {
+	it("takes the pointer over the card and gives it back the moment it leaves", () => {
+		// This is what keeps an open terminal from killing the whole desktop: the
+		// window is interactive over the CARD, not for as long as the card exists.
+		const onChange = vi.fn();
+		const tracker = createInteractionTracker(onChange);
+		const body = build(`<div id="band"></div><div ${SURFACE_ATTRIBUTE}="true" id="card"></div>`);
+
+		tracker.update(body.querySelector("#card"));
+		tracker.update(body.querySelector("#band"));
 
 		expect(onChange.mock.calls).toEqual([[true], [false]]);
 	});

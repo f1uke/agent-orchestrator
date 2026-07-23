@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	createWorld,
 	dragPet,
+	drawnX,
 	grabPet,
 	releasePet,
 	startConversation,
@@ -54,6 +55,35 @@ const PET_GAP = 8;
  */
 const TICK_MS = 500;
 
+/**
+ * How far a press may travel and still count as a CLICK rather than a drag.
+ *
+ * 5px is the app's existing answer — the split view's drag layer uses the same
+ * number to stop a click on a pane header turning into a drag — and it is about
+ * the wobble a hand puts into a deliberate click on a 30px figure.
+ */
+export const CLICK_SLOP_PX = 5;
+
+/**
+ * How long a press may be HELD and still count as a click.
+ *
+ * Distance alone is not enough here, because a Proc is a thing you pick up: press
+ * and hold without moving and the pet is in your hand, being held, which is a
+ * gesture with its own meaning. Letting go of that after a second should put the
+ * pet down, not open a terminal. 400ms is the usual "this was a tap, not a hold"
+ * boundary (macOS's own press-and-hold threshold is in this range).
+ */
+export const CLICK_HOLD_MS = 400;
+
+/**
+ * How often the overlay re-asks who owns the pointer while the pointer is still.
+ *
+ * Ten times a second: a hit test is cheap, the answer only crosses IPC when it
+ * changes, and a Proc that has walked under a resting cursor becomes clickable
+ * within a frame or two rather than "when you jiggle the mouse".
+ */
+export const POINTER_REVALIDATE_MS = 100;
+
 export type CompanionStageProps = {
 	feed?: CompanionFeed;
 	/**
@@ -76,6 +106,41 @@ export type CompanionStageProps = {
 	 * already means by "options for this thing".
 	 */
 	onRequestLook?: (sessionId: string) => void;
+	/**
+	 * A CLEAN LEFT CLICK on a Proc: "let me talk to
+	 * this session". Fired on release, and only when the press never became a drag.
+	 *
+	 * The split has to be made here rather than by a `click` handler, because a
+	 * press on a Proc is ALREADY a gesture: it picks the Proc up, and letting go
+	 * throws it at the speed of the hand. `click` fires after a throw too — the DOM
+	 * has no idea a drag happened — so the two would collide on every flick. The
+	 * rule is the same one the drag layer of the split view settled on: a press that
+	 * moved less than a few pixels was never a drag, and a press that moved is never
+	 * a click. A shake (which calls a rally) is a drag by construction and so can
+	 * never end in a click either.
+	 */
+	onActivate?: (sessionId: string, at: { x: number; y: number }) => void;
+	/**
+	 * whose terminal is open.
+	 *
+	 * The terminal is a WINDOW, not something drawn here — putting it in the
+	 * overlay meant making the overlay focusable, and that cost the band its mouse
+	 * events and made every Proc blink out for a beat (main/terminal-window.ts).
+	 * What the stage still owns is where that window belongs: only it knows where a
+	 * Proc actually IS, because a walking Proc's `x` is where it set off from and
+	 * the compositor is carrying the rest.
+	 */
+	attachedSession?: string;
+	/** Where the attached Proc is now, in this window's coordinates. */
+	onAttachedAnchorMove?: (anchor: { x: number; y: number }) => void;
+	/**
+	 * The Proc whose terminal is open has left the band — its session ended.
+	 *
+	 * A terminal floating over nobody is a terminal pointing at a session that is
+	 * not there any more, so the shell closes it. Reported from here because the
+	 * band is what knows who is still on it.
+	 */
+	onAttachedGone?: () => void;
 	/**
 	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
 	 * reduced-motion path is a real behaviour with its own rules, and it is not
@@ -118,6 +183,10 @@ export function CompanionStage({
 	bubbleFor,
 	onInteractiveChange,
 	onRequestLook,
+	onActivate,
+	attachedSession,
+	onAttachedAnchorMove,
+	onAttachedGone,
 	reducedMotion,
 	onStage,
 	castFor: castForOverride,
@@ -286,6 +355,25 @@ export function CompanionStage({
 		 */
 		let grabbed: string | null = null;
 		let shake = newShakeTrack();
+		/**
+		 * Where the pointer was last seen, so the window's click-through state can be
+		 * re-decided WITHOUT a pointer event.
+		 *
+		 * It has to be re-decidable, because the pointer is not the only thing that
+		 * moves: a Proc walks under a resting cursor, and a card closes out from under
+		 * one. Deciding only on pointer events leaves the window in whatever state the
+		 * last MOVE left it in — which is how a click after closing a terminal fell
+		 * straight through to the desktop, and how a Proc that walked under a still
+		 * cursor could not be clicked at all.
+		 */
+		let lastPointer: { x: number; y: number } | null = null;
+		/**
+		 * The press that is still eligible to be a CLICK, and stops being one the
+		 * moment the hand moves past the slop. Kept beside `grabbed` rather than
+		 * inside it because a press that has become a drag must still finish its
+		 * drag — only its right to end in a click is withdrawn.
+		 */
+		let press: { id: string; x: number; y: number; at: number } | null = null;
 		/** Height above the floor line, which is the bottom of the window. */
 		const heightOf = (clientY: number) => window.innerHeight - clientY;
 
@@ -294,11 +382,23 @@ export function CompanionStage({
 			return target.closest("[data-proc]")?.getAttribute("data-session") ?? null;
 		};
 
+		/** Re-decide who owns the pointer from where it actually is right now. */
+		const revalidate = () => {
+			// jsdom has no layout and so no hit testing; there is nothing to re-decide
+			// there, and the pointer-event paths above are what its tests drive.
+			if (!lastPointer || typeof document.elementFromPoint !== "function") return;
+			tracker.update(document.elementFromPoint(lastPointer.x, lastPointer.y));
+		};
+
 		const onMove = (event: PointerEvent) => {
+			lastPointer = { x: event.clientX, y: event.clientY };
 			tracker.update(event.target);
 			// Press-and-shake is a COMMAND laid over the drag rather than instead of it:
 			// the Proc goes on following the pointer throughout, because taking it out of
 			// the hand mid-gesture reads as the app dropping the thing you are holding.
+			if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_SLOP_PX) {
+				press = null;
+			}
 			if (grabbed) {
 				const leaderId = grabbed;
 				shake = trackShake(shake, { x: event.clientX, y: event.clientY, at: event.timeStamp || performance.now() });
@@ -330,6 +430,13 @@ export function CompanionStage({
 		};
 
 		const onDown = (event: PointerEvent) => {
+			console.log(
+				"[proto] pointerdown overPet=",
+				isOverPet(event.target),
+				"target=",
+				(event.target as Element)?.tagName,
+				Date.now() % 100000,
+			);
 			tracker.update(event.target);
 			if (!isOverPet(event.target)) return;
 			// LEFT button only. A right-press was never meant to pick a Proc up, and it
@@ -343,6 +450,7 @@ export function CompanionStage({
 			// it to the desktop.
 			tracker.hold(true);
 			grabbed = id;
+			press = { id, x: event.clientX, y: event.clientY, at: performance.now() };
 			shake = trackShake(newShakeTrack(), {
 				x: event.clientX,
 				y: event.clientY,
@@ -362,9 +470,16 @@ export function CompanionStage({
 		const onUp = (event: PointerEvent) => {
 			tracker.hold(false);
 			const thrown = sample && performance.now() - sample.at < 120 ? throwSpeed : { vx: 0, vy: 0 };
+			// A press that never moved and never lingered: the human clicked this Proc.
+			// Read BEFORE the release below, so the pet is still the one that was held.
+			const clicked = press && performance.now() - press.at <= CLICK_HOLD_MS ? press : null;
+			press = null;
 			sample = null;
 			grabbed = null;
 			shake = newShakeTrack();
+			if (clicked) {
+				onActivate?.(clicked.id, { x: clicked.x, y: clicked.y });
+			}
 			setWorld((current) => {
 				const holding = current.pets.find((pet) => pet.motion.kind === "held");
 				if (!holding) return current;
@@ -378,9 +493,38 @@ export function CompanionStage({
 			tracker.update(event.target);
 		};
 
+		/**
+		 * The pointer genuinely left the WINDOW: nothing here owns it any more.
+		 *
+		 * Bound WITHOUT capture, and that is the whole of it. `pointerleave` does not
+		 * bubble, so a plain listener on the document fires only when the pointer
+		 * leaves the document — which is the question being asked. With capture, the
+		 * same listener also caught every leave from every element inside the page:
+		 * each Proc walking out from under the cursor, each card closing, hundreds a
+		 * minute. Every one of them said "the pointer has gone" and handed the desktop
+		 * back, so the window's click-through state flapped constantly and a click
+		 * landing in the wrong half of that flap fell through to the desktop.
+		 */
 		const onOut = () => {
+			lastPointer = null;
 			tracker.release();
 			setHover(idleHover());
+		};
+
+		/**
+		 * The WINDOW lost the keyboard — which says nothing about where the mouse is.
+		 *
+		 * This used to release the pointer outright, which was harmless while the
+		 * overlay could never be focused at all. Now that a terminal borrows the
+		 * keyboard and gives it back, `blur` fires in the middle of ordinary use, with
+		 * the pointer sitting on a Proc — and releasing there made the window
+		 * click-through under the cursor, so the next click went to the desktop behind
+		 * instead of to the pet. Close the tooltip (it asserts a hover we can no longer
+		 * be sure of) and re-decide the pointer from where the pointer actually is.
+		 */
+		const onWindowBlur = () => {
+			setHover(idleHover());
+			revalidate();
 		};
 
 		// The look gesture. It opens the library in the MAIN WINDOW rather than drawing
@@ -399,24 +543,30 @@ export function CompanionStage({
 			onRequestLook?.(id);
 		};
 
+		// The scene moves on its own — Procs walk, cards open and close — so the
+		// question "is the pointer on something of ours" has to be asked on a clock as
+		// well as on pointer events. It only crosses IPC when the ANSWER changes.
+		const revalidateTimer = setInterval(revalidate, POINTER_REVALIDATE_MS);
+
 		document.addEventListener("pointermove", onMove, true);
 		document.addEventListener("pointerdown", onDown, true);
 		document.addEventListener("pointerup", onUp, true);
 		document.addEventListener("pointercancel", onUp, true);
-		document.addEventListener("pointerleave", onOut, true);
+		document.addEventListener("pointerleave", onOut);
 		document.addEventListener("contextmenu", onMenu, true);
-		window.addEventListener("blur", onOut);
+		window.addEventListener("blur", onWindowBlur);
 		return () => {
+			clearInterval(revalidateTimer);
 			document.removeEventListener("pointermove", onMove, true);
 			document.removeEventListener("pointerdown", onDown, true);
 			document.removeEventListener("pointerup", onUp, true);
 			document.removeEventListener("pointercancel", onUp, true);
-			document.removeEventListener("pointerleave", onOut, true);
+			document.removeEventListener("pointerleave", onOut);
 			document.removeEventListener("contextmenu", onMenu, true);
-			window.removeEventListener("blur", onOut);
+			window.removeEventListener("blur", onWindowBlur);
 			tracker.release();
 		};
-	}, [onInteractiveChange, onRequestLook]);
+	}, [onInteractiveChange, onRequestLook, onActivate]);
 
 	const painted = paintOrder(world.pets);
 	// Everything a pet SAYS, and everything you can ask it, belongs to a pet that is
@@ -466,6 +616,69 @@ export function CompanionStage({
 		}
 		setCardSizes((current) => (sameSizes(current, measured) ? current : measured));
 	}, [bubbleTick]);
+
+	// The Proc whose terminal is open, if it is still on the band. A session that
+	// ended while its terminal was up simply has no Proc to follow.
+	const attachedPet = attachedSession ? (world.pets.find((pet) => pet.id === attachedSession) ?? null) : null;
+	const attachedPresent = attachedPet !== null;
+
+	// A Proc you are TALKING to stands still.
+	//
+	// The card rides its Proc, so it would otherwise slide across the desktop mid
+	// sentence while you were typing into it — and a terminal that wanders is a
+	// terminal you cannot use. It stops where it is (`drawnX`, so there is no jump
+	// from wherever the walk had actually got to) and holds off on strolling until
+	// the terminal closes. It can still be picked up and thrown; the card follows.
+	const attachedId = attachedSession;
+	useEffect(() => {
+		if (!attachedId) return;
+		const stop = (current: World): World => ({
+			...current,
+			pets: current.pets.map((pet) =>
+				pet.id !== attachedId || pet.motion.kind !== "walking"
+					? pet
+					: { ...pet, x: drawnX(pet, Date.now()), motion: { kind: "standing" }, restUntil: Number.MAX_SAFE_INTEGER },
+			),
+		});
+		setWorld(stop);
+		// A walk can begin between renders; hold the Proc for as long as its terminal
+		// is open rather than only at the moment it opened.
+		const timer = setInterval(() => setWorld(stop), TICK_MS);
+		return () => {
+			clearInterval(timer);
+			setWorld((current) => ({
+				...current,
+				pets: current.pets.map((pet) => (pet.id === attachedId ? { ...pet, restUntil: Date.now() } : pet)),
+			}));
+		};
+	}, [attachedId]);
+
+	// Tell the shell where the attached Proc is, so its terminal window travels with
+	// it. Reported from the DRAWN position, and only when it has actually moved:
+	// this crosses a process boundary, and a Proc that is standing still (which one
+	// with an open terminal does) must not generate any traffic at all.
+	const anchorX = attachedPet
+		? drawnX(attachedPet, frameNow) + figureLeft(attachedPet.facing === "left") + FRAME.figureWidth / 2
+		: null;
+	const anchorY = attachedPet ? window.innerHeight - attachedPet.y : null;
+	const lastAnchor = useRef<{ x: number; y: number } | null>(null);
+	// Only once the band has actually been populated: an empty world at mount is
+	// "nothing has arrived yet", not "the session you were watching has ended".
+	const bandHasPets = world.pets.length > 0;
+	useEffect(() => {
+		if (attachedSession && bandHasPets && !attachedPresent) onAttachedGone?.();
+	}, [attachedSession, attachedPresent, bandHasPets, onAttachedGone]);
+	useEffect(() => {
+		if (anchorX === null || anchorY === null) {
+			lastAnchor.current = null;
+			return;
+		}
+		const next = { x: Math.round(anchorX), y: Math.round(anchorY) };
+		const previous = lastAnchor.current;
+		if (previous && Math.abs(previous.x - next.x) < 2 && Math.abs(previous.y - next.y) < 2) return;
+		lastAnchor.current = next;
+		onAttachedAnchorMove?.(next);
+	}, [anchorX, anchorY, onAttachedAnchorMove]);
 
 	// How high each bubble has to sit to clear the ones before it. Computed for the
 	// whole band at once — a bubble cannot know on its own whether it is in the way.

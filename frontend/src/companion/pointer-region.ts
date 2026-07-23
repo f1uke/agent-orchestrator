@@ -25,10 +25,34 @@ export const FIGURE_ATTRIBUTE = "data-figure";
 
 const FIGURE_SELECTOR = `[${FIGURE_ATTRIBUTE}]`;
 
+/**
+ * Marks a real SURFACE on the overlay — today only the terminal bubble.
+ *
+ * A Proc is scenery you can poke: it takes the pointer per painted pixel, and the
+ * transparent gaps inside its own box fall through to the desktop. A surface is
+ * the opposite: it is a card, it is solid, and every pixel of it belongs to it —
+ * including the gaps between its own controls, which the desktop must not receive
+ * clicks through while a terminal is sitting there.
+ */
+export const SURFACE_ATTRIBUTE = "data-companion-interactive";
+
+const SURFACE_SELECTOR = `[${SURFACE_ATTRIBUTE}]`;
+
 /** True only when an event landed on a Proc's own pixels. */
 export function isOverPet(target: EventTarget | null): boolean {
 	if (!target || !(target instanceof Element)) return false;
 	return target.closest(FIGURE_SELECTOR) !== null;
+}
+
+/** True when an event landed on an open surface (the terminal bubble). */
+export function isOverSurface(target: EventTarget | null): boolean {
+	if (!target || !(target instanceof Element)) return false;
+	return target.closest(SURFACE_SELECTOR) !== null;
+}
+
+/** Either of the two things on the overlay that own the pointer. */
+export function ownsPointer(target: EventTarget | null): boolean {
+	return isOverPet(target) || isOverSurface(target);
 }
 
 export type InteractionTracker = {
@@ -59,7 +83,7 @@ export function createInteractionTracker(onChange: (interactive: boolean) => voi
 
 	return {
 		update(target) {
-			set(held || isOverPet(target));
+			set(held || ownsPointer(target));
 		},
 		release() {
 			if (held) return;
