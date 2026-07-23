@@ -538,8 +538,7 @@ describe("shaking the Orchestrator to call its project in", () => {
 		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 600, clientY: 300 });
 		shakeOver(container.querySelector(".companion-stage")!, 4);
 
-		expect(container.querySelector("[data-rally-call]")).not.toBeNull();
-		expect(procOf(container, "lead").querySelector("[data-calling]")).not.toBeNull();
+		expect(procOf(container, "lead").querySelector("[data-rally-call]")).not.toBeNull();
 		// Running, not strolling: a rally is an event, and it moves at the meet's pace.
 		expect(moveMs(procOf(container, "a1"))).toBeGreaterThan(0);
 		expect(moveMs(procOf(container, "a1"))).toBeLessThanOrEqual(MEET_RUN_MAX_MS);

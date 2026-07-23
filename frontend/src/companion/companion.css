@@ -204,25 +204,13 @@ body {
 	}
 }
 
-/* The Orchestrator answering a shake: it braces against the floor and calls. One
-   beat, once — the rally FIRING is the event; the huddle that follows is the state,
-   and the ring below says that. Transform only, about the figure's own feet. */
-@keyframes procs-rally-call {
-	0% {
-		transform: translateY(0) scale(1, 1);
-	}
-	20% {
-		transform: translateY(0) scale(1.1, 0.9);
-	}
-	52% {
-		transform: translateY(-7px) scale(0.96, 1.06);
-	}
-	100% {
-		transform: translateY(0) scale(1, 1);
-	}
-}
+/* The call going out: a ring off the Orchestrator, twice.
 
-/* The call itself, going out: a ring off the Orchestrator, twice.
+   The ONLY cue on the leader itself, deliberately. A pulse on its BODY cannot be
+   seen: the gesture is press-and-shake, so the Proc is in the human's hand for the
+   whole call and already animating its held flail — a second body animation would
+   either lose to that one or replace it, and stopping a Proc flailing while you are
+   still holding it reads as the drag having broken.
 
    Drawn in TWO channels like every other cue on this overlay — a light ring with ink
    either side of it — because the thing behind it is the user's wallpaper and may be

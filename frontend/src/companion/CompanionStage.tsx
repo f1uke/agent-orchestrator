@@ -551,7 +551,6 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 				held={held}
 				running={running}
 				greeting={greeting}
-				calling={calling}
 				bounce={pet.bounce}
 				size={PET_HEIGHT}
 				className="companion-proc-art"
