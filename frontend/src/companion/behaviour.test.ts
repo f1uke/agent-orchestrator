@@ -364,6 +364,31 @@ describe("the cap on how many Procs fit", () => {
 		expect(transits(next)).toEqual([]);
 	});
 
+	// The loudest false-portal trap in the codebase, now with more sessions than fit: the
+	// overlay hands the stage a different feed when the daemon answers, and the stage
+	// un-seeds before subscribing so that feed's first snapshot is a baseline. It has to
+	// stay a baseline when the cap is choosing, too.
+	it("takes a first roster bigger than the band as a baseline, not a screenful of portals", () => {
+		let next = syncActivities(world(), roster(8, "pr_open", 900), T0, half);
+		next = { ...next, seeded: false };
+		next = syncActivities(next, roster(MAX_PETS + 4), T0 + 1_000, half);
+
+		expect(transits(next)).toEqual([]);
+		expect(next.pets).toHaveLength(MAX_PETS);
+	});
+
+	it("tells the two apart when a session ends and another spawns in the SAME snapshot", () => {
+		let next = syncActivities(world(), roster(MAX_PETS + 3), T0, half);
+		next = syncActivities(next, [...roster(MAX_PETS + 2, "pr_open", 1), activity("fresh", "todo")], T0 + 4_000, half);
+
+		expect(transits(next).sort()).toEqual(["arriving:fresh", "leaving:s0"]);
+
+		next = tick(next, T0 + 4_000 + PORTAL_OUT_MS, half);
+		expect(next.pets).toHaveLength(MAX_PETS);
+		expect(next.pets.map((p) => p.id)).toContain("fresh");
+		expect(next.pets.map((p) => p.id)).not.toContain("s0");
+	});
+
 	it("keeps a Proc that is mid-portal on the band, so its ring never plays over an empty spot", () => {
 		let next = syncActivities(world(), roster(MAX_PETS - 1), T0, half);
 		next = syncActivities(next, [...roster(MAX_PETS - 1), activity("fresh", "todo")], T0 + 4_000, half);
