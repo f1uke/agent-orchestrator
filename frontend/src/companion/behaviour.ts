@@ -145,11 +145,44 @@ export const RALLY_RUN_MAX_MS = MEET_RUN_MAX_MS;
  */
 export const RALLY_HOLD_MS = 2_800;
 /**
- * Closest the ring ever stands to the Orchestrator. A floor, not the usual value:
- * the standing clearance is wider than this once real drawn widths are measured,
- * and it wins, because a huddle whose members overlap is not a huddle.
+ * How much of a Proc's own figure the neighbour standing in front of it laps over,
+ * in the gathered pose.
+ *
+ * This is the one place the standing clearance is overridden, and it is overridden
+ * on purpose: a team photo is a packed pose, not a spaced row. The pitch is measured
+ * on the FIGURE rather than on {@link World.spacing}'s whole drawn frame, so the
+ * scenery overlaps freely — during the photo a desk laid over the Proc behind is the
+ * intended reading, not the collision {@link World.spacing} exists to prevent.
+ *
+ * 0.34 puts the neighbour's leftmost body ink — a head's left edge, at 14 of the
+ * 96-unit cell — at 77, a few units inside this Proc's own head's right edge (82) and
+ * just clear of its cheek (77). Heads genuinely lap, ears lap plainly, and no face is
+ * touched. 0.3 was the first number and it was measurably too airy: only the EARS met,
+ * which read as a tidy queue rather than as a group crowding in for a photo.
+ *
+ * It applies to the huddle and to nothing else. Roaming keeps #172's clearance
+ * untouched, and a Proc released from the photo is an ordinary Proc again on the
+ * same tick — see {@link advanceRally}.
  */
-export const RALLY_GAP_PX = 96;
+export const RALLY_LINEUP_OVERLAP = 0.34;
+/**
+ * The tightest the row may ever be squeezed, when the band is too short to take it.
+ *
+ * Fitting on screen is worth giving up spacing for; it is not worth giving up a face
+ * for. Read off the art: the widest-set eye across the six rigs ends at 73 of the cell
+ * (the Proc's own, at cx 63 with r 10), and a neighbour's head starts 14 into its
+ * cell — so a pitch of 59 units is where an eye would start to go behind somebody,
+ * and 1 − 59/96 is 0.385. Rounded down.
+ */
+export const RALLY_LINEUP_MAX_OVERLAP = 0.38;
+/**
+ * How many Procs the photo's depth ladder is allowed to be deep.
+ *
+ * The overlay draws at most twelve Procs, so a rally can never need more than that —
+ * and the bound is what keeps {@link Rally.depth} inside its own stacking layer
+ * instead of climbing into the one a meeting or a dragged Proc paints in.
+ */
+export const RALLY_MAX_DEPTH = 16;
 
 /**
  * Default centre-to-centre clearance between two Procs standing on the band. The
@@ -157,6 +190,12 @@ export const RALLY_GAP_PX = 96;
  * and for a world built before anything has been measured.
  */
 export const DEFAULT_SPACING_PX = 100;
+/**
+ * Default width of the drawn FIGURE — the creature itself, without the scenery its
+ * frame carries either side. Same fallback role as {@link DEFAULT_SPACING_PX}, and
+ * kept at the same ratio to it that the real numbers have (93 of 155).
+ */
+export const DEFAULT_FIGURE_WIDTH_PX = 60;
 
 export type Facing = "front" | "left" | "right";
 
@@ -281,6 +320,16 @@ export type Rally = {
 	startedAt: number;
 	/** When the huddle breaks up. Absolute, and the same for everyone in it. */
 	until: number;
+	/**
+	 * Where this Proc stands front-to-back in the photo. Higher paints in front.
+	 *
+	 * The row's bodies overlap on purpose, so which one is in front has to be DECIDED;
+	 * left to document order it would be a jumble that changed whenever the feed
+	 * re-ordered the cast. Assigned once, at layout time, from the row's final x order
+	 * (see {@link lineup}) — stored rather than derived because the cohort is still
+	 * running in for the first second and its positions are still the old ones.
+	 */
+	depth: number;
 };
 
 /** The floor band the cast lives on: one line above the Dock, inset from both edges. */
@@ -295,6 +344,17 @@ export type World = {
 	 * there are two, so a session silently vanishes behind another.
 	 */
 	spacing: number;
+	/**
+	 * Width of the drawn FIGURE alone, without the scenery its frame carries either
+	 * side of it.
+	 *
+	 * `spacing` is the whole frame, which is the right measure for standing clearance:
+	 * a Proc's desk and its cord are how it says what it is doing, so they need room
+	 * of their own. The gathered photo is the one pose that deliberately gives that
+	 * room up, and "shoulder to shoulder" is a fact about shoulders — so it needs the
+	 * figure, and reading it off `spacing` would be a guess. See {@link lineupPitch}.
+	 */
+	figureWidth: number;
 	/** `prefers-reduced-motion`: Procs stand at their positions, nothing walks. */
 	reducedMotion: boolean;
 	/** Occluded, another app is fullscreen, or the display slept: hold everything. */
@@ -320,7 +380,15 @@ export type World = {
 export type Rng = () => number;
 
 export function createWorld(band: Band): World {
-	return { pets: [], band, spacing: DEFAULT_SPACING_PX, reducedMotion: false, parked: false, seeded: false };
+	return {
+		pets: [],
+		band,
+		spacing: DEFAULT_SPACING_PX,
+		figureWidth: DEFAULT_FIGURE_WIDTH_PX,
+		reducedMotion: false,
+		parked: false,
+		seeded: false,
+	};
 }
 
 export function walkingCount(world: World): number {
@@ -828,13 +896,16 @@ export function startRally(world: World, leaderId: string, now: number): World {
 	if (leader.rally || leader.meeting || leader.transit) return world;
 
 	const centre = Math.min(world.band.maxX, Math.max(world.band.minX, drawnX(leader, now)));
-	// `isBusy` covers the three things a roll-call must not interrupt: a Proc in the
-	// human's hand, one mid-conversation, and one already answering an earlier call.
+	// `isBusy` covers everything a roll-call must not interrupt: a Proc in the human's
+	// hand, one mid-conversation, one already answering an earlier call — and one
+	// mid-portal, which is the case the photo makes vivid. A Proc on its way OUT has no
+	// session left to stand in a team photo, and one on its way IN is not on the desktop
+	// yet; putting either in the row would stage a picture of somebody who is not there.
+	// Neither joins late either: the row is laid out once, at the moment of the shake.
 	const members = world.pets.filter((pet) => pet.id !== leader.id && pet.project === leader.project && !isBusy(pet));
-	const spots = rallySpots(world, centre, members, leader.id);
-	const rally: Rally = {
+	const poses = lineup(world, centre, members, leader.id);
+	const call = {
 		leaderId: leader.id,
-		phase: "answering",
 		startedAt: now,
 		until: now + RALLY_RUN_MAX_MS + RALLY_HOLD_MS,
 	};
@@ -842,79 +913,124 @@ export function startRally(world: World, leaderId: string, now: number): World {
 	return {
 		...world,
 		pets: world.pets.map((pet) => {
+			const pose = poses.get(pet.id);
+			if (pose === undefined) return pet;
+			const rally: Rally = { ...call, phase: "answering", depth: pose.depth };
 			// The one that was shaken carries the call, and nothing else about it moves.
 			if (pet.id === leader.id) return { ...pet, rally: { ...rally, phase: "gathered" } };
-			const spot = spots.get(pet.id);
-			if (spot === undefined) return pet;
 			const from = drawnX(pet, now);
-			// Reduced motion keeps the meaning — they gathered — and drops only the travel.
+			// Reduced motion keeps the meaning — they gathered, in this pose — and drops
+			// only the travel, facing the viewer included.
 			if (world.reducedMotion || world.parked) {
-				return { ...pet, x: spot, y: 0, motion: { kind: "standing" }, rally: { ...rally, phase: "gathered" } };
+				return {
+					...pet,
+					x: pose.x,
+					y: 0,
+					facing: "front",
+					motion: { kind: "standing" },
+					rally: { ...rally, phase: "gathered" },
+				};
 			}
-			return { ...pet, x: from, facing: facingFor(from, spot), motion: runTo(from, spot, now), rally };
+			return { ...pet, x: from, facing: facingFor(from, pose.x), motion: runTo(from, pose.x, now), rally };
 		}),
 	};
 }
 
+/** Where one Proc stands in the photo: its spot on the band, and its layer in the row. */
+type Pose = { x: number; depth: number };
+
 /**
- * Where the ring stands.
+ * How tightly the photo packs, in px between neighbours.
  *
- * The band is one line, so a "ring" here is a flanking arc: slots step outward from
- * the leader, alternating right and left, one clearance apart, skipping anything off
- * the band — which is what lets a leader shaken at the screen edge gather everyone
- * on the side that exists instead of stacking half the cast off the display.
- *
- * Bystanders get a say, but a BOUNDED one. Stepping over every Proc that was not
- * called reads well on an empty band and catastrophically on a full one: with the
- * near slots taken, the search walks outward until it finds room and the "huddle"
- * ends up most of a screen away from the Proc it is supposed to be surrounding
- * (measured in the browser: 800px, with four uninvolved Procs in between). So the
- * clear-slot search may only look a ring or two further out; past that the tight
- * arrangement wins and a bystander standing in it is simply overlapped. The huddle
- * paints in front of the idle band (see `stacking.ts`), and being NEXT TO the leader
- * is the whole point of the gesture.
- *
- * Members are then matched to slots in x order, which makes the assignment
- * order-preserving: nobody crosses anybody else on the way in.
+ * THE huddle-only override of the standing clearance. Everything else in the engine
+ * keeps measuring room with {@link World.spacing} — the whole drawn frame, which is
+ * what #172's crowding repulsion is built on — and nothing else calls this.
  */
-function rallySpots(world: World, centre: number, members: Pet[], leaderId: string): Map<string, number> {
-	if (members.length === 0) return new Map();
-	const pitch = Math.max(RALLY_GAP_PX, world.spacing);
-	const called = new Set(members.map((pet) => pet.id));
-	const bystanders = world.pets.filter((pet) => pet.id !== leaderId && !called.has(pet.id));
+export function lineupPitch(world: World): number {
+	return world.figureWidth * (1 - RALLY_LINEUP_OVERLAP);
+}
 
-	/** Slots walking outward from the leader, alternating sides, that pass `usable`. */
-	const walk = (rings: number, usable: (x: number) => boolean): number[] => {
-		const found: number[] = [];
-		for (let ring = 1; ring <= rings && found.length < members.length; ring++) {
-			for (const side of [1, -1]) {
-				if (found.length === members.length) break;
-				const x = centre + side * ring * pitch;
-				if (x < world.band.minX || x > world.band.maxX) continue;
-				if (!usable(x)) continue;
-				found.push(x);
-			}
-		}
-		return found;
-	};
+/**
+ * Where the team photo stands.
+ *
+ * ONE tidy row running out from the leader, packed to {@link lineupPitch} so the
+ * bodies lap over each other — a group crowding in for a photo rather than a spaced
+ * arc. Three decisions, each forced by something real:
+ *
+ * **Depth rises with x.** A Proc's drawn frame is 152 units around a 96-unit figure,
+ * and the extra is not symmetric: ~8 units of held-prop room on the LEFT against ~48
+ * units of ground prop and cord on the RIGHT. So the Proc on the right must paint in
+ * FRONT — it then laps its near-empty left overhang over its neighbour's scenery, and
+ * no face is touched. The other way round a Proc's desk lands squarely on the head
+ * next to it. The order is a fact about the art, not a preference.
+ *
+ * **The row runs left by preference,** which puts the leader at its right end — the
+ * end that paints in front. That is the reference's Orchestrator leading its team's
+ * photo, anchoring the row and standing before it. Against the left edge the row runs
+ * the other way instead: the leader still anchors an end, and no face is covered, it
+ * is simply the back of the picture.
+ *
+ * **It squeezes, it does not wrap.** The band is a single floor line — `y > 0` means
+ * airborne — so a second row would be a row of Procs hovering. A row too long for the
+ * side it wanted is scaled down to fit, and never past {@link RALLY_LINEUP_MAX_OVERLAP}:
+ * fitting on screen is worth spacing, it is not worth a face. Squeezed to the floor and
+ * still too long, the row turns back THROUGH the leader and carries on down its other
+ * side — one row at one pitch either way, with the leader standing in it rather than at
+ * its end. Reachable: eleven sessions on one project with the Orchestrator mid-screen
+ * needs more band than either side of it has. End-anchoring is the preference; a
+ * visible face is the floor, and the floor wins.
+ *
+ * Bystanders are not stepped over. #171's ring made room for them because a SPACED
+ * ring standing on somebody read as a mistake; a packed pose that overlaps by design
+ * cannot say the same, and walking the row aside to dodge one would be exactly the
+ * huddle-most-of-a-screen-away #171 measured and rejected. The photo paints in front
+ * of the idle band (`stacking.ts`), and standing beside the leader is the gesture.
+ *
+ * Members are matched to slots in x order, so the assignment is order-preserving:
+ * nobody crosses anybody else on the way in.
+ */
+function lineup(world: World, centre: number, members: Pet[], leaderId: string): Map<string, Pose> {
+	const clamp = (x: number) => Math.min(world.band.maxX, Math.max(world.band.minX, x));
+	const nominal = lineupPitch(world);
+	const roomLeft = centre - world.band.minX;
+	const roomRight = world.band.maxX - centre;
+	// Left unless left will not take the row and right is roomier.
+	const direction = roomLeft >= members.length * nominal || roomLeft >= roomRight ? -1 : 1;
+	const room = Math.max(0, direction === -1 ? roomLeft : roomRight);
+	const pitch = Math.max(
+		world.figureWidth * (1 - RALLY_LINEUP_MAX_OVERLAP),
+		Math.min(nominal, members.length === 0 ? nominal : room / members.length),
+	);
 
-	const onBand = () => true;
-	// A ring or two of slack to step over a bystander, and no more.
-	const clear = walk(Math.ceil(members.length / 2) + 1, (x) => isFree(x, bystanders, world.spacing));
-	const spots = clear.length === members.length ? clear : walk(members.length * 2 + 4, onBand);
-	// The band itself has no room left. Standing close is then the honest outcome —
-	// the same trade the crowding rules already make — and still better than a Proc
-	// that was called and never came.
-	for (let ring = 1; spots.length < members.length; ring++) {
-		for (const side of [1, -1]) {
-			if (spots.length === members.length) break;
-			spots.push(Math.min(world.band.maxX, Math.max(world.band.minX, centre + side * ring * pitch)));
+	// Out from the leader on the side it chose, turning back through it onto the other
+	// side once the band runs out. Clamped only when BOTH sides are spent, which needs
+	// a band narrower than the photo itself — nowhere left to stand, so standing on
+	// each other is the honest answer, exactly as it is for a band packed to its
+	// clearance while roaming.
+	const spots: number[] = [];
+	let ahead = 0;
+	let behind = 0;
+	for (let index = 0; index < members.length; index++) {
+		const next = centre + direction * (ahead + 1) * pitch;
+		if (next >= world.band.minX && next <= world.band.maxX) {
+			ahead += 1;
+			spots.push(next);
+			continue;
 		}
+		behind += 1;
+		spots.push(clamp(centre - direction * behind * pitch));
 	}
-
 	spots.sort((a, b) => a - b);
 	const ordered = [...members].sort((a, b) => a.x - b.x || a.id.localeCompare(b.id));
-	return new Map(ordered.map((pet, index) => [pet.id, spots[index]]));
+	const placed = ordered.map((pet, index) => ({ id: pet.id, x: spots[index] }));
+
+	// The leader is in the picture too — it is the thing everybody came to stand next
+	// to — so it takes its depth from the same ordering rather than a rule of its own.
+	return new Map(
+		[...placed, { id: leaderId, x: centre }]
+			.sort((a, b) => a.x - b.x || a.id.localeCompare(b.id))
+			.map((entry, depth) => [entry.id, { x: entry.x, depth: Math.min(depth, RALLY_MAX_DEPTH - 1) }]),
+	);
 }
 
 /**
@@ -941,16 +1057,18 @@ function advanceRally(pet: Pet, now: number, rng: Rng): Pet {
 	return { ...pet, rally: undefined, facing: "front", restUntil: pickRest(now, rng) };
 }
 
-/** The ring turns to look at the Proc it came for, whichever side of it each one stands. */
-function faceTheLeader(pets: Pet[]): Pet[] {
-	const byId = new Map(pets.map((pet) => [pet.id, pet]));
+/**
+ * The photo turns to the camera.
+ *
+ * #171's ring turned each Proc inward to look at the one that called it, which is
+ * what an arc facing its centre should do. A team photo faces the viewer instead —
+ * so nobody is mirrored, nobody is looking away, and no Proc's scenery is flipped to
+ * the far side of it in the one pose the human asked to look at.
+ */
+function faceTheCamera(pets: Pet[]): Pet[] {
 	return pets.map((pet) => {
 		if (pet.rally?.phase !== "gathered" || pet.motion.kind !== "standing") return pet;
-		if (pet.rally.leaderId === pet.id) return pet;
-		const leader = byId.get(pet.rally.leaderId);
-		if (!leader) return pet;
-		const facing: Facing = leader.x < pet.x ? "left" : "right";
-		return facing === pet.facing ? pet : { ...pet, facing };
+		return pet.facing === "front" ? pet : { ...pet, facing: "front" as Facing };
 	});
 }
 
@@ -1233,7 +1351,7 @@ export function tick(world: World, now: number, rng: Rng): World {
 	pets = pets.map((pet) => advanceMeeting(pet, now, rng));
 	pets = pets.map((pet) => advanceRally(pet, now, rng));
 	pets = faceEachOther(pets);
-	pets = faceTheLeader(pets);
+	pets = faceTheCamera(pets);
 
 	// 3. Rescue anyone left off the band (a display resize). Deliberately NOT a
 	//    crowding sweep: re-flowing the row on every tick meant one Proc arriving

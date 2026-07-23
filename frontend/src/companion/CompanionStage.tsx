@@ -150,6 +150,9 @@ export function CompanionStage({
 		// cord drape across a neighbour — the scenery is how a Proc says what it is
 		// doing, so it needs its own room as much as the body does.
 		spacing: FRAME.width + PET_GAP,
+		// The figure ALONE, which is what "shoulder to shoulder" is a fact about. The
+		// gathered photo is the one pose that gives the scenery's room up on purpose.
+		figureWidth: FRAME.figureWidth,
 	}));
 
 	useEffect(() => {
