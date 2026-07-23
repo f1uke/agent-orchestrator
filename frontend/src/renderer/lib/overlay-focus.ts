@@ -37,7 +37,9 @@ type OverlayDismissOverrides<E extends Dismissable> = {
  * this hook directly only for raw `@radix-ui/react-dialog` content. Pass a
  * consumer's own handlers as `overrides` so neither is dropped.
  */
-export function useOverlayDismissFocus<E extends Dismissable = Dismissable>(overrides?: OverlayDismissOverrides<E>) {
+export function useOverlayDismissFocus<E extends Dismissable = Dismissable>(
+	overrides?: OverlayDismissOverrides<E>,
+) {
 	// True when this open was dismissed by a pointer press outside the overlay.
 	const dismissedByPointerRef = useRef(false);
 

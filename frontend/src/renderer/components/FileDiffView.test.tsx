@@ -23,16 +23,7 @@ const target = {
 		resolved: false,
 		isBot: false,
 		comments: [
-			{
-				id: "C1",
-				author: "f1uke",
-				body: "re-poll on the `reviewInterval`",
-				url: "",
-				resolved: false,
-				isBot: false,
-				system: false,
-				createdAt: "2026-07-09T10:00:00Z",
-			},
+			{ id: "C1", author: "f1uke", body: "re-poll on the `reviewInterval`", url: "", resolved: false, isBot: false, system: false, createdAt: "2026-07-09T10:00:00Z" },
 		],
 	},
 };

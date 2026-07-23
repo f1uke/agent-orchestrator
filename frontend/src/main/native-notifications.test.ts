@@ -74,10 +74,7 @@ describe("createNativeNotifier", () => {
 
 		expect(created).toHaveLength(1);
 		expect(created[0].shown).toBe(true);
-		expect(created[0].options).toEqual({
-			title: "checkout needs input",
-			body: "The agent is waiting for your response.",
-		});
+		expect(created[0].options).toEqual({ title: "checkout needs input", body: "The agent is waiting for your response." });
 	});
 
 	it("ignores notifications missing an id or title", () => {
