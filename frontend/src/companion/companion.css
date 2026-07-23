@@ -873,3 +873,17 @@ body {
 		transform: translateX(1.6px);
 	}
 }
+
+/* PROTOTYPE (terminal bubble). The board hides xterm's own scrollbar so it cannot
+   reserve width and shift the cell grid (styles.css); the overlay is a separate
+   page with its own stylesheet, so without this the raw OS scrollbar paints a
+   white slab down the right-hand side of the terminal card. The wheel still
+   scrolls — xterm handles that itself. */
+.xterm .xterm-viewport {
+	scrollbar-width: none;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}

@@ -54,6 +54,26 @@ const PET_GAP = 8;
  */
 const TICK_MS = 500;
 
+/**
+ * How far a press may travel and still count as a CLICK rather than a drag.
+ *
+ * 5px is the app's existing answer — the split view's drag layer uses the same
+ * number to stop a click on a pane header turning into a drag — and it is about
+ * the wobble a hand puts into a deliberate click on a 30px figure.
+ */
+export const CLICK_SLOP_PX = 5;
+
+/**
+ * How long a press may be HELD and still count as a click.
+ *
+ * Distance alone is not enough here, because a Proc is a thing you pick up: press
+ * and hold without moving and the pet is in your hand, being held, which is a
+ * gesture with its own meaning. Letting go of that after a second should put the
+ * pet down, not open a terminal. 400ms is the usual "this was a tap, not a hold"
+ * boundary (macOS's own press-and-hold threshold is in this range).
+ */
+export const CLICK_HOLD_MS = 400;
+
 export type CompanionStageProps = {
 	feed?: CompanionFeed;
 	/**
@@ -76,6 +96,20 @@ export type CompanionStageProps = {
 	 * already means by "options for this thing".
 	 */
 	onRequestLook?: (sessionId: string) => void;
+	/**
+	 * PROTOTYPE (terminal bubble). A CLEAN LEFT CLICK on a Proc: "let me talk to
+	 * this session". Fired on release, and only when the press never became a drag.
+	 *
+	 * The split has to be made here rather than by a `click` handler, because a
+	 * press on a Proc is ALREADY a gesture: it picks the Proc up, and letting go
+	 * throws it at the speed of the hand. `click` fires after a throw too — the DOM
+	 * has no idea a drag happened — so the two would collide on every flick. The
+	 * rule is the same one the drag layer of the split view settled on: a press that
+	 * moved less than a few pixels was never a drag, and a press that moved is never
+	 * a click. A shake (which calls a rally) is a drag by construction and so can
+	 * never end in a click either.
+	 */
+	onActivate?: (sessionId: string, at: { x: number; y: number }) => void;
 	/**
 	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
 	 * reduced-motion path is a real behaviour with its own rules, and it is not
@@ -118,6 +152,7 @@ export function CompanionStage({
 	bubbleFor,
 	onInteractiveChange,
 	onRequestLook,
+	onActivate,
 	reducedMotion,
 	onStage,
 	castFor: castForOverride,
@@ -286,6 +321,13 @@ export function CompanionStage({
 		 */
 		let grabbed: string | null = null;
 		let shake = newShakeTrack();
+		/**
+		 * The press that is still eligible to be a CLICK, and stops being one the
+		 * moment the hand moves past the slop. Kept beside `grabbed` rather than
+		 * inside it because a press that has become a drag must still finish its
+		 * drag — only its right to end in a click is withdrawn.
+		 */
+		let press: { id: string; x: number; y: number; at: number } | null = null;
 		/** Height above the floor line, which is the bottom of the window. */
 		const heightOf = (clientY: number) => window.innerHeight - clientY;
 
@@ -299,6 +341,9 @@ export function CompanionStage({
 			// Press-and-shake is a COMMAND laid over the drag rather than instead of it:
 			// the Proc goes on following the pointer throughout, because taking it out of
 			// the hand mid-gesture reads as the app dropping the thing you are holding.
+			if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_SLOP_PX) {
+				press = null;
+			}
 			if (grabbed) {
 				const leaderId = grabbed;
 				shake = trackShake(shake, { x: event.clientX, y: event.clientY, at: event.timeStamp || performance.now() });
@@ -343,6 +388,7 @@ export function CompanionStage({
 			// it to the desktop.
 			tracker.hold(true);
 			grabbed = id;
+			press = { id, x: event.clientX, y: event.clientY, at: performance.now() };
 			shake = trackShake(newShakeTrack(), {
 				x: event.clientX,
 				y: event.clientY,
@@ -362,9 +408,16 @@ export function CompanionStage({
 		const onUp = (event: PointerEvent) => {
 			tracker.hold(false);
 			const thrown = sample && performance.now() - sample.at < 120 ? throwSpeed : { vx: 0, vy: 0 };
+			// A press that never moved and never lingered: the human clicked this Proc.
+			// Read BEFORE the release below, so the pet is still the one that was held.
+			const clicked = press && performance.now() - press.at <= CLICK_HOLD_MS ? press : null;
+			press = null;
 			sample = null;
 			grabbed = null;
 			shake = newShakeTrack();
+			if (clicked) {
+				onActivate?.(clicked.id, { x: clicked.x, y: clicked.y });
+			}
 			setWorld((current) => {
 				const holding = current.pets.find((pet) => pet.motion.kind === "held");
 				if (!holding) return current;
@@ -416,7 +469,7 @@ export function CompanionStage({
 			window.removeEventListener("blur", onOut);
 			tracker.release();
 		};
-	}, [onInteractiveChange, onRequestLook]);
+	}, [onInteractiveChange, onRequestLook, onActivate]);
 
 	const painted = paintOrder(world.pets);
 	// Everything a pet SAYS, and everything you can ask it, belongs to a pet that is

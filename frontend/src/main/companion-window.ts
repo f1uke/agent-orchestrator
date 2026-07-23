@@ -40,6 +40,15 @@ export type OverlayWindowOptions = {
 export interface OverlayWindow {
 	setBounds(bounds: OverlayBounds): void;
 	setIgnoreMouseEvents(ignore: boolean, options?: { forward?: boolean }): void;
+	/**
+	 * PROTOTYPE (terminal bubble). The overlay is built `focusable: false` so it can
+	 * never steal the keyboard from the app you are working in. A terminal you can
+	 * type into needs exactly that, though — so the flag is flipped for the life of
+	 * one open bubble and put back the moment it closes.
+	 */
+	setFocusable(focusable: boolean): void;
+	focus(): void;
+	blur(): void;
 	setVisibleOnAllWorkspaces(visible: boolean, options?: { visibleOnFullScreen?: boolean }): void;
 	setAlwaysOnTop(flag: boolean, level?: string): void;
 	loadURL(url: string): Promise<void>;
@@ -52,6 +61,14 @@ export interface OverlayWindow {
 
 /** "Go and re-read the chosen looks." Carries nothing; see `notifyLooksChanged`. */
 export const LOOKS_CHANGED_CHANNEL = "companion:looksChanged";
+
+/**
+ * PROTOTYPE (terminal bubble): "the board window is up — let go of the terminal."
+ *
+ * Carries nothing either. The overlay's only correct response is to detach, and
+ * a payload would invite it to decide whether to.
+ */
+export const MAIN_WINDOW_OPENED_CHANNEL = "companion:mainWindowOpened";
 
 export type CompanionOverlayDeps = {
 	createWindow(options: OverlayWindowOptions): OverlayWindow;
@@ -76,9 +93,23 @@ export type CompanionOverlay = {
 	 * finds the work already done.
 	 */
 	notifyLooksChanged(): void;
+	/** PROTOTYPE: the board window came up; any live bubble terminal must detach. */
+	notifyMainWindowOpened(): void;
 	/** Re-band after a display change. */
 	relayout(): void;
 	isOpen(): boolean;
+	/**
+	 * PROTOTYPE (terminal bubble): take or give back the keyboard.
+	 *
+	 * Taking it is two steps because one is not enough: `setFocusable(true)` only
+	 * makes the window ELIGIBLE for the keyboard, and `focus()` actually takes it.
+	 * Giving it back is two steps for a different reason: on macOS
+	 * `setFocusable(false)` explicitly does NOT drop focus a window already holds
+	 * (Electron's own docs say so, and it is measured — see the probe in the
+	 * record), so without the `blur()` the desktop keeps typing into a bubble that
+	 * is no longer there.
+	 */
+	setKeyboard(on: boolean): void;
 	dispose(): void;
 };
 
@@ -204,11 +235,33 @@ export function createCompanionOverlay(deps: CompanionOverlayDeps): CompanionOve
 				deps.logError("AO: failed to tell the companion overlay about a look change", err);
 			}
 		},
+		notifyMainWindowOpened() {
+			try {
+				live()?.send(MAIN_WINDOW_OPENED_CHANNEL);
+			} catch (err) {
+				deps.logError("AO: failed to tell the companion overlay the board window opened", err);
+			}
+		},
 		relayout() {
 			live()?.setBounds(overlayBandBounds(deps.workArea()));
 		},
 		isOpen() {
 			return live() !== null;
+		},
+		setKeyboard(on) {
+			const current = live();
+			if (!current) return;
+			try {
+				if (on) {
+					current.setFocusable(true);
+					current.focus();
+				} else {
+					current.setFocusable(false);
+					current.blur();
+				}
+			} catch (err) {
+				deps.logError("AO: failed to move the keyboard in or out of the companion overlay", err);
+			}
 		},
 		dispose() {
 			close();

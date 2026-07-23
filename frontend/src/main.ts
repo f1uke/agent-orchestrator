@@ -99,7 +99,18 @@ if (process.platform === "win32") {
 // inside ~/.ao alongside the daemon's data dir and running.json. sessionData and
 // crashDumps derive from userData, so this one override reparents them all.
 // Must run before app ready.
-app.setPath("userData", path.join(os.homedir(), ".ao", "electron"));
+// PROTOTYPE (terminal bubble) harness: lets the verification script drive the
+// overlay's REAL windows — click a Proc, type into the terminal — through the same
+// Chromium input pipeline a mouse and keyboard use. Unpackaged only, and only when
+// asked for; the packaged app never opens a debugging port.
+if (!app.isPackaged && process.env.AO_COMPANION_PROTO_DEBUG_PORT) {
+	app.commandLine.appendSwitch("remote-debugging-port", process.env.AO_COMPANION_PROTO_DEBUG_PORT);
+}
+
+// PROTOTYPE (terminal bubble) harness: a second, UNPACKAGED app run alongside the
+// installed one would otherwise share this profile and fight it for the
+// localStorage lock. The override stays under ~/.ao, so the hard rule holds.
+app.setPath("userData", path.join(os.homedir(), ".ao", process.env.AO_ELECTRON_SUBDIR || "electron"));
 
 let mainWindow: BrowserWindow | null = null;
 let daemonProcess: ChildProcessWithoutNullStreams | null = null;
@@ -222,10 +233,16 @@ function companionPreloadPath(): string {
 // sits on the desktop has no business booting the router, the query client or the
 // daemon connection.
 function companionUrl(): string {
-	if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-		return new URL("companion.html", MAIN_WINDOW_VITE_DEV_SERVER_URL).toString();
-	}
-	return `${RENDERER_ORIGIN}/companion.html`;
+	const base =
+		typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL
+			? new URL("companion.html", MAIN_WINDOW_VITE_DEV_SERVER_URL).toString()
+			: `${RENDERER_ORIGIN}/companion.html`;
+	// PROTOTYPE (terminal bubble) harness only, and unpackaged only: point every
+	// Proc's click at one real tmux pane, so the overlay can be driven against an
+	// isolated daemon that has no sessions of its own. See PROTO_HANDLE in
+	// src/companion/main.tsx.
+	const proto = isDev ? process.env.AO_COMPANION_PROTO_HANDLE : undefined;
+	return proto ? `${base}?protoHandle=${encodeURIComponent(proto)}` : base;
 }
 
 // Runtime window/taskbar icon for Linux and Windows. macOS ignores this and
@@ -430,6 +447,13 @@ function createWindow(): void {
 	});
 
 	void mainWindow.loadURL(rendererUrl());
+
+	// PROTOTYPE (terminal bubble): the board window exists again, so any bubble
+	// terminal on the overlay must let its pane go before this window attaches it.
+	// 'show' as well as creation: a window that was only hidden comes back this way.
+	notifyMainWindowOpened();
+	mainWindow.on("show", () => notifyMainWindowOpened());
+	mainWindow.on("focus", () => notifyMainWindowOpened());
 
 	if (isDev && process.env.AO_OPEN_DEVTOOLS === "1") {
 		mainWindow.webContents.once("did-frame-finish-load", () => {
@@ -1338,6 +1362,78 @@ ipcMain.on("companion:looksChanged", () => {
 	companionOverlay?.notifyLooksChanged();
 });
 
+// ─── PROTOTYPE: click a Proc, talk to its session ────────────────────────────
+//
+// The routing lives HERE, in the one process that knows whether the board window
+// exists, and it is what makes the whole feature safe: a session's terminal is
+// shown in exactly ONE surface at a time, so the same tmux pane is never attached
+// twice.
+//
+//   board window open   → bring it forward on that session. No bubble.
+//   board window closed → the overlay opens a bubble and takes the keyboard.
+//
+// The overlay is told the answer rather than deciding it: `mainWindow` is a main-
+// process fact, and a renderer that guessed could guess wrong exactly when the
+// user was opening the window.
+
+/** Where a Proc's click was answered. The overlay renders on `bubble` only. */
+export type CompanionActivation = "app" | "bubble" | "unavailable";
+
+function revealSessionInApp(sessionId: string): boolean {
+	if (!mainWindow || mainWindow.isDestroyed()) return false;
+	if (mainWindow.isMinimized()) mainWindow.restore();
+	mainWindow.show();
+	mainWindow.focus();
+	// The same deep link a native notification click uses (NotificationCenter's
+	// openRoute), so "reveal this session" has ONE implementation in the renderer.
+	mainWindow.webContents.send("notifications:click", { id: "", route: { kind: "session", sessionId } });
+	return true;
+}
+
+ipcMain.handle("companion:activateSession", (_event, sessionId: unknown): CompanionActivation => {
+	if (typeof sessionId !== "string" || sessionId === "") return "unavailable";
+	if (revealSessionInApp(sessionId)) {
+		// A bubble may be open at this moment; the overlay closes it when it sees
+		// the window come up (below). Belt and braces: the keyboard goes back now,
+		// so the window that is being raised is the one that receives typing.
+		companionOverlay?.setKeyboard(false);
+		return "app";
+	}
+	companionOverlay?.setKeyboard(true);
+	return "bubble";
+});
+
+/** The bubble closed (Esc, the ✕, or the session went away). Give the keyboard back. */
+ipcMain.on("companion:releaseKeyboard", () => {
+	companionOverlay?.setKeyboard(false);
+});
+
+// PROTOTYPE harness only: the verification script has no way to click the Dock
+// icon, and the hand-off it has to prove is triggered by the board window OPENING.
+// Unpackaged + explicitly asked for, so it cannot exist in a shipped app.
+ipcMain.on("companion:protoOpenMainWindow", () => {
+	if (app.isPackaged || !process.env.AO_COMPANION_PROTO_DEBUG_PORT) return;
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		mainWindow.show();
+		mainWindow.focus();
+		return;
+	}
+	createWindow();
+});
+
+/**
+ * The board window opened while a bubble was live.
+ *
+ * This is the hand-off's safety net: the overlay detaches its terminal BEFORE the
+ * app attaches, so the pane is never attached in two places. It is a push rather
+ * than a poll because the window can appear for reasons the overlay never hears
+ * about (Dock click, ⌘Tab, a notification).
+ */
+function notifyMainWindowOpened(): void {
+	companionOverlay?.setKeyboard(false);
+	companionOverlay?.notifyMainWindowOpened();
+}
+
 // The overlay page has no daemon connection of its own and the port is discovered,
 // so it asks for the base URL rather than assuming one. Null while the daemon is
 // not running; the overlay retries and stays on its mock until it answers.
@@ -1510,6 +1606,9 @@ function initCompanionOverlay(): void {
 			return {
 				setBounds: (bounds) => win.setBounds(bounds),
 				setIgnoreMouseEvents: (ignore, opts) => win.setIgnoreMouseEvents(ignore, opts),
+				setFocusable: (focusable) => win.setFocusable(focusable),
+				focus: () => win.focus(),
+				blur: () => win.blur(),
 				setVisibleOnAllWorkspaces: (visible, opts) => win.setVisibleOnAllWorkspaces(visible, opts),
 				setAlwaysOnTop: (flag, level) => win.setAlwaysOnTop(flag, level as Parameters<typeof win.setAlwaysOnTop>[1]),
 				loadURL: (url) => win.loadURL(url),

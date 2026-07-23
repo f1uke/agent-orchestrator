@@ -201,7 +201,11 @@ function Eyes({
 		<>
 			{at.map(([cx, cy], index) => (
 				<g
-					key={`${cx}-${cy}`}
+					// Keyed by POSITION IN THE LIST, not by coordinates: a face whose two
+					// eyes sit at the same point (a species drawn head-on, one eye behind
+					// the other) gave both the same key, and React spent every frame
+					// complaining about it in the overlay's console.
+					key={index}
 					data-eye
 					data-eye-style={style}
 					style={
@@ -336,7 +340,8 @@ function Blush({
 	return (
 		<g clipPath={`url(#${clip})`}>
 			{at.map(([cx, cy], index) => (
-				<g key={`${cx}-${cy}`} data-cheek={style}>
+				// Same as the eyes: two cheeks can share a coordinate, list order cannot.
+				<g key={index} data-cheek={style}>
 					{style === "hatch" ? (
 						[-1, 0, 1].map((step) => (
 							<path

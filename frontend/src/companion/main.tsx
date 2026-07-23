@@ -13,6 +13,7 @@ import { refreshProjectLooks } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 import { speciesForProject, type SpeciesId } from "./species";
+import { TerminalBubble } from "./TerminalBubble";
 
 // Entry point for the overlay window. Deliberately tiny and separate from the main
 // renderer: the overlay has no router, no query client, no daemon connection and no
@@ -24,6 +25,10 @@ type CompanionBridge = {
 	daemonUrl?(): Promise<string | null>;
 	requestLook?(sessionId: string): void;
 	onLooksChanged?(listener: () => void): () => void;
+	// PROTOTYPE (terminal bubble)
+	activateSession?(sessionId: string): Promise<"app" | "bubble" | "unavailable">;
+	releaseKeyboard?(): void;
+	onMainWindowOpened?(listener: () => void): () => void;
 };
 
 const bridge = (window as unknown as { aoCompanion?: CompanionBridge }).aoCompanion;
@@ -39,9 +44,37 @@ const DAEMON_WAIT_MS = 5_000;
  * companion is broken" when it only means "the daemon is still starting". The
  * moment a real roster arrives the mock is replaced wholesale.
  */
+/**
+ * PROTOTYPE (terminal bubble) harness switch: `companion.html?protoHandle=<tmux>`.
+ *
+ * The prototype runs against an ISOLATED daemon that has no sessions in it, so
+ * there would be no Proc to click and no pane to attach. With this set, the band
+ * keeps its mock cast and every click attaches to the named tmux pane — which is
+ * a REAL pane, reached through the REAL daemon mux. Absent (every packaged
+ * overlay), nothing on this path runs.
+ */
+const PROTO_HANDLE = new URLSearchParams(window.location.search).get("protoHandle");
+
+/** The open bubble, or nothing. Exactly one at a time — one terminal, one keyboard. */
+type OpenBubble = { sessionId: string; handleId: string; title: string; anchorX: number };
+
+async function terminalHandleFor(daemonUrl: string, sessionId: string): Promise<string | null> {
+	if (PROTO_HANDLE) return PROTO_HANDLE;
+	try {
+		const response = await fetch(`${daemonUrl}/api/v1/sessions`);
+		if (!response.ok) return null;
+		const body = (await response.json()) as { sessions?: Array<{ id?: string; terminalHandleId?: string }> };
+		return body.sessions?.find((session) => session.id === sessionId)?.terminalHandleId ?? null;
+	} catch {
+		return null;
+	}
+}
+
 function Overlay() {
 	const [live, setLive] = useState<LiveFeed | null>(null);
 	const [mock] = useState<CompanionFeed>(() => createMockFeed());
+	const [daemonUrl, setDaemonUrl] = useState<string | null>(null);
+	const [bubble, setBubble] = useState<OpenBubble | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -54,6 +87,8 @@ function Overlay() {
 				timer = setTimeout(attach, DAEMON_WAIT_MS);
 				return;
 			}
+			setDaemonUrl(url);
+			if (PROTO_HANDLE) return; // keep the mock cast; see PROTO_HANDLE.
 			setLive(createLiveFeed({ ...createHttpTransport(url), now: () => Date.now() }));
 		};
 
@@ -69,13 +104,61 @@ function Overlay() {
 	// event never does; both paths do nothing but re-read localStorage.
 	useEffect(() => bridge?.onLooksChanged?.(() => refreshProjectLooks()), []);
 
+	const closeBubble = useCallback(() => {
+		setBubble(null);
+		bridge?.releaseKeyboard?.();
+	}, []);
+
+	// The hand-off. The board window is up, so the terminal belongs to IT now: the
+	// bubble unmounts, which detaches the pane, BEFORE the app can attach it. One
+	// pane, one attachment — the safety property the whole routing exists for.
+	useEffect(() => bridge?.onMainWindowOpened?.(() => closeBubble()), [closeBubble]);
+
+	const onActivate = useCallback(
+		(sessionId: string, at: { x: number; y: number }) => {
+			void (async () => {
+				// Ask the main process where this click is answered. It is the only one
+				// that knows whether the board window exists, and the only one that can
+				// bring it forward.
+				const where = (await bridge?.activateSession?.(sessionId)) ?? "unavailable";
+				console.log("[proto] activate", sessionId, where, "daemonUrl=", daemonUrl);
+				if (where !== "bubble") return; // revealed in the app, or nothing to reveal
+				if (!daemonUrl) return;
+				const handleId = await terminalHandleFor(daemonUrl, sessionId);
+				console.log("[proto] handle", handleId);
+				if (!handleId) {
+					bridge?.releaseKeyboard?.();
+					return;
+				}
+				setBubble({ sessionId, handleId, title: sessionId, anchorX: at.x });
+			})();
+		},
+		[daemonUrl],
+	);
+
+	const onInteractiveChange = useCallback((interactive: boolean) => bridge?.setInteractive(interactive), []);
+	const onRequestLook = useCallback((sessionId: string) => bridge?.requestLook?.(sessionId), []);
+
 	return (
-		<CompanionStage
-			feed={live ?? mock}
-			bubbleFor={live ? (id) => live.bubbleFor(id) : undefined}
-			onInteractiveChange={(interactive) => bridge?.setInteractive(interactive)}
-			onRequestLook={(sessionId) => bridge?.requestLook?.(sessionId)}
-		/>
+		<>
+			<CompanionStage
+				feed={live ?? mock}
+				bubbleFor={live ? (id) => live.bubbleFor(id) : undefined}
+				onInteractiveChange={onInteractiveChange}
+				onRequestLook={onRequestLook}
+				onActivate={onActivate}
+			/>
+			{bubble && daemonUrl ? (
+				<TerminalBubble
+					key={bubble.sessionId}
+					handleId={bubble.handleId}
+					title={bubble.title}
+					daemonUrl={daemonUrl}
+					anchorX={bubble.anchorX}
+					onClose={closeBubble}
+				/>
+			) : null}
+		</>
 	);
 }
 

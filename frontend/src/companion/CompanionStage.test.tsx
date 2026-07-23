@@ -780,3 +780,91 @@ describe("shaking the Orchestrator to call its project in", () => {
 		expect(atX(procOf(container, "a1"))).not.toBe(before);
 	});
 });
+
+// PROTOTYPE (terminal bubble): the click/drag split.
+describe("clicking a Proc to talk to its session", () => {
+	function staged(onActivate: (sessionId: string, at: { x: number; y: number }) => void) {
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} onActivate={onActivate} />);
+		push([{ sessionId: "a", status: "pr_open", name: "fix the flaky test", project: "agent-orchestrator" }]);
+		return view;
+	}
+	// Re-queried every time: picking a Proc up swaps its pose, so the node changes.
+	const figure = (container: HTMLElement) => container.querySelector("[data-figure] rect")!;
+
+	it("a press that never moved is a click", () => {
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+
+		expect(onActivate).toHaveBeenCalledWith("a", { x: 400, y: 900 });
+	});
+
+	it("a hand's wobble is still a click", () => {
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 403, clientY: 901 });
+		fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 403, clientY: 901 });
+
+		expect(onActivate).toHaveBeenCalledTimes(1);
+	});
+
+	it("a DRAG throws the Proc and opens nothing", () => {
+		// The two gestures start identically, so the split has to be made on what the
+		// hand did — not on which handler fired.
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 520, clientY: 840 });
+		fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 520, clientY: 840 });
+
+		expect(onActivate).not.toHaveBeenCalled();
+	});
+
+	it("a Proc that was picked up and HELD is put down, not opened", () => {
+		vi.useFakeTimers();
+		try {
+			const onActivate = vi.fn();
+			const { container } = staged(onActivate);
+
+			fireEvent.pointerDown(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+			act(() => vi.advanceTimersByTime(1_500));
+			fireEvent.pointerUp(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
+
+			expect(onActivate).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("a right-click asks for the look, never for a terminal", () => {
+		const onActivate = vi.fn();
+		const onRequestLook = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onActivate={onActivate} onRequestLook={onRequestLook} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+
+		fireEvent.pointerDown(figure(container), { bubbles: true, button: 2, clientX: 400, clientY: 900 });
+		fireEvent.contextMenu(figure(container), { bubbles: true });
+		fireEvent.pointerUp(figure(container), { bubbles: true, button: 2, clientX: 400, clientY: 900 });
+
+		expect(onRequestLook).toHaveBeenCalledWith("a");
+		expect(onActivate).not.toHaveBeenCalled();
+	});
+
+	it("a press on empty band is nobody's click", () => {
+		const onActivate = vi.fn();
+		const { container } = staged(onActivate);
+		const band = container.querySelector(".companion-stage")!;
+
+		fireEvent.pointerDown(band, { bubbles: true, clientX: 100, clientY: 900 });
+		fireEvent.pointerUp(band, { bubbles: true, clientX: 100, clientY: 900 });
+
+		expect(onActivate).not.toHaveBeenCalled();
+	});
+});
