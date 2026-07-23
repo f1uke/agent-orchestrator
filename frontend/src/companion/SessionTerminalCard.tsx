@@ -217,6 +217,15 @@ export function SessionTerminalCard({
 				// window's bottom edge and the pointed bit lives in the gap.
 				paddingBottom: TAIL_HEIGHT,
 				boxSizing: "border-box",
+				// This window shares the overlay's stylesheet, which sets
+				// `pointer-events: none` on html/body so the BAND is click-through — a
+				// hole in the screen you can only poke a pet through. A terminal window
+				// is a real window, so its card takes the pointer back, the same move a
+				// pet makes for itself. Without this the ✕ and every other click pass
+				// straight through the card to the page root: the button never fires
+				// (that was "✕ does not close") and the stray click blurs the terminal,
+				// leaving you unable to type (that was "input dies after ✕").
+				pointerEvents: "auto",
 			}}
 		>
 			<div
@@ -232,7 +241,18 @@ export function SessionTerminalCard({
 					boxSizing: "border-box",
 				}}
 			>
-				<div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px" }}>
+				<div
+					// The header is a toolbar over a terminal, and a toolbar must not take
+					// the caret: clicking the title or the status text would otherwise move
+					// focus off the xterm textarea and leave you unable to type until you
+					// clicked back into the terminal. Preventing the mousedown's default
+					// keeps focus where it is — and it does NOT cancel the click, so the ✕
+					// button still fires and closes the window. The terminal body below is
+					// deliberately excluded, because clicking INTO the terminal to focus it
+					// or select text is exactly what should move focus there.
+					onMouseDown={(event) => event.preventDefault()}
+					style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px" }}
+				>
 					<span
 						aria-hidden="true"
 						title={status ? STATUS_LABELS[status] : undefined}

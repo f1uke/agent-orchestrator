@@ -121,6 +121,37 @@ describe("the card a Proc opens", () => {
 		expect(onClose).toHaveBeenCalledTimes(2);
 	});
 
+	it("takes the pointer back from the overlay's click-through stylesheet", () => {
+		// The window shares companion.css, which sets `pointer-events: none` on
+		// html/body so the BAND is a hole in the screen. Inheriting that here made
+		// every click — the ✕ included — pass straight through the card to the page
+		// root: the button never fired and the stray click blurred the terminal, so
+		// typing died. The card must reclaim the pointer for itself.
+		const { container } = card();
+		const root = container.querySelector<HTMLElement>("[data-session-terminal]");
+
+		expect(root?.style.pointerEvents).toBe("auto");
+	});
+
+	it("does not let a click on the header steal the caret from the terminal", () => {
+		// A toolbar over a terminal must not take focus: clicking the title or the
+		// status text would otherwise leave you unable to type until you clicked back
+		// into the terminal. Preventing the mousedown's default keeps focus put — and
+		// it does not cancel the click, so the ✕ still closes.
+		const onClose = vi.fn();
+		const { getByText, getByLabelText } = card({ title: "fix the flaky test", onClose });
+
+		const header = getByText("fix the flaky test").parentElement!;
+		const onHeader = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+		header.dispatchEvent(onHeader);
+		expect(onHeader.defaultPrevented).toBe(true);
+
+		// The ✕ lives in that same header, so its mousedown is prevented too — which
+		// must NOT stop its click from closing.
+		fireEvent.click(getByLabelText("Close terminal"));
+		expect(onClose).toHaveBeenCalled();
+	});
+
 	it("hands its detach up, and takes it back when it goes", () => {
 		// The hand-off calls this before the window is destroyed; a destroyed window's
 		// cleanup never runs, so the pane would otherwise never be told to let go.
