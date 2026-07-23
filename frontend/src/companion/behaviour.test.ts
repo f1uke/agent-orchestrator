@@ -3,6 +3,9 @@ import { ALL_COMPANION_STATUSES, isAnchored } from "./scene";
 import {
 	MAX_ANIMATING,
 	MAX_CONCURRENT_WALKS,
+	RALLY_LINEUP_MAX_OVERLAP,
+	RALLY_LINEUP_OVERLAP,
+	RALLY_MAX_DEPTH,
 	REST_MAX_MS,
 	REST_MIN_MS,
 	SUMMON_SPACING_PX,
@@ -17,6 +20,7 @@ import {
 	createWorld,
 	dragPet,
 	grabPet,
+	lineupPitch,
 	releasePet,
 	startConversation,
 	startRally,
@@ -1871,6 +1875,31 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 	}
 
 	const members = (w: World) => w.pets.filter((p) => p.rally && p.rally.leaderId !== p.id);
+	/** Everyone standing in the photo — leader included — read off left to right. */
+	const photo = (w: World) => w.pets.filter((p) => p.rally).sort((a, b) => a.x - b.x);
+	const gaps = (w: World) =>
+		photo(w)
+			.slice(1)
+			.map((p, i) => p.x - photo(w)[i].x);
+
+	/** A project of `size` workers plus its Orchestrator, on a band of `width`. */
+	function team(size: number, { width = 1000, leaderX = 500 } = {}): World {
+		const ids = Array.from({ length: size }, (_, i) => `a${i + 1}`);
+		const base = syncActivities(
+			world({ band: { minX: 0, maxX: width } }),
+			[project("lead", "alpha", "orchestrator"), ...ids.map((id) => project(id, "alpha"))],
+			T0,
+			half,
+		);
+		return {
+			...base,
+			pets: base.pets.map((pet) => ({
+				...pet,
+				x: pet.id === "lead" ? leaderX : (width * (ids.indexOf(pet.id) + 1)) / (size + 1),
+				restUntil: T0 + 10 * REST_MAX_MS,
+			})),
+		};
+	}
 
 	it("sets every Proc on the leader's project running toward it", () => {
 		const called = startRally(band(), "lead", T0);
@@ -1898,18 +1927,6 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 		expect(Math.abs(motion.toX - motion.fromX) / (motion.endsAt - motion.startedAt)).toBeGreaterThan(strollPace);
 	});
 
-	it("stands them around the leader without piling them on top of it", () => {
-		const gathered = run(startRally(band(), "lead", T0), 2);
-		const spots = [...members(gathered), petById(gathered, "lead")].map((p) => p.x).sort((a, b) => a - b);
-
-		expect(members(gathered)).toHaveLength(2);
-		for (let i = 1; i < spots.length; i++) {
-			expect(spots[i] - spots[i - 1]).toBeGreaterThanOrEqual(gathered.spacing);
-		}
-		// Surrounding it: one on each side, not a queue on one flank.
-		expect(spots[1]).toBe(500);
-	});
-
 	it("keeps the whole huddle on the band when the leader is called at the edge", () => {
 		const gathered = run(startRally(band({ lead: 995 }), "lead", T0), 3);
 
@@ -1920,22 +1937,11 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 		expect(members(gathered).every((p) => p.rally?.phase === "gathered")).toBe(true);
 	});
 
-	it("keeps the ring clear of a Proc that was never called", () => {
-		// A bystander standing exactly where a ring spot would go. The spot moves; the
-		// bystander does not — it had nothing to do with the gesture.
-		const gathered = run(startRally(band({ b1: 600 }), "lead", T0), 3);
-
-		expect(petById(gathered, "b1").x).toBe(600);
-		for (const member of members(gathered)) {
-			expect(Math.abs(member.x - 600), member.id).toBeGreaterThanOrEqual(gathered.spacing);
-		}
-	});
-
 	it("stays NEXT to the leader even on a band with no room to be tidy in", () => {
-		// Found by looking at it: with the near slots taken, a search that steps over
-		// every uninvolved Proc walks the "huddle" most of a screen away from the Proc
-		// it is meant to be surrounding. Overlapping a bystander is the lesser evil —
-		// the huddle paints in front of the band it is standing in.
+		// Found by looking at it (#171): a search that steps over every uninvolved Proc
+		// walks the "huddle" most of a screen away from the Proc it is meant to be
+		// standing beside. Overlapping a bystander is the lesser evil — the photo paints
+		// in front of the band it is standing in.
 		const crowded = band({ lead: 500, a1: 60, a2: 940, b1: 400 });
 		const packed = {
 			...crowded,
@@ -1948,13 +1954,202 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 		}
 	});
 
-	it("turns the ring to look at the leader", () => {
-		const gathered = run(startRally(band(), "lead", T0), 2);
-		const [left, right] = [...members(gathered)].sort((a, b) => a.x - b.x);
+	describe("the gathered pose is a team photo", () => {
+		it("packs them into one row, shoulder to shoulder at the photo's pitch", () => {
+			const gathered = run(startRally(team(4), "lead", T0), 3);
 
-		expect(left.facing).toBe("right");
-		expect(right.facing).toBe("left");
-		expect(petById(gathered, "lead").facing).toBe("front");
+			expect(photo(gathered)).toHaveLength(5);
+			for (const gap of gaps(gathered)) expect(gap).toBeCloseTo(lineupPitch(gathered), 6);
+		});
+
+		it("stands them closer than the band ever lets them stand while roaming", () => {
+			// The whole point of the pose, and the one knob the huddle overrides. The
+			// roaming clearance is the drawn FRAME; the photo is measured on the figure.
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+
+			expect(lineupPitch(gathered)).toBeLessThan(gathered.spacing);
+			for (const gap of gaps(gathered)) expect(gap).toBeLessThan(gathered.spacing);
+		});
+
+		it("laps their bodies over each other on purpose", () => {
+			// A row spaced by the figure would be a tidy queue. The overlap is what makes
+			// it read as one group crowding in for a photo rather than five Procs in line.
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+
+			for (const gap of gaps(gathered)) expect(gap).toBeLessThan(gathered.figureWidth);
+			expect(RALLY_LINEUP_OVERLAP).toBeGreaterThan(0);
+		});
+
+		it("never laps so far that a Proc is hidden behind its neighbour", () => {
+			// Slight overlap only: every face stays visible. The depth order below means a
+			// Proc is only ever lapped from ONE side, so this bound is the whole story.
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+			const floor = gathered.figureWidth * (1 - RALLY_LINEUP_MAX_OVERLAP);
+
+			expect(RALLY_LINEUP_MAX_OVERLAP).toBeLessThan(0.5);
+			for (const gap of gaps(gathered)) expect(gap).toBeGreaterThanOrEqual(floor);
+		});
+
+		it("anchors the row on the Orchestrator, at one end and not in the middle", () => {
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+			const row = photo(gathered);
+
+			expect([row[0].id, row[row.length - 1].id]).toContain("lead");
+		});
+
+		it("turns the whole photo to face you", () => {
+			// A pose, so nobody is mirrored or looking away. #171 had the ring turn inward
+			// to look at the leader; a team photo looks at the camera.
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+
+			for (const pet of photo(gathered)) expect(pet.facing, pet.id).toBe("front");
+		});
+
+		it("paints the row front to back, one depth each and no two the same", () => {
+			// Depth rises with x, because a Proc's drawn frame hangs its ground prop and
+			// its cord off its RIGHT: the Proc on the right laps its own near-empty left
+			// overhang over its neighbour's scenery, and no face is ever covered.
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+			const depths = photo(gathered).map((p) => p.rally?.depth);
+
+			expect(depths).toEqual([0, 1, 2, 3, 4]);
+			expect(new Set(depths).size).toBe(depths.length);
+		});
+
+		it("puts the Orchestrator in FRONT of its team where the band lets it", () => {
+			// The row runs left of the leader by preference, which is the end that paints
+			// in front — the reference's Orchestrator leading its team's photo.
+			const gathered = run(startRally(team(4), "lead", T0), 3);
+			const row = photo(gathered);
+
+			expect(row[row.length - 1].id).toBe("lead");
+		});
+
+		it("runs the row the other way when the leader is called against the left edge", () => {
+			// Still one row, still anchored on an end, still no face covered — it is simply
+			// the back of the photo rather than the front.
+			const gathered = run(startRally(team(4, { leaderX: 5 }), "lead", T0), 3);
+			const row = photo(gathered);
+
+			expect(row[0].id).toBe("lead");
+			expect(row.map((p) => p.rally?.depth)).toEqual([0, 1, 2, 3, 4]);
+			for (const gap of gaps(gathered)) expect(gap).toBeCloseTo(lineupPitch(gathered), 6);
+		});
+
+		it("squeezes the row rather than running it off the screen", () => {
+			// A row longer than the band beside the leader scales to fit. It does NOT wrap
+			// to a second row — the band is one floor line, so a second row would be Procs
+			// hovering above the desktop.
+			const gathered = run(startRally(team(6, { width: 460, leaderX: 230 }), "lead", T0), 3);
+
+			for (const pet of gathered.pets) {
+				expect(pet.x, pet.id).toBeGreaterThanOrEqual(gathered.band.minX);
+				expect(pet.x, pet.id).toBeLessThanOrEqual(gathered.band.maxX);
+			}
+			const squeezed = gaps(gathered);
+			expect(Math.max(...squeezed)).toBeLessThan(lineupPitch(gathered));
+			// Still ONE row at ONE pitch: squeezing evenly, not bunching up one end.
+			for (const gap of squeezed) expect(gap).toBeCloseTo(squeezed[0], 6);
+		});
+
+		it("stops squeezing before a Proc would disappear behind its neighbour", () => {
+			// Squeezed to the floor and still too long, the row turns back through the
+			// leader and carries on down its other side. Reachable: eleven sessions on one
+			// project with the Orchestrator mid-screen needs more band than either side of
+			// it has. The Orchestrator gives up its end of the row before anyone gives up
+			// their face.
+			const gathered = run(startRally(team(9, { width: 500, leaderX: 250 }), "lead", T0), 3);
+			const floor = gathered.figureWidth * (1 - RALLY_LINEUP_MAX_OVERLAP);
+			const row = photo(gathered);
+
+			for (const pet of gathered.pets) {
+				expect(pet.x, pet.id).toBeGreaterThanOrEqual(gathered.band.minX);
+				expect(pet.x, pet.id).toBeLessThanOrEqual(gathered.band.maxX);
+			}
+			for (const gap of gaps(gathered)) expect(gap).toBeCloseTo(floor, 6);
+			expect([row[0].id, row[row.length - 1].id]).not.toContain("lead");
+			expect(row.map((p) => p.rally?.depth)).toEqual([...row.keys()]);
+		});
+
+		it("keeps the photo's depth inside its own stacking layer, however big the project is", () => {
+			// The overlay caps the cast at twelve, so the depth ladder is bounded — it can
+			// never climb into the layer a meeting or a dragged Proc paints in.
+			const gathered = run(startRally(team(11), "lead", T0), 3);
+
+			for (const pet of photo(gathered)) {
+				expect(pet.rally?.depth, pet.id).toBeLessThan(RALLY_MAX_DEPTH);
+			}
+		});
+	});
+
+	describe("and then the band goes back to roaming", () => {
+		/**
+		 * Roam `w` and watch every stroll it starts.
+		 *
+		 * Reports how many started, and the tightest a destination ever came to another
+		 * Proc's claimed spot — #172's one invariant, measured rather than reasoned about.
+		 */
+		function roam(w: World, seconds: number, from = T0) {
+			const claimed = (pet: Pet) => (pet.motion.kind === "walking" ? pet.motion.toX : pet.x);
+			let started = 0;
+			let tightest = Number.POSITIVE_INFINITY;
+			for (let i = 1; i <= seconds * 4; i++) {
+				const next = tick(w, from + i * 250, half);
+				for (const pet of next.pets) {
+					if (pet.motion.kind !== "walking" || petById(w, pet.id).motion.kind === "walking") continue;
+					started += 1;
+					for (const other of next.pets) {
+						if (other.id === pet.id) continue;
+						tightest = Math.min(tightest, Math.abs(pet.motion.toX - claimed(other)));
+					}
+				}
+				w = next;
+			}
+			return { world: w, started, tightest };
+		}
+
+		it("hands the band back to ordinary crowding the moment the photo breaks up", () => {
+			// The tight pack is the POSE, not a new rule for the band. #172's repulsion owns
+			// the spacing again the instant the huddle lets go, and the row it leaves behind
+			// is a crowd to walk out of — which is the exact case #172 was written for.
+			const gathered = run(startRally(team(3), "lead", T0), 12);
+			expect(gathered.pets.every((p) => p.rally === undefined)).toBe(true);
+
+			const roamed = roam(gathered, 600, T0 + 12_000);
+
+			expect(roamed.started).toBeGreaterThan(0);
+			// Every destination is a FULL roaming clearance from everybody: the huddle's
+			// tight pitch never leaks out of the huddle.
+			expect(roamed.tightest).toBeGreaterThanOrEqual(gathered.spacing);
+		});
+
+		it("loosens the row it left behind", () => {
+			// Not just "a walk happened": the packed row actually dissolves.
+			const gathered = run(startRally(team(3), "lead", T0), 12);
+			const tightest = (w: World) => {
+				const xs = w.pets.map((p) => p.x).sort((a, b) => a - b);
+				return Math.min(...xs.slice(1).map((x, i) => x - xs[i]));
+			};
+
+			expect(tightest(gathered)).toBeLessThan(gathered.spacing);
+			expect(tightest(roam(gathered, 600, T0 + 12_000).world)).toBeGreaterThan(tightest(gathered));
+		});
+
+		it("leaves ordinary crowding exactly as it was — the tight pitch is the photo's alone", () => {
+			// The regression guard for #172. A band that has never seen a rally still repels:
+			// Procs clustered at the photo's pitch by hand walk out of it, and no destination
+			// is ever inside the clearance.
+			const cluster = team(3);
+			const packed = {
+				...cluster,
+				pets: cluster.pets.map((pet, i) => ({ ...pet, x: 480 + i * lineupPitch(cluster), restUntil: T0 })),
+			};
+			const roamed = roam(packed, 600);
+
+			expect(roamed.world.pets.every((p) => p.rally === undefined)).toBe(true);
+			expect(roamed.started).toBeGreaterThan(0);
+			expect(roamed.tightest).toBeGreaterThanOrEqual(packed.spacing);
+		});
 	});
 
 	it("holds the huddle a moment and then lets everyone go, where they stand", () => {
@@ -2101,8 +2296,19 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 				expect(member.motion.kind, member.id).toBe("standing");
 				expect(member.rally?.phase, member.id).toBe("gathered");
 			}
-			const spots = members(called).map((p) => p.x);
-			expect(Math.abs(spots[0] - spots[1])).toBeGreaterThanOrEqual(called.spacing);
+		});
+
+		it("snaps them into the SAME team photo, pose and depth and all", () => {
+			// Reduced motion drops the travel, never the meaning. What you get is the
+			// picture the run-in would have arrived at.
+			const called = startRally(quiet(team(4)), "lead", T0);
+			const row = photo(called);
+
+			expect(row).toHaveLength(5);
+			expect(row[row.length - 1].id).toBe("lead");
+			expect(row.map((p) => p.rally?.depth)).toEqual([0, 1, 2, 3, 4]);
+			for (const pet of row) expect(pet.facing, pet.id).toBe("front");
+			for (const gap of gaps(called)) expect(gap).toBeCloseTo(lineupPitch(called), 6);
 		});
 
 		it("lets them go again when the huddle breaks up, where they gathered", () => {

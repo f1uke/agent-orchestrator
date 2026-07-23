@@ -1,4 +1,4 @@
-import type { Pet } from "./behaviour";
+import { RALLY_MAX_DEPTH, type Pet } from "./behaviour";
 
 // Which Proc paints in front of which.
 //
@@ -13,21 +13,30 @@ import type { Pet } from "./behaviour";
 
 export const STACK_BASE = 1;
 
-/** Highest wins. Ordered by how much the human is currently looking at it. */
+/**
+ * Highest wins. Ordered by how much the human is currently looking at it.
+ *
+ * Spaced a hundred apart rather than packed, because one of them — the roll-call —
+ * is not a single layer but a ladder: the gathered photo overlaps its Procs on
+ * purpose, so each carries its own depth within the band its layer opens. The gap is
+ * what stops that ladder ever climbing into the layer above it.
+ */
 export const STACK_LAYERS = {
 	/** Going about its business. */
 	resting: 0,
 	/** Answering a roll-call: the huddle is the scene, so it stands over the idle band. */
-	rallying: 5,
+	rallying: 100,
 	/** Mid-conversation: a staged scene, and the pair belong in front of the crowd. */
-	meeting: 10,
+	meeting: 200,
 	/** In the human's hand. Nothing outranks the thing being dragged. */
-	held: 20,
+	held: 300,
 } as const;
 
 export function stackOrder(pet: Pet): number {
 	if (pet.motion.kind === "held") return STACK_BASE + STACK_LAYERS.held;
 	if (pet.meeting) return STACK_BASE + STACK_LAYERS.meeting;
-	if (pet.rally) return STACK_BASE + STACK_LAYERS.rallying;
+	// The photo's own front-to-back order, decided by the engine when the row was laid
+	// out. Bounded by RALLY_MAX_DEPTH, which is well under the gap to the next layer.
+	if (pet.rally) return STACK_BASE + STACK_LAYERS.rallying + Math.min(pet.rally.depth, RALLY_MAX_DEPTH - 1);
 	return STACK_BASE + STACK_LAYERS.resting;
 }
