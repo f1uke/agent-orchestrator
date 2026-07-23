@@ -1,29 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { castForSession, withSpecies, type CastMember } from "../../../companion/cast";
+import { isSpeciesChosen, resolveSpecies } from "../../../companion/look-store";
 import {
-	accessoriesFor,
-	APPEARANCE_AXES,
-	castFromLook,
-	HATS,
-	paletteOf,
-	palettesFor,
-	storedIdFor,
-	withSpecies,
-	type AppearanceAxis,
-	type AxisId,
-	type CastMember,
-} from "../../../companion/cast";
-import { composeCast } from "../../../companion/cast";
-import { castFor, isAxisChosen, isSpeciesChosen, resolveLook, resolveSpecies } from "../../../companion/look-store";
-import {
-	clearStoredLookChoice,
 	clearStoredProjectSpecies,
-	pruneStoredLooks,
-	storeLookChoice,
+	pruneStoredProjectLooks,
 	storeProjectSpecies,
-	useLookOverrides,
 	useProjectLooks,
 } from "../../../companion/look-store-live";
-import { SPECIES, type SpeciesId } from "../../../companion/species";
+import { SPECIES, speciesById, type SpeciesId } from "../../../companion/species";
 import { PROCS_INK } from "../../../companion/palette";
 import { Procs } from "../../../companion/Procs";
 import { useWorkspaceQuery } from "../../hooks/useWorkspaceQuery";
@@ -31,201 +15,248 @@ import { aoBridge } from "../../lib/bridge";
 import { cn } from "../../lib/utils";
 import { useUiStore } from "../../stores/ui-store";
 
-// The Pet library: pick the colour and the hat one session wears.
+// The Pet library: which CREATURE each project is.
 //
-// It overrides a DEFAULT, never fills a blank. Every session already has a look the
-// moment it exists - a stable hash of its ref, one dimension per axis - and that is
-// what makes a Proc recognisable across restarts. This is the escape hatch for when
-// the hash puts two teal Procs on one desk, not a step anybody has to take.
+// That is the whole screen, and the smallness is the design. A pet has three things about
+// it — its creature, its colour and what it is wearing — and only the first is a question
+// a person can answer better than a hash can. The creature says WHICH PROJECT, which is
+// knowledge the machine does not have; the other two only have to be DIFFERENT from each
+// other, which is exactly what a hash of the session ref is for.
 //
-// Nothing here names "colour" or "hat". It walks `APPEARANCE_AXES`, so the character
-// TYPES the human wants next arrive as a row in that registry rather than as another
-// hand-written section in this file.
+// So colour and accessory are automatic, per session, stable across restarts, and there is
+// no control for them anywhere. An earlier build let a human dress one session by hand; it
+// was removed, store and all, because a second source of truth for a pet's colour costs
+// every reader a branch and buys a choice nobody wanted to make.
+//
+// This still OVERRIDES a default rather than filling a blank: every project is already
+// some animal the moment it exists (the hash of its name). This is the escape hatch for
+// when two projects come out as the same one — and, with six creatures, the answer to the
+// seventh project.
 
 /**
- * The plainest scene there is: no ground prop, no held prop, nothing emitted - just
- * the figure and its cord.
+ * The plainest scene there is: no ground prop, no held prop, nothing emitted - just the
+ * figure and its cord.
  *
- * Which is exactly right for a look picker, because the figure and the cord are the
- * part this screen CANNOT change. A Proc is a running process with a power lead;
- * colours and hats are variety on that. Drawing it holding a laptop would put a
- * status into a picture that is not about status.
+ * Which is exactly right for a look picker, because the figure and the cord are the part
+ * this screen CANNOT change. Drawing a pet holding a laptop would put a status into a
+ * picture that is not about status.
  */
 const PREVIEW_STATUS = "unknown";
 
 /** Dark to light, the range a desktop wallpaper actually spans. Mirrors CompanionPreview. */
 const WALLPAPER_TONES = ["#12141c", "#3d4457", "#6f727b", "#b6b2a8", "#f2efe8"];
 
-const HERO_SIZE = 124;
+/**
+ * How many of a project's pets stand on the strip.
+ *
+ * A cap rather than all of them, because the strip is an ARGUMENT — same animal, different
+ * colours — and four make that argument as well as twenty do. Anything over the cap is
+ * COUNTED in the caption rather than dropped silently.
+ *
+ * ⚠ FOUR, measured rather than guessed. The detail column is ~438px here and a Proc's drawn
+ * frame is about 1.15× the size it is asked for, so six at any readable size overflow and
+ * wrap — which lands a single orphaned pet on a second row under five. Four at 88 is ~405px
+ * and fits with room to spare.
+ */
+const STRIP_MAX = 4;
+
 const SWATCH_SIZE = 50;
 const THUMB_SIZE = 32;
 
-type LibrarySession = { id: string; title: string; project: string };
-type LibraryGroup = { name: string; sessions: LibrarySession[] };
+/** Big when there are few, smaller when the strip is full, so it is always ONE row. */
+function stripSize(count: number): number {
+	if (count <= 2) return 112;
+	if (count === 3) return 96;
+	return 88;
+}
+
+type LibrarySession = { id: string; title: string };
+type LibraryProject = { name: string; sessions: LibrarySession[] };
 
 export function PetLibrary() {
 	const query = useWorkspaceQuery();
-	const looks = useLookOverrides();
 	const projectLooks = useProjectLooks();
 	const request = useUiStore((state) => state.petLibraryRequest);
 	const clearRequest = useUiStore((state) => state.requestPetLibrary);
 	const [picked, setPicked] = useState<string | null>(null);
 
-	// Terminated sessions have no Proc on the band, so there is nothing to dress.
-	const groups = useMemo<LibraryGroup[]>(
+	// Terminated sessions have no pet on the band, so there is nothing of theirs to draw.
+	// A project all of whose sessions have ended therefore drops off this list — but NOT
+	// out of the store; see the pruning note below.
+	const projects = useMemo<LibraryProject[]>(
 		() =>
 			(query.data ?? [])
 				.map((project) => ({
 					name: project.name,
 					sessions: project.sessions
 						.filter((session) => !session.isTerminated)
-						.map((session) => ({ id: session.id, title: session.title, project: project.name })),
+						.map((session) => ({ id: session.id, title: session.title })),
 				}))
-				.filter((group) => group.sessions.length > 0),
+				.filter((project) => project.sessions.length > 0),
 		[query.data],
 	);
-	const all = useMemo(() => groups.flatMap((group) => group.sessions), [groups]);
-	const selected = all.find((session) => session.id === picked) ?? all[0] ?? null;
+	const selected = projects.find((project) => project.name === picked) ?? projects[0] ?? null;
 
-	// Forget the sessions that are gone.
+	// Forget the projects that are gone.
 	//
-	// ⚠ Here, and NOT in the overlay. This is the authoritative list - every session
-	// of every project, terminated ones included, because a terminated session still
-	// exists. The overlay shows at most MAX_PETS, so pruning against what IT can see
-	// would delete the saved look of a session that is merely off the band.
+	// ⚠ Against EVERY project the workspace knows, including those whose sessions have all
+	// ended — a project with nothing running is still a project, and its creature has to
+	// survive the quiet spell. Pruning against the list rendered above would delete it the
+	// moment its last worker stopped.
 	//
-	// Guarded on `isSuccess`: an in-flight or failed fetch is not evidence that
-	// anybody's session is gone.
-	const projects = query.data;
+	// Guarded on `isSuccess`: an in-flight or failed fetch is not evidence that anybody's
+	// project is gone.
+	const workspace = query.data;
 	useEffect(() => {
-		if (!query.isSuccess || !projects) return;
-		pruneStoredLooks(
-			projects.flatMap((project) => project.sessions.map((session) => session.id)),
-			projects.map((project) => project.name),
-		);
-	}, [query.isSuccess, projects]);
+		if (!query.isSuccess || !workspace) return;
+		pruneStoredProjectLooks(workspace.map((project) => project.name));
+	}, [query.isSuccess, workspace]);
 
-	// A right-click on a Proc asked for this session. Honoured once and then
+	// A right-click on a pet asked for this SESSION, and the creature is chosen per
+	// project — so the app resolves one to the other against the list it already holds,
+	// which is the only place the two are authoritatively related. Honoured once and then
 	// forgotten, or the next visit to Settings would jump somewhere unasked.
 	useEffect(() => {
 		if (!request) return;
-		if (all.some((session) => session.id === request)) setPicked(request);
+		const owner = projects.find((project) => project.sessions.some((session) => session.id === request));
+		if (owner) setPicked(owner.name);
 		clearRequest(null);
-	}, [request, all, clearRequest]);
+	}, [request, projects, clearRequest]);
 
 	if (!selected) {
 		return (
 			<p className="text-[12px] leading-5 text-muted-foreground">
-				No sessions to dress yet. Every session is given a character the moment it starts, and this is where you can
-				change the one it got.
+				No projects with anything running yet. Every project is given a creature the moment it exists, and this is where
+				you can change the one it got.
 			</p>
 		);
 	}
 
-	const choose = (axisId: AxisId, optionId: string) => {
-		storeLookChoice(selected.id, axisId, optionId);
-		aoBridge.companion.looksChanged();
-	};
-	const reset = (axisId: AxisId) => {
-		clearStoredLookChoice(selected.id, axisId);
-		aoBridge.companion.looksChanged();
-	};
-
-	// Two questions, two keys: the CREATURE is the project's, the colour and the
-	// accessory are this session's. The picker has to ask both, in that order, because
-	// the creature decides what the other two axes even offer.
-	const species = resolveSpecies(selected.project, projectLooks);
-	const look = resolveLook(selected.id, looks);
-	const cast = withSpecies(castFromLook(look), species);
-
+	const species = resolveSpecies(selected.name, projectLooks);
 	const chooseCreature = (next: SpeciesId) => {
-		storeProjectSpecies(selected.project, next);
+		storeProjectSpecies(selected.name, next);
 		aoBridge.companion.looksChanged();
 	};
 	const resetCreature = () => {
-		clearStoredProjectSpecies(selected.project);
+		clearStoredProjectSpecies(selected.name);
 		aoBridge.companion.looksChanged();
 	};
+
+	// The tiles wear the FIRST session's colour and accessory slot, so a tile is the real
+	// answer to "what would I get" rather than a picture of somebody else's pet.
+	const sample = withSpecies(castForSession(selected.sessions[0].id), species);
 
 	return (
 		<div className="flex flex-col gap-3">
 			<p className="text-[12px] leading-5 text-muted-foreground">
-				Every project is given a creature and every session a colour, the moment they exist — so you never have to come
-				here. Change the creature when two projects come out as the same animal, and a colour when two sessions on one
-				project come out too alike to tell apart.
+				Every project is given a creature the moment it exists, so you never have to come here. Change it when two
+				projects come out as the same animal. Each session's own colour is picked for it and is never the same question.
 			</p>
 
 			<div className="grid grid-cols-[196px_minmax(0,1fr)] gap-3">
-				<nav aria-label="Sessions" className="flex max-h-[380px] flex-col gap-2 overflow-y-auto pr-1">
-					{groups.map((group) => (
-						<div key={group.name} className="flex flex-col gap-0.5">
-							{/* muted, not `passive`: the project a session belongs to is what tells two
-							    same-named workers apart, and `passive` measures 2.8:1 on the light
-							    theme, which is under the 4.5 an 11px label needs. */}
-							<p className="truncate px-1.5 text-[11px] font-medium text-muted-foreground">{group.name}</p>
-							{group.sessions.map((session) => (
-								<SessionRow
-									key={session.id}
-									session={session}
-									active={session.id === selected.id}
-									onSelect={() => setPicked(session.id)}
-								/>
-							))}
-						</div>
+				<nav aria-label="Projects" className="flex max-h-[380px] flex-col gap-0.5 overflow-y-auto pr-1">
+					{projects.map((project) => (
+						<ProjectRow
+							key={project.name}
+							project={project}
+							species={resolveSpecies(project.name, projectLooks)}
+							active={project.name === selected.name}
+							onSelect={() => setPicked(project.name)}
+						/>
 					))}
 				</nav>
 
 				<div className="flex min-w-0 flex-col gap-3">
-					{/* On a WALLPAPER strip, not an app surface: the pets live on a desktop,
-					    and the ink rim exists so they survive any tone behind them. A flat
-					    panel would flatter the art and hide the failure mode it guards. */}
-					<div
-						className="flex items-end justify-center overflow-hidden rounded-lg border border-border pt-2"
-						style={{ background: `linear-gradient(100deg, ${WALLPAPER_TONES.join(", ")})` }}
-						aria-hidden="true"
-					>
-						<Procs cast={cast} status={PREVIEW_STATUS} facing="front" walking={false} size={HERO_SIZE} />
-					</div>
-					{/* The caption is the accessible name for the picture above it, which is
-					    why the picture itself is hidden: "Teal bucket hat, unknown" is what
-					    the sprite would announce, and "unknown" is a session status this
-					    screen is not about. */}
-					<p className="text-center text-[12px] text-muted-foreground" data-pet-preview={cast.id}>
-						<span className="text-foreground">{selected.title}</span> wears the {cast.name.toLowerCase()}
-					</p>
+					<ProjectPets project={selected} species={species} />
 
 					<CreaturePicker
-						project={selected.project}
+						project={selected.name}
 						species={species}
-						cast={cast}
-						chosen={isSpeciesChosen(projectLooks, selected.project)}
+						cast={sample}
+						chosen={isSpeciesChosen(projectLooks, selected.name)}
 						onChoose={chooseCreature}
 						onReset={resetCreature}
 					/>
-
-					{APPEARANCE_AXES.map((axis) => (
-						<AxisPicker
-							key={axis.id}
-							axis={axis}
-							species={species}
-							cast={cast}
-							chosen={isAxisChosen(looks, selected.id, axis.id)}
-							onChoose={(optionId) => choose(axis.id, storedIdFor(axis.id, species, optionId))}
-							onReset={() => reset(axis.id)}
-						/>
-					))}
 				</div>
 			</div>
 		</div>
 	);
 }
 
-function SessionRow({ session, active, onSelect }: { session: LibrarySession; active: boolean; onSelect: () => void }) {
-	const looks = useLookOverrides();
-	// ⚠ The creature too, not just the session's colour. Without it this list drew every
-	// session as a Proc while the picker beside it and the band on the desktop drew the
-	// project's animal — three views of one pet, disagreeing. Caught by opening the app.
-	const projectLooks = useProjectLooks();
+/**
+ * The project's live sessions, standing together as they really look.
+ *
+ * The picture IS the explanation: one animal, one colour each. It is what makes "every
+ * session on this project becomes a ghost" a thing you can see rather than a sentence you
+ * have to trust, and it is drawn from the same two functions the desktop draws from.
+ *
+ * ⚠ On a WALLPAPER strip, not an app surface: the pets live on a desktop, and the ink rim
+ * exists so they survive any tone behind them. A flat panel would flatter the art and hide
+ * the failure mode it guards.
+ */
+function ProjectPets({ project, species }: { project: LibraryProject; species: SpeciesId }) {
+	const shown = project.sessions.slice(0, STRIP_MAX);
+	const hidden = project.sessions.length - shown.length;
+	const size = stripSize(shown.length);
+	const creature = speciesById(species);
+	return (
+		<div className="flex flex-col gap-2">
+			<div
+				data-pet-strip={project.name}
+				className="flex flex-nowrap items-end justify-center gap-1 overflow-hidden rounded-lg border border-border pt-2"
+				style={{ background: `linear-gradient(100deg, ${WALLPAPER_TONES.join(", ")})` }}
+				aria-hidden="true"
+			>
+				{shown.map((session) => (
+					<Procs
+						key={session.id}
+						cast={withSpecies(castForSession(session.id), species)}
+						status={PREVIEW_STATUS}
+						facing="front"
+						walking={false}
+						size={size}
+					/>
+				))}
+			</div>
+			{/* The caption is the accessible name for the picture above it, which is why the
+			    picture itself is hidden: a sprite would announce "Teal Ghost, bow, unknown"
+			    six times over, and "unknown" is a session status this screen is not about. */}
+			<p className="text-center text-[12px] text-muted-foreground" data-pet-preview={species}>
+				{project.sessions.length === 1 ? (
+					<>
+						<span className="text-foreground">{project.sessions[0].title}</span> is a {creature.name.toLowerCase()}
+					</>
+				) : hidden > 0 ? (
+					<>
+						{/* "4 of the 9" rather than "all 9 (5 not shown)": naming the cap up front is
+						    both shorter and honest, and it stops the sentence wrapping a two-word
+						    parenthesis onto a line of its own. */}
+						{shown.length} of the {project.sessions.length} sessions on{" "}
+						<span className="text-foreground">{project.name}</span> — all {creature.name.toLowerCase()}s, each in its
+						own colour
+					</>
+				) : (
+					<>
+						All {project.sessions.length} sessions on <span className="text-foreground">{project.name}</span> are{" "}
+						{creature.name.toLowerCase()}s, each in its own colour
+					</>
+				)}
+			</p>
+		</div>
+	);
+}
+
+function ProjectRow({
+	project,
+	species,
+	active,
+	onSelect,
+}: {
+	project: LibraryProject;
+	species: SpeciesId;
+	active: boolean;
+	onSelect: () => void;
+}) {
 	return (
 		<button
 			type="button"
@@ -239,30 +270,32 @@ function SessionRow({ session, active, onSelect }: { session: LibrarySession; ac
 			)}
 		>
 			<span className="shrink-0" aria-hidden="true">
+				{/* The row's own pet is the project's FIRST session, so the thumbnail is a real
+				    one off the band rather than a stand-in nobody owns. */}
 				<Procs
-					cast={withSpecies(castFor(session.id, looks), resolveSpecies(session.project, projectLooks))}
+					cast={withSpecies(castForSession(project.sessions[0].id), species)}
 					status={PREVIEW_STATUS}
 					facing="front"
 					walking={false}
 					size={THUMB_SIZE}
 				/>
 			</span>
-			<span className="min-w-0 flex-1 truncate">{session.title}</span>
+			<span className="min-w-0 flex-1 truncate">{project.name}</span>
+			<span className="shrink-0 text-[10.5px] text-passive tabular-nums">{project.sessions.length}</span>
 		</button>
 	);
 }
 
 /**
- * Which CREATURE a project is drawn as.
+ * Which CREATURE a project is drawn as. The only control on this screen.
  *
- * ⚠ Chosen per PROJECT, and it is the only control on this screen that is. Every
- * session on a project is the same animal, which is what took the coloured mark off
- * the name chip: the band groups itself by shape and there is nothing left to decode.
- * Six creatures tell six projects apart on their own; a seventh collides, and this is
- * the answer to that.
+ * ⚠ Chosen per PROJECT. Every session on a project is the same animal, which is what took
+ * the coloured mark off the name chip: the band groups itself by shape and there is nothing
+ * left to decode. Six creatures tell six projects apart on their own; a seventh collides,
+ * and this is the answer to that.
  *
- * Every tile wears the SESSION's current colour and accessory by slot, so it is the
- * real answer to "what would I get" rather than a picture of somebody else's pet.
+ * Every tile wears the project's own colour and accessory slot, so it is the real answer to
+ * "what would I get" rather than a picture of somebody else's pet.
  */
 function CreaturePicker({
 	project,
@@ -295,10 +328,14 @@ function CreaturePicker({
 					<span className="shrink-0 text-[11px] text-muted-foreground">The one it was given</span>
 				)}
 			</div>
+			{/* muted, not `passive`: `passive` measures 2.8:1 on the light theme, which is
+			    under the 4.5 an 11.5px line needs. */}
 			<p className="text-[11.5px] leading-4 text-muted-foreground">
 				Which animal <span className="text-foreground">{project}</span> is. Every session on it is the same one, so a
 				glance at the band says which project a pet belongs to.
 			</p>
+			{/* auto-fill, so a seventh creature simply wraps rather than overflowing a column
+			    count written down here. */}
 			<div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(66px,1fr))]">
 				{SPECIES.map((entry) => {
 					const active = entry.id === species;
@@ -316,6 +353,9 @@ function CreaturePicker({
 									: "border-border text-muted-foreground hover:border-passive hover:bg-interactive-hover",
 							)}
 						>
+							{/* The tile gets its own dark plate rather than the app surface. These are
+							    colours chosen to survive a WALLPAPER, and on a light theme's near-white
+							    card the pale ones wash out completely. */}
 							<span
 								className="flex items-end justify-center rounded px-1 pb-0.5 pt-1"
 								style={{ background: PROCS_INK }}
@@ -329,114 +369,15 @@ function CreaturePicker({
 									size={SWATCH_SIZE}
 								/>
 							</span>
-							<span className="flex flex-col items-center gap-px leading-3">
-								<span className="text-[10.5px]">{entry.name}</span>
-								<span className={cn("text-[9.5px] font-semibold", active ? "text-foreground" : "invisible")}>
-									In use
-								</span>
-							</span>
-						</button>
-					);
-				})}
-			</div>
-		</section>
-	);
-}
-
-/**
- * One axis' worth of choices, each drawn as the pet it would actually produce.
- *
- * A colour tile wears the session's CURRENT accessory and an accessory tile its current
- * colour, so every tile is the real answer to "what would I get" rather than an abstract
- * chip. That is the whole reason to have a gallery instead of a list of names.
- *
- * ⚠ The options come from the CREATURE, not from the axis' own list. The axis registry
- * carries the Proc's six as a default; offering those to a slime would be offering six
- * hats to a jelly cube.
- */
-function AxisPicker({
-	axis,
-	species,
-	cast,
-	chosen,
-	onChoose,
-	onReset,
-}: {
-	axis: AppearanceAxis;
-	species: SpeciesId;
-	cast: CastMember;
-	chosen: boolean;
-	onChoose: (optionId: string) => void;
-	onReset: () => void;
-}) {
-	const options = axis.id === "palette" ? palettesFor(species) : accessoriesFor(species);
-	const worn = axis.id === "palette" ? cast.palette : cast.hatId;
-	return (
-		<section role="group" aria-label={axis.name} className="flex flex-col gap-1.5">
-			<div className="flex items-baseline justify-between gap-2">
-				<h4 className="text-[12.5px] font-medium text-foreground">{axis.name}</h4>
-				{chosen ? (
-					<button
-						type="button"
-						onClick={onReset}
-						className="shrink-0 rounded px-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-					>
-						Back to the default
-					</button>
-				) : (
-					<span className="shrink-0 text-[11px] text-muted-foreground">The one it was given</span>
-				)}
-			</div>
-			<p className="text-[11.5px] leading-4 text-muted-foreground">{axis.hint}</p>
-			{/* auto-fill, so more colours or more hats simply wrap rather than
-			    overflowing a column count written down here. */}
-			<div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(66px,1fr))]">
-				{options.map((option) => {
-					const active = worn === option.id;
-					return (
-						<button
-							key={option.id}
-							type="button"
-							aria-pressed={active}
-							aria-label={`${option.name}${active ? " (in use)" : ""}`}
-							onClick={() => onChoose(option.id)}
-							className={cn(
-								"flex flex-col items-center gap-0.5 rounded-md border py-1.5 transition-colors",
-								active
-									? "border-accent bg-secondary text-foreground"
-									: "border-border text-muted-foreground hover:border-passive hover:bg-interactive-hover",
-							)}
-						>
-							{/* The tile gets its own dark plate rather than the app surface. These
-							    are colours chosen to survive a WALLPAPER, and on a light theme's
-							    near-white card the pale ones wash out completely. */}
-							<span
-								className="flex items-end justify-center rounded px-1 pb-0.5 pt-1"
-								style={{ background: PROCS_INK }}
-								aria-hidden="true"
-							>
-								<Procs
-									cast={
-										axis.id === "palette"
-											? composeCast(paletteOf(species, option.id), HATS[0], species, cast.hatId)
-											: composeCast(paletteOf(species, cast.palette), HATS[0], species, option.id)
-									}
-									status={PREVIEW_STATUS}
-									facing="front"
-									walking={false}
-									size={SWATCH_SIZE}
-								/>
-							</span>
-							{/* The name stays on EVERY tile, in use or not: "In use" alone would
-							    hide the one thing someone came here to read, which is what the
-							    look they are wearing is called. The second line is reserved on
+							{/* The name stays on EVERY tile, in use or not: "In use" alone would hide
+							    the one thing someone came here to read. The second line is reserved on
 							    all of them so picking one does not resize the row. */}
 							<span className="flex flex-col items-center gap-px leading-3">
-								<span className="text-[10.5px] first-letter:uppercase">{option.name}</span>
+								<span className="text-[10.5px]">{entry.name}</span>
 								{/* Foreground, not the accent: at 9.5px the blue measures 4.4:1 on the
-									    selected tile's own fill in the light theme, which is under the
-									    4.5 a word this small has to clear. The accent is already
-									    carrying the selection, in the border. */}
+								    selected tile's own fill in the light theme, under the 4.5 a word
+								    this small has to clear. The accent already carries the selection,
+								    in the border. */}
 								<span className={cn("text-[9.5px] font-semibold", active ? "text-foreground" : "invisible")}>
 									In use
 								</span>

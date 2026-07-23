@@ -1,12 +1,12 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
-import { castForSession, castFromLook, defaultLook, withSpecies } from "./cast";
+import { castForSession, withSpecies } from "./cast";
 import { MEET_RUN_MAX_MS } from "./behaviour";
 import { CompanionStage } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
-import { LOOKS_STORAGE_KEY, serializeLookOverrides } from "./look-store";
-import { storeLookChoice } from "./look-store-live";
+import { LOOKS_STORAGE_KEY, serializeProjectLooks } from "./look-store";
+import { storeProjectSpecies } from "./look-store-live";
 import { speciesForProject } from "./species";
 
 afterEach(() => {
@@ -454,40 +454,52 @@ describe("the look a Proc wears", () => {
 		expect(speciesOf(container, "a")).toBe(speciesOf(container, "b"));
 	});
 
-	it("wears a chosen hat, and keeps the hash COLOUR", () => {
-		storeLookChoice("a", "hat", "cone");
+	it("wears the creature its PROJECT was given, over the hash", () => {
+		storeProjectSpecies("p", "ghost");
 		const { container } = pushTwo();
 
-		// Chosen on the SESSION axis and mapped onto the creature's own set by slot.
-		expect(hatOf(container, "a")).toBe(
-			withSpecies(castFromLook({ ...defaultLook("a"), hat: "cone" }), speciesForProject("p")).hatId,
-		);
-		expect(paletteOf(container, "a")).toBe(hashPaletteOn("a", "p"));
+		expect(speciesOf(container, "a")).toBe("ghost");
+		expect(speciesOf(container, "b")).toBe("ghost");
+	});
+
+	it("keeps each session's own colour and accessory when the project's creature changes", () => {
+		// ⚠ The invariant the Pet library's simplification rests on. Colour and accessory
+		// are the hash of the SESSION and nobody chooses them; a project's creature changes
+		// which BODY they are painted on, never which slot of it they land in.
+		storeProjectSpecies("p", "ghost");
+		const { container } = pushTwo();
+
+		expect(paletteOf(container, "a")).toBe(withSpecies(castForSession("a"), "ghost").palette);
+		expect(hatOf(container, "a")).toBe(withSpecies(castForSession("a"), "ghost").hatId);
 	});
 
 	it("repaints when the OTHER window changes it, which is the whole cross-window path", () => {
 		const { container } = pushTwo();
 
 		act(() => {
-			const value = serializeLookOverrides({ a: { palette: "mint" } });
+			const value = serializeProjectLooks({ p: "toadstool" });
 			window.localStorage.setItem(LOOKS_STORAGE_KEY, value);
 			window.dispatchEvent(new StorageEvent("storage", { key: LOOKS_STORAGE_KEY, newValue: value }));
 		});
 
-		// Chosen on the SESSION axis, so it survives being mapped onto the project's
-		// creature — it is a slot in that creature's own six.
-		expect(paletteOf(container, "a")).toBe(
-			withSpecies(castFromLook({ ...defaultLook("a"), palette: "mint" }), speciesForProject("p")).palette,
-		);
+		expect(speciesOf(container, "a")).toBe("toadstool");
+		expect(speciesOf(container, "b")).toBe("toadstool");
 	});
 
-	it("leaves every other session exactly as it was", () => {
-		// Recognisability: redecorating one pet must not move anybody else's.
-		storeLookChoice("a", "hat", "cone");
-		const { container } = pushTwo();
+	it("leaves every other PROJECT exactly as it was", () => {
+		// Recognisability: redressing one project must not move anybody else's pets.
+		storeProjectSpecies("p", "ghost");
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+		push([
+			{ sessionId: "a", status: "pr_open", name: "one", project: "p" },
+			{ sessionId: "c", status: "pr_open", name: "three", project: "q" },
+		]);
 
-		expect(hatOf(container, "b")).toBe(hashWornOn("b", "p"));
-		expect(paletteOf(container, "b")).toBe(hashPaletteOn("b", "p"));
+		expect(speciesOf(container, "a")).toBe("ghost");
+		expect(speciesOf(container, "c")).toBe(speciesForProject("q"));
+		expect(paletteOf(container, "c")).toBe(hashPaletteOn("c", "q"));
+		expect(hatOf(container, "c")).toBe(hashWornOn("c", "q"));
 	});
 });
 

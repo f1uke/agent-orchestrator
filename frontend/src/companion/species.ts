@@ -175,9 +175,9 @@ export function speciesById(id: SpeciesId): Species {
 /**
  * Whether this creature can wear anything on that axis.
  *
- * What the Pet library asks before it draws a section: a picker that offered a hat
- * to a toadstool would be offering a choice with no effect, which is worse than not
- * offering it — the user picks, nothing changes, and the feature looks broken.
+ * What the RIG asks before it draws the hat group: a toadstool's accessory is the
+ * pattern on its own cap, so hanging a Proc's hat above it would put a second thing on
+ * a head that already has one.
  */
 export function speciesWears(id: SpeciesId, axis: AxisId): boolean {
 	return speciesById(id).axes.includes(axis);

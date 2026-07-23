@@ -16,9 +16,9 @@ import {
 import { isShaking, newShakeTrack, trackShake } from "./shake";
 import { Bubble } from "./Bubble";
 import type { ComposedBubble } from "./bubble-compose";
-import { withSpecies, type CastMember } from "./cast";
-import { castFor, resolveSpecies } from "./look-store";
-import { useLookOverrides, useProjectLooks } from "./look-store-live";
+import { castForSession, withSpecies, type CastMember } from "./cast";
+import { resolveSpecies } from "./look-store";
+import { useProjectLooks } from "./look-store-live";
 import { hoverAt, HOVER_TOOLTIP_DELAY_MS, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
@@ -120,20 +120,20 @@ export function CompanionStage({
 	castFor: castForOverride,
 }: CompanionStageProps) {
 	const source = useMemo(() => feed ?? createMockFeed(), [feed]);
-	// A pet's look is the hash of its session ref, UNLESS someone has picked one in
-	// the Pet library. Both windows read the same localStorage key, so a choice made
-	// in Settings lands here on the `storage` event with nothing in between.
-	const looks = useLookOverrides();
+	// The CREATURE is the only part anybody chooses, and it is chosen per PROJECT. Both
+	// windows read the same localStorage key, so a choice made in Settings lands here on
+	// the `storage` event with nothing in between.
 	const projectLooks = useProjectLooks();
-	// Two questions, two keys. The COLOUR and the hat come from the session, so two
-	// workers on one project can be told apart; the CREATURE comes from the PROJECT, so
-	// every session on it is the same animal and the band groups itself by shape. That
-	// is what took the coloured mark off the name chip — a mark has to be decoded, a
-	// creature is known by the time you have noticed it.
+	// Two questions, two answers. The COLOUR and the accessory are the hash of the session
+	// ref — automatic, stable across restarts, and varied enough that two workers on one
+	// project are tellable apart. The CREATURE comes from the PROJECT, so every session on
+	// it is the same animal and the band groups itself by shape. That is what took the
+	// coloured mark off the name chip — a mark has to be decoded, a creature is known by
+	// the time you have noticed it.
 	const resolveCast =
 		castForOverride ??
 		((sessionId: string, project?: string) =>
-			withSpecies(castFor(sessionId, looks), resolveSpecies(project, projectLooks)));
+			withSpecies(castForSession(sessionId), resolveSpecies(project, projectLooks)));
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
 	// rebuilt on every state change.
