@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./companion.css";
 import type { World } from "./behaviour";
+import { castForSession, withSpecies } from "./cast";
 import { CompanionStage } from "./CompanionStage";
+import { ConceptSheet } from "./ConceptSheet";
 import { createManualFeed, type ManualFeed } from "./dev-feed";
 import { DevPanel } from "./DevPanel";
 import type { CompanionFeed } from "./feed";
@@ -10,6 +12,7 @@ import { createLiveFeed, type LiveFeed } from "./live-feed";
 import { refreshLookOverrides } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
+import { speciesForProject, type SpeciesId } from "./species";
 
 // Entry point for the overlay window. Deliberately tiny and separate from the main
 // renderer: the overlay has no router, no query client, no daemon connection and no
@@ -91,9 +94,24 @@ function Lab() {
 	const [feed] = useState<ManualFeed>(() => createManualFeed(mockActivitiesAt(0)));
 	const [setWorld, setSetWorld] = useState<React.Dispatch<React.SetStateAction<World>> | null>(null);
 	const [reducedMotion, setReducedMotion] = useState(false);
+	const [species, setSpecies] = useState<SpeciesId | "mixed">("mixed");
+	const [sheet, setSheet] = useState(false);
 	const onStage = useCallback((api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => {
 		setSetWorld(() => api.setWorld);
 	}, []);
+
+	// The lab's creature switcher. `mixed` is the DEFAULT here because it is what the
+	// real thing does now — the creature comes from the PROJECT, so a band of several
+	// projects is several creatures without anybody choosing anything. Picking a single
+	// creature overrides that, to look at one body across every state.
+	const castFor = useCallback(
+		(sessionId: string, project?: string) => {
+			const base = castForSession(sessionId);
+			if (species === "mixed") return withSpecies(base, speciesForProject(project));
+			return withSpecies(base, species);
+		},
+		[species],
+	);
 
 	return (
 		<>
@@ -102,8 +120,18 @@ function Lab() {
 				bubbleFor={(id) => feed.bubbleFor(id)}
 				reducedMotion={reducedMotion}
 				onStage={onStage}
+				castFor={castFor}
 			/>
-			<DevPanel feed={feed} setWorld={setWorld} reducedMotion={reducedMotion} onReducedMotion={setReducedMotion} />
+			<DevPanel
+				feed={feed}
+				setWorld={setWorld}
+				reducedMotion={reducedMotion}
+				onReducedMotion={setReducedMotion}
+				species={species}
+				onSpecies={setSpecies}
+				onConceptSheet={() => setSheet(true)}
+			/>
+			{sheet ? <ConceptSheet onClose={() => setSheet(false)} /> : null}
 		</>
 	);
 }

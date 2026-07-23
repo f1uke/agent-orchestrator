@@ -35,8 +35,12 @@ export const PROP_COLOURS = {
 	blanket: "#a9bde4",
 	/** Held pages and signs. */
 	paper: "#fbfafd",
-	/** CI sparks. */
+	/** CI sparks, a chick's beak and legs, a cat's bell, a slime's coin. */
 	spark: "#ffd166",
+	/** A stalk and a leaf: the green a slime's cherry and leaf are grown on. */
+	sprig: "#8fd18f",
+	/** A slime's cherry. */
+	cherry: "#f3a3b0",
 	/** The three confetti colours a merge throws. */
 	confettiA: "#f4c558",
 	confettiB: "#92d8dc",
@@ -61,34 +65,8 @@ export const PROP_COLOURS = {
 	bubbleAlert: "#a3341f",
 } as const;
 
-/**
- * The per-project marker's colours.
- *
- * NOT swept against the wallpaper, and that is not an omission: the marker is
- * drawn INSIDE the name chip, so the chip is what faces the desktop and the chip
- * is already swept (`paper`, plus the ink rim). Sweeping the marker too would
- * force it into the same mid-luminance band the Procs live in — where it would
- * measure under 2:1 against the chip's own near-white fill, i.e. a mark you
- * cannot see, in the name of a wallpaper it never touches.
- *
- * What IS measured, in project-marker.test.ts: against the chip's paper fill,
- * against the coordinator's GOLD fill (the same marker has to work on both), and
- * against the ink rim it is drawn with. Deliberately dark rather than pastel —
- * these are the only colours on the overlay that must read at 12px on a light
- * card, which is the opposite constraint to everything else here.
- *
- * Deliberately NOT gold-adjacent either. Gold means "this one coordinates" and is
- * already on that chip; a gold-ish project marker beside it reads as a second
- * crown.
- */
-export const PROJECT_MARKER_COLOURS: readonly string[] = [
-	"#c2185b",
-	"#1565c0",
-	"#558b2f",
-	"#7d3fa8",
-	"#b4651a",
-	"#00695c",
-];
+// The per-project MARKER's colours used to live here. They are gone with the marker:
+// the project is the CREATURE now, so there is nothing on the name chip to colour.
 
 function channel(value: number): number {
 	const c = value / 255;

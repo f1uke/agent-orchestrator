@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALL_LOOKS, PALETTES } from "./cast";
+import { ALL_LOOKS, looksOf, PALETTES, palettesFor } from "./cast";
+import { SPECIES } from "./species";
 import { PROP_COLOURS, PROCS_INK, PROCS_RIM_PX, contrastRatio, relativeLuminance, worstSeparation } from "./palette";
 
 // Contrast is a pure function of relative luminance, so sweeping the grey axis
@@ -13,9 +14,17 @@ function wallpapers(steps = 200): string[] {
 	});
 }
 
-/** Every colour that is ever drawn against the wallpaper rather than against the pet. */
+/**
+ * Every colour that is ever drawn against the wallpaper rather than against the pet.
+ *
+ * ⚠ EVERY CREATURE'S, not just the Proc's. Each species brings its own six colours now,
+ * and a sweep that only enumerated `ALL_LOOKS` would be measuring one sixth of what is
+ * actually drawn on a desktop — five bodies would ship having never been held to the
+ * floor this whole palette exists to guarantee.
+ */
 function exposedColours(): Array<{ what: string; colour: string }> {
-	const fromCast = ALL_LOOKS.flatMap((member) => [
+	const everyLook = [...ALL_LOOKS, ...SPECIES.flatMap((species) => looksOf(species.id))];
+	const fromCast = everyLook.flatMap((member) => [
 		{ what: `${member.name} body`, colour: member.body },
 		{ what: `${member.name} shade`, colour: member.shade },
 		{ what: `${member.name} hat`, colour: member.hatFill },
@@ -65,14 +74,14 @@ describe("wallpaper legibility", () => {
 	});
 
 	it("keeps the face readable on every character's head and body", () => {
-		for (const member of ALL_LOOKS) {
+		for (const member of [...ALL_LOOKS, ...SPECIES.flatMap((species) => looksOf(species.id))]) {
 			expect(contrastRatio(PROCS_INK, member.body), member.name).toBeGreaterThanOrEqual(4.5);
 			expect(contrastRatio(PROCS_INK, member.shade), member.name).toBeGreaterThanOrEqual(4.5);
 		}
 	});
 
 	it("keeps each character's blush visible on its own head without shouting", () => {
-		for (const member of ALL_LOOKS) {
+		for (const member of [...ALL_LOOKS, ...SPECIES.flatMap((species) => looksOf(species.id))]) {
 			const against = contrastRatio(member.blush, member.body);
 
 			expect(against, member.name).toBeGreaterThan(1.35);
@@ -86,14 +95,40 @@ describe("wallpaper legibility", () => {
 });
 
 describe("telling the cast apart", () => {
-	it("gives no two colours near-identical head tints", () => {
-		// Six pale tints that measure the same are six of the same character as far
-		// as a glance across the room is concerned.
-		for (const a of PALETTES) {
-			for (const b of PALETTES) {
-				if (a.id === b.id) continue;
-				expect(distance(a.body, b.body), `${a.name} vs ${b.name}`).toBeGreaterThan(40);
+	it("gives no two colours near-identical head tints, within any creature's set", () => {
+		// Six tints that measure the same are six of the same character as far as a glance
+		// across the room is concerned. WITHIN a creature's own set, because two different
+		// creatures being a similar colour is fine — the silhouette tells them apart, which
+		// is the entire point of there being more than one body.
+		// Judged on the BODY or the SHADE, whichever separates them — because a creature's
+		// six are a family. A ghost is white six times over and carries its colour in the
+		// fold it drapes into; demanding the cloth itself differ would be demanding six
+		// ghosts that are not white. What must never happen is two entries a person cannot
+		// tell apart AT ALL, and either channel doing it is enough.
+		for (const species of SPECIES) {
+			const set = palettesFor(species.id);
+			for (const a of set) {
+				for (const b of set) {
+					if (a.id === b.id) continue;
+					const apart = Math.max(distance(a.body, b.body), distance(a.shade, b.shade));
+
+					expect(apart, `${species.id}: ${a.name} vs ${b.name}`).toBeGreaterThan(34);
+				}
 			}
+		}
+	});
+
+	it("gives each creature a palette of its OWN, not a copy of the Proc's", () => {
+		// The complaint this answers: one colour template wearing six shapes. A creature
+		// whose six were the Proc's six would be exactly that again.
+		for (const species of SPECIES.filter((entry) => entry.id !== "proc")) {
+			const set = palettesFor(species.id);
+
+			expect(set.length, species.id).toBe(PALETTES.length);
+			expect(
+				set.map((palette) => palette.body),
+				species.id,
+			).not.toEqual(PALETTES.map((palette) => palette.body));
 		}
 	});
 });

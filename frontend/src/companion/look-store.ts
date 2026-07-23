@@ -1,4 +1,5 @@
 import { APPEARANCE_AXES, castFromLook, defaultLook, type AxisId, type CastMember, type Look } from "./cast";
+import { SPECIES, speciesForProject, type SpeciesId } from "./species";
 
 // A session's CHOSEN look, one axis at a time, over the hash default.
 //
@@ -23,6 +24,23 @@ export type LookChoices = Readonly<Record<string, string>>;
 
 /** Every session anybody has chosen for. Sessions absent from it are pure hash. */
 export type LookOverrides = Readonly<Record<string, LookChoices>>;
+
+/**
+ * Which CREATURE each project is drawn as. Sparse; absent means the hash decides.
+ *
+ * ⚠ Keyed on the PROJECT, deliberately, and it is the one axis that is. Colour and hat
+ * answer "which session is this?" and vary within a project so two workers can be told
+ * apart. The creature answers the question above that one — WHICH PROJECT — so every
+ * session on a project is the same animal, and the band groups itself by shape without
+ * anybody having to read a label.
+ *
+ * It is what replaced the coloured mark on the name chip: a mark has to be looked at
+ * and decoded, a creature is known by the time you have noticed it.
+ */
+export type ProjectLooks = Readonly<Record<string, SpeciesId>>;
+
+/** Everything the store holds: the per-session looks, and the per-project creatures. */
+export type StoredLooks = { sessions: LookOverrides; projects: ProjectLooks };
 
 /** Where the choices live. Same key in both windows; they share an origin. */
 export const LOOKS_STORAGE_KEY = "ao.companion.looks";
@@ -60,6 +78,39 @@ export function resolveLook(sessionRef: string, overrides: LookOverrides): Look 
 /** The resolved look, flattened into what the rig paints. */
 export function castFor(sessionRef: string, overrides: LookOverrides): CastMember {
 	return castFromLook(resolveLook(sessionRef, overrides));
+}
+
+/**
+ * The creature this project shows: the chosen one, or the hash of its name.
+ *
+ * Defensive on the stored value for the same reason `resolveLook` is: the file may have
+ * been written by a LATER build that knows creatures this one does not, and the right
+ * answer to a creature we cannot draw is the one the hash would have given — not a
+ * crash, and not a blank.
+ */
+export function resolveSpecies(project: string | undefined, projects: ProjectLooks): SpeciesId {
+	const chosen = project ? projects[project] : undefined;
+	if (chosen && SPECIES.some((entry) => entry.id === chosen)) return chosen;
+	return speciesForProject(project);
+}
+
+/** True when this project is showing a human's choice rather than the hash. */
+export function isSpeciesChosen(projects: ProjectLooks, project: string | undefined): boolean {
+	const chosen = project ? projects[project] : undefined;
+	return Boolean(chosen && SPECIES.some((entry) => entry.id === chosen));
+}
+
+/** Record a project's creature. */
+export function chooseSpecies(projects: ProjectLooks, project: string, species: SpeciesId): ProjectLooks {
+	return { ...projects, [project]: species };
+}
+
+/** Put a project back on the hash. Absent is the only way to say "the default". */
+export function clearSpeciesChoice(projects: ProjectLooks, project: string): ProjectLooks {
+	if (!(project in projects)) return projects;
+	const next = { ...projects };
+	delete next[project];
+	return next;
 }
 
 /** True when this axis is showing a human's choice rather than the hash. */
@@ -156,5 +207,53 @@ export function parseLookOverrides(raw: string | null | undefined): LookOverride
 
 /** The stored form: a versioned envelope, so a future shape change is detectable. */
 export function serializeLookOverrides(overrides: LookOverrides): string {
-	return JSON.stringify({ v: STORAGE_VERSION, sessions: overrides });
+	return serializeStoredLooks({ sessions: overrides, projects: {} });
+}
+
+/**
+ * The projects half of the stored value.
+ *
+ * Read as wide as the sessions half and for the same reasons: this runs on the OVERLAY,
+ * on someone's desktop, before a single pet is drawn. Anything unreadable costs the
+ * decoration and never the pets.
+ */
+export function parseProjectLooks(raw: string | null | undefined): ProjectLooks {
+	if (!raw) return {};
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return {};
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+	const projects = (parsed as { projects?: unknown }).projects;
+	if (typeof projects !== "object" || projects === null || Array.isArray(projects)) return {};
+
+	const out: Record<string, SpeciesId> = {};
+	for (const [name, value] of Object.entries(projects as Record<string, unknown>)) {
+		if (name === "" || typeof value !== "string") continue;
+		if (SPECIES.some((entry) => entry.id === value)) out[name] = value as SpeciesId;
+	}
+	return out;
+}
+
+/** Both halves, from one read. */
+export function parseStoredLooks(raw: string | null | undefined): StoredLooks {
+	return { sessions: parseLookOverrides(raw), projects: parseProjectLooks(raw) };
+}
+
+/** Both halves, into one value. ⚠ Always write BOTH, or one half erases the other. */
+export function serializeStoredLooks(stored: StoredLooks): string {
+	return JSON.stringify({ v: STORAGE_VERSION, sessions: stored.sessions, projects: stored.projects });
+}
+
+/**
+ * Forget the projects that are gone. Same warning as {@link pruneLookOverrides}: feed it
+ * the AUTHORITATIVE list, which only the main app has.
+ */
+export function pruneProjectLooks(projects: ProjectLooks, liveNames: Iterable<string>): ProjectLooks {
+	const live = new Set(liveNames);
+	const kept = Object.keys(projects).filter((name) => live.has(name));
+	if (kept.length === Object.keys(projects).length) return projects;
+	return Object.fromEntries(kept.map((name) => [name, projects[name]]));
 }

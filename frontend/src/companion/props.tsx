@@ -344,15 +344,41 @@ const CORD_LOOSE = "M67 92 C 77 96 83 104 85 115";
 const CORD_COILED = "M67 92 C 78 92 82 100 74 104 C 68 107 70 112 86 112";
 
 /**
+ * The same four routes, grown from a different point on the body.
+ *
+ * Only the START moves. Every route still ends where it ended — in the ground prop's
+ * socket, or coiled on the floor — so the plug, the pips and the sparks all stay put
+ * and a cat's tail, a ghost's wisp and a Proc's power lead are ONE piece of machinery
+ * drawn out of different anatomy. Rewriting the whole path per creature would have
+ * been four more paths per species and four more chances for a plug to miss its socket.
+ */
+function startAt(d: string, from?: readonly [number, number]): string {
+	if (!from) return d;
+	return d.replace(/^M[-\d.]+ [-\d.]+/, `M${from[0]} ${from[1]}`);
+}
+
+/**
  * The cord: the LINK, and the one part of the rig that reports on the session
  * rather than the task. It always leaves RIGHT — into a ground prop when the scene
  * has one, off the frame towards whatever it is attached to when there is none, and
  * dropped on the floor when the session is over or lost.
  */
-export function CordLayer({ cord, ground, cast }: { cord: Cord; ground: Ground; cast: CastMember }) {
+export function CordLayer({
+	cord,
+	ground,
+	cast,
+	from,
+}: {
+	cord: Cord;
+	ground: Ground;
+	cast: CastMember;
+	/** Where this creature's lead leaves its body. A tail, a wisp and a plug lead all start somewhere different. */
+	from?: readonly [number, number];
+}) {
 	const plugged = ground !== "none";
 	const unplugged = cord === "unplugged";
-	const d = unplugged ? CORD_LOOSE : plugged ? (cord === "coiled" ? CORD_COILED : CORD_TO_GROUND) : CORD_TO_FLOOR;
+	const route = unplugged ? CORD_LOOSE : plugged ? (cord === "coiled" ? CORD_COILED : CORD_TO_GROUND) : CORD_TO_FLOOR;
+	const d = startAt(route, from);
 
 	return (
 		<g

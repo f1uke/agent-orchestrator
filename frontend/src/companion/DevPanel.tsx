@@ -6,6 +6,7 @@ import type { ManualFeed } from "./dev-feed";
 import { STATUS_LABELS } from "./preview";
 import { appendActivity, everyStatus, makeActivity } from "./dev-roster";
 import { ALL_COMPANION_STATUSES } from "./scene";
+import { SPECIES, type SpeciesId } from "./species";
 
 // The playground, mounted on `companion.html` in dev only (see main.tsx).
 //
@@ -112,9 +113,22 @@ export type DevPanelProps = {
 	setWorld: React.Dispatch<React.SetStateAction<World>> | null;
 	reducedMotion: boolean;
 	onReducedMotion: (value: boolean) => void;
+	/** Which creature the whole band is drawn as. `mixed` deals all six round. */
+	species: SpeciesId | "mixed";
+	onSpecies: (species: SpeciesId | "mixed") => void;
+	/** Opens the contact sheet: every creature, every state, every wallpaper tone. */
+	onConceptSheet: () => void;
 };
 
-export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: DevPanelProps) {
+export function DevPanel({
+	feed,
+	setWorld,
+	reducedMotion,
+	onReducedMotion,
+	species,
+	onSpecies,
+	onConceptSheet,
+}: DevPanelProps) {
 	const [roster, setRosterState] = useState<CompanionActivity[]>(() => feed.roster());
 	const [selected, setSelected] = useState<string | null>(roster[0]?.sessionId ?? null);
 	const [applyToAll, setApplyToAll] = useState(false);
@@ -202,6 +216,33 @@ export function DevPanel({ feed, setWorld, reducedMotion, onReducedMotion }: Dev
 					<input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)} />
 					apply to the whole cast
 				</label>
+			</Section>
+
+			<Section title="Creature (per PROJECT)">
+				<p style={{ ...MUTED, margin: 0 }}>
+					`by project` is what the real thing does: the creature comes from the project name, so every session on a
+					project is the same animal. The rest force one body, to look at it across every state.
+				</p>
+				<div style={ROW_OF_BUTTONS}>
+					{[
+						{ id: "mixed" as const, name: "by project" },
+						...SPECIES.map((entry) => ({ id: entry.id as SpeciesId | "mixed", name: entry.name })),
+					].map((entry) => (
+						<button
+							key={entry.id}
+							type="button"
+							style={{ ...BUTTON, ...(entry.id === species ? ROW_ON : null) }}
+							onClick={() => onSpecies(entry.id)}
+						>
+							{entry.name}
+						</button>
+					))}
+				</div>
+				<div style={ROW_OF_BUTTONS}>
+					<button type="button" style={BUTTON} onClick={onConceptSheet}>
+						concept sheet ▸
+					</button>
+				</div>
 			</Section>
 
 			<Section title="State (drives the scene + how it moves)">
