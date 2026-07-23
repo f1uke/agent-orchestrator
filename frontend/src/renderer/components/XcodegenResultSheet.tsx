@@ -8,9 +8,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
  * failure (`error`).
  */
 export type XcodegenViewState =
-	| { phase: "running" }
-	| { phase: "error" }
-	| { phase: "done"; result: RunXcodegenResult };
+	{ phase: "running" } | { phase: "error" } | { phase: "done"; result: RunXcodegenResult };
 
 type XcodegenResultSheetProps = {
 	open: boolean;
@@ -92,7 +90,9 @@ function Body({ state }: { state: XcodegenViewState | null }) {
 				</div>
 				<div className="text-[13px] text-muted-foreground">
 					Install it, then try again:
-					<pre className="mt-2 rounded-md bg-muted/60 p-2 font-mono text-[12px] text-foreground">brew install xcodegen</pre>
+					<pre className="mt-2 rounded-md bg-muted/60 p-2 font-mono text-[12px] text-foreground">
+						brew install xcodegen
+					</pre>
 				</div>
 			</div>
 		);

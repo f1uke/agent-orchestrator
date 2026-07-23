@@ -33,6 +33,7 @@
 // the bucket hat is the worker fixing the flaky test. Re-randomising every launch
 // would throw that away for nothing — the pets would stop being anybody.
 
+import { SPECIES_ACCESSORIES, type Accessory } from "./species-accessories";
 import { SPECIES_PALETTES } from "./species-palettes";
 import { speciesById, type SpeciesId } from "./species";
 
@@ -86,7 +87,16 @@ export type CastMember = {
 	/** Human-readable, for the accessible label: "Teal bucket hat", "Teal Cat, bucket hat". */
 	name: string;
 	palette: string;
-	hatId: HatId;
+	/**
+	 * What this creature is WEARING, from its own set: one of the six hats on a Proc, a
+	 * collar on a cat, a cherry suspended in a slime.
+	 *
+	 * ⚠ A plain string, and the field keeps the name `hatId` on purpose — it is the axis
+	 * id `hat`, which is what is written in everybody's localStorage. Renaming the axis
+	 * would silently reset every choice anybody has made; renaming only the field would
+	 * leave the two out of step, which is worse than a name that has outgrown itself.
+	 */
+	hatId: string;
 	/**
 	 * WHICH CREATURE. Defaults to `proc` everywhere the caller does not say, so every
 	 * session in existence keeps the body it already had.
@@ -282,9 +292,13 @@ export const APPEARANCE_AXES: readonly AppearanceAxis[] = [
 	},
 	{
 		id: "hat",
-		name: "Hat",
-		hint: "What makes the silhouette differ, and the part that reads in the corner of your eye.",
+		name: "Accessory",
+		hint: "What it is wearing. Each creature has its own — a hat, a collar, a cherry suspended in jelly.",
 		salt: HAT_SALT,
+		// ⚠ The Proc's, as the default. The real options are per CREATURE and come from
+		// `accessoriesFor` — a picker that offered these six to a slime would be offering
+		// six hats to a jelly cube. The id stays `hat` because that is what is written in
+		// everybody's localStorage.
 		options: HATS.map((hat) => ({ id: hat.id, name: hat.name })),
 	},
 ];
@@ -326,10 +340,11 @@ export function castFromLook(look: Look): CastMember {
 	);
 }
 
-/** Every look a creature has: its own six colours × the hats it can wear. */
+/** Every look a creature has: its own colours × its own accessories. */
 export function looksOf(species: SpeciesId): readonly CastMember[] {
-	const hats = speciesById(species).axes.includes("hat") ? HATS : [HATS[0]];
-	return palettesFor(species).flatMap((palette) => hats.map((hat) => composeCast(palette, hat, species)));
+	return palettesFor(species).flatMap((palette) =>
+		accessoriesFor(species).map((worn) => composeCast(palette, HATS[0], species, worn.id)),
+	);
 }
 
 /**
@@ -350,18 +365,21 @@ export function castForSession(sessionRef: string): CastMember {
  * five new bodies out of the live cast until they are registered as an axis: every
  * existing caller composes exactly the Proc it composed before, id and name included.
  */
-export function composeCast(palette: Palette, hat: Hat, species: SpeciesId = "proc"): CastMember {
+export function composeCast(
+	palette: Palette,
+	hat: Hat,
+	species: SpeciesId = "proc",
+	/** Which of the CREATURE's own accessories. Defaults to the hat's id, which is the Proc's. */
+	accessory: string = hat.id,
+): CastMember {
 	const creature = speciesById(species);
+	const worn = accessoryOf(species, accessory);
+	const wornName = accessoriesFor(species).find((entry) => entry.id === worn)?.name ?? worn;
 	return {
-		id: species === "proc" ? `${palette.id}-${hat.id}` : `${species}-${palette.id}-${hat.id}`,
-		name:
-			species === "proc"
-				? `${palette.name} ${hat.name}`
-				: creature.axes.includes("hat")
-					? `${palette.name} ${creature.name}, ${hat.name}`
-					: `${palette.name} ${creature.name}`,
+		id: species === "proc" ? `${palette.id}-${hat.id}` : `${species}-${palette.id}-${worn}`,
+		name: species === "proc" ? `${palette.name} ${hat.name}` : `${palette.name} ${creature.name}, ${wornName}`,
 		palette: palette.id,
-		hatId: hat.id,
+		hatId: worn,
 		species,
 		body: palette.body,
 		shade: palette.shade,
@@ -384,6 +402,20 @@ export function palettesFor(species: SpeciesId): readonly Palette[] {
 	return SPECIES_PALETTES[species] ?? PALETTES;
 }
 
+/**
+ * What a creature can WEAR: hats on a Proc, a collar on a cat, a cherry suspended in a
+ * slime. The axis is the same one; the options belong to the creature.
+ */
+export function accessoriesFor(species: SpeciesId): readonly Accessory[] {
+	return SPECIES_ACCESSORIES[species] ?? HATS.map((hat) => ({ id: hat.id, name: hat.name }));
+}
+
+/** One accessory of a creature's own set, by id, falling back to its first. */
+export function accessoryOf(species: SpeciesId, accessoryId: string): string {
+	const set = accessoriesFor(species);
+	return (set.find((entry) => entry.id === accessoryId) ?? set[0]).id;
+}
+
 /** One colour of a creature's own set, by id, falling back to its first. */
 export function paletteOf(species: SpeciesId, paletteId: string): Palette {
 	const set = palettesFor(species);
@@ -398,16 +430,25 @@ export function paletteOf(species: SpeciesId, paletteId: string): Palette {
  * decided per session and are not this axis' business to re-roll.
  */
 export function withSpecies(cast: CastMember, species: SpeciesId): CastMember {
-	// By SLOT, not by id. Each creature has its own six colours with its own names, so
-	// "the same colour" across bodies is the same position in the list — there is no
-	// ginger Proc to carry over and no amber cat to carry back.
-	const from = palettesFor(cast.species);
-	const slot = Math.max(
-		0,
-		from.findIndex((palette) => palette.id === cast.palette),
+	// By SLOT, not by id, on BOTH axes. Each creature has its own colours and its own
+	// accessories with their own names, so "the same choice" across bodies is the same
+	// position in the list — there is no ginger Proc to carry over, and no beanie a
+	// slime could put on.
+	const slotIn = <T extends { id: string }>(set: readonly T[], id: string) =>
+		Math.max(
+			0,
+			set.findIndex((entry) => entry.id === id),
+		);
+	const colours = palettesFor(species);
+	const worn = accessoriesFor(species);
+	const colourSlot = slotIn(palettesFor(cast.species), cast.palette);
+	const wornSlot = slotIn(accessoriesFor(cast.species), cast.hatId);
+	return composeCast(
+		colours[colourSlot % colours.length],
+		HATS.find((hat) => hat.id === worn[wornSlot % worn.length].id) ?? HATS[0],
+		species,
+		worn[wornSlot % worn.length].id,
 	);
-	const to = palettesFor(species);
-	return composeCast(to[slot % to.length], HATS.find((hat) => hat.id === cast.hatId) ?? HATS[0], species);
 }
 
 /** Every look there is: one per (colour, hat) pair. Used by tests and the demo roster. */

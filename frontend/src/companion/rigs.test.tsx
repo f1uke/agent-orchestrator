@@ -1,11 +1,11 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { SessionStatus } from "../renderer/types/workspace";
-import { composeCast, HATS, PALETTES } from "./cast";
+import { accessoriesFor, composeCast, HATS, PALETTES } from "./cast";
 import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
 import { Procs, PROCS_VIEW } from "./Procs";
 import { ALL_COMPANION_STATUSES, ALL_CORDS, sceneFor } from "./scene";
-import { LIMB_POSE, SPECIES, speciesById, speciesWears, type SpeciesId } from "./species";
+import { LIMB_POSE, SPECIES, speciesById, type SpeciesId } from "./species";
 import { blinkPhase, pivoted, tellGlow, tellOrigin } from "./rigs";
 
 // What five new BODIES have to prove, and it is the same list the Proc had to: they
@@ -120,30 +120,41 @@ describe("six creatures, one set of machinery", () => {
 });
 
 describe("what each creature can wear", () => {
-	it("puts a hat on the three with a head for one, and on nobody else", () => {
-		// A picker that offered a hat to a toadstool would offer a choice with no effect,
-		// which is worse than not offering it: the user picks, nothing changes, and the
-		// feature looks broken. `speciesWears` is the data the library reads; this is the
-		// drawing obeying it.
+	it("keeps the Proc's HATS on the Proc and nowhere else", () => {
+		// A hat is cut for the Proc's tall head. Every other creature wears its own thing
+		// in a place only its own rig knows — a collar round a neck, a cherry suspended
+		// inside a jelly — so a hat turning up on one of them would be a hat on a box.
 		for (const species of SPECIES) {
 			const { container, unmount } = renderSpecies(species.id);
-			const worn = container.querySelectorAll("[data-hat-piece]").length;
 
-			expect(worn > 0, `${species.id}`).toBe(speciesWears(species.id, "hat"));
+			expect(container.querySelectorAll("[data-hat-piece]").length > 0, species.id).toBe(species.id === "proc");
 			unmount();
 		}
 	});
 
-	it("wears every one of the six hats, on every creature that wears any", () => {
-		for (const species of SPECIES.filter((entry) => entry.axes.includes("hat"))) {
-			for (let hat = 0; hat < HATS.length; hat++) {
-				const { container, unmount } = renderSpecies(species.id, "working", hat);
-
-				expect(container.querySelectorAll("[data-hat-piece]").length, `${species.id}/${HATS[hat].id}`).toBe(
-					HATS[hat].pieces.length,
+	it("draws every one of a creature's own accessories, and draws them differently", () => {
+		// The axis is only worth having if the options are visibly different. Six ids that
+		// rendered the same markup would be one look with six names.
+		for (const species of SPECIES) {
+			const drawings = new Set<string>();
+			for (const worn of accessoriesFor(species.id)) {
+				const { container, unmount } = render(
+					<Procs
+						cast={composeCast(PALETTES[0], HATS[0], species.id, worn.id)}
+						status="working"
+						facing="front"
+						walking={false}
+					/>,
 				);
+
+				expect(container.querySelector("svg")?.getAttribute("data-accessory"), `${species.id}/${worn.id}`).toBe(
+					worn.id,
+				);
+				drawings.add(drawn(container));
 				unmount();
 			}
+
+			expect(drawings.size, species.id).toBe(accessoriesFor(species.id).length);
 		}
 	});
 

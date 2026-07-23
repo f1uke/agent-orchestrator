@@ -99,9 +99,7 @@ describe("useReplyToThread", () => {
 		const groups = qc.getQueryData<PRCommentGroup[]>(CACHE_KEY);
 		const thread = groups?.[0]?.threads[0];
 		expect(thread?.comments).toHaveLength(2);
-		expect(thread?.comments[1]).toEqual(
-			expect.objectContaining({ id: "c2", author: "me", body: "thanks" }),
-		);
+		expect(thread?.comments[1]).toEqual(expect.objectContaining({ id: "c2", author: "me", body: "thanks" }));
 	});
 
 	it("surfaces the error message and leaves the cache untouched on failure", async () => {

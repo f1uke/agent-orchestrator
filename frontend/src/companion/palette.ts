@@ -35,8 +35,12 @@ export const PROP_COLOURS = {
 	blanket: "#a9bde4",
 	/** Held pages and signs. */
 	paper: "#fbfafd",
-	/** CI sparks. */
+	/** CI sparks, a chick's beak and legs, a cat's bell, a slime's coin. */
 	spark: "#ffd166",
+	/** A stalk and a leaf: the green a slime's cherry and leaf are grown on. */
+	sprig: "#8fd18f",
+	/** A slime's cherry. */
+	cherry: "#f3a3b0",
 	/** The three confetti colours a merge throws. */
 	confettiA: "#f4c558",
 	confettiB: "#92d8dc",

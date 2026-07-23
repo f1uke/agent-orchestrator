@@ -37,7 +37,13 @@ export type RigProps = {
 	uid: string;
 	/** The task prop — a page, a laptop, a sign — already mirrored for the facing. */
 	heldProp: React.ReactNode;
-	/** The hat, if this creature wears one. Positioned by the rig, which knows where its head is. */
+	/**
+	 * The Proc's hat, as the shell assembles it from `HATS`.
+	 *
+	 * ⚠ ONLY the Proc uses it. Every other creature draws its own accessory from
+	 * `cast.hatId` — a collar, a halo, a cherry suspended in jelly — because those are
+	 * not one shape in one slot and no shared table could have placed them.
+	 */
 	hat: React.ReactNode;
 };
 
@@ -504,6 +510,87 @@ function Strip({
 	);
 }
 
+// ---------------------------------------------------------------- accessories
+//
+// Each creature wears its OWN, and the shared ones are here because a bow is a bow
+// wherever it is pinned. What is NOT shared is where each creature puts it — a ghost's
+// halo floats above it, a cat's collar goes round its neck, a slime's cherry is
+// SUSPENDED INSIDE IT, and a toadstool's is the pattern on its cap. None of those four
+// is one shape drawn in one slot, which is why the rigs place them rather than a table.
+//
+// All of them obey the same two rules the bodies do: a swept fill plus the ink rim on
+// anything facing the wallpaper, and paths in M/L/C/Z only.
+
+/** A bow: two loops and a knot. Symmetric, so it survives the sprite turning round. */
+function Bow({ cx, cy, size, colour }: { cx: number; cy: number; size: number; colour: string }) {
+	const w = size;
+	return (
+		<g data-worn="bow">
+			<path
+				data-rim
+				d={`M${round(cx)} ${round(cy)} L${round(cx - w)} ${round(cy - w * 0.7)} L${round(cx - w)} ${round(cy + w * 0.7)} Z`}
+				fill={colour}
+				strokeLinejoin="round"
+				{...RIM}
+			/>
+			<path
+				data-rim
+				d={`M${round(cx)} ${round(cy)} L${round(cx + w)} ${round(cy - w * 0.7)} L${round(cx + w)} ${round(cy + w * 0.7)} Z`}
+				fill={colour}
+				strokeLinejoin="round"
+				{...RIM}
+			/>
+			<circle data-rim cx={cx} cy={cy} r={round(w * 0.34)} fill={colour} {...RIM} />
+		</g>
+	);
+}
+
+/** A scarf: a band round the neck with one end hanging. */
+function Scarf({ cx, cy, width, colour }: { cx: number; cy: number; width: number; colour: string }) {
+	const half = width / 2;
+	return (
+		<g data-worn="scarf">
+			<path
+				data-rim
+				d={`M${round(cx - half)} ${round(cy)} C ${round(cx - half)} ${round(cy + 8)} ${round(cx + half)} ${round(cy + 8)} ${round(cx + half)} ${round(cy)} C ${round(cx + half)} ${round(cy - 5)} ${round(cx - half)} ${round(cy - 5)} ${round(cx - half)} ${round(cy)} Z`}
+				fill={colour}
+				strokeLinejoin="round"
+				{...RIM}
+			/>
+			<path
+				data-rim
+				d={`M${round(cx + half - 3)} ${round(cy + 2)} L${round(cx + half + 4)} ${round(cy + 14)} L${round(cx + half - 4)} ${round(cy + 15)} L${round(cx + half - 7)} ${round(cy + 4)} Z`}
+				fill={colour}
+				strokeLinejoin="round"
+				{...RIM}
+			/>
+		</g>
+	);
+}
+
+/** A little flower: five petals round a middle. */
+function Flower({ cx, cy, r, colour }: { cx: number; cy: number; r: number; colour: string }) {
+	return (
+		<g data-worn="flower">
+			{[0, 1, 2, 3, 4].map((i) => {
+				const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
+				return (
+					<circle
+						key={i}
+						data-rim
+						cx={round(cx + Math.cos(angle) * r * 0.72)}
+						cy={round(cy + Math.sin(angle) * r * 0.72)}
+						r={round(r * 0.52)}
+						fill={PROP_COLOURS.paper}
+						{...RIM}
+					/>
+				);
+			})}
+			<circle data-rim cx={cx} cy={cy} r={round(r * 0.42)} fill={colour} {...RIM} />
+		</g>
+	);
+}
+
 /** One stubby leg. */
 function Leg({
 	x,
@@ -683,11 +770,49 @@ function GhostRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigPro
 						uid={uid}
 					/>
 					<Mouth cx={48} cy={78} width={9} held={held} />
+					<GhostWorn worn={cast.hatId} colour={cast.shade} />
 					{heldProp}
 				</g>
 			</g>
 		</>
 	);
+}
+
+/** What a ghost haunts with. Placed at the peak of the drape, where a head would be. */
+function GhostWorn({ worn, colour }: { worn: string; colour: string }) {
+	if (worn === "halo") {
+		return (
+			<g data-worn="halo">
+				{/* Above it and not touching, which is the only way a halo reads as one. */}
+				<ellipse data-rim cx="48" cy="6" rx="17" ry="5.5" fill="none" {...RIM} />
+				<ellipse cx="48" cy="6" rx="17" ry="5.5" fill="none" stroke={PROP_COLOURS.spark} strokeWidth="2.6" />
+			</g>
+		);
+	}
+	if (worn === "candle") {
+		return (
+			<g data-worn="candle">
+				<rect data-rim x="43" y="6" width="10" height="16" rx="2" fill={PROP_COLOURS.linen} {...RIM} />
+				<path data-rim d="M48 -6 C 53 0 52 6 48 6 C 44 6 43 0 48 -6 Z" fill={PROP_COLOURS.spark} {...RIM} />
+			</g>
+		);
+	}
+	if (worn === "patch") {
+		return (
+			<g data-worn="patch">
+				{/* A square of cloth stitched on. A ghost is a sheet, and a sheet gets mended. */}
+				<rect data-rim x="58" y="70" width="17" height="15" rx="2" fill={colour} {...RIM} />
+				<path
+					d="M58 74 L75 74 M58 81 L75 81 M62 70 L62 85 M70 70 L70 85"
+					stroke={PROCS_INK}
+					strokeWidth="1.4"
+					opacity="0.5"
+					fill="none"
+				/>
+			</g>
+		);
+	}
+	return <Bow cx={48} cy={22} size={11} colour={colour} />;
 }
 
 // ---------------------------------------------------------------- Cat
@@ -775,7 +900,7 @@ function CatFace({ cx, cy, held, ink = PROCS_INK }: { cx: number; cy: number; he
 	);
 }
 
-function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: RigProps) {
+function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigProps) {
 	const headClip = `procs-head-${uid}`;
 	// Standing still, it sits. That is both the better drawing and what a cat does.
 	if (!walking) {
@@ -823,7 +948,7 @@ function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: Rig
 					uid={uid}
 				/>
 				<CatFace cx={48} cy={56} held={held} />
-				<g transform="translate(48 30) scale(0.9) translate(-48 -34)">{hat}</g>
+				<CatWorn worn={cast.hatId} colour={cast.shade} at={[48, 72]} ear={[74, 30]} />
 				<SwingPair part="ears" cord={scene.cord} root={CAT_SIT_EAR_ROOT} axis={CAT_AXIS} speedMs={1400}>
 					<path data-rim data-ear d={CAT_EAR} fill={cast.body} strokeLinejoin="round" {...RIM} />
 					<path data-ear-lining d={CAT_EAR_INNER} fill={cast.blush} />
@@ -877,7 +1002,7 @@ function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: Rig
 				{/* One eye, because this is a profile. Two would be the same mistake again. */}
 				<Eyes at={[[72, 46]]} r={8} held={held} style="slit" blink={BLINK_MS.cat} uid={uid} />
 				<CatFace cx={84} cy={57} held={held} />
-				<g transform="translate(70 38) scale(0.72) translate(-48 -34)">{hat}</g>
+				<CatWorn worn={cast.hatId} colour={cast.shade} at={[62, 70]} ear={[88, 34]} />
 				<SwingPair part="ears" cord={scene.cord} root={CAT_WALK_EAR_ROOT} axis={CAT_AXIS} speedMs={1400} single>
 					<path data-rim data-ear d={CAT_WALK_EAR} fill={cast.body} strokeLinejoin="round" {...RIM} />
 					<path data-ear-lining d={CAT_WALK_EAR_INNER} fill={cast.blush} />
@@ -905,6 +1030,42 @@ function CatLeg({ x, lift, colour }: { x: number; lift: number; colour: string }
 	);
 }
 
+/**
+ * What a cat is given. Round the neck for three of them, behind the ear for the flower.
+ *
+ * Placed by the caller because this cat has TWO poses with the neck in two places — the
+ * one thing a shared accessory table could not have known.
+ */
+function CatWorn({
+	worn,
+	colour,
+	at,
+	ear,
+}: {
+	worn: string;
+	colour: string;
+	at: readonly [number, number];
+	ear: readonly [number, number];
+}) {
+	if (worn === "bowtie") return <Bow cx={at[0]} cy={at[1]} size={9} colour={colour} />;
+	if (worn === "scarf") return <Scarf cx={at[0]} cy={at[1]} width={30} colour={colour} />;
+	if (worn === "flower") return <Flower cx={ear[0]} cy={ear[1]} r={8} colour={colour} />;
+	return (
+		<g data-worn="collar">
+			<rect data-rim x={round(at[0] - 17)} y={round(at[1] - 4)} width="34" height="8" rx="4" fill={colour} {...RIM} />
+			{/* The bell. A collar without one is a strap. */}
+			<circle data-rim cx={at[0]} cy={round(at[1] + 6)} r="5.5" fill={PROP_COLOURS.spark} {...RIM} />
+			<path
+				d={`M${round(at[0] - 3)} ${round(at[1] + 6)} L${round(at[0] + 3)} ${round(at[1] + 6)}`}
+				stroke={PROCS_INK}
+				strokeWidth="1.6"
+				strokeLinecap="round"
+				fill="none"
+			/>
+		</g>
+	);
+}
+
 // ---------------------------------------------------------------- Slime
 //
 // A jelly CUBE with soft corners and a flat bottom — squared off on purpose, because
@@ -918,7 +1079,7 @@ const SLIME_BODY =
 	"M20 116 C 15 116 15 111 15 105 L 15 80 C 15 58 29 52 48 52 C 67 52 81 58 81 80 L 81 105 C 81 111 81 116 76 116 Z";
 const SLIME_NUCLEUS = [48, 100] as const;
 
-function SlimeRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: RigProps) {
+function SlimeRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigProps) {
 	const bodyClip = `procs-body-${uid}`;
 	return (
 		<>
@@ -969,6 +1130,8 @@ function SlimeRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 				/>
 				<Mouth cx={48} cy={89} width={9} held={held} />
 
+				<SlimeWorn worn={cast.hatId} />
+
 				<GlowPart part="nucleus" cord={scene.cord} origin={SLIME_NUCLEUS}>
 					<ellipse
 						data-rim
@@ -981,10 +1144,66 @@ function SlimeRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 						{...RIM}
 					/>
 				</GlowPart>
-				{hat}
 				{heldProp}
 			</g>
 		</>
+	);
+}
+
+/**
+ * What is SUSPENDED IN a slime.
+ *
+ * Nothing else in the cast can wear a thing inside itself, and it is the most slime-ish
+ * idea available — a hat on a jelly cube is a hat on a box. Placed high and left, clear
+ * of both the face and the nucleus, which is the tell and must never be crowded.
+ */
+function SlimeWorn({ worn }: { worn: string }) {
+	if (worn === "star") {
+		return (
+			<path
+				data-rim
+				data-worn="star"
+				d="M28 60 L31 67 L38.5 67.5 L32.5 72 L34.5 79 L28 74.5 L21.5 79 L23.5 72 L17.5 67.5 L25 67 Z"
+				fill={PROP_COLOURS.spark}
+				strokeLinejoin="round"
+				{...RIM}
+			/>
+		);
+	}
+	if (worn === "coin") {
+		return (
+			<g data-worn="coin">
+				<circle data-rim cx="28" cy="69" r="9" fill={PROP_COLOURS.spark} {...RIM} />
+				<circle cx="28" cy="69" r="4.6" fill="none" stroke={PROCS_INK} strokeWidth="1.6" opacity="0.55" />
+			</g>
+		);
+	}
+	if (worn === "leaf") {
+		return (
+			<g data-worn="leaf">
+				<path
+					data-rim
+					d="M19 76 C 19 64 27 58 37 58 C 37 70 29 76 19 76 Z"
+					fill={PROP_COLOURS.sprig}
+					strokeLinejoin="round"
+					{...RIM}
+				/>
+				<path d="M21 74 L35 60" stroke={PROCS_INK} strokeWidth="1.4" strokeLinecap="round" opacity="0.5" fill="none" />
+			</g>
+		);
+	}
+	return (
+		<g data-worn="cherry">
+			<path
+				d="M28 58 C 31 63 33 66 33 70"
+				stroke={PROP_COLOURS.sprig}
+				strokeWidth="2.4"
+				strokeLinecap="round"
+				fill="none"
+			/>
+			<circle data-rim cx="26" cy="72" r="7" fill={PROP_COLOURS.cherry} {...RIM} />
+			<circle data-rim cx="37" cy="74" r="6" fill={PROP_COLOURS.cherry} {...RIM} />
+		</g>
 	);
 }
 
@@ -1000,7 +1219,7 @@ const CHICK_WING = "M22 62 C 8 64 2 76 5 86 C 14 86 21 76 26 68 Z";
 const CHICK_CREST = "M42 26 L 40 4 L 50 16 L 54 0 L 58 18 L 66 8 Z";
 const CHICK_CREST_ROOT = [48, 26] as const;
 
-function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: RigProps) {
+function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigProps) {
 	const bodyClip = `procs-body-${uid}`;
 	return (
 		<>
@@ -1084,7 +1303,7 @@ function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 						{...RIM}
 					/>
 				)}
-				<g transform={hatTransform("chick")}>{hat}</g>
+				<ChickWorn worn={cast.hatId} colour={cast.shade} />
 				{/* Over the hat, deliberately, and it is also the TELL: a crest a beanie
 				    swallowed would leave this one indistinguishable from any other round
 				    body, and a tell on the left would be behind the held prop in eight of
@@ -1095,6 +1314,41 @@ function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 				{heldProp}
 			</g>
 		</>
+	);
+}
+
+/** What a chick has. The eggshell is the one it hatched out of, which is the joke. */
+function ChickWorn({ worn, colour }: { worn: string; colour: string }) {
+	if (worn === "bow") return <Bow cx={48} cy={30} size={10} colour={colour} />;
+	if (worn === "scarf") return <Scarf cx={48} cy={92} width={30} colour={colour} />;
+	if (worn === "seed") {
+		return (
+			<ellipse
+				data-rim
+				data-worn="seed"
+				cx="48"
+				cy="86"
+				rx="5"
+				ry="7"
+				fill={PROP_COLOURS.wood}
+				transform="rotate(14 48 86)"
+				{...RIM}
+			/>
+		);
+	}
+	return (
+		<path
+			data-rim
+			data-worn="shell"
+			// ⚠ A DOME with a jagged bottom edge, in `paper` rather than `linen`. Drawn as a
+			// jagged band in linen it vanished into a pale chick and left nothing on screen
+			// but the zigzag of its own outline, which read as a spiky crown. Half an
+			// eggshell is a shape, and the shape is what has to be there.
+			d="M17 32 L24 22 L31 31 L38 19 L45 29 L52 18 L59 29 L66 20 L73 30 L79 21 L79 16 C 74 4 62 -2 48 -2 C 34 -2 22 4 17 16 Z"
+			fill={PROP_COLOURS.paper}
+			strokeLinejoin="round"
+			{...RIM}
+		/>
 	);
 }
 
@@ -1137,10 +1391,11 @@ function ToadstoolRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: Ri
 				<path data-rim data-part="stem" d={TOAD_STEM} fill={PROP_COLOURS.linen} strokeLinejoin="round" {...RIM} />
 				<path data-rim data-part="cap" d={TOAD_CAP} fill={cast.body} strokeLinejoin="round" {...RIM} />
 
+				{/* ⚠ The cap's pattern is BOTH the accessory and the tell, and they do not
+				    collide: the accessory chooses the SHAPE, the cord chooses how brightly
+				    it burns. A snail is the odd one out and keeps a single spot to light. */}
 				<GlowPart part="spots" cord={scene.cord} origin={[48, 34]}>
-					{TOAD_SPOTS.map((spot) => (
-						<ellipse key={spot.cx + spot.cy} data-spot {...spot} fill={glow} />
-					))}
+					<ToadstoolWorn worn={cast.hatId} glow={glow} />
 				</GlowPart>
 
 				<Blush
@@ -1171,6 +1426,71 @@ function ToadstoolRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: Ri
 				{heldProp}
 			</g>
 		</>
+	);
+}
+
+/** The pattern on a toadstool's cap — which is the only place a toadstool could wear one. */
+function ToadstoolWorn({ worn, glow }: { worn: string; glow: string }) {
+	if (worn === "rings") {
+		return (
+			<g data-worn="rings">
+				{[
+					{ rx: 30, ry: 13 },
+					{ rx: 20, ry: 9 },
+					{ rx: 10, ry: 5 },
+				].map((ring) => (
+					<ellipse key={ring.rx} data-spot cx="48" cy="38" {...ring} fill="none" stroke={glow} strokeWidth="4.5" />
+				))}
+			</g>
+		);
+	}
+	if (worn === "dew") {
+		return (
+			<g data-worn="dew">
+				{[
+					{ cx: 26, cy: 42 },
+					{ cx: 44, cy: 30 },
+					{ cx: 62, cy: 44 },
+					{ cx: 70, cy: 30 },
+				].map((drop) => (
+					<path
+						key={drop.cx}
+						data-spot
+						d={`M${drop.cx} ${drop.cy - 7} C ${drop.cx + 5} ${drop.cy} ${drop.cx + 4} ${drop.cy + 5} ${drop.cx} ${drop.cy + 5} C ${drop.cx - 4} ${drop.cy + 5} ${drop.cx - 5} ${drop.cy} ${drop.cx} ${drop.cy - 7} Z`}
+						fill={glow}
+					/>
+				))}
+			</g>
+		);
+	}
+	if (worn === "snail") {
+		return (
+			<g data-worn="snail">
+				<ellipse data-spot cx="62" cy="30" rx="11" ry="9.5" fill={glow} />
+				<path
+					d="M62 30 C 66 30 67 26 63 25 C 58 24 56 30 61 33 C 67 36 70 29 66 24"
+					stroke={PROCS_INK}
+					strokeWidth="1.8"
+					fill="none"
+					strokeLinecap="round"
+					opacity="0.6"
+				/>
+				<path
+					data-rim
+					d="M52 36 C 44 36 40 32 38 26 L44 24 C 46 28 48 30 53 30 Z"
+					fill={PROP_COLOURS.linen}
+					strokeLinejoin="round"
+					{...RIM}
+				/>
+			</g>
+		);
+	}
+	return (
+		<g data-worn="spots">
+			{TOAD_SPOTS.map((spot) => (
+				<ellipse key={spot.cx + spot.cy} data-spot {...spot} fill={glow} />
+			))}
+		</g>
 	);
 }
 

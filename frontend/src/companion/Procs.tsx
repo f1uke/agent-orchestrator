@@ -97,6 +97,7 @@ export function Procs({
 			role="img"
 			data-species={cast.species}
 			data-palette={cast.palette}
+			data-accessory={cast.hatId}
 			aria-label={`${cast.name}, ${held ? "being picked up" : status.replace(/_/g, " ")}`}
 			className={className}
 			width={frame.width}

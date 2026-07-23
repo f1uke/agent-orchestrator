@@ -58,14 +58,14 @@ export type Species = {
 	tell: string;
 	locomotion: Locomotion;
 	/**
-	 * Which OTHER appearance axes this body can wear.
+	 * Which appearance axes this body can wear.
 	 *
-	 * ⚠ Not every axis fits every creature, and the library has to KNOW that rather
-	 * than offer a choice that does nothing. A toadstool's cap is already a hat and a
-	 * second one on top of it reads as a mistake; a ghost is a cloth draped over
-	 * nothing, and the drape IS the silhouette — perch a beanie on it and it becomes
-	 * a bag. Colour applies to all six, because colour is a parameter rather than a
-	 * layer, and a creature that could not be tinted would be one character again.
+	 * ⚠ All six wear both now, and the reason is worth keeping: three of them USED to
+	 * wear only a colour, because the second axis was six HATS cut for the Proc's tall
+	 * head — and a ghost has no head to perch one on, a slime's head is its whole self,
+	 * and a toadstool's cap is already a hat. Three creatures with one look each was the
+	 * result. The axis is now the creature's OWN accessory set (`species-accessories.ts`),
+	 * so the answer stopped being "no second axis" and became "its own second axis".
 	 */
 	axes: readonly AxisId[];
 	/**
@@ -110,7 +110,7 @@ export const SPECIES: readonly Species[] = [
 			"A little sheet-ghost: a peaked drape with a scalloped hem, floating a hand's width off the floor. Its trailing wisp IS the power lead.",
 		tell: "its sleeves, and how high it floats",
 		locomotion: "float",
-		axes: ["palette"],
+		axes: ["palette", "hat"],
 		cordFrom: [72, 96],
 		heldOffset: [0, 4],
 		emitOffset: [0, 0],
@@ -135,10 +135,7 @@ export const SPECIES: readonly Species[] = [
 			"A jelly cube with soft corners and a bright nucleus, sitting flat on the floor. It hops rather than walks.",
 		tell: "its nucleus",
 		locomotion: "hop",
-		// ⚠ No hat, and the render is what decided it: the six hats are cut for the
-		// Proc's tall head, and on a body whose "head" IS its whole self the band came
-		// down across the eyes. A jelly cube in a beanie is a box in a beanie.
-		axes: ["palette"],
+		axes: ["palette", "hat"],
 		cordFrom: [72, 100],
 		heldOffset: [0, 6],
 		emitOffset: [0, 34],
@@ -161,7 +158,7 @@ export const SPECIES: readonly Species[] = [
 		identity: "A walking mushroom: a wide spotted cap over a stubby stem with the face on it. The cap is its own hat.",
 		tell: "its cap",
 		locomotion: "hop",
-		axes: ["palette"],
+		axes: ["palette", "hat"],
 		cordFrom: [64, 96],
 		heldOffset: [0, 10],
 		emitOffset: [0, 6],

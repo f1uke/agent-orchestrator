@@ -1,12 +1,12 @@
 import { useState } from "react";
 import type { SessionStatus } from "../renderer/types/workspace";
 import { Bubble } from "./Bubble";
-import { composeCast, HATS, palettesFor, type CastMember } from "./cast";
+import { accessoriesFor, composeCast, HATS, palettesFor, type CastMember } from "./cast";
 import { NameTag } from "./NameTag";
 import { Procs } from "./Procs";
 import { STATUS_LABELS } from "./preview";
 import { ALL_COMPANION_STATUSES } from "./scene";
-import { SPECIES, speciesWears, type SpeciesId } from "./species";
+import { SPECIES, type SpeciesId } from "./species";
 
 // The concept sheet: every creature, across states, across the wallpaper range.
 //
@@ -61,8 +61,8 @@ export function ConceptSheet({ onClose }: { onClose: () => void }) {
 						{entry.label}
 					</button>
 				))}
-				<button type="button" style={BUTTON} onClick={() => setHatIndex((n) => (n + 1) % HATS.length)}>
-					hat: {HATS[hatIndex].name}
+				<button type="button" style={BUTTON} onClick={() => setHatIndex((n) => (n + 1) % 4)}>
+					accessory {hatIndex + 1} of each
 				</button>
 				<button
 					type="button"
@@ -86,8 +86,13 @@ export function ConceptSheet({ onClose }: { onClose: () => void }) {
 							<h2 style={TITLE}>{species.name}</h2>
 							<p style={IDENTITY}>{species.identity}</p>
 							<p style={{ ...IDENTITY, opacity: 0.72 }}>
-								Reports the link with <b>{species.tell}</b> · gets about by <b>{species.locomotion}</b> ·{" "}
-								{speciesWears(species.id, "hat") ? "wears hats" : <b>no hat</b>}
+								Reports the link with <b>{species.tell}</b> · gets about by <b>{species.locomotion}</b>
+							</p>
+							<p style={{ ...IDENTITY, opacity: 0.72 }}>
+								Wears:{" "}
+								{accessoriesFor(species.id)
+									.map((worn) => worn.name)
+									.join(" · ")}
 							</p>
 						</div>
 						{STATES.map((status) => (
@@ -125,8 +130,9 @@ export function ConceptSheet({ onClose }: { onClose: () => void }) {
 
 /** A demo look: this creature, one of ITS OWN colours, and whichever hat the sheet shows. */
 function lookFor(species: SpeciesId, index: number, hatIndex: number): CastMember {
-	const set = palettesFor(species);
-	return composeCast(set[(index * 2 + 1) % set.length], HATS[hatIndex], species);
+	const colours = palettesFor(species);
+	const worn = accessoriesFor(species);
+	return composeCast(colours[(index * 2 + 1) % colours.length], HATS[0], species, worn[hatIndex % worn.length].id);
 }
 
 const BUBBLES: Partial<Record<SessionStatus, { text: string; tone?: "alert" }>> = {

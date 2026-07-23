@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APPEARANCE_AXES, composeCast, HATS, PALETTES } from "./cast";
+import { accessoriesFor, APPEARANCE_AXES, composeCast, HATS, PALETTES } from "./cast";
 import { ALL_CORDS, type Cord } from "./scene";
 import {
 	GLOW,
@@ -48,24 +48,40 @@ describe("the cast of creatures", () => {
 		}
 	});
 
-	it("tints every creature, and hats only the ones with a head to put one on", () => {
-		// Colour is a PARAMETER and applies to everything — a creature that could not be
-		// tinted would put the whole band back to one look per body. A hat is a LAYER cut
-		// for the Proc's tall head, and three of these do not have one: a ghost is a drape
-		// (the drape is the silhouette), a slime's head is its whole self, and a
-		// toadstool's cap is already a hat.
-		for (const entry of SPECIES) expect(entry.axes, entry.id).toContain("palette");
+	it("gives every creature both axes, now the second one is its OWN", () => {
+		// ⚠ Three of them used to wear only a colour, because the second axis was six HATS
+		// cut for the Proc's tall head — and a ghost has no head, a slime's head is its
+		// whole self, and a toadstool's cap is already a hat. Three creatures with one
+		// look each was the result. The axis is now the creature's own accessory set, so
+		// the answer stopped being "no second axis" and became "its own second axis".
+		for (const entry of SPECIES) {
+			expect(entry.axes, entry.id).toContain("palette");
+			expect(entry.axes, entry.id).toContain("hat");
+		}
+	});
 
-		expect(SPECIES.filter((entry) => entry.axes.includes("hat")).map((entry) => entry.id)).toEqual([
-			"proc",
-			"cat",
-			"chick",
-		]);
+	it("gives each creature its own SET, with no two creatures offering the same one", () => {
+		// A shared set is what made this axis useless for half the cast: a cat gets a
+		// collar and a bell, a slime gets a cherry suspended inside it, and neither could
+		// be the other's. Two creatures may both offer a bow — a bow is a bow wherever it
+		// is pinned — but no two may offer the same LIST, and no id may repeat inside one.
+		const sets = new Map<string, string>();
+		for (const entry of SPECIES) {
+			const ids = accessoriesFor(entry.id).map((worn) => worn.id);
+
+			expect(ids.length, entry.id).toBeGreaterThanOrEqual(4);
+			expect(new Set(ids).size, `${entry.id} repeats an id`).toBe(ids.length);
+
+			const key = ids.join("|");
+			const clash = sets.get(key);
+			expect(clash, `${entry.id} offers exactly what ${clash} offers`).toBeUndefined();
+			sets.set(key, entry.id);
+		}
 	});
 
 	it("answers which axes a creature wears, for the picker", () => {
 		expect(speciesWears("proc", "hat")).toBe(true);
-		expect(speciesWears("ghost", "hat")).toBe(false);
+		expect(speciesWears("ghost", "hat")).toBe(true);
 		expect(speciesWears("ghost", "palette")).toBe(true);
 	});
 
@@ -147,10 +163,15 @@ describe("composing a look with a creature on it", () => {
 		}
 	});
 
-	it("names a creature, and does not name a hat it cannot wear", () => {
-		expect(composeCast(PALETTES[1], HATS[5], "cat").name).toBe("Teal Cat, bucket hat");
-		expect(composeCast(PALETTES[1], HATS[5], "ghost").name).toBe("Teal Ghost");
-		expect(composeCast(PALETTES[1], HATS[5], "ghost").id).toBe("ghost-teal-bucket");
+	it("names a creature by what IT wears, not by a hat it has never seen", () => {
+		expect(composeCast(PALETTES[1], HATS[5], "cat", "collar").name).toBe("Teal Cat, Collar and bell");
+		expect(composeCast(PALETTES[1], HATS[5], "ghost", "halo").name).toBe("Teal Ghost, Halo");
+		expect(composeCast(PALETTES[1], HATS[5], "ghost", "halo").id).toBe("ghost-teal-halo");
+	});
+
+	it("falls back to a creature's first accessory when handed one it does not have", () => {
+		// A stored id can be anything: another creature's, or a later build's.
+		expect(composeCast(PALETTES[0], HATS[0], "slime", "beanie").hatId).toBe(accessoriesFor("slime")[0].id);
 	});
 });
 

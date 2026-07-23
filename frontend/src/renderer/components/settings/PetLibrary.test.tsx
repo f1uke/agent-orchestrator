@@ -95,7 +95,7 @@ describe("the axes", () => {
 		const mine = castForSession("ao-1");
 
 		expect(optionButton("Colour", mine.palette)).toHaveAttribute("aria-pressed", "true");
-		expect(optionButton("Hat", mine.hatId)).toHaveAttribute("aria-pressed", "true");
+		expect(optionButton("Accessory", mine.hatId)).toHaveAttribute("aria-pressed", "true");
 		expect(within(optionButton("Colour", mine.palette)).getByText(/in use/i)).toBeTruthy();
 	});
 });
@@ -103,7 +103,7 @@ describe("the axes", () => {
 describe("picking a look", () => {
 	async function pickHat(hat: string) {
 		render(<PetLibrary />);
-		await userEvent.click(optionButton("Hat", hat));
+		await userEvent.click(optionButton("Accessory", hat));
 	}
 
 	const otherThan = (axisId: "palette" | "hat", ref: string) =>
@@ -124,8 +124,8 @@ describe("picking a look", () => {
 		const wanted = otherThan("hat", "ao-1");
 		await pickHat(wanted);
 
-		expect(optionButton("Hat", wanted)).toHaveAttribute("aria-pressed", "true");
-		expect(optionButton("Hat", defaultLook("ao-1").hat)).toHaveAttribute("aria-pressed", "false");
+		expect(optionButton("Accessory", wanted)).toHaveAttribute("aria-pressed", "true");
+		expect(optionButton("Accessory", defaultLook("ao-1").hat)).toHaveAttribute("aria-pressed", "false");
 	});
 
 	it("tells the overlay to go and look, so the desktop changes at once", async () => {
@@ -146,10 +146,12 @@ describe("picking a look", () => {
 		const hat = otherThan("hat", "ao-1");
 		const palette = otherThan("palette", "ao-1");
 		render(<PetLibrary />);
-		await userEvent.click(optionButton("Hat", hat));
+		await userEvent.click(optionButton("Accessory", hat));
 		await userEvent.click(optionButton("Colour", palette));
 
-		await userEvent.click(within(screen.getByRole("group", { name: "Hat" })).getByRole("button", { name: /default/i }));
+		await userEvent.click(
+			within(screen.getByRole("group", { name: "Accessory" })).getByRole("button", { name: /default/i }),
+		);
 
 		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
 		expect(resolveLook("ao-1", stored).hat).toBe(defaultLook("ao-1").hat);
@@ -159,11 +161,15 @@ describe("picking a look", () => {
 	it("offers the reset only on an axis somebody has actually chosen", async () => {
 		render(<PetLibrary />);
 
-		expect(within(screen.getByRole("group", { name: "Hat" })).queryByRole("button", { name: /default/i })).toBeNull();
+		expect(
+			within(screen.getByRole("group", { name: "Accessory" })).queryByRole("button", { name: /default/i }),
+		).toBeNull();
 
-		await userEvent.click(optionButton("Hat", otherThan("hat", "ao-1")));
+		await userEvent.click(optionButton("Accessory", otherThan("hat", "ao-1")));
 
-		expect(within(screen.getByRole("group", { name: "Hat" })).getByRole("button", { name: /default/i })).toBeTruthy();
+		expect(
+			within(screen.getByRole("group", { name: "Accessory" })).getByRole("button", { name: /default/i }),
+		).toBeTruthy();
 	});
 });
 

@@ -413,14 +413,16 @@ describe("the look a Proc wears", () => {
 		return { ...view, push };
 	}
 
-	const hatOf = (container: HTMLElement, session: string) =>
-		container.querySelector(`[data-session="${session}"] [data-hat]`)?.getAttribute("data-hat");
+	// All three read off the SVG ROOT. Reading them off the hat group used to work and
+	// no longer can: only the Proc HAS a hat now — the others wear their own accessory,
+	// drawn in a place only their own rig knows.
+	const rootOf = (container: HTMLElement, session: string) =>
+		container.querySelector(`[data-session="${session}"] svg[data-species]`);
+	const hatOf = (container: HTMLElement, session: string) => rootOf(container, session)?.getAttribute("data-accessory");
 	const paletteOf = (container: HTMLElement, session: string) =>
-		container.querySelector(`[data-session="${session}"] [data-hat]`)?.getAttribute("data-palette");
-	// On the SVG root, not the hat: three creatures wear no hat at all, so reading it
-	// off the hat group would make the assertion depend on which creature turned up.
+		rootOf(container, session)?.getAttribute("data-palette");
 	const speciesOf = (container: HTMLElement, session: string) =>
-		container.querySelector(`[data-session="${session}"] svg[data-species]`)?.getAttribute("data-species");
+		rootOf(container, session)?.getAttribute("data-species");
 	/**
 	 * The hash colour a session gets, expressed on whatever CREATURE its project is.
 	 *
@@ -431,11 +433,13 @@ describe("the look a Proc wears", () => {
 	 */
 	const hashPaletteOn = (session: string, project: string) =>
 		withSpecies(castForSession(session), speciesForProject(project)).palette;
+	const hashWornOn = (session: string, project: string) =>
+		withSpecies(castForSession(session), speciesForProject(project)).hatId;
 
 	it("wears the hash look when nobody has chosen one", () => {
 		const { container } = pushTwo();
 
-		expect(hatOf(container, "a")).toBe(castForSession("a").hatId);
+		expect(hatOf(container, "a")).toBe(hashWornOn("a", "p"));
 		expect(paletteOf(container, "a")).toBe(hashPaletteOn("a", "p"));
 	});
 
@@ -453,7 +457,10 @@ describe("the look a Proc wears", () => {
 		storeLookChoice("a", "hat", "cone");
 		const { container } = pushTwo();
 
-		expect(hatOf(container, "a")).toBe("cone");
+		// Chosen on the SESSION axis and mapped onto the creature's own set by slot.
+		expect(hatOf(container, "a")).toBe(
+			withSpecies(castFromLook({ ...defaultLook("a"), hat: "cone" }), speciesForProject("p")).hatId,
+		);
 		expect(paletteOf(container, "a")).toBe(hashPaletteOn("a", "p"));
 	});
 
@@ -478,7 +485,7 @@ describe("the look a Proc wears", () => {
 		storeLookChoice("a", "hat", "cone");
 		const { container } = pushTwo();
 
-		expect(hatOf(container, "b")).toBe(castForSession("b").hatId);
+		expect(hatOf(container, "b")).toBe(hashWornOn("b", "p"));
 		expect(paletteOf(container, "b")).toBe(hashPaletteOn("b", "p"));
 	});
 });
