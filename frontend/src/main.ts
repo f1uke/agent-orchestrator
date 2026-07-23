@@ -50,7 +50,12 @@ import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/post
 import { buildTelemetryBootstrap } from "./shared/telemetry";
 import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view-host";
 import { createCompanionOverlay, type CompanionOverlay } from "./main/companion-window";
-import { createTerminalWindowHost, type TerminalAnchor, type TerminalWindowHost } from "./main/terminal-window";
+import {
+	createTerminalWindowHost,
+	type TerminalAnchor,
+	type TerminalSize,
+	type TerminalWindowHost,
+} from "./main/terminal-window";
 import { readCompanionSettings, writeCompanionSettings, type CompanionSettings } from "./main/companion-settings";
 import { connectSupervisor, type SupervisorLinkHandle } from "./main/supervisor-link";
 import { shouldLinkOnAttach } from "./main/daemon-owner";
@@ -100,18 +105,7 @@ if (process.platform === "win32") {
 // inside ~/.ao alongside the daemon's data dir and running.json. sessionData and
 // crashDumps derive from userData, so this one override reparents them all.
 // Must run before app ready.
-// PROTOTYPE (terminal bubble) harness: lets the verification script drive the
-// overlay's REAL windows — click a Proc, type into the terminal — through the same
-// Chromium input pipeline a mouse and keyboard use. Unpackaged only, and only when
-// asked for; the packaged app never opens a debugging port.
-if (!app.isPackaged && process.env.AO_COMPANION_PROTO_DEBUG_PORT) {
-	app.commandLine.appendSwitch("remote-debugging-port", process.env.AO_COMPANION_PROTO_DEBUG_PORT);
-}
-
-// PROTOTYPE (terminal bubble) harness: a second, UNPACKAGED app run alongside the
-// installed one would otherwise share this profile and fight it for the
-// localStorage lock. The override stays under ~/.ao, so the hard rule holds.
-app.setPath("userData", path.join(os.homedir(), ".ao", process.env.AO_ELECTRON_SUBDIR || "electron"));
+app.setPath("userData", path.join(os.homedir(), ".ao", "electron"));
 
 let mainWindow: BrowserWindow | null = null;
 let daemonProcess: ChildProcessWithoutNullStreams | null = null;
@@ -123,9 +117,59 @@ let browserViewHost: BrowserViewHost | null = null;
 // The desktop-companion overlay. A SECOND window in this app, never a second app
 // instance, and off until the user says otherwise.
 let companionOverlay: CompanionOverlay | null = null;
-// PROTOTYPE (terminal bubble): the terminal a Proc opens lives in its OWN window,
-// never inside the overlay — see main/terminal-window.ts for what that cost us.
+// The terminal a Proc opens lives in its OWN window, never inside the overlay —
+// see main/terminal-window.ts for what trying it the other way cost.
 let terminalWindow: TerminalWindowHost | null = null;
+// The size the human last left a terminal window at. Read once at startup and
+// written back when they resize one, so the next terminal opens the way they like it.
+let terminalWindowSize: TerminalSize | null = null;
+/**
+ * How far the card may sit off its Proc before the tail stops claiming to be centred.
+ * Half the tail's own width: past that, a centred tail no longer overlaps the Proc.
+ */
+const TERMINAL_TAIL_SLACK = 12;
+
+/** Keep the size the human chose, without losing the rest of the companion's settings. */
+async function persistTerminalSize(size: TerminalSize): Promise<void> {
+	const runFile = runFilePath();
+	if (!runFile) return;
+	try {
+		const stateDir = path.dirname(runFile);
+		const settings = await readCompanionSettings(stateDir);
+		await writeCompanionSettings(stateDir, { ...settings, terminalSize: size });
+	} catch (err) {
+		console.error("AO: failed to remember the terminal window's size:", err);
+	}
+}
+
+/**
+ * Ask a terminal window's page to let its pane go, and resolve when it says it has
+ * — or when the wait runs out, whichever comes first. See `requestDetach`.
+ */
+function requestTerminalDetach(win: BrowserWindow, timeoutMs: number): Promise<void> {
+	if (win.isDestroyed()) return Promise.resolve();
+	const id = win.webContents.id;
+	return new Promise<void>((resolve) => {
+		let done = false;
+		const finish = () => {
+			if (done) return;
+			done = true;
+			ipcMain.removeListener("terminal:detached", onAck);
+			clearTimeout(timer);
+			resolve();
+		};
+		const onAck = (event: Electron.IpcMainEvent) => {
+			if (event.sender.id === id) finish();
+		};
+		const timer = setTimeout(finish, timeoutMs);
+		ipcMain.on("terminal:detached", onAck);
+		try {
+			win.webContents.send("terminal:detach");
+		} catch {
+			finish();
+		}
+	});
+}
 // Held for the app lifetime. Dropping it (on any exit) triggers daemon self-stop.
 let supervisorLink: SupervisorLinkHandle | null = null;
 
@@ -241,12 +285,7 @@ function companionUrl(): string {
 		typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL
 			? new URL("companion.html", MAIN_WINDOW_VITE_DEV_SERVER_URL).toString()
 			: `${RENDERER_ORIGIN}/companion.html`;
-	// PROTOTYPE (terminal bubble) harness only, and unpackaged only: point every
-	// Proc's click at one real tmux pane, so the overlay can be driven against an
-	// isolated daemon that has no sessions of its own. See PROTO_HANDLE in
-	// src/companion/main.tsx.
-	const proto = isDev ? process.env.AO_COMPANION_PROTO_HANDLE : undefined;
-	return proto ? `${base}?protoHandle=${encodeURIComponent(proto)}` : base;
+	return base;
 }
 
 /**
@@ -468,9 +507,9 @@ function createWindow(): void {
 
 	void mainWindow.loadURL(rendererUrl());
 
-	// PROTOTYPE (terminal bubble): the board window exists again, so any bubble
-	// terminal on the overlay must let its pane go before this window attaches it.
-	// 'show' as well as creation: a window that was only hidden comes back this way.
+	// The board window exists again, so any terminal on the desktop must let its pane
+	// go before this window attaches it. 'show' and 'focus' as well as creation: a
+	// window that was only hidden comes back those ways.
 	notifyMainWindowOpened();
 	mainWindow.on("show", () => notifyMainWindowOpened());
 	mainWindow.on("focus", () => notifyMainWindowOpened());
@@ -1349,6 +1388,9 @@ ipcMain.handle("companionSettings:set", async (_event, settings: CompanionSettin
 	if (!runFile) return;
 	await writeCompanionSettings(path.dirname(runFile), settings);
 	companionOverlay?.setEnabled(settings.enabled === true);
+	// Switching the companion off takes its terminal with it: the window was opened
+	// from a Proc, and there are no Procs any more.
+	if (settings.enabled !== true) terminalWindow?.close();
 });
 
 // Sent by the overlay renderer as the pointer crosses a Proc. `send`, not
@@ -1382,7 +1424,7 @@ ipcMain.on("companion:looksChanged", () => {
 	companionOverlay?.notifyLooksChanged();
 });
 
-// ─── PROTOTYPE: click a Proc, talk to its session ────────────────────────────
+// ─── Click a Proc, talk to its session ───────────────────────────────────────
 //
 // The routing lives HERE, in the one process that knows whether the board window
 // exists, and it is what makes the whole feature safe: a session's terminal is
@@ -1418,13 +1460,15 @@ const readAnchor = (value: unknown): TerminalAnchor | null => {
 	return typeof x === "number" && typeof y === "number" ? { x, y } : null;
 };
 
-ipcMain.handle("companion:activateSession", (_event, input: ActivateInput): CompanionActivation => {
+ipcMain.handle("companion:activateSession", async (_event, input: ActivateInput): Promise<CompanionActivation> => {
 	const sessionId = typeof input?.sessionId === "string" ? input.sessionId : "";
 	if (sessionId === "") return "unavailable";
-	if (revealSessionInApp(sessionId)) {
-		// The board window owns this session's terminal now, so a card on the
-		// desktop must let its pane go before the app attaches it.
-		terminalWindow?.close();
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		// The board window owns this session's terminal now. Let the desktop card go
+		// FIRST and wait for it to say so — the app must never attach a pane that is
+		// still attached somewhere else.
+		await terminalWindow?.closeForHandoff();
+		revealSessionInApp(sessionId);
 		return "app";
 	}
 	const handleId = typeof input?.handleId === "string" ? input.handleId : "";
@@ -1445,17 +1489,28 @@ ipcMain.on("companion:closeTerminal", () => {
 	terminalWindow?.close();
 });
 
-// PROTOTYPE harness only: the verification script has no way to click the Dock
-// icon, and the hand-off it has to prove is triggered by the board window OPENING.
-// Unpackaged + explicitly asked for, so it cannot exist in a shipped app.
-ipcMain.on("companion:protoOpenMainWindow", () => {
-	if (app.isPackaged || !process.env.AO_COMPANION_PROTO_DEBUG_PORT) return;
-	if (mainWindow && !mainWindow.isDestroyed()) {
-		mainWindow.show();
-		mainWindow.focus();
-		return;
-	}
-	createWindow();
+/** The human typed into the terminal: it is not idle, so the idle clock restarts. */
+ipcMain.on("terminal:activity", () => {
+	terminalWindow?.noteActivity();
+});
+
+/**
+ * Which way the terminal's Proc is, so the card's tail points at it.
+ *
+ * Answered from the WINDOW's own geometry rather than from the Proc's: the window
+ * is placed centred on its Proc and only slides when the screen edge stops it, so
+ * "how far the card had to move to stay on screen" is exactly the question the
+ * tail is asking.
+ */
+ipcMain.handle("terminal:tail", (event): "left" | "centre" | "right" => {
+	const win = BrowserWindow.fromWebContents(event.sender);
+	const anchor = terminalWindow?.anchor();
+	if (!win || !anchor) return "centre";
+	const bounds = win.getBounds();
+	const middle = bounds.x + bounds.width / 2;
+	if (anchor.x < middle - TERMINAL_TAIL_SLACK) return "left";
+	if (anchor.x > middle + TERMINAL_TAIL_SLACK) return "right";
+	return "centre";
 });
 
 /**
@@ -1467,7 +1522,9 @@ ipcMain.on("companion:protoOpenMainWindow", () => {
  * about (Dock click, ⌘Tab, a notification).
  */
 function notifyMainWindowOpened(): void {
-	terminalWindow?.close();
+	// The board window is up, so any terminal on the desktop lets its pane go before
+	// the app can attach it — asked and acknowledged, not merely destroyed.
+	void terminalWindow?.closeForHandoff();
 	companionOverlay?.notifyMainWindowOpened();
 }
 
@@ -1660,27 +1717,55 @@ function initCompanionOverlay(): void {
 		logError: (message, error) => console.error(message, error),
 	});
 
-	// PROTOTYPE (terminal bubble): the terminal's window. Separate from the overlay
-	// on purpose — a window that takes the keyboard cannot be the window the Procs
-	// live in (see main/terminal-window.ts).
+	// The terminal's window. Separate from the overlay on purpose: a window that
+	// takes the keyboard cannot be the window the Procs live in.
 	terminalWindow = createTerminalWindowHost({
 		createWindow: (options) => {
 			const win = new BrowserWindow({ ...options, show: true });
+			// A terminal window shows one session and nothing else: no in-app windows,
+			// no navigating away from the page it was opened on. Same rule as the board.
+			win.webContents.setWindowOpenHandler(({ url }) => {
+				if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+				return { action: "deny" };
+			});
+			win.webContents.on("will-navigate", (event, url) => {
+				if (url !== win.webContents.getURL()) event.preventDefault();
+			});
 			return {
 				setBounds: (bounds) => win.setBounds(bounds),
+				getBounds: () => win.getBounds(),
 				loadURL: (url) => win.loadURL(url),
 				focus: () => win.focus(),
 				onClosed: (listener) => win.on("closed", listener),
+				// 'resized' fires when the drag SETTLES, so the remembered size is the
+				// one the human chose rather than every pixel they passed through.
+				onResized: (listener) => win.on("resized", listener),
+				requestDetach: (timeoutMs) => requestTerminalDetach(win, timeoutMs),
 				destroy: () => win.destroy(),
 				isDestroyed: () => win.isDestroyed(),
 			};
 		},
 		urlFor: (sessionId, handleId) => terminalUrl(sessionId, handleId),
-		workArea: () => screen.getPrimaryDisplay().workArea,
+		// The display the Proc is standing on, so a pet dragged to a second screen
+		// opens its terminal there instead of back on the primary one.
+		workAreaNear: (anchor) => screen.getDisplayNearestPoint({ x: anchor.x, y: anchor.y }).workArea,
 		preloadPath: companionPreloadPath,
+		readSize: () => terminalWindowSize,
+		writeSize: (size) => {
+			terminalWindowSize = size;
+			void persistTerminalSize(size);
+		},
 		onClosed: () => companionOverlay?.notifyTerminalClosed(),
 		logError: (message, error) => console.error(message, error),
 	});
+	const stateDir = runFilePath();
+	if (stateDir) {
+		void readCompanionSettings(path.dirname(stateDir))
+			.then((settings) => {
+				terminalWindowSize = settings.terminalSize ?? null;
+			})
+			.catch((err) => console.error("AO: failed to read the terminal window's size:", err));
+	}
 
 	const relayout = () => companionOverlay?.relayout();
 	screen.on("display-metrics-changed", relayout);

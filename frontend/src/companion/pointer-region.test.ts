@@ -121,7 +121,6 @@ describe("createInteractionTracker", () => {
 	});
 });
 
-// PROTOTYPE (terminal bubble)
 describe("isOverSurface", () => {
 	it("is true anywhere on a surface, including the gaps between its controls", () => {
 		// The opposite rule to a Proc: a Proc takes the pointer per painted pixel, a

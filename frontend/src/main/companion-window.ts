@@ -54,7 +54,7 @@ export interface OverlayWindow {
 export const LOOKS_CHANGED_CHANNEL = "companion:looksChanged";
 
 /**
- * PROTOTYPE (terminal bubble): "the board window is up — let go of the terminal."
+ * "the board window is up — let go of the terminal."
  *
  * Carries nothing either. The overlay's only correct response is to detach, and
  * a payload would invite it to decide whether to.
@@ -62,7 +62,7 @@ export const LOOKS_CHANGED_CHANNEL = "companion:looksChanged";
 export const MAIN_WINDOW_OPENED_CHANNEL = "companion:mainWindowOpened";
 
 /**
- * PROTOTYPE (terminal bubble): "the terminal window has gone."
+ * "the terminal window has gone."
  *
  * However it went — its own ✕, Escape, the board window coming up, a crash — the
  * band is the thing that has to know, because a Proc whose terminal is open stands
@@ -93,9 +93,9 @@ export type CompanionOverlay = {
 	 * finds the work already done.
 	 */
 	notifyLooksChanged(): void;
-	/** PROTOTYPE: the board window came up; any live bubble terminal must detach. */
+	/** the board window came up; any live bubble terminal must detach. */
 	notifyMainWindowOpened(): void;
-	/** PROTOTYPE: the terminal window closed, so its Proc is free to wander again. */
+	/** the terminal window closed, so its Proc is free to wander again. */
 	notifyTerminalClosed(): void;
 	/** Re-band after a display change. */
 	relayout(): void;

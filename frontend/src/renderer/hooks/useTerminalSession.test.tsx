@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MuxConnectionState, TerminalMux } from "../lib/terminal-mux";
 import type { WorkspaceSession } from "../types/workspace";
 import { useTerminalSession, type AttachableTerminal } from "./useTerminalSession";
-import { workspaceQueryKey } from "./useWorkspaceQuery";
 
 const session: WorkspaceSession = {
 	id: "sess-1",
@@ -135,13 +134,14 @@ function setup({ daemonReady = true, attachedSession = session as WorkspaceSessi
 		muxes.push(fake);
 		return fake.mux;
 	};
-	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-	const wrapper = ({ children }: { children: ReactNode }) => (
-		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-	);
+	// The hook no longer knows what a query client is: it reports that the session
+	// changed and the OWNER decides what that means (the board re-reads its
+	// workspace query; the companion's terminal window has nothing to re-read).
+	const onSessionChanged = vi.fn();
+	const wrapper = ({ children }: { children: ReactNode }) => <>{children}</>;
 	const view = renderHook(
-		({ daemonReady: ready }) => useTerminalSession(attachedSession, { daemonReady: ready, createMux }),
+		({ daemonReady: ready }) =>
+			useTerminalSession(attachedSession, { daemonReady: ready, createMux, onSessionChanged }),
 		{ initialProps: { daemonReady }, wrapper },
 	);
 	const terminal = createFakeTerminal();
@@ -149,7 +149,7 @@ function setup({ daemonReady = true, attachedSession = session as WorkspaceSessi
 	act(() => {
 		detach = view.result.current.attach(terminal);
 	});
-	return { view, terminal, muxes, invalidateSpy, detach: () => detach() };
+	return { view, terminal, muxes, onSessionChanged, detach: () => detach() };
 }
 
 beforeEach(() => {
@@ -256,11 +256,11 @@ describe("useTerminalSession", () => {
 	});
 
 	it("marks exit in the terminal and refetches workspace state instead of writing status", () => {
-		const { view, terminal, muxes, invalidateSpy } = setup();
+		const { view, terminal, muxes, onSessionChanged } = setup();
 		act(() => muxes[0].emitExit("handle-1"));
 		expect(view.result.current.state).toBe("exited");
 		expect(terminal.lines.some((line) => line.includes("[process exited]"))).toBe(true);
-		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: workspaceQueryKey });
+		expect(onSessionChanged).toHaveBeenCalled();
 	});
 
 	it("reconnects when a restored session becomes live with the same terminal handle", () => {
@@ -330,11 +330,11 @@ describe("useTerminalSession", () => {
 	});
 
 	it("surfaces pane errors and refetches, with no automatic retry", () => {
-		const { view, muxes, invalidateSpy } = setup();
+		const { view, muxes, onSessionChanged } = setup();
 		act(() => muxes[0].emitError("handle-1", "no such pane"));
 		expect(view.result.current.state).toBe("error");
 		expect(view.result.current.error).toBe("no such pane");
-		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: workspaceQueryKey });
+		expect(onSessionChanged).toHaveBeenCalled();
 		act(() => muxes[0].emitConnection("closed"));
 		act(() => void vi.advanceTimersByTime(60_000));
 		expect(muxes).toHaveLength(1);

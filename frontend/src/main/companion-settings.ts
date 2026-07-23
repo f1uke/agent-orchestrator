@@ -11,18 +11,34 @@ import path from "node:path";
 //
 // `asked` records that the first-run offer has been shown, so it is offered once
 // and never nags. Declining sets asked=true with enabled=false.
+//
+// `terminalSize` is the size the human last left a session's terminal window at.
+// It lives here rather than in a file of its own because it is the same kind of
+// fact — one small preference about the companion — and a second file would be a
+// second thing to write atomically and a second thing to find.
 export interface CompanionSettings {
 	enabled: boolean;
 	asked: boolean;
+	terminalSize?: { width: number; height: number };
 }
 
 export const COMPANION_SETTINGS_FILE_NAME = "companion-settings.json";
 
 const DEFAULTS: CompanionSettings = { enabled: false, asked: false };
 
+/** A remembered size is only worth keeping if it is two positive, finite numbers. */
+function coerceSize(raw: unknown): CompanionSettings["terminalSize"] {
+	const o = (raw ?? {}) as Record<string, unknown>;
+	const width = typeof o.width === "number" && Number.isFinite(o.width) && o.width > 0 ? Math.round(o.width) : null;
+	const height =
+		typeof o.height === "number" && Number.isFinite(o.height) && o.height > 0 ? Math.round(o.height) : null;
+	return width !== null && height !== null ? { width, height } : undefined;
+}
+
 function coerce(raw: unknown): CompanionSettings {
 	const o = (raw ?? {}) as Record<string, unknown>;
-	return { enabled: o.enabled === true, asked: o.asked === true };
+	const terminalSize = coerceSize(o.terminalSize);
+	return { enabled: o.enabled === true, asked: o.asked === true, ...(terminalSize ? { terminalSize } : {}) };
 }
 
 /** Read the companion settings, tolerating a missing or corrupt file (returns defaults). */

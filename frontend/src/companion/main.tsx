@@ -13,7 +13,6 @@ import { refreshProjectLooks } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 import { speciesForProject, type SpeciesId } from "./species";
-import { protoNote, startProtoTrace } from "./proto-trace";
 import { TerminalWindowApp } from "./TerminalWindowApp";
 
 // Entry point for the overlay window. Deliberately tiny and separate from the main
@@ -26,7 +25,7 @@ type CompanionBridge = {
 	daemonUrl?(): Promise<string | null>;
 	requestLook?(sessionId: string): void;
 	onLooksChanged?(listener: () => void): () => void;
-	// PROTOTYPE (terminal bubble)
+	//
 	activateSession?(input: {
 		sessionId: string;
 		handleId: string;
@@ -43,33 +42,11 @@ const bridge = (window as unknown as { aoCompanion?: CompanionBridge }).aoCompan
 /** How often to re-ask for the daemon URL while it is not up yet. */
 const DAEMON_WAIT_MS = 5_000;
 
-/**
- * Waits for the daemon, then runs on real sessions.
- *
- * Until the daemon answers there is nothing true to show, so the overlay shows the
- * MOCK cast rather than an empty band — an empty desktop would read as "the
- * companion is broken" when it only means "the daemon is still starting". The
- * moment a real roster arrives the mock is replaced wholesale.
- */
-/**
- * PROTOTYPE (terminal bubble) harness switch: `companion.html?protoHandle=<tmux>`.
- *
- * The prototype runs against an ISOLATED daemon that has no sessions in it, so
- * there would be no Proc to click and no pane to attach. With this set, the band
- * keeps its mock cast and every click attaches to the named tmux pane — which is
- * a REAL pane, reached through the REAL daemon mux. Absent (every packaged
- * overlay), nothing on this path runs.
- */
-const PROTO_HANDLE = new URLSearchParams(window.location.search).get("protoHandle");
-
-// The instrument for the human-driven bug hunt. Only in the prototype harness.
-if (PROTO_HANDLE) startProtoTrace();
-
 /** Whose terminal window is up. The window itself lives in the main process. */
 type OpenTerminal = { sessionId: string };
 
+/** The pane behind a session, asked for at the moment it is needed rather than cached. */
 async function terminalHandleFor(daemonUrl: string, sessionId: string): Promise<string | null> {
-	if (PROTO_HANDLE) return PROTO_HANDLE;
 	try {
 		const response = await fetch(`${daemonUrl}/api/v1/sessions`);
 		if (!response.ok) return null;
@@ -80,6 +57,14 @@ async function terminalHandleFor(daemonUrl: string, sessionId: string): Promise<
 	}
 }
 
+/**
+ * Waits for the daemon, then runs on real sessions.
+ *
+ * Until the daemon answers there is nothing true to show, so the overlay shows the
+ * MOCK cast rather than an empty band — an empty desktop would read as "the
+ * companion is broken" when it only means "the daemon is still starting". The
+ * moment a real roster arrives the mock is replaced wholesale.
+ */
 function Overlay() {
 	const [live, setLive] = useState<LiveFeed | null>(null);
 	const [mock] = useState<CompanionFeed>(() => createMockFeed());
@@ -98,7 +83,6 @@ function Overlay() {
 				return;
 			}
 			setDaemonUrl(url);
-			if (PROTO_HANDLE) return; // keep the mock cast; see PROTO_HANDLE.
 			setLive(createLiveFeed({ ...createHttpTransport(url), now: () => Date.now() }));
 		};
 
@@ -129,7 +113,6 @@ function Overlay() {
 				// this page: this page just happens to know where the Proc is.
 				const anchor = { x: window.screenX + at.x, y: window.screenY + at.y };
 				const where = (await bridge?.activateSession?.({ sessionId, handleId, anchor })) ?? "unavailable";
-				protoNote("activate", `${sessionId} → ${where}`);
 				setTerminal(where === "bubble" ? { sessionId } : null);
 			})();
 		},
@@ -143,10 +126,14 @@ function Overlay() {
 		bridge?.moveTerminal?.({ x: window.screenX + anchor.x, y: window.screenY + anchor.y });
 	}, []);
 
-	const onInteractiveChange = useCallback((interactive: boolean) => {
-		protoNote("window takes the mouse", String(interactive));
-		bridge?.setInteractive(interactive);
+	// The session ended while its terminal was open: close it rather than leave a
+	// window pointing at a Proc that has walked out through its portal.
+	const onAttachedGone = useCallback(() => {
+		setTerminal(null);
+		bridge?.closeTerminal?.();
 	}, []);
+
+	const onInteractiveChange = useCallback((interactive: boolean) => bridge?.setInteractive(interactive), []);
 	const onRequestLook = useCallback((sessionId: string) => bridge?.requestLook?.(sessionId), []);
 
 	return (
@@ -158,6 +145,7 @@ function Overlay() {
 			onActivate={onActivate}
 			attachedSession={terminal?.sessionId}
 			onAttachedAnchorMove={onAnchorMove}
+			onAttachedGone={onAttachedGone}
 		/>
 	);
 }

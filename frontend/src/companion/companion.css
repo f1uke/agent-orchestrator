@@ -874,7 +874,7 @@ body {
 	}
 }
 
-/* PROTOTYPE (terminal bubble). The board hides xterm's own scrollbar so it cannot
+/* The board hides xterm's own scrollbar so it cannot
    reserve width and shift the cell grid (styles.css); the overlay is a separate
    page with its own stylesheet, so without this the raw OS scrollbar paints a
    white slab down the right-hand side of the terminal card. The wheel still
@@ -888,7 +888,7 @@ body {
 	height: 0;
 }
 
-/* PROTOTYPE (terminal bubble). The open terminal is pinned to its Proc: it sits
+/* The open terminal is pinned to its Proc: it sits
    inside the same transformed wrapper the Proc's chrome uses, so the transition
    that carries a walking Proc across the band carries its terminal too. Which way
    it opens is a discrete choice (see `attachmentSide`) rather than a per-frame

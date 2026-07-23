@@ -5,6 +5,10 @@ import {
 	TERMINAL_ANCHOR_GAP,
 	TERMINAL_WINDOW_HEIGHT,
 	TERMINAL_WINDOW_WIDTH,
+	TERMINAL_DETACH_TIMEOUT_MS,
+	TERMINAL_MIN_HEIGHT,
+	TERMINAL_MIN_WIDTH,
+	type TerminalSize,
 	type TerminalWindow,
 	type TerminalWindowOptions,
 } from "./terminal-window";
@@ -17,18 +21,30 @@ type FakeWindow = TerminalWindow & {
 	loaded: string[];
 	focused: number;
 	destroyed: boolean;
+	/** How the page answered the detach request, and in what order it happened. */
+	detachAsks: number[];
+	detachAnswers: "prompt" | "never";
+	events: string[];
 	fireClosed(): void;
+	fireResized(): void;
 };
 
 function fakeWindow(options: TerminalWindowOptions): FakeWindow {
 	let closed: (() => void) | null = null;
+	let resized: (() => void) | null = null;
 	const win: FakeWindow = {
 		options,
-		bounds: [],
+		bounds: [{ x: 0, y: 0, width: 720, height: 420 }],
 		loaded: [],
 		focused: 0,
 		destroyed: false,
-		setBounds: (bounds) => win.bounds.push(bounds),
+		detachAsks: [],
+		detachAnswers: "prompt",
+		events: [],
+		setBounds: (bounds) => {
+			win.bounds.push(bounds);
+		},
+		getBounds: () => win.bounds[win.bounds.length - 1],
 		loadURL: (url) => {
 			win.loaded.push(url);
 			return Promise.resolve();
@@ -39,33 +55,74 @@ function fakeWindow(options: TerminalWindowOptions): FakeWindow {
 		onClosed: (listener) => {
 			closed = listener;
 		},
+		onResized: (listener) => {
+			resized = listener;
+		},
+		requestDetach: (timeoutMs) => {
+			win.detachAsks.push(timeoutMs);
+			win.events.push("detach asked");
+			// "never" stands for a page too wedged to answer; the real adapter gives
+			// up on its own timeout, which is why this still resolves.
+			return win.detachAnswers === "prompt" ? Promise.resolve() : Promise.resolve();
+		},
 		destroy: () => {
 			win.destroyed = true;
+			win.events.push("destroyed");
 			closed?.();
 		},
 		isDestroyed: () => win.destroyed,
 		fireClosed: () => closed?.(),
+		fireResized: () => resized?.(),
 	};
 	return win;
 }
 
-function harness() {
+function harness(options: { size?: TerminalSize | null } = {}) {
 	const created: FakeWindow[] = [];
 	const closedNotices: number[] = [];
 	const errors: string[] = [];
+	const written: TerminalSize[] = [];
+	const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = [];
+	let remembered = options.size ?? null;
 	const host = createTerminalWindowHost({
-		createWindow: (options) => {
-			const win = fakeWindow(options);
+		createWindow: (opts) => {
+			const win = fakeWindow(opts);
 			created.push(win);
 			return win;
 		},
 		urlFor: (sessionId, handleId) => `app://renderer/companion.html?terminalFor=${sessionId}&handle=${handleId}`,
-		workArea: () => WORK_AREA,
+		workAreaNear: () => WORK_AREA,
 		preloadPath: () => "/preload.js",
+		readSize: () => remembered,
+		writeSize: (size) => {
+			remembered = size;
+			written.push(size);
+		},
 		onClosed: () => closedNotices.push(1),
 		logError: (message) => errors.push(message),
+		setTimer: (fn, ms) => {
+			const entry = { fn, ms, cancelled: false };
+			timers.push(entry);
+			return entry;
+		},
+		clearTimer: (handle) => {
+			(handle as { cancelled: boolean }).cancelled = true;
+		},
 	});
-	return { host, created, closedNotices, errors, last: () => created[created.length - 1] };
+	const runIdleTimer = () => {
+		const live = timers.filter((t) => !t.cancelled);
+		live[live.length - 1]?.fn();
+	};
+	return {
+		host,
+		created,
+		closedNotices,
+		errors,
+		written,
+		timers,
+		runIdleTimer,
+		last: () => created[created.length - 1],
+	};
 }
 
 const OPEN = { sessionId: "s1", handleId: "pane-1", anchor: { x: 700, y: 880 } };
@@ -113,7 +170,7 @@ describe("the terminal window", () => {
 		const { host, last } = harness();
 		host.open(OPEN);
 
-		expect(last().options).toMatchObject({ frame: false, transparent: true, alwaysOnTop: true, resizable: false });
+		expect(last().options).toMatchObject({ frame: false, transparent: true, alwaysOnTop: true, resizable: true });
 		expect(last().options.webPreferences).toMatchObject({
 			contextIsolation: true,
 			nodeIntegration: false,
@@ -127,7 +184,7 @@ describe("the terminal window", () => {
 		host.open(OPEN);
 
 		expect(last().loaded).toEqual(["app://renderer/companion.html?terminalFor=s1&handle=pane-1"]);
-		expect(last().bounds[0]).toEqual(terminalBoundsFor(OPEN.anchor, WORK_AREA));
+		expect(last().bounds.at(-1)).toEqual(terminalBoundsFor(OPEN.anchor, WORK_AREA));
 		expect(last().focused).toBe(1);
 		expect(host.openFor()).toBe("s1");
 	});
@@ -179,5 +236,108 @@ describe("the terminal window", () => {
 
 		expect(() => host.close()).not.toThrow();
 		expect(errors).toEqual([]);
+	});
+});
+
+describe("handing a pane over without ever attaching it twice", () => {
+	it("asks the page to let go, and only destroys the window once it has", async () => {
+		const { host, last } = harness();
+		host.open(OPEN);
+
+		await host.closeForHandoff();
+
+		// The ORDER is the safety property: ask, then destroy. A window destroyed
+		// first takes its renderer with it, and the pane is never told anything.
+		expect(last().events).toEqual(["detach asked", "destroyed"]);
+		expect(last().detachAsks).toEqual([TERMINAL_DETACH_TIMEOUT_MS]);
+		expect(host.isOpen()).toBe(false);
+	});
+
+	it("still closes when the page cannot answer", async () => {
+		// A wedged renderer must not be able to hold the board window shut.
+		const { host, last } = harness();
+		host.open(OPEN);
+		last().detachAnswers = "never";
+
+		await host.closeForHandoff();
+
+		expect(last().destroyed).toBe(true);
+	});
+
+	it("handing off when nothing is open is a no-op", async () => {
+		const { host, created, errors } = harness();
+
+		await host.closeForHandoff();
+
+		expect(created).toHaveLength(0);
+		expect(errors).toEqual([]);
+	});
+});
+
+describe("the size the human chose", () => {
+	it("opens at the remembered size", () => {
+		const { host, last } = harness({ size: { width: 900, height: 560 } });
+		host.open(OPEN);
+
+		expect(last().bounds.at(-1)).toMatchObject({ width: 900, height: 560 });
+	});
+
+	it("remembers a size once the drag has settled", () => {
+		const { host, last, written } = harness();
+		host.open(OPEN);
+		last().bounds.push({ x: 0, y: 0, width: 980, height: 610 });
+
+		last().fireResized();
+
+		expect(written).toEqual([{ width: 980, height: 610 }]);
+	});
+
+	it("keeps the size while following its Proc", () => {
+		const { host, last } = harness({ size: { width: 900, height: 560 } });
+		host.open(OPEN);
+
+		host.moveTo({ x: 300, y: 700 });
+
+		expect(last().bounds.at(-1)).toMatchObject({ width: 900, height: 560 });
+	});
+
+	it("never opens smaller than a terminal you can read", () => {
+		const { host, last } = harness({ size: { width: 40, height: 20 } });
+		host.open(OPEN);
+
+		expect(last().bounds.at(-1)!.width).toBeGreaterThanOrEqual(TERMINAL_MIN_WIDTH);
+		expect(last().bounds.at(-1)!.height).toBeGreaterThanOrEqual(TERMINAL_MIN_HEIGHT);
+	});
+});
+
+describe("a terminal left open all night", () => {
+	it("closes itself once nobody has touched it for a long time", () => {
+		const { host, last, runIdleTimer } = harness();
+		host.open(OPEN);
+
+		runIdleTimer();
+
+		expect(last().destroyed).toBe(true);
+		expect(host.isOpen()).toBe(false);
+	});
+
+	it("starts the clock again every time the human types", () => {
+		const { host, timers, runIdleTimer, last } = harness();
+		host.open(OPEN);
+		const first = timers[0];
+
+		host.noteActivity();
+
+		expect(first.cancelled).toBe(true);
+		runIdleTimer();
+		expect(last().destroyed).toBe(true);
+	});
+
+	it("does not start a clock for a terminal that is not open", () => {
+		const { host, timers } = harness();
+
+		host.noteActivity();
+
+		expect(timers).toHaveLength(0);
 	});
 });

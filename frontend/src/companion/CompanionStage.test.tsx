@@ -788,7 +788,7 @@ describe("shaking the Orchestrator to call its project in", () => {
 	});
 });
 
-// PROTOTYPE (terminal bubble): the click/drag split.
+// the click/drag split.
 describe("clicking a Proc to talk to its session", () => {
 	function staged(onActivate: (sessionId: string, at: { x: number; y: number }) => void) {
 		const { feed, push } = stubFeed();
@@ -876,7 +876,7 @@ describe("clicking a Proc to talk to its session", () => {
 	});
 });
 
-// PROTOTYPE (terminal bubble): the window's click-through state must survive the
+// the window's click-through state must survive the
 // two things that move WITHOUT the pointer moving — losing the keyboard, and the
 // scene changing under a resting cursor.
 describe("who owns the pointer when the pointer is not the thing that moved", () => {
@@ -960,7 +960,7 @@ describe("who owns the pointer when the pointer is not the thing that moved", ()
 	});
 });
 
-// PROTOTYPE (terminal bubble): the terminal is a WINDOW, and the stage's job is to
+// the terminal is a WINDOW, and the stage's job is to
 // tell the shell where its Proc is so the window can travel with it.
 describe("a terminal pinned to a Proc", () => {
 	it("reports where its Proc is, so the terminal window can follow", () => {
@@ -976,6 +976,34 @@ describe("a terminal pinned to a Proc", () => {
 		const anchor = onAttachedAnchorMove.mock.calls.at(-1)![0];
 		expect(Number.isFinite(anchor.x)).toBe(true);
 		expect(Number.isFinite(anchor.y)).toBe(true);
+	});
+
+	it("says the Proc has gone when its session ends, so the terminal can close", () => {
+		// A terminal floating over nobody points at a session that is not there.
+		vi.useFakeTimers();
+		const onAttachedGone = vi.fn();
+		const { feed, push } = stubFeed();
+		render(<CompanionStage feed={feed} attachedSession="a" onAttachedGone={onAttachedGone} />);
+		push([
+			{ sessionId: "a", status: "working", name: "one", project: "p" },
+			{ sessionId: "b", status: "working", name: "two", project: "p" },
+		]);
+		expect(onAttachedGone).not.toHaveBeenCalled();
+
+		// "a" ends: it leaves through its portal and is off the band afterwards.
+		push([{ sessionId: "b", status: "working", name: "two", project: "p" }]);
+		act(() => void vi.advanceTimersByTime(PORTAL_OUT_MS + 1_000));
+
+		expect(onAttachedGone).toHaveBeenCalled();
+	});
+
+	it("does not call it before the band has anybody on it at all", () => {
+		// An empty world at mount is "nothing has arrived yet", not "your session ended".
+		const onAttachedGone = vi.fn();
+		const { feed } = stubFeed();
+		render(<CompanionStage feed={feed} attachedSession="a" onAttachedGone={onAttachedGone} />);
+
+		expect(onAttachedGone).not.toHaveBeenCalled();
 	});
 
 	it("says nothing when the session it belongs to has left the band", () => {

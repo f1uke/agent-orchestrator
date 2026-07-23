@@ -107,7 +107,7 @@ export type CompanionStageProps = {
 	 */
 	onRequestLook?: (sessionId: string) => void;
 	/**
-	 * PROTOTYPE (terminal bubble). A CLEAN LEFT CLICK on a Proc: "let me talk to
+	 * A CLEAN LEFT CLICK on a Proc: "let me talk to
 	 * this session". Fired on release, and only when the press never became a drag.
 	 *
 	 * The split has to be made here rather than by a `click` handler, because a
@@ -121,7 +121,7 @@ export type CompanionStageProps = {
 	 */
 	onActivate?: (sessionId: string, at: { x: number; y: number }) => void;
 	/**
-	 * PROTOTYPE (terminal bubble): whose terminal is open.
+	 * whose terminal is open.
 	 *
 	 * The terminal is a WINDOW, not something drawn here — putting it in the
 	 * overlay meant making the overlay focusable, and that cost the band its mouse
@@ -133,6 +133,14 @@ export type CompanionStageProps = {
 	attachedSession?: string;
 	/** Where the attached Proc is now, in this window's coordinates. */
 	onAttachedAnchorMove?: (anchor: { x: number; y: number }) => void;
+	/**
+	 * The Proc whose terminal is open has left the band — its session ended.
+	 *
+	 * A terminal floating over nobody is a terminal pointing at a session that is
+	 * not there any more, so the shell closes it. Reported from here because the
+	 * band is what knows who is still on it.
+	 */
+	onAttachedGone?: () => void;
 	/**
 	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
 	 * reduced-motion path is a real behaviour with its own rules, and it is not
@@ -178,6 +186,7 @@ export function CompanionStage({
 	onActivate,
 	attachedSession,
 	onAttachedAnchorMove,
+	onAttachedGone,
 	reducedMotion,
 	onStage,
 	castFor: castForOverride,
@@ -611,6 +620,7 @@ export function CompanionStage({
 	// The Proc whose terminal is open, if it is still on the band. A session that
 	// ended while its terminal was up simply has no Proc to follow.
 	const attachedPet = attachedSession ? (world.pets.find((pet) => pet.id === attachedSession) ?? null) : null;
+	const attachedPresent = attachedPet !== null;
 
 	// A Proc you are TALKING to stands still.
 	//
@@ -652,6 +662,12 @@ export function CompanionStage({
 		: null;
 	const anchorY = attachedPet ? window.innerHeight - attachedPet.y : null;
 	const lastAnchor = useRef<{ x: number; y: number } | null>(null);
+	// Only once the band has actually been populated: an empty world at mount is
+	// "nothing has arrived yet", not "the session you were watching has ended".
+	const bandHasPets = world.pets.length > 0;
+	useEffect(() => {
+		if (attachedSession && bandHasPets && !attachedPresent) onAttachedGone?.();
+	}, [attachedSession, attachedPresent, bandHasPets, onAttachedGone]);
 	useEffect(() => {
 		if (anchorX === null || anchorY === null) {
 			lastAnchor.current = null;

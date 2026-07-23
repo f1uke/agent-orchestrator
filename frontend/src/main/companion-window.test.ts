@@ -291,7 +291,7 @@ describe("telling the overlay the looks moved", () => {
 	});
 });
 
-// PROTOTYPE (terminal bubble)
+//
 describe("the board window coming up", () => {
 	it("tells an open overlay when the board window comes up, so a live bubble lets go", () => {
 		const { overlay, created } = harness();
