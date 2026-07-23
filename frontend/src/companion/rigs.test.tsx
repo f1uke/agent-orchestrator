@@ -162,7 +162,9 @@ describe("what each creature can wear", () => {
 describe("how each creature gets about", () => {
 	it("steps a leg strip only where there are legs, and only while it is moving", () => {
 		for (const species of SPECIES) {
-			const moving = renderSpecies(species.id);
+			const moving = render(
+				<Procs cast={composeCast(PALETTES[0], HATS[0], species.id)} status="working" facing="front" walking />,
+			);
 			const still = renderSpecies(species.id);
 			const walks = speciesById(species.id).locomotion === "walk";
 
@@ -173,6 +175,41 @@ describe("how each creature gets about", () => {
 			moving.unmount();
 			still.unmount();
 		}
+	});
+
+	it("sits the cat down when it stops, and stands it side-on when it walks", () => {
+		// The whole answer to three failed cats: one figure cannot be both, because a
+		// head-on face on a side-on body is the children's-drawing convention and reads
+		// exactly like one. Two poses, one viewpoint each — and a cat that sits down when
+		// it stops is what a cat does anyway.
+		const sitting = renderSpecies("cat");
+		const walking = render(
+			<Procs cast={composeCast(PALETTES[0], HATS[0], "cat")} status="working" facing="front" walking />,
+		);
+
+		// Sitting is head-on: two eyes. Walking is a profile: one.
+		expect(sitting.container.querySelectorAll("[data-eye]").length).toBe(2);
+		expect(walking.container.querySelectorAll("[data-eye]").length).toBe(1);
+		expect(drawn(sitting.container)).not.toBe(drawn(walking.container));
+		sitting.unmount();
+		walking.unmount();
+	});
+
+	it("moves the cat's lead to whichever end its tail is at", () => {
+		// Sitting, the tail curls round its right side; walking, it turns side-on and the
+		// tail is at the BACK, which is the other end of the animal. One anchor for both
+		// would have the lead growing out of its face half the time.
+		const sitting = renderSpecies("cat");
+		const walking = render(
+			<Procs cast={composeCast(PALETTES[0], HATS[0], "cat")} status="working" facing="front" walking />,
+		);
+		const from = (container: HTMLElement) =>
+			(container.querySelector('[data-core="cord"]')?.getAttribute("d") ?? "").match(/^M(-?[\d.]+)/)?.[1];
+
+		expect(Number(from(sitting.container))).toBeGreaterThan(60);
+		expect(Number(from(walking.container))).toBeLessThan(30);
+		sitting.unmount();
+		walking.unmount();
 	});
 
 	it("runs each creature's own cycle when it sets off", () => {
@@ -398,14 +435,23 @@ describe("colour, everywhere these bodies put it", () => {
 			unmount();
 		}
 
-		// A cat's ear LINING is the one that leaves the head, so it is measured against
-		// the ear: every vertex of the lining inside the ear's own outline.
-		const { container: cat, unmount: close } = renderSpecies("cat");
-		const outer = triangle(cat.querySelector("[data-ear]")!);
-		for (const vertex of triangle(cat.querySelector("[data-ear-lining]")!)) {
-			expect(inside(vertex, outer), `ear lining vertex ${vertex} outside the ear`).toBe(true);
+		// A cat's ear LINING is the one that leaves the head, so it is measured against the
+		// ear: every vertex of the lining inside the ear's own outline. Both poses, because
+		// the cat has two ears drawn two different ways and only one of them is on screen
+		// at a time.
+		for (const pose of [false, true]) {
+			const { container: cat, unmount: close } = render(
+				<Procs cast={composeCast(PALETTES[0], HATS[0], "cat")} status="working" facing="front" walking={pose} />,
+			);
+			const lining = cat.querySelector("[data-ear-lining]")!;
+			const outer = triangle(lining.parentElement!.querySelector("[data-ear]")!);
+			for (const vertex of triangle(lining)) {
+				expect(inside(vertex, outer), `${pose ? "walking" : "sitting"}: lining vertex ${vertex} outside the ear`).toBe(
+					true,
+				);
+			}
+			close();
 		}
-		close();
 
 		// A glow sits inside the body it is mounted in.
 		for (const [species, box] of [

@@ -6,7 +6,7 @@ import { PROCS_RIM_PX } from "./palette";
 import { FIGURE_ATTRIBUTE } from "./pointer-region";
 import { CordLayer, DustPuff, EmitLayer, GroundProp, HeldProp, RIM } from "./props";
 import { sceneFor } from "./scene";
-import { CELL, hatTransform, RIGS } from "./rigs";
+import { CELL, RIGS } from "./rigs";
 import { speciesById, speciesWears } from "./species";
 
 // Procs — a little running process. ONE rig, parameterised by a cast member and a
@@ -111,7 +111,12 @@ export function Procs({
 			}}
 		>
 			<GroundProp ground={scene.ground} />
-			<CordLayer cord={scene.cord} ground={scene.ground} cast={cast} from={species.cordFrom} />
+			<CordLayer
+				cord={scene.cord}
+				ground={scene.ground}
+				cast={cast}
+				from={(walking && species.cordFromWalking) || species.cordFrom}
+			/>
 
 			{/* The character itself. Everything inside this group takes the pointer;
 			    everything outside it — the scenery — passes clicks to the desktop. */}
@@ -140,12 +145,7 @@ export function Procs({
 						uid={uid}
 						hat={
 							speciesWears(cast.species, "hat") ? (
-								<g
-									data-slot="hat"
-									data-hat={cast.hatId}
-									data-palette={cast.palette}
-									transform={hatTransform(cast.species)}
-								>
+								<g data-slot="hat" data-hat={cast.hatId} data-palette={cast.palette}>
 									{cast.hat.map((piece) => (
 										<path
 											key={piece.d}

@@ -76,6 +76,15 @@ export type Species = {
 	 * a lead are one piece of machinery drawn out of different anatomy.
 	 */
 	cordFrom: readonly [number, number];
+	/**
+	 * Where the cord leaves the body WHILE MOVING, when that is somewhere else.
+	 *
+	 * Only the cat needs it, and it needs it badly: sitting, its tail curls round its
+	 * right side and the lead carries on from the tip; walking, it turns side-on and the
+	 * tail is at the BACK, which is the other end of the animal. One anchor for both
+	 * would have the lead growing out of its face half the time.
+	 */
+	cordFromWalking?: readonly [number, number];
 	/** Where the held prop hangs, relative to where a Proc holds it. */
 	heldOffset: readonly [number, number];
 	/** Where the emitted zzz/sparks/confetti start, relative to a Proc's. */
@@ -110,13 +119,14 @@ export const SPECIES: readonly Species[] = [
 		id: "cat",
 		name: "Cat",
 		identity:
-			"A cat on all fours, head turned to you. Its tail runs out to the plug, so the lead is part of the animal.",
+			"A cat head-on, standing on all fours — the hind haunches either side are what say four legs from the front. Its tail runs out to the plug, so the lead is part of the animal.",
 		tell: "its ears",
 		locomotion: "walk",
 		axes: ["palette", "hat"],
-		cordFrom: [80, 78],
-		heldOffset: [-2, 8],
-		emitOffset: [-8, 22],
+		cordFrom: [90, 92],
+		cordFromWalking: [10, 64],
+		heldOffset: [-4, 2],
+		emitOffset: [0, 8],
 	},
 	{
 		id: "slime",

@@ -488,52 +488,6 @@ function Leg({
 	);
 }
 
-/**
- * A cat's leg: a tapered limb with a PAW on the end.
- *
- * ⚠ Four identical rounded posts is what the first pass had, and the human's word for
- * it was ugly — which is right, because posts are what furniture stands on. What makes
- * a leg an animal's is that it is thicker at the top than at the bottom and finishes in
- * a foot, and at 30px the foot is the part that does the work.
- *
- * The back pair get a haunch and the front pair do not, because that is the difference
- * a cat actually has and it is what stops four legs reading as a table.
- */
-function CatLeg({
-	x,
-	lift,
-	back,
-	colour,
-	shade,
-}: {
-	x: number;
-	lift: number;
-	back: boolean;
-	colour: string;
-	shade: string;
-}) {
-	// ⚠ The top is well INSIDE the body, not level with its underside. A leg that starts
-	// where the body ends has nothing above it and reads as a stick propped against the
-	// animal — which was the human's word for the first two passes, that the legs looked
-	// detached. Sixteen units of overlap is what makes a leg part of the cat; the body's
-	// own ink rim, drawn after, is what hides the join.
-	const top = 80 - lift;
-	const foot = 118 - lift;
-	return (
-		<g data-cat-leg={back ? "back" : "front"}>
-			{back && <ellipse data-rim cx={round(x + 4.5)} cy={round(top + 14)} rx="10.5" ry="12" fill={shade} {...RIM} />}
-			<path
-				data-rim
-				d={`M${round(x)} ${round(top)} L${round(x + 9)} ${round(top)} L${round(x + 7.4)} ${round(foot - 4)} L${round(x + 1.6)} ${round(foot - 4)} Z`}
-				fill={colour}
-				strokeLinejoin="round"
-				{...RIM}
-			/>
-			<ellipse data-rim data-paw cx={round(x + 4.5)} cy={round(foot - 3)} rx="6.2" ry="4.2" fill={colour} {...RIM} />
-		</g>
-	);
-}
-
 // The four beats: wide stance → left foot up → feet together → right foot up.
 //
 // A pet faces YOU even while it travels sideways, so the legs must never swap sides
@@ -612,7 +566,7 @@ function ProcRig({ cast, held, walking, cycleMs, uid, heldProp, hat }: RigProps)
 					blink={BLINK_MS.proc}
 				/>
 				<Mouth cx={48} cy={67} width={10} held={held} />
-				{hat}
+				<g transform={hatTransform("proc")}>{hat}</g>
 				{heldProp}
 			</g>
 		</>
@@ -699,95 +653,215 @@ function GhostRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigPro
 
 // ---------------------------------------------------------------- Cat
 //
-// A generic cat on all fours, head turned to face you — which is the pose that keeps
-// the face readable while the body stays unmistakably four-legged. Its TAIL runs off
-// to the right and becomes the cord, so the lead is part of the animal rather than
-// something attached to it.
+// TWO POSES, and that is the whole design.
+//
+// ⚠ Three attempts failed here before the human named the fix, and the reason they
+// failed is worth keeping: all three drew ONE figure with the head from the front and
+// the body from the side. That is not a rendering bug, it is the children's-drawing
+// convention — face from the front so you can see it, body from the side so you can see
+// the legs — and no amount of moving legs about was going to rescue it.
+//
+// A cat sitting and a cat walking are different SHAPES, so they are drawn as different
+// shapes, each from one viewpoint:
+//
+//   STILL   a fat round cat sitting head-on, paws together, tail curled round its side.
+//           This is the pose it is in nearly all the time and the one that has to be
+//           charming.
+//   WALKING it gets up and turns side-on, and walks. Head leads, tail trails, four legs
+//           step. Drawn facing RIGHT, because the rig mirrors the whole sprite to walk
+//           left — so head-right is the one drawing that is correct both ways.
+//
+// A cat that sits down when it stops is also just what a cat does.
 
-// ⚠ Redrawn after the first render, where a small head and a plain oval behind it read
-// as TWO OBJECTS rather than as one animal. What fixes it is chibi proportions — a head
-// big enough to dominate — plus a body that overlaps it instead of sitting beside it.
-const CAT_HEAD = { x: 6, y: 22, width: 60, height: 56, rx: 26 };
-const CAT_AXIS = 36;
-const CAT_EAR = "M16 34 L 10 6 L 34 25 Z";
-const CAT_EAR_ROOT = [24, 29] as const;
-/** Where the tail leaves the body and the cord takes over. */
-// A short thick stub where the tail leaves the body, which the CORD then continues.
-// The join is the whole idea: the lead is part of the animal rather than clipped to it.
-const CAT_TAIL = "M68 90 C 76 90 80 85 83 76 L 75 72 C 72 80 71 82 66 84 Z";
+const CAT_AXIS = 48;
+
+// ---- sitting, head-on
+const CAT_SIT_HEAD = { cx: 48, cy: 44, rx: 31, ry: 28 };
+/** Fat and round: the body is wider than the head and sits flat on the floor. */
+const CAT_SIT_BODY = "M48 62 C 20 62 12 84 13 100 C 14 112 26 117 48 117 C 70 117 82 112 83 100 C 84 84 76 62 48 62 Z";
+const CAT_SIT_BIB = "M40 112 C 35 100 37 84 48 78 C 59 84 61 100 56 112 Z";
+/** Curled round its own side and out, where the cord takes over. */
+const CAT_SIT_TAIL = "M76 112 C 88 111 94 103 93 92 L 85 90 C 86 99 83 104 73 105 Z";
+const CAT_EAR = "M23 28 L 15 -2 L 45 18 Z";
+// ⚠ Scaled about the outer ear's own CENTROID rather than nudged by eye — by eye, the
+// first one poked out past the ear's lower edge by two units and the containment test
+// caught it. A centroid-scaled triangle is inside its parent by construction.
+const CAT_EAR_INNER = "M24.8 22.9 L 19.8 4.3 L 38.4 16.7 Z";
+const CAT_SIT_EAR_ROOT = [30, 24] as const;
+
+// ---- walking, side-on, facing right
+const CAT_WALK_HEAD = { cx: 70, cy: 52, rx: 24, ry: 22 };
+const CAT_WALK_BODY = "M22 66 C 10 66 6 78 8 88 C 10 98 22 102 40 102 C 58 102 72 98 74 88 C 76 76 66 64 50 64 Z";
+/** The far ear, drawn behind the head so the near one reads as the near one. */
+const CAT_WALK_EAR_FAR = "M58 34 L 58 16 L 74 30 Z";
+const CAT_WALK_EAR = "M68 34 L 76 12 L 88 32 Z";
+const CAT_WALK_EAR_INNER = "M71.5 31 L 76.5 17.3 L 83.9 29.7 Z";
+const CAT_WALK_EAR_ROOT = [78, 33] as const;
+/** Up and back, the way a cat carries it while it trots. */
+const CAT_WALK_TAIL = "M14 74 C 4 72 0 62 2 50 L 10 48 C 9 58 10 64 18 66 Z";
+
+/** A paw: a rounded foot with two toe notches, which says paw rather than peg. */
+function CatPaw({ x, y, wide, fill }: { x: number; y: number; wide: number; fill: string }) {
+	return (
+		<>
+			<ellipse data-rim data-paw cx={x} cy={y} rx={wide} ry={round(wide * 0.72)} fill={fill} {...RIM} />
+			<path
+				d={`M${round(x - wide * 0.3)} ${round(y - wide * 0.5)} L${round(x - wide * 0.3)} ${round(y - wide * 0.1)} M${round(x + wide * 0.3)} ${round(y - wide * 0.5)} L${round(x + wide * 0.3)} ${round(y - wide * 0.1)}`}
+				stroke={PROCS_INK}
+				strokeWidth="1.4"
+				strokeLinecap="round"
+				opacity="0.65"
+				fill="none"
+			/>
+		</>
+	);
+}
+
+/** The muzzle, nose and mouth, wherever the face happens to be. */
+function CatFace({ cx, cy, held, ink = PROCS_INK }: { cx: number; cy: number; held: boolean; ink?: string }) {
+	if (held) return <Mouth cx={cx} cy={cy + 3} width={10} held />;
+	return (
+		<>
+			<path data-nose d={`M${cx - 3.6} ${cy - 3} L${cx + 3.6} ${cy - 3} L${cx} ${cy + 1} Z`} fill={ink} />
+			<path
+				data-mouth
+				d={`M${cx - 6} ${cy + 4} C ${cx - 4} ${cy + 8.5} ${cx - 1} ${cy + 8.5} ${cx} ${cy + 4.8} C ${cx + 1} ${cy + 8.5} ${cx + 4} ${cy + 8.5} ${cx + 6} ${cy + 4}`}
+				fill="none"
+				stroke={ink}
+				strokeWidth="2.4"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+		</>
+	);
+}
 
 function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: RigProps) {
 	const headClip = `procs-head-${uid}`;
-	return (
-		<>
-			<defs>
-				<clipPath id={headClip}>
-					<rect {...CAT_HEAD} />
-				</clipPath>
-			</defs>
+	// Standing still, it sits. That is both the better drawing and what a cat does.
+	if (!walking) {
+		return (
+			<>
+				<defs>
+					<clipPath id={headClip}>
+						<ellipse {...CAT_SIT_HEAD} />
+					</clipPath>
+				</defs>
 
-			<Strip uid={uid} top={78} walking={walking} cycleMs={cycleMs}>
-				{CAT_POSES.map((pose, index) => (
-					<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
-						{/* Back legs first: they are behind the body, and the body's rim should
-						    cover where they meet it. */}
-						<CatLeg x={57} lift={held ? -5 : pose.back[0]} back colour={cast.body} shade={cast.shade} />
-						<CatLeg x={68} lift={held ? -6 : pose.back[1]} back colour={cast.body} shade={cast.shade} />
-						<CatLeg x={24} lift={held ? -4 : pose.front[0]} back={false} colour={cast.body} shade={cast.shade} />
-						<CatLeg x={36} lift={held ? -6 : pose.front[1]} back={false} colour={cast.body} shade={cast.shade} />
-					</g>
-				))}
-			</Strip>
+				<path data-rim data-part="tail" d={CAT_SIT_TAIL} fill={cast.shade} strokeLinejoin="round" {...RIM} />
+				<path data-rim data-part="body" d={CAT_SIT_BODY} fill={cast.shade} strokeLinejoin="round" {...RIM} />
+				<path data-bib d={CAT_SIT_BIB} fill={PROP_COLOURS.linen} />
+				<g data-cat-paw="front">
+					<CatPaw x={38} y={112} wide={7.6} fill={cast.body} />
+					<CatPaw x={58} y={112} wide={7.6} fill={cast.body} />
+				</g>
 
-			<g style={walking ? { animation: `procs-bob ${cycleMs}ms ease-in-out infinite alternate` } : undefined}>
-				<path data-rim data-part="tail" d={CAT_TAIL} fill={cast.shade} strokeLinejoin="round" {...RIM} />
-				<rect data-rim data-part="body" x="17" y="62" width="63" height="32" rx="16" fill={cast.shade} {...RIM} />
-				<rect data-rim data-part="head" {...CAT_HEAD} fill={cast.body} {...RIM} />
+				<ellipse data-rim data-part="head" {...CAT_SIT_HEAD} fill={cast.body} {...RIM} />
+				<g clipPath={`url(#${headClip})`}>
+					<ellipse data-muzzle cx="41" cy="59" rx="10" ry="7.5" fill={PROP_COLOURS.linen} />
+					<ellipse data-muzzle cx="55" cy="59" rx="10" ry="7.5" fill={PROP_COLOURS.linen} />
+				</g>
 				<Blush
 					at={[
-						[19, 60],
-						[55, 60],
+						[20, 52],
+						[76, 52],
 					]}
-					rx={6}
-					ry={4}
+					rx={7}
+					ry={4.5}
 					colour={cast.blush}
 					clip={headClip}
 					style="whisker"
 				/>
 				<Eyes
 					at={[
-						[25, 50],
-						[49, 50],
+						[33, 41],
+						[63, 41],
 					]}
-					r={8}
+					r={9}
 					held={held}
 					style="slit"
 					blink={BLINK_MS.cat}
 				/>
-				{held ? (
-					<Mouth cx={36} cy={63} width={9} held />
-				) : (
-					<>
-						<path data-nose d="M33 63 L39 63 L36 66.4 Z" fill={PROCS_INK} />
-						<path
-							data-mouth
-							d="M30 68 C 32 72 35 72 36 68.6 C 37 72 40 72 42 68"
-							fill="none"
-							stroke={PROCS_INK}
-							strokeWidth="2.4"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-						/>
-					</>
-				)}
-				{hat}
-				<SwingPair part="ears" cord={scene.cord} root={CAT_EAR_ROOT} axis={CAT_AXIS} speedMs={1400}>
+				<CatFace cx={48} cy={56} held={held} />
+				<g transform="translate(48 30) scale(0.9) translate(-48 -34)">{hat}</g>
+				<SwingPair part="ears" cord={scene.cord} root={CAT_SIT_EAR_ROOT} axis={CAT_AXIS} speedMs={1400}>
 					<path data-rim data-ear d={CAT_EAR} fill={cast.body} strokeLinejoin="round" {...RIM} />
-					<path data-ear-lining d="M20 31 L 14 11 L 30 25 Z" fill={cast.blush} />
+					<path data-ear-lining d={CAT_EAR_INNER} fill={cast.blush} />
+				</SwingPair>
+				{heldProp}
+			</>
+		);
+	}
+
+	// Walking: up on all fours and side-on, head leading.
+	return (
+		<>
+			<defs>
+				<clipPath id={headClip}>
+					<ellipse {...CAT_WALK_HEAD} />
+				</clipPath>
+			</defs>
+
+			<Strip uid={uid} top={94} walking cycleMs={cycleMs}>
+				{CAT_POSES.map((pose, index) => (
+					<g key={pose.key} data-walk-pose transform={`translate(${index * CELL} 0)`}>
+						{/* Far side first, in the shade: a trotting cat shows two pairs of legs
+						    and the near pair has to win. */}
+						<CatLeg x={20} lift={pose.back[1]} colour={cast.shade} />
+						<CatLeg x={54} lift={pose.front[1]} colour={cast.shade} />
+						<CatLeg x={30} lift={pose.back[0]} colour={cast.body} />
+						<CatLeg x={62} lift={pose.front[0]} colour={cast.body} />
+					</g>
+				))}
+			</Strip>
+
+			<g style={{ animation: `procs-bob ${cycleMs}ms ease-in-out infinite alternate` }}>
+				<path data-rim data-part="tail" d={CAT_WALK_TAIL} fill={cast.shade} strokeLinejoin="round" {...RIM} />
+				<path data-rim data-ear d={CAT_WALK_EAR_FAR} fill={cast.shade} strokeLinejoin="round" {...RIM} />
+				<path data-rim data-part="body" d={CAT_WALK_BODY} fill={cast.shade} strokeLinejoin="round" {...RIM} />
+				<ellipse data-rim data-part="head" {...CAT_WALK_HEAD} fill={cast.body} {...RIM} />
+				<g clipPath={`url(#${headClip})`}>
+					<ellipse data-muzzle cx="82" cy="60" rx="11" ry="8" fill={PROP_COLOURS.linen} />
+				</g>
+				<Blush
+					at={[
+						[66, 58],
+						[66, 58],
+					]}
+					rx={6.5}
+					ry={4}
+					colour={cast.blush}
+					clip={headClip}
+					style="soft"
+				/>
+				{/* One eye, because this is a profile. Two would be the same mistake again. */}
+				<Eyes at={[[72, 46]]} r={8} held={held} style="slit" blink={BLINK_MS.cat} />
+				<CatFace cx={84} cy={57} held={held} />
+				<g transform="translate(70 38) scale(0.72) translate(-48 -34)">{hat}</g>
+				<SwingPair part="ears" cord={scene.cord} root={CAT_WALK_EAR_ROOT} axis={CAT_AXIS} speedMs={1400} single>
+					<path data-rim data-ear d={CAT_WALK_EAR} fill={cast.body} strokeLinejoin="round" {...RIM} />
+					<path data-ear-lining d={CAT_WALK_EAR_INNER} fill={cast.blush} />
 				</SwingPair>
 				{heldProp}
 			</g>
 		</>
+	);
+}
+
+/** One leg of a trotting cat: a tapered limb with a paw, in profile. */
+function CatLeg({ x, lift, colour }: { x: number; lift: number; colour: string }) {
+	const top = 92 - lift;
+	return (
+		<g data-cat-leg>
+			<path
+				data-rim
+				d={`M${x} ${top} L${round(x + 9)} ${top} L${round(x + 7.4)} ${round(112 - lift)} L${round(x + 1.6)} ${round(112 - lift)} Z`}
+				fill={colour}
+				strokeLinejoin="round"
+				{...RIM}
+			/>
+			<CatPaw x={round(x + 4.5)} y={round(114 - lift)} wide={6.4} fill={colour} />
+		</g>
 	);
 }
 
@@ -968,7 +1042,7 @@ function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 						{...RIM}
 					/>
 				)}
-				{hat}
+				<g transform={hatTransform("chick")}>{hat}</g>
 				{/* Over the hat, deliberately, and it is also the TELL: a crest a beanie
 				    swallowed would leave this one indistinguishable from any other round
 				    body, and a tell on the left would be behind the held prop in eight of
@@ -1083,10 +1157,15 @@ const CANONICAL_BRIM = 34;
 
 export const HAT_FIT: Partial<Record<SpeciesId, { centre: number; brim: number; scale: number }>> = {
 	proc: { centre: 48, brim: CANONICAL_BRIM, scale: 1 },
-	cat: { centre: 36, brim: 33, scale: 0.78 },
 	chick: { centre: 48, brim: 46, scale: 0.85 },
 };
 
+/**
+ * ⚠ Each RIG applies this, not the shell. Only the rig knows where its own head is —
+ * and the cat's moves, because a sitting cat and a walking cat are two drawings with
+ * the head in two places. A hat positioned once outside the rig would sit on the cat's
+ * shoulder for half its life.
+ */
 export function hatTransform(species: SpeciesId): string | undefined {
 	const fit = HAT_FIT[species];
 	if (!fit || (fit.centre === 48 && fit.brim === CANONICAL_BRIM && fit.scale === 1)) return undefined;

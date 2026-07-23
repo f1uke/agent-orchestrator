@@ -77,12 +77,21 @@ describe("the cast of creatures", () => {
 		expect(speciesById("cat").locomotion).toBe("walk");
 	});
 
-	it("keeps every creature's lead within reach of the shared cord routes", () => {
-		// Only the START of the cord moves per creature; every route still ends at the
-		// same socket. A start dragged too far turns the curve inside out and the plug
-		// stops meeting the ground prop.
+	it("anchors every creature's lead on the creature, at both ends of a pose change", () => {
+		// Only the START of the cord moves per creature; every route still ends at the same
+		// socket, so what has to be true of an anchor is that it is ON THE BODY and inside
+		// the drawn frame. Distance from the Proc's own anchor is NOT the rule — the cat
+		// deliberately moves its anchor the whole width of itself when it turns side-on,
+		// because its tail goes from its right flank to the back of the animal.
 		for (const entry of SPECIES) {
-			expect(Math.hypot(entry.cordFrom[0] - 67, entry.cordFrom[1] - 92), entry.id).toBeLessThan(22);
+			for (const anchor of [entry.cordFrom, entry.cordFromWalking].filter(Boolean) as Array<
+				readonly [number, number]
+			>) {
+				expect(anchor[0], `${entry.id} x`).toBeGreaterThan(0);
+				expect(anchor[0], `${entry.id} x`).toBeLessThan(96);
+				expect(anchor[1], `${entry.id} y`).toBeGreaterThan(40);
+				expect(anchor[1], `${entry.id} y`).toBeLessThan(118);
+			}
 		}
 	});
 });
