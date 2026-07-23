@@ -19,6 +19,7 @@ import {
 	grabPet,
 	releasePet,
 	startConversation,
+	startRally,
 	MEET_GAP_PX,
 	syncActivities,
 	tick,
@@ -26,6 +27,7 @@ import {
 	type Pet,
 	type World,
 } from "./behaviour";
+import type { SessionKind } from "./live-roster";
 
 const BAND = { minX: 0, maxX: 1000 };
 const T0 = 1_000_000;
@@ -1455,5 +1457,279 @@ describe("grabbing a Proc that is on the move", () => {
 		const put = { ...still, pets: still.pets.map((p) => ({ ...p, x: 321 })) };
 
 		expect(petById(grabPet(put, "a", T0 + 5_000), "a").x).toBe(321);
+	});
+});
+
+describe("a rally: shaking the Orchestrator calls its project in", () => {
+	// A rally is the one gesture that moves Procs that were not touched. It is
+	// user-directed, so it may get an anchored Proc up from its desk — and like the
+	// meet, its post is home rather than a cage, so it goes back to it.
+	function project(id: string, name: string, kind: SessionKind = "worker", status: Pet["status"] = "pr_open") {
+		return { sessionId: id, status, name: id, project: name, kind };
+	}
+
+	/** Leader mid-band on `alpha`, two more on `alpha`, one on `beta` well out of the way. */
+	function band(at: Record<string, number> = {}): World {
+		const base = syncActivities(
+			world(),
+			[project("lead", "alpha", "orchestrator"), project("a1", "alpha"), project("a2", "alpha"), project("b1", "beta")],
+			T0,
+			half,
+		);
+		const home: Record<string, number> = { lead: 500, a1: 120, a2: 900, b1: 40, ...at };
+		return {
+			...base,
+			pets: base.pets.map((p) => ({ ...p, x: home[p.id], restUntil: T0 + 10 * REST_MAX_MS })),
+		};
+	}
+
+	function run(w: World, seconds: number, from = T0): World {
+		let next = w;
+		for (let i = 1; i <= seconds * 4; i++) next = tick(next, from + i * 250, half);
+		return next;
+	}
+
+	const members = (w: World) => w.pets.filter((p) => p.rally && p.rally.leaderId !== p.id);
+
+	it("sets every Proc on the leader's project running toward it", () => {
+		const called = startRally(band(), "lead", T0);
+
+		for (const id of ["a1", "a2"]) {
+			expect(petById(called, id).motion.kind, id).toBe("walking");
+			expect(petById(called, id).rally?.leaderId, id).toBe("lead");
+		}
+	});
+
+	it("leaves every other project exactly where it was standing", () => {
+		const called = startRally(band(), "lead", T0);
+		const other = petById(called, "b1");
+
+		expect(other.rally).toBeUndefined();
+		expect(other.motion.kind).toBe("standing");
+		expect(other.x).toBe(40);
+	});
+
+	it("runs them in, rather than strolling them in", () => {
+		const motion = petById(startRally(band(), "lead", T0), "a1").motion;
+		if (motion.kind !== "walking") throw new Error("expected a run");
+
+		const strollPace = (WALK_MIN_PX + WALK_MAX_PX) / (WALK_MIN_MS + WALK_MAX_MS);
+		expect(Math.abs(motion.toX - motion.fromX) / (motion.endsAt - motion.startedAt)).toBeGreaterThan(strollPace);
+	});
+
+	it("stands them around the leader without piling them on top of it", () => {
+		const gathered = run(startRally(band(), "lead", T0), 2);
+		const spots = [...members(gathered), petById(gathered, "lead")].map((p) => p.x).sort((a, b) => a - b);
+
+		expect(members(gathered)).toHaveLength(2);
+		for (let i = 1; i < spots.length; i++) {
+			expect(spots[i] - spots[i - 1]).toBeGreaterThanOrEqual(gathered.spacing);
+		}
+		// Surrounding it: one on each side, not a queue on one flank.
+		expect(spots[1]).toBe(500);
+	});
+
+	it("keeps the whole huddle on the band when the leader is called at the edge", () => {
+		const gathered = run(startRally(band({ lead: 995 }), "lead", T0), 3);
+
+		for (const pet of gathered.pets) {
+			expect(pet.x, pet.id).toBeGreaterThanOrEqual(gathered.band.minX);
+			expect(pet.x, pet.id).toBeLessThanOrEqual(gathered.band.maxX);
+		}
+		expect(members(gathered).every((p) => p.rally?.phase === "gathered")).toBe(true);
+	});
+
+	it("keeps the ring clear of a Proc that was never called", () => {
+		// A bystander standing exactly where a ring spot would go. The spot moves; the
+		// bystander does not — it had nothing to do with the gesture.
+		const gathered = run(startRally(band({ b1: 600 }), "lead", T0), 3);
+
+		expect(petById(gathered, "b1").x).toBe(600);
+		for (const member of members(gathered)) {
+			expect(Math.abs(member.x - 600), member.id).toBeGreaterThanOrEqual(gathered.spacing);
+		}
+	});
+
+	it("stays NEXT to the leader even on a band with no room to be tidy in", () => {
+		// Found by looking at it: with the near slots taken, a search that steps over
+		// every uninvolved Proc walks the "huddle" most of a screen away from the Proc
+		// it is meant to be surrounding. Overlapping a bystander is the lesser evil —
+		// the huddle paints in front of the band it is standing in.
+		const crowded = band({ lead: 500, a1: 60, a2: 940, b1: 400 });
+		const packed = {
+			...crowded,
+			pets: [...crowded.pets, { ...petById(crowded, "b1"), id: "b2", x: 600 }],
+		};
+		const gathered = run(startRally(packed, "lead", T0), 3);
+
+		for (const member of members(gathered)) {
+			expect(Math.abs(member.x - 500), member.id).toBeLessThanOrEqual(2 * gathered.spacing);
+		}
+	});
+
+	it("turns the ring to look at the leader", () => {
+		const gathered = run(startRally(band(), "lead", T0), 2);
+		const [left, right] = [...members(gathered)].sort((a, b) => a.x - b.x);
+
+		expect(left.facing).toBe("right");
+		expect(right.facing).toBe("left");
+		expect(petById(gathered, "lead").facing).toBe("front");
+	});
+
+	it("holds the huddle a moment and then lets everyone go, where they stand", () => {
+		// They do NOT troop back to where they were called from. They came because
+		// they were called, and the spot they are on now is simply where they live —
+		// a Proc's place travels with it, desk and all, so there is nothing to go back
+		// TO. (The human asked for this explicitly, 2026-07-23: running home again read
+		// as the roll-call being undone.)
+		const w = band();
+		const gathered = run(startRally(w, "lead", T0), 2);
+		const spots = members(gathered).map((p) => p.x);
+		const after = run(startRally(w, "lead", T0), 30);
+
+		expect(members(gathered)).toHaveLength(2);
+		expect(after.pets.every((p) => p.rally === undefined)).toBe(true);
+		expect(["a1", "a2"].map((id) => petById(after, id).x)).toEqual(spots);
+	});
+
+	it("never leaves a Proc gathered for ever, whatever else happens", () => {
+		// Including the leader's own session ending mid-rally: the clock is absolute,
+		// so the ones it called still disperse.
+		let w = startRally(band(), "lead", T0);
+		w = run(w, 1);
+		w = syncActivities(w, [project("a1", "alpha"), project("a2", "alpha")], T0 + 1_000, half);
+
+		expect(run(w, 30, T0 + 1_000).pets.every((p) => p.rally === undefined)).toBe(true);
+	});
+
+	it("gets a Proc up from its desk for it, and leaves it standing where it came to", () => {
+		// The one exception to structural anchoring, exactly as the ao-send meet is:
+		// the call is addressed to this project, so this project answers. Its place is
+		// not a spot on the band — the desk is drawn AROUND the Proc and travels with
+		// it — so there is nothing it has been taken away from.
+		const w = band();
+		const desks = { ...w, pets: w.pets.map((p) => (p.id === "a1" ? { ...p, status: "idle" as const } : p)) };
+		const gathered = run(startRally(desks, "lead", T0), 2);
+
+		expect(isAnchored("idle")).toBe(true);
+		expect(petById(gathered, "a1").rally?.phase).toBe("gathered");
+		expect(petById(gathered, "a1").x).not.toBe(120);
+		expect(petById(run(startRally(desks, "lead", T0), 30), "a1").x).toBe(petById(gathered, "a1").x);
+	});
+
+	it("moves Procs and nothing else — every session still shows its real state", () => {
+		const before = band();
+		const gathered = run(startRally(before, "lead", T0), 2);
+
+		for (const pet of before.pets) {
+			expect(petById(gathered, pet.id).status, pet.id).toBe(pet.status);
+		}
+	});
+
+	it("leaves the leader in the hand — a shake does not put down what you are holding", () => {
+		const held = dragPet(grabPet(band(), "lead", T0), "lead", 640, 180);
+		const leader = petById(startRally(held, "lead", T0 + 200), "lead");
+
+		expect(leader.motion.kind).toBe("held");
+		expect(leader.x).toBe(640);
+		expect(leader.y).toBe(180);
+		expect(leader.rally?.leaderId).toBe("lead");
+	});
+
+	it("gathers around wherever the shaking hand has the leader, on the band", () => {
+		// Held out past the end of the display, the ring still forms ON the band —
+		// a huddle nobody can see is not a roll-call.
+		const held = dragPet(grabPet(band(), "lead", T0), "lead", 1_400, 0);
+		const gathered = run(startRally(held, "lead", T0 + 200), 3, T0 + 200);
+
+		for (const member of members(gathered)) {
+			expect(member.x, member.id).toBeLessThanOrEqual(gathered.band.maxX);
+			expect(member.x, member.id).toBeGreaterThanOrEqual(gathered.band.minX);
+		}
+	});
+
+	it("ends the leader's call on the clock even while it is still being held", () => {
+		// The call is on an absolute clock, and the hand may simply not have let go.
+		const held = grabPet(band(), "lead", T0);
+		const long = run(startRally(held, "lead", T0), 30);
+
+		expect(petById(long, "lead").rally).toBeUndefined();
+		expect(petById(long, "lead").motion.kind).toBe("held");
+	});
+
+	it("is only ever called by an Orchestrator", () => {
+		const w = band();
+
+		expect(startRally(w, "a1", T0)).toBe(w);
+	});
+
+	it("refuses when we do not know which project the leader is on", () => {
+		// A Proc whose project we cannot see cannot honestly call "its project" — and
+		// the alternative, gathering everything else we also cannot place, is a lie.
+		const w = band();
+		const unknown = { ...w, pets: w.pets.map((p) => (p.id === "lead" ? { ...p, project: "" } : p)) };
+
+		expect(startRally(unknown, "lead", T0)).toBe(unknown);
+		expect(startRally(w, "nobody", T0)).toBe(w);
+	});
+
+	it("does not pull a Proc out of the human's hand, or out of a conversation", () => {
+		const talking = startConversation(band(), { from: "a1", to: "b1", line: "hi", now: T0 });
+		const called = startRally(talking, "lead", T0 + 10);
+
+		expect(petById(called, "a1").rally).toBeUndefined();
+		expect(petById(called, "a1").meeting?.withId).toBe("b1");
+	});
+
+	it("ignores a second shake while the roll-call is still running", () => {
+		const called = startRally(band(), "lead", T0);
+
+		expect(startRally(called, "lead", T0 + 400)).toBe(called);
+	});
+
+	it("does not let the ambient stroll clock pull a Proc out of the huddle", () => {
+		const w = band();
+		const eager = { ...w, pets: w.pets.map((p) => ({ ...p, restUntil: 0 })) };
+		const gathered = run(startRally(eager, "lead", T0), 2);
+
+		expect(members(gathered).every((p) => p.motion.kind === "standing")).toBe(true);
+	});
+
+	it("fires for an Orchestrator that is the only session on its project", () => {
+		// Nobody comes, and that is the honest answer — but the gesture still registered,
+		// so the call cue still plays. A shake that looks like nothing happened reads as
+		// a broken gesture.
+		const alone = startRally(band(), "lead", T0);
+		const solo = startRally(
+			{ ...alone, pets: alone.pets.filter((p) => p.project !== "alpha" || p.id === "lead") },
+			"lead",
+			T0,
+		);
+
+		expect(petById(solo, "lead").rally?.leaderId).toBe("lead");
+	});
+
+	describe("with motion reduced", () => {
+		const quiet = (w: World) => ({ ...w, reducedMotion: true });
+
+		it("gathers them without running them, and the gesture still works", () => {
+			const called = startRally(quiet(band()), "lead", T0);
+
+			expect(members(called)).toHaveLength(2);
+			for (const member of members(called)) {
+				expect(member.motion.kind, member.id).toBe("standing");
+				expect(member.rally?.phase, member.id).toBe("gathered");
+			}
+			const spots = members(called).map((p) => p.x);
+			expect(Math.abs(spots[0] - spots[1])).toBeGreaterThanOrEqual(called.spacing);
+		});
+
+		it("lets them go again when the huddle breaks up, where they gathered", () => {
+			const called = startRally(quiet(band()), "lead", T0);
+			const done = run(called, 30);
+
+			expect(["a1", "a2"].map((id) => petById(done, id).x)).toEqual(["a1", "a2"].map((id) => petById(called, id).x));
+			expect(done.pets.every((p) => p.rally === undefined)).toBe(true);
+		});
 	});
 });

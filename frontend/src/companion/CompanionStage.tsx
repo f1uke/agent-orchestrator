@@ -5,6 +5,7 @@ import {
 	grabPet,
 	releasePet,
 	startConversation,
+	startRally,
 	advanceFlight,
 	syncActivities,
 	tick,
@@ -12,6 +13,7 @@ import {
 	type Pet,
 	type World,
 } from "./behaviour";
+import { isShaking, newShakeTrack, trackShake } from "./shake";
 import { Bubble } from "./Bubble";
 import type { ComposedBubble } from "./bubble-compose";
 import { withSpecies, type CastMember } from "./cast";
@@ -243,6 +245,18 @@ export function CompanionStage({
 		// Proc at the speed the hand was actually moving.
 		let sample: { x: number; y: number; at: number } | null = null;
 		let throwSpeed = { vx: 0, vy: 0 };
+		/**
+		 * Which Proc the press went down on, and the shape the pointer has traced
+		 * since. Reset on every press, so one gesture can never finish another's shake.
+		 *
+		 * Read from the DOM rather than from the world, and deliberately: a `setWorld`
+		 * updater does not run until React renders, so anything learned inside one is
+		 * not available to the pointer moves that arrive in the meantime — which is
+		 * exactly the window a shake happens in. Whether this Proc may actually call a
+		 * rally is the ENGINE's question, and `startRally` answers it.
+		 */
+		let grabbed: string | null = null;
+		let shake = newShakeTrack();
 		/** Height above the floor line, which is the bottom of the window. */
 		const heightOf = (clientY: number) => window.innerHeight - clientY;
 
@@ -253,6 +267,19 @@ export function CompanionStage({
 
 		const onMove = (event: PointerEvent) => {
 			tracker.update(event.target);
+			// Press-and-shake is a COMMAND laid over the drag rather than instead of it:
+			// the Proc goes on following the pointer throughout, because taking it out of
+			// the hand mid-gesture reads as the app dropping the thing you are holding.
+			if (grabbed) {
+				const leaderId = grabbed;
+				shake = trackShake(shake, { x: event.clientX, y: event.clientY, at: event.timeStamp || performance.now() });
+				if (isShaking(shake)) {
+					// Cleared so the same wiggle cannot be counted twice. Shaking a Proc that
+					// is not the coordinator simply asks and is refused, which costs nothing.
+					shake = newShakeTrack();
+					setWorld((current) => startRally(current, leaderId, Date.now()));
+				}
+			}
 			setWorld((current) => {
 				const holding = current.pets.find((pet) => pet.motion.kind === "held");
 				if (!holding) return current;
@@ -286,6 +313,12 @@ export function CompanionStage({
 			// constantly, and reverting to click-through mid-drag would hand the rest of
 			// it to the desktop.
 			tracker.hold(true);
+			grabbed = id;
+			shake = trackShake(newShakeTrack(), {
+				x: event.clientX,
+				y: event.clientY,
+				at: event.timeStamp || performance.now(),
+			});
 			setWorld((current) => {
 				const pet = current.pets.find((entry) => entry.id === id);
 				grabOffset = pet ? event.clientX - pet.x : 0;
@@ -301,9 +334,17 @@ export function CompanionStage({
 			tracker.hold(false);
 			const thrown = sample && performance.now() - sample.at < 120 ? throwSpeed : { vx: 0, vy: 0 };
 			sample = null;
+			grabbed = null;
+			shake = newShakeTrack();
 			setWorld((current) => {
 				const holding = current.pets.find((pet) => pet.motion.kind === "held");
-				return holding ? releasePet(current, holding.id, Date.now(), Math.random, thrown) : current;
+				if (!holding) return current;
+				// A Proc that has just been shaken into calling a rally is NOT being thrown.
+				// The wrist speed that fired the rally is the same speed that would fling
+				// it, so read literally every successful shake would end in a throw — and
+				// then the two gestures are not distinct at all, whatever the detector says.
+				const speed = holding.rally ? { vx: 0, vy: 0 } : thrown;
+				return releasePet(current, holding.id, Date.now(), Math.random, speed);
 			});
 			tracker.update(event.target);
 		};
@@ -457,6 +498,10 @@ function placement(pet: Pet): React.CSSProperties {
 		["--procs-figure-left" as string]: `${figureLeft(pet.facing === "left")}px`,
 		["--procs-name-room" as string]: `${NAME_TAG_ALLOWANCE}px`,
 		["--procs-frame-height" as string]: `${FRAME.height}px`,
+		// The FIGURE's own box, which the call cue's ring is centred on. The frame is
+		// taller and wider than it — it carries the scenery — so a ring drawn on the
+		// frame sits off the Proc it is coming out of.
+		["--procs-figure-height" as string]: `${PET_HEIGHT}px`,
 	};
 }
 
@@ -483,8 +528,13 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 	const walking = pet.motion.kind === "walking";
 	const held = pet.motion.kind === "held";
 	const greeting = pet.meeting?.phase === "greeting";
-	// A Proc on its way to (or back from) a meeting is running, not strolling.
-	const running = walking && pet.meeting !== undefined;
+	// A Proc on its way to (or back from) a meeting — or answering a roll-call — is
+	// running, not strolling. The same event pace, because it is the same kind of
+	// event: the human asked for it.
+	const running = walking && (pet.meeting !== undefined || pet.rally !== undefined);
+	// The one that was shaken. It carries a rally naming ITSELF as the leader, which
+	// is the same fact the engine works from rather than a second copy of it.
+	const calling = pet.rally?.leaderId === pet.id;
 
 	return (
 		<div
@@ -501,10 +551,19 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 				held={held}
 				running={running}
 				greeting={greeting}
+				calling={calling}
 				bounce={pet.bounce}
 				size={PET_HEIGHT}
 				className="companion-proc-art"
 			/>
+			{/* Keyed by WHEN the shake landed, so a second rally is a second element and
+			    its rings play again instead of being skipped as unchanged. */}
+			{calling ? (
+				<div className="companion-proc-rally" data-rally-call key={pet.rally?.startedAt}>
+					<span />
+					<span />
+				</div>
+			) : null}
 			<div className="companion-proc-name">
 				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
 			</div>

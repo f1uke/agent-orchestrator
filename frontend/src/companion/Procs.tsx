@@ -64,6 +64,8 @@ export type ProcsProps = {
 	running?: boolean;
 	/** Face to face with the Proc it came to meet: a couple of hops. */
 	greeting?: boolean;
+	/** It has just been shaken and is calling its project in: one sharp brace. */
+	calling?: boolean;
 	/** The landing it has just made, if any: `seq` counts them, `strength` sizes the puff. */
 	bounce?: { seq: number; strength: number };
 	/** Drawn height of the FIGURE in px; props extend beyond it. */
@@ -79,6 +81,7 @@ export function Procs({
 	held = false,
 	running = false,
 	greeting = false,
+	calling = false,
 	bounce,
 	size = DEFAULT_SIZE,
 	className,
@@ -127,12 +130,20 @@ export function Procs({
 				<g
 					data-teased={held || undefined}
 					data-greeting={greeting || undefined}
+					data-calling={calling || undefined}
 					style={
 						held
 							? { animation: "procs-flail 620ms ease-in-out infinite alternate", transformOrigin: "48px 8px" }
-							: greeting
-								? { animation: "procs-hop-greet 760ms ease-out 2" }
-								: undefined
+							: calling
+								? // Squashed about its own FEET, so it braces against the floor to
+									// shout rather than growing out of its middle like a balloon.
+									{
+										animation: "procs-rally-call 560ms ease-out 1",
+										transformOrigin: `${CELL / 2}px ${PROCS_BOX.height}px`,
+									}
+								: greeting
+									? { animation: "procs-hop-greet 760ms ease-out 2" }
+									: undefined
 					}
 				>
 					{/* WHICH CREATURE. A rig owns the body, the face, the legs-or-none and the

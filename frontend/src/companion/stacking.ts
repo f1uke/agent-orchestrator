@@ -17,6 +17,8 @@ export const STACK_BASE = 1;
 export const STACK_LAYERS = {
 	/** Going about its business. */
 	resting: 0,
+	/** Answering a roll-call: the huddle is the scene, so it stands over the idle band. */
+	rallying: 5,
 	/** Mid-conversation: a staged scene, and the pair belong in front of the crowd. */
 	meeting: 10,
 	/** In the human's hand. Nothing outranks the thing being dragged. */
@@ -26,5 +28,6 @@ export const STACK_LAYERS = {
 export function stackOrder(pet: Pet): number {
 	if (pet.motion.kind === "held") return STACK_BASE + STACK_LAYERS.held;
 	if (pet.meeting) return STACK_BASE + STACK_LAYERS.meeting;
+	if (pet.rally) return STACK_BASE + STACK_LAYERS.rallying;
 	return STACK_BASE + STACK_LAYERS.resting;
 }

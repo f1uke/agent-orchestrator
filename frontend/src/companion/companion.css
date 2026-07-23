@@ -204,6 +204,82 @@ body {
 	}
 }
 
+/* The Orchestrator answering a shake: it braces against the floor and calls. One
+   beat, once — the rally FIRING is the event; the huddle that follows is the state,
+   and the ring below says that. Transform only, about the figure's own feet. */
+@keyframes procs-rally-call {
+	0% {
+		transform: translateY(0) scale(1, 1);
+	}
+	20% {
+		transform: translateY(0) scale(1.1, 0.9);
+	}
+	52% {
+		transform: translateY(-7px) scale(0.96, 1.06);
+	}
+	100% {
+		transform: translateY(0) scale(1, 1);
+	}
+}
+
+/* The call itself, going out: a ring off the Orchestrator, twice.
+
+   Drawn in TWO channels like every other cue on this overlay — a light ring with ink
+   either side of it — because the thing behind it is the user's wallpaper and may be
+   any colour at all. A single-channel ring vanishes on half the desktops there are.
+
+   The resting style is the ring at full size and nearly opaque, NOT at the start of
+   the animation: with `prefers-reduced-motion` the page kills every animation, and
+   what is left has to be the cue rather than a ring frozen at scale 0. */
+.companion-proc-rally {
+	position: absolute;
+	bottom: var(--procs-name-room, 0px);
+	left: var(--procs-figure-left, 0);
+	width: var(--procs-figure-width, 96px);
+	height: var(--procs-figure-height, 128px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+
+.companion-proc-rally span {
+	position: absolute;
+	width: 104px;
+	height: 104px;
+	border-radius: 50%;
+	/* Ink either side of a light core, at the same weight the art's own rim uses.
+	   Measured against both a near-white and a near-black wallpaper: at 1.6px the ink
+	   read as a hairline and the white core disappeared entirely on a pale desktop,
+	   leaving a cue you had to look for. */
+	border: 3px solid #fbfafd;
+	box-shadow:
+		0 0 0 2.4px rgba(24, 20, 34, 0.82),
+		inset 0 0 0 2.4px rgba(24, 20, 34, 0.82);
+	opacity: 0.92;
+	animation: procs-rally-ring 780ms ease-out 2 forwards;
+}
+
+/* The second ring is the same ring a beat later, which is what makes it read as a
+   call going OUT rather than as one circle pulsing on the spot. */
+.companion-proc-rally span:nth-child(2) {
+	animation-delay: 220ms;
+}
+
+@keyframes procs-rally-ring {
+	0% {
+		opacity: 0;
+		transform: scale(0.42);
+	}
+	18% {
+		opacity: 0.95;
+	}
+	100% {
+		opacity: 0;
+		transform: scale(1.5);
+	}
+}
+
 /* The puff a landing throws up: out, up a little, and gone. Transform and opacity
    only, and it runs ONCE — a landing is an event, not a state. */
 @keyframes procs-dust {
