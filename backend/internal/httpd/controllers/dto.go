@@ -399,8 +399,10 @@ type CleanupSessionsResponse struct {
 }
 
 // SendSessionMessageRequest is the body of POST /api/v1/sessions/{sessionId}/send.
+// maxLength mirrors maxAgentMessageLen in sessions.go — a defensive bound on
+// what may be pasted into a live agent, not a transport limit.
 type SendSessionMessageRequest struct {
-	Message string `json:"message" minLength:"1" maxLength:"4096"`
+	Message string `json:"message" minLength:"1" maxLength:"131072"`
 }
 
 // SendSessionMessageResponse is the body of POST /api/v1/sessions/{sessionId}/send.

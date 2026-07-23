@@ -5684,7 +5684,7 @@ components:
     SendSessionMessageRequest:
       properties:
         message:
-          maxLength: 4096
+          maxLength: 131072
           minLength: 1
           type: string
       required:

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -23,8 +24,14 @@ import (
 )
 
 const (
-	defaultTimeout    = 5 * time.Second
-	defaultChunkBytes = 16 * 1024
+	defaultTimeout = 5 * time.Second
+	// defaultChunkBytes is the target size of one `send-keys -l` payload. It sits
+	// deliberately below tmux's hard per-command ceiling (see
+	// sendKeysLiteralBudget, ~16346 bytes minus the session id) so routine sends
+	// never ride tmux's edge and a future tmux that spends a few more bytes on
+	// framing cannot break delivery. The cost of the smaller chunk is one extra
+	// chunkDelay per 8 KB, which is noise next to enterDelay.
+	defaultChunkBytes = 8 * 1024
 
 	// defaultChunkDelay is the pause between literal send-keys chunks, and
 	// defaultEnterDelay the pause before the submitting Enter. They give the
@@ -47,7 +54,7 @@ type Options struct {
 	Binary     string        // default "tmux" (resolved via exec.LookPath)
 	Shell      string        // default $SHELL else /bin/sh
 	Timeout    time.Duration // default 5s
-	ChunkSize  int           // default 16*1024
+	ChunkSize  int           // default 8*1024; always clamped to sendKeysLiteralBudget
 	ChunkDelay time.Duration // pause between send-keys chunks; default 15ms
 	EnterDelay time.Duration // pause before the submitting Enter; default 300ms
 }
@@ -66,6 +73,19 @@ type Runtime struct {
 	// hasLiveChild reports whether pid has at least one live child process. It is
 	// the seam AgentAlive uses to see past the keep-alive shell; tests fake it.
 	hasLiveChild func(ctx context.Context, pid int) (bool, error)
+	// sendLocks holds one mutex per session id, serializing SendMessage per
+	// session (see SendMessage). Keyed per id rather than global so a slow send
+	// to one pane never blocks sends to another. The zero sync.Map is ready to
+	// use, so New needs no extra setup.
+	sendLocks sync.Map // session id -> *sync.Mutex
+}
+
+// sendLock returns the mutex guarding sends to one session, creating it on first
+// use.
+func (r *Runtime) sendLock(id string) *sync.Mutex {
+	lock, _ := r.sendLocks.LoadOrStore(id, &sync.Mutex{})
+	mu, _ := lock.(*sync.Mutex)
+	return mu
 }
 
 var _ ports.Runtime = (*Runtime)(nil)
@@ -365,15 +385,36 @@ func defaultHasLiveChild(ctx context.Context, pid int) (bool, error) {
 // (PTY_INPUT_CHUNK_DELAY_MS / PTY_INPUT_ENTER_DELAY_MS), which the tmux port
 // had dropped.
 //
+// Chunk sizing is not cosmetic either: tmux accepts only so much argv in one
+// command (sendKeysLiteralBudget), and an over-budget send-keys is rejected
+// wholesale with "command too long" rather than truncated. The configured chunk
+// size is therefore clamped to what this target can actually carry, so an
+// arbitrarily long message is delivered as a series of commands tmux accepts.
+//
+// The whole send is serialized per session: a message is now many commands, and
+// two concurrent senders would otherwise shred each other's text in the pane —
+// or land one's Enter in the middle of the other's message and submit half of it.
+//
 // ponytail: send-keys -l chunked is simpler than load-buffer/paste-buffer; the
-// ceiling is very large messages may be slower, but chunk size defaults to 16 KB
-// which is ample for agent prompts.
+// ceiling is very large messages may be slower, which is fine for agent prompts.
 func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error {
 	id, err := handleID(handle)
 	if err != nil {
 		return err
 	}
-	parts := chunks(message, r.chunkSize)
+	size := r.chunkSize
+	if budget := sendKeysLiteralBudget(id); budget < size {
+		if budget <= 0 {
+			return fmt.Errorf("tmux runtime: send message %s: session id leaves no room in tmux's %d-byte command budget", id, tmuxCommandArgvBudget)
+		}
+		size = budget
+	}
+
+	lock := r.sendLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	parts := chunks(message, size)
 	for i, chunk := range parts {
 		if _, err := r.run(ctx, sendKeysLiteralArgs(id, chunk)...); err != nil {
 			return fmt.Errorf("tmux runtime: send message %s: %w", id, err)

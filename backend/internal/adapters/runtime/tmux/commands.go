@@ -72,6 +72,37 @@ func sendKeysLiteralArgs(id, chunk string) []string {
 	return []string{"send-keys", "-t", id, "-l", chunk}
 }
 
+// tmuxCommandArgvBudget is how many bytes of packed argv fit in one tmux
+// command. The tmux CLI ships a command to the tmux server as a single libimsg
+// message, so this is a hard protocol ceiling, not a tunable: MAX_IMSGSIZE
+// (16384) minus IMSG_HEADER_SIZE (16) minus the `int argc` of struct
+// msg_command (4). Exceed it and tmux refuses the command outright with
+// "command too long" — it does not truncate.
+const tmuxCommandArgvBudget = 16384 - 16 - 4
+
+// packedArgvBytes reports how much of the budget an argv consumes. tmux's
+// cmd_pack_argv writes each argument followed by a NUL, so every argument costs
+// its length plus one.
+func packedArgvBytes(args []string) int {
+	n := 0
+	for _, a := range args {
+		n += len(a) + 1
+	}
+	return n
+}
+
+// sendKeysLiteralBudget returns the largest literal payload that
+// `tmux send-keys -t <id> -l <chunk>` can carry for this target. The overhead is
+// derived from sendKeysLiteralArgs itself rather than hardcoded, so it cannot
+// drift if those flags ever change. Note the target id is charged against the
+// same budget: a longer session id leaves less room for the message.
+//
+// Verified against tmux 3.6a — the returned size is accepted and one byte more
+// is rejected, for both short and long session ids.
+func sendKeysLiteralBudget(id string) int {
+	return tmuxCommandArgvBudget - packedArgvBytes(sendKeysLiteralArgs(id, ""))
+}
+
 // sendEnterArgs builds args for `tmux send-keys -t <id> Enter` to submit the
 // queued input.
 func sendEnterArgs(id string) []string {
