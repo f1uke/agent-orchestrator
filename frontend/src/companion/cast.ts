@@ -306,17 +306,15 @@ export function defaultLook(sessionRef: string): Look {
 }
 
 /**
- * Flatten a look into what the rig draws.
+ * Flatten a look into what the rig draws — always as a PROC.
  *
- * This is the seam a new CHARACTER TYPE lands on: it arrives as a third axis, and
- * this function grows a dispatch on it. The store, the persistence, the pruning and
- * the picker are all axis-generic and would not change.
+ * ⚠ The creature is NOT applied here, because it is not part of a look: it comes from
+ * the project, and `withSpecies` is what puts this look on it. That split is why a
+ * session keeps its colour when its project's creature changes under it — the look is
+ * a pair of SLOTS, and the body they land on is somebody else's question.
  *
- * Defensive on both lookups because a look can come out of localStorage, where the
- * option ids are whatever was written by whichever version wrote them. An id this
- * build does not have falls back rather than throwing. `resolveLook` already
- * substitutes the default for exactly that case, so reaching the fallback here
- * means something handed us a look it never resolved.
+ * Defensive on both lookups because a look is built from a hash of whatever ref it was
+ * handed, and an id this build does not have must fall back rather than throw.
  */
 export function castFromLook(look: Look): CastMember {
 	return composeCast(
@@ -333,22 +331,23 @@ export function looksOf(species: SpeciesId): readonly CastMember[] {
 }
 
 /**
- * The look a session always gets. Pure, stable across restarts, both axes.
+ * The look a session gets. Pure, stable across restarts, both axes.
  *
- * Still the DEFAULT, and still the whole assignment for a session nobody has picked
- * for, which is every session until someone opens the Pet library.
+ * ⚠ Not a default any more — the WHOLE answer. Nobody picks a session's colour or
+ * accessory, so this is where every pet's own look comes from, always. It is stable per
+ * ref on purpose: re-rolling each launch would give the same variety and throw away the
+ * thing that makes it worth having, which is that the teal one is somebody you know.
  */
 export function castForSession(sessionRef: string): CastMember {
 	return castFromLook(defaultLook(sessionRef));
 }
 
 /**
- * Assemble a look from a chosen colour, a chosen hat and — once the human has picked
- * them — a chosen creature.
+ * Assemble a colour, an accessory and a creature into the one thing the rig paints.
  *
- * The species argument is OPTIONAL and defaults to the Proc, which is what keeps the
- * five new bodies out of the live cast until they are registered as an axis: every
- * existing caller composes exactly the Proc it composed before, id and name included.
+ * The species argument is OPTIONAL and defaults to the Proc, so a caller that only has a
+ * look — which is everything upstream of the project, because a look is a pair of slots —
+ * composes exactly the Proc it always did, id and name included.
  */
 export function composeCast(
 	palette: Palette,
@@ -410,9 +409,11 @@ export function paletteOf(species: SpeciesId, paletteId: string): Palette {
 /**
  * The same look, on a different creature.
  *
- * What the Procs lab drives its species switcher with, and the shape the third axis
- * resolves to once the Pet library registers one: the colour and the hat are already
- * decided per session and are not this axis' business to re-roll.
+ * ⚠ THE seam between the two questions. The colour and the accessory are already decided,
+ * by the session's hash, and a project changing its creature is not licence to re-roll
+ * them — so this maps them onto the new body rather than picking again. It is what lets a
+ * project's creature change under a running session without the session becoming somebody
+ * else, and it is what the Pet library, the overlay and the lab all resolve through.
  */
 export function withSpecies(cast: CastMember, species: SpeciesId): CastMember {
 	// By SLOT, not by id, on BOTH axes. Each creature has its own colours and its own

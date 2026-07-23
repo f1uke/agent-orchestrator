@@ -20,9 +20,10 @@ import type { SpeciesId } from "./species";
 //   Chick      a broken eggshell cap, a bow, a seed in the beak, a scarf
 //   Toadstool  the pattern on its cap: spots, rings, dew, or a snail sitting on it
 //
-// ⚠ The axis ID is still `hat`, deliberately: it is what is written in everybody's
-// localStorage, and renaming it would silently reset every choice anybody has made. What
-// the picker CALLS it is a display string, and that says "Accessory".
+// ⚠ The axis ID is still `hat`, deliberately. Nobody CHOOSES an accessory any more — it
+// is a hash dimension of the session ref — but the id is the one `CastMember.hatId` and
+// `speciesWears` are written in, and a rename would be churn across every rig for a word
+// no user ever sees.
 
 export type Accessory = { id: string; name: string };
 

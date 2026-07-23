@@ -31,9 +31,13 @@ type UiState = {
 	splitLayouts: Readonly<Record<string, SplitNode>>;
 	orchestratorReplacementErrors: Record<string, string>;
 	/**
-	 * A session the Pet library should open on, set by right-clicking its Proc on
-	 * the desktop. Ephemeral and deliberately NOT persisted: it is a single
-	 * navigation, and the Settings pane clears it the moment it has been honoured.
+	 * A session whose PROJECT the Pet library should open on, set by right-clicking that
+	 * session's pet on the desktop.
+	 *
+	 * ⚠ A session ref, although the library is a list of projects: the overlay knows which
+	 * pet was clicked, and the app is where a session is authoritatively related to its
+	 * project, so the resolution happens there. Ephemeral and deliberately NOT persisted —
+	 * it is a single navigation, and the Settings pane clears it once honoured.
 	 */
 	petLibraryRequest: string | null;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
