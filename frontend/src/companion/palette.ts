@@ -58,6 +58,17 @@ export const PROP_COLOURS = {
 	 */
 	lead: "#ffd75e",
 	/**
+	 * The portal a session arrives through and leaves by.
+	 *
+	 * The app's accent is `#5b9dff` and it CANNOT be used here: it measures 2.58:1 at
+	 * its worst, i.e. it is one of the colours this sweep exists to reject. So the
+	 * portal is the accent's own hue lifted into the band the two-channel rule allows
+	 * — the same blue the app means, at a luminance a wallpaper cannot swallow.
+	 */
+	portalCore: "#9cc4ff",
+	/** The light inside it — the far side showing through. */
+	portalGlow: "#d7e8ff",
+	/**
 	 * Bubble text colours. Measured against the bubble's OWN `paper` fill, never
 	 * against the wallpaper — that is the point of it being a self-contained card.
 	 */

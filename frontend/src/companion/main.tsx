@@ -95,7 +95,9 @@ function Lab() {
 	const [setWorld, setSetWorld] = useState<React.Dispatch<React.SetStateAction<World>> | null>(null);
 	const [reducedMotion, setReducedMotion] = useState(false);
 	const [species, setSpecies] = useState<SpeciesId | "mixed">("mixed");
-	const [sheet, setSheet] = useState(false);
+	// `#concepts` opens the sheet on load, so `ao preview` can be pointed straight at
+	// the art instead of asking whoever is looking to find a button first.
+	const [sheet, setSheet] = useState(() => window.location.hash === "#concepts");
 	const onStage = useCallback((api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => {
 		setSetWorld(() => api.setWorld);
 	}, []);

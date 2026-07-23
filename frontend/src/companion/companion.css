@@ -64,6 +64,10 @@ body {
 }
 
 .companion-proc {
+	/* How far to the pet's left its portal stands, and therefore how far the leap
+	   carries. ONE number: the gate is set back by it and the pet starts its arc on it,
+	   so the two can never disagree about where the mouth is. */
+	--procs-portal-gap: 26px;
 	position: absolute;
 	bottom: 0;
 	left: 0;
@@ -74,6 +78,11 @@ body {
 	   transparent. Making it take the pointer laid ~150px of invisible dead zone
 	   across the band per Proc and swallowed clicks meant for the desktop. */
 	pointer-events: none;
+	/* A stacking context of its OWN, so the portal drawn behind the pet (z-index -1)
+	   is contained by it. On the overlay the transform already made one; on the
+	   concept sheet, where a pet is laid out in flow, nothing did — and a negative
+	   z-index with no context to sit in falls straight through the page behind it. */
+	isolation: isolate;
 }
 
 /* The drawing is wider than the figure — a scene hangs a ground prop to the right
@@ -282,6 +291,341 @@ body {
 		opacity: 0;
 		transform: translate(var(--procs-dust-dx, 0), -7px) scale(1.25);
 	}
+}
+
+/* ---- The portal a session arrives through and leaves by. ----
+
+   Drawn on the pet's OWN figure box and standing on the same floor line, so it costs
+   the band no space: the pet arrives where its portal is, and the crowding rules
+   never see a second body.
+
+   Everything here is transform and opacity, and every duration is written INLINE from
+   the TS constants in Portal.tsx — the engine times the pet's transition off the same
+   numbers, and a duration written twice is a duration that drifts. */
+.companion-proc-portal {
+	position: absolute;
+	bottom: var(--procs-name-room, 0px);
+	/* Set BACK from where the pet stands, so the leap is an arc across a gap rather
+	   than a pet growing on the spot out of a hole under its own feet — which is what
+	   it read as when the gate was centred on the figure. Still inside the figure's own
+	   96px box, so the band gives up no space for it and crowding never sees it. */
+	left: calc(var(--procs-figure-left, 0px) - var(--procs-portal-gap));
+	width: var(--procs-figure-width, 96px);
+	height: var(--procs-figure-height, 128px);
+	/* BEHIND the pet: one leaping OUT is in front of the gate it came through, and one
+	   leaping in is swallowed by it. Negative, which paints under the in-flow art
+	   without having to rank the art itself — ranking the art would have lifted it
+	   over the rally ring and the name chip, which are absolute siblings drawn after
+	   it and are meant to stay on top. `.companion-proc` isolates, so this cannot
+	   escape behind the desktop. */
+	z-index: -1;
+	pointer-events: none;
+	/* It tears open around its OWN middle, which is where the ring's centre sits in this
+	   box. Opening from the base made a big ring look like it was being pushed up out
+	   of the floor rather than torn into the air the pet then jumps through. */
+	transform-origin: 50% 50%;
+	animation-fill-mode: both;
+	animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.companion-proc-portal[data-portal-phase="arriving"] {
+	animation-name: procs-portal-in;
+}
+
+.companion-proc-portal[data-portal-phase="leaving"] {
+	animation-name: procs-portal-out;
+}
+
+/* The swirl inside the mouth, and the light at its centre breathing. Both are
+   INFINITE and both are the first casualties of reduced motion, which is the point:
+   what is left is an open portal rather than a still of one mid-spin. */
+.companion-proc-portal [data-portal-spin] {
+	animation: procs-portal-swirl 2400ms linear infinite;
+}
+
+.companion-proc-portal [data-portal-iris] {
+	animation: procs-portal-iris 1400ms ease-in-out infinite alternate;
+}
+
+/* The bracket gate's two wings, swinging apart around the mouth and snapping back.
+   `inherit` takes the envelope's own inline duration, so the wings can never be open
+   for longer than the gate is. */
+/* The corona turns one way and the rim ticks turn the other, at different speeds. Two
+   opposed rotations is what reads as a ring being HELD open by something; one
+   rotation on its own just reads as a spinning circle. */
+.companion-proc-portal [data-portal-corona] {
+	animation: procs-portal-swirl 5200ms linear infinite;
+}
+
+.companion-proc-portal [data-portal-ticks] {
+	animation: procs-portal-swirl 3600ms linear infinite reverse;
+}
+
+.companion-proc-portal [data-portal-motes] {
+	animation: procs-portal-swirl 1900ms linear infinite reverse;
+}
+
+/* The shockwaves: a ring off the tear, and a brighter one where the pet crosses. Both
+   run ONCE — they are events, not states — and both are timed inline off the same
+   clock the leap is, so the second one lands on the frame the pet goes through. */
+.companion-proc-portal [data-portal-wave] {
+	animation-name: procs-portal-wave;
+	animation-fill-mode: both;
+	animation-timing-function: cubic-bezier(0.16, 0.84, 0.44, 1);
+}
+
+@keyframes procs-portal-wave {
+	0% {
+		opacity: 0;
+		transform: scale(0.55);
+	}
+	22% {
+		opacity: 0.95;
+	}
+	100% {
+		opacity: 0;
+		transform: scale(1.85);
+	}
+}
+
+/* 1500ms, and the shape of it is: tear open fast (a fifth), stay open (nearly two
+   thirds), collapse (a sixth). The pet's whole leap fits inside the open stretch with
+   room either side, so the ring is a place that was THERE rather than a flicker. */
+@keyframes procs-portal-in {
+	0% {
+		opacity: 0;
+		transform: scale(0.06, 0.02);
+	}
+	6% {
+		opacity: 1;
+		transform: scale(0.5, 0.14);
+	}
+	11% {
+		transform: scale(0.88, 0.74);
+	}
+	16% {
+		transform: scale(1.08, 1.06);
+	}
+	21%,
+	84% {
+		opacity: 1;
+		transform: scale(1, 1);
+	}
+	/* It CLOSES rather than fades: the scale does the work and the opacity is held to
+	   the last moment. Fading it out early left a grey ghost of a ring hanging over the
+	   wallpaper for a third of a second. */
+	91% {
+		opacity: 1;
+		transform: scale(0.9, 1.04);
+	}
+	97% {
+		opacity: 1;
+		transform: scale(0.42, 0.26);
+	}
+	100% {
+		opacity: 0;
+		transform: scale(0.08, 0.02);
+	}
+}
+
+@keyframes procs-portal-out {
+	0% {
+		opacity: 0;
+		transform: scale(0.06, 0.02);
+	}
+	6% {
+		opacity: 1;
+		transform: scale(0.55, 0.16);
+	}
+	14% {
+		transform: scale(1.07, 1.05);
+	}
+	20%,
+	54% {
+		opacity: 1;
+		transform: scale(1, 1);
+	}
+	/* The swallow: the ring takes the pet and flexes on it, which is what makes the pet
+	   look eaten rather than merely faded out on top of a circle. */
+	61% {
+		opacity: 1;
+		transform: scale(1.13, 1.09);
+	}
+	70%,
+	84% {
+		opacity: 1;
+		transform: scale(1, 1);
+	}
+	97% {
+		opacity: 1;
+		transform: scale(0.42, 0.26);
+	}
+	100% {
+		opacity: 0;
+		transform: scale(0.08, 0.02);
+	}
+}
+
+@keyframes procs-portal-swirl {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes procs-portal-iris {
+	from {
+		transform: scale(0.82);
+	}
+	to {
+		transform: scale(1.08);
+	}
+}
+
+/* ---- The pet's own leap, out of the portal and into it. ----
+
+   A wrapper around the art rather than a property of it: the walk, the bob and the
+   blink keep running underneath, because a transform on an ancestor COMPOSES with
+   them instead of replacing them.
+
+   Squash and stretch about the FEET, so a landing compresses the pet onto the floor
+   rather than shrinking it towards its own middle. */
+.companion-proc-transit {
+	transform-origin: 50% 100%;
+	animation-fill-mode: both;
+	animation-timing-function: ease-out;
+}
+
+.companion-proc-transit[data-portal-phase="arriving"] {
+	animation-name: procs-portal-leap-out;
+}
+
+.companion-proc-transit[data-portal-phase="leaving"] {
+	animation-name: procs-portal-leap-in;
+}
+
+/* Out of the gate: hidden while it opens, a burst out of the mouth, an arc, and a
+   landing that squashes and rebounds — the anticipation happened out of sight, which
+   is exactly where a pet that was not on this desktop a moment ago should have been. */
+@keyframes procs-portal-leap-out {
+	0%,
+	26% {
+		opacity: 0;
+		transform: translate3d(calc(-1 * var(--procs-portal-gap)), 8px, 0) scale(0.24);
+	}
+	30% {
+		opacity: 1;
+		transform: translate3d(calc(-0.86 * var(--procs-portal-gap)), -12px, 0) scale(0.46, 0.62);
+	}
+	/* The apex, out over the gap and stretched along the way it is going. */
+	40% {
+		opacity: 1;
+		transform: translate3d(calc(-0.42 * var(--procs-portal-gap)), -46px, 0) scale(0.94, 1.12);
+	}
+	52% {
+		transform: translate3d(0, 0, 0) scale(1.2, 0.8);
+	}
+	58% {
+		transform: translate3d(0, -9px, 0) scale(0.95, 1.07);
+	}
+	64% {
+		transform: translate3d(0, 0, 0) scale(1.06, 0.95);
+	}
+	70%,
+	100% {
+		opacity: 1;
+		transform: translate3d(0, 0, 0) scale(1, 1);
+	}
+}
+
+/* Into the gate: a beat standing while it opens, a crouch, the jump, and the mouth
+   taking it. It shrinks as it crosses the threshold rather than fading on the spot,
+   because a pet that dissolves in mid-air has not gone ANYWHERE. */
+@keyframes procs-portal-leap-in {
+	0%,
+	22% {
+		opacity: 1;
+		transform: translate3d(0, 0, 0) scale(1, 1);
+	}
+	/* The crouch. Everything after it is committed, which is what makes it a jump
+	   rather than a pet sliding sideways into a hole. */
+	31% {
+		transform: translate3d(0, 2px, 0) scale(1.18, 0.8);
+	}
+	41% {
+		transform: translate3d(calc(-0.4 * var(--procs-portal-gap)), -44px, 0) scale(0.9, 1.14);
+	}
+	51% {
+		opacity: 1;
+		transform: translate3d(calc(-0.86 * var(--procs-portal-gap)), -14px, 0) scale(0.52, 0.6);
+	}
+	59%,
+	100% {
+		opacity: 0;
+		transform: translate3d(calc(-1 * var(--procs-portal-gap)), 6px, 0) scale(0.16, 0.2);
+	}
+}
+
+/* The pet's LABEL does not leap with it — a squashed, stretched name chip reads as a
+   rendering fault — but it must not be standing there on its own either, naming a
+   session whose pet is still inside the portal. So it does the one thing the leap
+   also does: it is not there until the pet is out, and it goes before the pet does. */
+.companion-proc-transit-chrome {
+	animation-fill-mode: both;
+	animation-timing-function: ease-out;
+}
+
+.companion-proc-transit-chrome[data-portal-phase="arriving"] {
+	animation-name: procs-portal-label-in;
+}
+
+.companion-proc-transit-chrome[data-portal-phase="leaving"] {
+	animation-name: procs-portal-label-out;
+}
+
+@keyframes procs-portal-label-in {
+	0%,
+	52% {
+		opacity: 0;
+	}
+	64%,
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes procs-portal-label-out {
+	0%,
+	22% {
+		opacity: 1;
+	}
+	36%,
+	100% {
+		opacity: 0;
+	}
+}
+
+/* The lab's freeze frame. A negative delay winds an animation forward to a chosen
+   instant and `paused` holds it there, which is how the concept sheet lays a portal
+   out as a SEQUENCE — six stills of one 900ms move, side by side — rather than as a
+   loop nobody can point at. Lab only; nothing on a desktop sets this. */
+[data-portal-freeze] .companion-proc-portal,
+[data-portal-freeze] .companion-proc-portal *,
+[data-portal-freeze] .companion-proc-transit,
+[data-portal-freeze] .companion-proc-transit-chrome {
+	animation-delay: var(--procs-portal-freeze, 0ms);
+	animation-play-state: paused;
+}
+
+/* The lab's preview of reduced motion, so the equivalent can actually be LOOKED at
+   without changing an OS setting to see it. Exactly the media query's own two rules,
+   scoped to whatever carries the attribute — not a second, drifting definition of
+   what reduced motion means here. */
+[data-reduced-motion] .companion-proc {
+	transition: none !important;
+}
+
+[data-reduced-motion] .companion-proc * {
+	animation: none !important;
 }
 
 /* ---- Scene animations. transform/opacity only, so every one stays on the

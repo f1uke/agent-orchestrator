@@ -7,6 +7,7 @@ import {
 	startConversation,
 	startRally,
 	advanceFlight,
+	advanceTransits,
 	syncActivities,
 	tick,
 	type Band,
@@ -21,6 +22,8 @@ import { resolveSpecies } from "./look-store";
 import { useProjectLooks } from "./look-store-live";
 import { hoverAt, HOVER_TOOLTIP_DELAY_MS, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
+import { Portal, PortalLabel, PortalTransit } from "./Portal";
+import { transitOpacity } from "./portal-transit";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
 import type { CompanionFeed } from "./feed";
 import { createMockFeed } from "./mock-feed";
@@ -150,6 +153,12 @@ export function CompanionStage({
 	}));
 
 	useEffect(() => {
+		// UN-SEEDED for this feed, so its first snapshot is a baseline rather than a
+		// lifecycle event. The overlay swaps the mock cast for the live roster by handing
+		// this component a different feed, and without this the swap reads as every mock
+		// pet's session ending and every real one's beginning — a dozen portals for
+		// nothing that happened. A reload gets the same protection from a fresh world.
+		setWorld((current) => (current.seeded ? { ...current, seeded: false } : current));
 		return source.subscribe((activities) => {
 			setWorld((current) => syncActivities(current, activities, Date.now(), Math.random));
 		});
@@ -202,6 +211,23 @@ export function CompanionStage({
 		frame = requestAnimationFrame(advance);
 		return () => cancelAnimationFrame(frame);
 	}, [flying]);
+
+	// A portal is short and it is on a clock, so it cannot be drawn on the engine's
+	// 500ms tick: a reduced-motion transition is 260ms and would fall between two of
+	// them entirely, and a pet whose exit had finished would linger up to half a second
+	// after it. While anything is in transit the frame loop retires them instead — and
+	// re-renders, which is what gives the reduced-motion fade a clock to read.
+	const transiting = world.pets.some((pet) => pet.transit !== undefined);
+	useEffect(() => {
+		if (!transiting) return;
+		let frame = 0;
+		const advance = () => {
+			setWorld((current) => advanceTransits(current, Date.now()));
+			frame = requestAnimationFrame(advance);
+		};
+		frame = requestAnimationFrame(advance);
+		return () => cancelAnimationFrame(frame);
+	}, [transiting]);
 
 	// Reduced motion and parking are inputs to the engine, not renderer special
 	// cases: that is what keeps "no walking" true rather than merely invisible.
@@ -390,6 +416,15 @@ export function CompanionStage({
 	}, [onInteractiveChange, onRequestLook]);
 
 	const painted = paintOrder(world.pets);
+	// Everything a pet SAYS, and everything you can ask it, belongs to a pet that is
+	// actually on the desktop. One that is arriving has not got here and one that is
+	// leaving has finished — a session narrating its way into a portal would be the
+	// flourish inventing status, which is the one thing it must never do.
+	const speaking = painted.filter((pet) => pet.transit === undefined);
+	// The clock the transitions are drawn against. Read here rather than kept in state
+	// because the frame loop above already re-renders on every frame a transition is
+	// running, and a second copy of "what time is it" is a second thing to keep in step.
+	const frameNow = transiting ? Date.now() : 0;
 
 	// The cards' DRAWN sizes, read back off the layer after it renders.
 	//
@@ -432,7 +467,7 @@ export function CompanionStage({
 	// How high each bubble has to sit to clear the ones before it. Computed for the
 	// whole band at once — a bubble cannot know on its own whether it is in the way.
 	const offsets = stackBubbles(
-		painted
+		speaking
 			.filter((pet) => spokenLine(pet, bubbleFor?.(pet.id) ?? null) !== null)
 			.map((pet) => bubbleBox(pet, cardSizes[pet.id])),
 	);
@@ -446,11 +481,11 @@ export function CompanionStage({
 		<div className="companion-stage">
 			<div className="companion-cast">
 				{painted.map((pet) => (
-					<ProcArt key={pet.id} pet={pet} cast={resolveCast(pet.id, pet.project)} />
+					<ProcArt key={pet.id} pet={pet} cast={resolveCast(pet.id, pet.project)} now={frameNow} />
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>
-				{painted.map((pet) => (
+				{speaking.map((pet) => (
 					<ProcChrome
 						key={pet.id}
 						pet={pet}
@@ -524,7 +559,7 @@ function spokenLine(pet: Pet, bubble: ComposedBubble | null): ComposedBubble | n
 // The look is resolved once for the whole band and handed down, rather than each
 // Proc subscribing to the store for itself: twelve subscriptions to one localStorage
 // key would all fire on the same change and re-render the same frame twelve times.
-function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
+function ProcArt({ pet, cast, now }: { pet: Pet; cast: CastMember; now: number }) {
 	const walking = pet.motion.kind === "walking";
 	const held = pet.motion.kind === "held";
 	const greeting = pet.meeting?.phase === "greeting";
@@ -536,6 +571,37 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 	// is the same fact the engine works from rather than a second copy of it.
 	const calling = pet.rally?.leaderId === pet.id;
 
+	// Coming through a portal, or going into one. The transition owns the pet's frame
+	// for as long as it runs: the art still draws whatever the session is doing, but a
+	// wrapper carries the leap and the ring is drawn behind it.
+	const transit = pet.transit;
+	const runFor = transit ? transit.until - transit.startedAt : 0;
+	// Only ever SEEN under reduced motion, where the keyframes are dead and this is the
+	// whole effect. Computed unconditionally so there is one code path rather than a
+	// reduced-motion branch somebody can forget to keep working.
+	const fade = transit ? transitOpacity(transit.phase, now - transit.startedAt, runFor) : undefined;
+
+	const figure = (
+		<Procs
+			cast={cast}
+			status={pet.status}
+			facing={pet.facing}
+			walking={walking}
+			held={held}
+			running={running}
+			greeting={greeting}
+			travelling={transit !== undefined}
+			bounce={pet.bounce}
+			size={PET_HEIGHT}
+			className="companion-proc-art"
+		/>
+	);
+	const label = (
+		<div className="companion-proc-name">
+			<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
+		</div>
+	);
+
 	return (
 		<div
 			data-proc
@@ -543,18 +609,17 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 			className="companion-proc"
 			style={{ ...placement(pet), zIndex: stackOrder(pet) }}
 		>
-			<Procs
-				cast={cast}
-				status={pet.status}
-				facing={pet.facing}
-				walking={walking}
-				held={held}
-				running={running}
-				greeting={greeting}
-				bounce={pet.bounce}
-				size={PET_HEIGHT}
-				className="companion-proc-art"
-			/>
+			{/* Keyed by WHEN the transition started, so a pet that leaves and comes
+			    straight back gets a second element and plays its arrival rather than
+			    inheriting the exit's progress. */}
+			{transit ? <Portal key={transit.startedAt} phase={transit.phase} durationMs={runFor} /> : null}
+			{transit ? (
+				<PortalTransit key={`leap-${transit.startedAt}`} phase={transit.phase} durationMs={runFor} opacity={fade}>
+					{figure}
+				</PortalTransit>
+			) : (
+				figure
+			)}
 			{/* Keyed by WHEN the shake landed, so a second rally is a second element and
 			    its rings play again instead of being skipped as unchanged. */}
 			{calling ? (
@@ -563,9 +628,13 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 					<span />
 				</div>
 			) : null}
-			<div className="companion-proc-name">
-				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
-			</div>
+			{transit ? (
+				<PortalLabel key={`name-${transit.startedAt}`} phase={transit.phase} durationMs={runFor} opacity={fade}>
+					{label}
+				</PortalLabel>
+			) : (
+				label
+			)}
 		</div>
 	);
 }

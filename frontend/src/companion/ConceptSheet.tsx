@@ -3,6 +3,7 @@ import type { SessionStatus } from "../renderer/types/workspace";
 import { Bubble } from "./Bubble";
 import { accessoriesFor, composeCast, HATS, palettesFor, type CastMember } from "./cast";
 import { NameTag } from "./NameTag";
+import { PortalSheet } from "./PortalSheet";
 import { Procs } from "./Procs";
 import { STATUS_LABELS } from "./preview";
 import { ALL_COMPANION_STATUSES } from "./scene";
@@ -78,6 +79,11 @@ export function ConceptSheet({ onClose }: { onClose: () => void }) {
 					close
 				</button>
 			</header>
+
+			{/* First, because it is the only thing on this sheet that is a MOMENT rather
+			    than a state: a still of a portal says nothing about whether the leap
+			    lands. */}
+			<PortalSheet tone={tone} />
 
 			<div style={{ ...SHEET, background: tone.background }}>
 				{SPECIES.map((species, index) => (

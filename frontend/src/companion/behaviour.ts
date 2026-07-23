@@ -17,6 +17,7 @@ import type { SessionStatus } from "../renderer/types/workspace";
 import type { CompanionActivity } from "./feed";
 import type { SessionKind } from "./live-roster";
 import { modeFor, type CompanionMode } from "./mode";
+import { beginTransit, type PortalTransit } from "./portal-transit";
 import { sceneAnimates } from "./scene";
 
 /** A stroll is 3-8 seconds long… */
@@ -231,6 +232,20 @@ export type Pet = {
 	 * and restarts the animation.
 	 */
 	bounce?: { seq: number; strength: number };
+	/**
+	 * This pet is coming through a portal, or going into one. See {@link syncActivities}.
+	 *
+	 * The only two moments on this desktop that are about the SESSION rather than about
+	 * what the session is doing: it started, and it is over. Everything else here —
+	 * status, bubbles, the walk — is a running session's state, and none of it may put
+	 * a pet into one of these.
+	 *
+	 * While it is set the pet is not available: it is not a walker, it starts nothing,
+	 * it cannot be picked up, and it is not somebody another pet can be sent to meet.
+	 * It is on its way in or on its way out, and `until` says when that stops being
+	 * true — absolutely, so no sequence of snapshots can strand one here.
+	 */
+	transit?: PortalTransit;
 };
 
 /**
@@ -284,12 +299,28 @@ export type World = {
 	reducedMotion: boolean;
 	/** Occluded, another app is fullscreen, or the display slept: hold everything. */
 	parked: boolean;
+	/**
+	 * Whether a roster has ever landed on this world.
+	 *
+	 * The one fact that separates "a session just started" from "this is what was
+	 * already running". A snapshot arriving on an UNSEEDED world is the baseline: its
+	 * sessions are the ones that were there before anybody was watching, and they are
+	 * placed without a portal. Every snapshot after it is a change, and a change is
+	 * what a portal is allowed to claim.
+	 *
+	 * This is what makes an overlay reload cost nothing: a fresh world is unseeded, so
+	 * the roster it loads with is a baseline and six pets do not replay their birth
+	 * because the window was reopened. The stage un-seeds on every re-subscribe for the
+	 * same reason — the swap from the mock cast to the real one is a new feed's first
+	 * snapshot, not twelve lifecycle events.
+	 */
+	seeded: boolean;
 };
 
 export type Rng = () => number;
 
 export function createWorld(band: Band): World {
-	return { pets: [], band, spacing: DEFAULT_SPACING_PX, reducedMotion: false, parked: false };
+	return { pets: [], band, spacing: DEFAULT_SPACING_PX, reducedMotion: false, parked: false, seeded: false };
 }
 
 export function walkingCount(world: World): number {
@@ -304,7 +335,9 @@ export function walkingCount(world: World): number {
  * strolling instead of adding to it.
  */
 export function animatingCount(world: World): number {
-	return world.pets.filter((pet) => pet.motion.kind !== "standing" || sceneAnimates(pet.status)).length;
+	return world.pets.filter(
+		(pet) => pet.motion.kind !== "standing" || pet.transit !== undefined || sceneAnimates(pet.status),
+	).length;
 }
 
 /**
@@ -526,9 +559,18 @@ function canWander(status: SessionStatus): boolean {
 }
 
 /**
- * Reconcile the cast against the activity source: add Procs for new sessions, drop
- * Procs whose session is gone, and carry position/timers through a status change so
- * a Proc never teleports because its PR moved on.
+ * Reconcile the cast against the activity source: add Procs for new sessions, send
+ * Procs whose session is gone out through a portal, and carry position/timers through
+ * a status change so a Proc never teleports because its PR moved on.
+ *
+ * This is where the two lifecycle moments are DECIDED, and the decision is made from
+ * one thing only: whether a session id is in this snapshot and was not in the last, or
+ * the other way round. Not from status, not from a bubble, not from the connection —
+ * a portal has to mean a session really started or really ended, or it is a lie told
+ * with an animation, and the failure mode of that is a desktop that celebrates a
+ * spawn every time the window reloads.
+ *
+ * The first snapshot on an unseeded world is the BASELINE (see {@link World.seeded}).
  */
 export function syncActivities(world: World, activities: CompanionActivity[], now: number, rng: Rng): World {
 	const existing = new Map(world.pets.map((pet) => [pet.id, pet]));
@@ -537,9 +579,40 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 	// one name chip painted over the other. First reading wins, which is what a Map
 	// built from the snapshot would give, and it is stable.
 	const seen = new Set<string>();
+	// Everyone this snapshot no longer has. Worked out FIRST, because they are still
+	// standing on the band for as long as their exit runs and a Proc arriving in the
+	// same snapshot has to be placed clear of them — a pet dropped on top of one that
+	// is still leaving is exactly the overlap the crowding rules exist to prevent, and
+	// it would be the one case nobody thought to look for.
+	//
+	// On an UNSEEDED world there is nothing to see out: whatever was standing there was
+	// not a roster, it was a placeholder — the mock cast the overlay shows while the
+	// daemon starts. Those sessions did not end, they were never real, and marching six
+	// of them into portals the instant the true roster lands would be the same lie in
+	// the other direction.
+	const inSnapshot = new Set(activities.map((activity) => activity.sessionId));
+	const leaving = world.pets
+		.filter((pet) => world.seeded && !inSnapshot.has(pet.id))
+		.map((pet) =>
+			pet.transit?.phase === "leaving"
+				? pet
+				: {
+						...pet,
+						// The exit overrides everything the pet could have been doing, and
+						// deliberately: the session is over, so being anchored at a desk,
+						// mid-conversation, answering a roll-call or sitting in the human's hand
+						// are all states about a session that no longer exists. The same override
+						// the rally and the meeting already claim, for a better reason than either.
+						motion: { kind: "standing" } as PetMotion,
+						meeting: undefined,
+						rally: undefined,
+						summonedTo: undefined,
+						transit: beginTransit("leaving", now, world.reducedMotion),
+					},
+		);
 	// Grows as the roster is walked, so two Procs appearing in the same snapshot are
 	// placed clear of each other and not just of the ones already on screen.
-	const placed: Pet[] = [];
+	const placed: Pet[] = [...leaving];
 	const pets = activities
 		.filter((activity) => {
 			if (seen.has(activity.sessionId)) return false;
@@ -562,9 +635,29 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 					facing: "front",
 					motion: { kind: "standing" },
 					restUntil: pickRest(now, rng),
+					// A session that has just started leaps out of a portal. One that was
+					// ALREADY running when this world was created did not just start — it is
+					// simply the first time anybody asked.
+					transit: world.seeded ? beginTransit("arriving", now, world.reducedMotion) : undefined,
 				};
 				placed.push(born);
 				return born;
+			}
+			// Back before its exit had finished: a flap in the roster, usually a poll that
+			// came back empty. It comes out of the portal it was going into — truthful, the
+			// session is running — and it cannot be stranded, because an arrival ends on
+			// its own clock exactly like any other.
+			if (prev.transit?.phase === "leaving") {
+				const returned: Pet = {
+					...prev,
+					status: activity.status,
+					name: activity.name ?? prev.name,
+					project: activity.project ?? prev.project,
+					kind: activity.kind ?? prev.kind,
+					transit: beginTransit("arriving", now, world.reducedMotion),
+				};
+				placed.push(returned);
+				return returned;
 			}
 			const renamed =
 				(activity.name ?? "") !== prev.name ||
@@ -596,12 +689,23 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 			placed.push(next);
 			return next;
 		});
-	return { ...world, pets };
+	// The leavers are NOT dropped — a pet that vanishes between two frames is the thing
+	// this feature exists to replace — they stay on the band with an exit running, and
+	// `advanceTransits` takes them off when it is over.
+	return { ...world, pets: [...pets, ...leaving], seeded: true };
 }
 
-/** True when this Proc is busy with something the engine must not interrupt. */
+/**
+ * True when this Proc is busy with something the engine must not interrupt.
+ *
+ * A pet mid-portal is the strongest case of it: on the way IN it is not on the desktop
+ * yet, and on the way OUT its session has already ended. Neither is something to send
+ * a message to, gather into a huddle, or pick up.
+ */
 function isBusy(pet: Pet): boolean {
-	return pet.motion.kind === "held" || pet.meeting !== undefined || pet.rally !== undefined;
+	return (
+		pet.motion.kind === "held" || pet.meeting !== undefined || pet.rally !== undefined || pet.transit !== undefined
+	);
 }
 
 /**
@@ -719,8 +823,9 @@ export function startRally(world: World, leaderId: string, now: number): World {
 	const leader = world.pets.find((pet) => pet.id === leaderId);
 	if (!leader || leader.kind !== "orchestrator" || leader.project === "") return world;
 	// Already calling. A second shake mid-roll-call would restage an event that is
-	// still happening, and re-cut every runner's destination underneath it.
-	if (leader.rally || leader.meeting) return world;
+	// still happening, and re-cut every runner's destination underneath it. A leader
+	// mid-portal cannot call one at all — it is arriving or its session has ended.
+	if (leader.rally || leader.meeting || leader.transit) return world;
 
 	const centre = Math.min(world.band.maxX, Math.max(world.band.minX, drawnX(leader, now)));
 	// `isBusy` covers the three things a roll-call must not interrupt: a Proc in the
@@ -891,6 +996,10 @@ function advanceMeeting(pet: Pet, now: number, rng: Rng): Pet {
  * this puts down whatever was already in hand.
  */
 export function grabPet(world: World, petId: string, now: number): World {
+	// Mid-portal there is nothing to take hold of: it is either not out yet or already
+	// on its way. Refusing here is what keeps `dragPet` and the throw honest too —
+	// both work off `held`, which this is the only way into.
+	if (world.pets.find((pet) => pet.id === petId)?.transit) return world;
 	return {
 		...world,
 		pets: world.pets.map((pet) => {
@@ -1080,6 +1189,31 @@ function kickUpDust(pet: Pet, landingSpeed: number): { seq: number; strength: nu
 	};
 }
 
+/**
+ * Retire the lifecycle transitions that have run their course.
+ *
+ * A pet that has LANDED rejoins normal behaviour here — it is a pet like any other
+ * from this instant. A pet that has LEFT is taken off the band here, and this is the
+ * only place a pet is ever removed: `syncActivities` no longer drops anybody, it only
+ * marks them as leaving, so "gone" has exactly one meaning and one moment.
+ *
+ * Separate from {@link tick} because the renderer runs it on animation frames while
+ * anything is in transit. The engine's own tick is 500ms, and a reduced-motion
+ * transition is 260ms — on the tick alone a whole transition could fall between two of
+ * them and never be drawn at all.
+ *
+ * Parking does NOT hold this back. An `until` that only elapses while somebody is
+ * looking is not absolute, and a display asleep through an exit would wake to a pet
+ * standing in a portal for a session that ended minutes ago.
+ */
+export function advanceTransits(world: World, now: number): World {
+	if (!world.pets.some((pet) => pet.transit)) return world;
+	const pets = world.pets
+		.filter((pet) => !(pet.transit?.phase === "leaving" && now >= pet.transit.until))
+		.map((pet) => (pet.transit && now >= pet.transit.until ? { ...pet, transit: undefined } : pet));
+	return { ...world, pets };
+}
+
 /** Advance the world to `now`. Pure: same inputs, same output. */
 export function tick(world: World, now: number, rng: Rng): World {
 	// 1. Settle every stroll that has finished (or that parking cut short), and put
@@ -1087,7 +1221,10 @@ export function tick(world: World, now: number, rng: Rng): World {
 	//    animation frames, and animation frames STOP when the window is occluded or
 	//    the display sleeps — so without this a thrown Proc hangs in mid-air until
 	//    somebody looks at the desktop again.
-	let pets = world.pets.map((pet) => settle(pet, now, world, rng));
+	// 0. Finish the lifecycle transitions that are over.
+	let pets = advanceTransits(world, now).pets;
+
+	pets = pets.map((pet) => settle(pet, now, world, rng));
 	if (world.parked) pets = pets.map((pet) => land(pet, now, rng));
 
 	// 2. Move any conversation on. Before the crowding rescue, so a Proc that has
@@ -1175,6 +1312,9 @@ function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolea
 	// own until it is let go / the conversation is over.
 	if (pet.motion.kind !== "standing") return pet;
 	if (pet.meeting || pet.rally) return pet;
+	// Mid-portal it is emerging or leaving, not roaming. It joins in on the tick its
+	// transit ends, which is also the tick it becomes a normal pet in every other way.
+	if (pet.transit) return pet;
 	if (world.parked) return pet;
 
 	const mode: CompanionMode = modeFor(pet.status);

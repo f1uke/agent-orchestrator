@@ -29,6 +29,7 @@ import {
 	type World,
 } from "./behaviour";
 import type { SessionKind } from "./live-roster";
+import { PORTAL_IN_MS, PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
 
 const BAND = { minX: 0, maxX: 1000 };
 const T0 = 1_000_000;
@@ -100,8 +101,186 @@ describe("syncActivities", () => {
 	it("removes the Proc when its session leaves the feed", () => {
 		let next = syncActivities(world(), [activity("a", "pr_open"), activity("b", "draft")], T0, half);
 		next = syncActivities(next, [activity("b", "draft")], T0 + 1_000, half);
+		// It leaves through a portal rather than blinking out, so it is still on the
+		// band until that has played; the tick past its end is what removes it.
+		next = tick(next, T0 + 1_000 + PORTAL_OUT_MS, half);
 
 		expect(next.pets.map((p) => p.id)).toEqual(["b"]);
+	});
+});
+
+// The lifecycle a portal dramatises. Two moments only — a session that appeared and a
+// session that is gone — and the whole risk of the feature is claiming either one when
+// it did not happen: a desktop that re-births its whole cast because the overlay
+// reloaded is worse than no animation at all.
+describe("portal transitions", () => {
+	it("does NOT portal in the sessions that were already running when the overlay started", () => {
+		const next = syncActivities(world(), [activity("a", "working"), activity("b", "idle")], T0, half);
+
+		expect(next.pets.map((p) => p.transit)).toEqual([undefined, undefined]);
+		expect(next.seeded).toBe(true);
+	});
+
+	it("portals in a session that appears AFTER that first snapshot", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [activity("a", "working"), activity("b", "working")], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit).toBeUndefined();
+		expect(petById(next, "b").transit).toEqual({
+			phase: "arriving",
+			startedAt: T0 + 4_000,
+			until: T0 + 4_000 + PORTAL_IN_MS,
+		});
+	});
+
+	it("treats the first snapshot as a baseline even when it is empty", () => {
+		let next = syncActivities(world(), [], T0, half);
+		next = syncActivities(next, [activity("a", "working")], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit?.phase).toBe("arriving");
+	});
+
+	it("keeps a pet whose session is gone on the band, leaving, rather than vanishing it", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit).toEqual({
+			phase: "leaving",
+			startedAt: T0 + 4_000,
+			until: T0 + 4_000 + PORTAL_OUT_MS,
+		});
+	});
+
+	it("removes a leaving pet once its portal has finished, and not before", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [], T0 + 4_000, half);
+
+		expect(tick(next, T0 + 4_000 + PORTAL_OUT_MS - 1, half).pets).toHaveLength(1);
+		expect(tick(next, T0 + 4_000 + PORTAL_OUT_MS, half).pets).toHaveLength(0);
+	});
+
+	it("hands an arriving pet back to normal behaviour when it lands", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [activity("a", "working"), activity("b", "working")], T0 + 4_000, half);
+		next = tick(next, T0 + 4_000 + PORTAL_IN_MS, half);
+
+		expect(petById(next, "b").transit).toBeUndefined();
+	});
+
+	it("does not portal anything on a repeated snapshot, however often the feed polls", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		for (let poll = 1; poll <= 5; poll++) {
+			next = syncActivities(next, [activity("a", "working")], T0 + poll * 4_000, half);
+		}
+
+		expect(petById(next, "a").transit).toBeUndefined();
+	});
+
+	it("does not portal on a status change — a portal is about the session, not its state", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [activity("a", "needs_input")], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit).toBeUndefined();
+	});
+
+	// The flap: a poll drops a session and the next one has it back. Nothing may be
+	// left half-portaled, and nothing may be stuck — every transit carries an absolute
+	// end, so the worst case is one extra arrival.
+	it("brings a pet back out of the portal it was leaving by, when its session returns", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [], T0 + 4_000, half);
+		next = syncActivities(next, [activity("a", "working")], T0 + 4_400, half);
+
+		expect(petById(next, "a").transit).toEqual({
+			phase: "arriving",
+			startedAt: T0 + 4_400,
+			until: T0 + 4_400 + PORTAL_IN_MS,
+		});
+		expect(tick(next, T0 + 4_400 + PORTAL_IN_MS, half).pets).toHaveLength(1);
+		expect(petById(tick(next, T0 + 4_400 + PORTAL_IN_MS, half), "a").transit).toBeUndefined();
+	});
+
+	it("gives a leaving pet no second portal when the same empty snapshot arrives again", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [], T0 + 4_000, half);
+		next = syncActivities(next, [], T0 + 8_000, half);
+
+		expect(petById(next, "a").transit?.startedAt).toBe(T0 + 4_000);
+	});
+
+	// A leaving pet is still STANDING there for the length of its exit, so it still
+	// takes up room. Placing an arrival against the snapshot alone would drop it on top
+	// of one on its way out — the one overlap nobody would think to look for, because
+	// the pet it collides with is not in the roster any more.
+	it("places a Proc arriving in the same snapshot clear of the one that is still leaving", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = { ...next, pets: next.pets.map((pet) => ({ ...pet, x: 500 })) };
+		next = syncActivities(next, [activity("b", "working")], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit?.phase).toBe("leaving");
+		expect(Math.abs(petById(next, "b").x - petById(next, "a").x)).toBeGreaterThanOrEqual(next.spacing);
+	});
+
+	it("counts a pet in transit as animating, so a burst of portals cannot beat the cap", () => {
+		let next = syncActivities(world(), [], T0, half);
+		next = syncActivities(next, [activity("a", "pr_open")], T0 + 4_000, half);
+
+		expect(animatingCount(next)).toBe(1);
+		expect(walkingCount(next)).toBe(0);
+	});
+
+	it("keeps a pet in transit out of every stroll the engine would otherwise start", () => {
+		let next = syncActivities(world(), [], T0, half);
+		next = syncActivities(next, [activity("a", "pr_open")], T0 + 4_000, half);
+		next = { ...next, pets: next.pets.map((pet) => ({ ...pet, restUntil: T0 })) };
+		next = tick(next, T0 + 4_100, half);
+
+		expect(petById(next, "a").motion.kind).toBe("standing");
+	});
+
+	it("cannot be picked up mid-portal — it is not on the desktop to be grabbed", () => {
+		let next = syncActivities(world(), [], T0, half);
+		next = syncActivities(next, [activity("a", "pr_open")], T0 + 4_000, half);
+		next = grabPet(next, "a", T0 + 4_100);
+
+		expect(petById(next, "a").motion.kind).toBe("standing");
+	});
+
+	// An anchored pet is one the engine refuses to move. Its session ending is not the
+	// engine moving it — the session is over, and the exit overrides the anchor exactly
+	// the way a rally or a message does.
+	it("takes an anchored pet out of its place when its session ends", () => {
+		let next = syncActivities(world(), [activity("a", "todo")], T0, half);
+		next = syncActivities(next, [], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit?.phase).toBe("leaving");
+	});
+
+	it("takes a pet out of the human's hand, and out of a meeting, to leave", () => {
+		let next = syncActivities(world(), [activity("a", "working"), activity("b", "working")], T0, half);
+		next = startConversation(next, { from: "b", to: "a", line: "hello", now: T0 + 100 });
+		next = grabPet(next, "a", T0 + 200);
+		next = syncActivities(next, [activity("b", "working")], T0 + 4_000, half);
+
+		const leaver = petById(next, "a");
+		expect(leaver.transit?.phase).toBe("leaving");
+		expect(leaver.motion.kind).toBe("standing");
+		expect(leaver.meeting).toBeUndefined();
+	});
+
+	it("will not stage a conversation with an end that is mid-portal", () => {
+		let next = syncActivities(world(), [activity("a", "working")], T0, half);
+		next = syncActivities(next, [activity("a", "working"), activity("b", "working")], T0 + 4_000, half);
+		const staged = startConversation(next, { from: "a", to: "b", line: "hello", now: T0 + 4_100 });
+
+		expect(staged).toBe(next);
+	});
+
+	it("shortens the whole transition under reduced motion", () => {
+		let next = syncActivities({ ...world(), reducedMotion: true }, [], T0, half);
+		next = syncActivities(next, [activity("a", "working")], T0 + 4_000, half);
+
+		expect(petById(next, "a").transit?.until).toBe(T0 + 4_000 + PORTAL_REDUCED_MS);
 	});
 });
 
