@@ -129,6 +129,30 @@ describe("CompanionStage", () => {
 		expect(container.querySelector('[data-session="c"] .companion-proc-portal')).not.toBeNull();
 	});
 
+	// What the human actually saw on the live overlay, which the lab never showed because
+	// the lab never runs more sessions than the band can hold: spawning a worker drew TWO
+	// portals — the right one at the new Proc, and a second one standing on its own with
+	// no pet in it at all. The second was a session the cap had shoved off the band being
+	// seen out as though it had ended; by the time you look, the Proc it is closing over
+	// has already gone into it, so what is left is a ring over an empty spot.
+	it("draws ONE portal for a spawn on a full band, on the new Proc and nowhere else", () => {
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+		const full = Array.from({ length: 14 }, (_, i) => ({ sessionId: `s${i}`, status: "pr_open" as const }));
+
+		push(full);
+		expect(container.querySelectorAll(".companion-proc-portal")).toHaveLength(0);
+
+		push([...full, { sessionId: "spawned", status: "todo" }]);
+
+		const portals = container.querySelectorAll(".companion-proc-portal");
+		expect(portals).toHaveLength(1);
+		const proc = portals[0].closest<HTMLElement>("[data-proc]");
+		expect(proc?.dataset.session).toBe("spawned");
+		// And it is drawn where its Proc actually stands, not at the band's origin.
+		expect(proc?.style.transform).toMatch(/^translate3d\((?!0px)/);
+	});
+
 	it("does not portal anything when the same roster is polled again", () => {
 		const { feed, push } = stubFeed();
 		const { container } = render(<CompanionStage feed={feed} />);

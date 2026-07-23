@@ -375,6 +375,17 @@ export type World = {
 	 * snapshot, not twelve lifecycle events.
 	 */
 	seeded: boolean;
+	/**
+	 * Every session the last snapshot carried: the ones ON the band, and the ones the
+	 * cap could not find a place for.
+	 *
+	 * `pets` cannot answer "was this session already running?", because a session past
+	 * the cap is alive and has no Proc. Without this, the moment a place came free the
+	 * session that took it would be indistinguishable from one that had just started,
+	 * and would leap out of a portal to announce something that happened ten minutes
+	 * ago. A portal is about a session's LIFE, never about its seat.
+	 */
+	roster: string[];
 };
 
 export type Rng = () => number;
@@ -388,6 +399,7 @@ export function createWorld(band: Band): World {
 		reducedMotion: false,
 		parked: false,
 		seeded: false,
+		roster: [],
 	};
 }
 
@@ -627,6 +639,76 @@ function canWander(status: SessionStatus): boolean {
 }
 
 /**
+ * More Procs than this and the band stops being readable — they crowd, the names
+ * collide, and the thing stops being glanceable, which is its only job.
+ *
+ * It lives HERE, with the world, rather than beside the roster it used to trim. The
+ * cap is a fact about how much band there is to draw on, and the reconcile is the only
+ * place that can apply it without lying: it alone knows which sessions already have a
+ * Proc, so it alone can tell "this session ended" from "this session could not be fitted
+ * on screen". Applied a step earlier, on the roster, the two were the same thing — and a
+ * session shoved off the band by the cap left through a full portal, announcing an end
+ * that had not happened.
+ */
+export const MAX_PETS = 12;
+
+/**
+ * When the cap bites, keep the ones that want something from you first, then the ones
+ * doing something, then the rest. Dropping the Proc that is asking for help would be
+ * the worst possible thing to drop.
+ */
+function attentionRank(status: SessionStatus): number {
+	const mode = modeFor(status);
+	if (mode === "summon") return 0;
+	if (mode === "anchor") return 1;
+	if (mode === "amble") return 2;
+	return 3;
+}
+
+/**
+ * Which sessions get a Proc on the band.
+ *
+ * The rule that matters is not who is picked but how STICKY the picking is: a Proc may
+ * only lose its place when the roster itself changes. Ranking the whole roster afresh
+ * every snapshot — which is what this used to do — meant a status flip anywhere (a CI
+ * poll, an idle timer) reshuffled the cast, and every reshuffle read to the reconcile as
+ * one session ending and another beginning. On a desktop sitting a few sessions over the
+ * cap that was a pair of portals on a timer, for nothing that had happened.
+ *
+ * So, in order:
+ *   1. a Proc mid-portal, which cannot be taken off the band without leaving its ring
+ *      closing over an empty spot;
+ *   2. sessions that have genuinely just started — a spawn you asked for has to show up,
+ *      even on a full band;
+ *   3. the Procs already standing there;
+ *   4. the sessions still waiting for a place.
+ * Attention rank orders each group, so the one asking for you is still the last to be
+ * dropped and the first to be let in.
+ */
+function bandMembers(
+	world: World,
+	roster: CompanionActivity[],
+	existing: Map<string, Pet>,
+	known: Set<string>,
+): Set<string> {
+	if (roster.length <= MAX_PETS) return new Set(roster.map((activity) => activity.sessionId));
+	const byRank = (group: CompanionActivity[]) =>
+		[...group].sort((a, b) => attentionRank(a.status) - attentionRank(b.status));
+	const groups: CompanionActivity[][] = [[], [], [], []];
+	for (const activity of roster) {
+		const pet = existing.get(activity.sessionId);
+		if (pet?.transit) groups[0].push(activity);
+		else if (pet) groups[2].push(activity);
+		// An unseeded world has no history to read, so nothing on it has "just started":
+		// its first snapshot is the baseline, and every session on it is simply found.
+		else if (world.seeded && !known.has(activity.sessionId)) groups[1].push(activity);
+		else groups[3].push(activity);
+	}
+	const order = groups.flatMap(byRank);
+	return new Set(order.slice(0, MAX_PETS).map((activity) => activity.sessionId));
+}
+
+/**
  * Reconcile the cast against the activity source: add Procs for new sessions, send
  * Procs whose session is gone out through a portal, and carry position/timers through
  * a status change so a Proc never teleports because its PR moved on.
@@ -638,6 +720,14 @@ function canWander(status: SessionStatus): boolean {
  * with an animation, and the failure mode of that is a desktop that celebrates a
  * spawn every time the window reloads.
  *
+ * Which is why `activities` is EVERY live session and not the ones that fit. The cap is
+ * applied here, a step later, against the band — because a roster already trimmed to what
+ * fits cannot answer the question this function is asking. A session held back for want
+ * of room is missing from a trimmed roster in exactly the way a session that ended is,
+ * and it used to be seen out through a portal for it: a ring closing over a session that
+ * was working away perfectly well, and (by the time you looked) over nothing at all,
+ * because the Proc had already gone into it.
+ *
  * The first snapshot on an unseeded world is the BASELINE (see {@link World.seeded}).
  */
 export function syncActivities(world: World, activities: CompanionActivity[], now: number, rng: Rng): World {
@@ -647,6 +737,21 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 	// one name chip painted over the other. First reading wins, which is what a Map
 	// built from the snapshot would give, and it is stable.
 	const seen = new Set<string>();
+	const roster = activities.filter((activity) => {
+		if (seen.has(activity.sessionId)) return false;
+		seen.add(activity.sessionId);
+		return true;
+	});
+	// Every session that EXISTS, whether or not the band has room for it. This is the
+	// list the lifecycle is read from, and keeping it separate from the list of Procs
+	// is the whole fix: an id that is gone from HERE is a session that ended, while an
+	// id that is merely off the band is a session that is running perfectly well
+	// somewhere the desktop has no room to draw.
+	const live = new Set(roster.map((activity) => activity.sessionId));
+	// What the last snapshot knew about, so "new to the band" and "newly alive" cannot
+	// be confused.
+	const known = new Set(world.roster);
+	const onBand = bandMembers(world, roster, existing, known);
 	// Everyone this snapshot no longer has. Worked out FIRST, because they are still
 	// standing on the band for as long as their exit runs and a Proc arriving in the
 	// same snapshot has to be placed clear of them — a pet dropped on top of one that
@@ -658,9 +763,13 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 	// daemon starts. Those sessions did not end, they were never real, and marching six
 	// of them into portals the instant the true roster lands would be the same lie in
 	// the other direction.
-	const inSnapshot = new Set(activities.map((activity) => activity.sessionId));
+	//
+	// A Proc that has merely lost its PLACE is not in here. It is taken off the band
+	// without a portal, because its session is still running: a ring closing over a
+	// session that is alive is the flourish inventing a fact, and it is exactly the
+	// ghost this fix exists to remove.
 	const leaving = world.pets
-		.filter((pet) => world.seeded && !inSnapshot.has(pet.id))
+		.filter((pet) => world.seeded && !live.has(pet.id))
 		.map((pet) =>
 			pet.transit?.phase === "leaving"
 				? pet
@@ -678,15 +787,21 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 						transit: beginTransit("leaving", now, world.reducedMotion),
 					},
 		);
-	// Grows as the roster is walked, so two Procs appearing in the same snapshot are
-	// placed clear of each other and not just of the ones already on screen.
-	const placed: Pet[] = [...leaving];
-	const pets = activities
-		.filter((activity) => {
-			if (seen.has(activity.sessionId)) return false;
-			seen.add(activity.sessionId);
-			return true;
-		})
+	const standing = roster
+		.filter((activity) => onBand.has(activity.sessionId))
+		.map((activity) => existing.get(activity.sessionId))
+		.filter((pet): pet is Pet => pet !== undefined);
+	// Every Proc that will still be on the band once this snapshot is applied, seeded
+	// BEFORE the roster is walked and grown as new ones are placed.
+	//
+	// Building it up as the walk went along looked equivalent and was not: a Proc near
+	// the FRONT of the snapshot was placed clear only of the handful listed before it,
+	// so which half of the band a new Proc dodged came down to the order the daemon
+	// happened to return its sessions in — and a new Proc could land squarely on one
+	// listed after it.
+	const placed: Pet[] = [...leaving, ...standing];
+	const pets = roster
+		.filter((activity) => onBand.has(activity.sessionId))
 		.map((activity) => {
 			const prev = existing.get(activity.sessionId);
 			if (!prev) {
@@ -705,8 +820,13 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 					restUntil: pickRest(now, rng),
 					// A session that has just started leaps out of a portal. One that was
 					// ALREADY running when this world was created did not just start — it is
-					// simply the first time anybody asked.
-					transit: world.seeded ? beginTransit("arriving", now, world.reducedMotion) : undefined,
+					// simply the first time anybody asked. Nor did one the cap had been
+					// holding off the band until a place came free: it has been working away
+					// this whole time, and a portal would announce a spawn that never was.
+					transit:
+						world.seeded && !known.has(activity.sessionId)
+							? beginTransit("arriving", now, world.reducedMotion)
+							: undefined,
 				};
 				placed.push(born);
 				return born;
@@ -724,17 +844,13 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 					kind: activity.kind ?? prev.kind,
 					transit: beginTransit("arriving", now, world.reducedMotion),
 				};
-				placed.push(returned);
 				return returned;
 			}
 			const renamed =
 				(activity.name ?? "") !== prev.name ||
 				(activity.project ?? "") !== prev.project ||
 				(activity.kind ?? "worker") !== prev.kind;
-			if (prev.status === activity.status && !renamed) {
-				placed.push(prev);
-				return prev;
-			}
+			if (prev.status === activity.status && !renamed) return prev;
 			const next = {
 				...prev,
 				status: activity.status,
@@ -754,13 +870,12 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 				// called it rather than past it.
 				facing: prev.meeting || prev.rally || canWander(activity.status) ? prev.facing : ("front" as Facing),
 			};
-			placed.push(next);
 			return next;
 		});
 	// The leavers are NOT dropped — a pet that vanishes between two frames is the thing
 	// this feature exists to replace — they stay on the band with an exit running, and
 	// `advanceTransits` takes them off when it is over.
-	return { ...world, pets: [...pets, ...leaving], seeded: true };
+	return { ...world, pets: [...pets, ...leaving], seeded: true, roster: [...live] };
 }
 
 /**
@@ -1312,8 +1427,13 @@ function kickUpDust(pet: Pet, landingSpeed: number): { seq: number; strength: nu
  *
  * A pet that has LANDED rejoins normal behaviour here — it is a pet like any other
  * from this instant. A pet that has LEFT is taken off the band here, and this is the
- * only place a pet is ever removed: `syncActivities` no longer drops anybody, it only
- * marks them as leaving, so "gone" has exactly one meaning and one moment.
+ * only place a pet is removed BECAUSE ITS SESSION ENDED: `syncActivities` never drops a
+ * leaver, it only marks it, so "the session is gone" has exactly one meaning and one
+ * moment.
+ *
+ * The one other way a Proc leaves the band is losing its PLACE to the cap, and that one
+ * is instant and silent on purpose — nothing ended, there was simply no room to draw it,
+ * and a portal there is the lie this whole mechanism exists to avoid telling.
  *
  * Separate from {@link tick} because the renderer runs it on animation frames while
  * anything is in transit. The engine's own tick is 500ms, and a reduced-motion

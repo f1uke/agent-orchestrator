@@ -1,7 +1,6 @@
 import type { SessionStatus } from "../renderer/types/workspace";
 import type { components } from "../api/schema";
 import type { CompanionActivity } from "./feed";
-import { modeFor } from "./mode";
 
 // Which Procs exist, and what state they are in — read from the SESSIONS API, not
 // from the activity feed.
@@ -29,13 +28,6 @@ export type LiveSession = {
 export type SessionKind = "orchestrator" | "worker";
 
 /**
- * More Procs than this and the band stops being readable — they crowd, the names
- * collide, and the thing stops being glanceable, which is its only job. Sessions
- * beyond the cap are dropped from the OVERLAY only; nothing else in AO changes.
- */
-export const MAX_PETS = 12;
-
-/**
  * True only when the agent itself raised a prompt and is genuinely blocked on the
  * human.
  *
@@ -56,33 +48,24 @@ function overlayStatus(session: LiveSession): SessionStatus {
 	return session.status;
 }
 
-// When the cap bites, keep the ones that want something from you first, then the
-// ones doing something, then the rest. Dropping the pet that is asking for help
-// would be the worst possible thing to drop.
-function attentionRank(status: SessionStatus): number {
-	const mode = modeFor(status);
-	if (mode === "summon") return 0;
-	if (mode === "anchor") return 1;
-	if (mode === "amble") return 2;
-	return 3;
-}
-
-/** The live roster, as the behaviour engine's `CompanionActivity` list. */
+/**
+ * The live roster, as the behaviour engine's `CompanionActivity` list.
+ *
+ * EVERY live session, including the ones the desktop will turn out to have no room to
+ * draw. Trimming it to what fits used to happen here, and that was the ghost-portal bug:
+ * downstream, "not in this list" is how a session's END is recognised, so a session held
+ * back by the cap was read as a session that had finished and was seen out through a
+ * portal. How many Procs fit is a question about the BAND, and it is answered where the
+ * band is — see `MAX_PETS` and `bandMembers` in `behaviour.ts`.
+ */
 export function sessionsToActivities(sessions: LiveSession[]): CompanionActivity[] {
-	const live = sessions
+	return sessions
 		.filter((session) => !session.isTerminated)
-		.map((session) => ({ session, status: overlayStatus(session) }));
-
-	const kept =
-		live.length <= MAX_PETS
-			? live
-			: [...live].sort((a, b) => attentionRank(a.status) - attentionRank(b.status)).slice(0, MAX_PETS);
-
-	return kept.map(({ session, status }) => ({
-		sessionId: session.id,
-		status,
-		name: session.name,
-		project: session.projectName ?? "",
-		kind: session.kind,
-	}));
+		.map((session) => ({
+			sessionId: session.id,
+			status: overlayStatus(session),
+			name: session.name,
+			project: session.projectName ?? "",
+			kind: session.kind,
+		}));
 }
