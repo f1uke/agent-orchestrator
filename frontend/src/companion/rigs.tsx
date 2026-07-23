@@ -1344,7 +1344,12 @@ function ChickWorn({ worn, colour }: { worn: string; colour: string }) {
 			// jagged band in linen it vanished into a pale chick and left nothing on screen
 			// but the zigzag of its own outline, which read as a spiky crown. Half an
 			// eggshell is a shape, and the shape is what has to be there.
-			d="M17 32 L24 22 L31 31 L38 19 L45 29 L52 18 L59 29 L66 20 L73 30 L79 21 L79 16 C 74 4 62 -2 48 -2 C 34 -2 22 4 17 16 Z"
+			//
+			// ⚠ And it sits DOWN ON the skull, not above it. Drawn with its broken edge at
+			// the body's own top line it floated clear of the bird and read as a hat being
+			// held over its head; the jagged edge has to cut ACROSS the crown, the way half
+			// an eggshell actually sits on the chick that just came out of it.
+			d="M17 45 L24 35 L31 44 L38 32 L45 42 L52 31 L59 42 L66 33 L73 43 L79 34 L79 29 C 74 17 62 11 48 11 C 34 11 22 17 17 29 Z"
 			fill={PROP_COLOURS.paper}
 			strokeLinejoin="round"
 			{...RIM}

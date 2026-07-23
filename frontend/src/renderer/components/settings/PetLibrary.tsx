@@ -222,6 +222,10 @@ export function PetLibrary() {
 
 function SessionRow({ session, active, onSelect }: { session: LibrarySession; active: boolean; onSelect: () => void }) {
 	const looks = useLookOverrides();
+	// ⚠ The creature too, not just the session's colour. Without it this list drew every
+	// session as a Proc while the picker beside it and the band on the desktop drew the
+	// project's animal — three views of one pet, disagreeing. Caught by opening the app.
+	const projectLooks = useProjectLooks();
 	return (
 		<button
 			type="button"
@@ -236,7 +240,7 @@ function SessionRow({ session, active, onSelect }: { session: LibrarySession; ac
 		>
 			<span className="shrink-0" aria-hidden="true">
 				<Procs
-					cast={castFor(session.id, looks)}
+					cast={withSpecies(castFor(session.id, looks), resolveSpecies(session.project, projectLooks))}
 					status={PREVIEW_STATUS}
 					facing="front"
 					walking={false}

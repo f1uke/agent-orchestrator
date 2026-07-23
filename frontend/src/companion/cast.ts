@@ -286,7 +286,7 @@ export const APPEARANCE_AXES: readonly AppearanceAxis[] = [
 	{
 		id: "palette",
 		name: "Colour",
-		hint: "What it is tinted. Carries at a glance what the hat carries up close.",
+		hint: "What it is tinted. Tells two sessions on one project apart at a glance.",
 		salt: "",
 		options: PALETTES.map((palette) => ({ id: palette.id, name: palette.name })),
 	},

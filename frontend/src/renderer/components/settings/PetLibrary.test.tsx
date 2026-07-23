@@ -81,6 +81,16 @@ describe("choosing which session to dress", () => {
 		expect(screen.getByRole("button", { name: /api rewrite/ })).toBeTruthy();
 	});
 
+	it("draws each row as the creature its PROJECT is", () => {
+		// ⚠ Three views of one pet — this list, the picker beside it, and the band on the
+		// desktop — and they have to agree. This one drew every session as a Proc until
+		// somebody opened the app and looked at it.
+		render(<PetLibrary />);
+		const row = screen.getByRole("button", { name: /api rewrite/ });
+
+		expect(row.querySelector("svg[data-species]")?.getAttribute("data-species")).toBe(speciesForProject("starlight"));
+	});
+
 	it("opens on the first session, so there is always something to look at", () => {
 		render(<PetLibrary />);
 
