@@ -1,8 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { APPEARANCE_AXES, castForSession, defaultLook } from "../../../companion/cast";
-import { LOOKS_STORAGE_KEY, parseLookOverrides, resolveLook } from "../../../companion/look-store";
+import {
+	accessoriesFor,
+	APPEARANCE_AXES,
+	castForSession,
+	defaultLook,
+	palettesFor,
+	storedIdFor,
+	withSpecies,
+} from "../../../companion/cast";
+import {
+	LOOKS_STORAGE_KEY,
+	parseLookOverrides,
+	parseProjectLooks,
+	resolveLook,
+	resolveSpecies,
+} from "../../../companion/look-store";
+import { SPECIES, speciesForProject } from "../../../companion/species";
 import { useUiStore } from "../../stores/ui-store";
 import { PetLibrary } from "./PetLibrary";
 
@@ -35,9 +50,17 @@ beforeEach(() => {
 	useUiStore.setState({ petLibraryRequest: null });
 });
 
-/** The buttons under one axis heading, e.g. every colour. */
+/**
+ * The option TILES under one heading, e.g. every colour.
+ *
+ * Filtered on `aria-pressed`, because a section that somebody has chosen in also holds a
+ * "back to the default" button — counting that as an option made a six-colour set
+ * measure as seven the moment anyone touched it.
+ */
 function optionsUnder(axisName: string) {
-	return within(screen.getByRole("group", { name: axisName })).getAllByRole("button");
+	return within(screen.getByRole("group", { name: axisName }))
+		.getAllByRole("button")
+		.filter((button) => button.hasAttribute("aria-pressed"));
 }
 
 function optionButton(axisName: string, optionName: string) {
@@ -49,9 +72,11 @@ function optionButton(axisName: string, optionName: string) {
 describe("choosing which session to dress", () => {
 	it("lists the live sessions under the project they belong to", () => {
 		render(<PetLibrary />);
+		// Scoped to the nav: the creature section names the project too, in its hint.
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
 
-		expect(screen.getByText("agent-orchestrator")).toBeTruthy();
-		expect(screen.getByText("starlight")).toBeTruthy();
+		expect(nav.getByText("agent-orchestrator")).toBeTruthy();
+		expect(nav.getByText("starlight")).toBeTruthy();
 		expect(screen.getByRole("button", { name: /fix the flaky test/ })).toBeTruthy();
 		expect(screen.getByRole("button", { name: /api rewrite/ })).toBeTruthy();
 	});
@@ -78,21 +103,39 @@ describe("choosing which session to dress", () => {
 	});
 });
 
+/** What the selected session actually shows: its own colour, on its PROJECT's creature. */
+function wornBy(ref: string, project: string) {
+	return withSpecies(castForSession(ref), speciesForProject(project));
+}
+
 describe("the axes", () => {
-	it("draws one section per axis in the registry, not two it names itself", () => {
-		// A third axis - the new character types - must appear here by being added to
-		// APPEARANCE_AXES, with no change to this component.
+	it("draws one section per axis in the registry, plus the creature", () => {
+		// The axes still arrive by being in APPEARANCE_AXES, with no change to this
+		// component. The creature is its own section because it is keyed on the PROJECT
+		// rather than the session, which no axis in that registry is.
 		render(<PetLibrary />);
 
 		for (const axis of APPEARANCE_AXES) {
 			expect(screen.getByRole("group", { name: axis.name }), axis.id).toBeTruthy();
-			expect(optionsUnder(axis.name).length, axis.id).toBe(axis.options.length);
 		}
+		expect(screen.getByRole("group", { name: "Creature" })).toBeTruthy();
+	});
+
+	it("offers the CREATURE's own options, not the Proc's", () => {
+		// ⚠ The failure this catches: offering the Proc's six hats to a slime. The axis
+		// registry carries them as a default, and a picker that read them straight off it
+		// would offer six hats to a jelly cube.
+		render(<PetLibrary />);
+		const species = speciesForProject("agent-orchestrator");
+
+		expect(optionsUnder("Colour").length).toBe(palettesFor(species).length);
+		expect(optionsUnder("Accessory").length).toBe(accessoriesFor(species).length);
+		expect(optionsUnder("Creature").length).toBe(SPECIES.length);
 	});
 
 	it("marks the option a session is wearing as in use", () => {
 		render(<PetLibrary />);
-		const mine = castForSession("ao-1");
+		const mine = wornBy("ao-1", "agent-orchestrator");
 
 		expect(optionButton("Colour", mine.palette)).toHaveAttribute("aria-pressed", "true");
 		expect(optionButton("Accessory", mine.hatId)).toHaveAttribute("aria-pressed", "true");
@@ -100,23 +143,99 @@ describe("the axes", () => {
 	});
 });
 
+describe("picking the creature a PROJECT is", () => {
+	// The one control on this screen keyed on the project rather than the session. Every
+	// session on a project is the same animal, which is what took the coloured mark off
+	// the name chip — and it is the answer to two projects hashing onto one creature.
+
+	it("marks the creature the project is currently drawn as", () => {
+		render(<PetLibrary />);
+
+		expect(optionButton("Creature", speciesById("agent-orchestrator"))).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it("changes the creature for the whole PROJECT, not for the session", async () => {
+		render(<PetLibrary />);
+		await userEvent.click(optionButton("Creature", "Ghost"));
+
+		const stored = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
+		expect(resolveSpecies("agent-orchestrator", stored)).toBe("ghost");
+		// The OTHER session on the same project moved with it; the other project did not.
+		expect(resolveSpecies("starlight", stored)).toBe(speciesForProject("starlight"));
+		expect(looksChanged).toHaveBeenCalled();
+	});
+
+	it("keeps the session's own colour when the creature changes under it", async () => {
+		// A session's choice is stored in the Proc's option space — a SLOT — precisely so
+		// it survives its project becoming a different animal.
+		render(<PetLibrary />);
+		const wanted = palettesFor(speciesForProject("agent-orchestrator"))[3].id;
+		await userEvent.click(optionButton("Colour", wanted));
+		await userEvent.click(optionButton("Creature", "Ghost"));
+
+		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
+		expect(resolveLook("ao-1", stored).palette).toBe(
+			storedIdFor("palette", speciesForProject("agent-orchestrator"), wanted),
+		);
+		expect(optionsUnder("Colour").length).toBe(palettesFor("ghost").length);
+	});
+
+	it("goes back to the hash of the project's name", async () => {
+		render(<PetLibrary />);
+		await userEvent.click(optionButton("Creature", "Ghost"));
+		await userEvent.click(
+			within(screen.getByRole("group", { name: "Creature" })).getByRole("button", { name: /default/i }),
+		);
+
+		const stored = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
+		expect("agent-orchestrator" in stored).toBe(false);
+		expect(resolveSpecies("agent-orchestrator", stored)).toBe(speciesForProject("agent-orchestrator"));
+	});
+
+	it("offers the reset only once somebody has chosen", async () => {
+		render(<PetLibrary />);
+
+		expect(
+			within(screen.getByRole("group", { name: "Creature" })).queryByRole("button", { name: /default/i }),
+		).toBeNull();
+
+		await userEvent.click(optionButton("Creature", "Ghost"));
+
+		expect(
+			within(screen.getByRole("group", { name: "Creature" })).getByRole("button", { name: /default/i }),
+		).toBeTruthy();
+	});
+});
+
+/** The display NAME of the creature a project is drawn as, for finding its tile. */
+function speciesById(project: string): string {
+	const id = speciesForProject(project);
+	return SPECIES.find((entry) => entry.id === id)!.name;
+}
+
 describe("picking a look", () => {
 	async function pickHat(hat: string) {
 		render(<PetLibrary />);
 		await userEvent.click(optionButton("Accessory", hat));
 	}
 
-	const otherThan = (axisId: "palette" | "hat", ref: string) =>
-		APPEARANCE_AXES.find((axis) => axis.id === axisId)!.options.find(
-			(option) => option.id !== defaultLook(ref)[axisId],
-		)!.id;
+	/** An option of the CREATURE's own set that is not the one this session already has. */
+	const otherThan = (axisId: "palette" | "hat", ref: string) => {
+		const species = speciesForProject("agent-orchestrator");
+		const set = axisId === "palette" ? palettesFor(species) : accessoriesFor(species);
+		const worn = withSpecies(castForSession(ref), species);
+		return set.find((option) => option.id !== (axisId === "palette" ? worn.palette : worn.hatId))!.id;
+	};
+	/** …and what that lands on in the store, which is the Proc's slot for it. */
+	const stores = (axisId: "palette" | "hat", optionId: string) =>
+		storedIdFor(axisId, speciesForProject("agent-orchestrator"), optionId);
 
 	it("changes the hat and leaves the colour on the hash", async () => {
 		const wanted = otherThan("hat", "ao-1");
 		await pickHat(wanted);
 
 		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(resolveLook("ao-1", stored).hat).toBe(wanted);
+		expect(resolveLook("ao-1", stored).hat).toBe(stores("hat", wanted));
 		expect(resolveLook("ao-1", stored).palette).toBe(defaultLook("ao-1").palette);
 	});
 
@@ -125,7 +244,10 @@ describe("picking a look", () => {
 		await pickHat(wanted);
 
 		expect(optionButton("Accessory", wanted)).toHaveAttribute("aria-pressed", "true");
-		expect(optionButton("Accessory", defaultLook("ao-1").hat)).toHaveAttribute("aria-pressed", "false");
+		expect(optionButton("Accessory", wornBy("ao-1", "agent-orchestrator").hatId)).toHaveAttribute(
+			"aria-pressed",
+			"false",
+		);
 	});
 
 	it("tells the overlay to go and look, so the desktop changes at once", async () => {
@@ -155,7 +277,7 @@ describe("picking a look", () => {
 
 		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
 		expect(resolveLook("ao-1", stored).hat).toBe(defaultLook("ao-1").hat);
-		expect(resolveLook("ao-1", stored).palette).toBe(palette);
+		expect(resolveLook("ao-1", stored).palette).toBe(stores("palette", palette));
 	});
 
 	it("offers the reset only on an axis somebody has actually chosen", async () => {
@@ -174,6 +296,19 @@ describe("picking a look", () => {
 });
 
 describe("housekeeping", () => {
+	it("forgets the creature of a project that no longer exists", () => {
+		window.localStorage.setItem(
+			LOOKS_STORAGE_KEY,
+			JSON.stringify({ v: 1, sessions: {}, projects: { "agent-orchestrator": "ghost", gone: "cat" } }),
+		);
+		window.dispatchEvent(new StorageEvent("storage", { key: null }));
+
+		render(<PetLibrary />);
+
+		const stored = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
+		expect(stored).toEqual({ "agent-orchestrator": "ghost" });
+	});
+
 	it("forgets the look of a session that no longer exists", () => {
 		window.localStorage.setItem(
 			LOOKS_STORAGE_KEY,

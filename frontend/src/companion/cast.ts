@@ -416,6 +416,25 @@ export function accessoryOf(species: SpeciesId, accessoryId: string): string {
 	return (set.find((entry) => entry.id === accessoryId) ?? set[0]).id;
 }
 
+/**
+ * The option id to STORE for a session, so that it lands on `optionId` of this creature.
+ *
+ * ⚠ A session's stored choice is kept in the PROC's option space, not the creature's,
+ * and that is deliberate: the creature comes from the PROJECT and can change under a
+ * session at any time. Stored as "ginger", a cat's colour would be meaningless the
+ * moment its project became a slime. Stored as the SLOT — which is what a Proc id is
+ * here — the choice survives, and `withSpecies` maps it onto whatever body turns up.
+ */
+export function storedIdFor(axis: "palette" | "hat", species: SpeciesId, optionId: string): string {
+	const set = axis === "palette" ? palettesFor(species) : accessoriesFor(species);
+	const slot = Math.max(
+		0,
+		set.findIndex((entry) => entry.id === optionId),
+	);
+	const proc = axis === "palette" ? PALETTES : HATS;
+	return proc[slot % proc.length].id;
+}
+
 /** One colour of a creature's own set, by id, falling back to its first. */
 export function paletteOf(species: SpeciesId, paletteId: string): Palette {
 	const set = palettesFor(species);

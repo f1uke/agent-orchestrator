@@ -1,12 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
-import { APPEARANCE_AXES, castFromLook, type AppearanceAxis, type AxisId, type Look } from "../../../companion/cast";
-import { castFor, isAxisChosen, resolveLook } from "../../../companion/look-store";
+import {
+	accessoriesFor,
+	APPEARANCE_AXES,
+	castFromLook,
+	HATS,
+	paletteOf,
+	palettesFor,
+	storedIdFor,
+	withSpecies,
+	type AppearanceAxis,
+	type AxisId,
+	type CastMember,
+} from "../../../companion/cast";
+import { composeCast } from "../../../companion/cast";
+import { castFor, isAxisChosen, isSpeciesChosen, resolveLook, resolveSpecies } from "../../../companion/look-store";
 import {
 	clearStoredLookChoice,
+	clearStoredProjectSpecies,
 	pruneStoredLooks,
 	storeLookChoice,
+	storeProjectSpecies,
 	useLookOverrides,
+	useProjectLooks,
 } from "../../../companion/look-store-live";
+import { SPECIES, type SpeciesId } from "../../../companion/species";
 import { PROCS_INK } from "../../../companion/palette";
 import { Procs } from "../../../companion/Procs";
 import { useWorkspaceQuery } from "../../hooks/useWorkspaceQuery";
@@ -43,12 +60,13 @@ const HERO_SIZE = 124;
 const SWATCH_SIZE = 50;
 const THUMB_SIZE = 32;
 
-type LibrarySession = { id: string; title: string };
+type LibrarySession = { id: string; title: string; project: string };
 type LibraryGroup = { name: string; sessions: LibrarySession[] };
 
 export function PetLibrary() {
 	const query = useWorkspaceQuery();
 	const looks = useLookOverrides();
+	const projectLooks = useProjectLooks();
 	const request = useUiStore((state) => state.petLibraryRequest);
 	const clearRequest = useUiStore((state) => state.requestPetLibrary);
 	const [picked, setPicked] = useState<string | null>(null);
@@ -61,7 +79,7 @@ export function PetLibrary() {
 					name: project.name,
 					sessions: project.sessions
 						.filter((session) => !session.isTerminated)
-						.map((session) => ({ id: session.id, title: session.title })),
+						.map((session) => ({ id: session.id, title: session.title, project: project.name })),
 				}))
 				.filter((group) => group.sessions.length > 0),
 		[query.data],
@@ -81,7 +99,10 @@ export function PetLibrary() {
 	const projects = query.data;
 	useEffect(() => {
 		if (!query.isSuccess || !projects) return;
-		pruneStoredLooks(projects.flatMap((project) => project.sessions.map((session) => session.id)));
+		pruneStoredLooks(
+			projects.flatMap((project) => project.sessions.map((session) => session.id)),
+			projects.map((project) => project.name),
+		);
 	}, [query.isSuccess, projects]);
 
 	// A right-click on a Proc asked for this session. Honoured once and then
@@ -110,14 +131,28 @@ export function PetLibrary() {
 		aoBridge.companion.looksChanged();
 	};
 
+	// Two questions, two keys: the CREATURE is the project's, the colour and the
+	// accessory are this session's. The picker has to ask both, in that order, because
+	// the creature decides what the other two axes even offer.
+	const species = resolveSpecies(selected.project, projectLooks);
 	const look = resolveLook(selected.id, looks);
-	const cast = castFromLook(look);
+	const cast = withSpecies(castFromLook(look), species);
+
+	const chooseCreature = (next: SpeciesId) => {
+		storeProjectSpecies(selected.project, next);
+		aoBridge.companion.looksChanged();
+	};
+	const resetCreature = () => {
+		clearStoredProjectSpecies(selected.project);
+		aoBridge.companion.looksChanged();
+	};
 
 	return (
 		<div className="flex flex-col gap-3">
 			<p className="text-[12px] leading-5 text-muted-foreground">
-				Every session is given a colour and a hat the moment it starts, so you never have to come here. Change one when
-				two of them come out too alike to tell apart.
+				Every project is given a creature and every session a colour, the moment they exist — so you never have to come
+				here. Change the creature when two projects come out as the same animal, and a colour when two sessions on one
+				project come out too alike to tell apart.
 			</p>
 
 			<div className="grid grid-cols-[196px_minmax(0,1fr)] gap-3">
@@ -159,13 +194,23 @@ export function PetLibrary() {
 						<span className="text-foreground">{selected.title}</span> wears the {cast.name.toLowerCase()}
 					</p>
 
+					<CreaturePicker
+						project={selected.project}
+						species={species}
+						cast={cast}
+						chosen={isSpeciesChosen(projectLooks, selected.project)}
+						onChoose={chooseCreature}
+						onReset={resetCreature}
+					/>
+
 					{APPEARANCE_AXES.map((axis) => (
 						<AxisPicker
 							key={axis.id}
 							axis={axis}
-							look={look}
+							species={species}
+							cast={cast}
 							chosen={isAxisChosen(looks, selected.id, axis.id)}
-							onChoose={(optionId) => choose(axis.id, optionId)}
+							onChoose={(optionId) => choose(axis.id, storedIdFor(axis.id, species, optionId))}
 							onReset={() => reset(axis.id)}
 						/>
 					))}
@@ -204,25 +249,124 @@ function SessionRow({ session, active, onSelect }: { session: LibrarySession; ac
 }
 
 /**
- * One axis' worth of choices, each drawn as the Proc it would actually produce.
+ * Which CREATURE a project is drawn as.
  *
- * A colour tile wears the session's CURRENT hat and a hat tile its current colour,
- * so every tile is the real answer to "what would I get" rather than an abstract
+ * ⚠ Chosen per PROJECT, and it is the only control on this screen that is. Every
+ * session on a project is the same animal, which is what took the coloured mark off
+ * the name chip: the band groups itself by shape and there is nothing left to decode.
+ * Six creatures tell six projects apart on their own; a seventh collides, and this is
+ * the answer to that.
+ *
+ * Every tile wears the SESSION's current colour and accessory by slot, so it is the
+ * real answer to "what would I get" rather than a picture of somebody else's pet.
+ */
+function CreaturePicker({
+	project,
+	species,
+	cast,
+	chosen,
+	onChoose,
+	onReset,
+}: {
+	project: string;
+	species: SpeciesId;
+	cast: CastMember;
+	chosen: boolean;
+	onChoose: (species: SpeciesId) => void;
+	onReset: () => void;
+}) {
+	return (
+		<section role="group" aria-label="Creature" className="flex flex-col gap-1.5">
+			<div className="flex items-baseline justify-between gap-2">
+				<h4 className="text-[12.5px] font-medium text-foreground">Creature</h4>
+				{chosen ? (
+					<button
+						type="button"
+						onClick={onReset}
+						className="shrink-0 rounded px-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+					>
+						Back to the default
+					</button>
+				) : (
+					<span className="shrink-0 text-[11px] text-muted-foreground">The one it was given</span>
+				)}
+			</div>
+			<p className="text-[11.5px] leading-4 text-muted-foreground">
+				Which animal <span className="text-foreground">{project}</span> is. Every session on it is the same one, so a
+				glance at the band says which project a pet belongs to.
+			</p>
+			<div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(66px,1fr))]">
+				{SPECIES.map((entry) => {
+					const active = entry.id === species;
+					return (
+						<button
+							key={entry.id}
+							type="button"
+							aria-pressed={active}
+							aria-label={`${entry.name}${active ? " (in use)" : ""}`}
+							onClick={() => onChoose(entry.id)}
+							className={cn(
+								"flex flex-col items-center gap-0.5 rounded-md border py-1.5 transition-colors",
+								active
+									? "border-accent bg-secondary text-foreground"
+									: "border-border text-muted-foreground hover:border-passive hover:bg-interactive-hover",
+							)}
+						>
+							<span
+								className="flex items-end justify-center rounded px-1 pb-0.5 pt-1"
+								style={{ background: PROCS_INK }}
+								aria-hidden="true"
+							>
+								<Procs
+									cast={withSpecies(cast, entry.id)}
+									status={PREVIEW_STATUS}
+									facing="front"
+									walking={false}
+									size={SWATCH_SIZE}
+								/>
+							</span>
+							<span className="flex flex-col items-center gap-px leading-3">
+								<span className="text-[10.5px]">{entry.name}</span>
+								<span className={cn("text-[9.5px] font-semibold", active ? "text-foreground" : "invisible")}>
+									In use
+								</span>
+							</span>
+						</button>
+					);
+				})}
+			</div>
+		</section>
+	);
+}
+
+/**
+ * One axis' worth of choices, each drawn as the pet it would actually produce.
+ *
+ * A colour tile wears the session's CURRENT accessory and an accessory tile its current
+ * colour, so every tile is the real answer to "what would I get" rather than an abstract
  * chip. That is the whole reason to have a gallery instead of a list of names.
+ *
+ * ⚠ The options come from the CREATURE, not from the axis' own list. The axis registry
+ * carries the Proc's six as a default; offering those to a slime would be offering six
+ * hats to a jelly cube.
  */
 function AxisPicker({
 	axis,
-	look,
+	species,
+	cast,
 	chosen,
 	onChoose,
 	onReset,
 }: {
 	axis: AppearanceAxis;
-	look: Look;
+	species: SpeciesId;
+	cast: CastMember;
 	chosen: boolean;
 	onChoose: (optionId: string) => void;
 	onReset: () => void;
 }) {
+	const options = axis.id === "palette" ? palettesFor(species) : accessoriesFor(species);
+	const worn = axis.id === "palette" ? cast.palette : cast.hatId;
 	return (
 		<section role="group" aria-label={axis.name} className="flex flex-col gap-1.5">
 			<div className="flex items-baseline justify-between gap-2">
@@ -243,8 +387,8 @@ function AxisPicker({
 			{/* auto-fill, so more colours or more hats simply wrap rather than
 			    overflowing a column count written down here. */}
 			<div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(66px,1fr))]">
-				{axis.options.map((option) => {
-					const active = look[axis.id] === option.id;
+				{options.map((option) => {
+					const active = worn === option.id;
 					return (
 						<button
 							key={option.id}
@@ -268,7 +412,11 @@ function AxisPicker({
 								aria-hidden="true"
 							>
 								<Procs
-									cast={castFromLook({ ...look, [axis.id]: option.id })}
+									cast={
+										axis.id === "palette"
+											? composeCast(paletteOf(species, option.id), HATS[0], species, cast.hatId)
+											: composeCast(paletteOf(species, cast.palette), HATS[0], species, option.id)
+									}
 									status={PREVIEW_STATUS}
 									facing="front"
 									walking={false}
