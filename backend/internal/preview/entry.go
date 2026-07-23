@@ -23,9 +23,35 @@ var previewableExts = map[string]struct{}{
 	".markdown": {},
 }
 
-// maxPreviewWalkFiles bounds the most-recent fallback scan so a pathological
-// workspace cannot stall the preview poller.
-const maxPreviewWalkFiles = 5000
+// vendoredPreviewDirs are dependency and build caches that never hold a document
+// an agent meant to show. They dominate a real worktree (an iOS checkout carries
+// tens of thousands of such files), so pruning them keeps the fallback scan
+// affordable. Hidden directories (.git, .build, .venv, …) are pruned as well.
+var vendoredPreviewDirs = map[string]struct{}{
+	"node_modules": {},
+	"vendor":       {},
+	"Pods":         {},
+	"Carthage":     {},
+	"DerivedData":  {},
+	"__pycache__":  {},
+	"venv":         {},
+	"target":       {},
+}
+
+// walkBounds caps the fallback scan so a pathological workspace cannot stall the
+// request that asked for it.
+type walkBounds struct {
+	// maxDepth is how many directory levels below the workspace root the scan
+	// descends. A preview document an agent wants shown is not buried deeper.
+	maxDepth int
+	// maxEntries caps total directory entries visited, not just matches, so a
+	// huge tree of non-previewable files is bounded too.
+	maxEntries int
+	// maxCandidates caps how many previewable files are compared.
+	maxCandidates int
+}
+
+var defaultWalkBounds = walkBounds{maxDepth: 8, maxEntries: 50000, maxCandidates: 5000}
 
 // Entry is a workspace-local static frontend entrypoint.
 type Entry struct {
@@ -35,12 +61,18 @@ type Entry struct {
 	Size    int64
 }
 
-// DiscoverEntry returns the entry the browser panel should preview for a
-// workspace. A conventional index.html (or its public/dist/build variants)
-// always wins; when none exists it falls back to the most-recently-modified
-// previewable file (.html/.htm/.md/.markdown) anywhere in the workspace, so a
-// freshly generated report or document shows up automatically.
-func DiscoverEntry(workspacePath string) (Entry, bool) {
+// DiscoverEntrypoint returns the workspace's conventional static entrypoint —
+// index.html or its public/dist/build variants — and nothing else. It costs a
+// handful of stats and never walks the tree.
+//
+// This is the discovery the preview poller runs, because the poller reveals the
+// browser panel *unprompted*. An unprompted reveal must fire on a fact ("this
+// workspace has a servable frontend"), never on a heuristic ("this file was
+// touched most recently"): a heuristic steals the tab the moment an agent writes
+// its own scratch notes, and re-running it across every session on a ticker is
+// what pinned a CPU core. Everything looser lives behind an explicit
+// `ao preview`, in DiscoverEntry.
+func DiscoverEntrypoint(workspacePath string) (Entry, bool) {
 	if strings.TrimSpace(workspacePath) == "" {
 		return Entry{}, false
 	}
@@ -54,28 +86,56 @@ func DiscoverEntry(workspacePath string) (Entry, bool) {
 			return Entry{Path: candidate, AbsPath: file, ModTime: info.ModTime(), Size: info.Size()}, true
 		}
 	}
-	return mostRecentPreviewable(workspacePath)
+	return Entry{}, false
 }
 
-// mostRecentPreviewable walks the workspace and returns the newest previewable
-// file. Ties (equal mod times) break on the slash path so the result is
-// deterministic. Hidden directories and node_modules are skipped, and the scan
-// is bounded by maxPreviewWalkFiles.
-func mostRecentPreviewable(workspacePath string) (Entry, bool) {
+// DiscoverEntry returns the entry the browser panel should preview for a
+// workspace when someone asked for one. The conventional entrypoint always wins;
+// when none exists it falls back to the most-recently-modified previewable file
+// (.html/.htm/.md/.markdown) in the workspace, so a freshly generated report or
+// document shows up for a bare `ao preview`.
+//
+// The fallback scans the filesystem, so it belongs on the request path only —
+// see DiscoverEntrypoint for what runs on a timer.
+func DiscoverEntry(workspacePath string) (Entry, bool) {
+	// Guarded here as well as in DiscoverEntrypoint: a blank path would send the
+	// fallback scan walking the daemon's working directory.
+	if strings.TrimSpace(workspacePath) == "" {
+		return Entry{}, false
+	}
+	if entry, ok := DiscoverEntrypoint(workspacePath); ok {
+		return entry, true
+	}
+	return scanPreviewable(workspacePath, defaultWalkBounds)
+}
+
+// scanPreviewable walks the workspace and returns the newest previewable file.
+// Ties (equal mod times) break on the slash path so the result is deterministic.
+// Hidden and vendored directories are pruned, and the walk stops once it exceeds
+// any of the supplied bounds, keeping the result whatever it found so far.
+func scanPreviewable(workspacePath string, bounds walkBounds) (Entry, bool) {
 	root, err := filepath.Abs(workspacePath)
 	if err != nil {
 		return Entry{}, false
 	}
 	var best Entry
 	found := false
-	seen := 0
+	candidates := 0
+	entries := 0
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			//nolint:nilerr // skip unreadable entries rather than aborting the whole scan
 			return nil
 		}
+		entries++
+		if entries > bounds.maxEntries {
+			return filepath.SkipAll
+		}
 		if d.IsDir() {
-			if p != root && skipPreviewDir(d.Name()) {
+			if p == root {
+				return nil
+			}
+			if skipPreviewDir(d.Name()) || walkDepth(root, p) > bounds.maxDepth {
 				return filepath.SkipDir
 			}
 			return nil
@@ -83,8 +143,8 @@ func mostRecentPreviewable(workspacePath string) (Entry, bool) {
 		if _, ok := previewableExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
 			return nil
 		}
-		seen++
-		if seen > maxPreviewWalkFiles {
+		candidates++
+		if candidates > bounds.maxCandidates {
 			return filepath.SkipAll
 		}
 		info, err := d.Info()
@@ -119,7 +179,21 @@ func newerPreviewable(info fs.FileInfo, relSlash string, best Entry) bool {
 }
 
 func skipPreviewDir(name string) bool {
-	return strings.HasPrefix(name, ".") || name == "node_modules"
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	_, vendored := vendoredPreviewDirs[name]
+	return vendored
+}
+
+// walkDepth counts how many directory levels dir sits below root; the root
+// itself is depth 0.
+func walkDepth(root, dir string) int {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return 0
+	}
+	return len(strings.Split(filepath.ToSlash(rel), "/"))
 }
 
 // IsMarkdownPath reports whether p names a Markdown file the preview/files

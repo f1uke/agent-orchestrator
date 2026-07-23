@@ -3,6 +3,7 @@ package preview
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -102,6 +103,99 @@ func TestDiscoverEntryTieBreaksOnPath(t *testing.T) {
 func TestDiscoverEntryEmptyWorkspace(t *testing.T) {
 	if _, ok := DiscoverEntry(t.TempDir()); ok {
 		t.Fatal("DiscoverEntry: ok=true for empty workspace, want false")
+	}
+}
+
+// The poller reveals the Browser tab unprompted, so it may only act on a
+// conventional entrypoint — never on a "newest file wins" guess.
+func TestDiscoverEntrypointFindsConventionalEntries(t *testing.T) {
+	for _, candidate := range entryCandidates {
+		t.Run(candidate, func(t *testing.T) {
+			ws := t.TempDir()
+			writeEntryFile(t, filepath.Join(ws, filepath.FromSlash(candidate)), "<main>app</main>", time.Now())
+
+			entry, ok := DiscoverEntrypoint(ws)
+			if !ok {
+				t.Fatalf("DiscoverEntrypoint: ok=false, want %s", candidate)
+			}
+			if entry.Path != candidate {
+				t.Fatalf("entry.Path = %q, want %q", entry.Path, candidate)
+			}
+		})
+	}
+}
+
+func TestDiscoverEntrypointIgnoresLooseFiles(t *testing.T) {
+	ws := t.TempDir()
+	base := time.Now()
+	// A worker's scratch notes and a stray report are not an entrypoint: revealing
+	// either would steal the Browser tab nobody asked for.
+	writeEntryFile(t, filepath.Join(ws, "PLAN.md"), "# plan", base.Add(time.Hour))
+	writeEntryFile(t, filepath.Join(ws, "docs", "report.html"), "<main>report</main>", base)
+	writeEntryFile(t, filepath.Join(ws, "frontend", "index.html"), "<main>vite</main>", base)
+
+	if entry, ok := DiscoverEntrypoint(ws); ok {
+		t.Fatalf("DiscoverEntrypoint: ok=true (%q), want no unprompted entry", entry.Path)
+	}
+}
+
+func TestDiscoverEntrypointEmptyWorkspacePath(t *testing.T) {
+	if _, ok := DiscoverEntrypoint("  "); ok {
+		t.Fatal("DiscoverEntrypoint: ok=true for blank workspace path, want false")
+	}
+}
+
+// The explicit `ao preview` fallback still walks, so it must be bounded: an AO
+// worktree can carry tens of thousands of vendored files.
+func TestScanPreviewableSkipsVendoredDirs(t *testing.T) {
+	ws := t.TempDir()
+	base := time.Now()
+	for _, dir := range []string{"node_modules", "vendor", "Pods", "Carthage", "DerivedData", "__pycache__", "venv", "target"} {
+		writeEntryFile(t, filepath.Join(ws, dir, "dep.html"), "x", base.Add(time.Hour))
+	}
+	writeEntryFile(t, filepath.Join(ws, "visible.html"), "ok", base)
+
+	entry, ok := scanPreviewable(ws, defaultWalkBounds)
+	if !ok {
+		t.Fatal("scanPreviewable: ok=false, want visible entry")
+	}
+	if entry.Path != "visible.html" {
+		t.Fatalf("entry.Path = %q, want visible.html", entry.Path)
+	}
+}
+
+func TestScanPreviewableStopsAtMaxDepth(t *testing.T) {
+	ws := t.TempDir()
+	base := time.Now()
+	deep := filepath.Join(ws, "a", "b", "c", "d")
+	writeEntryFile(t, filepath.Join(deep, "deep.html"), "deep", base.Add(time.Hour))
+	writeEntryFile(t, filepath.Join(ws, "shallow.html"), "shallow", base)
+
+	entry, ok := scanPreviewable(ws, walkBounds{maxDepth: 2, maxEntries: 1000, maxCandidates: 1000})
+	if !ok {
+		t.Fatal("scanPreviewable: ok=false, want shallow entry")
+	}
+	if entry.Path != "shallow.html" {
+		t.Fatalf("entry.Path = %q, want shallow.html (deeper file is past maxDepth)", entry.Path)
+	}
+}
+
+func TestScanPreviewableStopsAtMaxEntries(t *testing.T) {
+	ws := t.TempDir()
+	base := time.Now()
+	writeEntryFile(t, filepath.Join(ws, "a.html"), "first", base)
+	for i := range 20 {
+		writeEntryFile(t, filepath.Join(ws, "filler", "f"+strconv.Itoa(i)+".txt"), "x", base)
+	}
+	// Newest file, but the entry budget is spent long before the walk reaches it.
+	writeEntryFile(t, filepath.Join(ws, "z.html"), "newest", base.Add(time.Hour))
+
+	entry, ok := scanPreviewable(ws, walkBounds{maxDepth: 8, maxEntries: 3, maxCandidates: 1000})
+	if !ok {
+		t.Fatal("scanPreviewable: ok=false, want the entry found before the budget ran out")
+	}
+	if entry.Path != "a.html" {
+		t.Fatalf("entry.Path = %q, want a.html (walk must stop at maxEntries)", entry.Path)
 	}
 }
 
