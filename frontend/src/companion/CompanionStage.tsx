@@ -83,6 +83,15 @@ export type CompanionStageProps = {
 	 * which is exactly why the seam is explicit rather than a mutable export.
 	 */
 	onStage?: (api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => void;
+	/**
+	 * What a session LOOKS like, overriding the stored-choices-over-hash resolution.
+	 *
+	 * Only the Procs lab passes it, to switch the whole band between creatures so the
+	 * new bodies can be watched walking, talking and being picked up rather than only
+	 * standing on a contact sheet. With it absent — which is every real overlay — the
+	 * look is the human's choice over the session's hash, exactly as before.
+	 */
+	castFor?: (sessionId: string) => CastMember;
 };
 
 // The band is inset by the SCENE's overhang, not just the figure's: a Proc parked
@@ -106,12 +115,16 @@ export function CompanionStage({
 	onRequestLook,
 	reducedMotion,
 	onStage,
+	castFor: castForOverride,
 }: CompanionStageProps) {
 	const source = useMemo(() => feed ?? createMockFeed(), [feed]);
 	// A pet's look is the hash of its session ref, UNLESS someone has picked one in
 	// the Pet library. Both windows read the same localStorage key, so a choice made
 	// in Settings lands here on the `storage` event with nothing in between.
 	const looks = useLookOverrides();
+	// The lab's override wins where it is given; everywhere else this is the choice
+	// over the hash, which is the whole of the real behaviour.
+	const resolveCast = castForOverride ?? ((sessionId: string) => castFor(sessionId, looks));
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
 	// rebuilt on every state change.
@@ -385,7 +398,7 @@ export function CompanionStage({
 		<div className="companion-stage">
 			<div className="companion-cast">
 				{painted.map((pet) => (
-					<ProcArt key={pet.id} pet={pet} cast={castFor(pet.id, looks)} />
+					<ProcArt key={pet.id} pet={pet} cast={resolveCast(pet.id)} />
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>

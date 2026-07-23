@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./companion.css";
 import type { World } from "./behaviour";
+import { castForSession, withSpecies } from "./cast";
 import { CompanionStage } from "./CompanionStage";
+import { ConceptSheet } from "./ConceptSheet";
 import { createManualFeed, type ManualFeed } from "./dev-feed";
 import { DevPanel } from "./DevPanel";
 import type { CompanionFeed } from "./feed";
@@ -10,6 +12,7 @@ import { createLiveFeed, type LiveFeed } from "./live-feed";
 import { refreshLookOverrides } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
+import { SPECIES, type SpeciesId } from "./species";
 
 // Entry point for the overlay window. Deliberately tiny and separate from the main
 // renderer: the overlay has no router, no query client, no daemon connection and no
@@ -91,9 +94,25 @@ function Lab() {
 	const [feed] = useState<ManualFeed>(() => createManualFeed(mockActivitiesAt(0)));
 	const [setWorld, setSetWorld] = useState<React.Dispatch<React.SetStateAction<World>> | null>(null);
 	const [reducedMotion, setReducedMotion] = useState(false);
+	const [species, setSpecies] = useState<SpeciesId | "mixed">("proc");
+	const [sheet, setSheet] = useState(false);
 	const onStage = useCallback((api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => {
 		setSetWorld(() => api.setWorld);
 	}, []);
+
+	// Which CREATURE the whole band is, so the new bodies can be watched walking,
+	// talking and being picked up rather than only standing on a contact sheet. Only
+	// the lab passes this; a real overlay is the human's choice over the session's
+	// hash, which is what keeps the new bodies out of the live cast until they are
+	// registered as an axis.
+	const castFor = useCallback(
+		(sessionId: string) => {
+			const base = castForSession(sessionId);
+			if (species === "proc") return base;
+			return withSpecies(base, species === "mixed" ? dealSpecies(sessionId) : species);
+		},
+		[species],
+	);
 
 	return (
 		<>
@@ -102,10 +121,27 @@ function Lab() {
 				bubbleFor={(id) => feed.bubbleFor(id)}
 				reducedMotion={reducedMotion}
 				onStage={onStage}
+				castFor={species === "proc" ? undefined : castFor}
 			/>
-			<DevPanel feed={feed} setWorld={setWorld} reducedMotion={reducedMotion} onReducedMotion={setReducedMotion} />
+			<DevPanel
+				feed={feed}
+				setWorld={setWorld}
+				reducedMotion={reducedMotion}
+				onReducedMotion={setReducedMotion}
+				species={species}
+				onSpecies={setSpecies}
+				onConceptSheet={() => setSheet(true)}
+			/>
+			{sheet ? <ConceptSheet onClose={() => setSheet(false)} /> : null}
 		</>
 	);
+}
+
+/** Deal the creatures round a mixed lab band. Stable per ref, like the real thing. */
+function dealSpecies(sessionId: string): SpeciesId {
+	let sum = 0;
+	for (let i = 0; i < sessionId.length; i++) sum = (sum * 31 + sessionId.charCodeAt(i)) >>> 0;
+	return SPECIES[sum % SPECIES.length].id;
 }
 
 const container = document.getElementById("companion-root");

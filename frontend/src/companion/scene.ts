@@ -49,6 +49,15 @@ export type Emit = "zzz" | "sparks" | "confetti" | "quiet" | "none";
 /** What the cord — the link to the session — is doing. */
 export type Cord = "attached" | "streaming" | "tugging" | "sparking" | "coiled" | "unplugged";
 
+/**
+ * Every cord state there is.
+ *
+ * Beside the type rather than derived from it, because a table keyed on `Cord` — the
+ * species tells are three of them — has to be WALKABLE to be checked, and a new cord
+ * value has to make something go red rather than quietly acquiring no pose at all.
+ */
+export const ALL_CORDS: readonly Cord[] = ["attached", "streaming", "tugging", "sparking", "coiled", "unplugged"];
+
 export type Scene = {
 	ground: Ground;
 	held: Held;

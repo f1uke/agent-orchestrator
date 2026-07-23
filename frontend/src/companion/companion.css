@@ -184,9 +184,9 @@ body {
 	pointer-events: none;
 }
 
-/* Two hops when a Proc meets the one that just messaged it. Transform only, and
+/* Two hops when a pet meets the one that just messaged it. Transform only, and
    it runs twice rather than forever: a greeting is an event, not a state. */
-@keyframes procs-hop {
+@keyframes procs-hop-greet {
 	0% {
 		transform: translateY(0);
 	}
@@ -288,6 +288,164 @@ body {
 	}
 	to {
 		transform: rotate(5deg);
+	}
+}
+
+/* ---- Locomotion, per creature. The engine decides WHETHER a pet is moving; these
+   decide what moving looks like on a body that has no legs to do it with. ---- */
+
+/* A ghost never stops hovering, so this is its resting state and not its walk —
+   only the amplitude changes when it sets off. Nothing else in the cast animates
+   while standing still, and nothing else in the cast is holding itself up. */
+@keyframes procs-float {
+	from {
+		transform: translateY(0);
+	}
+
+	to {
+		transform: translateY(-4px);
+	}
+}
+
+/* A slime and a toadstool travel by HOP: squash on the floor, stretch in the air.
+   Scaled about its own base, or a body would grow from the middle and read as a
+   balloon being inflated rather than as something pushing off the ground. */
+@keyframes procs-hop {
+	0%,
+	100% {
+		transform: translateY(0) scale(1.06, 0.94);
+	}
+
+	30% {
+		transform: translateY(-9px) scale(0.95, 1.06);
+	}
+
+	60% {
+		transform: translateY(-2px) scale(1, 1);
+	}
+}
+
+/* A blink: the EYELID travelling down over the eye and back up, shut for about 5% of
+   the cycle, which is roughly what a real one is. Staggered per creature and between
+   the two eyes, so a band of pets never blinks in unison — in unison it reads as a
+   screen refreshing rather than as a room full of living things.
+
+   ⚠ The lid moves, NOT the eye. Squashing the eye with scaleY was the first attempt and
+   it reads as the eye sliding down its own face, because that is what a vertical squash
+   about a centre point is. An eye does not shrink when it closes.
+
+   translateY only, by the eye's own height (handed in as `--procs-lid`, so one keyframe
+   serves every eye in the cast), and the lid is clipped to the eye's outline so it can
+   only ever appear inside it. It says nothing about status: it is the same class of
+   thing as a walk or a hover — how a drawing is alive rather than printed. */
+@keyframes procs-blink {
+	0%,
+	90%,
+	100% {
+		transform: translateY(calc(-1 * var(--procs-lid, 20px)));
+	}
+
+	94%,
+	96% {
+		transform: translateY(0);
+	}
+}
+
+/* ---- Species tells. Each creature says what the LINK is doing with a part of its
+   own body — a cat's ears, a ghost's sleeves, a chick's wings, a slime's nucleus,
+   a toadstool's cap spots — driven by the very same `Cord` value the cord itself is
+   drawn from, so the two can never disagree. Only the three live states move at all:
+   nothing that has lost its link may twitch, because motion asserts liveness we do
+   not have.
+
+   Every pose is legible with the animation OFF. The angle, the glow and the hover
+   height carry the reading; these keyframes are the garnish, which is exactly what
+   reduced motion should be able to take away. ---- */
+
+/* Data flowing: a slow, contented sway. */
+@keyframes procs-swing-live {
+	0%,
+	100% {
+		transform: rotate(0deg);
+	}
+
+	50% {
+		transform: rotate(5deg);
+	}
+}
+
+/* Asking for you: a sharper flick, the way an ear turns towards a sound. */
+@keyframes procs-swing-urgent {
+	0%,
+	100% {
+		transform: rotate(0deg);
+	}
+
+	18% {
+		transform: rotate(-9deg);
+	}
+
+	44% {
+		transform: rotate(4deg);
+	}
+}
+
+/* A failed run: a shiver rather than a swing — it is a fright, not a mood. */
+@keyframes procs-swing-alarm {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+
+	25% {
+		transform: translateX(-1.5px);
+	}
+
+	75% {
+		transform: translateX(1.5px);
+	}
+}
+
+/* The same three registers for something that GLOWS, which cannot swing: rotating a
+   nucleus does nothing at all, so brightness and size carry them instead. */
+@keyframes procs-lamp-live {
+	0%,
+	100% {
+		opacity: 0.72;
+		transform: scale(0.9);
+	}
+
+	50% {
+		opacity: 1;
+		transform: scale(1.1);
+	}
+}
+
+@keyframes procs-lamp-urgent {
+	0%,
+	100% {
+		opacity: 0.6;
+		transform: scale(0.85);
+	}
+
+	35% {
+		opacity: 1;
+		transform: scale(1.15);
+	}
+}
+
+@keyframes procs-lamp-alarm {
+	0%,
+	60%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+
+	20%,
+	80% {
+		opacity: 0.35;
+		transform: scale(0.92);
 	}
 }
 

@@ -33,6 +33,9 @@
 // the bucket hat is the worker fixing the flaky test. Re-randomising every launch
 // would throw that away for nothing — the pets would stop being anybody.
 
+import { SPECIES_PALETTES } from "./species-palettes";
+import { speciesById, type SpeciesId } from "./species";
+
 /** Ear paths are authored for the LEFT side and mirrored, so the rig owns symmetry. */
 const EAR_MIRROR_AXIS = 48;
 
@@ -44,7 +47,12 @@ export type HatPiece = { d: string; role?: "trim" };
 
 /** The COLOUR axis: everything a Proc's own body is tinted with. */
 export type Palette = {
-	id: PaletteId;
+	/**
+	 * ⚠ A plain string, not `PaletteId`. The Proc's six ids are still the union below,
+	 * but every creature now brings its OWN six — a ghost has no amber and a cat has no
+	 * teal — so the id space is per-species and cannot be one closed union.
+	 */
+	id: string;
 	name: string;
 	/** Head fill. */
 	body: string;
@@ -73,12 +81,17 @@ export type Hat = {
  * have to know that a look is assembled from two axes, only what to paint.
  */
 export type CastMember = {
-	/** `<palette>-<hat>`, e.g. `teal-bucket`. Stable, and unique to the pair. */
+	/** `<palette>-<hat>`, e.g. `teal-bucket`, prefixed by the creature when it is not a Proc. */
 	id: string;
-	/** Human-readable, for the accessible label: "Teal bucket hat". */
+	/** Human-readable, for the accessible label: "Teal bucket hat", "Teal Cat, bucket hat". */
 	name: string;
-	palette: PaletteId;
+	palette: string;
 	hatId: HatId;
+	/**
+	 * WHICH CREATURE. Defaults to `proc` everywhere the caller does not say, so every
+	 * session in existence keeps the body it already had.
+	 */
+	species: SpeciesId;
 	body: string;
 	shade: string;
 	blush: string;
@@ -313,6 +326,12 @@ export function castFromLook(look: Look): CastMember {
 	);
 }
 
+/** Every look a creature has: its own six colours × the hats it can wear. */
+export function looksOf(species: SpeciesId): readonly CastMember[] {
+	const hats = speciesById(species).axes.includes("hat") ? HATS : [HATS[0]];
+	return palettesFor(species).flatMap((palette) => hats.map((hat) => composeCast(palette, hat, species)));
+}
+
 /**
  * The look a session always gets. Pure, stable across restarts, both axes.
  *
@@ -323,13 +342,27 @@ export function castForSession(sessionRef: string): CastMember {
 	return castFromLook(defaultLook(sessionRef));
 }
 
-/** Assemble a look from a chosen colour and a chosen hat. */
-export function composeCast(palette: Palette, hat: Hat): CastMember {
+/**
+ * Assemble a look from a chosen colour, a chosen hat and — once the human has picked
+ * them — a chosen creature.
+ *
+ * The species argument is OPTIONAL and defaults to the Proc, which is what keeps the
+ * five new bodies out of the live cast until they are registered as an axis: every
+ * existing caller composes exactly the Proc it composed before, id and name included.
+ */
+export function composeCast(palette: Palette, hat: Hat, species: SpeciesId = "proc"): CastMember {
+	const creature = speciesById(species);
 	return {
-		id: `${palette.id}-${hat.id}`,
-		name: `${palette.name} ${hat.name}`,
+		id: species === "proc" ? `${palette.id}-${hat.id}` : `${species}-${palette.id}-${hat.id}`,
+		name:
+			species === "proc"
+				? `${palette.name} ${hat.name}`
+				: creature.axes.includes("hat")
+					? `${palette.name} ${creature.name}, ${hat.name}`
+					: `${palette.name} ${creature.name}`,
 		palette: palette.id,
 		hatId: hat.id,
+		species,
 		body: palette.body,
 		shade: palette.shade,
 		blush: palette.blush,
@@ -337,6 +370,44 @@ export function composeCast(palette: Palette, hat: Hat): CastMember {
 		hatTrim: hat.trim,
 		hat: hat.pieces,
 	};
+}
+
+/**
+ * The six colours a creature is tinted from.
+ *
+ * ⚠ Per-species, and the Proc's list is the one every session in existence has already
+ * been hashed against — so it is returned by identity here rather than copied anywhere.
+ * A creature with no list of its own falls back to it, which is also what an id from a
+ * LATER build resolves to.
+ */
+export function palettesFor(species: SpeciesId): readonly Palette[] {
+	return SPECIES_PALETTES[species] ?? PALETTES;
+}
+
+/** One colour of a creature's own set, by id, falling back to its first. */
+export function paletteOf(species: SpeciesId, paletteId: string): Palette {
+	const set = palettesFor(species);
+	return set.find((palette) => palette.id === paletteId) ?? set[0];
+}
+
+/**
+ * The same look, on a different creature.
+ *
+ * What the Procs lab drives its species switcher with, and the shape the third axis
+ * resolves to once the Pet library registers one: the colour and the hat are already
+ * decided per session and are not this axis' business to re-roll.
+ */
+export function withSpecies(cast: CastMember, species: SpeciesId): CastMember {
+	// By SLOT, not by id. Each creature has its own six colours with its own names, so
+	// "the same colour" across bodies is the same position in the list — there is no
+	// ginger Proc to carry over and no amber cat to carry back.
+	const from = palettesFor(cast.species);
+	const slot = Math.max(
+		0,
+		from.findIndex((palette) => palette.id === cast.palette),
+	);
+	const to = palettesFor(species);
+	return composeCast(to[slot % to.length], HATS.find((hat) => hat.id === cast.hatId) ?? HATS[0], species);
 }
 
 /** Every look there is: one per (colour, hat) pair. Used by tests and the demo roster. */

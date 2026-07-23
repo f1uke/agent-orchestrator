@@ -1,0 +1,180 @@
+import { describe, expect, it } from "vitest";
+import { APPEARANCE_AXES, composeCast, HATS, PALETTES } from "./cast";
+import { ALL_CORDS, type Cord } from "./scene";
+import {
+	GLOW,
+	glowColour,
+	HOVER,
+	LIMB_POSE,
+	NEW_SPECIES,
+	SPECIES,
+	speciesById,
+	speciesWears,
+	TELL_MOTION,
+} from "./species";
+
+// Every cord state there is, written out a SECOND time on purpose. `ALL_CORDS` is what
+// the tell tables are walked with; this list is what says `ALL_CORDS` itself is
+// complete. Derive both from one place and a new cord value quietly acquires no pose on
+// any creature, and nothing goes red.
+const CORDS: Cord[] = ["attached", "streaming", "tugging", "sparking", "coiled", "unplugged"];
+
+function pairs<T>(items: readonly T[]): Array<[T, T]> {
+	return items.flatMap((a, i) => items.slice(i + 1).map((b) => [a, b] as [T, T]));
+}
+
+describe("the cast of creatures", () => {
+	it("has one row per creature, with distinct ids and names", () => {
+		expect(new Set(SPECIES.map((entry) => entry.id)).size).toBe(SPECIES.length);
+		expect(new Set(SPECIES.map((entry) => entry.name)).size).toBe(SPECIES.length);
+		for (const entry of SPECIES) expect(entry.identity.length, entry.id).toBeGreaterThan(20);
+	});
+
+	it("keeps the Proc first and the default", () => {
+		expect(SPECIES[0].id).toBe("proc");
+		expect(NEW_SPECIES).not.toContain("proc");
+		expect(NEW_SPECIES.length).toBe(SPECIES.length - 1);
+	});
+
+	it("throws on a creature it does not have, because that is a typo not input", () => {
+		expect(() => speciesById("dragon" as never)).toThrow(/unknown species/);
+	});
+
+	it("names only axes that actually exist, so the library cannot be asked for a section it has no data for", () => {
+		const known = new Set(APPEARANCE_AXES.map((axis) => axis.id));
+		for (const entry of SPECIES) {
+			for (const axis of entry.axes) expect(known, `${entry.id}: ${axis}`).toContain(axis);
+		}
+	});
+
+	it("tints every creature, and hats only the ones with a head to put one on", () => {
+		// Colour is a PARAMETER and applies to everything — a creature that could not be
+		// tinted would put the whole band back to one look per body. A hat is a LAYER cut
+		// for the Proc's tall head, and three of these do not have one: a ghost is a drape
+		// (the drape is the silhouette), a slime's head is its whole self, and a
+		// toadstool's cap is already a hat.
+		for (const entry of SPECIES) expect(entry.axes, entry.id).toContain("palette");
+
+		expect(SPECIES.filter((entry) => entry.axes.includes("hat")).map((entry) => entry.id)).toEqual([
+			"proc",
+			"cat",
+			"chick",
+		]);
+	});
+
+	it("answers which axes a creature wears, for the picker", () => {
+		expect(speciesWears("proc", "hat")).toBe(true);
+		expect(speciesWears("ghost", "hat")).toBe(false);
+		expect(speciesWears("ghost", "palette")).toBe(true);
+	});
+
+	it("gives more than one way of getting about, and says which per creature", () => {
+		// A ghost has no legs to walk on in any state and a slime has none either, so
+		// locomotion is anatomy rather than status. If every creature walked, five of them
+		// would be a Proc in a costume.
+		expect(new Set(SPECIES.map((entry) => entry.locomotion)).size).toBeGreaterThan(2);
+		expect(speciesById("ghost").locomotion).toBe("float");
+		expect(speciesById("cat").locomotion).toBe("walk");
+	});
+
+	it("keeps every creature's lead within reach of the shared cord routes", () => {
+		// Only the START of the cord moves per creature; every route still ends at the
+		// same socket. A start dragged too far turns the curve inside out and the plug
+		// stops meeting the ground prop.
+		for (const entry of SPECIES) {
+			expect(Math.hypot(entry.cordFrom[0] - 67, entry.cordFrom[1] - 92), entry.id).toBeLessThan(22);
+		}
+	});
+});
+
+describe("composing a look with a creature on it", () => {
+	it("leaves every existing look untouched when no creature is named", () => {
+		// The five new bodies must not reach a single live session until they are
+		// registered as an axis. Every caller that composed a Proc before still does,
+		// down to the id string other code keys on.
+		for (const palette of PALETTES) {
+			for (const hat of HATS) {
+				const look = composeCast(palette, hat);
+
+				expect(look.species).toBe("proc");
+				expect(look.id).toBe(`${palette.id}-${hat.id}`);
+				expect(look.name).toBe(`${palette.name} ${hat.name}`);
+			}
+		}
+	});
+
+	it("names a creature, and does not name a hat it cannot wear", () => {
+		expect(composeCast(PALETTES[1], HATS[5], "cat").name).toBe("Teal Cat, bucket hat");
+		expect(composeCast(PALETTES[1], HATS[5], "ghost").name).toBe("Teal Ghost");
+		expect(composeCast(PALETTES[1], HATS[5], "ghost").id).toBe("ghost-teal-bucket");
+	});
+});
+
+describe("the tell — what a creature says the LINK is doing", () => {
+	it("knows about every cord state the scene layer has", () => {
+		expect([...ALL_CORDS].sort()).toEqual([...CORDS].sort());
+	});
+
+	it("has a pose, a glow and a hover height for every cord state", () => {
+		for (const cord of CORDS) {
+			expect(LIMB_POSE[cord], cord).toBeDefined();
+			expect(GLOW[cord], cord).toBeDefined();
+			expect(HOVER[cord], cord).toBeDefined();
+			expect(TELL_MOTION, cord).toHaveProperty(cord);
+		}
+	});
+
+	it("draws no two cord states the same, on any of the three channels", () => {
+		// The rule the whole art obeys: two states drawn alike are two states the overlay
+		// cannot tell you apart. A tell that collapsed two of them would be worse than no
+		// tell — it would be a confident wrong answer.
+		for (const [a, b] of pairs(CORDS)) {
+			expect(LIMB_POSE[a], `limb: ${a} vs ${b}`).not.toEqual(LIMB_POSE[b]);
+			expect([GLOW[a], glowColour(a)], `glow: ${a} vs ${b}`).not.toEqual([GLOW[b], glowColour(b)]);
+			expect(HOVER[a], `hover: ${a} vs ${b}`).not.toEqual(HOVER[b]);
+		}
+	});
+
+	it("separates the limb poses by enough angle to be seen, not just enough to differ", () => {
+		// 12° apart at the ~30px these are really drawn at. Values that merely differed
+		// passed the test above and were indistinguishable on the contact sheet.
+		for (const [a, b] of pairs(CORDS)) {
+			expect(Math.abs(LIMB_POSE[a].angle - LIMB_POSE[b].angle), `${a} vs ${b}`).toBeGreaterThanOrEqual(12);
+		}
+	});
+
+	it("holds a fold shorter than an upright pose, so a folded part stays in frame", () => {
+		for (const cord of CORDS) {
+			if (LIMB_POSE[cord].angle < -40) expect(LIMB_POSE[cord].scale, cord).toBeLessThan(0.9);
+			expect(LIMB_POSE[cord].scale, cord).toBeGreaterThan(0.6);
+		}
+	});
+
+	it("moves only where the link is live, and never where it is gone", () => {
+		// Motion asserts liveness. A session we have lost contact with, one that has ended
+		// and one at rest must all be STILL — the rule the quiet dots already follow.
+		expect(TELL_MOTION.streaming).not.toBeNull();
+		expect(TELL_MOTION.tugging).not.toBeNull();
+		expect(TELL_MOTION.sparking).not.toBeNull();
+		expect(TELL_MOTION.attached).toBeNull();
+		expect(TELL_MOTION.coiled).toBeNull();
+		expect(TELL_MOTION.unplugged).toBeNull();
+	});
+
+	it("puts a glow out completely, and sinks a floater to the floor, when the cord is out", () => {
+		expect(GLOW.unplugged).toBe(0);
+		expect(GLOW.streaming).toBe(1);
+		expect(Math.min(...CORDS.map((cord) => HOVER[cord]))).toBe(HOVER.unplugged);
+		expect(HOVER.unplugged).toBeLessThan(HOVER.coiled);
+	});
+
+	it("gives a failed run its own glow colour, not just a dimmer one", () => {
+		// Brightness alone cannot carry a failure: `sparking` at 0.62 and `attached` at
+		// 0.72 are the same lamp as far as a glance is concerned. Hue is what makes it a
+		// different reading.
+		expect(glowColour("sparking")).not.toBe(glowColour("attached"));
+		for (const cord of CORDS) {
+			if (cord !== "sparking") expect(glowColour(cord), cord).toBe(glowColour("attached"));
+		}
+	});
+});
