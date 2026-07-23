@@ -28,6 +28,7 @@ import {
 	MEET_GAP_PX,
 	syncActivities,
 	tick,
+	pinFrozen,
 	walkingCount,
 	walkSlots,
 	type Pet,
@@ -2487,5 +2488,91 @@ describe("a rally: shaking the Orchestrator calls its project in", () => {
 			expect(["a1", "a2"].map((id) => petById(done, id).x)).toEqual(["a1", "a2"].map((id) => petById(called, id).x));
 			expect(done.pets.every((p) => p.rally === undefined)).toBe(true);
 		});
+	});
+});
+
+describe("a Proc whose terminal is open (world.frozenId)", () => {
+	// A band whose pet's rest has run out, so WITHOUT the freeze it would stroll on
+	// the next tick — the control that proves these tests would catch a regression.
+	function ready(id = "a"): World {
+		const base = syncActivities(world(), [activity(id, "pr_open")], T0, half);
+		return { ...base, pets: base.pets.map((p) => ({ ...p, x: 400, restUntil: T0 })) };
+	}
+
+	it("control: an un-frozen Proc with its rest run out DOES stroll", () => {
+		const next = tick(ready(), T0 + 1, half);
+
+		expect(petById(next, "a").motion.kind).toBe("walking");
+	});
+
+	it("never sets off strolling while its terminal is open", () => {
+		// The bug: the pet paced back and forth with its terminal open. The freeze is
+		// an engine input now, so the tick that owns motion simply never starts it.
+		let w: World = { ...ready(), frozenId: "a" };
+		for (let i = 1; i <= 120; i++) w = tick(w, T0 + i * 1_000, half);
+
+		expect(petById(w, "a").motion.kind).toBe("standing");
+		expect(petById(w, "a").x).toBe(400);
+	});
+
+	it("stops a stroll that was already in flight when the terminal opened", () => {
+		// It cancels the walk, not just future ones — snapped to where it had actually
+		// got to (drawnX), so there is no jump.
+		const walking: World = {
+			...ready(),
+			frozenId: "a",
+			pets: [
+				{
+					...petById(ready(), "a"),
+					motion: { kind: "walking" as const, fromX: 400, toX: 700, startedAt: T0, endsAt: T0 + 4_000 },
+				},
+			],
+		};
+		const next = tick(walking, T0 + 2_000, half);
+
+		expect(petById(next, "a").motion.kind).toBe("standing");
+	});
+
+	it("is pulled out of a meeting rather than walking off to greet", () => {
+		const meeting: World = {
+			...ready(),
+			frozenId: "a",
+			pets: [
+				{
+					...petById(ready(), "a"),
+					meeting: { withId: "b", homeX: 400, line: "", phase: "approaching", until: T0 + 9_999 },
+				},
+			],
+		};
+
+		expect(pinFrozen(meeting, T0).pets[0].meeting).toBeUndefined();
+	});
+
+	it("can still be picked up and thrown — held and flying are left alone", () => {
+		const held: World = {
+			...ready(),
+			frozenId: "a",
+			pets: [{ ...petById(ready(), "a"), motion: { kind: "held" as const, grabbedAt: T0 } }],
+		};
+		const flying: World = {
+			...ready(),
+			frozenId: "a",
+			pets: [{ ...petById(ready(), "a"), motion: { kind: "flying" as const, vx: 0.4, vy: -0.6 } }],
+		};
+
+		expect(pinFrozen(held, T0).pets[0].motion.kind).toBe("held");
+		expect(pinFrozen(flying, T0).pets[0].motion.kind).toBe("flying");
+	});
+
+	it("strolls again once the terminal closes (frozenId cleared)", () => {
+		let w: World = { ...ready(), frozenId: "a" };
+		w = tick(w, T0 + 1, half);
+		expect(petById(w, "a").motion.kind).toBe("standing");
+
+		// Terminal closed: the pet is un-frozen and given a fresh, already-elapsed rest.
+		w = { ...w, frozenId: undefined, pets: w.pets.map((p) => ({ ...p, restUntil: T0 })) };
+		w = tick(w, T0 + 2, half);
+
+		expect(petById(w, "a").motion.kind).toBe("walking");
 	});
 });

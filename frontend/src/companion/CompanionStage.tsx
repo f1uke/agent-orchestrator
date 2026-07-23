@@ -3,6 +3,7 @@ import {
 	createWorld,
 	dragPet,
 	drawnX,
+	pinFrozen,
 	grabPet,
 	releasePet,
 	startConversation,
@@ -626,30 +627,25 @@ export function CompanionStage({
 	//
 	// The card rides its Proc, so it would otherwise slide across the desktop mid
 	// sentence while you were typing into it — and a terminal that wanders is a
-	// terminal you cannot use. It stops where it is (`drawnX`, so there is no jump
-	// from wherever the walk had actually got to) and holds off on strolling until
-	// the terminal closes. It can still be picked up and thrown; the card follows.
+	// terminal you cannot use. So the pet is FROZEN: named on the world, the engine
+	// itself refuses to move it (`pinFrozen`, applied inside every tick), rather
+	// than being corrected afterwards on a timer that raced the tick and let it
+	// pace. It can still be picked up and thrown; the card follows.
 	const attachedId = attachedSession;
 	useEffect(() => {
-		if (!attachedId) return;
-		const stop = (current: World): World => ({
-			...current,
-			pets: current.pets.map((pet) =>
-				pet.id !== attachedId || pet.motion.kind !== "walking"
-					? pet
-					: { ...pet, x: drawnX(pet, Date.now()), motion: { kind: "standing" }, restUntil: Number.MAX_SAFE_INTEGER },
-			),
-		});
-		setWorld(stop);
-		// A walk can begin between renders; hold the Proc for as long as its terminal
-		// is open rather than only at the moment it opened.
-		const timer = setInterval(() => setWorld(stop), TICK_MS);
+		// Name the frozen pet on the world and snap it still at once (the next tick
+		// would too, but not for up to 500ms). Clearing it hands the pet a fresh rest
+		// so it resumes strolling like any other instead of standing there for ever.
+		setWorld((current) => pinFrozen({ ...current, frozenId: attachedId }, Date.now()));
 		return () => {
-			clearInterval(timer);
-			setWorld((current) => ({
-				...current,
-				pets: current.pets.map((pet) => (pet.id === attachedId ? { ...pet, restUntil: Date.now() } : pet)),
-			}));
+			setWorld((current) => {
+				if (current.frozenId !== attachedId) return current;
+				return {
+					...current,
+					frozenId: undefined,
+					pets: current.pets.map((pet) => (pet.id === attachedId ? { ...pet, restUntil: Date.now() } : pet)),
+				};
+			});
 		};
 	}, [attachedId]);
 

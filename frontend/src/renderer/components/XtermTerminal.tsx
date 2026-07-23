@@ -34,6 +34,7 @@ import type { ExternalRefMatch } from "../lib/terminal-scm-links";
 import type { FileLinkMatch } from "../lib/terminal-file-links";
 import { registerTerminalFocus } from "../lib/terminal-focus";
 import { buildTerminalThemes } from "../lib/terminal-themes";
+import { createWheelForwarder } from "../lib/terminal-wheel";
 import type { Theme } from "../stores/ui-store";
 
 export type XtermTerminalProps = {
@@ -243,29 +244,6 @@ function normalizedTerminalShortcut(event: KeyboardEvent): string | null {
 function terminalHasFocus(host: HTMLElement): boolean {
 	const activeElement = document.activeElement;
 	return !!activeElement && host.contains(activeElement);
-}
-
-// For mouse-tracking panes we synthesize SGR mouse-wheel reports and write them
-// to the pane; tmux (with `mouse on`, set by the runtime adapter) acts on them
-// and scrolls its scrollback via copy-mode. Left to itself xterm would convert
-// the wheel into cursor-arrow keys (its alt-buffer fallback), which move the
-// agent's cursor rather than scrolling. SGR button 64 = wheel up, 65 = down;
-// reports are 1-based and a single cell is enough for a borderless single pane.
-const SGR_WHEEL_UP = 64;
-const SGR_WHEEL_DOWN = 65;
-
-function sgrWheelReport(button: number, count: number): string {
-	return `\x1b[<${button};1;1M`.repeat(count);
-}
-
-// PageUp (CSI 5~) / PageDown (CSI 6~) for pane apps that scroll their transcript
-// by keyboard rather than mouse reports. One page key per wheel notch: a page
-// already scrolls a full screen, so scaling by line count would over-scroll.
-const PAGE_UP = "\x1b[5~";
-const PAGE_DOWN = "\x1b[6~";
-
-function pageKeyReport(lines: number): string {
-	return lines < 0 ? PAGE_UP : PAGE_DOWN;
 }
 
 export function XtermTerminal(props: XtermTerminalProps) {
@@ -712,59 +690,17 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			},
 		});
 
-		// Translate wheel motion into SGR wheel reports for the pane (see
-		// sgrWheelReport), one report per scrolled line. WheelEvent.deltaMode
-		// varies by platform/device: trackpads and normalized wheels report
-		// pixels (mode 0, the macOS case), while many Linux/Windows mouse wheels
-		// report whole lines (mode 1) or pages (mode 2). Mirror xterm's native
-		// getLinesScrolled across all three so scroll works everywhere; pixel
-		// deltas accumulate so a full cell-height emits one line. Returning false
-		// suppresses xterm's arrow-key wheel fallback. Ctrl/Cmd wheel is the
-		// font-size zoom (CenterPane), so leave it for that handler.
-		let wheelAccumPx = 0;
-		term.attachCustomWheelEventHandler((event) => {
-			if (event.ctrlKey || event.metaKey) return false;
-			let lines: number;
-			if (event.deltaMode === 1 /* DOM_DELTA_LINE */) {
-				lines = Math.trunc(event.deltaY) || Math.sign(event.deltaY);
-			} else if (event.deltaMode === 2 /* DOM_DELTA_PAGE */) {
-				lines = (Math.trunc(event.deltaY) || Math.sign(event.deltaY)) * term.rows;
-			} else {
-				const rowHeight = (term.options.fontSize ?? 12) * (term.options.lineHeight ?? 1);
-				wheelAccumPx += event.deltaY;
-				lines = Math.trunc(wheelAccumPx / rowHeight);
-				wheelAccumPx -= lines * rowHeight;
-			}
-			if (lines === 0) return false;
-			// A full-screen TUI that keeps its own transcript and scrolls it only by
-			// keyboard (opencode) ignores wheel/mouse reports on every platform; route
-			// its wheel to page keys. Kept first so opencode is unaffected by the
-			// buffer-aware paths below.
-			if (callbacksRef.current.paneScrollsByKeyboard) {
-				emitUserInput(pageKeyReport(lines), "wheel");
-				return false;
-			}
-			// A normal-buffer pane with mouse tracking off (codex, a plain shell)
-			// prints its transcript and relies on the terminal's own scrollback — the
-			// way it scrolls in a raw terminal. Scroll xterm's viewport locally; the
-			// pane never sees these bytes. Requires scrollback > 0 (see Terminal opts).
-			if (term.modes.mouseTrackingMode === "none" && term.buffer.active.type === "normal") {
-				term.scrollLines(lines);
-				return false;
-			}
-			// Mouse tracking on: the pane (tmux/zellij copy-mode, or any app that
-			// tracks the mouse) acts on SGR wheel reports. On Windows conpty this
-			// reaches the app directly; under a mux it drives copy-mode.
-			if (term.modes.mouseTrackingMode !== "none") {
-				const button = lines < 0 ? SGR_WHEEL_UP : SGR_WHEEL_DOWN;
-				emitUserInput(sgrWheelReport(button, Math.abs(lines)), "wheel");
-				return false;
-			}
-			// Alt-buffer pane with mouse tracking off and no keyboard-scroll hint:
-			// no scrollback to move locally, so fall back to page keys.
-			emitUserInput(pageKeyReport(lines), "wheel");
-			return false;
-		});
+		// Translate wheel motion into the right kind of scroll for whatever the pane
+		// is — local scrollback, SGR wheel reports, or page keys. Shared with the
+		// companion's terminal card so a pane scrolls the same everywhere; the rule
+		// itself lives in terminal-wheel.ts. Ctrl/Cmd wheel is the font-size zoom
+		// (CenterPane), which the forwarder leaves alone.
+		term.attachCustomWheelEventHandler(
+			createWheelForwarder(term, {
+				paneScrollsByKeyboard: () => callbacksRef.current.paneScrollsByKeyboard === true,
+				emit: emitUserInput,
+			}),
+		);
 		const pasteInput = (event: ClipboardEvent) => {
 			event.preventDefault();
 			event.stopPropagation();

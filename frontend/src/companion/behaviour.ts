@@ -386,6 +386,20 @@ export type World = {
 	 * ago. A portal is about a session's LIFE, never about its seat.
 	 */
 	roster: string[];
+	/**
+	 * The one Proc, if any, whose terminal is open — the pet you are "on a call"
+	 * with. It stands where it is and does nothing of its own (no amble, no meeting,
+	 * no rally) until the terminal closes, because the terminal window is pinned
+	 * above it and a Proc that wanders takes its terminal with it.
+	 *
+	 * This is an ENGINE INPUT, the same shape as `parked` and `reducedMotion`: the
+	 * pet is held still INSIDE the tick, by the one thing that owns motion, rather
+	 * than corrected afterwards by a second timer racing the tick — which is what
+	 * let the frozen pet stroll for up to a tick at a time before being snapped
+	 * back. Held and flying are exempt: you can still pick the pet up and throw it,
+	 * and the card follows.
+	 */
+	frozenId?: string;
 };
 
 export type Rng = () => number;
@@ -1499,7 +1513,43 @@ export function tick(world: World, now: number, rng: Rng): World {
 	}
 	if (started.size > 0) pets = pets.map((pet) => started.get(pet.id) ?? pet);
 
-	return { ...world, pets };
+	// 5. Hold the pet whose terminal is open still — last, so it undoes anything the
+	//    steps above did to it (a walk begun before the freeze, a meeting it was
+	//    pulled into), and stays true no matter which of them moved it.
+	return pinFrozen({ ...world, pets }, now);
+}
+
+/**
+ * Hold the "on a call" pet still: the one whose terminal is open stands where it is
+ * and does nothing of its own until the terminal closes.
+ *
+ * Applied INSIDE the tick every time (see step 5), which is what makes it robust:
+ * the earlier design corrected the pet on a separate 500ms interval that raced the
+ * tick, so a stroll begun on one tick was only snapped back on the next — the pet
+ * visibly paced. Here the engine that owns motion refuses to move it in the first
+ * place. Held and flying are left untouched, so the pet can still be picked up and
+ * thrown; a walk in progress is snapped to where it has actually got to (`drawnX`,
+ * so there is no jump) and any meeting or rally it was in is dropped.
+ */
+export function pinFrozen(world: World, now: number): World {
+	const id = world.frozenId;
+	if (!id) return world;
+	let changed = false;
+	const pets = world.pets.map((pet) => {
+		if (pet.id !== id) return pet;
+		if (pet.motion.kind === "held" || pet.motion.kind === "flying") return pet;
+		const walking = pet.motion.kind === "walking";
+		if (!walking && pet.meeting === undefined && pet.rally === undefined) return pet;
+		changed = true;
+		return {
+			...pet,
+			...(walking ? { x: drawnX(pet, now), motion: { kind: "standing" as const } } : {}),
+			facing: "front" as const,
+			meeting: undefined,
+			rally: undefined,
+		};
+	});
+	return changed ? { ...world, pets } : world;
 }
 
 /** Two Procs mid-greeting turn to look at each other, whichever way round they stand. */
@@ -1546,6 +1596,10 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 
 // consider decides whether a standing Proc starts moving on this tick.
 function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolean): Pet {
+	// A Proc whose terminal is open is on a call: it never sets off on its own. Held
+	// still as an engine input rather than snapped back after the fact — see
+	// `World.frozenId` and `pinFrozen`.
+	if (world.frozenId === pet.id) return pet;
 	// A Proc in the user's hand, or away meeting another one, does nothing of its
 	// own until it is let go / the conversation is over.
 	if (pet.motion.kind !== "standing") return pet;

@@ -4,6 +4,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { buildTerminalThemes } from "../renderer/lib/terminal-themes";
 import { createTerminalMux, muxUrlFromApiBase } from "../renderer/lib/terminal-mux";
+import { createWheelForwarder } from "../renderer/lib/terminal-wheel";
+import { SGR_MOUSE_REPORT } from "../renderer/components/XtermTerminal";
 import {
 	useTerminalSession,
 	type AttachableTerminal,
@@ -125,9 +127,6 @@ export function SessionTerminalCard({
 		term.open(host);
 		fit.fit();
 
-		// Only keyboard and paste are forwarded — never xterm's raw `onData`, which
-		// also carries the terminal's own answers to the attach handshake and would
-		// corrupt the TUI (the rule XtermTerminal.tsx documents at length).
 		const inputListeners = new Set<(data: string, source: TerminalUserInputSource) => void>();
 		const emit = (data: string, source: TerminalUserInputSource) => {
 			onActivity?.();
@@ -140,6 +139,25 @@ export function SessionTerminalCard({
 			if (text) emit(text, "paste");
 		};
 		textarea?.addEventListener("paste", onPaste);
+
+		// The mouse, forwarded the same way the board's terminal does it (the rules
+		// are shared code — terminal-wheel.ts and SGR_MOUSE_REPORT — so a session
+		// scrolls and clicks the same wherever it is shown). Without this the card
+		// could only be typed into: the wheel did nothing, so a full-screen agent like
+		// Claude Code could not be scrolled to read what had gone by.
+		//
+		//  - The WHEEL becomes local scrollback, SGR wheel reports, or page keys,
+		//    picked from the pane's live modes.
+		//  - Xterm's raw `onData` is NOT forwarded wholesale — it also carries the
+		//    terminal's own answers to the attach handshake, which would corrupt the
+		//    real PTY — only the mouse reports out of it (the "\x1b[<" SGR prefix is
+		//    unique to them). The DEFAULT encoding arrives on `onBinary`, which xterm
+		//    uses only for mouse reports, so that is forwarded whole.
+		term.attachCustomWheelEventHandler(createWheelForwarder(term, { paneScrollsByKeyboard: () => false, emit }));
+		const mouseData = term.onData((data) => {
+			if (SGR_MOUSE_REPORT.test(data)) emit(data, "mouse");
+		});
+		const mouseBinary = term.onBinary((data) => emit(data, "mouse"));
 
 		const bound: AttachableTerminal = {
 			get cols() {
@@ -174,6 +192,8 @@ export function SessionTerminalCard({
 			observer.disconnect();
 			textarea?.removeEventListener("paste", onPaste);
 			key.dispose();
+			mouseData.dispose();
+			mouseBinary.dispose();
 			setTerminal(null);
 			term.dispose();
 		};
