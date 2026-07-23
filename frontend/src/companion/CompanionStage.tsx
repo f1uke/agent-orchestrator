@@ -14,9 +14,9 @@ import {
 } from "./behaviour";
 import { Bubble } from "./Bubble";
 import type { ComposedBubble } from "./bubble-compose";
-import type { CastMember } from "./cast";
-import { castFor } from "./look-store";
-import { useLookOverrides } from "./look-store-live";
+import { withSpecies, type CastMember } from "./cast";
+import { castFor, resolveSpecies } from "./look-store";
+import { useLookOverrides, useProjectLooks } from "./look-store-live";
 import { hoverAt, HOVER_TOOLTIP_DELAY_MS, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
@@ -91,7 +91,7 @@ export type CompanionStageProps = {
 	 * standing on a contact sheet. With it absent — which is every real overlay — the
 	 * look is the human's choice over the session's hash, exactly as before.
 	 */
-	castFor?: (sessionId: string) => CastMember;
+	castFor?: (sessionId: string, project?: string) => CastMember;
 };
 
 // The band is inset by the SCENE's overhang, not just the figure's: a Proc parked
@@ -122,9 +122,16 @@ export function CompanionStage({
 	// the Pet library. Both windows read the same localStorage key, so a choice made
 	// in Settings lands here on the `storage` event with nothing in between.
 	const looks = useLookOverrides();
-	// The lab's override wins where it is given; everywhere else this is the choice
-	// over the hash, which is the whole of the real behaviour.
-	const resolveCast = castForOverride ?? ((sessionId: string) => castFor(sessionId, looks));
+	const projectLooks = useProjectLooks();
+	// Two questions, two keys. The COLOUR and the hat come from the session, so two
+	// workers on one project can be told apart; the CREATURE comes from the PROJECT, so
+	// every session on it is the same animal and the band groups itself by shape. That
+	// is what took the coloured mark off the name chip — a mark has to be decoded, a
+	// creature is known by the time you have noticed it.
+	const resolveCast =
+		castForOverride ??
+		((sessionId: string, project?: string) =>
+			withSpecies(castFor(sessionId, looks), resolveSpecies(project, projectLooks)));
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
 	// rebuilt on every state change.
@@ -398,7 +405,7 @@ export function CompanionStage({
 		<div className="companion-stage">
 			<div className="companion-cast">
 				{painted.map((pet) => (
-					<ProcArt key={pet.id} pet={pet} cast={resolveCast(pet.id)} />
+					<ProcArt key={pet.id} pet={pet} cast={resolveCast(pet.id, pet.project)} />
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>
@@ -499,7 +506,7 @@ function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 				className="companion-proc-art"
 			/>
 			<div className="companion-proc-name">
-				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} project={pet.project} />
+				<NameTag name={pet.name} lead={pet.kind === "orchestrator"} />
 			</div>
 		</div>
 	);

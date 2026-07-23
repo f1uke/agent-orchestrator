@@ -1,11 +1,12 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
-import { castForSession } from "./cast";
+import { castForSession, castFromLook, defaultLook, withSpecies } from "./cast";
 import { CompanionStage } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
 import { LOOKS_STORAGE_KEY, serializeLookOverrides } from "./look-store";
 import { storeLookChoice } from "./look-store-live";
+import { speciesForProject } from "./species";
 
 afterEach(() => {
 	cleanup();
@@ -416,12 +417,36 @@ describe("the look a Proc wears", () => {
 		container.querySelector(`[data-session="${session}"] [data-hat]`)?.getAttribute("data-hat");
 	const paletteOf = (container: HTMLElement, session: string) =>
 		container.querySelector(`[data-session="${session}"] [data-hat]`)?.getAttribute("data-palette");
+	// On the SVG root, not the hat: three creatures wear no hat at all, so reading it
+	// off the hat group would make the assertion depend on which creature turned up.
+	const speciesOf = (container: HTMLElement, session: string) =>
+		container.querySelector(`[data-session="${session}"] svg[data-species]`)?.getAttribute("data-species");
+	/**
+	 * The hash colour a session gets, expressed on whatever CREATURE its project is.
+	 *
+	 * ⚠ The colour axis is per-session and the creature axis is per-PROJECT, and each
+	 * creature brings its own six colours — so "the hash colour" is a SLOT in that
+	 * creature's set, not the Proc's id for it. Asserting the Proc's id would be
+	 * asserting that the project axis does nothing.
+	 */
+	const hashPaletteOn = (session: string, project: string) =>
+		withSpecies(castForSession(session), speciesForProject(project)).palette;
 
 	it("wears the hash look when nobody has chosen one", () => {
 		const { container } = pushTwo();
 
 		expect(hatOf(container, "a")).toBe(castForSession("a").hatId);
-		expect(paletteOf(container, "a")).toBe(castForSession("a").palette);
+		expect(paletteOf(container, "a")).toBe(hashPaletteOn("a", "p"));
+	});
+
+	it("draws every session on a project as the SAME creature", () => {
+		// The whole point of the project axis, and what took the coloured mark off the
+		// name chip: the band groups itself by shape, so which project a pet belongs to
+		// is something you see rather than something you decode.
+		const { container } = pushTwo();
+
+		expect(speciesOf(container, "a")).toBe(speciesForProject("p"));
+		expect(speciesOf(container, "a")).toBe(speciesOf(container, "b"));
 	});
 
 	it("wears a chosen hat, and keeps the hash COLOUR", () => {
@@ -429,7 +454,7 @@ describe("the look a Proc wears", () => {
 		const { container } = pushTwo();
 
 		expect(hatOf(container, "a")).toBe("cone");
-		expect(paletteOf(container, "a")).toBe(castForSession("a").palette);
+		expect(paletteOf(container, "a")).toBe(hashPaletteOn("a", "p"));
 	});
 
 	it("repaints when the OTHER window changes it, which is the whole cross-window path", () => {
@@ -441,7 +466,11 @@ describe("the look a Proc wears", () => {
 			window.dispatchEvent(new StorageEvent("storage", { key: LOOKS_STORAGE_KEY, newValue: value }));
 		});
 
-		expect(paletteOf(container, "a")).toBe("mint");
+		// Chosen on the SESSION axis, so it survives being mapped onto the project's
+		// creature — it is a slot in that creature's own six.
+		expect(paletteOf(container, "a")).toBe(
+			withSpecies(castFromLook({ ...defaultLook("a"), palette: "mint" }), speciesForProject("p")).palette,
+		);
 	});
 
 	it("leaves every other session exactly as it was", () => {
@@ -450,6 +479,6 @@ describe("the look a Proc wears", () => {
 		const { container } = pushTwo();
 
 		expect(hatOf(container, "b")).toBe(castForSession("b").hatId);
-		expect(paletteOf(container, "b")).toBe(castForSession("b").palette);
+		expect(paletteOf(container, "b")).toBe(hashPaletteOn("b", "p"));
 	});
 });

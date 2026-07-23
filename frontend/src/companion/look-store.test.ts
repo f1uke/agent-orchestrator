@@ -3,14 +3,23 @@ import { APPEARANCE_AXES, castForSession, defaultLook, type AxisId } from "./cas
 import {
 	castFor,
 	chooseLook,
+	chooseSpecies,
 	clearLookChoice,
+	clearSpeciesChoice,
 	isAxisChosen,
+	isSpeciesChosen,
 	parseLookOverrides,
+	parseProjectLooks,
+	parseStoredLooks,
 	pruneLookOverrides,
+	pruneProjectLooks,
 	resolveLook,
+	resolveSpecies,
 	serializeLookOverrides,
+	serializeStoredLooks,
 	type LookOverrides,
 } from "./look-store";
+import { speciesForProject } from "./species";
 
 const REF = "agent-orchestrator-168";
 const OTHER = "agent-orchestrator-169";
@@ -201,5 +210,75 @@ describe("pruning sessions that no longer exist", () => {
 
 	it("forgets everything when there are no sessions left", () => {
 		expect(pruneLookOverrides(chooseLook({}, REF, "hat", "cone"), [])).toEqual({});
+	});
+});
+
+describe("the creature a project wears", () => {
+	// Per PROJECT, not per session — the one axis that is. Every session on a project is
+	// the same animal, which is what let the coloured mark come off the name chip.
+
+	it("falls back to the hash of the project's name", () => {
+		expect(resolveSpecies("demo-app", {})).toBe(speciesForProject("demo-app"));
+	});
+
+	it("shows a chosen creature over the hash", () => {
+		const chosen = chooseSpecies({}, "demo-app", "ghost");
+
+		expect(resolveSpecies("demo-app", chosen)).toBe("ghost");
+		expect(isSpeciesChosen(chosen, "demo-app")).toBe(true);
+	});
+
+	it("leaves other projects alone", () => {
+		const chosen = chooseSpecies({}, "demo-app", "ghost");
+
+		expect(resolveSpecies("demo-api", chosen)).toBe(speciesForProject("demo-api"));
+	});
+
+	it("goes back to the hash when the choice is cleared, and says so by being ABSENT", () => {
+		const cleared = clearSpeciesChoice(chooseSpecies({}, "demo-app", "ghost"), "demo-app");
+
+		expect("demo-app" in cleared).toBe(false);
+		expect(resolveSpecies("demo-app", cleared)).toBe(speciesForProject("demo-app"));
+		expect(isSpeciesChosen(cleared, "demo-app")).toBe(false);
+	});
+
+	it("returns the same object when there was nothing to clear", () => {
+		const before = chooseSpecies({}, "demo-app", "ghost");
+
+		expect(clearSpeciesChoice(before, "demo-api")).toBe(before);
+	});
+
+	it("ignores a creature this build cannot draw", () => {
+		// The file may have been written by a LATER build that knows creatures this one
+		// does not. The right answer is the hash, not a crash and not a blank.
+		const raw = JSON.stringify({ v: 1, sessions: {}, projects: { "demo-app": "dragon" } });
+
+		expect(parseProjectLooks(raw)).toEqual({});
+		expect(resolveSpecies("demo-app", { "demo-app": "dragon" as never })).toBe(speciesForProject("demo-app"));
+	});
+
+	it("survives anything at all in the stored value", () => {
+		for (const raw of [null, "", "{", "[]", '{"projects":5}', '{"projects":{"":"ghost"}}', '{"projects":{"a":7}}']) {
+			expect(parseProjectLooks(raw as string)).toEqual({});
+		}
+	});
+
+	it("carries BOTH halves through a round trip, so one cannot erase the other", () => {
+		// ⚠ The failure this exists to prevent: writing a session choice with a
+		// sessions-only serializer would silently drop every project's creature.
+		const stored = {
+			sessions: { "a-1": { palette: "mint" } },
+			projects: { "demo-app": "ghost" as const },
+		};
+		const round = parseStoredLooks(serializeStoredLooks(stored));
+
+		expect(round).toEqual(stored);
+	});
+
+	it("forgets projects that are gone, and only when asked", () => {
+		const projects = { "demo-app": "ghost" as const, gone: "cat" as const };
+
+		expect(pruneProjectLooks(projects, ["demo-app"])).toEqual({ "demo-app": "ghost" });
+		expect(pruneProjectLooks(projects, ["demo-app", "gone"])).toBe(projects);
 	});
 });

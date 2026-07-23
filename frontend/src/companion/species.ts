@@ -186,7 +186,54 @@ export function speciesWears(id: SpeciesId, axis: AxisId): boolean {
 	return speciesById(id).axes.includes(axis);
 }
 
-/** The five that are not the default. `proc` is what every session has until it is dressed. */
+/**
+ * FNV-1a with murmur3's avalanche finalizer.
+ *
+ * The same hash `cast.ts` uses and for the same reason: `% n` takes the low bits, which
+ * FNV's are weakest, and project names in one workspace are near-identical strings
+ * (`demo-app`, `demo-api`, `demo-web`). Without the finalizer half of them land on one
+ * creature, which is the exact failure this axis exists to prevent.
+ */
+function hash(value: string): number {
+	let result = 0x811c9dc5;
+	for (let i = 0; i < value.length; i++) {
+		result ^= value.charCodeAt(i);
+		result = Math.imul(result, 0x01000193);
+	}
+	result ^= result >>> 16;
+	result = Math.imul(result, 0x85ebca6b);
+	result ^= result >>> 13;
+	result = Math.imul(result, 0xc2b2ae35);
+	result ^= result >>> 16;
+	return result >>> 0;
+}
+
+/**
+ * The creature a PROJECT is drawn as.
+ *
+ * ⚠ Keyed on the project, not the session, and that is the whole point of it. The other
+ * two axes answer "which session is this?" — a colour and a hat vary within a project so
+ * you can tell two workers apart. The species answers the question above that one:
+ * WHICH PROJECT, and every session on a project is the same creature.
+ *
+ * It replaces the coloured mark that used to sit after the name on the chip. A mark is
+ * something you have to look at and decode; a creature is something you already know by
+ * the time you have noticed it is there, which on a band you see out of the corner of
+ * your eye is the whole difference.
+ *
+ * ⚠ Six creatures means six projects told apart by shape alone. A seventh collides, and
+ * the answer to that is the library rather than a seventh body nobody wanted: pick the
+ * creature for the project by hand and the collision is gone.
+ *
+ * No project, no creature: a session that belongs to nothing is a Proc, which is the
+ * default everything started as.
+ */
+export function speciesForProject(project: string | undefined): SpeciesId {
+	if (!project) return "proc";
+	return SPECIES[hash(project) % SPECIES.length].id;
+}
+
+/** The five that are not the default. `proc` is what a session with no project gets. */
 export const NEW_SPECIES: readonly SpeciesId[] = SPECIES.filter((entry) => entry.id !== "proc").map(
 	(entry) => entry.id,
 );

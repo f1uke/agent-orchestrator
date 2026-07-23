@@ -95,6 +95,8 @@ export function Procs({
 	return (
 		<svg
 			role="img"
+			data-species={cast.species}
+			data-palette={cast.palette}
 			aria-label={`${cast.name}, ${held ? "being picked up" : status.replace(/_/g, " ")}`}
 			className={className}
 			width={frame.width}

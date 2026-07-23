@@ -34,6 +34,11 @@ export const MOCK_FEED_STEP_MS = 20_000;
 //
 // Session refs follow the real `<project>-<n>` shape, because the tooltip shows them
 // and because the character is a stable hash of the ref. A first set of realistic
+// ⚠ Spread across FOUR projects on purpose, with two of them holding more than one
+// session. The creature is now chosen by the project, so a mock that put everything on
+// one project would draw one animal eight times and demonstrate nothing — and a mock
+// with eight projects would draw eight and hide the grouping, which is the actual point.
+//
 // refs clustered four of eight sessions onto one character — five shared a project
 // prefix and differed only in a low number — which is the all-identical complaint
 // again, caught by the roster test rather than by eye — so these ids ARE the
@@ -55,9 +60,9 @@ const SCRIPTS: Array<{
 		states: ["working", "working", "pr_open", "review_pending", "approved"],
 	},
 	{
-		sessionId: "demo-app-74",
+		sessionId: "demo-web-74",
 		name: "lint rules",
-		project: "demo-app",
+		project: "demo-web",
 		states: ["ci_failed", "working", "ci_failed", "changes_requested"],
 	},
 	{
@@ -67,15 +72,15 @@ const SCRIPTS: Array<{
 		states: ["needs_input", "needs_input", "working", "mergeable", "merged"],
 	},
 	{
-		sessionId: "demo-app-35",
+		sessionId: "demo-web-35",
 		name: "cache warmup",
-		project: "demo-app",
+		project: "demo-web",
 		states: ["idle", "idle", "working"],
 	},
 	{
-		sessionId: "demo-app-70",
+		sessionId: "demo-infra-70",
 		name: "search filters",
-		project: "demo-app",
+		project: "demo-infra",
 		states: ["todo", "todo", "working", "draft", "pr_open", "mergeable", "merged"],
 	},
 	{
@@ -91,8 +96,8 @@ const SCRIPTS: Array<{
 		states: ["merged", "terminated", "todo", "working", "approved", "mergeable"],
 	},
 	{
-		// One coordinator, as a real project has: the mark is drawn on its label and
-		// there is no seeing it if the demo roster is all workers.
+		// One coordinator, as a real project has: it wears the gold chip and the crown,
+		// and there is no seeing either if the demo roster is all workers.
 		sessionId: "demo-app-10",
 		name: "coordinating demo-app",
 		project: "demo-app",

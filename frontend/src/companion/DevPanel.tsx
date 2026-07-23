@@ -218,11 +218,15 @@ export function DevPanel({
 				</label>
 			</Section>
 
-			<Section title="Creature (the species axis)">
+			<Section title="Creature (per PROJECT)">
+				<p style={{ ...MUTED, margin: 0 }}>
+					`by project` is what the real thing does: the creature comes from the project name, so every session on a
+					project is the same animal. The rest force one body, to look at it across every state.
+				</p>
 				<div style={ROW_OF_BUTTONS}>
 					{[
+						{ id: "mixed" as const, name: "by project" },
 						...SPECIES.map((entry) => ({ id: entry.id as SpeciesId | "mixed", name: entry.name })),
-						{ id: "mixed" as const, name: "mixed" },
 					].map((entry) => (
 						<button
 							key={entry.id}

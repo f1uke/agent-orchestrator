@@ -167,55 +167,23 @@ describe("the orchestrator's name chip", () => {
 	});
 });
 
-describe("the project mark on the chip", () => {
-	// The human could not tell which pet belonged to which project: the look is
-	// assigned per SESSION, so it carried no project signal, and the only project
-	// information on screen was inside a hover card you have to ask for.
-	it("marks a Proc with its project", () => {
-		const { container } = render(<NameTag name="login rate limit" project="demo-app" />);
-
-		expect(container.querySelector("[data-project-mark]")).not.toBeNull();
-	});
-
-	it("gives two sessions on the same project the same mark", () => {
-		const one = render(<NameTag name="a" project="demo-app" />).container;
-		const two = render(<NameTag name="b" project="demo-app" />).container;
-
-		expect(markOf(one)).toBe(markOf(two));
-	});
-
-	it("gives two projects different marks", () => {
-		const app = render(<NameTag name="a" project="demo-app" />).container;
-		const api = render(<NameTag name="a" project="demo-api" />).container;
-
-		expect(markOf(app)).not.toBe(markOf(api));
-	});
-
-	it("shows no mark at all when the project is unknown", () => {
+describe("what the chip carries, now the project is the creature", () => {
+	it("shows nothing on the chip but the name and, for a coordinator, its crown", () => {
+		// ⚠ The project MARK is gone from here on purpose. It was a small coloured shape
+		// that had to be looked at and decoded; the project is now the CREATURE, so the
+		// band groups itself by shape and the chip is back to being just a name.
 		const { container } = render(<NameTag name="login rate limit" />);
+		const chip = container.querySelector("[data-name-tag]") as HTMLElement;
 
 		expect(container.querySelector("[data-project-mark]")).toBeNull();
+		expect([...chip.children].length).toBe(1);
 	});
 
-	it("puts the mark AFTER the name and the crown BEFORE it", () => {
-		// In front, the mark and the crown crowd each other and read as one cluttered
-		// badge. The human's call once both were on the same chip.
-		const { container } = render(<NameTag name="orchestrating" project="demo-app" lead />);
+	it("still crowns the coordinator, and puts the crown BEFORE the name", () => {
+		const { container } = render(<NameTag name="orchestrating" lead />);
 		const chip = container.querySelector("[data-name-tag]") as HTMLElement;
 		const kids = [...chip.children];
 
 		expect(kids.findIndex((k) => k.matches("[data-lead-crown]"))).toBe(0);
-		expect(kids.findIndex((k) => k.matches("[data-project-mark]"))).toBe(kids.length - 1);
-	});
-
-	it("carries the ink rim, like every other mark out here", () => {
-		const { container } = render(<NameTag name="a" project="demo-app" />);
-		const path = container.querySelector("[data-project-mark] path");
-
-		expect(path?.getAttribute("stroke")).toBe(PROCS_INK);
 	});
 });
-
-function markOf(container: HTMLElement): string | null {
-	return container.querySelector("[data-project-mark]")?.getAttribute("data-project-mark") ?? null;
-}

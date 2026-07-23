@@ -8,6 +8,7 @@ import {
 	LIMB_POSE,
 	NEW_SPECIES,
 	SPECIES,
+	speciesForProject,
 	speciesById,
 	speciesWears,
 	TELL_MOTION,
@@ -92,6 +93,40 @@ describe("the cast of creatures", () => {
 				expect(anchor[1], `${entry.id} y`).toBeGreaterThan(40);
 				expect(anchor[1], `${entry.id} y`).toBeLessThan(118);
 			}
+		}
+	});
+});
+
+describe("the creature a PROJECT is drawn as", () => {
+	// The axis that replaced the coloured mark on the name chip. Colour and hat answer
+	// "which session is this?"; the creature answers the question above it — WHICH
+	// PROJECT — so a band groups itself by shape with nothing to decode.
+	const PROJECTS = ["demo-app", "demo-api", "demo-web", "demo-infra", "demo-tools", "starlight"];
+
+	it("gives one project one creature, every time", () => {
+		for (const project of PROJECTS) {
+			expect(speciesForProject(project)).toBe(speciesForProject(project));
+		}
+	});
+
+	it("spreads near-identical project names across the cast", () => {
+		// ⚠ The real input, and the reason the hash needs an avalanche finalizer: projects
+		// in one workspace are near-identical strings that differ in their last few
+		// characters, which is exactly where a weak hash puts them all on one creature.
+		const dealt = new Set(PROJECTS.map(speciesForProject));
+
+		expect(dealt.size, [...dealt].join(", ")).toBeGreaterThanOrEqual(4);
+	});
+
+	it("draws a session with no project as the default", () => {
+		// No project, no creature identity to carry. A Proc is what everything started as.
+		expect(speciesForProject(undefined)).toBe("proc");
+		expect(speciesForProject("")).toBe("proc");
+	});
+
+	it("can only ever name a creature that exists", () => {
+		for (const project of [...PROJECTS, "x", "a-very-long-project-name-indeed", "🙂"]) {
+			expect(SPECIES.map((entry) => entry.id)).toContain(speciesForProject(project));
 		}
 	});
 });

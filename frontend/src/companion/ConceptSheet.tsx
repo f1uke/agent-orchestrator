@@ -162,7 +162,7 @@ function Stand({
 			<div className="companion-proc" style={{ position: "static" }}>
 				<Procs cast={cast} status={status} facing="front" walking={walking} size={size} />
 			</div>
-			<NameTag name="login rate limit" project="demo-app" />
+			<NameTag name="login rate limit" />
 		</div>
 	);
 }
