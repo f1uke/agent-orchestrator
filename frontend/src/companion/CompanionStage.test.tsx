@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
 import { castForSession, castFromLook, defaultLook, withSpecies } from "./cast";
+import { MEET_RUN_MAX_MS } from "./behaviour";
 import { CompanionStage } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
 import { LOOKS_STORAGE_KEY, serializeLookOverrides } from "./look-store";
@@ -487,5 +488,142 @@ describe("the look a Proc wears", () => {
 
 		expect(hatOf(container, "b")).toBe(hashWornOn("b", "p"));
 		expect(paletteOf(container, "b")).toBe(hashPaletteOn("b", "p"));
+	});
+});
+
+describe("shaking the Orchestrator to call its project in", () => {
+	// The end of the gesture the engine cannot see: real pointer events, on a real
+	// figure, arriving in the order a hand produces them.
+	const ALPHA: CompanionActivity[] = [
+		{ sessionId: "lead", status: "working", name: "coordinator", project: "alpha", kind: "orchestrator" },
+		{ sessionId: "a1", status: "pr_open", name: "one", project: "alpha" },
+		{ sessionId: "b1", status: "pr_open", name: "outsider", project: "beta" },
+	];
+
+	function stage() {
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} />);
+		push(ALPHA);
+		return view;
+	}
+
+	const figureOf = (container: HTMLElement, id: string) =>
+		container.querySelector(`[data-session="${id}"] [data-figure] rect`)!;
+	const procOf = (container: HTMLElement, id: string) => container.querySelector(`[data-session="${id}"]`)!;
+	const atX = (node: Element) => Number(/translate3d\((-?[\d.]+)px/.exec(node.getAttribute("style") ?? "")?.[1]);
+	/**
+	 * How long this Proc's current move takes, in ms. The tell that separates the
+	 * three things a Proc can be doing: 0 is standing, a run is capped at
+	 * `MEET_RUN_MAX_MS`, and a stroll is never shorter than `WALK_MIN_MS`.
+	 */
+	const moveMs = (node: Element) =>
+		Number(/transition-duration:\s*([\d.]+)ms/.exec(node.getAttribute("style") ?? "")?.[1] ?? "0");
+
+	/** Wiggle the pointer: `legs` fast reversals, which is what a shake actually is. */
+	function shakeOver(node: Element, legs: number, amplitude = 40) {
+		let x = 600;
+		for (let leg = 0; leg < legs; leg++) {
+			const step = (leg % 2 === 0 ? amplitude : -amplitude) / 4;
+			for (let i = 0; i < 4; i++) {
+				x += step;
+				fireEvent.pointerMove(node, { bubbles: true, clientX: x, clientY: 300 });
+			}
+		}
+	}
+
+	it("calls the leader's project in, and leaves every other project standing", () => {
+		const { container } = stage();
+		const outsiderAt = atX(procOf(container, "b1"));
+
+		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 600, clientY: 300 });
+		shakeOver(container.querySelector(".companion-stage")!, 4);
+
+		expect(procOf(container, "lead").querySelector("[data-rally-call]")).not.toBeNull();
+		// Running, not strolling: a rally is an event, and it moves at the meet's pace.
+		expect(moveMs(procOf(container, "a1"))).toBeGreaterThan(0);
+		expect(moveMs(procOf(container, "a1"))).toBeLessThanOrEqual(MEET_RUN_MAX_MS);
+		expect(atX(procOf(container, "b1"))).toBe(outsiderAt);
+		expect(moveMs(procOf(container, "b1"))).toBe(0);
+	});
+
+	it("keeps the leader in the hand while it is shaken", () => {
+		const { container } = stage();
+
+		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 600, clientY: 300 });
+		shakeOver(container.querySelector(".companion-stage")!, 4);
+
+		expect(container.querySelector("[data-rally-call]")).not.toBeNull();
+		expect(container.querySelector("[data-teased]")).not.toBeNull();
+	});
+
+	it("does not throw the leader on the release that ends the shake", () => {
+		// The wrist speed that fires a rally is the same speed that would fling a Proc
+		// across the desktop. Read literally, every successful shake ends in a throw —
+		// and then the two gestures are not distinct at all.
+		const { container } = stage();
+		const stage_ = container.querySelector(".companion-stage")!;
+
+		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 600, clientY: 300 });
+		shakeOver(stage_, 4);
+		const droppedAt = atX(procOf(container, "lead"));
+		fireEvent.pointerUp(stage_, { bubbles: true, clientX: 600, clientY: 300 });
+
+		expect(container.querySelector("[data-teased]")).toBeNull();
+		// Set down, not launched: no flight to carry it anywhere.
+		expect(atX(procOf(container, "lead"))).toBeCloseTo(droppedAt, 0);
+	});
+
+	it("still throws on a fling, because a fling is not a shake", () => {
+		const { container } = stage();
+		const stage_ = container.querySelector(".companion-stage")!;
+
+		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 300, clientY: 300 });
+		// One long directional run — the throw gesture, untouched.
+		for (let x = 340; x <= 900; x += 40) {
+			fireEvent.pointerMove(stage_, { bubbles: true, clientX: x, clientY: 260 });
+		}
+
+		expect(container.querySelector("[data-rally-call]")).toBeNull();
+		expect(container.querySelector("[data-teased]")).not.toBeNull();
+	});
+
+	it("does not rally off a worker, however hard it is shaken", () => {
+		const { container } = stage();
+
+		fireEvent.pointerDown(figureOf(container, "a1"), { bubbles: true, clientX: 600, clientY: 300 });
+		shakeOver(container.querySelector(".companion-stage")!, 6);
+
+		expect(container.querySelector("[data-rally-call]")).toBeNull();
+	});
+
+	it("does not rally on a slow drag, which is how a Proc gets repositioned", () => {
+		vi.useFakeTimers();
+		const { container } = stage();
+		const stage_ = container.querySelector(".companion-stage")!;
+
+		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 600, clientY: 300 });
+		// The same reversals, carried at a walking pace instead of flicked.
+		for (const x of [700, 800, 700, 600, 700, 800, 700, 600]) {
+			act(() => vi.advanceTimersByTime(500));
+			fireEvent.pointerMove(stage_, { bubbles: true, clientX: x, clientY: 300 });
+		}
+
+		expect(container.querySelector("[data-rally-call]")).toBeNull();
+	});
+
+	it("gathers without running when motion is reduced, and the gesture still works", () => {
+		prefersReducedMotion(true);
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} />);
+		push(ALPHA);
+
+		const before = atX(procOf(container, "a1"));
+		fireEvent.pointerDown(figureOf(container, "lead"), { bubbles: true, clientX: 600, clientY: 300 });
+		shakeOver(container.querySelector(".companion-stage")!, 4);
+
+		expect(container.querySelector("[data-rally-call]")).not.toBeNull();
+		// Gathered, not run in: it is simply already standing at its place in the ring.
+		expect(moveMs(procOf(container, "a1"))).toBe(0);
+		expect(atX(procOf(container, "a1"))).not.toBe(before);
 	});
 });

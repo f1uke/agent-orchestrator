@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SessionStatus } from "../renderer/types/workspace";
-import { tick, type World } from "./behaviour";
+import { startRally, tick, type World } from "./behaviour";
 import type { CompanionActivity } from "./feed";
 import type { ManualFeed } from "./dev-feed";
 import { STATUS_LABELS } from "./preview";
@@ -330,6 +330,27 @@ export function DevPanel({
 						}}
 					>
 						coordinator → this one
+					</button>
+				</div>
+			</Section>
+
+			<Section title="Roll-call (shake the coordinator)">
+				<p style={{ ...MUTED, margin: 0 }}>
+					The gesture itself is press-and-shake on the crowned Proc — this button is the same call, without the wrist.
+					Everything on the coordinator&apos;s project runs in, stands round it, and goes home.
+				</p>
+				<div style={ROW_OF_BUTTONS}>
+					<button
+						type="button"
+						style={BUTTON}
+						onClick={() =>
+							setWorld?.((current) => {
+								const lead = current.pets.find((pet) => pet.kind === "orchestrator");
+								return lead ? startRally(current, lead.id, Date.now()) : current;
+							})
+						}
+					>
+						rally
 					</button>
 				</div>
 			</Section>

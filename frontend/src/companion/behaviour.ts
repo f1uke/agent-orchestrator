@@ -110,6 +110,29 @@ export const MEET_RUN_MIN_MS = 400;
 export const MAX_CONCURRENT_MEETS = 1;
 
 /**
+ * A rally's run is the meet's run: the same pace, the same cap, the same function.
+ * A Proc answering a roll-call and a Proc answering a message are doing the same
+ * thing — leaving what they were at because the human asked for them.
+ */
+export const RALLY_RUN_MAX_MS = MEET_RUN_MAX_MS;
+/**
+ * How long the huddle holds before it breaks up.
+ *
+ * The clock is absolute and set once, at the moment the shake lands, at
+ * `RALLY_RUN_MAX_MS + RALLY_HOLD_MS` — so the whole cohort has arrived before it
+ * expires and they break TOGETHER. Per-Proc timers started on arrival would trickle
+ * them away one at a time, which reads as the huddle falling apart rather than as a
+ * roll-call that has finished.
+ */
+export const RALLY_HOLD_MS = 2_800;
+/**
+ * Closest the ring ever stands to the Orchestrator. A floor, not the usual value:
+ * the standing clearance is wider than this once real drawn widths are measured,
+ * and it wins, because a huddle whose members overlap is not a huddle.
+ */
+export const RALLY_GAP_PX = 96;
+
+/**
  * Default centre-to-centre clearance between two Procs standing on the band. The
  * renderer overrides it with the real drawn width; this is the fallback for tests
  * and for a world built before anything has been measured.
@@ -178,6 +201,8 @@ export type Pet = {
 	placed?: boolean;
 	/** Set while this Proc is away meeting another one. See {@link startConversation}. */
 	meeting?: Meeting;
+	/** Set while this Proc is answering a roll-call. See {@link startRally}. */
+	rally?: Rally;
 	/**
 	 * The last time this Proc hit the floor, and how hard.
 	 *
@@ -205,6 +230,23 @@ export type Meeting = {
 	line: string;
 	phase: "approaching" | "greeting" | "returning";
 	/** When `greeting` is over. Only the greeting is on a clock; the two runs end when they land. */
+	until: number;
+};
+
+/**
+ * One Proc's part in a roll-call.
+ *
+ * The LEADER carries one too, with `leaderId` equal to its own id — that is what
+ * makes it the leader, and what the renderer draws the call cue off. One field
+ * rather than two, so "who is in this rally" and "who called it" can never disagree.
+ */
+export type Rally = {
+	/** The Orchestrator everyone is answering. */
+	leaderId: string;
+	phase: "answering" | "gathered";
+	/** When the shake landed. The renderer replays its cue when this changes. */
+	startedAt: number;
+	/** When the huddle breaks up. Absolute, and the same for everyone in it. */
 	until: number;
 };
 
@@ -431,7 +473,9 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 				// to its other side, reading as the furniture teleporting.
 				// …unless it is mid-conversation, where the facing is what makes the two of
 				// them look at each other rather than past each other.
-				facing: prev.meeting || canWander(activity.status) ? prev.facing : ("front" as Facing),
+				// …or mid-rally, where the facing is what has it looking at the Proc that
+				// called it rather than past it.
+				facing: prev.meeting || prev.rally || canWander(activity.status) ? prev.facing : ("front" as Facing),
 			};
 			placed.push(next);
 			return next;
@@ -441,7 +485,7 @@ export function syncActivities(world: World, activities: CompanionActivity[], no
 
 /** True when this Proc is busy with something the engine must not interrupt. */
 function isBusy(pet: Pet): boolean {
-	return pet.motion.kind === "held" || pet.meeting !== undefined;
+	return pet.motion.kind === "held" || pet.meeting !== undefined || pet.rally !== undefined;
 }
 
 /**
@@ -531,6 +575,162 @@ function meetingCentre(world: World, wanted: number, participants: string[]): nu
 		}
 	}
 	return start;
+}
+
+/**
+ * Answer a shake of the Orchestrator: call this project's Procs in around it.
+ *
+ * The one gesture that moves Procs the human never touched, so it is deliberately
+ * narrow. It is scoped to the leader's PROJECT — per #169 a project is one creature,
+ * so "everyone on this project" is a group you can already see — and it is refused
+ * outright unless we know which project that is: a Proc whose project we cannot see
+ * cannot honestly call "its project", and gathering everything else we also cannot
+ * place would be a lie dressed up as a feature.
+ *
+ * Like the ao-send meet, it overrides anchoring: a Proc at its desk gets up to answer
+ * the call. Unlike the meet, nobody goes back afterwards — they gathered because they
+ * were called, and where they end up is where they now live (a Proc's place travels
+ * WITH it, desk and all, so standing somewhere new costs it nothing). Nothing about
+ * what a session IS changes: status, scene and bubble are untouched. Only where its
+ * Proc is standing.
+ *
+ * The leader is not disturbed at all. It stays exactly where the gesture has it —
+ * in the hand, if that is where the hand still is — because taking it out mid-shake
+ * reads as the app dropping the thing you are holding. The release that follows is
+ * what refuses to throw it (see the stage's `onUp`).
+ */
+export function startRally(world: World, leaderId: string, now: number): World {
+	const leader = world.pets.find((pet) => pet.id === leaderId);
+	if (!leader || leader.kind !== "orchestrator" || leader.project === "") return world;
+	// Already calling. A second shake mid-roll-call would restage an event that is
+	// still happening, and re-cut every runner's destination underneath it.
+	if (leader.rally || leader.meeting) return world;
+
+	const centre = Math.min(world.band.maxX, Math.max(world.band.minX, drawnX(leader, now)));
+	// `isBusy` covers the three things a roll-call must not interrupt: a Proc in the
+	// human's hand, one mid-conversation, and one already answering an earlier call.
+	const members = world.pets.filter((pet) => pet.id !== leader.id && pet.project === leader.project && !isBusy(pet));
+	const spots = rallySpots(world, centre, members, leader.id);
+	const rally: Rally = {
+		leaderId: leader.id,
+		phase: "answering",
+		startedAt: now,
+		until: now + RALLY_RUN_MAX_MS + RALLY_HOLD_MS,
+	};
+
+	return {
+		...world,
+		pets: world.pets.map((pet) => {
+			// The one that was shaken carries the call, and nothing else about it moves.
+			if (pet.id === leader.id) return { ...pet, rally: { ...rally, phase: "gathered" } };
+			const spot = spots.get(pet.id);
+			if (spot === undefined) return pet;
+			const from = drawnX(pet, now);
+			// Reduced motion keeps the meaning — they gathered — and drops only the travel.
+			if (world.reducedMotion || world.parked) {
+				return { ...pet, x: spot, y: 0, motion: { kind: "standing" }, rally: { ...rally, phase: "gathered" } };
+			}
+			return { ...pet, x: from, facing: facingFor(from, spot), motion: runTo(from, spot, now), rally };
+		}),
+	};
+}
+
+/**
+ * Where the ring stands.
+ *
+ * The band is one line, so a "ring" here is a flanking arc: slots step outward from
+ * the leader, alternating right and left, one clearance apart, skipping anything off
+ * the band — which is what lets a leader shaken at the screen edge gather everyone
+ * on the side that exists instead of stacking half the cast off the display.
+ *
+ * Bystanders get a say, but a BOUNDED one. Stepping over every Proc that was not
+ * called reads well on an empty band and catastrophically on a full one: with the
+ * near slots taken, the search walks outward until it finds room and the "huddle"
+ * ends up most of a screen away from the Proc it is supposed to be surrounding
+ * (measured in the browser: 800px, with four uninvolved Procs in between). So the
+ * clear-slot search may only look a ring or two further out; past that the tight
+ * arrangement wins and a bystander standing in it is simply overlapped. The huddle
+ * paints in front of the idle band (see `stacking.ts`), and being NEXT TO the leader
+ * is the whole point of the gesture.
+ *
+ * Members are then matched to slots in x order, which makes the assignment
+ * order-preserving: nobody crosses anybody else on the way in.
+ */
+function rallySpots(world: World, centre: number, members: Pet[], leaderId: string): Map<string, number> {
+	if (members.length === 0) return new Map();
+	const pitch = Math.max(RALLY_GAP_PX, world.spacing);
+	const called = new Set(members.map((pet) => pet.id));
+	const bystanders = world.pets.filter((pet) => pet.id !== leaderId && !called.has(pet.id));
+
+	/** Slots walking outward from the leader, alternating sides, that pass `usable`. */
+	const walk = (rings: number, usable: (x: number) => boolean): number[] => {
+		const found: number[] = [];
+		for (let ring = 1; ring <= rings && found.length < members.length; ring++) {
+			for (const side of [1, -1]) {
+				if (found.length === members.length) break;
+				const x = centre + side * ring * pitch;
+				if (x < world.band.minX || x > world.band.maxX) continue;
+				if (!usable(x)) continue;
+				found.push(x);
+			}
+		}
+		return found;
+	};
+
+	const onBand = () => true;
+	// A ring or two of slack to step over a bystander, and no more.
+	const clear = walk(Math.ceil(members.length / 2) + 1, (x) => isFree(x, bystanders, world.spacing));
+	const spots = clear.length === members.length ? clear : walk(members.length * 2 + 4, onBand);
+	// The band itself has no room left. Standing close is then the honest outcome —
+	// the same trade the crowding rules already make — and still better than a Proc
+	// that was called and never came.
+	for (let ring = 1; spots.length < members.length; ring++) {
+		for (const side of [1, -1]) {
+			if (spots.length === members.length) break;
+			spots.push(Math.min(world.band.maxX, Math.max(world.band.minX, centre + side * ring * pitch)));
+		}
+	}
+
+	spots.sort((a, b) => a - b);
+	const ordered = [...members].sort((a, b) => a.x - b.x || a.id.localeCompare(b.id));
+	return new Map(ordered.map((pet, index) => [pet.id, spots[index]]));
+}
+
+/**
+ * Move a roll-call on by one beat.
+ *
+ * The huddle's clock is absolute and was set when the shake landed, so this only
+ * ever has to notice that it has run out — and when it does, everyone is simply
+ * released back into ordinary roaming from wherever they are standing. Nothing here
+ * can leave a Proc gathered: even a leader whose session ended mid-rally leaves the
+ * ones it called to break up on the same clock.
+ */
+function advanceRally(pet: Pet, now: number, rng: Rng): Pet {
+	const rally = pet.rally;
+	if (!rally) return pet;
+	// The leader may still be in the human's hand — the shake does not take it out —
+	// so its call ends on the clock whatever it happens to be doing.
+	if (rally.leaderId === pet.id) return now < rally.until ? pet : { ...pet, rally: undefined };
+
+	if (pet.motion.kind !== "standing") return pet;
+	if (rally.phase === "answering") return { ...pet, rally: { ...rally, phase: "gathered" } };
+	if (now < rally.until) return pet;
+	// Loose again, with a fresh randomised rest so the cohort does not all stroll off
+	// on the same beat. Where it is standing now is simply where it lives.
+	return { ...pet, rally: undefined, facing: "front", restUntil: pickRest(now, rng) };
+}
+
+/** The ring turns to look at the Proc it came for, whichever side of it each one stands. */
+function faceTheLeader(pets: Pet[]): Pet[] {
+	const byId = new Map(pets.map((pet) => [pet.id, pet]));
+	return pets.map((pet) => {
+		if (pet.rally?.phase !== "gathered" || pet.motion.kind !== "standing") return pet;
+		if (pet.rally.leaderId === pet.id) return pet;
+		const leader = byId.get(pet.rally.leaderId);
+		if (!leader) return pet;
+		const facing: Facing = leader.x < pet.x ? "left" : "right";
+		return facing === pet.facing ? pet : { ...pet, facing };
+	});
 }
 
 /** A run: the same shape as a stroll, but on the event's clock rather than ambience's. */
@@ -778,7 +978,9 @@ export function tick(world: World, now: number, rng: Rng): World {
 	//    just landed at a meeting spot is already in `greeting` rather than looking
 	//    like an ordinary Proc standing somewhere unexpected.
 	pets = pets.map((pet) => advanceMeeting(pet, now, rng));
+	pets = pets.map((pet) => advanceRally(pet, now, rng));
 	pets = faceEachOther(pets);
+	pets = faceTheLeader(pets);
 
 	// 3. Rescue anyone left off the band (a display resize). Deliberately NOT a
 	//    crowding sweep: re-flowing the row on every tick meant one Proc arriving
@@ -834,7 +1036,7 @@ function settle(pet: Pet, now: number, world: World, rng: Rng): Pet {
 	// A summoned Proc is exempt: its spot at the front is the alert.
 	// A summon's spot at the front and a meeting spot are both DELIBERATE, so they
 	// are not nudged aside the way an ordinary stroll's destination is.
-	const deliberate = summoned || pet.meeting !== undefined;
+	const deliberate = summoned || pet.meeting !== undefined || pet.rally !== undefined;
 	const landed = deliberate ? pet.motion.toX : nearestFreeX(pet.motion.toX, pet, world);
 	return {
 		...pet,
@@ -856,7 +1058,7 @@ function consider(pet: Pet, now: number, world: World, rng: Rng, hasSlot: boolea
 	// A Proc in the user's hand, or away meeting another one, does nothing of its
 	// own until it is let go / the conversation is over.
 	if (pet.motion.kind !== "standing") return pet;
-	if (pet.meeting) return pet;
+	if (pet.meeting || pet.rally) return pet;
 	if (world.parked) return pet;
 
 	const mode: CompanionMode = modeFor(pet.status);

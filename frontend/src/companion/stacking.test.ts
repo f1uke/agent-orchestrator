@@ -20,10 +20,16 @@ function pet(over: Partial<Pet> = {}): Pet {
 
 const meeting = pet({ meeting: { withId: "b", homeX: 100, line: "hi", phase: "greeting", until: 0 } });
 const held = pet({ motion: { kind: "held", grabbedAt: 0 } });
+const rallying = pet({ rally: { leaderId: "lead", phase: "gathered", startedAt: 0, until: 0 } });
 
 describe("which Proc paints in front of which", () => {
 	it("brings a staged conversation in front of the crowd around it", () => {
 		expect(stackOrder(meeting)).toBeGreaterThan(stackOrder(pet()));
+	});
+
+	it("lifts a roll-call over the band it is standing in, and under a staged conversation", () => {
+		expect(stackOrder(rallying)).toBeGreaterThan(stackOrder(pet()));
+		expect(stackOrder(rallying)).toBeLessThan(stackOrder(meeting));
 	});
 
 	it("puts the Proc in your hand above everything", () => {
