@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ALL_COMPANION_STATUSES, isAnchored } from "./scene";
 import {
 	MAX_ANIMATING,
+	MAX_PETS,
 	MAX_CONCURRENT_WALKS,
 	RALLY_LINEUP_MAX_OVERLAP,
 	RALLY_LINEUP_OVERLAP,
@@ -285,6 +286,98 @@ describe("portal transitions", () => {
 		next = syncActivities(next, [activity("a", "working")], T0 + 4_000, half);
 
 		expect(petById(next, "a").transit?.until).toBe(T0 + 4_000 + PORTAL_REDUCED_MS);
+	});
+});
+
+// The cap decides how many Procs the band can HOLD. It has nothing to say about which
+// sessions are alive, and the whole ghost-portal bug was those two questions being
+// answered by the same list: a session shoved off the band by the cap read as a session
+// that had ended, and got a full portal-out for something that never happened. What was
+// left on screen was a ring with no pet in it, because the pet it was closing over had
+// gone into it half a second earlier.
+describe("the cap on how many Procs fit", () => {
+	/** `n` sessions, all in the same state, so only the cap decides anything. */
+	function roster(n: number, status: Pet["status"] = "pr_open", from = 0) {
+		return Array.from({ length: n }, (_, i) => activity(`s${from + i}`, status));
+	}
+
+	const transits = (w: World) => w.pets.filter((p) => p.transit).map((p) => `${p.transit?.phase}:${p.id}` as const);
+
+	it("never puts more Procs on the band than it can hold", () => {
+		const next = syncActivities(world(), roster(MAX_PETS + 6), T0, half);
+
+		expect(next.pets).toHaveLength(MAX_PETS);
+	});
+
+	it("drops the quiet sessions first — the one asking for you is never the one dropped", () => {
+		const next = syncActivities(world(), [...roster(MAX_PETS + 5), activity("asking", "needs_input")], T0, half);
+
+		expect(next.pets.map((p) => p.id)).toContain("asking");
+	});
+
+	it("does NOT send a session that is still alive out through a portal to make room", () => {
+		let next = syncActivities(world(), roster(MAX_PETS), T0, half);
+		// A session is spawned. Somebody has to give up their place — but nobody's
+		// session ended, so nothing may leave through a portal.
+		next = syncActivities(next, [...roster(MAX_PETS), activity("fresh", "todo")], T0 + 4_000, half);
+
+		expect(transits(next)).toEqual(["arriving:fresh"]);
+	});
+
+	it("gives up a place without a portal, and the pet is gone at once rather than lingering", () => {
+		let next = syncActivities(world(), roster(MAX_PETS), T0, half);
+		next = syncActivities(next, [...roster(MAX_PETS), activity("fresh", "todo")], T0 + 4_000, half);
+
+		expect(next.pets).toHaveLength(MAX_PETS);
+		expect(next.pets.map((p) => p.id)).toContain("fresh");
+	});
+
+	it("keeps the same Procs on the band when only a STATUS changes", () => {
+		let next = syncActivities(world(), roster(MAX_PETS + 4), T0, half);
+		const before = next.pets.map((p) => p.id).sort();
+		// One of the sessions the cap left off the band starts asking for the human.
+		// Under the old ranking that alone swapped it onto the band and shoved a
+		// resident off it — two portals for nothing that happened.
+		next = syncActivities(
+			next,
+			[...roster(MAX_PETS + 3), activity(`s${MAX_PETS + 3}`, "needs_input")],
+			T0 + 4_000,
+			half,
+		);
+
+		expect(transits(next)).toEqual([]);
+		expect(next.pets.map((p) => p.id).sort()).toEqual(before);
+	});
+
+	it("does not portal in a session that was merely given a place that came free", () => {
+		let next = syncActivities(world(), roster(MAX_PETS + 1), T0, half);
+		const waiting = roster(MAX_PETS + 1).find((a) => !next.pets.some((p) => p.id === a.sessionId));
+		const onBand = next.pets.map((p) => activity(p.id, "pr_open"));
+		// One session really ends. Its Proc leaves through a portal — truthfully — and
+		// the seat it frees goes to the session that had been waiting for one. That
+		// session did not just start, so it must simply BE there.
+		next = syncActivities(next, [...onBand.slice(1), waiting!], T0 + 4_000, half);
+		expect(transits(next)).toEqual([`leaving:${onBand[0].sessionId}`]);
+
+		next = tick(next, T0 + 4_000 + PORTAL_OUT_MS, half);
+		expect(next.pets.map((p) => p.id)).toContain(waiting!.sessionId);
+		expect(transits(next)).toEqual([]);
+	});
+
+	it("keeps a Proc that is mid-portal on the band, so its ring never plays over an empty spot", () => {
+		let next = syncActivities(world(), roster(MAX_PETS - 1), T0, half);
+		next = syncActivities(next, [...roster(MAX_PETS - 1), activity("fresh", "todo")], T0 + 4_000, half);
+		expect(transits(next)).toEqual(["arriving:fresh"]);
+
+		// A crowd of new sessions lands while `fresh` is still coming out of its portal.
+		next = syncActivities(
+			next,
+			[...roster(MAX_PETS - 1), activity("fresh", "todo"), ...roster(6, "todo", 100)],
+			T0 + 4_400,
+			half,
+		);
+
+		expect(next.pets.map((p) => p.id)).toContain("fresh");
 	});
 });
 
@@ -695,6 +788,20 @@ describe("crowding", () => {
 		}
 
 		expect(next.pets).toHaveLength(3);
+		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
+	});
+
+	// The snapshot is walked in order, and the "who is already standing there" list used
+	// to be built up AS it was walked — so a Proc that appeared near the FRONT of the
+	// roster was only placed clear of the handful before it and could be dropped straight
+	// on top of one that came later. Which half of the band it dodged depended on nothing
+	// but the order the daemon happened to list the sessions in.
+	it("keeps a Proc that joins clear of the ones LATER in the snapshot too", () => {
+		let next = syncActivities(crowded(), [activity("standing", "pr_open")], T0, half);
+		next = { ...next, pets: next.pets.map((p) => ({ ...p, x: 500 })) };
+		next = syncActivities(next, [activity("joining", "pr_open"), activity("standing", "pr_open")], T0 + 1_000, half);
+
+		expect(next.pets).toHaveLength(2);
 		expect(closestPair(next)).toBeGreaterThanOrEqual(SPACING);
 	});
 

@@ -77,18 +77,16 @@ describe("sessionsToActivities", () => {
 		expect(roster[0].status).toBe("no_signal");
 	});
 
-	it("caps the roster rather than filling the band edge to edge", () => {
+	// The roster reports every session that is ALIVE. It deliberately does not trim
+	// itself to what the desktop has room to draw: further down, a session missing from
+	// this list is how the END of a session is recognised, so a session left out because
+	// the band was full was seen out through a portal — a ring closing over a session
+	// that was still working. How many Procs fit is answered against the band itself, by
+	// `MAX_PETS`/`bandMembers` in `behaviour.ts`, which is the only place that knows
+	// which sessions already have a Proc.
+	it("reports every live session, however many there are", () => {
 		const many = Array.from({ length: 40 }, (_, i) => session({ id: `s${i}` }));
 
-		expect(sessionsToActivities(many).length).toBeLessThanOrEqual(12);
-	});
-
-	it("keeps the sessions that want you when it has to choose", () => {
-		const many = [
-			...Array.from({ length: 30 }, (_, i) => session({ id: `bulk${i}`, status: "idle" })),
-			session({ id: "asking", status: "needs_input", statusReason: "waiting_input" }),
-		];
-
-		expect(sessionsToActivities(many).map((r) => r.sessionId)).toContain("asking");
+		expect(sessionsToActivities(many)).toHaveLength(40);
 	});
 });
