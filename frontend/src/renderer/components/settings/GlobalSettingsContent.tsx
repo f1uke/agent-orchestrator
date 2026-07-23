@@ -11,6 +11,7 @@ import { SettingsField } from "./SettingsField";
 import { SettingEditorRow } from "./SettingEditorRow";
 import { CompanionControls } from "./CompanionControls";
 import { CompanionPreview } from "./CompanionPreview";
+import { PetLibrary } from "./PetLibrary";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import type { PromptKind } from "./useGlobalSettingsForm";
@@ -358,6 +359,10 @@ function SystemSection({ form }: { form: GlobalForm }) {
 				</p>
 				<CompanionControls />
 				<CompanionPreview />
+			</SettingsGroup>
+
+			<SettingsGroup title="Pet library">
+				<PetLibrary />
 			</SettingsGroup>
 
 			<SettingsGroup title="Migration">

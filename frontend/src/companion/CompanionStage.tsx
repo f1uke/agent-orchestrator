@@ -14,7 +14,9 @@ import {
 } from "./behaviour";
 import { Bubble } from "./Bubble";
 import type { ComposedBubble } from "./bubble-compose";
-import { castForSession } from "./cast";
+import type { CastMember } from "./cast";
+import { castFor } from "./look-store";
+import { useLookOverrides } from "./look-store-live";
 import { hoverAt, HOVER_TOOLTIP_DELAY_MS, idleHover, tooltipTarget, type HoverState } from "./hover";
 import { NameTag, PetTooltip } from "./NameTag";
 import { createInteractionTracker, isOverPet } from "./pointer-region";
@@ -58,6 +60,18 @@ export type CompanionStageProps = {
 	/** Called with true while the pointer is over a Proc, so the shell can take clicks. */
 	onInteractiveChange?: (interactive: boolean) => void;
 	/**
+	 * Right-click on a Proc: "let me change how this one looks".
+	 *
+	 * A RIGHT click, specifically. Press-drag is `grabPet` and hover opens the name
+	 * card, so the two obvious alternatives are both taken: a double-click is two
+	 * whole press/release pairs, which grabs, drops, grabs and drops the pet before
+	 * the gesture is even recognised, and a control drawn on the sprite is a new hit
+	 * target on a 30px figure sitting on a band that must stay click-through. A
+	 * different mouse BUTTON cannot race the drag at all, and it is what the platform
+	 * already means by "options for this thing".
+	 */
+	onRequestLook?: (sessionId: string) => void;
+	/**
 	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
 	 * reduced-motion path is a real behaviour with its own rules, and it is not
 	 * reachable by eye without changing an OS setting mid-session.
@@ -85,8 +99,19 @@ function prefersReducedMotion(): boolean {
 	return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMotion, onStage }: CompanionStageProps) {
+export function CompanionStage({
+	feed,
+	bubbleFor,
+	onInteractiveChange,
+	onRequestLook,
+	reducedMotion,
+	onStage,
+}: CompanionStageProps) {
 	const source = useMemo(() => feed ?? createMockFeed(), [feed]);
+	// A pet's look is the hash of its session ref, UNLESS someone has picked one in
+	// the Pet library. Both windows read the same localStorage key, so a choice made
+	// in Settings lands here on the `storage` event with nothing in between.
+	const looks = useLookOverrides();
 	// Every effect below reaches the latest world through the functional setter, so
 	// the interval and listeners are installed once instead of being torn down and
 	// rebuilt on every state change.
@@ -231,6 +256,10 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 		const onDown = (event: PointerEvent) => {
 			tracker.update(event.target);
 			if (!isOverPet(event.target)) return;
+			// LEFT button only. A right-press was never meant to pick a Proc up, and it
+			// has to be genuinely free for the look gesture below: a right-click that
+			// also grabbed would fling the pet while its menu opened.
+			if (event.button !== 0) return;
 			const id = petIdAt(event.target);
 			if (!id) return;
 			// Keep the pointer for the whole gesture: a drag pulls it off the Proc
@@ -264,11 +293,28 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 			setHover(idleHover());
 		};
 
+		// The look gesture. It opens the library in the MAIN WINDOW rather than drawing
+		// a menu here: this page is a transparent always-on-top band whose click-through
+		// is decided per pointer move, and a popover living on it would have to pin the
+		// window interactive for as long as it stayed open. One missed close and the
+		// bottom of the user's screen stops taking clicks, which is the exact failure
+		// `pointer-region.ts` exists to prevent.
+		const onMenu = (event: MouseEvent) => {
+			if (!isOverPet(event.target)) return;
+			const id = petIdAt(event.target);
+			if (!id) return;
+			// Only once we know it landed on a Proc: elsewhere on the band the desktop
+			// underneath owns the click, and eating its context menu would be theft.
+			event.preventDefault();
+			onRequestLook?.(id);
+		};
+
 		document.addEventListener("pointermove", onMove, true);
 		document.addEventListener("pointerdown", onDown, true);
 		document.addEventListener("pointerup", onUp, true);
 		document.addEventListener("pointercancel", onUp, true);
 		document.addEventListener("pointerleave", onOut, true);
+		document.addEventListener("contextmenu", onMenu, true);
 		window.addEventListener("blur", onOut);
 		return () => {
 			document.removeEventListener("pointermove", onMove, true);
@@ -276,10 +322,11 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 			document.removeEventListener("pointerup", onUp, true);
 			document.removeEventListener("pointercancel", onUp, true);
 			document.removeEventListener("pointerleave", onOut, true);
+			document.removeEventListener("contextmenu", onMenu, true);
 			window.removeEventListener("blur", onOut);
 			tracker.release();
 		};
-	}, [onInteractiveChange]);
+	}, [onInteractiveChange, onRequestLook]);
 
 	const painted = paintOrder(world.pets);
 
@@ -338,7 +385,7 @@ export function CompanionStage({ feed, bubbleFor, onInteractiveChange, reducedMo
 		<div className="companion-stage">
 			<div className="companion-cast">
 				{painted.map((pet) => (
-					<ProcArt key={pet.id} pet={pet} />
+					<ProcArt key={pet.id} pet={pet} cast={castFor(pet.id, looks)} />
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>
@@ -409,10 +456,10 @@ function spokenLine(pet: Pet, bubble: ComposedBubble | null): ComposedBubble | n
 	return bubble;
 }
 
-function ProcArt({ pet }: { pet: Pet }) {
-	// The character is a stable function of the session ref, so the same worker is
-	// always the same Proc — that is what lets someone learn to recognise it.
-	const cast = castForSession(pet.id);
+// The look is resolved once for the whole band and handed down, rather than each
+// Proc subscribing to the store for itself: twelve subscriptions to one localStorage
+// key would all fire on the same change and re-render the same frame twelve times.
+function ProcArt({ pet, cast }: { pet: Pet; cast: CastMember }) {
 	const walking = pet.motion.kind === "walking";
 	const held = pet.motion.kind === "held";
 	const greeting = pet.meeting?.phase === "greeting";

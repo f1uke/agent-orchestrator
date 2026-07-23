@@ -7,6 +7,7 @@ import { createManualFeed, type ManualFeed } from "./dev-feed";
 import { DevPanel } from "./DevPanel";
 import type { CompanionFeed } from "./feed";
 import { createLiveFeed, type LiveFeed } from "./live-feed";
+import { refreshLookOverrides } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 
@@ -18,6 +19,8 @@ import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 type CompanionBridge = {
 	setInteractive(interactive: boolean): void;
 	daemonUrl?(): Promise<string | null>;
+	requestLook?(sessionId: string): void;
+	onLooksChanged?(listener: () => void): () => void;
 };
 
 const bridge = (window as unknown as { aoCompanion?: CompanionBridge }).aoCompanion;
@@ -58,11 +61,17 @@ function Overlay() {
 		};
 	}, []);
 
+	// The looks travel by `storage` event, because both windows are one origin. This
+	// is the same message arriving the other way, so a change lands even if the
+	// event never does; both paths do nothing but re-read localStorage.
+	useEffect(() => bridge?.onLooksChanged?.(() => refreshLookOverrides()), []);
+
 	return (
 		<CompanionStage
 			feed={live ?? mock}
 			bubbleFor={live ? (id) => live.bubbleFor(id) : undefined}
 			onInteractiveChange={(interactive) => bridge?.setInteractive(interactive)}
+			onRequestLook={(sessionId) => bridge?.requestLook?.(sessionId)}
 		/>
 	);
 }

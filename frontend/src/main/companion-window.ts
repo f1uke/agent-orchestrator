@@ -43,10 +43,15 @@ export interface OverlayWindow {
 	setVisibleOnAllWorkspaces(visible: boolean, options?: { visibleOnFullScreen?: boolean }): void;
 	setAlwaysOnTop(flag: boolean, level?: string): void;
 	loadURL(url: string): Promise<void>;
+	/** Push a message to the overlay page. */
+	send(channel: string, ...args: unknown[]): void;
 	onClosed(listener: () => void): void;
 	destroy(): void;
 	isDestroyed(): boolean;
 }
+
+/** "Go and re-read the chosen looks." Carries nothing; see `notifyLooksChanged`. */
+export const LOOKS_CHANGED_CHANNEL = "companion:looksChanged";
 
 export type CompanionOverlayDeps = {
 	createWindow(options: OverlayWindowOptions): OverlayWindow;
@@ -61,6 +66,16 @@ export type CompanionOverlay = {
 	setEnabled(enabled: boolean): void;
 	/** Called from the overlay renderer: true while the pointer is over a Proc. */
 	setInteractive(interactive: boolean): void;
+	/**
+	 * Tell the overlay that the chosen looks moved, so it re-reads them.
+	 *
+	 * Deliberately CONTENT-FREE. Both windows are one origin, so the looks already
+	 * travel by `storage` event and localStorage stays the single source of truth;
+	 * this is a second way to say "look again", not a second copy of the answer. Two
+	 * channels that both mean the same thing cannot disagree - the later one just
+	 * finds the work already done.
+	 */
+	notifyLooksChanged(): void;
 	/** Re-band after a display change. */
 	relayout(): void;
 	isOpen(): boolean;
@@ -180,6 +195,14 @@ export function createCompanionOverlay(deps: CompanionOverlayDeps): CompanionOve
 			if (!current) return;
 			if (interactive) current.setIgnoreMouseEvents(false);
 			else current.setIgnoreMouseEvents(true, { forward: true });
+		},
+		notifyLooksChanged() {
+			// A closed overlay needs no telling: it re-reads localStorage when it opens.
+			try {
+				live()?.send(LOOKS_CHANGED_CHANNEL);
+			} catch (err) {
+				deps.logError("AO: failed to tell the companion overlay about a look change", err);
+			}
 		},
 		relayout() {
 			live()?.setBounds(overlayBandBounds(deps.workArea()));

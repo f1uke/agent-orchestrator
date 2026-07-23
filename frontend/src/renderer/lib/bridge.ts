@@ -121,6 +121,13 @@ export const aoBridge: AoBridge =
 			get: async () => ({ enabled: false, asked: true }),
 			set: async () => undefined,
 		},
+		// There is no overlay in browser preview, so nothing ever right-clicks a Proc
+		// and nothing needs telling that a look moved. The Pet library itself still
+		// works: the choices live in localStorage, which the browser has.
+		companion: {
+			onOpenPetLibrary: () => () => undefined,
+			looksChanged: () => undefined,
+		},
 		updates: {
 			getStatus: async () => ({ state: "idle" }),
 			check: async () => undefined,

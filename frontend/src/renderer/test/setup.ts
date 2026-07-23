@@ -164,6 +164,10 @@ if (typeof window !== "undefined") {
 			get: async () => ({ enabled: false, asked: true }),
 			set: async () => undefined,
 		},
+		companion: {
+			onOpenPetLibrary: () => () => undefined,
+			looksChanged: () => undefined,
+		},
 		updates: {
 			getStatus: async () => ({ state: "idle" }),
 			check: async () => undefined,

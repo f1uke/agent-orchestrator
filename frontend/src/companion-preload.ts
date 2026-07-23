@@ -12,4 +12,17 @@ contextBridge.exposeInMainWorld("aoCompanion", {
 	// already knows it, hands it over. Null until the daemon is up, which is why the
 	// overlay retries rather than assuming a port.
 	daemonUrl: () => ipcRenderer.invoke("companion:daemonUrl") as Promise<string | null>,
+	// Right-click on a Proc. The overlay cannot open a window itself, and the
+	// library belongs in the main one anyway - see the handler in main.ts.
+	requestLook: (sessionId: string) => ipcRenderer.send("companion:requestLook", sessionId),
+	// "Go and re-read the chosen looks." Carries no data: the looks live in the
+	// localStorage both windows share, and this is only a second way of being told
+	// to look, alongside the `storage` event.
+	onLooksChanged: (listener: () => void) => {
+		const wrapped = () => listener();
+		ipcRenderer.on("companion:looksChanged", wrapped);
+		return () => {
+			ipcRenderer.off("companion:looksChanged", wrapped);
+		};
+	},
 });

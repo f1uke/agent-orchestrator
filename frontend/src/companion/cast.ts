@@ -211,18 +211,116 @@ function hash(ref: string): number {
 }
 
 /**
- * Salt for the hat's hash.
- *
- * The two axes MUST be drawn from independent bits, or they are not two axes: one
- * hash used twice would tie hat to colour again, just less obviously — every amber
- * Proc in a beanie, for ever. Hashing a salted ref gives a genuinely separate
- * dimension while staying a pure function of the session.
+ * Salt for the hat's hash. See `AppearanceAxis.salt` for why every axis needs one.
  */
 const HAT_SALT = "\u0000hat";
 
-/** The look a session always gets. Pure, stable across restarts, both axes. */
+// ---- the axis registry ------------------------------------------------------
+//
+// Everything above is DATA about one axis or the other. This is the list of the
+// axes themselves, and it exists so that nothing downstream has to know how many
+// there are or what they are called.
+//
+// The Pet library iterates it to draw its sections, the override store keys on
+// `axis.id`, and the default assignment hashes with `axis.salt`. A picker that
+// said "colour, then hat" in code would have to be rewritten the day a third axis
+// arrives - and a third axis IS the plan (new character types). Adding one is a
+// row here plus a case in `castFromLook`, and nothing else moves.
+
+/** Which axis. A new axis widens this union and adds a row to `APPEARANCE_AXES`. */
+export type AxisId = "palette" | "hat";
+
+/** One choice on an axis, as the library lists it. */
+export type AxisOption = { id: string; name: string };
+
+/** A whole look: one option id per axis. */
+export type Look = Readonly<Record<AxisId, string>>;
+
+export type AppearanceAxis = {
+	id: AxisId;
+	/** Section heading in the library. */
+	name: string;
+	/** One line saying what this axis is FOR, shown under the heading. */
+	hint: string;
+	/**
+	 * This axis' own hash dimension.
+	 *
+	 * The axes MUST be drawn from independent bits, or they are not axes: one hash
+	 * used twice would tie hat to colour again, just less obviously - every amber
+	 * Proc in a beanie, for ever. Hashing a salted ref gives a genuinely separate
+	 * dimension while staying a pure function of the session. Every axis' salt is
+	 * therefore distinct, and `cast.test.ts` pins that.
+	 *
+	 * The colour's salt is "" because that is what shipped: it is the bare
+	 * `hash(ref)` the original six characters were picked with. Changing it would
+	 * re-roll the colour of every session in existence.
+	 */
+	salt: string;
+	options: readonly AxisOption[];
+};
+
+export const APPEARANCE_AXES: readonly AppearanceAxis[] = [
+	{
+		id: "palette",
+		name: "Colour",
+		hint: "What it is tinted. Carries at a glance what the hat carries up close.",
+		salt: "",
+		options: PALETTES.map((palette) => ({ id: palette.id, name: palette.name })),
+	},
+	{
+		id: "hat",
+		name: "Hat",
+		hint: "What makes the silhouette differ, and the part that reads in the corner of your eye.",
+		salt: HAT_SALT,
+		options: HATS.map((hat) => ({ id: hat.id, name: hat.name })),
+	},
+];
+
+/** The options on one axis. Throws on an unknown axis, which is a typo rather than input. */
+export function optionsOf(axisId: AxisId): readonly AxisOption[] {
+	const axis = APPEARANCE_AXES.find((entry) => entry.id === axisId);
+	if (!axis) throw new Error(`unknown appearance axis: ${axisId}`);
+	return axis.options;
+}
+
+/** What the hash gives this session on one axis. */
+export function defaultOption(axis: AppearanceAxis, sessionRef: string): string {
+	return axis.options[hash(sessionRef + axis.salt) % axis.options.length].id;
+}
+
+/** The look a session gets with no choices made: the hash, on every axis. */
+export function defaultLook(sessionRef: string): Look {
+	return Object.fromEntries(APPEARANCE_AXES.map((axis) => [axis.id, defaultOption(axis, sessionRef)])) as Look;
+}
+
+/**
+ * Flatten a look into what the rig draws.
+ *
+ * This is the seam a new CHARACTER TYPE lands on: it arrives as a third axis, and
+ * this function grows a dispatch on it. The store, the persistence, the pruning and
+ * the picker are all axis-generic and would not change.
+ *
+ * Defensive on both lookups because a look can come out of localStorage, where the
+ * option ids are whatever was written by whichever version wrote them. An id this
+ * build does not have falls back rather than throwing. `resolveLook` already
+ * substitutes the default for exactly that case, so reaching the fallback here
+ * means something handed us a look it never resolved.
+ */
+export function castFromLook(look: Look): CastMember {
+	return composeCast(
+		PALETTES.find((palette) => palette.id === look.palette) ?? PALETTES[0],
+		HATS.find((hat) => hat.id === look.hat) ?? HATS[0],
+	);
+}
+
+/**
+ * The look a session always gets. Pure, stable across restarts, both axes.
+ *
+ * Still the DEFAULT, and still the whole assignment for a session nobody has picked
+ * for, which is every session until someone opens the Pet library.
+ */
 export function castForSession(sessionRef: string): CastMember {
-	return composeCast(PALETTES[hash(sessionRef) % PALETTES.length], HATS[hash(sessionRef + HAT_SALT) % HATS.length]);
+	return castFromLook(defaultLook(sessionRef));
 }
 
 /** Assemble a look from a chosen colour and a chosen hat. */

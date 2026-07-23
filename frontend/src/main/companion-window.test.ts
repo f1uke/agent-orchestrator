@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COMPANION_CONTENT_HEIGHT, petFrame } from "../companion/layout";
 import {
+	LOOKS_CHANGED_CHANNEL,
 	OVERLAY_BAND_HEIGHT,
 	createCompanionOverlay,
 	overlayBandBounds,
@@ -17,6 +18,7 @@ type FakeWindow = OverlayWindow & {
 	allWorkspaces: Array<{ visible: boolean; visibleOnFullScreen?: boolean }>;
 	alwaysOnTop: Array<{ flag: boolean; level?: string }>;
 	loaded: string[];
+	sent: string[];
 	destroyed: boolean;
 	fireClosed(): void;
 };
@@ -30,6 +32,7 @@ function fakeWindow(options: OverlayWindowOptions): FakeWindow {
 		allWorkspaces: [],
 		alwaysOnTop: [],
 		loaded: [],
+		sent: [],
 		destroyed: false,
 		setBounds: (b) => {
 			win.bounds = b;
@@ -42,6 +45,7 @@ function fakeWindow(options: OverlayWindowOptions): FakeWindow {
 			win.loaded.push(url);
 			return Promise.resolve();
 		},
+		send: (channel) => win.sent.push(channel),
 		onClosed: (cb) => {
 			closed = cb;
 		},
@@ -265,5 +269,23 @@ describe("relayout", () => {
 		const { overlay } = harness();
 
 		expect(() => overlay.relayout()).not.toThrow();
+	});
+});
+
+describe("telling the overlay the looks moved", () => {
+	it("nudges an open overlay to re-read them", () => {
+		const { overlay, created } = harness();
+		overlay.setEnabled(true);
+
+		overlay.notifyLooksChanged();
+
+		expect(created[0].sent).toEqual([LOOKS_CHANGED_CHANNEL]);
+	});
+
+	it("says nothing to an overlay that is closed", () => {
+		// It re-reads localStorage when it opens, so there is nothing to catch up on.
+		const { overlay } = harness();
+
+		expect(() => overlay.notifyLooksChanged()).not.toThrow();
 	});
 });
