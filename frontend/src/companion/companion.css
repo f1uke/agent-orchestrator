@@ -325,29 +325,34 @@ body {
 	}
 }
 
-/* A blink: the EYELID travelling down over the eye and back up, shut for about 5% of
-   the cycle, which is roughly what a real one is. Staggered per creature and between
-   the two eyes, so a band of pets never blinks in unison — in unison it reads as a
-   screen refreshing rather than as a room full of living things.
+/* A blink: the eye NARROWS, fast, until it is a dash — and stops there.
 
-   ⚠ The lid moves, NOT the eye. Squashing the eye with scaleY was the first attempt and
-   it reads as the eye sliding down its own face, because that is what a vertical squash
-   about a centre point is. An eye does not shrink when it closes.
+   ⚠ 0.09, not 0. The floor is the whole point: an eye that closes to nothing has been
+   erased rather than shut, and erasure is what the first two attempts both looked like
+   (one squashed the eye away, the other hid it behind a flap). At 0.09 a 20-unit eye is
+   still about two units of solid ink, which at the size these are really drawn is a
+   clean "-" — a closed eye, which is a thing, instead of an absent one, which is not.
 
-   translateY only, by the eye's own height (handed in as `--procs-lid`, so one keyframe
-   serves every eye in the cast), and the lid is clipped to the eye's outline so it can
-   only ever appear inside it. It says nothing about status: it is the same class of
-   thing as a walk or a hover — how a drawing is alive rather than printed. */
+   Fast, too — measured rather than eyeballed: about 80ms down, 45ms shut and 75ms back
+   up on the quickest creature, which is roughly what a real blink is. The reopen is the
+   part that has to be watched: leave it long and the eye does not blink, it wakes up. Staggered per creature and between the two eyes, so a band of
+   pets never blinks in unison — in unison it reads as a screen refreshing rather than
+   as a room full of living things.
+
+   scaleY only, about the eye's own `fill-box` centre, so it stays on the compositor. It
+   says nothing about status: it is the same class of thing as a walk or a hover — how a
+   drawing is alive rather than printed. */
 @keyframes procs-blink {
 	0%,
-	90%,
+	91%,
+	96.5%,
 	100% {
-		transform: translateY(calc(-1 * var(--procs-lid, 20px)));
+		transform: scaleY(1);
 	}
 
-	94%,
-	96% {
-		transform: translateY(0);
+	93.2%,
+	94.4% {
+		transform: scaleY(0.09);
 	}
 }
 

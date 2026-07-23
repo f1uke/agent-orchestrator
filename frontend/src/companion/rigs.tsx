@@ -145,8 +145,6 @@ function Eyes({
 	held,
 	style,
 	blink,
-	lid,
-	uid,
 }: {
 	at: ReadonlyArray<readonly [number, number]>;
 	r: number;
@@ -154,21 +152,32 @@ function Eyes({
 	style: EyeStyle;
 	/** The blink cycle for this creature, or 0 for eyes that are already closed. */
 	blink: number;
-	/** The colour of the face the eye sits on: what the eyelid is made of. */
-	lid: string;
-	uid: string;
 }) {
 	const radius = held ? r * 1.16 : r;
-	const tall = style === "tall" ? radius * 1.24 : style === "bead" ? radius * 0.78 : radius;
-	const wide = style === "tall" ? radius * 0.82 : style === "bead" ? radius * 0.78 : radius;
-	// A bead's white ring is part of the EYE, so the lid has to cover that too — sized to
-	// the pupil alone, a closed bird was still staring out of two white circles.
-	const lidRx = style === "bead" ? radius * 1.12 : wide;
-	const lidRy = style === "bead" ? radius * 1.12 : tall;
 	return (
 		<>
 			{at.map(([cx, cy], index) => (
-				<g key={`${cx}-${cy}`} data-eye data-eye-style={style}>
+				<g
+					key={`${cx}-${cy}`}
+					data-eye
+					data-eye-style={style}
+					style={
+						blink
+							? {
+									// ⚠ `fill-box`, not the view box. An SVG element's transform-origin
+									// is measured from the VIEW BOX's corner by default, which is at
+									// (-8, -24) here — get that wrong and the eye pivots about a point
+									// well above itself and appears to SLIDE down its own face instead
+									// of closing. Against its own bounding box, "center" is the eye's
+									// centre whatever shape or size the eye is, and there is no
+									// arithmetic left to get wrong.
+									transformBox: "fill-box",
+									transformOrigin: "center",
+									animation: `procs-blink ${blink}ms ease-in-out ${index * 60}ms infinite`,
+								}
+							: undefined
+					}
+				>
 					{style === "arc" ? (
 						<path
 							d={`M${round(cx - radius)} ${round(cy + radius * 0.3)} C ${round(cx - radius * 0.4)} ${round(cy - radius * 0.8)} ${round(cx + radius * 0.4)} ${round(cy - radius * 0.8)} ${round(cx + radius)} ${round(cy + radius * 0.3)}`}
@@ -228,85 +237,10 @@ function Eyes({
 									fill={PROCS_LIGHT}
 								/>
 							)}
-							{blink > 0 && (
-								<Eyelid
-									cx={cx}
-									cy={cy}
-									rx={lidRx}
-									ry={lidRy}
-									colour={lid}
-									ms={blink}
-									delay={index * 60}
-									uid={`${uid}-${index}`}
-								/>
-							)}
 						</>
 					)}
 				</g>
 			))}
-		</>
-	);
-}
-
-/**
- * A blink: an EYELID that comes down over the eye.
- *
- * ⚠ The first pass squashed the whole eye with `scaleY`, and the human's word for it was
- * that the eye looked like it was sliding down — which is exactly what a vertical squash
- * about a centre point IS. An eye does not shrink when it closes; something comes down
- * over it, and the lid is the thing that has to move.
- *
- * So the lid is a rectangle in the colour of the face, CLIPPED to the eye's own outline,
- * parked just above it and translated down across it. Clipped, it can only ever appear
- * inside the eye, so it closes the eye and touches nothing else — no matter what shape
- * the eye is, which is what lets one lid serve a tall ghost eye, a cat's slit and a
- * bird's bead. Transform only, so it stays on the compositor.
- */
-function Eyelid({
-	cx,
-	cy,
-	rx,
-	ry,
-	colour,
-	ms,
-	delay,
-	uid,
-}: {
-	cx: number;
-	cy: number;
-	rx: number;
-	ry: number;
-	colour: string;
-	ms: number;
-	delay: number;
-	uid: string;
-}) {
-	const clip = `procs-lid-${uid}`;
-	const height = round(ry * 2 + 2);
-	return (
-		<>
-			<defs>
-				<clipPath id={clip}>
-					<ellipse cx={cx} cy={cy} rx={round(rx + 0.6)} ry={round(ry + 0.6)} />
-				</clipPath>
-			</defs>
-			<g clipPath={`url(#${clip})`}>
-				<rect
-					data-eyelid
-					x={round(cx - rx - 1)}
-					y={round(cy - ry - 1)}
-					width={round(rx * 2 + 2)}
-					height={height}
-					fill={colour}
-					style={{
-						// Parked clear of the eye and swept down over it. The distance is the
-						// eye's own height, handed to the keyframe as a variable so one set of
-						// keyframes serves every eye in the cast whatever size it is.
-						["--procs-lid" as string]: `${height}px`,
-						animation: `procs-blink ${ms}ms ease-in ${delay}ms infinite`,
-					}}
-				/>
-			</g>
 		</>
 	);
 }
@@ -671,8 +605,6 @@ function ProcRig({ cast, held, walking, cycleMs, uid, heldProp, hat }: RigProps)
 					held={held}
 					style="round"
 					blink={BLINK_MS.proc}
-					lid={cast.body}
-					uid={uid}
 				/>
 				<Mouth cx={48} cy={67} width={10} held={held} />
 				{hat}
@@ -751,8 +683,6 @@ function GhostRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigPro
 						held={held}
 						style="tall"
 						blink={BLINK_MS.ghost}
-						lid={cast.body}
-						uid={uid}
 					/>
 					<Mouth cx={48} cy={78} width={9} held={held} />
 					{heldProp}
@@ -828,8 +758,6 @@ function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: Rig
 					held={held}
 					style="slit"
 					blink={BLINK_MS.cat}
-					lid={cast.body}
-					uid={uid}
 				/>
 				{held ? (
 					<Mouth cx={36} cy={63} width={9} held />
@@ -918,8 +846,6 @@ function SlimeRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 					held={held}
 					style="glassy"
 					blink={BLINK_MS.slime}
-					lid={cast.body}
-					uid={uid}
 				/>
 				<Mouth cx={48} cy={89} width={9} held={held} />
 
@@ -1024,8 +950,6 @@ function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 					held={held}
 					style="bead"
 					blink={BLINK_MS.chick}
-					lid={cast.body}
-					uid={uid}
 				/>
 				{held ? (
 					<Mouth cx={48} cy={74} width={9} held />
@@ -1120,8 +1044,6 @@ function ToadstoolRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: Ri
 					held={held}
 					style={held ? "round" : "arc"}
 					blink={held ? BLINK_MS.toadstool : 0}
-					lid={cast.body}
-					uid={uid}
 				/>
 				<Mouth cx={48} cy={95} width={8} held={held} />
 				{heldProp}
