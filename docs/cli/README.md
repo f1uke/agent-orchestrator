@@ -99,6 +99,18 @@ or unauthorized. It warns-but-continues when auth remains unknown because daemon
 spawn remains the authoritative runtime validation point. Use
 `--skip-agent-check` to bypass only this CLI-side preflight.
 
+`ao send` delivers a message to a running session's agent. The body comes from
+either `--message "<text>"` or `--message-file <path>` (mutually exclusive —
+passing both is a usage error); `--message-file -` reads stdin. The daemon
+accepts messages up to 128 KiB, matching the spawn prompt cap, so a full brief or
+report goes in one call and does not need splitting by hand. The limit is counted
+in **bytes**, so Thai and other multi-byte text is charged 3 bytes per character.
+Long messages are delivered to the agent's pane in order as a single message; the
+chunking that makes that possible is internal and never visible to the caller.
+
+When `AO_SESSION_ID` is set, the message is tagged `[from @<sender>]` so the
+recipient can navigate back to the sender.
+
 `ao preview` resolves its session from the `AO_SESSION_ID` environment variable
 (it is meant to run inside a session), not a flag. With no argument it
 autodetects an `index.html` in the session workspace; with a URL argument it

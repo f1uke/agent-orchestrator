@@ -30,8 +30,24 @@ const (
 	// argv+env). 128 KiB leaves comfortable headroom for env and shell-quote
 	// expansion while still rejecting pathological multi-megabyte bodies. Keep in
 	// sync with the `maxLength` tag on SpawnSessionRequest.Prompt in dto.go.
-	maxPromptLen      = 128 * 1024
-	maxMessageLen     = 4096
+	maxPromptLen = 128 * 1024
+	// maxAgentMessageLen bounds text delivered into a LIVE agent's input (ao
+	// send, and the extra prompt on a comment dispatch). Like maxPromptLen it is
+	// a defensive guard, not a transport limit: the runtime splits a message into
+	// commands its pane transport accepts (tmux's per-command argv budget, see
+	// adapters/runtime/tmux), so length is bounded by what is reasonable to paste
+	// into a running agent, not by what the wire can carry. Matched to
+	// maxPromptLen so a brief costs the same whether it spawns a session or is
+	// sent to one; still finite, because the text lands in a live agent's context.
+	// Counted in BYTES (len on a Go string), so Thai text — 3 bytes per character
+	// — is charged accordingly. Keep in sync with the `maxLength` tag on
+	// SendSessionMessageRequest.Message in dto.go.
+	maxAgentMessageLen = 128 * 1024
+	// maxCommentBodyLen bounds a PR review-thread reply. That body is posted to
+	// the SCM's comment API rather than into an agent pane, so it takes GitHub's
+	// documented comment-body ceiling (65536 characters) instead of the agent
+	// message cap — rejecting it here beats a confusing failure from the SCM.
+	maxCommentBodyLen = 65536
 	maxDisplayNameLen = 20
 )
 
@@ -799,7 +815,7 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_REQUIRED", "Message is required", nil)
 		return
 	}
-	if len(in.Message) > maxMessageLen {
+	if len(in.Message) > maxAgentMessageLen {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Message is too long", nil)
 		return
 	}
@@ -829,7 +845,7 @@ func (c *SessionsController) commentDispatch(w http.ResponseWriter, r *http.Requ
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "THREAD_REQUIRED", "prUrl and threadId are required", nil)
 		return
 	}
-	if len(in.ExtraPrompt) > maxMessageLen {
+	if len(in.ExtraPrompt) > maxAgentMessageLen {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Extra prompt is too long", nil)
 		return
 	}
@@ -861,7 +877,7 @@ func (c *SessionsController) commentReply(w http.ResponseWriter, r *http.Request
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "BODY_REQUIRED", "Reply body is required", nil)
 		return
 	}
-	if len(body) > maxMessageLen {
+	if len(body) > maxCommentBodyLen {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Reply body is too long", nil)
 		return
 	}

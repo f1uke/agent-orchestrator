@@ -713,7 +713,8 @@ export function BrowseJiraPage({ projectId }: { projectId: string }) {
 
 // buildOrchestratorMessage frames the selected issues as a clear, actionable request
 // for the orchestrator session (which decides whether to spawn). Carries key + summary
-// + status + type per issue; capped under the daemon's 4096-char send limit.
+// + status + type per issue. The trim below is about keeping the ask readable for a
+// human, not about the daemon's send cap (128 KiB) — a long selection would fit.
 function buildOrchestratorMessage(issues: JiraIssueSummary[]): string {
 	const lines = issues.map(
 		(i) => `- ${i.key} (${i.title ?? ""})${i.status ? ` [${i.status}]` : ""}${i.type ? ` · ${i.type}` : ""}`,

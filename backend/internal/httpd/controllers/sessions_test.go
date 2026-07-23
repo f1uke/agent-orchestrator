@@ -1200,6 +1200,120 @@ func TestSessionsAPI_SendValidation(t *testing.T) {
 	assertErrorCode(t, body, status, http.StatusBadRequest, "MESSAGE_REQUIRED")
 }
 
+// sendBody marshals a send request so a fixture with quotes/newlines/multi-byte
+// text is escaped correctly rather than hand-built.
+func sendBody(t *testing.T, message string) string {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"message": message})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// TestSessionsAPI_SendAcceptsLargeMessage asserts a full brief or report goes
+// through in one send. The old 4 KiB cap was a validation constant, not a
+// transport limit — the tmux runtime chunks a message into commands tmux
+// accepts — so it only forced callers to split messages by hand ("1/3, 2/3").
+func TestSessionsAPI_SendAcceptsLargeMessage(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	message := strings.Repeat("x", 64*1024) // 64 KiB — 16x the old cap
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, message))
+	if status != http.StatusOK {
+		t.Fatalf("send = %d, want 200; body=%s", status, body)
+	}
+	if svc.sent != message {
+		t.Fatalf("delivered %d bytes, want the full %d forwarded verbatim", len(svc.sent), len(message))
+	}
+}
+
+// TestSessionsAPI_SendRejectsOverlongMessage asserts the raised cap is still a
+// cap: a message is delivered into a live agent's input, so an unbounded paste
+// would flood that agent's context.
+func TestSessionsAPI_SendRejectsOverlongMessage(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	message := strings.Repeat("x", 200*1024) // above the 128 KiB cap
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, message))
+	assertErrorCode(t, body, status, http.StatusBadRequest, "MESSAGE_TOO_LONG")
+}
+
+// TestSessionsAPI_SendCapIsBytesNotRunes pins that the cap counts bytes. Thai is
+// 3 bytes per character, so a rune-denominated check would let a message
+// through at three times the intended size. This is also why the old 4096-byte
+// cap bit Thai callers at ~1300 characters.
+func TestSessionsAPI_SendCapIsBytesNotRunes(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	// 60k Thai characters: comfortably under 128 Ki *runes*, but ~176 KiB.
+	message := strings.Repeat("ก", 60000)
+	if len(message) <= 128*1024 {
+		t.Fatalf("fixture is %d bytes, want it over the byte cap", len(message))
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, message))
+	assertErrorCode(t, body, status, http.StatusBadRequest, "MESSAGE_TOO_LONG")
+}
+
+// TestSessionsAPI_SendAcceptsLargeThaiMessage is the other half: a Thai brief
+// that fits the byte cap must go through untouched, multi-byte characters and
+// all. ~10k Thai characters is a normal report; under the old cap it failed.
+func TestSessionsAPI_SendAcceptsLargeThaiMessage(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	message := strings.Repeat("รายงานความคืบหน้าของงาน ", 500) // ~36 KB
+	if len(message) <= 4096 {
+		t.Fatalf("fixture is %d bytes, want it over the old 4096-byte cap", len(message))
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, message))
+	if status != http.StatusOK {
+		t.Fatalf("send = %d, want 200; body=%s", status, body)
+	}
+	if svc.sent != message {
+		t.Fatalf("delivered message differs from the one sent (%d vs %d bytes)", len(svc.sent), len(message))
+	}
+}
+
+// TestSessionsAPI_CommentDispatchAcceptsLargeExtraPrompt asserts the extra
+// prompt rides the same agent-delivery path as a send, so it gets the same room.
+func TestSessionsAPI_CommentDispatchAcceptsLargeExtraPrompt(t *testing.T) {
+	fake := newFakeSessionService()
+	srv := newSessionTestServer(t, fake)
+
+	extra := strings.Repeat("y", 32*1024)
+	reqBody, err := json.Marshal(map[string]string{"prUrl": "pr1", "threadId": "T1", "extraPrompt": extra})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-dispatch", string(reqBody))
+	if status != http.StatusOK {
+		t.Fatalf("comment-dispatch = %d, want 200; body=%s", status, body)
+	}
+	if fake.dispatchedExtra != extra {
+		t.Fatalf("extra prompt truncated: %d bytes, want %d", len(fake.dispatchedExtra), len(extra))
+	}
+}
+
+// TestSessionsAPI_CommentReplyRejectsOverlongBody asserts the reply body keeps
+// its own, tighter cap: that body goes to the SCM's comment API, not into an
+// agent's pane, and GitHub rejects comment bodies over 65536 characters. Sharing
+// one constant with the agent-message path is what let a single number govern
+// two unrelated sinks.
+func TestSessionsAPI_CommentReplyRejectsOverlongBody(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	reqBody, err := json.Marshal(map[string]string{
+		"prUrl": "pr1", "threadId": "T1", "body": strings.Repeat("z", 65537),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/comment-reply", string(reqBody))
+	assertErrorCode(t, body, status, http.StatusBadRequest, "MESSAGE_TOO_LONG")
+}
+
 func TestSessionsAPI_CommentDispatch(t *testing.T) {
 	fake := newFakeSessionService()
 	srv := newSessionTestServer(t, fake)
