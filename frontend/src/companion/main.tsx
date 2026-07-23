@@ -5,6 +5,7 @@ import type { World } from "./behaviour";
 import { castForSession, withSpecies } from "./cast";
 import { CompanionStage } from "./CompanionStage";
 import { ConceptSheet } from "./ConceptSheet";
+import { PortalReview } from "./PortalSheet";
 import { createManualFeed, type ManualFeed } from "./dev-feed";
 import { DevPanel } from "./DevPanel";
 import type { CompanionFeed } from "./feed";
@@ -98,6 +99,9 @@ function Lab() {
 	// `#concepts` opens the sheet on load, so `ao preview` can be pointed straight at
 	// the art instead of asking whoever is looking to find a button first.
 	const [sheet, setSheet] = useState(() => window.location.hash === "#concepts");
+	// `#portals` goes further and opens ONLY the portals, because that is a review of one
+	// thing and the full contact sheet below it is six creatures of noise.
+	const [portals, setPortals] = useState(() => window.location.hash === "#portals");
 	const onStage = useCallback((api: { setWorld: React.Dispatch<React.SetStateAction<World>> }) => {
 		setSetWorld(() => api.setWorld);
 	}, []);
@@ -134,6 +138,7 @@ function Lab() {
 				onConceptSheet={() => setSheet(true)}
 			/>
 			{sheet ? <ConceptSheet onClose={() => setSheet(false)} /> : null}
+			{portals ? <PortalReview onClose={() => setPortals(false)} /> : null}
 		</>
 	);
 }

@@ -54,6 +54,82 @@ const TONE_PAIR = [
 	{ id: "dark", label: "dark wallpaper", background: "#1b1a22" },
 ];
 
+/**
+ * The portals on their own, as a page, with the wallpaper under them switchable.
+ *
+ * `companion.html#portals`. It exists because a review of ONE thing should not open
+ * onto six creatures across fifteen states — and because this art cannot be reviewed
+ * by reading a diff or a still. Somebody has to watch it.
+ */
+export function PortalReview({ onClose }: { onClose: () => void }) {
+	const [tone, setTone] = useState(REVIEW_TONES[0]);
+	return (
+		<div style={PAGE}>
+			<header style={BAR}>
+				<strong>Portals</strong>
+				<span style={MUTED}>how a session arrives, and how it leaves</span>
+				<span style={{ flex: 1 }} />
+				{REVIEW_TONES.map((entry) => (
+					<button
+						key={entry.id}
+						type="button"
+						style={{ ...BUTTON, ...(entry.id === tone.id ? BUTTON_ON : null) }}
+						onClick={() => setTone(entry)}
+					>
+						{entry.label}
+					</button>
+				))}
+				<button type="button" style={BUTTON} onClick={onClose}>
+					close
+				</button>
+			</header>
+			<PortalSheet tone={tone} />
+		</div>
+	);
+}
+
+/**
+ * The wallpaper range, as tones rather than pictures. Contrast depends only on relative
+ * luminance, so a light, a mid and a dark grey — plus one busy photo-ish gradient — is
+ * the whole axis rather than a sample of it.
+ */
+const REVIEW_TONES = [
+	{ id: "light", label: "light wallpaper", background: "#f2f0f5" },
+	{ id: "mid", label: "mid wallpaper", background: "#8d8a97" },
+	{ id: "dark", label: "dark wallpaper", background: "#1b1a22" },
+	{
+		id: "busy",
+		label: "busy wallpaper",
+		background: "linear-gradient(115deg, #2b1c3f 0%, #d8c7a2 38%, #16394a 62%, #f4f1ea 100%)",
+	},
+];
+
+const PAGE: React.CSSProperties = {
+	position: "fixed",
+	inset: 0,
+	overflowY: "auto",
+	pointerEvents: "auto",
+	background: "#100d18",
+	color: "#f3f0f8",
+	font: "500 12px/1.5 ui-sans-serif, system-ui, sans-serif",
+	zIndex: 10000,
+};
+
+const BAR: React.CSSProperties = {
+	position: "sticky",
+	top: 0,
+	display: "flex",
+	gap: 6,
+	alignItems: "center",
+	flexWrap: "wrap",
+	padding: "8px 12px",
+	background: "#16131f",
+	borderBottom: "1px solid #3a3448",
+	zIndex: 2,
+};
+
+const BUTTON_ON: React.CSSProperties = { background: "#3c2f5c", borderColor: "#7c5cf0" };
+
 export function PortalSheet({ tone }: { tone: { label: string; background: string } }) {
 	const { beat, elapsed, replay } = usePortalLoop();
 
@@ -70,7 +146,19 @@ export function PortalSheet({ tone }: { tone: { label: string; background: strin
 				</button>
 			</header>
 
-			<h3 style={SUBTITLE}>1 · The sequence, frozen. One move, read left to right.</h3>
+			<h3 style={SUBTITLE}>1 · A whole session's life, on a loop. It arrives, it works, its work finishes, it goes.</h3>
+			<div style={{ ...STRIP, background: tone.background, justifyContent: "center", gap: 24 }}>
+				{LIFECYCLE_CAST.map((entry, index) => (
+					<Lifecycle key={entry.species} cast={look(entry.species, index + 1)} status={entry.status} />
+				))}
+			</div>
+			<p style={NOTE}>
+				This is the real thing at its real size — the same components and the same stylesheet the overlay uses, at{" "}
+				{PORTAL_IN_MS}ms in and {PORTAL_OUT_MS}ms out. Between the two it just stands there being a pet; on a desktop
+				that stretch is however long the session lasts.
+			</p>
+
+			<h3 style={SUBTITLE}>2 · The same two moves, frozen. Read left to right.</h3>
 			{PHASES.map(({ phase, caption }) => (
 				<div key={phase} style={{ ...STRIP, background: tone.background }}>
 					<figcaption style={{ ...CAPTION, alignSelf: "center", width: 96, textAlign: "left" }}>{caption}</figcaption>
@@ -94,7 +182,7 @@ export function PortalSheet({ tone }: { tone: { label: string; background: strin
 				cannot take with it.
 			</p>
 
-			<h3 style={SUBTITLE}>2 · Playing, across the cast and both ends of the wallpaper axis.</h3>
+			<h3 style={SUBTITLE}>3 · Playing, across the cast and both ends of the wallpaper axis.</h3>
 			{TONE_PAIR.map((paper) => (
 				<div key={paper.id} style={{ ...STRIP, background: paper.background }}>
 					{CAST_ON_SHOW.map(({ species, status }, index) =>
@@ -110,7 +198,7 @@ export function PortalSheet({ tone }: { tone: { label: string; background: strin
 				</div>
 			))}
 
-			<h3 style={SUBTITLE}>3 · Reduced motion. The same event, with nothing that moves for its own sake.</h3>
+			<h3 style={SUBTITLE}>4 · Reduced motion. The same event, with nothing that moves for its own sake.</h3>
 			<div data-reduced-motion style={{ ...STRIP, background: tone.background }}>
 				{PHASES.map(({ phase, caption }) => (
 					<figure key={phase} style={FIGURE}>
@@ -132,6 +220,104 @@ export function PortalSheet({ tone }: { tone: { label: string; background: strin
 			</div>
 		</section>
 	);
+}
+
+/**
+ * One pet living a whole session, over and over: it arrives through a portal, stands
+ * there working, its work finishes, it leaves by one, and after a beat of empty band
+ * it starts again.
+ *
+ * The two moments are only half the question anybody actually has, which is "what will
+ * this look like on my desktop". Side-by-side strips answer "is the move good"; this
+ * answers "is the whole thing good", including the part where nothing is happening —
+ * and it is the part a reviewer cannot picture from a filmstrip.
+ */
+function Lifecycle({ cast, status }: { cast: CastMember; status: SessionStatus }) {
+	const { phase, cycle } = useLifecycle();
+	const transit = phase === "arriving" || phase === "leaving" ? phase : null;
+	const runFor = transit ? portalDurationMs(transit) : 0;
+
+	return (
+		<figure style={FIGURE}>
+			<div style={{ ...STAGE, width: 200 }}>
+				<div className="companion-proc" style={{ ...STAND_VARS, position: "relative" }}>
+					{/* Keyed by the cycle AND the phase, so every repeat is a new element whose
+					    animations start again rather than being skipped as unchanged. */}
+					{transit ? <Portal key={`${cycle}-${transit}`} phase={transit} durationMs={runFor} /> : null}
+					{phase === "gone" ? null : transit ? (
+						<PortalTransit key={`${cycle}-${transit}-leap`} phase={transit} durationMs={runFor}>
+							<Procs
+								cast={cast}
+								status={status}
+								facing="front"
+								walking={false}
+								travelling
+								size={PET_HEIGHT}
+								className="companion-proc-art"
+							/>
+						</PortalTransit>
+					) : (
+						<Procs
+							cast={cast}
+							status={status}
+							facing="front"
+							walking={false}
+							size={PET_HEIGHT}
+							className="companion-proc-art"
+						/>
+					)}
+					{phase === "gone" ? null : (
+						<div className="companion-proc-name">
+							<NameTag name="fix the flaky test" />
+						</div>
+					)}
+				</div>
+			</div>
+			<figcaption style={CAPTION}>{LIFECYCLE_CAPTIONS[phase]}</figcaption>
+		</figure>
+	);
+}
+
+type LifecyclePhase = "arriving" | "working" | "leaving" | "gone";
+
+const LIFECYCLE_CAPTIONS: Record<LifecyclePhase, string> = {
+	arriving: "▸ the worker was spawned",
+	working: "· running, like any other pet",
+	leaving: "▸ the work is finished",
+	gone: "· the band, without it",
+};
+
+/** Two creatures, so the loop is not one body's quirk. One of them anchored. */
+const LIFECYCLE_CAST: Array<{ species: SpeciesId; status: SessionStatus }> = [
+	{ species: "proc", status: "working" },
+	{ species: "cat", status: "idle" },
+];
+
+/** How long the pet just stands there between the two moments. */
+const LIFECYCLE_WORK_MS = 2_600;
+/** And how long the band stays empty before it starts over, so the loop has a seam. */
+const LIFECYCLE_GAP_MS = 1_100;
+
+/** The loop's clock, as a phase and which repeat we are on. */
+function useLifecycle(): { phase: LifecyclePhase; cycle: number } {
+	const [state, setState] = useState<{ phase: LifecyclePhase; cycle: number }>({ phase: "arriving", cycle: 0 });
+
+	useEffect(() => {
+		const next: Record<LifecyclePhase, { phase: LifecyclePhase; after: number }> = {
+			arriving: { phase: "working", after: PORTAL_IN_MS },
+			working: { phase: "leaving", after: LIFECYCLE_WORK_MS },
+			leaving: { phase: "gone", after: PORTAL_OUT_MS },
+			gone: { phase: "arriving", after: LIFECYCLE_GAP_MS },
+		};
+		const step = next[state.phase];
+		const timer = setTimeout(
+			() => setState((current) => ({ phase: step.phase, cycle: current.cycle + (step.phase === "arriving" ? 1 : 0) })),
+			step.after,
+		);
+		return () => clearTimeout(timer);
+	}, [state]);
+
+	return state;
 }
 
 /** One pet arriving or leaving, drawn exactly as the overlay lays a pet out. */
