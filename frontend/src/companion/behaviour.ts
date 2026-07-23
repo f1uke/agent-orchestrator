@@ -720,6 +720,14 @@ function bandMembers(
  * with an animation, and the failure mode of that is a desktop that celebrates a
  * spawn every time the window reloads.
  *
+ * Which is why `activities` is EVERY live session and not the ones that fit. The cap is
+ * applied here, a step later, against the band — because a roster already trimmed to what
+ * fits cannot answer the question this function is asking. A session held back for want
+ * of room is missing from a trimmed roster in exactly the way a session that ended is,
+ * and it used to be seen out through a portal for it: a ring closing over a session that
+ * was working away perfectly well, and (by the time you looked) over nothing at all,
+ * because the Proc had already gone into it.
+ *
  * The first snapshot on an unseeded world is the BASELINE (see {@link World.seeded}).
  */
 export function syncActivities(world: World, activities: CompanionActivity[], now: number, rng: Rng): World {
