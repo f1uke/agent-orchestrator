@@ -139,12 +139,46 @@ const BLINK_MS: Record<SpeciesId, number> = {
 	toadstool: 6700,
 };
 
+/**
+ * Where in its blink cycle THIS pet starts.
+ *
+ * ⚠ Not decoration. Every pet on the band mounts at the same moment, so without this
+ * they all run the same keyframes from the same instant and the whole cast blinks in
+ * time — caught on the real band, where three cats shut their eyes together and it read
+ * as the screen refreshing rather than as three animals. Staggering the two eyes of one
+ * face was never going to fix that; the pets have to be out of phase with each other.
+ *
+ * Derived from the instance's own id, so it is stable across re-renders: a phase that
+ * was re-rolled every render would restart the animation and the eye would never shut.
+ *
+ * ⚠ FNV-1a with murmur3's avalanche finalizer, and it is the SAME lesson `cast.ts`
+ * already learned the hard way: taking `% n` of a weak hash uses its low bits, and
+ * React hands out sequential ids (`:r0:`, `:r1:`, `:r2:`). A plain rolling hash of
+ * those came out 1ms apart across eight pets — measured on the real band — which is
+ * still in unison as far as anybody watching is concerned. The finalizer mixes the high
+ * bits down and spreads them across the whole cycle.
+ */
+export function blinkPhase(uid: string, cycle: number): number {
+	let value = 0x811c9dc5;
+	for (let i = 0; i < uid.length; i++) {
+		value ^= uid.charCodeAt(i);
+		value = Math.imul(value, 0x01000193);
+	}
+	value ^= value >>> 16;
+	value = Math.imul(value, 0x85ebca6b);
+	value ^= value >>> 13;
+	value = Math.imul(value, 0xc2b2ae35);
+	value ^= value >>> 16;
+	return (value >>> 0) % cycle;
+}
+
 function Eyes({
 	at,
 	r,
 	held,
 	style,
 	blink,
+	uid,
 }: {
 	at: ReadonlyArray<readonly [number, number]>;
 	r: number;
@@ -152,8 +186,11 @@ function Eyes({
 	style: EyeStyle;
 	/** The blink cycle for this creature, or 0 for eyes that are already closed. */
 	blink: number;
+	/** This instance's id, so this pet blinks out of step with the one beside it. */
+	uid: string;
 }) {
 	const radius = held ? r * 1.16 : r;
+	const phase = blink ? blinkPhase(uid, blink) : 0;
 	return (
 		<>
 			{at.map(([cx, cy], index) => (
@@ -173,7 +210,7 @@ function Eyes({
 									// arithmetic left to get wrong.
 									transformBox: "fill-box",
 									transformOrigin: "center",
-									animation: `procs-blink ${blink}ms ease-in-out ${index * 60}ms infinite`,
+									animation: `procs-blink ${blink}ms ease-in-out ${phase + index * 60}ms infinite`,
 								}
 							: undefined
 					}
@@ -564,6 +601,7 @@ function ProcRig({ cast, held, walking, cycleMs, uid, heldProp, hat }: RigProps)
 					held={held}
 					style="round"
 					blink={BLINK_MS.proc}
+					uid={uid}
 				/>
 				<Mouth cx={48} cy={67} width={10} held={held} />
 				<g transform={hatTransform("proc")}>{hat}</g>
@@ -642,6 +680,7 @@ function GhostRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: RigPro
 						held={held}
 						style="tall"
 						blink={BLINK_MS.ghost}
+						uid={uid}
 					/>
 					<Mouth cx={48} cy={78} width={9} held={held} />
 					{heldProp}
@@ -781,6 +820,7 @@ function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: Rig
 					held={held}
 					style="slit"
 					blink={BLINK_MS.cat}
+					uid={uid}
 				/>
 				<CatFace cx={48} cy={56} held={held} />
 				<g transform="translate(48 30) scale(0.9) translate(-48 -34)">{hat}</g>
@@ -835,7 +875,7 @@ function CatRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: Rig
 					style="soft"
 				/>
 				{/* One eye, because this is a profile. Two would be the same mistake again. */}
-				<Eyes at={[[72, 46]]} r={8} held={held} style="slit" blink={BLINK_MS.cat} />
+				<Eyes at={[[72, 46]]} r={8} held={held} style="slit" blink={BLINK_MS.cat} uid={uid} />
 				<CatFace cx={84} cy={57} held={held} />
 				<g transform="translate(70 38) scale(0.72) translate(-48 -34)">{hat}</g>
 				<SwingPair part="ears" cord={scene.cord} root={CAT_WALK_EAR_ROOT} axis={CAT_AXIS} speedMs={1400} single>
@@ -925,6 +965,7 @@ function SlimeRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 					held={held}
 					style="glassy"
 					blink={BLINK_MS.slime}
+					uid={uid}
 				/>
 				<Mouth cx={48} cy={89} width={9} held={held} />
 
@@ -1029,6 +1070,7 @@ function ChickRig({ cast, scene, held, walking, cycleMs, uid, heldProp, hat }: R
 					held={held}
 					style="bead"
 					blink={BLINK_MS.chick}
+					uid={uid}
 				/>
 				{held ? (
 					<Mouth cx={48} cy={74} width={9} held />
@@ -1123,6 +1165,7 @@ function ToadstoolRig({ cast, scene, held, walking, cycleMs, uid, heldProp }: Ri
 					held={held}
 					style={held ? "round" : "arc"}
 					blink={held ? BLINK_MS.toadstool : 0}
+					uid={uid}
 				/>
 				<Mouth cx={48} cy={95} width={8} held={held} />
 				{heldProp}

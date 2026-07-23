@@ -6,7 +6,7 @@ import { PROCS_INK, PROCS_LIGHT, PROCS_RIM_PX, PROP_COLOURS } from "./palette";
 import { Procs, PROCS_VIEW } from "./Procs";
 import { ALL_COMPANION_STATUSES, ALL_CORDS, sceneFor } from "./scene";
 import { LIMB_POSE, SPECIES, speciesById, speciesWears, type SpeciesId } from "./species";
-import { pivoted, tellGlow, tellOrigin } from "./rigs";
+import { blinkPhase, pivoted, tellGlow, tellOrigin } from "./rigs";
 
 // What five new BODIES have to prove, and it is the same list the Proc had to: they
 // read differently in every state, they carry both wallpaper channels, they say what
@@ -225,6 +225,26 @@ describe("how each creature gets about", () => {
 			expect(styles, species.id).toContain(expected[speciesById(species.id).locomotion]);
 			unmount();
 		}
+	});
+
+	it("puts every pet at its own point in the blink cycle", () => {
+		// ⚠ Measured on the real band, where eight pets shut their eyes together and it
+		// read as the screen refreshing rather than as eight animals. They all mount at
+		// the same instant, so the only thing that can separate them is the phase — and
+		// React hands out SEQUENTIAL ids, which is exactly the input a weak hash fails on.
+		// A plain rolling hash of `:r0:`…`:r7:` came out one millisecond apart.
+		const cycle = 4300;
+		const phases = Array.from({ length: 8 }, (_, i) => blinkPhase(`:r${i}:`, cycle)).sort((a, b) => a - b);
+		const gaps = phases.slice(1).map((phase, i) => phase - phases[i]);
+
+		expect(Math.min(...gaps), `phases: ${phases.join(", ")}`).toBeGreaterThan(cycle * 0.01);
+		expect(Math.max(...phases) - Math.min(...phases)).toBeGreaterThan(cycle * 0.5);
+	});
+
+	it("gives one pet the same phase every time, so its eye can finish closing", () => {
+		// Re-rolled per render, the animation restarts on every tick and the eye never
+		// gets far enough down the keyframes to shut at all.
+		expect(blinkPhase(":r4:", 4300)).toBe(blinkPhase(":r4:", 4300));
 	});
 
 	it("keeps a ghost hovering even when it is standing still", () => {
