@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,15 +13,21 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-// DefaultPollInterval is the preview poller's scan interval when none is configured.
-const DefaultPollInterval = 250 * time.Millisecond
+// DefaultPollInterval is the preview poller's scan interval when none is
+// configured. Every tick lists all sessions and stats each worker workspace, so
+// it is paced for the event it watches for — a build dropping an index.html —
+// not for keystroke latency.
+const DefaultPollInterval = 2 * time.Second
 
 type sessionPreviewSource interface {
 	ListAllSessions(ctx context.Context) ([]domain.SessionRecord, error)
 }
 
-type previewSetter interface {
+type previewService interface {
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
+	// EnsurePreviewAllowed reports whether the session's project renders in a
+	// browser at all; `ao preview` is refused outright when it does not.
+	EnsurePreviewAllowed(ctx context.Context, id domain.SessionID) error
 }
 
 // PollerConfig configures preview poller timing and logging.
@@ -33,11 +40,14 @@ type PollerConfig struct {
 // persists preview URL refreshes through the normal session service path.
 type Poller struct {
 	source   sessionPreviewSource
-	setter   previewSetter
+	setter   previewService
 	baseURL  string
 	interval time.Duration
 	logger   *slog.Logger
 	seen     map[domain.SessionID]entryState
+	// discover resolves a workspace's previewable entry. It is a field so tests
+	// can observe how often the poller reaches for the filesystem.
+	discover func(workspacePath string) (Entry, bool)
 }
 
 type entryState struct {
@@ -51,7 +61,7 @@ type entryState struct {
 }
 
 // NewPoller constructs a preview poller over the supplied session source and setter.
-func NewPoller(source sessionPreviewSource, setter previewSetter, baseURL string, cfg PollerConfig) *Poller {
+func NewPoller(source sessionPreviewSource, setter previewService, baseURL string, cfg PollerConfig) *Poller {
 	p := &Poller{
 		source:   source,
 		setter:   setter,
@@ -59,6 +69,7 @@ func NewPoller(source sessionPreviewSource, setter previewSetter, baseURL string
 		interval: cfg.Interval,
 		logger:   cfg.Logger,
 		seen:     map[domain.SessionID]entryState{},
+		discover: DiscoverEntrypoint,
 	}
 	if p.interval <= 0 {
 		p.interval = DefaultPollInterval
@@ -114,9 +125,15 @@ func (p *Poller) Poll(ctx context.Context) error {
 		if sess.Kind != domain.KindWorker {
 			continue
 		}
-		entry, ok := DiscoverEntry(sess.Metadata.WorkspacePath)
+		// An `ao preview <url>` target belongs to the agent that set it and is
+		// never overwritten, so there is nothing to learn from the filesystem.
+		// Checking that first keeps the common case off the disk entirely.
+		if hasExplicitPreview(sess) {
+			continue
+		}
+		entry, ok := p.discover(sess.Metadata.WorkspacePath)
 		if !ok {
-			if isWorkspacePreviewURL(sess.Metadata.PreviewURL, sess.ID) {
+			if isDanglingWorkspacePreview(sess) {
 				if _, err := p.setter.SetPreview(ctx, sess.ID, ""); err != nil {
 					p.logger.Error("preview poller: failed to clear stale preview",
 						"session", sess.ID, "err", err)
@@ -133,6 +150,19 @@ func (p *Poller) Poll(ctx context.Context) error {
 		target := FileURL(p.baseURL, sess.ID, entry.Path)
 		if !p.shouldRefresh(sess, target, seenBefore) {
 			p.seen[sess.ID] = state
+			continue
+		}
+		// `ao preview` is refused for a project with no web UI, so the poller must
+		// not publish behind the agent's back what the agent is forbidden to ask
+		// for. Asked here — after the cheap checks and only when a write is
+		// actually pending — so a steady workspace costs no database reads.
+		//
+		// A refusal deliberately leaves p.seen untouched: remembering it would
+		// mark the entry handled, and turning "Web UI" on later would then never
+		// publish until the entrypoint happened to change again.
+		if err := p.setter.EnsurePreviewAllowed(ctx, sess.ID); err != nil {
+			p.logger.Debug("preview poller: preview not allowed for session",
+				"session", sess.ID, "err", err)
 			continue
 		}
 		if _, err := p.setter.SetPreview(ctx, sess.ID, target); err != nil {
@@ -163,21 +193,73 @@ func (p *Poller) shouldRefresh(sess domain.SessionRecord, target string, seenBef
 	return isStaleWorkspacePath(current)
 }
 
+// hasExplicitPreview reports whether the session's stored preview target came
+// from the agent rather than from this poller: a target the poller wrote is a
+// preview/files URL for this session, and a legacy relative path is one it still
+// needs to upgrade.
+func hasExplicitPreview(sess domain.SessionRecord) bool {
+	current := strings.TrimSpace(sess.Metadata.PreviewURL)
+	if current == "" {
+		return false
+	}
+	return !isWorkspacePreviewURL(current, sess.ID) && !isStaleWorkspacePath(current)
+}
+
 func stateFor(entry Entry) entryState {
 	return entryState{path: entry.Path, modUnix: entry.ModTime.UnixNano(), size: entry.Size}
 }
 
-func isWorkspacePreviewURL(raw string, id domain.SessionID) bool {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
+// isDanglingWorkspacePreview reports whether the session's panel points at a
+// workspace file that no longer exists, so showing it would 404.
+//
+// A workspace preview URL is not proof the poller wrote it: a bare `ao preview`
+// can pin any file in the workspace, including one the poller would never
+// discover. Emptying the panel is therefore tied to the file being gone, not to
+// the poller having stopped recognising it.
+func isDanglingWorkspacePreview(sess domain.SessionRecord) bool {
+	entry, ok := workspacePreviewEntry(sess.Metadata.PreviewURL, sess.ID)
+	if !ok {
 		return false
+	}
+	file, ok := ConfinedPath(sess.Metadata.WorkspacePath, entry)
+	if !ok {
+		return true
+	}
+	info, err := os.Stat(file)
+	return err != nil || info.IsDir()
+}
+
+func isWorkspacePreviewURL(raw string, id domain.SessionID) bool {
+	_, ok := workspacePreviewEntry(raw, id)
+	return ok
+}
+
+// workspacePreviewEntry returns the workspace-relative path a preview/files URL
+// for this session points at.
+func workspacePreviewEntry(raw string, id domain.SessionID) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", false
 	}
 	previewPath := parsed.Path
 	if previewPath == "" {
 		previewPath = raw
 	}
 	prefix := "/api/v1/sessions/" + url.PathEscape(string(id)) + "/preview/files/"
-	return strings.HasPrefix(previewPath, prefix)
+	rest, found := strings.CutPrefix(previewPath, prefix)
+	if !found {
+		return "", false
+	}
+	segments := strings.Split(rest, "/")
+	for i, segment := range segments {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			return "", false
+		}
+		segments[i] = decoded
+	}
+	return strings.Join(segments, "/"), true
 }
 
 func isStaleWorkspacePath(raw string) bool {
