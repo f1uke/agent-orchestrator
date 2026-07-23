@@ -244,16 +244,16 @@ const HAT_SALT = "\u0000hat";
 // axes themselves, and it exists so that nothing downstream has to know how many
 // there are or what they are called.
 //
-// The Pet library iterates it to draw its sections, the override store keys on
-// `axis.id`, and the default assignment hashes with `axis.salt`. A picker that
-// said "colour, then hat" in code would have to be rewritten the day a third axis
-// arrives - and a third axis IS the plan (new character types). Adding one is a
-// row here plus a case in `castFromLook`, and nothing else moves.
+// ⚠ It is NOT a picker any more. The one thing a human chooses is the creature, and
+// that is chosen per PROJECT and lives in `look-store.ts`. What survives here is the
+// registry's real job: these are the INDEPENDENT HASH DIMENSIONS a session's own look
+// is drawn from, one `salt` each, and `species.ts` types its `axes` off the same ids.
+// A session's colour and accessory are automatic and nobody overrides them.
 
 /** Which axis. A new axis widens this union and adds a row to `APPEARANCE_AXES`. */
 export type AxisId = "palette" | "hat";
 
-/** One choice on an axis, as the library lists it. */
+/** One option on an axis: what the hash picks between. */
 export type AxisOption = { id: string; name: string };
 
 /** A whole look: one option id per axis. */
@@ -261,10 +261,6 @@ export type Look = Readonly<Record<AxisId, string>>;
 
 export type AppearanceAxis = {
 	id: AxisId;
-	/** Section heading in the library. */
-	name: string;
-	/** One line saying what this axis is FOR, shown under the heading. */
-	hint: string;
 	/**
 	 * This axis' own hash dimension.
 	 *
@@ -285,30 +281,19 @@ export type AppearanceAxis = {
 export const APPEARANCE_AXES: readonly AppearanceAxis[] = [
 	{
 		id: "palette",
-		name: "Colour",
-		hint: "What it is tinted. Tells two sessions on one project apart at a glance.",
 		salt: "",
 		options: PALETTES.map((palette) => ({ id: palette.id, name: palette.name })),
 	},
 	{
 		id: "hat",
-		name: "Accessory",
-		hint: "What it is wearing. Each creature has its own — a hat, a collar, a cherry suspended in jelly.",
 		salt: HAT_SALT,
-		// ⚠ The Proc's, as the default. The real options are per CREATURE and come from
-		// `accessoriesFor` — a picker that offered these six to a slime would be offering
-		// six hats to a jelly cube. The id stays `hat` because that is what is written in
-		// everybody's localStorage.
+		// ⚠ The Proc's, as the SLOTS. The real options are per CREATURE and come from
+		// `accessoriesFor` — six hats mean nothing to a jelly cube. `withSpecies` maps a
+		// slot onto whatever body turns up, which is why the hash can be taken once here
+		// and still land on a collar, a cherry or a beanie.
 		options: HATS.map((hat) => ({ id: hat.id, name: hat.name })),
 	},
 ];
-
-/** The options on one axis. Throws on an unknown axis, which is a typo rather than input. */
-export function optionsOf(axisId: AxisId): readonly AxisOption[] {
-	const axis = APPEARANCE_AXES.find((entry) => entry.id === axisId);
-	if (!axis) throw new Error(`unknown appearance axis: ${axisId}`);
-	return axis.options;
-}
 
 /** What the hash gives this session on one axis. */
 export function defaultOption(axis: AppearanceAxis, sessionRef: string): string {
@@ -414,25 +399,6 @@ export function accessoriesFor(species: SpeciesId): readonly Accessory[] {
 export function accessoryOf(species: SpeciesId, accessoryId: string): string {
 	const set = accessoriesFor(species);
 	return (set.find((entry) => entry.id === accessoryId) ?? set[0]).id;
-}
-
-/**
- * The option id to STORE for a session, so that it lands on `optionId` of this creature.
- *
- * ⚠ A session's stored choice is kept in the PROC's option space, not the creature's,
- * and that is deliberate: the creature comes from the PROJECT and can change under a
- * session at any time. Stored as "ginger", a cat's colour would be meaningless the
- * moment its project became a slime. Stored as the SLOT — which is what a Proc id is
- * here — the choice survives, and `withSpecies` maps it onto whatever body turns up.
- */
-export function storedIdFor(axis: "palette" | "hat", species: SpeciesId, optionId: string): string {
-	const set = axis === "palette" ? palettesFor(species) : accessoriesFor(species);
-	const slot = Math.max(
-		0,
-		set.findIndex((entry) => entry.id === optionId),
-	);
-	const proc = axis === "palette" ? PALETTES : HATS;
-	return proc[slot % proc.length].id;
 }
 
 /** One colour of a creature's own set, by id, falling back to its first. */

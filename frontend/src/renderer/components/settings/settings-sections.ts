@@ -79,7 +79,7 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		Icon: Monitor,
 		hint: "notifications, updates, companion & migration",
 		keywords:
-			"notifications test updates channel version check migration import legacy companion desktop pet overlay procs library colour color hat character look appearance",
+			"notifications test updates channel version check migration import legacy companion desktop pet overlay procs library creature species animal character look appearance colour color",
 	},
 ];
 

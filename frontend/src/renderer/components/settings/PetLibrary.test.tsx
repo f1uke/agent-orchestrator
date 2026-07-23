@@ -1,22 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-	accessoriesFor,
-	APPEARANCE_AXES,
-	castForSession,
-	defaultLook,
-	palettesFor,
-	storedIdFor,
-	withSpecies,
-} from "../../../companion/cast";
-import {
-	LOOKS_STORAGE_KEY,
-	parseLookOverrides,
-	parseProjectLooks,
-	resolveLook,
-	resolveSpecies,
-} from "../../../companion/look-store";
+import { castForSession, withSpecies } from "../../../companion/cast";
+import { LOOKS_STORAGE_KEY, parseProjectLooks, resolveSpecies } from "../../../companion/look-store";
 import { SPECIES, speciesForProject } from "../../../companion/species";
 import { useUiStore } from "../../stores/ui-store";
 import { PetLibrary } from "./PetLibrary";
@@ -44,330 +30,276 @@ const DEFAULT_DATA = workspaces(
 
 beforeEach(() => {
 	window.localStorage.clear();
+	// A `storage` event with a null key is what `localStorage.clear()` reports, and it is
+	// also how this suite drops the live store's cached snapshot between tests.
 	window.dispatchEvent(new StorageEvent("storage", { key: null }));
 	looksChanged.mockReset();
 	useWorkspaceQuery.mockReturnValue({ data: DEFAULT_DATA, isSuccess: true });
 	useUiStore.setState({ petLibraryRequest: null });
 });
 
-/**
- * The option TILES under one heading, e.g. every colour.
- *
- * Filtered on `aria-pressed`, because a section that somebody has chosen in also holds a
- * "back to the default" button — counting that as an option made a six-colour set
- * measure as seven the moment anyone touched it.
- */
-function optionsUnder(axisName: string) {
-	return within(screen.getByRole("group", { name: axisName }))
+/** The creature TILES, filtered on `aria-pressed` so the reset button is not one. */
+function creatureTiles() {
+	return within(screen.getByRole("group", { name: "Creature" }))
 		.getAllByRole("button")
 		.filter((button) => button.hasAttribute("aria-pressed"));
 }
 
-function optionButton(axisName: string, optionName: string) {
-	return within(screen.getByRole("group", { name: axisName })).getByRole("button", {
-		name: new RegExp(optionName, "i"),
+function creatureTile(name: string) {
+	return within(screen.getByRole("group", { name: "Creature" })).getByRole("button", {
+		name: new RegExp(name, "i"),
 	});
 }
 
-describe("choosing which session to dress", () => {
-	it("lists the live sessions under the project they belong to", () => {
-		render(<PetLibrary />);
-		// Scoped to the nav: the creature section names the project too, in its hint.
-		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+/** What the storage says this project wears, read back the way the overlay reads it. */
+function storedSpecies(project: string) {
+	return resolveSpecies(project, parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY)));
+}
 
-		expect(nav.getByText("agent-orchestrator")).toBeTruthy();
-		expect(nav.getByText("starlight")).toBeTruthy();
-		expect(screen.getByRole("button", { name: /fix the flaky test/ })).toBeTruthy();
-		expect(screen.getByRole("button", { name: /api rewrite/ })).toBeTruthy();
+describe("choosing which project to dress", () => {
+	it("lists the projects, which is the only thing there is to pick", () => {
+		render(<PetLibrary />);
+		const nav = within(screen.getByRole("navigation", { name: "Projects" }));
+
+		expect(nav.getByRole("button", { name: /agent-orchestrator/ })).toBeTruthy();
+		expect(nav.getByRole("button", { name: /starlight/ })).toBeTruthy();
 	});
 
-	it("draws each row as the creature its PROJECT is", () => {
-		// ⚠ Three views of one pet — this list, the picker beside it, and the band on the
-		// desktop — and they have to agree. This one drew every session as a Proc until
-		// somebody opened the app and looked at it.
+	it("never offers a session, because a session is not a thing you dress any more", () => {
+		// ⚠ The regression this guards: #168 listed every worker and let each be dressed by
+		// hand. The human asked for exactly one choice per project, so a session title must
+		// not be a control at all.
 		render(<PetLibrary />);
-		const row = screen.getByRole("button", { name: /api rewrite/ });
+
+		expect(screen.queryByRole("button", { name: /fix the flaky test/ })).toBeNull();
+		expect(screen.queryByRole("navigation", { name: "Sessions" })).toBeNull();
+	});
+
+	it("draws each row as the creature its project is", () => {
+		render(<PetLibrary />);
+		const row = screen.getByRole("button", { name: /starlight/ });
 
 		expect(row.querySelector("svg[data-species]")?.getAttribute("data-species")).toBe(speciesForProject("starlight"));
 	});
 
-	it("opens on the first session, so there is always something to look at", () => {
+	it("opens on the first project, so there is always something to look at", () => {
 		render(<PetLibrary />);
 
-		expect(screen.getByRole("button", { name: /fix the flaky test/ })).toHaveAttribute("aria-current", "true");
+		expect(screen.getByRole("button", { name: /agent-orchestrator/ })).toHaveAttribute("aria-current", "true");
 	});
 
-	it("switches to another session when it is picked", async () => {
+	it("switches to another project when it is picked", async () => {
 		render(<PetLibrary />);
 
-		await userEvent.click(screen.getByRole("button", { name: /api rewrite/ }));
+		await userEvent.click(screen.getByRole("button", { name: /starlight/ }));
 
-		expect(screen.getByRole("button", { name: /api rewrite/ })).toHaveAttribute("aria-current", "true");
+		expect(screen.getByRole("button", { name: /starlight/ })).toHaveAttribute("aria-current", "true");
 	});
 
-	it("says so plainly when there are no sessions to dress", () => {
+	it("says so plainly when there is nothing to dress", () => {
 		useWorkspaceQuery.mockReturnValue({ data: [], isSuccess: true });
 		render(<PetLibrary />);
 
-		expect(screen.getByText(/no sessions/i)).toBeTruthy();
+		expect(screen.getByText(/no projects/i)).toBeTruthy();
 	});
 });
 
-/** What the selected session actually shows: its own colour, on its PROJECT's creature. */
-function wornBy(ref: string, project: string) {
-	return withSpecies(castForSession(ref), speciesForProject(project));
-}
+describe("the project's own pets, drawn as they really are", () => {
+	it("shows every live session of the project, each in the colour its hash gave it", () => {
+		// The picture is the argument: same animal, different colours. Asserted against the
+		// hash rather than against each other, so it pins the actual mapping — the session's
+		// own slot, carried onto whichever creature the project wears.
+		const { container } = render(<PetLibrary />);
+		const drawn = [...container.querySelectorAll("[data-pet-strip] svg[data-species]")];
+		const wornBy = (ref: string) => withSpecies(castForSession(ref), speciesForProject("agent-orchestrator"));
 
-describe("the axes", () => {
-	it("draws one section per axis in the registry, plus the creature", () => {
-		// The axes still arrive by being in APPEARANCE_AXES, with no change to this
-		// component. The creature is its own section because it is keyed on the PROJECT
-		// rather than the session, which no axis in that registry is.
-		render(<PetLibrary />);
-
-		for (const axis of APPEARANCE_AXES) {
-			expect(screen.getByRole("group", { name: axis.name }), axis.id).toBeTruthy();
-		}
-		expect(screen.getByRole("group", { name: "Creature" })).toBeTruthy();
+		expect(drawn).toHaveLength(2);
+		expect(drawn.map((svg) => svg.getAttribute("data-palette"))).toEqual([
+			wornBy("ao-1").palette,
+			wornBy("ao-2").palette,
+		]);
+		expect(drawn.map((svg) => svg.getAttribute("data-accessory"))).toEqual([
+			wornBy("ao-1").hatId,
+			wornBy("ao-2").hatId,
+		]);
+		// And they actually differ, which is the only thing left telling two workers on one
+		// project apart now that they are the same animal.
+		expect(new Set(drawn.map((svg) => svg.getAttribute("data-palette"))).size).toBe(2);
 	});
 
-	it("offers the CREATURE's own options, not the Proc's", () => {
-		// ⚠ The failure this catches: offering the Proc's six hats to a slime. The axis
-		// registry carries them as a default, and a picker that read them straight off it
-		// would offer six hats to a jelly cube.
-		render(<PetLibrary />);
-		const species = speciesForProject("agent-orchestrator");
+	it("draws them all as the ONE creature the project wears", async () => {
+		const { container } = render(<PetLibrary />);
 
-		expect(optionsUnder("Colour").length).toBe(palettesFor(species).length);
-		expect(optionsUnder("Accessory").length).toBe(accessoriesFor(species).length);
-		expect(optionsUnder("Creature").length).toBe(SPECIES.length);
+		await userEvent.click(creatureTile("Ghost"));
+		const drawn = [...container.querySelectorAll("[data-pet-strip] svg[data-species]")];
+
+		expect(drawn.map((svg) => svg.getAttribute("data-species"))).toEqual(["ghost", "ghost"]);
 	});
 
-	it("marks the option a session is wearing as in use", () => {
-		render(<PetLibrary />);
-		const mine = wornBy("ao-1", "agent-orchestrator");
+	it("says how many it is not showing rather than dropping them quietly", () => {
+		useWorkspaceQuery.mockReturnValue({
+			data: workspaces({
+				name: "big",
+				sessions: Array.from({ length: 9 }, (_, i) => session(`b-${i}`, `job ${i}`)),
+			}),
+			isSuccess: true,
+		});
+		const { container } = render(<PetLibrary />);
 
-		expect(optionButton("Colour", mine.palette)).toHaveAttribute("aria-pressed", "true");
-		expect(optionButton("Accessory", mine.hatId)).toHaveAttribute("aria-pressed", "true");
-		expect(within(optionButton("Colour", mine.palette)).getByText(/in use/i)).toBeTruthy();
-	});
-});
-
-describe("picking the creature a PROJECT is", () => {
-	// The one control on this screen keyed on the project rather than the session. Every
-	// session on a project is the same animal, which is what took the coloured mark off
-	// the name chip — and it is the answer to two projects hashing onto one creature.
-
-	it("marks the creature the project is currently drawn as", () => {
-		render(<PetLibrary />);
-
-		expect(optionButton("Creature", speciesById("agent-orchestrator"))).toHaveAttribute("aria-pressed", "true");
-	});
-
-	it("changes the creature for the whole PROJECT, not for the session", async () => {
-		render(<PetLibrary />);
-		await userEvent.click(optionButton("Creature", "Ghost"));
-
-		const stored = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(resolveSpecies("agent-orchestrator", stored)).toBe("ghost");
-		// The OTHER session on the same project moved with it; the other project did not.
-		expect(resolveSpecies("starlight", stored)).toBe(speciesForProject("starlight"));
-		expect(looksChanged).toHaveBeenCalled();
-	});
-
-	it("keeps the session's own colour when the creature changes under it", async () => {
-		// A session's choice is stored in the Proc's option space — a SLOT — precisely so
-		// it survives its project becoming a different animal.
-		render(<PetLibrary />);
-		const wanted = palettesFor(speciesForProject("agent-orchestrator"))[3].id;
-		await userEvent.click(optionButton("Colour", wanted));
-		await userEvent.click(optionButton("Creature", "Ghost"));
-
-		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(resolveLook("ao-1", stored).palette).toBe(
-			storedIdFor("palette", speciesForProject("agent-orchestrator"), wanted),
-		);
-		expect(optionsUnder("Colour").length).toBe(palettesFor("ghost").length);
-	});
-
-	it("goes back to the hash of the project's name", async () => {
-		render(<PetLibrary />);
-		await userEvent.click(optionButton("Creature", "Ghost"));
-		await userEvent.click(
-			within(screen.getByRole("group", { name: "Creature" })).getByRole("button", { name: /default/i }),
-		);
-
-		const stored = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect("agent-orchestrator" in stored).toBe(false);
-		expect(resolveSpecies("agent-orchestrator", stored)).toBe(speciesForProject("agent-orchestrator"));
-	});
-
-	it("offers the reset only once somebody has chosen", async () => {
-		render(<PetLibrary />);
-
-		expect(
-			within(screen.getByRole("group", { name: "Creature" })).queryByRole("button", { name: /default/i }),
-		).toBeNull();
-
-		await userEvent.click(optionButton("Creature", "Ghost"));
-
-		expect(
-			within(screen.getByRole("group", { name: "Creature" })).getByRole("button", { name: /default/i }),
-		).toBeTruthy();
+		expect(container.querySelectorAll("[data-pet-strip] svg[data-species]")).toHaveLength(4);
+		expect(screen.getByText(/4 of the 9 sessions/)).toBeTruthy();
 	});
 });
 
-/** The display NAME of the creature a project is drawn as, for finding its tile. */
-function speciesById(project: string): string {
-	const id = speciesForProject(project);
-	return SPECIES.find((entry) => entry.id === id)!.name;
-}
-
-describe("picking a look", () => {
-	async function pickHat(hat: string) {
+describe("choosing the creature", () => {
+	it("offers every creature there is", () => {
 		render(<PetLibrary />);
-		await userEvent.click(optionButton("Accessory", hat));
-	}
 
-	/** An option of the CREATURE's own set that is not the one this session already has. */
-	const otherThan = (axisId: "palette" | "hat", ref: string) => {
-		const species = speciesForProject("agent-orchestrator");
-		const set = axisId === "palette" ? palettesFor(species) : accessoriesFor(species);
-		const worn = withSpecies(castForSession(ref), species);
-		return set.find((option) => option.id !== (axisId === "palette" ? worn.palette : worn.hatId))!.id;
-	};
-	/** …and what that lands on in the store, which is the Proc's slot for it. */
-	const stores = (axisId: "palette" | "hat", optionId: string) =>
-		storedIdFor(axisId, speciesForProject("agent-orchestrator"), optionId);
-
-	it("changes the hat and leaves the colour on the hash", async () => {
-		const wanted = otherThan("hat", "ao-1");
-		await pickHat(wanted);
-
-		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(resolveLook("ao-1", stored).hat).toBe(stores("hat", wanted));
-		expect(resolveLook("ao-1", stored).palette).toBe(defaultLook("ao-1").palette);
+		expect(creatureTiles()).toHaveLength(SPECIES.length);
 	});
 
-	it("moves the in-use mark to what was picked", async () => {
-		const wanted = otherThan("hat", "ao-1");
-		await pickHat(wanted);
+	it("marks the one the project is wearing", () => {
+		render(<PetLibrary />);
+		const mine = SPECIES.find((entry) => entry.id === speciesForProject("agent-orchestrator"))!;
 
-		expect(optionButton("Accessory", wanted)).toHaveAttribute("aria-pressed", "true");
-		expect(optionButton("Accessory", wornBy("ao-1", "agent-orchestrator").hatId)).toHaveAttribute(
-			"aria-pressed",
-			"false",
-		);
+		expect(creatureTile(mine.name)).toHaveAttribute("aria-pressed", "true");
 	});
 
-	it("tells the overlay to go and look, so the desktop changes at once", async () => {
-		await pickHat(otherThan("hat", "ao-1"));
+	it("stores the choice against the PROJECT, where the next launch will find it", async () => {
+		render(<PetLibrary />);
+
+		await userEvent.click(creatureTile("Toadstool"));
+
+		expect(storedSpecies("agent-orchestrator")).toBe("toadstool");
+		// Untouched: a creature answers "which project", so choosing one must not move
+		// anybody else's.
+		expect(storedSpecies("starlight")).toBe(speciesForProject("starlight"));
+	});
+
+	it("nudges the overlay, so the desktop repaints without a reload", async () => {
+		render(<PetLibrary />);
+
+		await userEvent.click(creatureTile("Slime"));
 
 		expect(looksChanged).toHaveBeenCalled();
 	});
 
-	it("dresses only the session that was selected", async () => {
-		await pickHat(otherThan("hat", "ao-1"));
+	it("offers the way back only once there is something to go back from", async () => {
+		render(<PetLibrary />);
+		const back = () => screen.queryByRole("button", { name: /back to the default/i });
 
-		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(resolveLook("ao-2", stored)).toEqual(defaultLook("ao-2"));
-		expect(resolveLook("sl-1", stored)).toEqual(defaultLook("sl-1"));
+		expect(back()).toBeNull();
+		await userEvent.click(creatureTile("Ghost"));
+		expect(back()).toBeTruthy();
+
+		await userEvent.click(back()!);
+
+		expect(storedSpecies("agent-orchestrator")).toBe(speciesForProject("agent-orchestrator"));
+		expect(back()).toBeNull();
 	});
 
-	it("puts one axis back on the default without touching the other", async () => {
-		const hat = otherThan("hat", "ao-1");
-		const palette = otherThan("palette", "ao-1");
-		render(<PetLibrary />);
-		await userEvent.click(optionButton("Accessory", hat));
-		await userEvent.click(optionButton("Colour", palette));
-
-		await userEvent.click(
-			within(screen.getByRole("group", { name: "Accessory" })).getByRole("button", { name: /default/i }),
-		);
-
-		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(resolveLook("ao-1", stored).hat).toBe(defaultLook("ao-1").hat);
-		expect(resolveLook("ao-1", stored).palette).toBe(stores("palette", palette));
-	});
-
-	it("offers the reset only on an axis somebody has actually chosen", async () => {
+	it("changes the project it is looking at, not the one it started on", async () => {
 		render(<PetLibrary />);
 
-		expect(
-			within(screen.getByRole("group", { name: "Accessory" })).queryByRole("button", { name: /default/i }),
-		).toBeNull();
+		await userEvent.click(screen.getByRole("button", { name: /starlight/ }));
+		await userEvent.click(creatureTile("Chick"));
 
-		await userEvent.click(optionButton("Accessory", otherThan("hat", "ao-1")));
-
-		expect(
-			within(screen.getByRole("group", { name: "Accessory" })).getByRole("button", { name: /default/i }),
-		).toBeTruthy();
+		expect(storedSpecies("starlight")).toBe("chick");
+		expect(storedSpecies("agent-orchestrator")).toBe(speciesForProject("agent-orchestrator"));
 	});
 });
 
-describe("housekeeping", () => {
-	it("forgets the creature of a project that no longer exists", () => {
-		window.localStorage.setItem(
-			LOOKS_STORAGE_KEY,
-			JSON.stringify({ v: 1, sessions: {}, projects: { "agent-orchestrator": "ghost", gone: "cat" } }),
-		);
-		window.dispatchEvent(new StorageEvent("storage", { key: null }));
-
+describe("what is NOT on this screen any more", () => {
+	it("has no colour picker and no accessory picker", () => {
+		// ⚠ The point of the whole change. Colour and accessory are automatic per session;
+		// a control for them would be a second answer to a question the hash already owns.
 		render(<PetLibrary />);
 
-		const stored = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(stored).toEqual({ "agent-orchestrator": "ghost" });
+		expect(screen.queryByRole("group", { name: "Colour" })).toBeNull();
+		expect(screen.queryByRole("group", { name: "Accessory" })).toBeNull();
+		expect(screen.getAllByRole("group")).toHaveLength(1);
 	});
 
-	it("forgets the look of a session that no longer exists", () => {
-		window.localStorage.setItem(
-			LOOKS_STORAGE_KEY,
-			JSON.stringify({ v: 1, sessions: { "ao-1": { hat: "cone" }, "gone-9": { hat: "beanie" } } }),
-		);
-		window.dispatchEvent(new StorageEvent("storage", { key: null }));
-
+	it("leaves a session's own look alone when the project's creature changes", async () => {
 		render(<PetLibrary />);
+		const before = castForSession("ao-1");
 
-		const stored = parseLookOverrides(window.localStorage.getItem(LOOKS_STORAGE_KEY));
-		expect(Object.keys(stored)).toEqual(["ao-1"]);
-	});
+		await userEvent.click(creatureTile("Cat"));
 
-	it("forgets nothing while the session list has not loaded", () => {
-		// A failed or in-flight fetch is not evidence that anybody's session is gone.
-		useWorkspaceQuery.mockReturnValue({ data: undefined, isSuccess: false });
-		const raw = JSON.stringify({ v: 1, sessions: { "gone-9": { hat: "beanie" } } });
-		window.localStorage.setItem(LOOKS_STORAGE_KEY, raw);
-		window.dispatchEvent(new StorageEvent("storage", { key: null }));
-
-		render(<PetLibrary />);
-
-		expect(window.localStorage.getItem(LOOKS_STORAGE_KEY)).toBe(raw);
+		// Nothing about the session was written; only the project's row exists.
+		expect(Object.keys(parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY)))).toEqual([
+			"agent-orchestrator",
+		]);
+		expect(castForSession("ao-1")).toEqual(before);
 	});
 });
 
 describe("arriving from a right-click on the desktop", () => {
-	it("opens on the session whose Proc was clicked", () => {
+	it("opens on the PROJECT of the pet that was clicked", () => {
+		// The overlay sends the SESSION it was right-clicked on; the creature is chosen per
+		// project, so the app resolves one to the other against the list it already holds.
 		useUiStore.setState({ petLibraryRequest: "sl-1" });
-
 		render(<PetLibrary />);
 
-		expect(screen.getByRole("button", { name: /api rewrite/ })).toHaveAttribute("aria-current", "true");
+		expect(screen.getByRole("button", { name: /starlight/ })).toHaveAttribute("aria-current", "true");
 	});
 
-	it("forgets the request once it has been honoured, so it cannot fire twice", () => {
+	it("forgets the request once honoured, or the next visit would jump unasked", () => {
 		useUiStore.setState({ petLibraryRequest: "sl-1" });
-
 		render(<PetLibrary />);
 
 		expect(useUiStore.getState().petLibraryRequest).toBeNull();
 	});
 
-	it("stays where it is when the session is not one it can show", () => {
-		useUiStore.setState({ petLibraryRequest: "not-a-session" });
-
+	it("stays where it is when the session is not one it knows", () => {
+		useUiStore.setState({ petLibraryRequest: "ghost-session" });
 		render(<PetLibrary />);
 
-		expect(screen.getByRole("button", { name: /fix the flaky test/ })).toHaveAttribute("aria-current", "true");
-		expect(useUiStore.getState().petLibraryRequest).toBeNull();
+		expect(screen.getByRole("button", { name: /agent-orchestrator/ })).toHaveAttribute("aria-current", "true");
+	});
+});
+
+describe("forgetting projects that are gone", () => {
+	it("drops the choice of a project that no longer exists", () => {
+		window.localStorage.setItem(
+			LOOKS_STORAGE_KEY,
+			JSON.stringify({ v: 1, projects: { "agent-orchestrator": "ghost", deleted: "cat" } }),
+		);
+		window.dispatchEvent(new StorageEvent("storage", { key: null }));
+		render(<PetLibrary />);
+
+		const kept = parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY));
+		expect(Object.keys(kept)).toEqual(["agent-orchestrator"]);
+	});
+
+	it("keeps a project whose sessions have all ended, because the project has not", () => {
+		// ⚠ Pruned against every PROJECT, terminated sessions included. A project with
+		// nothing running is still a project, and its creature must survive the quiet spell.
+		useWorkspaceQuery.mockReturnValue({
+			data: workspaces(
+				{ name: "agent-orchestrator", sessions: [session("ao-1", "fix the flaky test")] },
+				{ name: "dormant", sessions: [session("d-1", "done", { isTerminated: true })] },
+			),
+			isSuccess: true,
+		});
+		window.localStorage.setItem(
+			LOOKS_STORAGE_KEY,
+			JSON.stringify({ v: 1, projects: { dormant: "ghost", gone: "cat" } }),
+		);
+		window.dispatchEvent(new StorageEvent("storage", { key: null }));
+		render(<PetLibrary />);
+
+		expect(Object.keys(parseProjectLooks(window.localStorage.getItem(LOOKS_STORAGE_KEY)))).toEqual(["dormant"]);
+	});
+
+	it("forgets nothing while the fetch is still in flight", () => {
+		// An in-flight or failed fetch is not evidence that anybody's project is gone.
+		useWorkspaceQuery.mockReturnValue({ data: undefined, isSuccess: false });
+		const stored = JSON.stringify({ v: 1, projects: { "agent-orchestrator": "ghost", deleted: "cat" } });
+		window.localStorage.setItem(LOOKS_STORAGE_KEY, stored);
+		window.dispatchEvent(new StorageEvent("storage", { key: null }));
+		render(<PetLibrary />);
+
+		expect(window.localStorage.getItem(LOOKS_STORAGE_KEY)).toBe(stored);
 	});
 });

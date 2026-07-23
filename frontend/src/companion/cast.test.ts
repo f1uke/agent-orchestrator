@@ -8,7 +8,6 @@ import {
 	defaultLook,
 	HATS,
 	mirrorPathX,
-	optionsOf,
 	PALETTES,
 } from "./cast";
 
@@ -107,14 +106,13 @@ describe("the cast", () => {
 });
 
 describe("the axis registry", () => {
-	it("describes every axis as DATA, so a picker never names one in code", () => {
-		// The library iterates this list. If it ever hardcoded "colour, then hat", a
-		// third axis — the new character types the human wants next — would mean
-		// rewriting the picker instead of adding a row here.
+	it("describes every axis as DATA, so nothing downstream names one in code", () => {
+		// ⚠ No human picks these any more — a session's colour and accessory are automatic.
+		// What this list still IS is the set of independent hash dimensions they are drawn
+		// from, and `species.ts` types its own `axes` off the same ids.
 		expect(APPEARANCE_AXES.length).toBeGreaterThanOrEqual(2);
 		for (const axis of APPEARANCE_AXES) {
 			expect(axis.options.length, `${axis.id} has options`).toBeGreaterThan(0);
-			expect(axis.name.length, `${axis.id} is named for a human`).toBeGreaterThan(0);
 			expect(new Set(axis.options.map((option) => option.id)).size, `${axis.id} ids are unique`).toBe(
 				axis.options.length,
 			);
@@ -122,6 +120,8 @@ describe("the axis registry", () => {
 	});
 
 	it("carries the colour and hat lists themselves, not copies that can drift", () => {
+		const optionsOf = (id: string) => APPEARANCE_AXES.find((axis) => axis.id === id)!.options;
+
 		expect(optionsOf("palette").map((option) => option.id)).toEqual(PALETTES.map((p) => p.id));
 		expect(optionsOf("hat").map((option) => option.id)).toEqual(HATS.map((h) => h.id));
 	});

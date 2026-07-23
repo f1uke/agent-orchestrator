@@ -9,7 +9,7 @@ import { createManualFeed, type ManualFeed } from "./dev-feed";
 import { DevPanel } from "./DevPanel";
 import type { CompanionFeed } from "./feed";
 import { createLiveFeed, type LiveFeed } from "./live-feed";
-import { refreshLookOverrides } from "./look-store-live";
+import { refreshProjectLooks } from "./look-store-live";
 import { createHttpTransport } from "./live-transport";
 import { mockActivitiesAt, createMockFeed } from "./mock-feed";
 import { speciesForProject, type SpeciesId } from "./species";
@@ -67,7 +67,7 @@ function Overlay() {
 	// The looks travel by `storage` event, because both windows are one origin. This
 	// is the same message arriving the other way, so a change lands even if the
 	// event never does; both paths do nothing but re-read localStorage.
-	useEffect(() => bridge?.onLooksChanged?.(() => refreshLookOverrides()), []);
+	useEffect(() => bridge?.onLooksChanged?.(() => refreshProjectLooks()), []);
 
 	return (
 		<CompanionStage

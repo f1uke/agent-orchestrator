@@ -1,284 +1,185 @@
 import { describe, expect, it } from "vitest";
-import { APPEARANCE_AXES, castForSession, defaultLook, type AxisId } from "./cast";
+import { castForSession, withSpecies } from "./cast";
 import {
-	castFor,
-	chooseLook,
 	chooseSpecies,
-	clearLookChoice,
 	clearSpeciesChoice,
-	isAxisChosen,
 	isSpeciesChosen,
-	parseLookOverrides,
 	parseProjectLooks,
-	parseStoredLooks,
-	pruneLookOverrides,
 	pruneProjectLooks,
-	resolveLook,
 	resolveSpecies,
-	serializeLookOverrides,
-	serializeStoredLooks,
-	type LookOverrides,
+	serializeProjectLooks,
 } from "./look-store";
 import { speciesForProject } from "./species";
 
-const REF = "agent-orchestrator-168";
-const OTHER = "agent-orchestrator-169";
+const PROJECT = "agent-orchestrator";
+const OTHER = "starlight";
 
-/** An option on `axis` that is NOT the one this session would get by default. */
-function anotherOption(axisId: AxisId, sessionRef: string): string {
-	const axis = APPEARANCE_AXES.find((entry) => entry.id === axisId)!;
-	const mine = defaultLook(sessionRef)[axisId];
-	return axis.options.find((option) => option.id !== mine)!.id;
-}
+describe("the creature a project wears", () => {
+	// The ONE thing anybody chooses. Keyed on the PROJECT because that is the question a
+	// creature answers - every session on a project is the same animal, so the band groups
+	// itself by shape and there is nothing left to decode.
 
-describe("resolving a look", () => {
-	it("gives the hash default when nobody has chosen anything", () => {
-		// The whole promise of the feature: a new session gets a face instantly, with
-		// no action. Choosing is a bonus.
-		expect(resolveLook(REF, {})).toEqual(defaultLook(REF));
+	it("falls back to the hash of the project's name, so a project is somebody instantly", () => {
+		expect(resolveSpecies(PROJECT, {})).toBe(speciesForProject(PROJECT));
 	});
 
-	it("lets a chosen axis win while the OTHER axis stays on the hash", () => {
-		// Per-axis is the point. Changing the hat must not silently re-roll the colour.
-		const hat = anotherOption("hat", REF);
-		const overrides = chooseLook({}, REF, "hat", hat);
+	it("shows a chosen creature over the hash", () => {
+		const chosen = chooseSpecies({}, PROJECT, "ghost");
 
-		expect(resolveLook(REF, overrides).hat).toBe(hat);
-		expect(resolveLook(REF, overrides).palette).toBe(defaultLook(REF).palette);
+		expect(resolveSpecies(PROJECT, chosen)).toBe("ghost");
+		expect(isSpeciesChosen(chosen, PROJECT)).toBe(true);
 	});
 
-	it("works the same way round: a chosen colour leaves the hat alone", () => {
-		const palette = anotherOption("palette", REF);
-		const overrides = chooseLook({}, REF, "palette", palette);
+	it("leaves other projects on their own hash", () => {
+		const chosen = chooseSpecies({}, PROJECT, "ghost");
 
-		expect(resolveLook(REF, overrides).palette).toBe(palette);
-		expect(resolveLook(REF, overrides).hat).toBe(defaultLook(REF).hat);
+		expect(resolveSpecies(OTHER, chosen)).toBe(speciesForProject(OTHER));
+		expect(isSpeciesChosen(chosen, OTHER)).toBe(false);
 	});
 
-	it("takes a choice on EVERY axis there is", () => {
-		// Looped over the registry rather than written out, so a third axis is covered
-		// by this test the day it is added.
-		let overrides: LookOverrides = {};
-		const wanted: Record<string, string> = {};
-		for (const axis of APPEARANCE_AXES) {
-			wanted[axis.id] = anotherOption(axis.id, REF);
-			overrides = chooseLook(overrides, REF, axis.id, wanted[axis.id]);
-		}
-
-		expect(resolveLook(REF, overrides)).toEqual(wanted);
+	it("resolves a project with no name at all", () => {
+		// A pet whose project the feed did not carry. It still has to be drawn as something.
+		expect(resolveSpecies(undefined, chooseSpecies({}, PROJECT, "ghost"))).toBe(speciesForProject(undefined));
 	});
 
-	it("keeps a choice that happens to equal the default, because it was still a choice", () => {
-		const mine = defaultLook(REF).hat;
-		const overrides = chooseLook({}, REF, "hat", mine);
-
-		expect(isAxisChosen(overrides, REF, "hat")).toBe(true);
-		expect(resolveLook(REF, overrides).hat).toBe(mine);
-	});
-
-	it("falls back to the default for an option this build does not have", () => {
-		// A palette removed in a later version, or a hand-edited localStorage. The
-		// wrong answer is a Proc with no colour; the right one is the one it always had.
-		const overrides = chooseLook({}, REF, "palette", "chartreuse") as LookOverrides;
-
-		expect(resolveLook(REF, overrides).palette).toBe(defaultLook(REF).palette);
-		expect(isAxisChosen(overrides, REF, "palette")).toBe(false);
-	});
-
-	it("ignores a stored key that is not an axis at all", () => {
-		// Forward compatibility: a newer build writes an axis this one has never heard
-		// of, and this one must still draw a Proc rather than fall over.
-		const overrides = { [REF]: { hat: anotherOption("hat", REF), species: "octopus" } };
-
-		expect(resolveLook(REF, overrides)).toEqual({ ...defaultLook(REF), hat: overrides[REF].hat });
-	});
-
-	it("does not touch any OTHER session's look", () => {
-		// Recognisability is the reason the hash exists. One person redecorating one
-		// pet must not move anybody else's.
-		const overrides = chooseLook({}, REF, "hat", anotherOption("hat", REF));
-
-		expect(resolveLook(OTHER, overrides)).toEqual(defaultLook(OTHER));
-		for (let i = 0; i < 50; i++) {
-			const ref = `session-${i}`;
-			expect(castFor(ref, overrides), ref).toEqual(castForSession(ref));
-		}
-	});
-
-	it("hands the rig a real cast member, not a look", () => {
-		expect(castFor(REF, {})).toEqual(castForSession(REF));
-	});
-});
-
-describe("changing and clearing a choice", () => {
 	it("never mutates the map it was given", () => {
-		const before: LookOverrides = {};
-		chooseLook(before, REF, "hat", anotherOption("hat", REF));
+		const before = {};
+		chooseSpecies(before, PROJECT, "ghost");
 
 		expect(before).toEqual({});
 	});
 
-	it("puts one axis back on the hash and leaves the other chosen", () => {
-		const hat = anotherOption("hat", REF);
-		const palette = anotherOption("palette", REF);
-		const both = chooseLook(chooseLook({}, REF, "hat", hat), REF, "palette", palette);
+	it("goes back to the hash when the choice is cleared, and says so by being ABSENT", () => {
+		// Absent is the only way to say "the default", so there is exactly one way to say it.
+		const cleared = clearSpeciesChoice(chooseSpecies({}, PROJECT, "ghost"), PROJECT);
 
-		const cleared = clearLookChoice(both, REF, "hat");
-
-		expect(resolveLook(REF, cleared).hat).toBe(defaultLook(REF).hat);
-		expect(resolveLook(REF, cleared).palette).toBe(palette);
+		expect(PROJECT in cleared).toBe(false);
+		expect(resolveSpecies(PROJECT, cleared)).toBe(speciesForProject(PROJECT));
+		expect(isSpeciesChosen(cleared, PROJECT)).toBe(false);
 	});
 
-	it("clears the whole session and leaves no entry behind", () => {
-		const both = chooseLook(chooseLook({}, REF, "hat", anotherOption("hat", REF)), REF, "palette", "mint");
+	it("returns the same object when there was nothing to clear", () => {
+		const before = chooseSpecies({}, PROJECT, "ghost");
 
-		const cleared = clearLookChoice(both, REF);
-
-		expect(resolveLook(REF, cleared)).toEqual(defaultLook(REF));
-		expect(Object.keys(cleared)).not.toContain(REF);
+		expect(clearSpeciesChoice(before, OTHER)).toBe(before);
 	});
 
-	it("drops the session entry when its last axis is cleared", () => {
-		// An empty `{}` per session would accumulate for every pet ever looked at.
-		const one = chooseLook({}, REF, "hat", anotherOption("hat", REF));
+	it("ignores a creature this build cannot draw", () => {
+		// The file may have been written by a LATER build that knows creatures this one does
+		// not. The right answer is the hash, not a crash and not a blank.
+		expect(resolveSpecies(PROJECT, { [PROJECT]: "dragon" as never })).toBe(speciesForProject(PROJECT));
+		expect(isSpeciesChosen({ [PROJECT]: "dragon" as never }, PROJECT)).toBe(false);
+	});
+});
 
-		expect(Object.keys(clearLookChoice(one, REF, "hat"))).toEqual([]);
+describe("colour and accessory, which nobody chooses", () => {
+	// ⚠ The whole point of this change. There is NO api here that sets a session's colour or
+	// accessory, and these tests are what stops one growing back: a pet's own look is the
+	// hash of its ref and nothing else, which is what "random per pet" means.
+
+	it("gives a session the same look every time, which is what a restart is", () => {
+		expect(castForSession("ao-1")).toEqual(castForSession("ao-1"));
 	});
 
-	it("is a no-op for a session nobody has chosen for", () => {
-		const overrides = chooseLook({}, REF, "hat", anotherOption("hat", REF));
+	it("cannot be moved by anything stored, because the store only holds creatures", () => {
+		// A project's choice changes which BODY a session is drawn on and nothing else. Its
+		// colour slot and its accessory slot are the hash's, before and after.
+		const before = castForSession("ao-1");
+		const after = withSpecies(before, resolveSpecies(PROJECT, chooseSpecies({}, PROJECT, "slime")));
 
-		expect(clearLookChoice(overrides, OTHER)).toBe(overrides);
+		expect(after.species).toBe("slime");
+		expect(castForSession("ao-1")).toEqual(before);
+	});
+
+	it("varies across the sessions of ONE project, so two workers are still tellable apart", () => {
+		// Every session on a project is the same creature by design. The colour is the only
+		// thing left that separates them, so it has to actually differ.
+		const species = resolveSpecies(PROJECT, chooseSpecies({}, PROJECT, "cat"));
+		const siblings = Array.from({ length: 8 }, (_, i) => `agent-orchestrator-${170 + i}`);
+		const worn = siblings.map((ref) => withSpecies(castForSession(ref), species));
+
+		expect(new Set(worn.map((cast) => cast.species))).toEqual(new Set(["cat"]));
+		expect(new Set(worn.map((cast) => cast.palette)).size).toBeGreaterThan(1);
+		expect(new Set(worn.map((cast) => cast.id)).size).toBeGreaterThan(4);
 	});
 });
 
 describe("persisting", () => {
 	it("survives a write and a read, which is what a restart is", () => {
-		const overrides = chooseLook(chooseLook({}, REF, "hat", "cone"), OTHER, "palette", "mint");
+		const projects = chooseSpecies(chooseSpecies({}, PROJECT, "ghost"), OTHER, "toadstool");
 
-		const restored = parseLookOverrides(serializeLookOverrides(overrides));
+		const restored = parseProjectLooks(serializeProjectLooks(projects));
 
-		expect(restored).toEqual(overrides);
-		expect(resolveLook(REF, restored).hat).toBe("cone");
-		expect(resolveLook(OTHER, restored).palette).toBe("mint");
+		expect(restored).toEqual(projects);
+		expect(resolveSpecies(PROJECT, restored)).toBe("ghost");
+		expect(resolveSpecies(OTHER, restored)).toBe("toadstool");
+	});
+
+	it("writes a versioned envelope holding the projects and nothing else", () => {
+		// ⚠ The `sessions` half #168 wrote is GONE, not merely unread. Keeping a key nothing
+		// writes would leave a second, stale answer to "what colour is this pet".
+		const written = JSON.parse(serializeProjectLooks(chooseSpecies({}, PROJECT, "ghost")));
+
+		expect(written.v).toBe(1);
+		expect(written.projects).toEqual({ [PROJECT]: "ghost" });
+		expect(Object.keys(written).sort()).toEqual(["projects", "v"]);
+	});
+
+	it("keeps every project out of a value written by the build that also stored sessions", () => {
+		// The upgrade path off #168: its per-session dressing is dropped on the floor, which
+		// is the intent, and its project creatures come through untouched.
+		const old = JSON.stringify({
+			v: 1,
+			sessions: { "ao-1": { palette: "mint", hat: "cone" } },
+			projects: { [PROJECT]: "ghost" },
+		});
+
+		expect(parseProjectLooks(old)).toEqual({ [PROJECT]: "ghost" });
 	});
 
 	it("reads nothing at all as nothing chosen", () => {
-		expect(parseLookOverrides(null)).toEqual({});
-		expect(parseLookOverrides("")).toEqual({});
-	});
-
-	it("treats garbage as nothing chosen rather than throwing", () => {
-		// This runs on the OVERLAY, on someone's desktop. A parse failure must lose the
-		// decoration, never the pets.
-		for (const raw of ["not json", "[]", "42", '"nope"', "null", '{"v":"x"}', '{"sessions":5}']) {
-			expect(parseLookOverrides(raw), raw).toEqual({});
-		}
-	});
-
-	it("drops entries that are not axis-id to option-id strings", () => {
-		const raw = JSON.stringify({
-			v: 1,
-			sessions: { [REF]: { hat: 7, palette: "mint" }, [OTHER]: "beanie", "": { hat: "cone" } },
-		});
-
-		expect(parseLookOverrides(raw)).toEqual({ [REF]: { palette: "mint" } });
-	});
-
-	it("writes a versioned envelope, so a future shape change is detectable", () => {
-		const written = JSON.parse(serializeLookOverrides(chooseLook({}, REF, "hat", "cone")));
-
-		expect(written.v).toBe(1);
-		expect(written.sessions[REF]).toEqual({ hat: "cone" });
-	});
-});
-
-describe("pruning sessions that no longer exist", () => {
-	it("forgets a session that is gone and keeps the ones that are not", () => {
-		const overrides = chooseLook(chooseLook({}, REF, "hat", "cone"), OTHER, "palette", "mint");
-
-		expect(pruneLookOverrides(overrides, [REF])).toEqual({ [REF]: { hat: "cone" } });
-	});
-
-	it("returns the very same map when there is nothing to forget", () => {
-		// Identity, not equality: the caller writes to localStorage on a change, and a
-		// fresh object every poll would write on every tick for ever.
-		const overrides = chooseLook({}, REF, "hat", "cone");
-
-		expect(pruneLookOverrides(overrides, [REF, OTHER])).toBe(overrides);
-	});
-
-	it("forgets everything when there are no sessions left", () => {
-		expect(pruneLookOverrides(chooseLook({}, REF, "hat", "cone"), [])).toEqual({});
-	});
-});
-
-describe("the creature a project wears", () => {
-	// Per PROJECT, not per session — the one axis that is. Every session on a project is
-	// the same animal, which is what let the coloured mark come off the name chip.
-
-	it("falls back to the hash of the project's name", () => {
-		expect(resolveSpecies("demo-app", {})).toBe(speciesForProject("demo-app"));
-	});
-
-	it("shows a chosen creature over the hash", () => {
-		const chosen = chooseSpecies({}, "demo-app", "ghost");
-
-		expect(resolveSpecies("demo-app", chosen)).toBe("ghost");
-		expect(isSpeciesChosen(chosen, "demo-app")).toBe(true);
-	});
-
-	it("leaves other projects alone", () => {
-		const chosen = chooseSpecies({}, "demo-app", "ghost");
-
-		expect(resolveSpecies("demo-api", chosen)).toBe(speciesForProject("demo-api"));
-	});
-
-	it("goes back to the hash when the choice is cleared, and says so by being ABSENT", () => {
-		const cleared = clearSpeciesChoice(chooseSpecies({}, "demo-app", "ghost"), "demo-app");
-
-		expect("demo-app" in cleared).toBe(false);
-		expect(resolveSpecies("demo-app", cleared)).toBe(speciesForProject("demo-app"));
-		expect(isSpeciesChosen(cleared, "demo-app")).toBe(false);
-	});
-
-	it("returns the same object when there was nothing to clear", () => {
-		const before = chooseSpecies({}, "demo-app", "ghost");
-
-		expect(clearSpeciesChoice(before, "demo-api")).toBe(before);
-	});
-
-	it("ignores a creature this build cannot draw", () => {
-		// The file may have been written by a LATER build that knows creatures this one
-		// does not. The right answer is the hash, not a crash and not a blank.
-		const raw = JSON.stringify({ v: 1, sessions: {}, projects: { "demo-app": "dragon" } });
-
-		expect(parseProjectLooks(raw)).toEqual({});
-		expect(resolveSpecies("demo-app", { "demo-app": "dragon" as never })).toBe(speciesForProject("demo-app"));
+		expect(parseProjectLooks(null)).toEqual({});
+		expect(parseProjectLooks("")).toEqual({});
 	});
 
 	it("survives anything at all in the stored value", () => {
-		for (const raw of [null, "", "{", "[]", '{"projects":5}', '{"projects":{"":"ghost"}}', '{"projects":{"a":7}}']) {
-			expect(parseProjectLooks(raw as string)).toEqual({});
+		// This runs on the OVERLAY, on someone's desktop, before a single pet is drawn. A
+		// parse failure must cost the decoration and never the pets.
+		for (const raw of [
+			"not json",
+			"{",
+			"[]",
+			"42",
+			'"nope"',
+			"null",
+			'{"v":"x"}',
+			'{"projects":5}',
+			'{"projects":[]}',
+			'{"projects":{"":"ghost"}}',
+			'{"projects":{"a":7}}',
+			'{"projects":{"a":"dragon"}}',
+		]) {
+			expect(parseProjectLooks(raw), raw).toEqual({});
 		}
 	});
+});
 
-	it("carries BOTH halves through a round trip, so one cannot erase the other", () => {
-		// ⚠ The failure this exists to prevent: writing a session choice with a
-		// sessions-only serializer would silently drop every project's creature.
-		const stored = {
-			sessions: { "a-1": { palette: "mint" } },
-			projects: { "demo-app": "ghost" as const },
-		};
-		const round = parseStoredLooks(serializeStoredLooks(stored));
+describe("forgetting projects that no longer exist", () => {
+	it("forgets a project that is gone and keeps the ones that are not", () => {
+		const projects = chooseSpecies(chooseSpecies({}, PROJECT, "ghost"), "gone", "cat");
 
-		expect(round).toEqual(stored);
+		expect(pruneProjectLooks(projects, [PROJECT])).toEqual({ [PROJECT]: "ghost" });
 	});
 
-	it("forgets projects that are gone, and only when asked", () => {
-		const projects = { "demo-app": "ghost" as const, gone: "cat" as const };
+	it("returns the very same map when there is nothing to forget", () => {
+		// Identity, not equality: the caller writes to localStorage on a change, and a fresh
+		// object every poll would rewrite it on every tick for ever.
+		const projects = chooseSpecies({}, PROJECT, "ghost");
 
-		expect(pruneProjectLooks(projects, ["demo-app"])).toEqual({ "demo-app": "ghost" });
-		expect(pruneProjectLooks(projects, ["demo-app", "gone"])).toBe(projects);
+		expect(pruneProjectLooks(projects, [PROJECT, OTHER])).toBe(projects);
+	});
+
+	it("forgets everything when there are no projects left", () => {
+		expect(pruneProjectLooks(chooseSpecies({}, PROJECT, "ghost"), [])).toEqual({});
 	});
 });
