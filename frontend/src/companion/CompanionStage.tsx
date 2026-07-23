@@ -121,15 +121,18 @@ export type CompanionStageProps = {
 	 */
 	onActivate?: (sessionId: string, at: { x: number; y: number }) => void;
 	/**
-	 * PROTOTYPE (terminal bubble): something pinned to ONE Proc — its open terminal.
+	 * PROTOTYPE (terminal bubble): whose terminal is open.
 	 *
-	 * It is drawn here rather than by the caller because only the stage knows where
-	 * a Proc actually IS: a walking Proc's `x` is where it set off from, and the
-	 * compositor is carrying it across the screen on a transition. The card rides
-	 * that same transition, so it stays over its own Proc to the pixel instead of
-	 * being left standing where the Proc used to be.
+	 * The terminal is a WINDOW, not something drawn here — putting it in the
+	 * overlay meant making the overlay focusable, and that cost the band its mouse
+	 * events and made every Proc blink out for a beat (main/terminal-window.ts).
+	 * What the stage still owns is where that window belongs: only it knows where a
+	 * Proc actually IS, because a walking Proc's `x` is where it set off from and
+	 * the compositor is carrying the rest.
 	 */
-	attachment?: { sessionId: string; node: React.ReactNode };
+	attachedSession?: string;
+	/** Where the attached Proc is now, in this window's coordinates. */
+	onAttachedAnchorMove?: (anchor: { x: number; y: number }) => void;
 	/**
 	 * Override `prefers-reduced-motion`. Only the dev playground passes it: the
 	 * reduced-motion path is a real behaviour with its own rules, and it is not
@@ -173,7 +176,8 @@ export function CompanionStage({
 	onInteractiveChange,
 	onRequestLook,
 	onActivate,
-	attachment,
+	attachedSession,
+	onAttachedAnchorMove,
 	reducedMotion,
 	onStage,
 	castFor: castForOverride,
@@ -480,7 +484,18 @@ export function CompanionStage({
 			tracker.update(event.target);
 		};
 
-		/** The pointer genuinely left the window: nothing here owns it any more. */
+		/**
+		 * The pointer genuinely left the WINDOW: nothing here owns it any more.
+		 *
+		 * Bound WITHOUT capture, and that is the whole of it. `pointerleave` does not
+		 * bubble, so a plain listener on the document fires only when the pointer
+		 * leaves the document — which is the question being asked. With capture, the
+		 * same listener also caught every leave from every element inside the page:
+		 * each Proc walking out from under the cursor, each card closing, hundreds a
+		 * minute. Every one of them said "the pointer has gone" and handed the desktop
+		 * back, so the window's click-through state flapped constantly and a click
+		 * landing in the wrong half of that flap fell through to the desktop.
+		 */
 		const onOut = () => {
 			lastPointer = null;
 			tracker.release();
@@ -528,7 +543,7 @@ export function CompanionStage({
 		document.addEventListener("pointerdown", onDown, true);
 		document.addEventListener("pointerup", onUp, true);
 		document.addEventListener("pointercancel", onUp, true);
-		document.addEventListener("pointerleave", onOut, true);
+		document.addEventListener("pointerleave", onOut);
 		document.addEventListener("contextmenu", onMenu, true);
 		window.addEventListener("blur", onWindowBlur);
 		return () => {
@@ -537,7 +552,7 @@ export function CompanionStage({
 			document.removeEventListener("pointerdown", onDown, true);
 			document.removeEventListener("pointerup", onUp, true);
 			document.removeEventListener("pointercancel", onUp, true);
-			document.removeEventListener("pointerleave", onOut, true);
+			document.removeEventListener("pointerleave", onOut);
 			document.removeEventListener("contextmenu", onMenu, true);
 			window.removeEventListener("blur", onWindowBlur);
 			tracker.release();
@@ -594,8 +609,8 @@ export function CompanionStage({
 	}, [bubbleTick]);
 
 	// The Proc whose terminal is open, if it is still on the band. A session that
-	// ended while its terminal was up simply has no Proc to pin the card to.
-	const attachedPet = attachment ? (world.pets.find((pet) => pet.id === attachment.sessionId) ?? null) : null;
+	// ended while its terminal was up simply has no Proc to follow.
+	const attachedPet = attachedSession ? (world.pets.find((pet) => pet.id === attachedSession) ?? null) : null;
 
 	// A Proc you are TALKING to stands still.
 	//
@@ -604,7 +619,7 @@ export function CompanionStage({
 	// terminal you cannot use. It stops where it is (`drawnX`, so there is no jump
 	// from wherever the walk had actually got to) and holds off on strolling until
 	// the terminal closes. It can still be picked up and thrown; the card follows.
-	const attachedId = attachment?.sessionId;
+	const attachedId = attachedSession;
 	useEffect(() => {
 		if (!attachedId) return;
 		const stop = (current: World): World => ({
@@ -628,6 +643,27 @@ export function CompanionStage({
 		};
 	}, [attachedId]);
 
+	// Tell the shell where the attached Proc is, so its terminal window travels with
+	// it. Reported from the DRAWN position, and only when it has actually moved:
+	// this crosses a process boundary, and a Proc that is standing still (which one
+	// with an open terminal does) must not generate any traffic at all.
+	const anchorX = attachedPet
+		? drawnX(attachedPet, frameNow) + figureLeft(attachedPet.facing === "left") + FRAME.figureWidth / 2
+		: null;
+	const anchorY = attachedPet ? window.innerHeight - attachedPet.y : null;
+	const lastAnchor = useRef<{ x: number; y: number } | null>(null);
+	useEffect(() => {
+		if (anchorX === null || anchorY === null) {
+			lastAnchor.current = null;
+			return;
+		}
+		const next = { x: Math.round(anchorX), y: Math.round(anchorY) };
+		const previous = lastAnchor.current;
+		if (previous && Math.abs(previous.x - next.x) < 2 && Math.abs(previous.y - next.y) < 2) return;
+		lastAnchor.current = next;
+		onAttachedAnchorMove?.(next);
+	}, [anchorX, anchorY, onAttachedAnchorMove]);
+
 	// How high each bubble has to sit to clear the ones before it. Computed for the
 	// whole band at once — a bubble cannot know on its own whether it is in the way.
 	const offsets = stackBubbles(
@@ -649,13 +685,6 @@ export function CompanionStage({
 				))}
 			</div>
 			<div className="companion-chrome" ref={chromeLayer}>
-				{attachedPet ? (
-					<div className="companion-proc" style={placement(attachedPet)} data-attachment-of={attachedPet.id}>
-						<div className={`companion-attachment companion-attachment--${attachmentSide(attachedPet, world.band)}`}>
-							{attachment?.node}
-						</div>
-					</div>
-				) : null}
 				{speaking.map((pet) => (
 					<ProcChrome
 						key={pet.id}
@@ -683,23 +712,6 @@ function paintOrder(pets: Pet[]): Pet[] {
 }
 
 /** Everything about where a Proc IS: the same transform for its art and its chrome. */
-/**
- * Which way an attached card opens from its Proc.
- *
- * The card is far wider than a Proc, so a card that always centred itself would
- * hang off the screen for every Proc near an edge. Three discrete answers rather
- * than a per-frame clamp: clamping would fight the transition that carries the
- * card along with a walking Proc, and a card that slides sideways relative to its
- * own Proc reads as a card that has come loose from it.
- */
-export function attachmentSide(pet: Pet, band: Band): "left" | "centre" | "right" {
-	const span = Math.max(1, band.maxX - band.minX);
-	const position = (pet.x - band.minX) / span;
-	if (position < 0.25) return "left";
-	if (position > 0.75) return "right";
-	return "centre";
-}
-
 function placement(pet: Pet): React.CSSProperties {
 	// While walking, paint at the DESTINATION and let the transition carry the Proc
 	// there over exactly the walk's duration; the engine sets `x` to the same value

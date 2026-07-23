@@ -37,6 +37,8 @@ export type TerminalBubbleProps = {
 	title: string;
 	/** Daemon base URL from the main process (`http://127.0.0.1:<port>`). */
 	daemonUrl: string;
+	/** Fill the window it is drawn in, rather than sizing itself. */
+	fills?: boolean;
 	onClose(): void;
 };
 
@@ -47,7 +49,7 @@ const STATE_TEXT: Record<BubbleAttachState, string> = {
 	error: "Could not attach to this session.",
 };
 
-export function TerminalBubble({ handleId, title, daemonUrl, onClose }: TerminalBubbleProps) {
+export function TerminalBubble({ handleId, title, daemonUrl, fills, onClose }: TerminalBubbleProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const [state, setState] = useState<BubbleAttachState>("connecting");
 	const [detail, setDetail] = useState<string | undefined>(undefined);
@@ -156,10 +158,10 @@ export function TerminalBubble({ handleId, title, daemonUrl, onClose }: Terminal
 			// attribute, so the window stays click-through everywhere else.
 			data-companion-interactive="true"
 			style={{
-				// Position belongs to the stage, which is the only thing that knows where
-				// this card's Proc has walked to. The card only says how big it is.
-				width: BUBBLE_TERMINAL_WIDTH,
-				height: BUBBLE_TERMINAL_HEIGHT,
+				// In its own window the card IS the window: the frame is transparent, so
+				// the rim and the radius below are what the human sees on the wallpaper.
+				width: fills ? "100%" : BUBBLE_TERMINAL_WIDTH,
+				height: fills ? "100%" : BUBBLE_TERMINAL_HEIGHT,
 				background: CARD_FILL,
 				border: `${PROCS_RIM_PX}px solid ${PROCS_INK}`,
 				borderRadius: 14,

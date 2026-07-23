@@ -2,8 +2,8 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
 import { castForSession, withSpecies } from "./cast";
-import { MEET_RUN_MAX_MS, type Pet } from "./behaviour";
-import { attachmentSide, CompanionStage, POINTER_REVALIDATE_MS } from "./CompanionStage";
+import { MEET_RUN_MAX_MS } from "./behaviour";
+import { CompanionStage, POINTER_REVALIDATE_MS } from "./CompanionStage";
 import { createManualFeed } from "./dev-feed";
 import { LOOKS_STORAGE_KEY, serializeProjectLooks } from "./look-store";
 import { PORTAL_OUT_MS, PORTAL_REDUCED_MS } from "./portal-transit";
@@ -296,7 +296,7 @@ describe("CompanionStage", () => {
 		push([{ sessionId: "a", status: "working" }]);
 
 		fireEvent.pointerMove(container.querySelector("[data-figure] rect")!, { bubbles: true });
-		fireEvent.pointerLeave(document, { bubbles: true });
+		fireEvent.pointerLeave(document);
 
 		expect(onInteractiveChange.mock.calls).toEqual([[true], [false]]);
 	});
@@ -913,9 +913,28 @@ describe("who owns the pointer when the pointer is not the thing that moved", ()
 		fireEvent.pointerMove(figure(container), { bubbles: true, clientX: 400, clientY: 900 });
 		onInteractiveChange.mockClear();
 
-		fireEvent.pointerLeave(document, { bubbles: true });
+		fireEvent.pointerLeave(document);
 
 		expect(onInteractiveChange).toHaveBeenLastCalledWith(false);
+	});
+
+	it("does not hand the desktop back every time a Proc walks out from under the cursor", () => {
+		// With `capture: true` this listener caught the leave of EVERY element in the
+		// page, hundreds a minute as the band animates, and each one said "the pointer
+		// is gone". The window's click-through state flapped, and a click that landed
+		// in the wrong half of a flap went to the desktop instead of the pet.
+		const onInteractiveChange = vi.fn();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} onInteractiveChange={onInteractiveChange} />);
+		push([{ sessionId: "a", status: "pr_open", name: "n", project: "p" }]);
+		const figure = container.querySelector("[data-figure] rect")!;
+		fireEvent.pointerMove(figure, { bubbles: true, clientX: 400, clientY: 900 });
+		onInteractiveChange.mockClear();
+
+		// A leave from something INSIDE the page, which is not the pointer leaving.
+		fireEvent.pointerLeave(figure, { bubbles: false });
+
+		expect(onInteractiveChange).not.toHaveBeenCalled();
 	});
 
 	it("re-decides on a clock, so a Proc that walked under a resting cursor is clickable", () => {
@@ -941,53 +960,30 @@ describe("who owns the pointer when the pointer is not the thing that moved", ()
 	});
 });
 
-// PROTOTYPE (terminal bubble): an open terminal belongs to one Proc and travels with it.
+// PROTOTYPE (terminal bubble): the terminal is a WINDOW, and the stage's job is to
+// tell the shell where its Proc is so the window can travel with it.
 describe("a terminal pinned to a Proc", () => {
-	it("is drawn inside its own Proc's frame, so it moves when the Proc moves", () => {
+	it("reports where its Proc is, so the terminal window can follow", () => {
+		const onAttachedAnchorMove = vi.fn();
 		const { feed, push } = stubFeed();
-		const { container } = render(
-			<CompanionStage feed={feed} attachment={{ sessionId: "a", node: <div data-testid="card">terminal</div> }} />,
-		);
+		render(<CompanionStage feed={feed} attachedSession="a" onAttachedAnchorMove={onAttachedAnchorMove} />);
 		push([
 			{ sessionId: "a", status: "working", name: "one", project: "p" },
 			{ sessionId: "b", status: "working", name: "two", project: "p" },
 		]);
 
-		const holder = container.querySelector("[data-attachment-of='a']");
-		expect(holder).not.toBeNull();
-		expect(holder!.querySelector("[data-testid='card']")).not.toBeNull();
-		// The same transform the Proc itself carries — not a position of its own.
-		expect(holder!.getAttribute("style")).toContain("translate3d");
+		expect(onAttachedAnchorMove).toHaveBeenCalled();
+		const anchor = onAttachedAnchorMove.mock.calls.at(-1)![0];
+		expect(Number.isFinite(anchor.x)).toBe(true);
+		expect(Number.isFinite(anchor.y)).toBe(true);
 	});
 
-	it("draws nothing when the session it belongs to has left the band", () => {
+	it("says nothing when the session it belongs to has left the band", () => {
+		const onAttachedAnchorMove = vi.fn();
 		const { feed, push } = stubFeed();
-		const { container } = render(
-			<CompanionStage feed={feed} attachment={{ sessionId: "gone", node: <div data-testid="card" /> }} />,
-		);
+		render(<CompanionStage feed={feed} attachedSession="gone" onAttachedAnchorMove={onAttachedAnchorMove} />);
 		push([{ sessionId: "a", status: "working", name: "one", project: "p" }]);
 
-		expect(container.querySelector("[data-testid='card']")).toBeNull();
-	});
-});
-
-describe("attachmentSide", () => {
-	const band = { minX: 0, maxX: 1000 };
-	const at = (x: number) => ({ x }) as Pet;
-
-	it("opens a card centred on its Proc in the middle of the band", () => {
-		expect(attachmentSide(at(500), band)).toBe("centre");
-	});
-
-	it("opens it rightwards from a Proc near the left edge, and leftwards near the right", () => {
-		// A card is far wider than a Proc; centred, it would hang off the screen.
-		expect(attachmentSide(at(40), band)).toBe("left");
-		expect(attachmentSide(at(960), band)).toBe("right");
-	});
-
-	it("never divides by zero on a band with no width", () => {
-		// A band with no width has no middle to be in; any answer will do as long as
-		// it is a finite one and the card still opens.
-		expect(attachmentSide(at(0), { minX: 0, maxX: 0 })).toBe("left");
+		expect(onAttachedAnchorMove).not.toHaveBeenCalled();
 	});
 });

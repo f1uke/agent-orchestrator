@@ -50,6 +50,7 @@ import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/post
 import { buildTelemetryBootstrap } from "./shared/telemetry";
 import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view-host";
 import { createCompanionOverlay, type CompanionOverlay } from "./main/companion-window";
+import { createTerminalWindowHost, type TerminalAnchor, type TerminalWindowHost } from "./main/terminal-window";
 import { readCompanionSettings, writeCompanionSettings, type CompanionSettings } from "./main/companion-settings";
 import { connectSupervisor, type SupervisorLinkHandle } from "./main/supervisor-link";
 import { shouldLinkOnAttach } from "./main/daemon-owner";
@@ -122,6 +123,9 @@ let browserViewHost: BrowserViewHost | null = null;
 // The desktop-companion overlay. A SECOND window in this app, never a second app
 // instance, and off until the user says otherwise.
 let companionOverlay: CompanionOverlay | null = null;
+// PROTOTYPE (terminal bubble): the terminal a Proc opens lives in its OWN window,
+// never inside the overlay — see main/terminal-window.ts for what that cost us.
+let terminalWindow: TerminalWindowHost | null = null;
 // Held for the app lifetime. Dropping it (on any exit) triggers daemon self-stop.
 let supervisorLink: SupervisorLinkHandle | null = null;
 
@@ -243,6 +247,22 @@ function companionUrl(): string {
 	// src/companion/main.tsx.
 	const proto = isDev ? process.env.AO_COMPANION_PROTO_HANDLE : undefined;
 	return proto ? `${base}?protoHandle=${encodeURIComponent(proto)}` : base;
+}
+
+/**
+ * The terminal window's page: the SAME overlay bundle, told to be a terminal.
+ *
+ * One page, one preload, one CSP (the built companion.html already carries
+ * `connect-src ws://127.0.0.1:*`, which is the only thing the mux needs). A second
+ * HTML entry would be a second copy of all three to keep in step.
+ */
+function terminalUrl(sessionId: string, handleId: string): string {
+	const base =
+		typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL
+			? new URL("companion.html", MAIN_WINDOW_VITE_DEV_SERVER_URL).toString()
+			: `${RENDERER_ORIGIN}/companion.html`;
+	const query = new URLSearchParams({ terminalFor: sessionId, handle: handleId });
+	return `${base}?${query.toString()}`;
 }
 
 // Runtime window/taskbar icon for Linux and Windows. macOS ignores this and
@@ -1390,22 +1410,39 @@ function revealSessionInApp(sessionId: string): boolean {
 	return true;
 }
 
-ipcMain.handle("companion:activateSession", (_event, sessionId: unknown): CompanionActivation => {
-	if (typeof sessionId !== "string" || sessionId === "") return "unavailable";
+type ActivateInput = { sessionId?: unknown; handleId?: unknown; anchor?: unknown };
+
+const readAnchor = (value: unknown): TerminalAnchor | null => {
+	if (!value || typeof value !== "object") return null;
+	const { x, y } = value as { x?: unknown; y?: unknown };
+	return typeof x === "number" && typeof y === "number" ? { x, y } : null;
+};
+
+ipcMain.handle("companion:activateSession", (_event, input: ActivateInput): CompanionActivation => {
+	const sessionId = typeof input?.sessionId === "string" ? input.sessionId : "";
+	if (sessionId === "") return "unavailable";
 	if (revealSessionInApp(sessionId)) {
-		// A bubble may be open at this moment; the overlay closes it when it sees
-		// the window come up (below). Belt and braces: the keyboard goes back now,
-		// so the window that is being raised is the one that receives typing.
-		companionOverlay?.setKeyboard(false);
+		// The board window owns this session's terminal now, so a card on the
+		// desktop must let its pane go before the app attaches it.
+		terminalWindow?.close();
 		return "app";
 	}
-	companionOverlay?.setKeyboard(true);
+	const handleId = typeof input?.handleId === "string" ? input.handleId : "";
+	const anchor = readAnchor(input?.anchor);
+	if (handleId === "" || !anchor) return "unavailable";
+	terminalWindow?.open({ sessionId, handleId, anchor });
 	return "bubble";
 });
 
-/** The bubble closed (Esc, the ✕, or the session went away). Give the keyboard back. */
-ipcMain.on("companion:releaseKeyboard", () => {
-	companionOverlay?.setKeyboard(false);
+/** The Proc moved, so its terminal moves with it. */
+ipcMain.on("companion:moveTerminal", (_event, anchor: unknown) => {
+	const next = readAnchor(anchor);
+	if (next) terminalWindow?.moveTo(next);
+});
+
+/** Closed from the card itself (Esc or the ✕), or by the overlay letting go. */
+ipcMain.on("companion:closeTerminal", () => {
+	terminalWindow?.close();
 });
 
 // PROTOTYPE harness only: the verification script has no way to click the Dock
@@ -1430,7 +1467,7 @@ ipcMain.on("companion:protoOpenMainWindow", () => {
  * about (Dock click, ⌘Tab, a notification).
  */
 function notifyMainWindowOpened(): void {
-	companionOverlay?.setKeyboard(false);
+	terminalWindow?.close();
 	companionOverlay?.notifyMainWindowOpened();
 }
 
@@ -1603,28 +1640,9 @@ function initCompanionOverlay(): void {
 	companionOverlay = createCompanionOverlay({
 		createWindow: (options) => {
 			const win = new BrowserWindow({ ...options, show: true });
-			// PROTOTYPE instrumentation: every call that crosses into Electron, in order.
-			const trace = (what: string) => {
-				if (process.env.AO_COMPANION_PROTO_DEBUG_PORT) console.log(`[proto-main] ${Date.now() % 100000} ${what}`);
-			};
 			return {
 				setBounds: (bounds) => win.setBounds(bounds),
-				setIgnoreMouseEvents: (ignore, opts) => {
-					trace(`setIgnoreMouseEvents ignore=${ignore} forward=${opts?.forward === true}`);
-					win.setIgnoreMouseEvents(ignore, opts);
-				},
-				setFocusable: (focusable) => {
-					trace(`setFocusable ${focusable}`);
-					win.setFocusable(focusable);
-				},
-				focus: () => {
-					trace("focus");
-					win.focus();
-				},
-				blur: () => {
-					trace("blur");
-					win.blur();
-				},
+				setIgnoreMouseEvents: (ignore, opts) => win.setIgnoreMouseEvents(ignore, opts),
 				setVisibleOnAllWorkspaces: (visible, opts) => win.setVisibleOnAllWorkspaces(visible, opts),
 				setAlwaysOnTop: (flag, level) => win.setAlwaysOnTop(flag, level as Parameters<typeof win.setAlwaysOnTop>[1]),
 				loadURL: (url) => win.loadURL(url),
@@ -1639,6 +1657,28 @@ function initCompanionOverlay(): void {
 		workArea: () => screen.getPrimaryDisplay().workArea,
 		overlayUrl: companionUrl,
 		preloadPath: companionPreloadPath,
+		logError: (message, error) => console.error(message, error),
+	});
+
+	// PROTOTYPE (terminal bubble): the terminal's window. Separate from the overlay
+	// on purpose — a window that takes the keyboard cannot be the window the Procs
+	// live in (see main/terminal-window.ts).
+	terminalWindow = createTerminalWindowHost({
+		createWindow: (options) => {
+			const win = new BrowserWindow({ ...options, show: true });
+			return {
+				setBounds: (bounds) => win.setBounds(bounds),
+				loadURL: (url) => win.loadURL(url),
+				focus: () => win.focus(),
+				onClosed: (listener) => win.on("closed", listener),
+				destroy: () => win.destroy(),
+				isDestroyed: () => win.isDestroyed(),
+			};
+		},
+		urlFor: (sessionId, handleId) => terminalUrl(sessionId, handleId),
+		workArea: () => screen.getPrimaryDisplay().workArea,
+		preloadPath: companionPreloadPath,
+		onClosed: () => companionOverlay?.notifyTerminalClosed(),
 		logError: (message, error) => console.error(message, error),
 	});
 
@@ -1663,6 +1703,8 @@ app.on("before-quit", () => {
 	browserViewHost = null;
 	companionOverlay?.dispose();
 	companionOverlay = null;
+	terminalWindow?.close();
+	terminalWindow = null;
 });
 
 // Last resort: if the OS-native supervisor link is not actually connected

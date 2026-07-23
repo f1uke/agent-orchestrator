@@ -40,15 +40,6 @@ export type OverlayWindowOptions = {
 export interface OverlayWindow {
 	setBounds(bounds: OverlayBounds): void;
 	setIgnoreMouseEvents(ignore: boolean, options?: { forward?: boolean }): void;
-	/**
-	 * PROTOTYPE (terminal bubble). The overlay is built `focusable: false` so it can
-	 * never steal the keyboard from the app you are working in. A terminal you can
-	 * type into needs exactly that, though — so the flag is flipped for the life of
-	 * one open bubble and put back the moment it closes.
-	 */
-	setFocusable(focusable: boolean): void;
-	focus(): void;
-	blur(): void;
 	setVisibleOnAllWorkspaces(visible: boolean, options?: { visibleOnFullScreen?: boolean }): void;
 	setAlwaysOnTop(flag: boolean, level?: string): void;
 	loadURL(url: string): Promise<void>;
@@ -69,6 +60,15 @@ export const LOOKS_CHANGED_CHANNEL = "companion:looksChanged";
  * a payload would invite it to decide whether to.
  */
 export const MAIN_WINDOW_OPENED_CHANNEL = "companion:mainWindowOpened";
+
+/**
+ * PROTOTYPE (terminal bubble): "the terminal window has gone."
+ *
+ * However it went — its own ✕, Escape, the board window coming up, a crash — the
+ * band is the thing that has to know, because a Proc whose terminal is open stands
+ * still and stops strolling until it is told otherwise.
+ */
+export const TERMINAL_CLOSED_CHANNEL = "companion:terminalClosed";
 
 export type CompanionOverlayDeps = {
 	createWindow(options: OverlayWindowOptions): OverlayWindow;
@@ -95,21 +95,11 @@ export type CompanionOverlay = {
 	notifyLooksChanged(): void;
 	/** PROTOTYPE: the board window came up; any live bubble terminal must detach. */
 	notifyMainWindowOpened(): void;
+	/** PROTOTYPE: the terminal window closed, so its Proc is free to wander again. */
+	notifyTerminalClosed(): void;
 	/** Re-band after a display change. */
 	relayout(): void;
 	isOpen(): boolean;
-	/**
-	 * PROTOTYPE (terminal bubble): take or give back the keyboard.
-	 *
-	 * Taking it is two steps because one is not enough: `setFocusable(true)` only
-	 * makes the window ELIGIBLE for the keyboard, and `focus()` actually takes it.
-	 * Giving it back is two steps for a different reason: on macOS
-	 * `setFocusable(false)` explicitly does NOT drop focus a window already holds
-	 * (Electron's own docs say so, and it is measured — see the probe in the
-	 * record), so without the `blur()` the desktop keeps typing into a bubble that
-	 * is no longer there.
-	 */
-	setKeyboard(on: boolean): void;
 	dispose(): void;
 };
 
@@ -171,6 +161,15 @@ export function createCompanionOverlay(deps: CompanionOverlayDeps): CompanionOve
 				fullscreenable: false,
 				// The overlay must never steal the keyboard from the app you are
 				// working in — it is scenery you can occasionally poke, not a window.
+				//
+				// And it must never be made focusable LATER either. A terminal that
+				// borrowed the keyboard this way was measured doing two things to the
+				// desktop: every Proc vanished for a beat as the window blinked out of
+				// existence (`visibilitychange` on the page), and the overlay then
+				// stopped receiving mouse events entirely, so clicks fell through to the
+				// desktop and the pets could not be touched until another app was
+				// clicked twice. A terminal gets its own window instead — see
+				// main/terminal-window.ts.
 				focusable: false,
 				skipTaskbar: true,
 				// Fully transparent: on a transparent window an opaque backgroundColor
@@ -242,26 +241,18 @@ export function createCompanionOverlay(deps: CompanionOverlayDeps): CompanionOve
 				deps.logError("AO: failed to tell the companion overlay the board window opened", err);
 			}
 		},
+		notifyTerminalClosed() {
+			try {
+				live()?.send(TERMINAL_CLOSED_CHANNEL);
+			} catch (err) {
+				deps.logError("AO: failed to tell the companion overlay its terminal closed", err);
+			}
+		},
 		relayout() {
 			live()?.setBounds(overlayBandBounds(deps.workArea()));
 		},
 		isOpen() {
 			return live() !== null;
-		},
-		setKeyboard(on) {
-			const current = live();
-			if (!current) return;
-			try {
-				if (on) {
-					current.setFocusable(true);
-					current.focus();
-				} else {
-					current.setFocusable(false);
-					current.blur();
-				}
-			} catch (err) {
-				deps.logError("AO: failed to move the keyboard in or out of the companion overlay", err);
-			}
 		},
 		dispose() {
 			close();

@@ -21,8 +21,6 @@ type FakeWindow = OverlayWindow & {
 	loaded: string[];
 	sent: string[];
 	destroyed: boolean;
-	/** Every keyboard move the overlay made, in order: the hand-off is a SEQUENCE. */
-	keyboard: string[];
 	fireClosed(): void;
 };
 
@@ -37,13 +35,9 @@ function fakeWindow(options: OverlayWindowOptions): FakeWindow {
 		loaded: [],
 		sent: [],
 		destroyed: false,
-		keyboard: [],
 		setBounds: (b) => {
 			win.bounds = b;
 		},
-		setFocusable: (focusable) => win.keyboard.push(focusable ? "focusable" : "unfocusable"),
-		focus: () => win.keyboard.push("focus"),
-		blur: () => win.keyboard.push("blur"),
 		setIgnoreMouseEvents: (ignore, opts) => win.ignoreMouse.push({ ignore, forward: opts?.forward }),
 		setVisibleOnAllWorkspaces: (visible, opts) =>
 			win.allWorkspaces.push({ visible, visibleOnFullScreen: opts?.visibleOnFullScreen }),
@@ -298,38 +292,7 @@ describe("telling the overlay the looks moved", () => {
 });
 
 // PROTOTYPE (terminal bubble)
-describe("the keyboard, for a bubble terminal", () => {
-	it("takes it in the order that actually works: eligible first, then focused", () => {
-		const { overlay, created } = harness();
-		overlay.setEnabled(true);
-
-		overlay.setKeyboard(true);
-
-		// focus() on a window that is still `focusable: false` is a no-op, so the
-		// order is the behaviour, not a style preference.
-		expect(created[0].keyboard).toEqual(["focusable", "focus"]);
-	});
-
-	it("gives it back with an explicit blur, because dropping focusable does not", () => {
-		// Measured, not assumed: on macOS `setFocusable(false)` leaves a window that
-		// already holds focus holding it (Electron documents this), so without the
-		// blur the desktop goes on typing into a bubble that has closed.
-		const { overlay, created } = harness();
-		overlay.setEnabled(true);
-		overlay.setKeyboard(true);
-		created[0].keyboard.length = 0;
-
-		overlay.setKeyboard(false);
-
-		expect(created[0].keyboard).toEqual(["unfocusable", "blur"]);
-	});
-
-	it("ignores a keyboard move when the overlay is closed", () => {
-		const { overlay } = harness();
-
-		expect(() => overlay.setKeyboard(true)).not.toThrow();
-	});
-
+describe("the board window coming up", () => {
 	it("tells an open overlay when the board window comes up, so a live bubble lets go", () => {
 		const { overlay, created } = harness();
 		overlay.setEnabled(true);

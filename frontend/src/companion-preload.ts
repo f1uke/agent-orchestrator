@@ -27,12 +27,23 @@ contextBridge.exposeInMainWorld("aoCompanion", {
 	},
 	// PROTOTYPE (terminal bubble). A plain LEFT click on a Proc: "let me talk to
 	// this session." `invoke`, not `send`, because the answer decides what the
-	// overlay draws — and the answer is the main process's to give: only it knows
-	// whether the board window is up, and only it can bring that window forward.
-	activateSession: (sessionId: string) =>
-		ipcRenderer.invoke("companion:activateSession", sessionId) as Promise<"app" | "bubble" | "unavailable">,
-	/** The bubble closed. Hand the keyboard back to whatever the user was in. */
-	releaseKeyboard: () => ipcRenderer.send("companion:releaseKeyboard"),
+	// overlay does next — and the answer is the main process's to give: only it
+	// knows whether the board window is up, and only it can bring that window
+	// forward or put a terminal window on the desktop.
+	activateSession: (input: { sessionId: string; handleId: string; anchor: { x: number; y: number } }) =>
+		ipcRenderer.invoke("companion:activateSession", input) as Promise<"app" | "bubble" | "unavailable">,
+	/** The Proc moved; carry its terminal window along. */
+	moveTerminal: (anchor: { x: number; y: number }) => ipcRenderer.send("companion:moveTerminal", anchor),
+	/** Close the terminal window — from the card itself, or from the band. */
+	closeTerminal: () => ipcRenderer.send("companion:closeTerminal"),
+	/** The terminal window went away, however it went. */
+	onTerminalClosed: (listener: () => void) => {
+		const wrapped = () => listener();
+		ipcRenderer.on("companion:terminalClosed", wrapped);
+		return () => {
+			ipcRenderer.off("companion:terminalClosed", wrapped);
+		};
+	},
 	/** PROTOTYPE harness only (no-op unless the main process was asked for it). */
 	protoOpenMainWindow: () => ipcRenderer.send("companion:protoOpenMainWindow"),
 	/** The board window came up: detach the bubble's terminal before it attaches. */
