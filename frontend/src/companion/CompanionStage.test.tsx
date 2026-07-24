@@ -1014,4 +1014,63 @@ describe("a terminal pinned to a Proc", () => {
 
 		expect(onAttachedAnchorMove).not.toHaveBeenCalled();
 	});
+
+	// The bug the human hit on their real app: the Proc with its terminal open kept
+	// pacing. This drives the REAL path — the `attachedSession` prop — not a flag set
+	// by hand, and advances the engine's own tick well past a stroll's rest window.
+	it("stands its Proc still through many ticks while its terminal is open", () => {
+		vi.useFakeTimers();
+		const { feed, push } = stubFeed();
+		const { container } = render(<CompanionStage feed={feed} attachedSession="a" />);
+		push([
+			{ sessionId: "a", status: "working", name: "one", project: "p" },
+			{ sessionId: "b", status: "working", name: "two", project: "p" },
+		]);
+
+		const xOf = (id: string) => {
+			const proc = container.querySelector<HTMLElement>(`[data-proc][data-session="${id}"]`);
+			const style = proc?.getAttribute("style") ?? "";
+			return Number(/translate3d\((-?[\d.]+)px/.exec(style)?.[1] ?? "NaN");
+		};
+		const startX = xOf("a");
+		let walked = false;
+		// 120s of ticks — well past REST_MAX. The frozen Proc must never enter a walk.
+		for (let i = 0; i < 240; i++) {
+			act(() => void vi.advanceTimersByTime(500));
+			const proc = container.querySelector(`[data-proc][data-session="a"]`);
+			if (proc?.querySelector("[data-walk-strip]")?.getAttribute("style")?.includes("steps")) walked = true;
+			if (Math.abs(xOf("a") - startX) > 3) walked = true;
+		}
+
+		expect(walked).toBe(false);
+		expect(xOf("a")).toBeCloseTo(startX, 0);
+	});
+
+	it("lets its Proc stroll again once the terminal closes", () => {
+		vi.useFakeTimers();
+		const { feed, push } = stubFeed();
+		const view = render(<CompanionStage feed={feed} attachedSession="a" />);
+		push([{ sessionId: "a", status: "working", name: "one", project: "p" }]);
+
+		// Terminal closes: the prop clears, and the freed Proc is handed a fresh rest,
+		// so within the stroll window it walks like any other rather than standing for
+		// ever. (Motion itself stays rng-driven; we assert the freeze is lifted, i.e.
+		// the world no longer names it frozen — observable as the Proc being free to
+		// move — by checking it is not pinned in place across a long span.)
+		view.rerender(<CompanionStage feed={feed} attachedSession={undefined} />);
+		let moved = false;
+		const startX = () => {
+			const proc = view.container.querySelector<HTMLElement>(`[data-proc][data-session="a"]`);
+			return Number(/translate3d\((-?[\d.]+)px/.exec(proc?.getAttribute("style") ?? "")?.[1] ?? "NaN");
+		};
+		const from = startX();
+		for (let i = 0; i < 240 && !moved; i++) {
+			act(() => void vi.advanceTimersByTime(500));
+			const proc = view.container.querySelector(`[data-proc][data-session="a"]`);
+			if (proc?.querySelector("[data-walk-strip]")?.getAttribute("style")?.includes("steps")) moved = true;
+			if (Math.abs(startX() - from) > 3) moved = true;
+		}
+
+		expect(moved).toBe(true);
+	});
 });

@@ -10,6 +10,8 @@ import { STATUS_LABELS } from "./preview";
 const state = vi.hoisted(() => ({
 	keyListeners: new Set<(event: { key: string }) => void>(),
 	focused: 0,
+	wheelHandler: undefined as ((event: WheelEvent) => boolean) | undefined,
+	mouseTracking: "sgr",
 	disposed: 0,
 }));
 
@@ -18,7 +20,11 @@ vi.mock("@xterm/xterm", () => ({
 		cols = 80;
 		rows = 24;
 		textarea = document.createElement("textarea");
-		options = {};
+		options = { fontSize: 12, lineHeight: 1 };
+		get modes() {
+			return { mouseTrackingMode: state.mouseTracking };
+		}
+		buffer = { active: { type: "alternate" } };
 		loadAddon() {}
 		open() {}
 		focus() {
@@ -27,12 +33,22 @@ vi.mock("@xterm/xterm", () => ({
 		write() {}
 		writeln() {}
 		clear() {}
+		scrollLines() {}
 		dispose() {
 			state.disposed += 1;
 		}
 		onKey(listener: (event: { key: string }) => void) {
 			state.keyListeners.add(listener);
 			return { dispose: () => state.keyListeners.delete(listener) };
+		}
+		onData() {
+			return { dispose: () => undefined };
+		}
+		onBinary() {
+			return { dispose: () => undefined };
+		}
+		attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean) {
+			state.wheelHandler = handler;
 		}
 		onResize() {
 			return { dispose: () => undefined };
@@ -64,6 +80,8 @@ afterEach(() => {
 	state.keyListeners.clear();
 	state.focused = 0;
 	state.disposed = 0;
+	state.mouseTracking = "sgr";
+	state.wheelHandler = undefined;
 	attach.mockClear();
 	detach.mockClear();
 });
@@ -179,5 +197,23 @@ describe("the card a Proc opens", () => {
 		state.keyListeners.forEach((listener) => listener({ key: "a" }));
 
 		expect(onActivity).toHaveBeenCalled();
+	});
+
+	it("wires the wheel so the pane can be scrolled — the card was type-only before", () => {
+		// The bug the human hit: you could type into the terminal but not scroll it, so
+		// a full-screen agent's output could not be read back. The card now attaches the
+		// same wheel forwarder the board uses; here the fake pane tracks the mouse, so a
+		// wheel notch reaches the attachment as an SGR wheel report.
+		const captured: string[] = [];
+		attach.mockImplementationOnce((terminal: { onUserInput: (l: (d: string) => void) => void }) => {
+			terminal.onUserInput((data) => captured.push(data));
+			return detach;
+		});
+		card();
+		expect(state.wheelHandler).toBeDefined();
+
+		state.wheelHandler!({ deltaY: -12, deltaMode: 0 } as WheelEvent);
+
+		expect(captured.some((d) => d.includes("\x1b[<"))).toBe(true);
 	});
 });
