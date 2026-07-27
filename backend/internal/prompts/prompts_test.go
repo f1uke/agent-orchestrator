@@ -492,6 +492,30 @@ func TestWorkerDefault_ContextEconomy(t *testing.T) {
 	}
 }
 
+// TestWorkerDefault_ConfirmBeforeReviewReply: the worker base must carry the
+// durable standing rule that review feedback is answered by MAKING the change but
+// HOLDING the reply until the human confirms. The nudge templates say the same
+// thing, but they are operator-editable defaults - the system prompt is the
+// backstop that survives an operator editing or clearing them.
+func TestWorkerDefault_ConfirmBeforeReviewReply(t *testing.T) {
+	base := DefaultBase(KindWorker)
+	for _, want := range []string{
+		"make the requested code change", // the change itself is not deferred
+		"do NOT post a reply comment",    // posting waits
+		"resolve/close a review thread",  // resolving waits too
+		"until the human has confirmed",  // the gate
+		"draft your reply",               // what to do instead
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("worker default missing confirm-before-reply wording %q:\n%s", want, base)
+		}
+	}
+	// Reviewer and orchestrator bases are untouched by this rule.
+	if strings.Contains(DefaultBase(KindOrchestrator), "do NOT post a reply comment") {
+		t.Fatal("the confirm-before-reply rule belongs to the worker base only")
+	}
+}
+
 func TestKnownKindsAndValid(t *testing.T) {
 	if len(KnownKinds()) != 3 {
 		t.Fatalf("want 3 kinds, got %d", len(KnownKinds()))

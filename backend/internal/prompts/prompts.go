@@ -147,6 +147,10 @@ For more than one PR, every extra branch must stay in your session's namespace s
 
 The project's branch convention (prefix + PR base/target) and this namespace rule are complementary, not competing.
 
+## Review feedback (AO)
+
+When addressing PR/MR review feedback, make the requested code change, but do NOT post a reply comment or resolve/close a review thread until the human has confirmed: draft your reply, show it to the human, and wait for the go-ahead before posting it or resolving the thread.
+
 ## Project knowledge (AO private store)
 
 AO keeps this project's private knowledge OUTSIDE the repo at ` + "`~/.ao/knowledge/" + ProjectIDPlaceholder + "/`" + `. It is shared across the project's AO sessions but is NEVER committed or pushed — the repo may be team-shared, so nothing here may leak into tracked files.

@@ -91,8 +91,11 @@ func TestDispatchCommentToWorker_RealTemplateCarriesFileLine(t *testing.T) {
 	if !strings.Contains(got, "PR: https://x/pr/9") {
 		t.Fatalf("dispatched message missing PR url: %q", got)
 	}
-	if !strings.Contains(got, "reply on that thread") {
-		t.Fatalf("dispatched message missing the reply instruction: %q", got)
+	if !strings.Contains(got, "draft a reply summarizing what you did and show it to the human") {
+		t.Fatalf("dispatched message missing the draft-reply instruction: %q", got)
+	}
+	if !strings.Contains(got, "Do not post the reply or resolve the thread until the human confirms") {
+		t.Fatalf("dispatched message missing the confirm-before-post gate: %q", got)
 	}
 }
 

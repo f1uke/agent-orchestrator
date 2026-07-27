@@ -69,7 +69,18 @@ describe("genPrompt", () => {
 		const p = genPrompt("a/b.go", 42, "fix this");
 		expect(p).toContain("A reviewer left this unresolved comment on a/b.go:42");
 		expect(p).toContain("> fix this");
-		expect(p).toContain("reply on the thread summarizing what you did.");
+		expect(p).toContain("make the change, keep it minimal and consistent with the surrounding code");
+	});
+
+	// The worker makes the code change straight away but holds the reply: it drafts
+	// it for the human and posts/resolves only once the human confirms. Mirrors the
+	// backend reviewCommentDefault template wording so the manual "Send to worker"
+	// path and the auto-nudge path never diverge.
+	it("tells the worker to draft the reply and wait for the human before posting or resolving", () => {
+		const p = genPrompt("a/b.go", 42, "fix this");
+		expect(p).toContain("draft a reply summarizing what you did and show it to the human");
+		expect(p).toContain("Do not post the reply or resolve the thread until the human confirms.");
+		expect(p).not.toContain("reply on the thread summarizing what you did");
 	});
 });
 
@@ -80,9 +91,10 @@ describe("batchPrompt", () => {
 			{ path: "a/b.go", line: 68, body: "comment two" },
 			{ path: "c/d.ts", line: 72, body: "comment three" },
 		]);
-		// the "make the change … reply on that thread" instruction appears exactly once
+		// the "make the change … draft a reply" instruction appears exactly once
 		expect(p.match(/make the change/g)).toHaveLength(1);
-		expect(p.match(/reply on that thread/g)).toHaveLength(1);
+		expect(p.match(/draft a reply/g)).toHaveLength(1);
+		expect(p.match(/Do not post the reply or resolve the thread until the human confirms\./g)).toHaveLength(1);
 		expect(p).toContain("There are 3 unresolved review comments to address.");
 		// each comment carries its file:line and quoted body
 		expect(p).toContain("1. a/b.go:55\n   > comment one");

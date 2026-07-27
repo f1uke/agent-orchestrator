@@ -57,6 +57,45 @@ func TestDefaultsRenderWithZeroData(t *testing.T) {
 	}
 }
 
+// TestReviewNudgesDraftReplyAndWaitForConfirmation: every review-related
+// template must tell the worker to make the code change but hold its reply for
+// human confirmation. Both provider branches of the AO-reviewer templates live
+// in one raw template, so matching twice proves the ReviewID and GitLab paths
+// carry the gate without seven separate Execute calls.
+func TestReviewNudgesDraftReplyAndWaitForConfirmation(t *testing.T) {
+	for name, tmpl := range map[string]string{
+		"reviewComment":    Default(NameReviewCommentDispatch),
+		"aoReviewerBatch":  Default(NameAOReviewerBatch),
+		"aoReviewerSingle": Default(NameAOReviewerSingle),
+	} {
+		for _, want := range []string{
+			"draft a reply",
+			"show it to the human",
+			"Do not post the reply or resolve",
+			"until the human confirms",
+		} {
+			if got := strings.Count(tmpl, want); got < 2 {
+				t.Fatalf("%s has %d occurrence(s) of %q, want at least 2:\n%s", name, got, want, tmpl)
+			}
+		}
+		lower := strings.ToLower(tmpl)
+		if !strings.Contains(lower, "make the change") && !strings.Contains(lower, "make the requested code change") {
+			t.Fatalf("%s must tell the worker to make the code change immediately:\n%s", name, tmpl)
+		}
+		for _, unwanted := range []string{
+			"reply on that thread",
+			"reply on the review threads",
+			"reply on review",
+			"then resolve the review comment threads",
+			"Once you have addressed it, resolve",
+		} {
+			if strings.Contains(tmpl, unwanted) {
+				t.Fatalf("%s still carries the reply-now directive %q:\n%s", name, unwanted, tmpl)
+			}
+		}
+	}
+}
+
 // The single-comment dispatch must tell the worker the comment's file:line and
 // quoted body (the bug this fix closes) plus one clear instruction - mirroring
 // the frontend genPrompt phrasing. No numbered list for a lone comment.
@@ -70,7 +109,7 @@ func TestReviewCommentDefaultSingleGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "A reviewer left an unresolved comment on PR #7. Address it: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+	want := "A reviewer left an unresolved comment on PR #7. Address it: make the change, keep it minimal and consistent with the surrounding code, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the thread until the human confirms." +
 		"\nPR: https://x/pr/7" +
 		"\n\na.go:75\n> tidy this"
 	if out != want {
@@ -92,7 +131,7 @@ func TestReviewCommentDefaultMultiGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "There are 2 unresolved review comments on your PR to address. For each: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+	want := "There are 2 unresolved review comments on your PR to address. For each: make the change, keep it minimal and consistent with the surrounding code, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the thread until the human confirms." +
 		"\n\n1. a.go:75\n   > first" +
 		"\n\n2. b.go:12\n   > second"
 	if out != want {
@@ -108,7 +147,7 @@ func TestReviewCommentDefaultNoCommentsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "A reviewer requested changes on your PR. Address the feedback, then reply on the review threads summarizing what you did."
+	want := "A reviewer requested changes on your PR. Address the feedback: make the requested code change, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the review threads until the human confirms."
 	if out != want {
 		t.Fatalf("no-comment render = %q, want %q", out, want)
 	}
@@ -126,16 +165,16 @@ func TestAOReviewerBatchGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Review 1 carries a GitHub review id (reply-on-review branch); Review 2 has
-	// none — the GitLab case — so it takes the {{else}} branch and is still told
-	// to resolve the reviewer's resolvable discussion threads.
+	// Review 1 carries a GitHub review id; Review 2 has none (the GitLab case),
+	// so it takes the {{else}} branch and is still told to resolve the reviewer's
+	// resolvable discussion threads after human confirmation.
 	want := "[AO reviewer] AO's internal code reviewer submitted 2 review(s) requesting changes.\n" +
 		"\nReview 1\nPR: https://x/pr/1\nVerdict: changes_requested" +
 		"\nHead commit: abc" +
-		"\nReview: R1\nOnce you have addressed it, reply on review R1 with how you addressed it, then resolve the review comment threads you addressed." +
+		"\nReview: R1\nMake the requested code change, then draft a reply for review R1 summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms." +
 		"\n\nReview body:\nfix it\n" +
 		"\nReview 2\nPR: https://x/pr/2\nVerdict: changes_requested" +
-		"\nOnce you have addressed it, resolve the review comment threads you addressed."
+		"\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms."
 	if out != want {
 		t.Fatalf("batch golden mismatch:\n got %q\nwant %q", out, want)
 	}
@@ -149,7 +188,7 @@ func TestAOReviewerSingleGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: https://x/pr/9\nVerdict: changes_requested" +
-		"\nReview: R9\n\nOnce you have addressed it, reply on review R9 with how you addressed it, then resolve the review comment threads you addressed." +
+		"\nReview: R9\n\nMake the requested code change, then draft a reply for review R9 summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms." +
 		"\n\nReview body:\nplease fix"
 	if out != want {
 		t.Fatalf("single golden mismatch:\n got %q\nwant %q", out, want)
@@ -167,7 +206,7 @@ func TestAOReviewerSingleGitLabResolvesThreadsWithoutReviewID(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: https://gitlab.example.com/g/p/-/merge_requests/9\nVerdict: changes_requested" +
-		"\n\nOnce you have addressed it, resolve the review comment threads you addressed." +
+		"\n\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms." +
 		"\n\nReview body:\nplease fix"
 	if out != want {
 		t.Fatalf("gitlab single mismatch:\n got %q\nwant %q", out, want)
