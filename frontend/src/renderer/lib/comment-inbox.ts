@@ -260,9 +260,15 @@ export function originOf(url: string): string {
  * The auto-generated worker prompt for a review comment — verbatim from the
  * design's `genPrompt`. Seeded (editable) into the "Edit prompt…" drawer and
  * used for batch "one task, all comments".
+ *
+ * The worker makes the code change immediately but HOLDS the reply: it drafts it
+ * for the human and posts/resolves only once the human confirms. This must stay
+ * word-for-word in step with the backend `reviewCommentDefault` template
+ * (internal/messagetemplates) so the manual "Send to worker" path and the
+ * auto-send nudge tell the worker the same thing.
  */
 export function genPrompt(path: string, line: number, body: string): string {
-	return `A reviewer left this unresolved comment on ${path}:${line}\n\n> ${body}\n\nPlease address it: make the change, keep it minimal and consistent with the surrounding code, then reply on the thread summarizing what you did.`;
+	return `A reviewer left this unresolved comment on ${path}:${line}\n\n> ${body}\n\nPlease address it: make the change, keep it minimal and consistent with the surrounding code, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the thread until the human confirms.`;
 }
 
 /** One unresolved review comment fed into {@link batchPrompt}. */
@@ -277,14 +283,15 @@ export interface BatchPromptItem {
  * natural singular phrasing of {@link genPrompt}; multiple comments state the
  * shared instruction ONCE, then list each comment compactly by `path:line` with
  * its quoted body so the worker can locate and reply on the right thread - no
- * per-comment boilerplate repetition.
+ * per-comment boilerplate repetition. As in {@link genPrompt}, the reply is
+ * drafted for the human and nothing is posted or resolved until they confirm.
  */
 export function batchPrompt(items: BatchPromptItem[]): string {
 	if (items.length === 1) {
 		const it = items[0];
 		return genPrompt(it.path, it.line, it.body);
 	}
-	const lead = `There are ${items.length} unresolved review comments to address. For each: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did.`;
+	const lead = `There are ${items.length} unresolved review comments to address. For each: make the change, keep it minimal and consistent with the surrounding code, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the thread until the human confirms.`;
 	const list = items.map((it, i) => `${i + 1}. ${it.path}:${it.line}\n   > ${it.body}`).join("\n");
 	return `${lead}\n\n${list}`;
 }

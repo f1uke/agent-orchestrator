@@ -168,26 +168,32 @@ func Execute(tmplText string, data any) (string, error) {
 }
 
 // reviewCommentDefault tells the worker WHICH file:line each unresolved review
-// comment is on plus the quoted body, so it can make the change and reply on the
-// right thread without guessing the location. It mirrors the frontend
-// genPrompt/batchPrompt format (comment-inbox.ts) so the worker sees a
+// comment is on plus the quoted body, so it can make the change and draft its
+// reply for the right thread without guessing the location. It mirrors the
+// frontend genPrompt/batchPrompt format (comment-inbox.ts) so the worker sees a
 // consistent message whether the comment arrives via the manual "Send to worker"
 // button or the auto-send toggle. Three branches on Count: a single comment reads
 // naturally without a number; multiple comments state the shared instruction once
 // then a numbered file:line list; zero comments (a bare changes-requested
 // decision with no inline threads) omits the list. file:line is the thread
 // reference the worker replies on - the same locator the frontend uses.
+//
+// The code change is made immediately, but POSTING the reply and RESOLVING the
+// thread wait for the human to confirm the drafted reply. AO cannot enforce that
+// (the worker posts through its own gh/glab), so the gate is wording: it is
+// restated in the frontend prompt builders and, durably, in the worker system
+// prompt (internal/prompts) in case an operator edits these templates.
 const reviewCommentDefault = "" +
 	"{{if eq .Count 1}}" +
-	"A reviewer left an unresolved comment on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address it: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+	"A reviewer left an unresolved comment on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address it: make the change, keep it minimal and consistent with the surrounding code, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the thread until the human confirms." +
 	"{{if .PRURL}}\nPR: {{.PRURL}}{{end}}" +
 	"{{range .Comments}}\n\n{{.File}}:{{.Line}}\n> {{.Body}}{{end}}" +
 	"{{else if .Comments}}" +
-	"There are {{.Count}} unresolved review comments on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}} to address. For each: make the change, keep it minimal and consistent with the surrounding code, then reply on that thread summarizing what you did." +
+	"There are {{.Count}} unresolved review comments on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}} to address. For each: make the change, keep it minimal and consistent with the surrounding code, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the thread until the human confirms." +
 	"{{if .PRURL}}\nPR: {{.PRURL}}{{end}}" +
 	"{{range .Comments}}\n\n{{.Index}}. {{.File}}:{{.Line}}\n   > {{.Body}}{{end}}" +
 	"{{else}}" +
-	"A reviewer requested changes on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address the feedback, then reply on the review threads summarizing what you did." +
+	"A reviewer requested changes on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Address the feedback: make the requested code change, then draft a reply summarizing what you did and show it to the human. Do not post the reply or resolve the review threads until the human confirms." +
 	"{{if .PRURL}}\nPR: {{.PRURL}}{{end}}" +
 	"{{end}}"
 
@@ -201,17 +207,19 @@ const trackerBotDefault = "A bot left a new comment on your tracker issue. Addre
 // ApplyReviewBatch. The leading intro line ends with "\n"; each review begins
 // with a blank line ("\n" before "Review N"). A GitHub review carries an id to
 // reply on; a GitLab merge request has none ({{.ReviewID}} is empty), so the
-// {{else}} branch still tells the worker to resolve the reviewer's resolvable
-// discussion threads — otherwise the MR stays blocked on unresolved comments.
+// {{else}} branch drops the id but keeps the same instruction - the reviewer's
+// resolvable discussion threads must still be resolved (otherwise the MR stays
+// blocked on unresolved comments), just not before the human confirms the reply.
 const aoReviewerBatchDefault = "[AO reviewer] AO's internal code reviewer submitted {{.Count}} review(s) requesting changes.\n" +
 	"{{range .Reviews}}\nReview {{.Index}}\nPR: {{.PRURL}}\nVerdict: {{.Verdict}}" +
 	"{{if .TargetSHA}}\nHead commit: {{.TargetSHA}}{{end}}" +
-	"{{if .ReviewID}}\nReview: {{.ReviewID}}\nOnce you have addressed it, reply on review {{.ReviewID}} with how you addressed it, then resolve the review comment threads you addressed.{{else}}\nOnce you have addressed it, resolve the review comment threads you addressed.{{end}}" +
+	"{{if .ReviewID}}\nReview: {{.ReviewID}}\nMake the requested code change, then draft a reply for review {{.ReviewID}} summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{else}}\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{end}}" +
 	"{{if .Body}}\n\nReview body:\n{{.Body}}\n{{end}}{{end}}"
 
 // aoReviewerSingleDefault reproduces the pre-templating ApplyReviewResult text.
 // As with the batch template, the {{else}} branch covers GitLab merge requests
-// (no review id) so the worker is still told to resolve the threads.
+// (no review id) so the worker is still told to resolve the threads - once the
+// human has confirmed its drafted reply.
 const aoReviewerSingleDefault = "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: {{.PRURL}}\nVerdict: {{.Verdict}}" +
-	"{{if .ReviewID}}\nReview: {{.ReviewID}}\n\nOnce you have addressed it, reply on review {{.ReviewID}} with how you addressed it, then resolve the review comment threads you addressed.{{else}}\n\nOnce you have addressed it, resolve the review comment threads you addressed.{{end}}" +
+	"{{if .ReviewID}}\nReview: {{.ReviewID}}\n\nMake the requested code change, then draft a reply for review {{.ReviewID}} summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{else}}\n\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{end}}" +
 	"{{if .Body}}\n\nReview body:\n{{.Body}}{{end}}"
