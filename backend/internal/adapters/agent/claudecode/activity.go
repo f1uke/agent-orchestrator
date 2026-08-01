@@ -6,6 +6,40 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+// NestedWorktreeDenial reports whether a Claude Code hook callback would move an
+// AO worker's same-task child outside the worker's existing worktree, and the
+// reason to hand back to the agent.
+//
+// event is the AO hook sub-command name, as in DeriveActivityState. Only
+// pre-tool-use can be denied: it is the one callback that runs BEFORE the tool,
+// so it is the last point at which the wrong checkout can still be prevented.
+//
+// The caller scopes this decision to AO worker sessions; this parser deliberately
+// knows nothing about process environment or session kinds.
+func NestedWorktreeDenial(event string, payload []byte) (bool, string) {
+	if event != "pre-tool-use" {
+		return false, ""
+	}
+	var p struct {
+		ToolName  string `json:"tool_name"`
+		ToolInput struct {
+			Isolation string `json:"isolation"`
+		} `json:"tool_input"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return false, ""
+	}
+	switch p.ToolName {
+	case "EnterWorktree":
+		return true, "This AO worker already has an isolated worktree. Keep same-task child work in the current AO worktree and do not call EnterWorktree."
+	case "Agent":
+		if p.ToolInput.Isolation == "worktree" {
+			return true, "This AO worker already has an isolated worktree. Launch the child without worktree isolation so its edits stay in the current AO worktree."
+		}
+	}
+	return false, ""
+}
+
 // DeriveActivityState maps a Claude Code hook event (and its native stdin
 // payload) onto an AO activity state. The bool is false when the event carries
 // no activity signal — e.g. SessionStart (metadata only, v1), a Notification

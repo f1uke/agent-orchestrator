@@ -180,7 +180,13 @@ Post your review as comments on the pull request or merge request, stating clear
 // injected separately (only when an orchestrator is active).
 const workerFloor = "\n\n" + `## Required coordination (AO)
 
-Non-negotiable: keep every branch you create within your session's branch namespace so AO can attribute your pull requests, and message the orchestrator with ` + "`ao send`" + ` if you hit a blocker you cannot resolve.`
+Non-negotiable: keep every branch you create within your session's branch namespace so AO can attribute your pull requests, and message the orchestrator with ` + "`ao send`" + ` if you hit a blocker you cannot resolve.
+
+## Child agents share this AO worktree
+
+This session already runs in an AO-managed git worktree on its assigned branch. That is the isolation boundary for this task. Keep Subagent-Driven execution available, but same-task child agents must work in the current AO worktree so every edit remains on this branch. Do not launch an Agent with ` + "`isolation: \"worktree\"`" + `, do not call ` + "`EnterWorktree`" + `, and do not create another worktree with git. Those actions move child work outside the AO branch and may leave valid changes behind in an untracked checkout.
+
+Because implementation children share this worktree, run only one file-writing or implementation child at a time. The parent worker owns git state and commits: children must not commit, stash, reset, switch or create branches, or run destructive repository-wide commands. Give each child explicit file ownership and wait for it to finish before starting another writer. Read-only children may run concurrently.`
 
 // reviewerFloor re-states the review-only invariant that must survive a
 // cleared/edited reviewer base. A reviewer that pushes could corrupt the

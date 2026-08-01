@@ -55,6 +55,99 @@ func capturedState(t *testing.T, capture *activityCapture) string {
 	return req.State
 }
 
+func TestHooks_ClaudeWorkerRejectsNestedWorktreeTools(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	t.Setenv("AO_SESSION_KIND", "worker")
+
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "worktree-isolated child",
+			payload: `{"hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"description":"implement task","isolation":"worktree"}}`,
+		},
+		{
+			name:    "EnterWorktree",
+			payload: `{"hook_event_name":"PreToolUse","tool_name":"EnterWorktree","tool_input":{"name":"nested"}}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, errOut, err := executeCLI(t, Deps{In: strings.NewReader(tc.payload)}, "hooks", "claude-code", "pre-tool-use")
+			if err != nil {
+				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+			}
+			var response struct {
+				HookSpecificOutput struct {
+					HookEventName            string `json:"hookEventName"`
+					PermissionDecision       string `json:"permissionDecision"`
+					PermissionDecisionReason string `json:"permissionDecisionReason"`
+				} `json:"hookSpecificOutput"`
+			}
+			if err := json.Unmarshal([]byte(out), &response); err != nil {
+				t.Fatalf("decode hook response: %v\nstdout=%s", err, out)
+			}
+			if response.HookSpecificOutput.HookEventName != "PreToolUse" {
+				t.Errorf("hookEventName = %q, want PreToolUse", response.HookSpecificOutput.HookEventName)
+			}
+			if response.HookSpecificOutput.PermissionDecision != "deny" {
+				t.Errorf("permissionDecision = %q, want deny", response.HookSpecificOutput.PermissionDecision)
+			}
+			if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "current AO worktree") {
+				t.Errorf("permissionDecisionReason = %q, want current-worktree guidance", response.HookSpecificOutput.PermissionDecisionReason)
+			}
+		})
+	}
+}
+
+func TestHooks_ClaudeWorkerAllowsSharedWorktreeChildren(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	t.Setenv("AO_SESSION_KIND", "worker")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"description":"implement task","subagent_type":"general-purpose","run_in_background":false}}`
+	out, errOut, err := executeCLI(t, Deps{
+		In:           strings.NewReader(payload),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "claude-code", "pre-tool-use")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want empty allow response", out)
+	}
+	if capture.hits != 1 {
+		t.Fatalf("activity hits = %d, want 1", capture.hits)
+	}
+}
+
+func TestHooks_ClaudeNestedWorktreeGuardIsWorkerOnly(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	t.Setenv("AO_SESSION_KIND", "orchestrator")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"EnterWorktree","tool_input":{"name":"legitimate"}}`
+	out, errOut, err := executeCLI(t, Deps{
+		In:           strings.NewReader(payload),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "claude-code", "pre-tool-use")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want empty allow response", out)
+	}
+	if capture.hits != 1 {
+		t.Fatalf("activity hits = %d, want 1", capture.hits)
+	}
+}
+
 func TestHooks_NotificationReportsWaitingInput(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "ao-7")
 	cfg := setConfigEnv(t)

@@ -17,6 +17,31 @@ func TestDeriverTokensAreKnownHarnesses(t *testing.T) {
 	}
 }
 
+// Every nested-worktree denier key must be a known harness, and denying is
+// reachable only through DenyNestedWorktree, so a drifted token would silently
+// stop guarding that harness's worker sessions.
+func TestNestedWorktreeDenierTokensAreKnownHarnesses(t *testing.T) {
+	for token := range NestedWorktreeDeniers {
+		if !domain.AgentHarness(token).IsKnown() {
+			t.Errorf("denier token %q is not a known AgentHarness", token)
+		}
+	}
+}
+
+func TestDenyNestedWorktree(t *testing.T) {
+	// A registered harness denies a worktree-isolated child before it runs.
+	deny, reason := DenyNestedWorktree("claude-code", "pre-tool-use",
+		[]byte(`{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`))
+	if !deny || reason == "" {
+		t.Fatalf("claude-code Agent(isolation:worktree) = (%v, %q), want (true, non-empty)", deny, reason)
+	}
+	// A harness with no denier is never denied, so its worker children are unaffected.
+	if deny, _ := DenyNestedWorktree("codex", "pre-tool-use",
+		[]byte(`{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`)); deny {
+		t.Fatal("codex has no denier, want deny=false")
+	}
+}
+
 func TestSupportsHarness(t *testing.T) {
 	for _, h := range []domain.AgentHarness{domain.HarnessCodex, domain.HarnessClaudeCode, domain.HarnessOpenCode} {
 		if !SupportsHarness(h) {

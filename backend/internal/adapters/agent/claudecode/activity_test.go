@@ -6,6 +6,64 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+func TestNestedWorktreeDenial(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   string
+		payload string
+		want    bool
+	}{
+		{
+			name:    "worktree-isolated child",
+			event:   "pre-tool-use",
+			payload: `{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`,
+			want:    true,
+		},
+		{
+			name:    "EnterWorktree",
+			event:   "pre-tool-use",
+			payload: `{"tool_name":"EnterWorktree","tool_input":{"name":"nested"}}`,
+			want:    true,
+		},
+		{
+			name:    "shared-worktree child",
+			event:   "pre-tool-use",
+			payload: `{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}`,
+			want:    false,
+		},
+		{
+			name:    "unrelated tool",
+			event:   "pre-tool-use",
+			payload: `{"tool_name":"Read","tool_input":{"file_path":"README.md"}}`,
+			want:    false,
+		},
+		{
+			name:    "malformed payload",
+			event:   "pre-tool-use",
+			payload: `not json`,
+			want:    false,
+		},
+		{
+			// Only pre-tool-use runs BEFORE the tool, so it is the only callback
+			// that can still prevent the wrong checkout. A post-tool-use carrying
+			// the same tool must not be denied.
+			name:    "post-tool-use is never denied",
+			event:   "post-tool-use",
+			payload: `{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := NestedWorktreeDenial(tt.event, []byte(tt.payload))
+			if got != tt.want {
+				t.Fatalf("NestedWorktreeDenial(%q, %q) denied = %v, want %v", tt.event, tt.payload, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDeriveActivityState(t *testing.T) {
 	tests := []struct {
 		name    string

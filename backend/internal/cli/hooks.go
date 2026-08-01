@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -47,6 +48,25 @@ type setActivityAPIRequest struct {
 	Detail *domain.ActivityDetail `json:"detail,omitempty"`
 }
 
+// preToolUseDenial is the native PreToolUse hook response that refuses a tool
+// call. Claude Code reads it from the hook's stdout and hands the reason back to
+// the agent.
+type preToolUseDenial struct {
+	HookSpecificOutput struct {
+		HookEventName            string `json:"hookEventName"`
+		PermissionDecision       string `json:"permissionDecision"`
+		PermissionDecisionReason string `json:"permissionDecisionReason"`
+	} `json:"hookSpecificOutput"`
+}
+
+func newPreToolUseDenial(reason string) preToolUseDenial {
+	var denial preToolUseDenial
+	denial.HookSpecificOutput.HookEventName = "PreToolUse"
+	denial.HookSpecificOutput.PermissionDecision = "deny"
+	denial.HookSpecificOutput.PermissionDecisionReason = reason
+	return denial
+}
+
 // newHooksCommand builds the hidden `ao hooks <agent> <event>` command that
 // agent CLIs invoke from their workspace-local hook config. It reads the native
 // hook payload from stdin and the AO session id from AO_SESSION_ID, derives an
@@ -81,6 +101,17 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		// the empty payload and exit 0: a failed hook must not break the
 		// agent. The deriver tolerates an empty payload.
 		c.reportHookFailure(agent, event, sessionID, fmt.Errorf("read stdin: %w", err))
+	}
+
+	// An AO worker's worktree is the isolation boundary for its task, so a
+	// same-task child that creates or enters another worktree takes its edits off
+	// the worker's branch. Refuse before the tool runs. Only workers are guarded:
+	// other AO session kinds, and any agent used outside AO, are unaffected.
+	if os.Getenv("AO_SESSION_KIND") == string(domain.KindWorker) {
+		if deny, reason := activitydispatch.DenyNestedWorktree(agent, event, payload); deny {
+			_ = json.NewEncoder(c.deps.Out).Encode(newPreToolUseDenial(reason))
+			return nil
+		}
 	}
 
 	state, ok := activitydispatch.Derive(agent, event, payload)

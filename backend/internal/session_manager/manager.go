@@ -56,9 +56,10 @@ var (
 
 // Env vars a spawned process reads to learn who it is.
 const (
-	EnvSessionID = "AO_SESSION_ID"
-	EnvProjectID = "AO_PROJECT_ID"
-	EnvIssueID   = "AO_ISSUE_ID"
+	EnvSessionID   = "AO_SESSION_ID"
+	EnvSessionKind = "AO_SESSION_KIND"
+	EnvProjectID   = "AO_PROJECT_ID"
+	EnvIssueID     = "AO_ISSUE_ID"
 	// EnvDataDir tells a spawned agent's AO hook commands where the store lives.
 	EnvDataDir = "AO_DATA_DIR"
 	// EnvRunFile tells a spawned agent's AO hook commands which daemon to
@@ -484,7 +485,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:        ws.Branch,
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, project.Config.Env),
+		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, cfg.Kind, project.Config.Env),
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1227,7 +1228,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:        ws.Branch,
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, project.Config.Env),
+		Env:           m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, project.Config.Env),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
@@ -2679,12 +2680,13 @@ This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create 
 // the AO-internal vars last so they always win (a project cannot override
 // AO_SESSION_ID and friends). An empty runFile is omitted so the hook CLI's own
 // default run-file resolution applies.
-func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, dataDir, runFile string, projectEnv map[string]string) map[string]string {
-	env := make(map[string]string, len(projectEnv)+5)
+func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, dataDir, runFile string, projectEnv map[string]string) map[string]string {
+	env := make(map[string]string, len(projectEnv)+6)
 	for k, v := range projectEnv {
 		env[k] = v
 	}
 	env[EnvSessionID] = string(id)
+	env[EnvSessionKind] = string(kind)
 	env[EnvProjectID] = string(project)
 	env[EnvIssueID] = string(issue)
 	env[EnvDataDir] = dataDir
@@ -2703,8 +2705,8 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, projectEnv map[string]string) map[string]string {
-	env := spawnEnv(id, project, issue, m.dataDir, m.runFile, projectEnv)
+func (m *Manager) runtimeEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, projectEnv map[string]string) map[string]string {
+	env := spawnEnv(id, project, issue, kind, m.dataDir, m.runFile, projectEnv)
 	path, err := HookPATH(m.executable, os.Getenv, projectEnv)
 	if err != nil {
 		m.logger.Warn("session PATH not pinned to the daemon binary; `ao hooks` callbacks may resolve to a different ao and activity tracking will stall",

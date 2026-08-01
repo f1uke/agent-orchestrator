@@ -85,6 +85,34 @@ func DeriveDetail(agent, event string, payload []byte) (domain.ActivityDetail, b
 	return derive(event, payload)
 }
 
+// DenyFunc reports whether a native agent hook callback must be REFUSED, and
+// the reason handed back to the agent. Unlike the derivers above it can change
+// what the agent does, so it is only ever consulted for callbacks that run
+// before the action they describe.
+type DenyFunc func(event string, payload []byte) (bool, string)
+
+// NestedWorktreeDeniers maps the agent token in `ao hooks <agent> <event>` to
+// the check that refuses a nested worktree for a same-task child. An AO worker
+// already owns an isolated worktree on its branch, so a child that creates or
+// enters another one takes its edits off the worker's branch.
+//
+// It is sparser than Derivers by design: only harnesses that can both spawn
+// child agents into their own checkout AND let a hook veto that appear. A
+// harness missing here is simply never denied.
+var NestedWorktreeDeniers = map[string]DenyFunc{
+	"claude-code": claudecode.NestedWorktreeDenial,
+}
+
+// DenyNestedWorktree looks up the denier for an agent token and applies it.
+// deny=false when the token has no denier or the callback is harmless.
+func DenyNestedWorktree(agent, event string, payload []byte) (bool, string) {
+	deny, found := NestedWorktreeDeniers[agent]
+	if !found {
+		return false, ""
+	}
+	return deny(event, payload)
+}
+
 // SupportsHarness reports whether a harness has an activity pipeline at all:
 // a registered deriver here means its adapter installs `ao hooks <harness>`
 // callbacks that can reach the daemon. Status derivation uses this to decide
