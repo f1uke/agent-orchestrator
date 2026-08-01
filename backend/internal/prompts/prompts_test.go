@@ -340,6 +340,24 @@ func TestCoordinationFloor_WorkerHasNamespaceAndAoSend_OrchestratorEmpty(t *test
 	}
 }
 
+// Removing any of these rules re-opens the failure mode where Subagent-Driven
+// Development creates .claude/worktrees/agent-* outside the AO worker branch.
+func TestCoordinationFloor_WorkerOwnsOneWorktreeForSameTaskChildren(t *testing.T) {
+	worker := CoordinationFloor(KindWorker)
+	for _, want := range []string{
+		"already runs in an AO-managed git worktree",
+		"Agent with `isolation: \"worktree\"`",
+		"do not call `EnterWorktree`",
+		"one file-writing or implementation child at a time",
+		"Read-only children may run concurrently",
+		"must not commit, stash, reset, switch or create branches",
+	} {
+		if !strings.Contains(worker, want) {
+			t.Fatalf("worker floor missing same-worktree rule %q:\n%s", want, worker)
+		}
+	}
+}
+
 func TestConfidentialityGuard_IsLastGuardText(t *testing.T) {
 	if !strings.HasPrefix(ConfidentialityGuard, "\n\n") {
 		t.Fatal("guard must be prefixed with \\n\\n")

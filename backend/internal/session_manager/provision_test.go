@@ -11,17 +11,21 @@ import (
 )
 
 func TestSpawnEnvProjectVarsCannotOverrideInternal(t *testing.T) {
-	env := spawnEnv("mer-1", "mer", "issue-9", "/data", "/data/running.json", map[string]string{
-		"FOO":        "bar",
-		EnvSessionID: "hacked", // a project must not override AO-internal vars
-		EnvProjectID: "hacked",
-		EnvRunFile:   "hacked",
+	env := spawnEnv("mer-1", "mer", "issue-9", domain.KindWorker, "/data", "/data/running.json", map[string]string{
+		"FOO":          "bar",
+		EnvSessionID:   "hacked", // a project must not override AO-internal vars
+		EnvSessionKind: "hacked",
+		EnvProjectID:   "hacked",
+		EnvRunFile:     "hacked",
 	})
 	if env["FOO"] != "bar" {
 		t.Fatalf("FOO = %q, want bar", env["FOO"])
 	}
 	if env[EnvSessionID] != "mer-1" {
 		t.Fatalf("AO_SESSION_ID = %q, want mer-1 (internal wins)", env[EnvSessionID])
+	}
+	if env[EnvSessionKind] != string(domain.KindWorker) {
+		t.Fatalf("AO_SESSION_KIND = %q, want worker (internal wins)", env[EnvSessionKind])
 	}
 	if env[EnvProjectID] != "mer" {
 		t.Fatalf("AO_PROJECT_ID = %q, want mer (internal wins)", env[EnvProjectID])
@@ -35,14 +39,23 @@ func TestSpawnEnvProjectVarsCannotOverrideInternal(t *testing.T) {
 // the CLI resolves the daemon from the run file, and without AO_RUN_FILE in the
 // session env a daemon running under a non-default run file has its hook
 // callbacks silently posted to whatever daemon owns the DEFAULT run file.
+func TestSpawnEnvInjectsSessionKind(t *testing.T) {
+	env := spawnEnv("mer-1", "mer", "", domain.KindWorker, "/data", "", map[string]string{
+		EnvSessionKind: string(domain.KindOrchestrator),
+	})
+	if got := env[EnvSessionKind]; got != string(domain.KindWorker) {
+		t.Fatalf("AO_SESSION_KIND = %q, want worker (internal wins)", got)
+	}
+}
+
 func TestSpawnEnvInjectsRunFile(t *testing.T) {
-	env := spawnEnv("mer-1", "mer", "", "/data", "/custom/running.json", nil)
+	env := spawnEnv("mer-1", "mer", "", domain.KindWorker, "/data", "/custom/running.json", nil)
 	if env[EnvRunFile] != "/custom/running.json" {
 		t.Fatalf("AO_RUN_FILE = %q, want /custom/running.json", env[EnvRunFile])
 	}
 
 	// No run file configured → no key, so the CLI's own default resolution applies.
-	env = spawnEnv("mer-1", "mer", "", "/data", "", nil)
+	env = spawnEnv("mer-1", "mer", "", domain.KindWorker, "/data", "", nil)
 	if v, ok := env[EnvRunFile]; ok {
 		t.Fatalf("AO_RUN_FILE = %q, want absent when unconfigured", v)
 	}

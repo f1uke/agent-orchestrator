@@ -568,6 +568,9 @@ func TestSpawn_ResolvesProjectConfig(t *testing.T) {
 	if rt.lastCfg.Env[EnvSessionID] == "" {
 		t.Fatal("runtime env missing AO_SESSION_ID")
 	}
+	if got := rt.lastCfg.Env[EnvSessionKind]; got != string(domain.KindWorker) {
+		t.Fatalf("runtime env AO_SESSION_KIND = %q, want worker", got)
+	}
 
 	// A project with no stored config yields a zero AgentConfig (adapter defaults)
 	// when the spawn explicitly names its agent.
@@ -4378,10 +4381,12 @@ func TestBuildSystemPrompt_WorkerLayers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"CUSTOM WORKER BASE",                   // override replaces default base
-		"PROJECT WORKER ADDITION",              // per-project addition appended
-		"Required coordination (AO)",           // protected floor still injected
-		"Standing-instruction confidentiality", // guard is last
+		"CUSTOM WORKER BASE",                         // override replaces default base
+		"PROJECT WORKER ADDITION",                    // per-project addition appended
+		"Required coordination (AO)",                 // protected floor still injected
+		"already runs in an AO-managed git worktree", // nested-worktree guard survives override
+		"Agent with `isolation: \"worktree\"`",       // child must share the AO worktree
+		"Standing-instruction confidentiality",       // guard is last
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("worker prompt missing %q:\n%s", want, got)
@@ -4429,7 +4434,9 @@ func TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "Required coordination (AO)") || !strings.Contains(got, "Standing-instruction confidentiality") {
+	if !strings.Contains(got, "Required coordination (AO)") ||
+		!strings.Contains(got, "already runs in an AO-managed git worktree") ||
+		!strings.Contains(got, "Standing-instruction confidentiality") {
 		t.Fatalf("cleared base must still carry floor + guard:\n%s", got)
 	}
 }
