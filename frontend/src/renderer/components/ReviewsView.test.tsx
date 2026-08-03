@@ -85,26 +85,30 @@ function commentsPayload() {
 	};
 }
 
-const reviewsPayload = {
-	reviewerHandleId: "reviewer-1",
-	reviews: [
-		{
-			prUrl: PR_URL,
-			prNumber: 1,
-			title: "Add request retry",
-			targetSha: "abc",
-			status: "changes_requested",
-			latestRun: undefined,
-		},
-	],
-};
+function reviewsPayload(status = "changes_requested", reviewerHandleId = "reviewer-1") {
+	return {
+		reviewerHandleId,
+		reviews: [
+			{
+				prUrl: PR_URL,
+				prNumber: 1,
+				title: "Add request retry",
+				targetSha: "abc",
+				status,
+				latestRun: undefined,
+			},
+		],
+	};
+}
 
 let commentsData: ReturnType<typeof commentsPayload>;
+let reviewsData: ReturnType<typeof reviewsPayload>;
 
 beforeEach(() => {
 	commentsData = commentsPayload();
+	reviewsData = reviewsPayload();
 	getMock.mockReset().mockImplementation(async (path: string) => {
-		if (path === "/api/v1/sessions/{sessionId}/reviews") return { data: reviewsPayload, error: undefined };
+		if (path === "/api/v1/sessions/{sessionId}/reviews") return { data: reviewsData, error: undefined };
 		if (path === "/api/v1/projects/{id}") {
 			return {
 				data: { status: "ok", project: { id: "ws-1", kind: "git", config: { reviewers: [{ harness: "codex" }] } } },
@@ -162,7 +166,7 @@ function renderView(prs = [pr(1, "open")], onOpenFile?: (t: unknown) => void) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	render(
 		<QueryClientProvider client={qc}>
-			<ReviewsView session={session(prs)} onOpenFile={onOpenFile as never} />
+			<ReviewsView session={session(prs)} onOpenReviewerTerminal={() => {}} onOpenFile={onOpenFile as never} />
 		</QueryClientProvider>,
 	);
 }
@@ -316,5 +320,56 @@ describe("ReviewsView (merged reviews + comments)", () => {
 	it("shows the overall empty state when the session owns no PRs", async () => {
 		renderView([]);
 		expect(await screen.findByText("No pull request opened yet.")).toBeInTheDocument();
+	});
+
+	// A draft PR is ineligible for AO review (backend `review.Plan`), so the run
+	// button is correctly refused - but a refusal with no reason is a dead control.
+	describe("blocked reviewer controls say why", () => {
+		it("names the draft PR that keeps Run review disabled, and marks the row Draft", async () => {
+			reviewsData = reviewsPayload("ineligible", "");
+			renderView([pr(1, "draft")]);
+
+			const run = await screen.findByRole("button", { name: /run review/i });
+			expect(run).toBeDisabled();
+			const reason = await screen.findByText(
+				"PR #1 is still a draft - AO reviews a pull request once it is marked ready for review.",
+			);
+			// the reason is programmatically tied to the control it explains
+			expect(run).toHaveAttribute("aria-describedby", reason.id);
+			expect(run).toHaveAttribute("title", reason.textContent);
+			// and the blocking state is visible on the PR row itself
+			expect(screen.getByText("Draft")).toBeInTheDocument();
+		});
+
+		it("says a closed PR has nothing left to review", async () => {
+			reviewsData = reviewsPayload("ineligible", "");
+			renderView([pr(1, "closed")]);
+
+			expect(await screen.findByRole("button", { name: /run review/i })).toBeDisabled();
+			expect(
+				await screen.findByText("PR #1 is already closed or merged - there is nothing left to review."),
+			).toBeInTheDocument();
+		});
+
+		it("explains the dimmed Open terminal button before any review has run", async () => {
+			reviewsData = reviewsPayload("needs_review", "");
+			renderView([pr(1, "open")]);
+
+			// the run button is fine once the reviews load - only the terminal is gated
+			await waitFor(() => expect(screen.getByRole("button", { name: /run review/i })).toBeEnabled());
+			const terminal = screen.getByRole("button", { name: /open terminal/i });
+			expect(terminal).toBeDisabled();
+			const reason = await screen.findByText("The reviewer terminal opens once a review has run.");
+			expect(terminal).toHaveAttribute("aria-describedby", reason.id);
+		});
+
+		it("stays quiet when both controls are live", async () => {
+			renderView();
+			expect(await screen.findByRole("button", { name: /re-run review/i })).toBeEnabled();
+			expect(screen.getByRole("button", { name: /open terminal/i })).toBeEnabled();
+			expect(screen.queryByText(/is still a draft/)).toBeNull();
+			expect(screen.queryByText(/reviewer terminal opens/)).toBeNull();
+			expect(screen.queryByText("Draft")).toBeNull();
+		});
 	});
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DropdownMenu } from "radix-ui";
 import { Play, Shield, Terminal } from "lucide-react";
@@ -7,7 +7,14 @@ import { useSessionPRComments, type PRCommentGroup } from "../hooks/useSessionPR
 import { useInboxActions } from "../hooks/useInboxActions";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { approvalLabel, approvalProgress, prRef, providerFromPRURL, type ApprovalProgress } from "../lib/pr-display";
+import {
+	approvalLabel,
+	approvalProgress,
+	prRef,
+	prTitleLabel,
+	providerFromPRURL,
+	type ApprovalProgress,
+} from "../lib/pr-display";
 import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
 import { sortedPRs, type PullRequestFacts, type WorkspaceSession } from "../types/workspace";
 import { ApprovalMeter } from "./ApprovalMeter";
@@ -315,6 +322,10 @@ export function ReviewsView({
 						reviewStates.some((r) => r.status === "running") ||
 						reviewStates.every((r) => r.status === "ineligible")
 					}
+					runBlockedReason={runBlockedReason(reviewStates, prs, {
+						triggering: triggerReview.isPending,
+						loading: reviewsQuery.isLoading,
+					})}
 					terminalEnabled={Boolean(reviewerHandleId && onOpenReviewerTerminal)}
 					onTrigger={() => triggerReview.mutate()}
 					onOpenTerminal={() => reviewerHandleId && onOpenReviewerTerminal?.({ handleId: reviewerHandleId, harness })}
@@ -511,6 +522,7 @@ function ReviewerStrip({
 	notice,
 	runLabel,
 	runDisabled,
+	runBlockedReason,
 	terminalEnabled,
 	onTrigger,
 	onOpenTerminal,
@@ -521,11 +533,20 @@ function ReviewerStrip({
 	notice: string | null;
 	runLabel: string;
 	runDisabled: boolean;
+	/** Why Run review refuses, when the refusal is not self-evident from its label. */
+	runBlockedReason: string | null;
 	terminalEnabled: boolean;
 	onTrigger: () => void;
 	onOpenTerminal: () => void;
 }) {
 	const aggColor = TONE_COLOR[aggregate.tone];
+	// A disabled control that gives no reason is a dead end, so whichever control
+	// is refusing explains itself in one muted line under the row (and via its own
+	// hover title). Run review wins when both are blocked: no review has run, so
+	// the missing reviewer terminal is a consequence of it, not a separate gate.
+	const terminalBlockedReason = terminalEnabled ? null : TERMINAL_BLOCKED_REASON;
+	const blockedReason = runBlockedReason ?? terminalBlockedReason;
+	const reasonId = useId();
 	return (
 		<div
 			style={{
@@ -604,6 +625,8 @@ function ReviewerStrip({
 					<button
 						type="button"
 						disabled={runDisabled}
+						title={runBlockedReason ?? undefined}
+						aria-describedby={runBlockedReason ? reasonId : undefined}
 						onClick={onTrigger}
 						style={{
 							display: "inline-flex",
@@ -627,6 +650,8 @@ function ReviewerStrip({
 					<button
 						type="button"
 						disabled={!terminalEnabled}
+						title={terminalBlockedReason ?? undefined}
+						aria-describedby={blockedReason === terminalBlockedReason && terminalBlockedReason ? reasonId : undefined}
 						onClick={onOpenTerminal}
 						style={{
 							display: "inline-flex",
@@ -649,6 +674,11 @@ function ReviewerStrip({
 					</button>
 				</div>
 			</div>
+			{blockedReason && (
+				<p id={reasonId} style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: P.muted2 }}>
+					{blockedReason}
+				</p>
+			)}
 		</div>
 	);
 }
@@ -828,6 +858,9 @@ function PRBlock({
 	const ci = ciPill(block.facts?.ci);
 	const rv = block.review ? reviewVerdict(block.review) : null;
 	const conflict = block.facts?.mergeability === "conflicting";
+	// Draft is the state that keeps the AO reviewer off this PR, so the row has to
+	// show it - otherwise "Not run" looks like an idle reviewer rather than a gate.
+	const draft = block.facts?.state === "draft";
 	const threads = block.unresolved;
 
 	return (
@@ -879,8 +912,9 @@ function PRBlock({
 						</span>
 					)}
 				</div>
-				{(ci || rv || approval || conflict || threads.length > 0) && (
+				{(draft || ci || rv || approval || conflict || threads.length > 0) && (
 					<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+						{draft && <StatusPill color={P.muted2} label="Draft" />}
 						{ci && <StatusPill color={ci.color} label={ci.label} dot />}
 						{rv && <StatusPill color={TONE_COLOR[rv.tone]} label={rv.label} />}
 						{approval && <ApprovalPill progress={approval} />}
@@ -1532,6 +1566,61 @@ function reviewSessionRunAction(reviewStates: PRReviewState[], isTriggering: boo
 	if (isTriggering || reviewStates.some((r) => r.status === "running")) return "Reviewing…";
 	if (reviewStates.some((r) => r.status === "changes_requested" || r.latestRun)) return "Re-run review";
 	return "Run review";
+}
+
+/** Why the reviewer terminal cannot be opened - it only exists once a run has started it. */
+const TERMINAL_BLOCKED_REASON = "The reviewer terminal opens once a review has run.";
+
+/**
+ * Why "Run review" refuses, phrased for the human, or null when the button's own
+ * label already says it (a run in flight reads "Reviewing…"). Every gate in the
+ * button's `disabled` expression has a branch here: leaving one unexplained puts
+ * a dead control back in front of the user.
+ */
+function runBlockedReason(
+	reviewStates: PRReviewState[],
+	prs: PullRequestFacts[],
+	opts: { triggering: boolean; loading: boolean },
+): string | null {
+	if (opts.triggering || reviewStates.some((r) => r.status === "running")) return null;
+	if (reviewStates.length === 0) {
+		return opts.loading ? null : "AO has not read this session's pull requests yet, so there is nothing to review.";
+	}
+	if (!reviewStates.every((r) => r.status === "ineligible")) return null;
+	return ineligibleReason(reviewStates, prs);
+}
+
+/**
+ * Turn an all-ineligible plan into its cause. The backend marks a PR ineligible
+ * when it is draft, closed, merged, or missing the URL/head commit AO reviews
+ * against (`review.Plan`); the PR facts we already hold say which one it is.
+ */
+function ineligibleReason(reviewStates: PRReviewState[], prs: PullRequestFacts[]): string {
+	const stateByNumber = new Map(prs.map((pr) => [pr.number, pr.state]));
+	const draft: string[] = [];
+	const archived: string[] = [];
+	let unknown = 0;
+	for (const review of reviewStates) {
+		const label = prTitleLabel(providerFromPRURL(review.prUrl), review.prNumber);
+		const state = stateByNumber.get(review.prNumber);
+		if (state === "draft") draft.push(label);
+		else if (state === "merged" || state === "closed") archived.push(label);
+		else unknown += 1;
+	}
+	if (draft.length > 0 && archived.length === 0 && unknown === 0) {
+		return draft.length === 1
+			? `${draft[0]} is still a draft - AO reviews a pull request once it is marked ready for review.`
+			: `${joinLabels(draft)} are still drafts - AO reviews a pull request once it is marked ready for review.`;
+	}
+	if (archived.length > 0 && draft.length === 0 && unknown === 0) {
+		return `${joinLabels(archived)} ${archived.length === 1 ? "is" : "are"} already closed or merged - there is nothing left to review.`;
+	}
+	return "No pull request is ready for review - AO skips drafts, closed and merged PRs, and any PR whose head commit it has not read yet.";
+}
+
+function joinLabels(labels: string[]): string {
+	if (labels.length <= 1) return labels[0] ?? "";
+	return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 }
 
 // ---------------------------------------------------------------------------
