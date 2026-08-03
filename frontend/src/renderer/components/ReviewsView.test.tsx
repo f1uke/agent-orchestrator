@@ -323,7 +323,7 @@ describe("ReviewsView (merged reviews + comments)", () => {
 	});
 
 	// A draft PR is ineligible for AO review (backend `review.Plan`), so the run
-	// button is correctly refused — but a refusal with no reason is a dead control.
+	// button is correctly refused - but a refusal with no reason is a dead control.
 	describe("blocked reviewer controls say why", () => {
 		it("names the draft PR that keeps Run review disabled, and marks the row Draft", async () => {
 			reviewsData = reviewsPayload("ineligible", "");
@@ -355,7 +355,7 @@ describe("ReviewsView (merged reviews + comments)", () => {
 			reviewsData = reviewsPayload("needs_review", "");
 			renderView([pr(1, "open")]);
 
-			// the run button is fine once the reviews load — only the terminal is gated
+			// the run button is fine once the reviews load - only the terminal is gated
 			await waitFor(() => expect(screen.getByRole("button", { name: /run review/i })).toBeEnabled());
 			const terminal = screen.getByRole("button", { name: /open terminal/i });
 			expect(terminal).toBeDisabled();

@@ -859,7 +859,7 @@ function PRBlock({
 	const rv = block.review ? reviewVerdict(block.review) : null;
 	const conflict = block.facts?.mergeability === "conflicting";
 	// Draft is the state that keeps the AO reviewer off this PR, so the row has to
-	// show it — otherwise "Not run" looks like an idle reviewer rather than a gate.
+	// show it - otherwise "Not run" looks like an idle reviewer rather than a gate.
 	const draft = block.facts?.state === "draft";
 	const threads = block.unresolved;
 
@@ -1568,7 +1568,7 @@ function reviewSessionRunAction(reviewStates: PRReviewState[], isTriggering: boo
 	return "Run review";
 }
 
-/** Why the reviewer terminal cannot be opened — it only exists once a run has started it. */
+/** Why the reviewer terminal cannot be opened - it only exists once a run has started it. */
 const TERMINAL_BLOCKED_REASON = "The reviewer terminal opens once a review has run.";
 
 /**
