@@ -858,8 +858,9 @@ function PRBlock({
 	const ci = ciPill(block.facts?.ci);
 	const rv = block.review ? reviewVerdict(block.review) : null;
 	const conflict = block.facts?.mergeability === "conflicting";
-	// Draft is the state that keeps the AO reviewer off this PR, so the row has to
-	// show it - otherwise "Not run" looks like an idle reviewer rather than a gate.
+	// Draft no longer keeps the AO reviewer off this PR - it is reviewable - but the
+	// row still says so, because whether the work is still a draft changes how the
+	// human reads a review verdict on it.
 	const draft = block.facts?.state === "draft";
 	const threads = block.unresolved;
 
@@ -1592,30 +1593,25 @@ function runBlockedReason(
 
 /**
  * Turn an all-ineligible plan into its cause. The backend marks a PR ineligible
- * when it is draft, closed, merged, or missing the URL/head commit AO reviews
- * against (`review.Plan`); the PR facts we already hold say which one it is.
+ * when it is closed, merged, or missing the URL/head commit AO reviews against
+ * (`review.Plan`); the PR facts we already hold say which one it is. Draft is
+ * deliberately absent - a draft is reviewable, so blaming draft-ness here would
+ * name a cause that can no longer occur.
  */
 function ineligibleReason(reviewStates: PRReviewState[], prs: PullRequestFacts[]): string {
 	const stateByNumber = new Map(prs.map((pr) => [pr.number, pr.state]));
-	const draft: string[] = [];
 	const archived: string[] = [];
 	let unknown = 0;
 	for (const review of reviewStates) {
 		const label = prTitleLabel(providerFromPRURL(review.prUrl), review.prNumber);
 		const state = stateByNumber.get(review.prNumber);
-		if (state === "draft") draft.push(label);
-		else if (state === "merged" || state === "closed") archived.push(label);
+		if (state === "merged" || state === "closed") archived.push(label);
 		else unknown += 1;
 	}
-	if (draft.length > 0 && archived.length === 0 && unknown === 0) {
-		return draft.length === 1
-			? `${draft[0]} is still a draft - AO reviews a pull request once it is marked ready for review.`
-			: `${joinLabels(draft)} are still drafts - AO reviews a pull request once it is marked ready for review.`;
-	}
-	if (archived.length > 0 && draft.length === 0 && unknown === 0) {
+	if (archived.length > 0 && unknown === 0) {
 		return `${joinLabels(archived)} ${archived.length === 1 ? "is" : "are"} already closed or merged - there is nothing left to review.`;
 	}
-	return "No pull request is ready for review - AO skips drafts, closed and merged PRs, and any PR whose head commit it has not read yet.";
+	return "No pull request is ready for review - AO skips closed and merged PRs, and any PR whose head commit it has not read yet.";
 }
 
 function joinLabels(labels: string[]): string {
@@ -1644,14 +1640,9 @@ function mockReviewsResponse(session: WorkspaceSession): ReviewsResponse {
 		reviews: prs.map((pr, index) => {
 			const targetSha = `demo${pr.number}${index}`;
 			const reviewedAt = new Date(Date.now() - (index + 1) * 11 * 60 * 1000).toISOString();
-			const verdict =
-				pr.state === "draft"
-					? "ineligible"
-					: index === 0
-						? "approved"
-						: index === 1
-							? "changes_requested"
-							: "needs_review";
+			// Draft PRs are reviewable, so the preview spreads verdicts by position
+			// only - a draft demo PR shows a live reviewer state like any other.
+			const verdict = index === 0 ? "approved" : index === 1 ? "changes_requested" : "needs_review";
 			const latestRun =
 				verdict === "approved" || verdict === "changes_requested"
 					? {
@@ -1678,9 +1669,7 @@ function mockReviewsResponse(session: WorkspaceSession): ReviewsResponse {
 						? "up_to_date"
 						: verdict === "changes_requested"
 							? "changes_requested"
-							: verdict === "ineligible"
-								? "ineligible"
-								: "needs_review",
+							: "needs_review",
 				targetSha,
 				title: mockReviewTitle(pr.number),
 			};
@@ -1695,7 +1684,7 @@ function mockReviewTitle(prNumber: number): string {
 		case 320:
 			return "Reviews tab nests comment threads per PR";
 		case 321:
-			return "Draft child PR waits for parent review";
+			return "Draft PR gets an early reviewer pass";
 		default:
 			return `Demo pull request ${prNumber}`;
 	}
