@@ -18,7 +18,8 @@ const (
 	ReviewStateUpToDate StateStatus = "up_to_date"
 	// ReviewStateChangesRequested means AO requested changes on the PR's current head.
 	ReviewStateChangesRequested StateStatus = "changes_requested"
-	// ReviewStateIneligible means the PR is draft, closed, merged, or missing required facts.
+	// ReviewStateIneligible means the PR is closed, merged, or missing required facts.
+	// Draft is NOT ineligible: see the eligibility check in Plan.
 	ReviewStateIneligible StateStatus = "ineligible"
 )
 
@@ -46,7 +47,14 @@ func Plan(prs []domain.PullRequest, runs []domain.ReviewRun) []PRReviewState {
 			TargetSHA: pr.HeadSHA,
 			Status:    ReviewStateNeedsReview,
 		}
-		if pr.URL == "" || pr.HeadSHA == "" || pr.Draft || pr.Merged || pr.Closed {
+		// A DRAFT PR/MR is eligible. Getting reviewer feedback while the work is
+		// still a draft - before it is marked ready - is the point, not an accident:
+		// draft state blocks MERGING on both forges, never commenting, so the
+		// reviewer's `gh api .../reviews` (event COMMENT) and `glab mr note` post
+		// normally. Merged and closed PRs stay ineligible because there is nothing
+		// left to act on, and a PR with no URL or no head commit stays ineligible
+		// because AO has nothing to review against.
+		if pr.URL == "" || pr.HeadSHA == "" || pr.Merged || pr.Closed {
 			review.Status = ReviewStateIneligible
 			if run, ok := latest[review.PRURL+"\x00"+review.TargetSHA]; ok {
 				review.LatestRun = &run

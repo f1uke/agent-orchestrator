@@ -322,25 +322,44 @@ describe("ReviewsView (merged reviews + comments)", () => {
 		expect(await screen.findByText("No pull request opened yet.")).toBeInTheDocument();
 	});
 
-	// A draft PR is ineligible for AO review (backend `review.Plan`), so the run
-	// button is correctly refused - but a refusal with no reason is a dead control.
-	describe("blocked reviewer controls say why", () => {
-		it("names the draft PR that keeps Run review disabled, and marks the row Draft", async () => {
-			reviewsData = reviewsPayload("ineligible", "");
+	// A draft PR IS reviewable: getting reviewer feedback before marking the PR
+	// ready is the whole point. The row still says Draft - that is information the
+	// human needs, not a gate.
+	describe("a draft PR is reviewable", () => {
+		it("enables Run review for a draft-only PR set, with no blocked reason, and still marks the row Draft", async () => {
+			reviewsData = reviewsPayload("needs_review", "");
 			renderView([pr(1, "draft")]);
 
 			const run = await screen.findByRole("button", { name: /run review/i });
-			expect(run).toBeDisabled();
-			const reason = await screen.findByText(
-				"PR #1 is still a draft - AO reviews a pull request once it is marked ready for review.",
-			);
-			// the reason is programmatically tied to the control it explains
-			expect(run).toHaveAttribute("aria-describedby", reason.id);
-			expect(run).toHaveAttribute("title", reason.textContent);
-			// and the blocking state is visible on the PR row itself
+			await waitFor(() => expect(run).toBeEnabled());
+			// nothing explains a gate that no longer exists
+			expect(run).not.toHaveAttribute("aria-describedby");
+			expect(run).not.toHaveAttribute("title");
+			expect(screen.queryByText(/is still a draft/)).toBeNull();
+			expect(screen.queryByText(/AO skips drafts/)).toBeNull();
+			// but the PR row still shows it is a draft
 			expect(screen.getByText("Draft")).toBeInTheDocument();
 		});
 
+		it("actually fires the trigger request when Run review is clicked on a draft", async () => {
+			reviewsData = reviewsPayload("needs_review", "");
+			renderView([pr(1, "draft")]);
+
+			const run = await screen.findByRole("button", { name: /run review/i });
+			await waitFor(() => expect(run).toBeEnabled());
+			await userEvent.click(run);
+
+			await waitFor(() =>
+				expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/reviews/trigger", {
+					params: { path: { sessionId: "s1" } },
+				}),
+			);
+		});
+	});
+
+	// Merged/closed and unread-head-commit PRs are still refused - and a refusal
+	// with no reason is a dead control.
+	describe("blocked reviewer controls say why", () => {
 		it("says a closed PR has nothing left to review", async () => {
 			reviewsData = reviewsPayload("ineligible", "");
 			renderView([pr(1, "closed")]);
@@ -348,6 +367,21 @@ describe("ReviewsView (merged reviews + comments)", () => {
 			expect(await screen.findByRole("button", { name: /run review/i })).toBeDisabled();
 			expect(
 				await screen.findByText("PR #1 is already closed or merged - there is nothing left to review."),
+			).toBeInTheDocument();
+		});
+
+		// A draft CAN still be ineligible - when AO has not read its head commit yet.
+		// The reason must name THAT, never draft-ness: a draft is reviewable, so
+		// blaming the draft would send the human off to mark it ready for nothing.
+		it("blames the unread head commit, not draft-ness, when a draft is ineligible", async () => {
+			reviewsData = reviewsPayload("ineligible", "");
+			renderView([pr(1, "draft")]);
+
+			expect(await screen.findByRole("button", { name: /run review/i })).toBeDisabled();
+			expect(
+				await screen.findByText(
+					"No pull request is ready for review - AO skips closed and merged PRs, and any PR whose head commit it has not read yet.",
+				),
 			).toBeInTheDocument();
 		});
 
