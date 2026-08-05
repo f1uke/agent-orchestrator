@@ -927,7 +927,11 @@ type DiffContextResponse struct {
 	Truncated bool                 `json:"truncated"`
 }
 
-// DiffContextLineDTO is one classified code-context line.
+// DiffContextLineDTO is one classified code-context line: "context", "add" or
+// "del". A fourth kind, "hunk", is not a line of the file but the seam where the
+// diff skips lines — oldLine/newLine are the starts of the hunk that follows and
+// text is git's verbatim `@@ -a,b +c,d @@ section` header. Clients must render it
+// as a boundary, never as code.
 type DiffContextLineDTO struct {
 	Kind    string `json:"kind"`
 	OldLine int    `json:"oldLine"`

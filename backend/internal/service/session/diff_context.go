@@ -21,9 +21,11 @@ const maxFileLines = 2000
 // file"). Odd so the anchor sits centered with equal context above and below.
 const hunkContextWindow = 15
 
-// DiffContextLine is one classified line of returned code context.
+// DiffContextLine is one classified line of returned code context. The "hunk"
+// kind is not a line of the file: it marks a seam where the diff skips lines,
+// carrying the following hunk's start numbers and git's `@@` header as Text.
 type DiffContextLine struct {
-	Kind    string // "context" | "add" | "del"
+	Kind    string // "context" | "add" | "del" | "hunk"
 	OldLine int
 	NewLine int
 	Text    string

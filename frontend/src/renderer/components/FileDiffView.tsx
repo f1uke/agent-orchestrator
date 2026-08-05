@@ -58,7 +58,9 @@ export function FileDiffView({
 	// then the last line, so a comment always lands somewhere sensible.
 	const anchorIndex = useMemo(() => {
 		if (!lines.length) return -1;
-		const byNew = lines.findIndex((l) => l.newLine === thread.line);
+		// Skip hunk seams: their newLine is the following hunk's start, so one can
+		// collide with the comment's line and steal the anchor from the real row.
+		const byNew = lines.findIndex((l) => l.kind !== "hunk" && l.newLine === thread.line);
 		if (byNew >= 0) return byNew;
 		let lastAdd = -1;
 		lines.forEach((l, i) => {

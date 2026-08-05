@@ -19,6 +19,11 @@ const (
 	KindAdd Kind = "add"
 	// KindDel is a line removed from the old side (NewLine == 0).
 	KindDel Kind = "del"
+	// KindHunk is not a line of the file at all: it marks a seam where the diff
+	// SKIPS lines, so a renderer can show a boundary instead of butting two
+	// distant regions together. OldLine/NewLine are the starts of the hunk that
+	// follows and Text is the verbatim `@@ -a,b +c,d @@ section` header.
+	KindHunk Kind = "hunk"
 )
 
 // Line is one classified diff line with 1-based old/new line numbers (0 where
@@ -36,7 +41,7 @@ type Line struct {
 // newLine (e.g. the anchor is in an unchanged region far from any change).
 func HunkForLine(diff string, newLine int) ([]Line, bool) {
 	var found []Line
-	eachHunk(diff, func(body []Line) bool {
+	eachHunk(diff, func(_ hunk, body []Line) bool {
 		for _, l := range body {
 			// Only context and add lines exist on the new side; a del line
 			// carries NewLine == 0, so it can never match a 1-based target.
@@ -56,18 +61,52 @@ func HunkForLine(diff string, newLine int) ([]Line, bool) {
 // AllLines parses a single file's unified diff and returns every hunk's lines in
 // order. Used by the Files panel, which shows a whole file's diff rather than
 // the one hunk around a review-comment anchor.
+//
+// Wherever the diff skips lines — between two hunks, or before the first hunk
+// when it does not start at line 1 — a KindHunk marker is emitted. Without it
+// the caller would render two distant regions of the file as if they were
+// consecutive code. Hunks that continue each other with nothing skipped (which
+// `-U0` can produce) get no marker, and neither does a whole-file addition or
+// deletion, whose single hunk covers everything there is.
 func AllLines(diff string) []Line {
 	var out []Line
-	eachHunk(diff, func(body []Line) bool {
+	// Highest old/new line number emitted so far; 0 before the first hunk. A hunk
+	// body can end on a deletion (NewLine == 0), so track the max per side rather
+	// than reading the last line.
+	oldEnd, newEnd := 0, 0
+	eachHunk(diff, func(h hunk, body []Line) bool {
+		if h.skipsLinesAfter(oldEnd, newEnd) {
+			out = append(out, Line{Kind: KindHunk, OldLine: h.OldStart, NewLine: h.NewStart, Text: h.Header})
+		}
 		out = append(out, body...)
+		for _, l := range body {
+			oldEnd = max(oldEnd, l.OldLine)
+			newEnd = max(newEnd, l.NewLine)
+		}
 		return true
 	})
 	return out
 }
 
-// eachHunk parses each hunk body in a unified diff and hands it to visit, which
-// returns false to stop scanning.
-func eachHunk(diff string, visit func(body []Line) bool) {
+// hunk is one parsed `@@` header: where its body starts on each side, and the
+// header line verbatim (including git's trailing section heading).
+type hunk struct {
+	OldStart int
+	NewStart int
+	Header   string
+}
+
+// skipsLinesAfter reports whether any line of the file sits between the region
+// already emitted (ending at oldEnd/newEnd) and this hunk's start. A side whose
+// start is 0 does not exist in this diff — a new file has no old side, a deleted
+// file no new side — so it cannot skip anything.
+func (h hunk) skipsLinesAfter(oldEnd, newEnd int) bool {
+	return (h.OldStart > 0 && h.OldStart > oldEnd+1) || (h.NewStart > 0 && h.NewStart > newEnd+1)
+}
+
+// eachHunk parses each hunk of a unified diff and hands its header and body to
+// visit, which returns false to stop scanning.
+func eachHunk(diff string, visit func(h hunk, body []Line) bool) {
 	rows := strings.Split(diff, "\n")
 	i := 0
 	for i < len(rows) {
@@ -80,6 +119,7 @@ func eachHunk(diff string, visit func(body []Line) bool) {
 			i++
 			continue
 		}
+		head := hunk{OldStart: oldCur, NewStart: newCur, Header: rows[i]}
 		i++
 		body := make([]Line, 0, 16)
 		for i < len(rows) {
@@ -115,7 +155,7 @@ func eachHunk(diff string, visit func(body []Line) bool) {
 			}
 			i++
 		}
-		if !visit(body) {
+		if !visit(head, body) {
 			return
 		}
 	}

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -331,6 +332,88 @@ func TestWorkspaceFileDiff_DeletedFile(t *testing.T) {
 			t.Fatalf("want an all-deletions patch, saw %+v", l)
 		}
 	}
+}
+
+// TestWorkspaceFileDiff_MarksSkippedRegions is the end-to-end guard for the bug
+// where two distant regions of a file arrived butted together, so the reader
+// could not tell that ~130 lines had been skipped between them.
+func TestWorkspaceFileDiff_MarksSkippedRegions(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	rows := make([]string, 200)
+	for i := range rows {
+		rows[i] = fmt.Sprintf("line %d", i+1)
+	}
+	write := func() {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "wide.go"), []byte(strings.Join(rows, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit("init", "-q")
+	runGit("config", "user.email", "t@t")
+	runGit("config", "user.name", "t")
+	write()
+	runGit("add", "-A")
+	runGit("commit", "-qm", "base")
+	runGit("branch", "-M", "main")
+	runGit("checkout", "-qb", "feature/x")
+
+	// Two edits far apart: line 20 and line 160. With three lines of context each
+	// side, git emits two hunks with ~130 unchanged lines between them.
+	rows[19] = "line 20 EDITED"
+	rows[159] = "line 160 EDITED"
+	write()
+
+	fake := newFakeStore()
+	fake.putSessionWithWorkspace("s1", dir)
+	rec := fake.sessions["s1"]
+	rec.PRTarget = "main"
+	fake.sessions["s1"] = rec
+	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
+
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "wide.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var marks []DiffContextLine
+	for _, l := range res.Lines {
+		if l.Kind == "hunk" {
+			marks = append(marks, l)
+		}
+	}
+	// One before the first hunk (lines 1-16 skipped), one between the two hunks.
+	if len(marks) != 2 {
+		t.Fatalf("want 2 hunk markers, got %d in %+v", len(marks), res.Lines)
+	}
+	if marks[0].NewLine != 17 || marks[1].NewLine != 157 {
+		t.Fatalf("marker starts = %d, %d; want 17 and 157", marks[0].NewLine, marks[1].NewLine)
+	}
+	if !strings.HasPrefix(marks[1].Text, "@@ ") {
+		t.Fatalf("marker text = %q, want git's @@ header", marks[1].Text)
+	}
+	// The seam must land between the two edited regions, not anywhere else.
+	before, after := res.Lines[indexOfLine(res.Lines, marks[1])-1], res.Lines[indexOfLine(res.Lines, marks[1])+1]
+	if before.NewLine != 23 || after.NewLine != 157 {
+		t.Fatalf("seam = %+v ... %+v, want new 23 then new 157", before, after)
+	}
+}
+
+// indexOfLine finds a line by identity of its numbering + kind.
+func indexOfLine(lines []DiffContextLine, want DiffContextLine) int {
+	for i, l := range lines {
+		if l == want {
+			return i
+		}
+	}
+	return -1
 }
 
 // TestWorkspaceFileDiff_UntrackedFile is a regression guard for a bug only live
