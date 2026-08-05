@@ -41,4 +41,56 @@ describe("DiffRows", () => {
 		render(<DiffRows lines={lines} size="narrow" />);
 		expect(screen.queryByTestId("change-bar-0")).toBeNull();
 	});
+
+	it("renders no hunk separator when every line is adjacent", () => {
+		render(<DiffRows lines={lines} size="wide" />);
+		expect(screen.queryByTestId("hunk-separator")).toBeNull();
+	});
+
+	it("separates two distant regions, naming the range and how many lines are hidden", () => {
+		const gapped = [
+			{ kind: "context", oldLine: 13, newLine: 13, text: "  d := 5" },
+			{ kind: "context", oldLine: 14, newLine: 14, text: "  e := 6" },
+			{ kind: "hunk", oldLine: 80, newLine: 80, text: "@@ -80,5 +80,5 @@ func second() {" },
+			{ kind: "context", oldLine: 80, newLine: 80, text: "  p := 1" },
+		];
+		render(<DiffRows lines={gapped} size="wide" />);
+		const sep = screen.getByTestId("hunk-separator");
+		expect(sep).toHaveTextContent("@@ -80,5 +80,5 @@");
+		// git's section heading orients the reader without re-reading the code
+		expect(sep).toHaveTextContent("func second() {");
+		// lines 15..79 are skipped
+		expect(sep).toHaveTextContent("65 lines hidden");
+		// chrome, not content: no +/- sign glyph and no add/del row tint
+		expect(sep.textContent).not.toMatch(/[+-]\s*$/);
+	});
+
+	it("marks lines skipped before a diff that does not start at line 1", () => {
+		const midFile = [
+			{ kind: "hunk", oldLine: 40, newLine: 40, text: "@@ -40,3 +40,3 @@ func mid() {" },
+			{ kind: "context", oldLine: 40, newLine: 40, text: "  a := 1" },
+		];
+		render(<DiffRows lines={midFile} size="wide" />);
+		expect(screen.getByTestId("hunk-separator")).toHaveTextContent("39 lines hidden");
+	});
+
+	it("counts hidden lines from the old side when the new side is empty (deleted region)", () => {
+		const deleted = [
+			{ kind: "del", oldLine: 5, newLine: 0, text: "  gone" },
+			{ kind: "hunk", oldLine: 60, newLine: 0, text: "@@ -60,2 +0,0 @@" },
+			{ kind: "del", oldLine: 60, newLine: 0, text: "  also gone" },
+		];
+		render(<DiffRows lines={deleted} size="wide" />);
+		expect(screen.getByTestId("hunk-separator")).toHaveTextContent("54 lines hidden");
+	});
+
+	it("uses the singular for a one-line gap", () => {
+		const gapped = [
+			{ kind: "context", oldLine: 10, newLine: 10, text: "  a" },
+			{ kind: "hunk", oldLine: 12, newLine: 12, text: "@@ -12,1 +12,1 @@" },
+			{ kind: "context", oldLine: 12, newLine: 12, text: "  b" },
+		];
+		render(<DiffRows lines={gapped} size="wide" />);
+		expect(screen.getByTestId("hunk-separator")).toHaveTextContent("1 line hidden");
+	});
 });

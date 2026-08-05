@@ -101,6 +101,50 @@ describe("WorkspaceChangesView", () => {
 		expect(within(section("src/a.ts")).getByText("−1")).toBeInTheDocument();
 	});
 
+	// The bug this guards: two hunks 60 lines apart used to render butted
+	// together, so unrelated regions of a file read as one continuous block.
+	it("separates hunks that skip lines, and leaves an adjacent diff alone", async () => {
+		serve([file("gapped.ts"), file("adjacent.ts")]);
+		getMock.mockImplementation((url: string, opts: { params?: { query?: { path?: string } } }) => {
+			if (url.endsWith("/workspace/changes")) {
+				return Promise.resolve({
+					data: {
+						available: true,
+						targetBranch: "main",
+						targetSource: "pr",
+						truncated: false,
+						files: [file("gapped.ts"), file("adjacent.ts")],
+					},
+					error: undefined,
+				});
+			}
+			if (opts?.params?.query?.path === "gapped.ts") {
+				return Promise.resolve({
+					data: {
+						available: true,
+						truncated: false,
+						lines: [
+							{ kind: "context", text: "  a := 1", oldLine: 10, newLine: 10 },
+							{ kind: "add", text: "  b := 2", oldLine: 0, newLine: 11 },
+							{ kind: "hunk", text: "@@ -70,3 +71,3 @@ func later() {", oldLine: 70, newLine: 71 },
+							{ kind: "context", text: "  z := 9", oldLine: 70, newLine: 71 },
+						],
+					},
+					error: undefined,
+				});
+			}
+			return Promise.resolve({ data: diffBody, error: undefined });
+		});
+		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });
+
+		await screen.findByRole("region", { name: "gapped.ts" });
+		const sep = await within(section("gapped.ts")).findByTestId("hunk-separator");
+		expect(sep).toHaveTextContent("@@ -70,3 +71,3 @@");
+		expect(sep).toHaveTextContent("59 lines hidden");
+		await waitFor(() => expect(within(section("adjacent.ts")).getByText("after")).toBeInTheDocument());
+		expect(within(section("adjacent.ts")).queryByTestId("hunk-separator")).toBeNull();
+	});
+
 	// The rail's tree groups directories before files, so stacking in raw API
 	// order would make scrolling here and reading down the tree disagree.
 	it("stacks the files in the rail's tree order, not the order the API returned", async () => {

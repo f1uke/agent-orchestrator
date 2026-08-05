@@ -1209,16 +1209,57 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
  * A stand-in per-file diff for mock mode, so the stacked Changes view renders
  * without a daemon (`verify-renderer-ui-with-mock-data.md`). Long enough to make
  * sticky headers and scroll-spy observable while scrolling.
+ *
+ * Deliberately THREE hunks with real numeric gaps between them (lines 30-53 and
+ * 62-119 are skipped) and a first hunk that starts mid-file. A single contiguous
+ * block would look like a diff while quietly failing to exercise the case that
+ * matters here: what the viewer does where the diff skips lines.
  */
 export function mockWorkspaceFileDiff(path: string): DiffContextResponse {
 	const name = path.slice(path.lastIndexOf("/") + 1);
 	const lines: DiffContextResponse["lines"] = [];
-	for (let i = 1; i <= 26; i++) {
-		if (i === 7) lines.push({ kind: "del", text: `\tconst legacy = load("${name}");`, oldLine: i, newLine: 0 });
-		else if (i === 8)
-			lines.push({ kind: "add", text: `\tconst next = load("${name}", { strict: true });`, oldLine: 0, newLine: i });
-		else if (i === 9) lines.push({ kind: "add", text: "\tif (!next) return null;", oldLine: 0, newLine: i });
-		else lines.push({ kind: "context", text: `\t// line ${i} of ${name}`, oldLine: i, newLine: i });
-	}
+	// Old and new cursors are tracked separately, exactly as the backend parser
+	// does, so the numbering stays honest once a hunk has added a net line.
+	let oldN = 0;
+	let newN = 0;
+	const ctx = (count: number) => {
+		for (let i = 0; i < count; i++) {
+			lines.push({ kind: "context", text: `\t// line ${newN} of ${name}`, oldLine: oldN, newLine: newN });
+			oldN++;
+			newN++;
+		}
+	};
+	const del = (text: string) => {
+		lines.push({ kind: "del", text, oldLine: oldN, newLine: 0 });
+		oldN++;
+	};
+	const add = (text: string) => {
+		lines.push({ kind: "add", text, oldLine: 0, newLine: newN });
+		newN++;
+	};
+	const hunk = (header: string, oldStart: number, newStart: number) => {
+		lines.push({ kind: "hunk", text: header, oldLine: oldStart, newLine: newStart });
+		oldN = oldStart;
+		newN = newStart;
+	};
+
+	hunk("@@ -20,9 +20,10 @@ export function load(name: string) {", 20, 20);
+	ctx(6);
+	del(`\tconst legacy = read("${name}");`);
+	add(`\tconst next = read("${name}", { strict: true });`);
+	add("\tif (!next) return null;");
+	ctx(2);
+
+	hunk("@@ -54,8 +55,8 @@ export function refresh() {", 54, 55);
+	ctx(4);
+	del("\tcache.clear();");
+	add("\tcache.invalidate({ cascade: true });");
+	ctx(3);
+
+	hunk("@@ -120,6 +121,7 @@ export function teardown() {", 120, 121);
+	ctx(3);
+	add("\tlisteners.removeAll();");
+	ctx(3);
+
 	return { available: true, truncated: false, mode: "file", path, lines };
 }
