@@ -6637,6 +6637,10 @@ components:
           type: string
         targetBranch:
           type: string
+        targetFetch:
+          type: string
+        targetFetchError:
+          type: string
         targetSource:
           type: string
         truncated:

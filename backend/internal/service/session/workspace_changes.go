@@ -128,6 +128,13 @@ type WorkspaceChangesResult struct {
 	MergeBase    string
 	Files        []ChangedFile
 	Truncated    bool
+	// TargetFetch reports how fresh the target branch's remote-tracking ref is
+	// (one of the TargetFetch* constants), and TargetFetchError carries the
+	// reason when it is TargetFetchFailed. Empty means there is no remote to be
+	// behind. Without this a diff measured against refs nobody refreshed looks
+	// exactly like a correct one.
+	TargetFetch      string
+	TargetFetchError string
 }
 
 // WorkspaceChanges lists the files differing between the session's branch and
@@ -160,12 +167,20 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 	if branch == "" {
 		return WorkspaceChangesResult{Reason: ChangesNoTargetBranch}, nil
 	}
+	// Refresh the target's remote-tracking ref before reading it. This does not
+	// block: it returns immediately with the freshness of what is on disk, and
+	// the diff below is computed from whatever refs exist right now. A branch
+	// that moved on the forge lands on the next poll rather than stalling this
+	// render behind the network.
+	fetchStatus, fetchErr := s.refreshTarget(ctx, workspace, branch)
+
 	ref, ok := resolveBranchRef(ctx, workspace, branch)
 	if !ok {
 		// The branch is named but does not exist in this worktree (never fetched,
 		// or renamed upstream). Naming it beats a bare "nothing to compare".
 		return WorkspaceChangesResult{
 			Reason: ChangesNoTargetBranch, TargetBranch: branch, TargetSource: source,
+			TargetFetch: fetchStatus, TargetFetchError: fetchErr,
 		}, nil
 	}
 	baseOut, err := gitOutput(ctx, workspace, "merge-base", ref, "HEAD")
@@ -177,12 +192,14 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 		//nolint:nilerr // intentional: an unrelated history degrades, it is not an error
 		return WorkspaceChangesResult{
 			Reason: ChangesNoTargetBranch, TargetBranch: branch, TargetSource: source,
+			TargetFetch: fetchStatus, TargetFetchError: fetchErr,
 		}, nil
 	}
 	mergeBase := strings.TrimSpace(string(baseOut))
 
 	res := WorkspaceChangesResult{
 		Available: true, TargetBranch: branch, TargetSource: source, MergeBase: mergeBase,
+		TargetFetch: fetchStatus, TargetFetchError: fetchErr,
 	}
 
 	// Diffing mergeBase against the WORKING TREE (no second ref) is what makes
@@ -267,9 +284,22 @@ func (s *Service) resolveTargetBranch(ctx context.Context, rec domain.SessionRec
 }
 
 // resolveBranchRef finds a ref that actually exists for the named branch,
-// preferring the local branch and falling back to its origin tracking ref.
+// preferring the REMOTE-TRACKING ref over the local branch.
+//
+// The order is the whole correctness of this view. `refs/heads/<branch>` in a
+// project repo is a human's personal checkout of the integration branch, which
+// only advances when they run `git pull`, while AO cuts every session worktree
+// from `origin/<branch>` (see gitworktree's baseRefCandidates). Measuring
+// against the local ref therefore bills every commit that landed in between to
+// this session — other people's already-merged work, shown as though the worker
+// wrote it. gitworktree's syncBaseRefCandidates already resolves the base this
+// way, for this reason; this path simply did not follow it.
+//
+// The local branch remains the fallback so a repository with no remote (or a
+// branch that has never been fetched) still diffs. The bare name comes last so
+// a qualified target like "upstream/main" still resolves.
 func resolveBranchRef(ctx context.Context, workspace, branch string) (string, bool) {
-	for _, cand := range []string{branch, "origin/" + branch, "refs/remotes/origin/" + branch} {
+	for _, cand := range []string{"refs/remotes/origin/" + branch, "refs/heads/" + branch, branch} {
 		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", cand+"^{commit}"); err == nil {
 			return cand, true
 		}

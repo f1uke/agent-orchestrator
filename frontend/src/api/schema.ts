@@ -2427,6 +2427,8 @@ export interface components {
             mergeBase?: string;
             reason?: string;
             targetBranch?: string;
+            targetFetch?: string;
+            targetFetchError?: string;
             targetSource?: string;
             truncated: boolean;
         };

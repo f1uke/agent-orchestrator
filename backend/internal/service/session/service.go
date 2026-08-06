@@ -138,6 +138,10 @@ type Service struct {
 	// live session. The read model exposes IdleCloseAt = idleReference + this so
 	// the board can count down to suspension. 0 (disabled) omits IdleCloseAt.
 	idleCloseTTL time.Duration
+	// targetFetch throttles the Changes panel's read-only refresh of a session's
+	// target branch. Zero value ready; deliberately a field rather than a package
+	// global so two services in one test process cannot share throttle state.
+	targetFetch targetFetcher
 }
 
 // New wires a controller-facing session service over an internal session Manager.

@@ -140,6 +140,46 @@ describe("FilesPanel", () => {
 		expect(screen.queryByText(/vs main/)).not.toBeInTheDocument();
 	});
 
+	// A diff measured against a ref that could not be refreshed looks exactly
+	// like a correct one. The user has to be able to tell them apart, or the
+	// panel is confidently wrong.
+	it("marks the diff when the target branch could not be refreshed", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			truncated: false,
+			targetFetch: "failed",
+			targetFetchError: "fatal: could not read Username for 'https://example.invalid'",
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		expect(await screen.findByLabelText("Could not refresh main")).toBeInTheDocument();
+	});
+
+	it("stays quiet when the target branch is current", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			truncated: false,
+			targetFetch: "current",
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+		// A badge on every healthy render is noise that trains the eye to skip
+		// the one that matters.
+		expect(screen.queryByLabelText(/Could not refresh/)).not.toBeInTheDocument();
+	});
+
+	// A repository with no remote has nothing to be behind, so it must not wear
+	// a "could not refresh" warning either.
+	it("stays quiet when there is no remote at all", async () => {
+		respondWith({ available: true, targetBranch: "main", truncated: false, files: [file()] });
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+		expect(screen.queryByLabelText(/Could not refresh/)).not.toBeInTheDocument();
+	});
+
 	it("shows a cleaned-up worktree as its own state, not an error", async () => {
 		respondWith({ available: false, reason: "no_workspace", files: [], truncated: false });
 		render(<FilesPanel sessionId="s1" />, { wrapper });
