@@ -55,10 +55,29 @@ type PRCheckObservation struct {
 
 // PRCommentObservation is one review comment observed on the PR.
 type PRCommentObservation struct {
-	ID       string
-	Author   string
+	ID     string
+	Author string
+	// ThreadID is the provider's review-thread identifier this comment belongs to.
+	// Several comments share it: a thread is one conversation the human sees as a
+	// single open item on the forge, so consumers that count or list review
+	// feedback must group by it rather than treating each comment as its own item.
+	// Empty for observations that predate review threads, which carry one comment
+	// per thread.
+	ThreadID string
 	File     string
 	Line     int
 	Body     string
 	Resolved bool
+	// SelfReply is true when the comment is OUR side replying on a thread that
+	// already existed — authored by the PR author (in AO's worker model, the
+	// identity the worker replies with) and not the note that opened the thread. It
+	// is our own reply, not feedback to address: it must never be presented back to
+	// the worker and must never count as review work. The note that OPENS a thread
+	// is never a self reply, even under our identity, because the human can review
+	// their own worker's PR from the very account that opened it.
+	SelfReply bool
+	// System is true when the provider marks the note as auto-generated activity
+	// (e.g. GitLab's "changed this line in version N of the diff") rather than
+	// human-authored feedback.
+	System bool
 }
