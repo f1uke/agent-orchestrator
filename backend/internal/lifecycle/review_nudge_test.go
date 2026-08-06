@@ -487,3 +487,24 @@ func TestPRObservation_ThreadlessCommentsEachCount(t *testing.T) {
 		t.Fatalf("threadless comments must each count, got %v", msg.msgs)
 	}
 }
+
+// TestPRObservation_CommentWithoutAnIDNudgesOnceOnly exercises the identity
+// fallback: every provider supplies a stable note id today, but if one ever stops,
+// the nudge must degrade to "once" rather than repeating forever (or, worse, being
+// suppressed because an empty id is indistinguishable from an unset mark entry).
+func TestPRObservation_CommentWithoutAnIDNudgesOnceOnly(t *testing.T) {
+	m, st, msg := newManager()
+	st.sessions["mer-1"] = autoNudgeSession("mer-1")
+
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Comments: []ports.PRCommentObservation{
+		{Author: "alice", File: "handler.go", Line: 75, Body: "guard this nil"},
+	}}
+	for i := 0; i < 3; i++ {
+		if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("an id-less comment must nudge exactly once, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+}
