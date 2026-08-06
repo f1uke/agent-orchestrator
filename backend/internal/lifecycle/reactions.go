@@ -211,28 +211,20 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			nudges = append(nudges, pendingNudge{key: "ci:" + o.URL + ":" + ch.Name, sig: ch.CommitHash + ":" + ch.LogTail, msg: msg, maxAttempts: 0})
 		}
 	}
-	// Auto-nudge the worker when its PR has unresolved human review comments (or
-	// a changes-requested decision) — but only when this session opts in: a
-	// per-session override wins, otherwise the global default. Dispatch is
-	// otherwise manual (Comments tab / Send-to-worker). The observer still
-	// fetches and persists these comments regardless (for that tab and for
-	// merge-readiness gating).
+	// Auto-nudge the worker when its PR carries human review feedback it has not
+	// been told about yet (see review_nudge.go for what counts and why "unresolved"
+	// is not the trigger) — but only when this session opts in: a per-session
+	// override wins, otherwise the global default. Dispatch is otherwise manual
+	// (Comments tab / Send-to-worker). The observer still fetches and persists these
+	// comments regardless (for that tab and for merge-readiness gating).
 	effective := m.autoNudgeDefault()
 	if rec.AutoNudgeComments != nil {
 		effective = *rec.AutoNudgeComments
 	}
-	if effective && (o.Review == domain.ReviewChangesRequest || hasUnresolvedComments(o.Comments)) {
-		items, sig := reviewContent(o.Comments)
-		msg := m.renderNudge(messagetemplates.NameReviewCommentDispatch, messagetemplates.ReviewCommentData{
-			PRIdentity: ident,
-			PRURL:      domain.SanitizeControlChars(o.URL),
-			Count:      len(items),
-			Comments:   items,
-		})
-		if sig == "" {
-			sig = string(o.Review)
+	if effective {
+		if err := m.queueReviewCommentNudge(ctx, o, ident, &nudges); err != nil {
+			return err
 		}
-		nudges = append(nudges, pendingNudge{key: "review:" + o.URL, sig: sig, msg: msg, maxAttempts: reviewMaxNudge})
 	}
 	// Suppress the merge-conflict nudge when the mergeability is stale — preserved
 	// from the local DB row on a review-only refresh or a failed metadata fetch —
@@ -630,25 +622,54 @@ func scmToPRObservation(o ports.SCMObservation) ports.PRObservation {
 			LogTail:    logTail,
 		})
 	}
+	// "Our side" is the PR author: in AO's worker model the worker opens the PR and
+	// replies to review threads with the same SCM token, so the PR author is the
+	// identity its own replies carry. The observer's auto-resolve path uses the same
+	// definition. Empty when the provider did not report an author, in which case no
+	// comment is claimed as ours rather than guessing.
+	self := strings.TrimSpace(o.PR.Author)
 	for _, th := range o.Review.Threads {
 		if th.Resolved || th.IsBot {
 			continue
 		}
-		for _, c := range th.Comments {
+		opener := threadOpener(th)
+		for i, c := range th.Comments {
 			if c.IsBot {
 				continue
 			}
 			pr.Comments = append(pr.Comments, ports.PRCommentObservation{
-				ID:       c.ID,
-				Author:   c.Author,
-				File:     th.Path,
-				Line:     th.Line,
-				Body:     c.Body,
-				Resolved: th.Resolved,
+				ID:        c.ID,
+				Author:    c.Author,
+				ThreadID:  th.ID,
+				File:      th.Path,
+				Line:      th.Line,
+				Body:      c.Body,
+				Resolved:  th.Resolved,
+				SelfReply: i != opener && self != "" && strings.EqualFold(strings.TrimSpace(c.Author), self),
+				System:    c.System,
 			})
 		}
 	}
 	return pr
+}
+
+// threadOpener is the index of the note that STARTED a review thread, skipping
+// provider system notes.
+//
+// The opener is never treated as our own reply even when it carries our identity.
+// The PR author and the human running AO can be the same SCM account (the worker
+// opens the PR with the human's token), so authorship alone cannot tell "the worker
+// replied on a thread" from "the human left a review comment on their own worker's
+// PR". Position can: a reply lands on a thread that already exists, while feedback
+// opens one. Getting this wrong in the other direction would silently stop nudging
+// a worker whose reviewer is the account that owns the PR.
+func threadOpener(th ports.SCMReviewThreadObservation) int {
+	for i, c := range th.Comments {
+		if !c.System {
+			return i
+		}
+	}
+	return -1
 }
 
 // ApplyTrackerFacts reacts to a fetched Tracker issue observation. It owns the
@@ -767,39 +788,6 @@ func firstFailedCheck(checks []ports.PRCheckObservation) (ports.PRCheckObservati
 		}
 	}
 	return ports.PRCheckObservation{}, false
-}
-
-func hasUnresolvedComments(comments []ports.PRCommentObservation) bool {
-	for _, c := range comments {
-		if !c.Resolved {
-			return true
-		}
-	}
-	return false
-}
-
-// reviewContent turns the unresolved review comments into the template's
-// per-comment items (file:line + quoted body, so the worker knows where to make
-// each change and reply) and the dedup signature. File and Body are
-// attacker-influenced (anyone who can comment on the PR) and get pasted into the
-// agent's live pane, so both are stripped of control/escape chars; the signature
-// is built from comment IDs, not bodies, so dedup is unaffected.
-func reviewContent(comments []ports.PRCommentObservation) ([]messagetemplates.ReviewCommentItem, string) {
-	items := make([]messagetemplates.ReviewCommentItem, 0, len(comments))
-	ids := make([]string, 0, len(comments))
-	for _, c := range comments {
-		if c.Resolved {
-			continue
-		}
-		items = append(items, messagetemplates.ReviewCommentItem{
-			Index: len(items) + 1,
-			File:  domain.SanitizeControlChars(c.File),
-			Line:  c.Line,
-			Body:  domain.SanitizeControlChars(c.Body),
-		})
-		ids = append(ids, c.ID)
-	}
-	return items, strings.Join(ids, ",")
 }
 
 // renderNudge renders a nudge template, logging (but tolerating) a failed
