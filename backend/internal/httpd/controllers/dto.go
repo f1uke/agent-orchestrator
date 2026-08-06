@@ -1024,6 +1024,14 @@ type WorkspaceChangesResponse struct {
 	MergeBase    string           `json:"mergeBase,omitempty"`
 	Files        []ChangedFileDTO `json:"files"`
 	Truncated    bool             `json:"truncated"`
+	// TargetFetch reports how fresh the target branch's remote-tracking ref is:
+	// "current" (refreshed from the remote just now), "refreshing" (a refresh is
+	// in flight, so this diff may still move), or "failed" (offline, auth, or
+	// the branch is gone from the remote — the diff is the best answer from
+	// known refs and may be out of date). Empty when the repository has no
+	// remote to be behind. TargetFetchError carries the reason for "failed".
+	TargetFetch      string `json:"targetFetch,omitempty"`
+	TargetFetchError string `json:"targetFetchError,omitempty"`
 }
 
 // ChangedFileDTO is one changed file in the Changes list.
@@ -1059,13 +1067,15 @@ func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceCh
 		})
 	}
 	return WorkspaceChangesResponse{
-		Available:    res.Available,
-		Reason:       res.Reason,
-		TargetBranch: res.TargetBranch,
-		TargetSource: res.TargetSource,
-		MergeBase:    res.MergeBase,
-		Files:        files,
-		Truncated:    res.Truncated,
+		Available:        res.Available,
+		Reason:           res.Reason,
+		TargetBranch:     res.TargetBranch,
+		TargetSource:     res.TargetSource,
+		MergeBase:        res.MergeBase,
+		Files:            files,
+		Truncated:        res.Truncated,
+		TargetFetch:      res.TargetFetch,
+		TargetFetchError: res.TargetFetchError,
 	}
 }
 

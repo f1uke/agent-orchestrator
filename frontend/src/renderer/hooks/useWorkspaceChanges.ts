@@ -26,7 +26,16 @@ async function fetchWorkspaceChanges(sessionId: string): Promise<WorkspaceChange
  * triggers, so nothing invalidates this when the agent writes a file. Rather
  * than poll every open session, the panel refetches when it is remounted or the
  * window regains focus, and offers an explicit refresh control.
+ *
+ * The one exception is `targetFetch: "refreshing"`. Opening the panel starts a
+ * background refresh of the target branch on the daemon, which never blocks the
+ * response — so the first payload is computed from the refs already on disk and
+ * the corrected diff only exists on a LATER request. Without this short poll the
+ * fetch would land into an empty room and the user would keep reading the stale
+ * answer until they happened to click refresh.
  */
+const REFRESHING_POLL_MS = 1_000;
+
 export function useWorkspaceChanges(sessionId?: string, enabled = true) {
 	return useQuery({
 		queryKey: workspaceChangesQueryKey(sessionId),
@@ -35,6 +44,7 @@ export function useWorkspaceChanges(sessionId?: string, enabled = true) {
 			usePreviewData ? Promise.resolve(mockWorkspaceChanges(sessionId!)) : fetchWorkspaceChanges(sessionId!),
 		refetchOnWindowFocus: true,
 		refetchOnMount: "always" as const,
+		refetchInterval: (query) => (query.state.data?.targetFetch === "refreshing" ? REFRESHING_POLL_MS : false),
 		staleTime: 5_000,
 		retry: 1,
 	});

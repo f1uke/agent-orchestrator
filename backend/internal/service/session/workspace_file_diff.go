@@ -49,6 +49,11 @@ func (s *Service) WorkspaceFileDiff(ctx context.Context, id domain.SessionID, re
 	if branch == "" {
 		return DiffContextResult{Mode: "file", Path: safePath}, nil
 	}
+	// Same non-blocking refresh the list does, and for the same reason: opening a
+	// row must not show hunks measured against a different (staler) target than
+	// the list that offered it. Throttling is shared, so this is normally free.
+	s.refreshTarget(ctx, workspace, branch)
+
 	ref, ok := resolveBranchRef(ctx, workspace, branch)
 	if !ok {
 		return DiffContextResult{Mode: "file", Path: safePath}, nil

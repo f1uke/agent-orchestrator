@@ -1,4 +1,4 @@
-import { FileText, FolderOpen, GitBranch, List, ListTree, RefreshCw, Search } from "lucide-react";
+import { FileText, FolderOpen, GitBranch, List, ListTree, RefreshCw, Search, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiErrorMessage } from "../lib/api-client";
@@ -185,7 +185,12 @@ export function FilesPanel({
 							additions={files.reduce((n, f) => n + (f.binary ? 0 : f.additions), 0)}
 							deletions={files.reduce((n, f) => n + (f.binary ? 0 : f.deletions), 0)}
 							onRefresh={() => void query.refetch()}
-							refreshing={query.isFetching}
+							// The spinner covers the daemon's background refresh too, not just
+							// this request: while the target branch is being fetched the numbers
+							// on screen can still move, and a still icon would claim otherwise.
+							refreshing={query.isFetching || data.targetFetch === "refreshing"}
+							fetchState={data.targetFetch}
+							fetchError={data.targetFetchError}
 						/>
 						{files.length === 0 ? (
 							<EmptyState
@@ -430,6 +435,8 @@ function SummaryLine({
 	deletions,
 	onRefresh,
 	refreshing,
+	fetchState,
+	fetchError,
 }: {
 	branch?: string;
 	inferred: boolean;
@@ -438,6 +445,8 @@ function SummaryLine({
 	deletions: number;
 	onRefresh: () => void;
 	refreshing: boolean;
+	fetchState?: string;
+	fetchError?: string;
 }) {
 	return (
 		<div className="files-panel__summary">
@@ -448,6 +457,7 @@ function SummaryLine({
 				vs {branch}
 				{inferred ? <span className="files-panel__inferred">*</span> : null}
 			</span>
+			<StaleMarker branch={branch} state={fetchState} error={fetchError} />
 			<span className="files-panel__sep">·</span>
 			<span className="files-panel__count">
 				{count} {count === 1 ? "file" : "files"}
@@ -465,6 +475,38 @@ function SummaryLine({
 				<RefreshCw aria-hidden="true" className={cn("h-3 w-3", refreshing && "animate-spin")} />
 			</button>
 		</div>
+	);
+}
+
+/**
+ * The freshness marker on the comparison branch.
+ *
+ * A diff measured against a ref nobody could refresh looks exactly like a
+ * correct one, so "could not refresh" has to be visible or the panel is
+ * confidently wrong. Only the degraded state is marked: a successful refresh is
+ * the expectation, and a badge saying "current" on every render would be noise
+ * that trains the eye to skip the badge that matters. Nothing is shown for a
+ * repository with no remote either — it has nothing to be behind.
+ */
+function StaleMarker({ branch, state, error }: { branch?: string; state?: string; error?: string }) {
+	if (state !== "failed") return null;
+	const target = branch || "the target branch";
+	return (
+		<SimpleTooltip
+			label={
+				// Width-capped here rather than on the shared TooltipContent: git's
+				// message is one long unbroken line (a remote URL or a filesystem
+				// path), so an uncapped bubble stretches clear across the window.
+				<span className="files-panel__stale-tip">
+					Could not refresh {target} from origin, so this diff may be out of date.
+					{error ? <span className="files-panel__stale-detail">{error}</span> : null}
+				</span>
+			}
+		>
+			<span className="files-panel__stale" role="status" aria-label={`Could not refresh ${target}`}>
+				<TriangleAlert aria-hidden="true" className="h-3 w-3" />
+			</span>
+		</SimpleTooltip>
 	);
 }
 

@@ -1178,6 +1178,31 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--fg-passive);
 }
 
+/* "This diff could not be refreshed" — amber, the same warning weight the
+   board uses, sized to sit inline with the 11px comparison line. */
+.files-panel__stale {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	color: var(--amber);
+}
+
+.files-panel__stale-tip {
+	display: block;
+	max-width: 260px;
+}
+
+.files-panel__stale-detail {
+	display: block;
+	margin-top: 3px;
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	/* git reports one long unbroken token (a URL or an absolute path); without
+	   this it refuses to wrap and drags the bubble off-panel. */
+	overflow-wrap: anywhere;
+	opacity: 0.8;
+}
+
 .files-panel__sep {
 	flex: none;
 	color: var(--fg-passive);
