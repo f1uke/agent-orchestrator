@@ -15,6 +15,7 @@ import (
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
+	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
 )
 
@@ -28,6 +29,7 @@ type APIDeps struct {
 	PRs                prsvc.ActionManager
 	Reviews            reviewsvc.Manager
 	Smoke              smokesvc.Manager
+	Sim                simsvc.Manager
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -60,6 +62,7 @@ type API struct {
 	prs           *controllers.PRsController
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
+	sim           *controllers.SimController
 	notifications *controllers.NotificationsController
 	activity      *controllers.ActivityController
 	imports       *controllers.ImportController
@@ -89,6 +92,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
+		sim:           &controllers.SimController{Svc: deps.Sim},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -119,6 +123,7 @@ func (a *API) Register(root chi.Router) {
 			a.prs.Register(r)
 			a.reviews.Register(r)
 			a.smoke.Register(r)
+			a.sim.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)

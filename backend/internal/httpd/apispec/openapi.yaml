@@ -2669,6 +2669,116 @@ paths:
       summary: Send a message to a running session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/sim-leases:
+    post:
+      operationId: acquireSimLease
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcquireSimLeaseInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimLeaseResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Claim an iOS Simulator for this session, or renew the session's own
+        lease
+      tags:
+      - sim
+  /api/v1/sessions/{sessionId}/sim-leases/{udid}:
+    delete:
+      operationId: releaseSimLease
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseSimLeaseResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Release this session's lease on an iOS Simulator
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/smoke-checks:
     get:
       operationId: listSmokeChecks
@@ -4016,6 +4126,31 @@ paths:
       summary: Replace the spawn-confirmation gate setting
       tags:
       - settings
+  /api/v1/sim/leases:
+    get:
+      operationId: listSimLeases
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSimLeasesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List every live iOS Simulator device lease on this machine
+      tags:
+      - sim
 components:
   schemas:
     APIError:
@@ -4035,6 +4170,19 @@ components:
       - error
       - code
       - message
+      type: object
+    AcquireSimLeaseInput:
+      properties:
+        ttlSeconds:
+          description: How long to hold it, in seconds. Omit for the 10 minute default;
+            the caller may hold for as little as a second (one gesture) and at most
+            an hour.
+          type: integer
+        udid:
+          description: Simulator udid to claim (case-insensitive).
+          type: string
+      required:
+      - udid
       type: object
     ActivityDetail:
       properties:
@@ -5084,6 +5232,15 @@ components:
       required:
       - sessions
       type: object
+    ListSimLeasesResponse:
+      properties:
+        leases:
+          items:
+            $ref: '#/components/schemas/SimLease'
+          type: array
+      required:
+      - leases
+      type: object
     ListSmokeChecksResponse:
       properties:
         checks:
@@ -5462,6 +5619,14 @@ components:
       required:
       - enabled
       - graceMinutes
+      type: object
+    ReleaseSimLeaseResponse:
+      properties:
+        released:
+          description: True when the caller's lease was dropped.
+          type: boolean
+      required:
+      - released
       type: object
     RemoveProjectResult:
       properties:
@@ -6231,6 +6396,31 @@ components:
           type: string
       required:
       - base
+      type: object
+    SimLease:
+      properties:
+        acquiredAt:
+          format: date-time
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+        sessionId:
+          type: string
+        udid:
+          type: string
+      required:
+      - udid
+      - sessionId
+      - acquiredAt
+      - expiresAt
+      type: object
+    SimLeaseResponse:
+      properties:
+        lease:
+          $ref: '#/components/schemas/SimLease'
+      required:
+      - lease
       type: object
     SmokeAuthoredCaseInput:
       properties:

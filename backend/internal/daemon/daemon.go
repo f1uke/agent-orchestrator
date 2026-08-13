@@ -36,6 +36,7 @@ import (
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
+	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -279,6 +280,7 @@ func Run() error {
 		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
+		Sim:                simsvc.New(store),
 		Notifications:      notifier,
 		NotificationStream: notificationHub,
 		ActivityFeed:       activityHub,

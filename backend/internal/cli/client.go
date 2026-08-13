@@ -25,6 +25,10 @@ type apiError struct {
 	Message   string `json:"message"`
 	Code      string `json:"code"`
 	RequestID string `json:"requestId"`
+	// Details carries the envelope's structured payload (e.g. which session
+	// holds a leased simulator) so a command can render a better message than
+	// the generic one without a second, racy call.
+	Details map[string]any `json:"details"`
 }
 
 type apiResponseError struct {
