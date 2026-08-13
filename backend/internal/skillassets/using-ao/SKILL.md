@@ -16,6 +16,7 @@ trigger: Using the ao CLI in an AO workspace: spawning workers, managing session
 | `orchestrator` | List orchestrator sessions | Viewing which sessions are orchestrators | [commands/orchestrator.md](commands/orchestrator.md) |
 | `review` | Submit a reviewer result for a worker's PR | Completing a code review loop | [commands/review.md](commands/review.md) |
 | `send` | Send a message to a running agent session | Correcting or directing a live agent | [commands/send.md](commands/send.md) |
+| `sim` | List local iOS Simulators and capture a booted one's screen | Checking how an iOS screen actually looks (macOS) | [commands/sim.md](commands/sim.md) |
 | `preview` | Open a URL in the desktop browser panel | Demoing a local server or file from inside a session | [commands/preview.md](commands/preview.md) | <!-- web-ui -->
 | `start` | Fetch (if needed) and open the AO desktop app | Launching the app | [commands/start.md](commands/start.md) |
 | `stop` | Stop the AO daemon | Shutting down AO | [commands/stop.md](commands/stop.md) |
