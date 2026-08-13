@@ -215,6 +215,14 @@ type SessionWorktree struct {
 	State        string
 }
 
+type SimLease struct {
+	Udid       string
+	SessionID  domain.SessionID
+	AcquiredAt time.Time
+	ExpiresAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type SmokeCheck struct {
 	ID         string
 	SessionID  domain.SessionID

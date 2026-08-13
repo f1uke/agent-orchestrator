@@ -25,9 +25,11 @@ import (
 // another AO session may be driving the same simulator, so every capture says
 // so rather than pretending the frame is ours alone.
 //
-// A device lease lands in the next slice. Every udid this file resolves goes
-// through resolveSimDevice — that one function is where the lease check will
-// hook in, so nothing else here needs to change for it.
+// Device leases live alongside these commands in sim_lease.go: `ao sim claim`
+// and `ao sim release` are the write half, and both read-only commands here
+// REPORT lease state without needing one. A screenshot cannot corrupt anyone's
+// gesture, and cheap unblocked screenshots are the whole point of the command,
+// so requiring a lease to take one would buy nothing and cost a great deal.
 
 const (
 	simctlBinary   = "xcrun"
@@ -55,6 +57,9 @@ type simDevice struct {
 	State             string `json:"state"`
 	Available         bool   `json:"available"`
 	Default           bool   `json:"default"`
+	// Lease is what AO knows about who is driving this device. It is never
+	// "free": see simLeaseUnknownReason.
+	Lease simLeaseView `json:"lease"`
 }
 
 func (d simDevice) booted() bool { return d.State == simStateBooted }
@@ -90,6 +95,8 @@ type simShotResult struct {
 	Bytes             int64  `json:"bytes"`
 	CapturedAt        string `json:"capturedAt"`
 	Note              string `json:"note"`
+	// Lease is additive: slice 1's keys above are a shipped contract.
+	Lease simLeaseView `json:"lease"`
 }
 
 func newSimCommand(ctx *commandContext) *cobra.Command {
@@ -102,7 +109,7 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 			"a simulator. Simulators are shared with other AO sessions and with any " +
 			"human using Xcode, so a captured frame may be mid-interaction.",
 	}
-	cmd.AddCommand(newSimListCommand(ctx), newSimShotCommand(ctx))
+	cmd.AddCommand(newSimListCommand(ctx), newSimShotCommand(ctx), newSimClaimCommand(ctx), newSimReleaseCommand(ctx))
 	return cmd
 }
 
@@ -119,10 +126,11 @@ func newSimListCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 			result := simList(devices)
+			result.attachLeases(ctx.simLeaseViews(cmd.Context()))
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), result)
 			}
-			return writeSimList(cmd.OutOrStdout(), result)
+			return writeSimList(cmd.OutOrStdout(), result, ctx.deps.Now().UTC())
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output simulators as JSON")
@@ -157,7 +165,7 @@ func newSimShotCommand(ctx *commandContext) *cobra.Command {
 			if opts.json {
 				return writeJSON(cmd.OutOrStdout(), result)
 			}
-			return writeSimShot(cmd.OutOrStdout(), result)
+			return writeSimShot(cmd.OutOrStdout(), result, strings.TrimSpace(os.Getenv("AO_SESSION_ID")))
 		},
 	}
 	f := cmd.Flags()
@@ -299,6 +307,25 @@ func simList(devices []simDevice) simListResult {
 	return result
 }
 
+// attachLeases records, per device, what AO knows about who is driving it.
+func (r *simListResult) attachLeases(views map[string]simLeaseView, daemonReachable bool) {
+	for i := range r.Devices {
+		r.Devices[i].Lease = simLeaseFor(views, r.Devices[i].UDID, daemonReachable)
+	}
+}
+
+// unknownReason is why the unleased devices in this listing read as unknown.
+// attachLeases gives every unknown device the same reason, so the first one
+// speaks for all of them.
+func (r simListResult) unknownReason() string {
+	for _, d := range r.Devices {
+		if d.Lease.Reason != "" {
+			return d.Lease.Reason
+		}
+	}
+	return simLeaseUnknownReason
+}
+
 func (c *commandContext) captureSimShot(ctx context.Context, udid, output string) (simShotResult, error) {
 	devices, err := c.listSimDevices(ctx)
 	if err != nil {
@@ -337,6 +364,10 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output string
 		return simShotResult{}, fmt.Errorf("`simctl io screenshot` wrote an empty file at %s", path)
 	}
 
+	// Read-only: the capture never took a lease and never waited for one. It
+	// only reports what AO knows, so an agent that reads a frame is told when
+	// the device belongs to somebody else rather than assuming it may drive it.
+	views, reachable := c.simLeaseViews(ctx)
 	return simShotResult{
 		UDID:              device.UDID,
 		Name:              device.Name,
@@ -346,6 +377,7 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output string
 		Bytes:             info.Size(),
 		CapturedAt:        capturedAt.Format(time.RFC3339),
 		Note:              simSharedDeviceNote,
+		Lease:             simLeaseFor(views, device.UDID, reachable),
 	}, nil
 }
 
@@ -366,13 +398,13 @@ func simSessionShotPath(capturedAt time.Time, udid string) (string, error) {
 	return filepath.Join(cfg.DataDir, "sim", sessionID, name), nil
 }
 
-func writeSimList(out io.Writer, result simListResult) error {
+func writeSimList(out io.Writer, result simListResult, now time.Time) error {
 	if len(result.Devices) == 0 {
 		_, err := fmt.Fprintln(out, "No simulators found on this machine.")
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "UDID\tSTATE\tRUNTIME\tNAME"); err != nil {
+	if _, err := fmt.Fprintln(tw, "UDID\tSTATE\tRUNTIME\tLEASE\tNAME"); err != nil {
 		return err
 	}
 	for _, d := range result.Devices {
@@ -383,21 +415,27 @@ func writeSimList(out io.Writer, result simListResult) error {
 		if d.Default {
 			name += "  <- default for `ao sim shot`"
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", d.UDID, d.State, d.Runtime, name); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", d.UDID, d.State, d.Runtime, d.Lease.column(now), name); err != nil {
 			return err
 		}
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	// Spell the honest meaning of the column out once, with the reason AO
+	// actually has: "nobody holds it" and "nobody could be asked" are both
+	// unknown, and printing the wrong one states something AO never checked.
+	if _, err := fmt.Fprintf(out, "\nLEASE is only what AO knows: `unknown` means %s.\n", result.unknownReason()); err != nil {
+		return err
+	}
 	if result.DefaultUDID == nil {
-		_, err := fmt.Fprintf(out, "\n`ao sim shot` has no default here: %s\n", result.DefaultReason)
+		_, err := fmt.Fprintf(out, "`ao sim shot` has no default here: %s\n", result.DefaultReason)
 		return err
 	}
 	return nil
 }
 
-func writeSimShot(out io.Writer, result simShotResult) error {
+func writeSimShot(out io.Writer, result simShotResult, sessionID string) error {
 	if _, err := fmt.Fprintf(out, "Captured %s (%s, %s) at %s\n",
 		result.Name, result.Runtime, result.UDID, result.CapturedAt); err != nil {
 		return err
@@ -407,6 +445,9 @@ func writeSimShot(out io.Writer, result simShotResult) error {
 	if _, err := fmt.Fprintln(out, result.Path); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "Note: %s\n", result.Note)
+	if _, err := fmt.Fprintf(out, "Note: %s\n", result.Note); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "Lease: %s\n", result.Lease.captureLine(sessionID))
 	return err
 }

@@ -266,6 +266,14 @@ var schemaNames = map[string]string{
 	// domain review entities
 	"DomainReviewRun":     "ReviewRun",
 	"ReviewPRReviewState": "PRReviewState",
+	// httpd/controllers — simulator device-lease wire envelopes
+	"ControllersSimLeaseParam":           "SimLeaseParam",
+	"ControllersAcquireSimLeaseInput":    "AcquireSimLeaseInput",
+	"ControllersSimLeaseResponse":        "SimLeaseResponse",
+	"ControllersListSimLeasesResponse":   "ListSimLeasesResponse",
+	"ControllersReleaseSimLeaseResponse": "ReleaseSimLeaseResponse",
+	// domain simulator entities
+	"DomainSimLease": "SimLease",
 	// httpd/controllers — smoke-test wire envelopes
 	"ControllersSmokeCheckParam":         "SmokeCheckParam",
 	"ControllersSmokeEvidenceParam":      "SmokeEvidenceParam",
@@ -394,6 +402,7 @@ func operations() []operation {
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, smokeOperations()...)
+	ops = append(ops, simOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, activityOperations()...)
 	ops = append(ops, importOperations()...)
@@ -730,6 +739,48 @@ func reviewOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ResetReviewResponse{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
+// simOperations declares the simulator device-lease operations. Must stay 1:1
+// with the routes SimController.Register mounts (enforced by the parity test).
+func simOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sim/leases", id: "listSimLeases", tag: "sim",
+			summary: "List every live iOS Simulator device lease on this machine",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSimLeasesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-leases", id: "acquireSimLease", tag: "sim",
+			summary:    "Claim an iOS Simulator for this session, or renew the session's own lease",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AcquireSimLeaseInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimLeaseResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-leases/{udid}", id: "releaseSimLease", tag: "sim",
+			summary:    "Release this session's lease on an iOS Simulator",
+			pathParams: []any{controllers.SimLeaseParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseSimLeaseResponse{}},
+				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

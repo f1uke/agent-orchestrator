@@ -119,6 +119,13 @@ type SmokeCheckParam struct {
 	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
 }
 
+// SimLeaseParam is the {sessionId}/{udid} path parameters for releasing a
+// simulator device lease.
+type SimLeaseParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	UDID      string `path:"udid" description:"Simulator udid (matched case-insensitively)."`
+}
+
 // SmokeEvidenceParam is the {sessionId}/{checkId}/{evidenceId} path parameters
 // for serving a stored evidence blob.
 type SmokeEvidenceParam struct {
