@@ -353,9 +353,12 @@ func TestSimShot_TextOutputPrintsPathOnItsOwnLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sim shot failed: %v\nstderr=%s", err, errOut)
 	}
+	// The point is that some line is nothing but the absolute artifact path, so
+	// it can be copied straight out of the terminal. filepath.IsAbs, not a
+	// leading separator: a Windows path starts with its drive letter.
 	var pathLine string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasSuffix(line, ".png") && strings.HasPrefix(line, string(filepath.Separator)) {
+		if strings.HasSuffix(line, ".png") && filepath.IsAbs(line) {
 			pathLine = line
 		}
 	}
