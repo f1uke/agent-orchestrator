@@ -1,0 +1,412 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+)
+
+// `ao sim` gives a session a cheap, strictly read-only way to see an iOS
+// Simulator screen. It shells out to `xcrun simctl` on demand and nothing else:
+// no helper process, no private frameworks, no HID synthesis, no polling, and
+// no command that could boot, shut down, reboot or erase a device. A human or
+// another AO session may be driving the same simulator, so every capture says
+// so rather than pretending the frame is ours alone.
+//
+// A device lease lands in the next slice. Every udid this file resolves goes
+// through resolveSimDevice — that one function is where the lease check will
+// hook in, so nothing else here needs to change for it.
+
+const (
+	simctlBinary   = "xcrun"
+	simStateBooted = "Booted"
+	// simSharedDeviceNote goes out with every capture. The frame may be mid
+	// interaction: a human in Xcode or another AO session shares the device.
+	simSharedDeviceNote = "This simulator is shared - a human driving Xcode, or another AO session, " +
+		"may have been mid-interaction when this frame was captured."
+	// simNeverBootsNote is repeated in every refusal so an agent does not go
+	// looking for a flag that boots a device. There is none, on purpose.
+	simNeverBootsNote = "AO never boots, shuts down or erases a simulator for you."
+	simRuntimePrefix  = "com.apple.CoreSimulator.SimRuntime."
+	// simShotStampLayout keeps millisecond precision so two captures from one
+	// session cannot collide on a filename.
+	simShotStampLayout = "20060102-150405.000"
+)
+
+// simDevice is one simulator as `xcrun simctl list devices --json` reports it,
+// plus the runtime it was listed under.
+type simDevice struct {
+	UDID              string `json:"udid"`
+	Name              string `json:"name"`
+	Runtime           string `json:"runtime"`
+	RuntimeIdentifier string `json:"runtimeIdentifier"`
+	State             string `json:"state"`
+	Available         bool   `json:"available"`
+	Default           bool   `json:"default"`
+}
+
+func (d simDevice) booted() bool { return d.State == simStateBooted }
+
+// label is how a device is named back to the user: enough to recognise it, and
+// the udid needed to address it.
+func (d simDevice) label() string {
+	return fmt.Sprintf("%s (%s, %s)", d.Name, d.Runtime, d.UDID)
+}
+
+// simctlDeviceList mirrors the part of `simctl list devices --json` we read.
+type simctlDeviceList struct {
+	Devices map[string][]struct {
+		UDID        string `json:"udid"`
+		Name        string `json:"name"`
+		State       string `json:"state"`
+		IsAvailable bool   `json:"isAvailable"`
+	} `json:"devices"`
+}
+
+type simListResult struct {
+	Devices       []simDevice `json:"devices"`
+	DefaultUDID   *string     `json:"defaultUdid"`
+	DefaultReason string      `json:"defaultReason"`
+}
+
+type simShotResult struct {
+	UDID              string `json:"udid"`
+	Name              string `json:"name"`
+	Runtime           string `json:"runtime"`
+	RuntimeIdentifier string `json:"runtimeIdentifier"`
+	Path              string `json:"path"`
+	Bytes             int64  `json:"bytes"`
+	CapturedAt        string `json:"capturedAt"`
+	Note              string `json:"note"`
+}
+
+func newSimCommand(ctx *commandContext) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sim",
+		Short: "Read-only access to local iOS Simulators",
+		Long: "Inspect local iOS Simulators and capture their screen.\n\n" +
+			"Every subcommand is read-only against the device: it shells out to " +
+			"`xcrun simctl` on demand and never boots, shuts down, reboots or erases " +
+			"a simulator. Simulators are shared with other AO sessions and with any " +
+			"human using Xcode, so a captured frame may be mid-interaction.",
+	}
+	cmd.AddCommand(newSimListCommand(ctx), newSimShotCommand(ctx))
+	return cmd
+}
+
+func newSimListCommand(ctx *commandContext) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List local iOS Simulators and which one `ao sim shot` would pick",
+		Args:    noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			devices, err := ctx.listSimDevices(cmd.Context())
+			if err != nil {
+				return err
+			}
+			result := simList(devices)
+			if asJSON {
+				return writeJSON(cmd.OutOrStdout(), result)
+			}
+			return writeSimList(cmd.OutOrStdout(), result)
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output simulators as JSON")
+	return cmd
+}
+
+func newSimShotCommand(ctx *commandContext) *cobra.Command {
+	var opts struct {
+		udid   string
+		output string
+		json   bool
+	}
+	cmd := &cobra.Command{
+		Use:   "shot",
+		Short: "Capture a booted simulator's screen to a PNG this session can read",
+		Long: "Capture the screen of a booted iOS Simulator and print the PNG's path.\n\n" +
+			"With no --udid the booted simulator is used, but only when exactly one is " +
+			"booted: with none, or with several, the command fails and says so rather " +
+			"than guessing. " + simNeverBootsNote + "\n\n" +
+			"The PNG lands under this session's own artifact directory " +
+			"(<AO data dir>/sim/<session id>/), outside any repository, so it can never " +
+			"be committed by accident. Use --output to write somewhere else.",
+		Example: `  ao sim shot
+  ao sim shot --udid 00000000-0000-0000-0000-000000000000
+  ao sim shot --output /tmp/screen.png --json`,
+		Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := ctx.captureSimShot(cmd.Context(), opts.udid, opts.output)
+			if err != nil {
+				return err
+			}
+			if opts.json {
+				return writeJSON(cmd.OutOrStdout(), result)
+			}
+			return writeSimShot(cmd.OutOrStdout(), result)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&opts.udid, "udid", "", "Capture this simulator instead of the booted one")
+	f.StringVar(&opts.output, "output", "", "Write the PNG here instead of the session artifact directory")
+	f.BoolVar(&opts.json, "json", false, "Output the capture result as JSON")
+	return cmd
+}
+
+// listSimDevices is the only path into simctl. Both subcommands go through it,
+// so there is a single place that knows how devices are discovered.
+func (c *commandContext) listSimDevices(ctx context.Context) ([]simDevice, error) {
+	if _, err := c.deps.LookPath(simctlBinary); err != nil {
+		return nil, fmt.Errorf("%s not found on PATH: `ao sim` needs the Xcode command line tools on macOS", simctlBinary)
+	}
+	out, err := c.deps.CommandOutput(ctx, simctlBinary, "simctl", "list", "devices", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("`simctl list devices` failed: %w: %s", err, simctlOutput(out))
+	}
+	var parsed simctlDeviceList
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return nil, fmt.Errorf("could not parse `simctl list devices --json` output: %w: %s", err, simctlOutput(out))
+	}
+
+	// simctl keys devices by runtime, which decodes into a Go map — iteration
+	// order would otherwise be random. Sort the runtimes and keep simctl's own
+	// order within each so the listing is stable and matches `simctl list`.
+	runtimes := make([]string, 0, len(parsed.Devices))
+	for runtime := range parsed.Devices {
+		runtimes = append(runtimes, runtime)
+	}
+	sort.Strings(runtimes)
+
+	devices := []simDevice{}
+	for _, runtime := range runtimes {
+		for _, d := range parsed.Devices[runtime] {
+			devices = append(devices, simDevice{
+				UDID:              d.UDID,
+				Name:              d.Name,
+				Runtime:           simRuntimeLabel(runtime),
+				RuntimeIdentifier: runtime,
+				State:             d.State,
+				Available:         d.IsAvailable,
+			})
+		}
+	}
+	return devices, nil
+}
+
+// simRuntimeLabel turns a runtime identifier into the label simctl itself
+// prints as a section header: com.apple.CoreSimulator.SimRuntime.iOS-26-3
+// becomes "iOS 26.3". Anything unexpected is passed through untouched, and the
+// raw identifier is always kept alongside it in JSON output.
+func simRuntimeLabel(identifier string) string {
+	short := strings.TrimPrefix(identifier, simRuntimePrefix)
+	if short == identifier {
+		return identifier
+	}
+	parts := strings.SplitN(short, "-", 2)
+	if len(parts) != 2 {
+		return short
+	}
+	return parts[0] + " " + strings.ReplaceAll(parts[1], "-", ".")
+}
+
+// simctlOutput trims simctl's own diagnostics for embedding in an error. An
+// empty result is reported as such: a silent failure is worse than a noisy one.
+func simctlOutput(out []byte) string {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return "(no output)"
+	}
+	const limit = 400
+	if len(trimmed) > limit {
+		return trimmed[:limit] + "…"
+	}
+	return trimmed
+}
+
+// resolveSimDevice is the single device-resolution rule for `ao sim`, and the
+// seam the device-lease slice will hook into. It never picks between several
+// booted simulators and never asks for one to be booted.
+func resolveSimDevice(devices []simDevice, udid string) (simDevice, error) {
+	if strings.TrimSpace(udid) != "" {
+		for _, d := range devices {
+			if strings.EqualFold(d.UDID, strings.TrimSpace(udid)) {
+				if !d.booted() {
+					return simDevice{}, fmt.Errorf("simulator %s is not booted (state: %s). %s Boot it yourself (Xcode, or Simulator.app) and retry",
+						d.label(), d.State, simNeverBootsNote)
+				}
+				return d, nil
+			}
+		}
+		return simDevice{}, fmt.Errorf("no simulator with udid %q; run `ao sim list` to see what this machine has", strings.TrimSpace(udid))
+	}
+
+	booted := []simDevice{}
+	for _, d := range devices {
+		if d.booted() {
+			booted = append(booted, d)
+		}
+	}
+	switch len(booted) {
+	case 1:
+		return booted[0], nil
+	case 0:
+		if len(devices) == 0 {
+			return simDevice{}, fmt.Errorf("no simulators found on this machine. %s", simNeverBootsNote)
+		}
+		return simDevice{}, fmt.Errorf("no booted simulator (%d exist, all shut down). %s Boot one (Xcode, or Simulator.app) and retry, or run `ao sim list`",
+			len(devices), simNeverBootsNote)
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d simulators are booted, so there is no unambiguous default. Re-run with one of:", len(booted))
+		for _, d := range booted {
+			fmt.Fprintf(&b, "\n  ao sim shot --udid %s   # %s (%s)", d.UDID, d.Name, d.Runtime)
+		}
+		return simDevice{}, errors.New(b.String())
+	}
+}
+
+// simList annotates the devices with the default `ao sim shot` would pick, and
+// says why when there is none.
+func simList(devices []simDevice) simListResult {
+	result := simListResult{Devices: devices}
+	chosen, err := resolveSimDevice(devices, "")
+	if err != nil {
+		result.DefaultReason = err.Error()
+		return result
+	}
+	for i := range result.Devices {
+		if result.Devices[i].UDID == chosen.UDID {
+			result.Devices[i].Default = true
+		}
+	}
+	udid := chosen.UDID
+	result.DefaultUDID = &udid
+	result.DefaultReason = "the only booted simulator"
+	return result
+}
+
+func (c *commandContext) captureSimShot(ctx context.Context, udid, output string) (simShotResult, error) {
+	devices, err := c.listSimDevices(ctx)
+	if err != nil {
+		return simShotResult{}, err
+	}
+	device, err := resolveSimDevice(devices, udid)
+	if err != nil {
+		return simShotResult{}, err
+	}
+
+	capturedAt := c.deps.Now().UTC()
+	path := strings.TrimSpace(output)
+	if path == "" {
+		path, err = simSessionShotPath(capturedAt, device.UDID)
+		if err != nil {
+			return simShotResult{}, err
+		}
+	} else if path, err = filepath.Abs(path); err != nil {
+		return simShotResult{}, fmt.Errorf("resolve --output path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return simShotResult{}, fmt.Errorf("create screenshot directory: %w", err)
+	}
+
+	out, err := c.deps.CommandOutput(ctx, simctlBinary, "simctl", "io", device.UDID, "screenshot", "--type=png", path)
+	if err != nil {
+		return simShotResult{}, fmt.Errorf("`simctl io screenshot` failed for %s: %w: %s", device.label(), err, simctlOutput(out))
+	}
+	// simctl can exit 0 without leaving a usable frame. Handing an agent an
+	// empty file it would read as a screen is worse than failing here.
+	info, err := os.Stat(path)
+	if err != nil {
+		return simShotResult{}, fmt.Errorf("`simctl io screenshot` reported success but wrote no file at %s: %w", path, err)
+	}
+	if info.Size() == 0 {
+		return simShotResult{}, fmt.Errorf("`simctl io screenshot` wrote an empty file at %s", path)
+	}
+
+	return simShotResult{
+		UDID:              device.UDID,
+		Name:              device.Name,
+		Runtime:           device.Runtime,
+		RuntimeIdentifier: device.RuntimeIdentifier,
+		Path:              path,
+		Bytes:             info.Size(),
+		CapturedAt:        capturedAt.Format(time.RFC3339),
+		Note:              simSharedDeviceNote,
+	}, nil
+}
+
+// simSessionShotPath puts the capture in this session's own artifact directory
+// under the AO data dir. Per-session keeps concurrent workers from clobbering
+// each other, and living outside every repository means a stray screenshot can
+// never be committed by accident.
+func simSessionShotPath(capturedAt time.Time, udid string) (string, error) {
+	sessionID := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+	if sessionID == "" {
+		return "", errors.New("ao sim shot writes into the current session's artifact directory, but AO_SESSION_ID is not set; pass --output <path> to capture outside an AO session")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	name := capturedAt.Format(simShotStampLayout) + "Z-" + udid + ".png"
+	return filepath.Join(cfg.DataDir, "sim", sessionID, name), nil
+}
+
+func writeSimList(out io.Writer, result simListResult) error {
+	if len(result.Devices) == 0 {
+		_, err := fmt.Fprintln(out, "No simulators found on this machine.")
+		return err
+	}
+	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "UDID\tSTATE\tRUNTIME\tNAME"); err != nil {
+		return err
+	}
+	for _, d := range result.Devices {
+		name := d.Name
+		if !d.Available {
+			name += " (unavailable)"
+		}
+		if d.Default {
+			name += "  <- default for `ao sim shot`"
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", d.UDID, d.State, d.Runtime, name); err != nil {
+			return err
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if result.DefaultUDID == nil {
+		_, err := fmt.Fprintf(out, "\n`ao sim shot` has no default here: %s\n", result.DefaultReason)
+		return err
+	}
+	return nil
+}
+
+func writeSimShot(out io.Writer, result simShotResult) error {
+	if _, err := fmt.Fprintf(out, "Captured %s (%s, %s) at %s\n",
+		result.Name, result.Runtime, result.UDID, result.CapturedAt); err != nil {
+		return err
+	}
+	// The path gets a line of its own so it can be read straight off the
+	// terminal and handed to a file read.
+	if _, err := fmt.Fprintln(out, result.Path); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "Note: %s\n", result.Note)
+	return err
+}
