@@ -454,7 +454,7 @@ function makeLive() {
 }
 
 describe("SimulatorPanel lease truth", () => {
-	it("says unknown with the reason, never free, and offers to claim", async () => {
+	it("says unknown with the reason, never free", async () => {
 		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
@@ -462,7 +462,6 @@ describe("SimulatorPanel lease truth", () => {
 		expect(within(menu).getByText(/Lease: unknown/i)).toBeInTheDocument();
 		expect(within(menu).getByText(/cannot see whether a human is driving it/i)).toBeInTheDocument();
 		expect(within(menu).queryByText(/free/i)).not.toBeInTheDocument();
-		expect(within(menu).getByRole("menuitem", { name: /claim to drive/i })).toBeInTheDocument();
 	});
 
 	// The one place the lease is enforced in the UI is what is offered: a
@@ -477,22 +476,38 @@ describe("SimulatorPanel lease truth", () => {
 		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
 		const menu = await openMenu();
 		expect(within(menu).getByText(/Leased by @other-7/i)).toBeInTheDocument();
-		expect(within(menu).queryByRole("menuitem", { name: /^claim to drive$/i })).not.toBeInTheDocument();
+	});
+
+	// Taking the device was two presses - the options menu, then the item in it -
+	// which is one too many for the thing a person does before they can touch the
+	// screen at all. It is a button in the toolbar, so no menu is involved.
+	it("claims in a single press, with no menu to open first", async () => {
+		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("button", { name: /claim to drive/i }));
+
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/sim-leases",
+				expect.objectContaining({ body: { udid: "UDID-A", takeOver: undefined } }),
+			),
+		);
 	});
 
 	// The lease stops two agents driving one device at once; it is not there to
-	// lock a person out of their own machine. Taking over is named after the
-	// holder so it reads as a decision rather than a slip.
-	it("offers to take the device over, naming who has it", async () => {
+	// lock a person out of their own machine. One press here too - and still
+	// named after the holder, so it reads as a decision rather than a slip.
+	it("takes the device over in a single press, naming who has it", async () => {
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
-		const menu = await openMenu();
-		const takeOver = within(menu).getByRole("menuitem", { name: /take over from @other-7/i });
-		await userEvent.click(takeOver);
+		await userEvent.click(await screen.findByRole("button", { name: /take over from @other-7/i }));
 
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/sim-leases",
@@ -503,19 +518,37 @@ describe("SimulatorPanel lease truth", () => {
 
 	// An ordinary claim on a device nobody holds must not ask to take anything
 	// over: the two refuse for different reasons and mean different things.
-	it("claims without taking over when nobody holds the device", async () => {
+	it("never offers to take over a device nobody holds", async () => {
 		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
-		const menu = await openMenu();
-		await userEvent.click(within(menu).getByRole("menuitem", { name: /claim to drive/i }));
+		await screen.findByRole("button", { name: /claim to drive/i });
+		expect(screen.queryByRole("button", { name: /take over/i })).not.toBeInTheDocument();
+	});
 
-		await waitFor(() =>
-			expect(postMock).toHaveBeenCalledWith(
-				"/api/v1/sessions/{sessionId}/sim-leases",
-				expect.objectContaining({ body: { udid: "UDID-A", takeOver: undefined } }),
-			),
-		);
+	// One control in that slot or none, never two: an offer to claim a device
+	// this session already holds is nonsense, and a second button appearing
+	// beside the first is the row growing again.
+	it("keeps one lease control in the toolbar whatever the lease says", async () => {
+		const controls = [/claim to drive/i, /take over from @other-7/i, /drive this device/i];
+		for (const [lease, expected] of [
+			[undefined, /claim to drive/i],
+			[{ state: "held", holder: "other-7" }, /take over from @other-7/i],
+			[{ state: "held", holder: "p-1" }, /drive this device/i],
+		] as const) {
+			getMock.mockResolvedValue(
+				devicesPayload([device(lease ? { lease } : {})], "UDID-A", "the only booted simulator"),
+			);
+			const view = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+			expect(await screen.findByRole("button", { name: expected })).toBeInTheDocument();
+			// Exactly one: two of these at once would be both a wider row and an
+			// offer to claim a device this session already holds.
+			for (const other of controls.filter((c) => c.source !== expected.source)) {
+				expect(screen.queryByRole("button", { name: other })).not.toBeInTheDocument();
+			}
+			view.unmount();
+			sessionStorage.clear();
+		}
 	});
 
 	// The daemon refuses a takeover while a touch is actually happening, and the
@@ -532,8 +565,7 @@ describe("SimulatorPanel lease truth", () => {
 		});
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
-		const menu = await openMenu();
-		await userEvent.click(within(menu).getByRole("menuitem", { name: /take over from @other-7/i }));
+		await userEvent.click(await screen.findByRole("button", { name: /take over from @other-7/i }));
 
 		expect(await screen.findByText(/gesture in flight from @other-7/i)).toBeInTheDocument();
 	});

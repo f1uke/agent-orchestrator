@@ -463,13 +463,41 @@ export function SimulatorPanel({
 							device={device}
 							heldByOther={Boolean(heldByOther)}
 							heldByThisSession={heldByThisSession}
-							onClaim={() => device && claim.mutate({ udid: device.udid })}
-							onTakeOver={() => device && claim.mutate({ udid: device.udid, takeOver: true })}
 							onRefresh={refreshDevices}
 							onRelease={() => device && release.mutate(device.udid)}
 							sessionId={sessionId}
 						/>
 					</div>
+
+					{/* Taking the device is what a person does before they can touch the
+					    screen at all, so it is a button and not an item inside a menu -
+					    it used to cost two presses. It shares the slot with the drive
+					    pill and is never shown beside it: there is one control here or
+					    none, so turning driving on and off - the thing done over and
+					    over - never changes the row. */}
+					{!heldByThisSession && device ? (
+						<SimpleTooltip
+							label={
+								<span className="block max-w-[220px]">
+									{heldByOther
+										? `Take the device from @${device.lease?.holder}. Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
+										: "Take the same lease `ao sim tap` takes. Watching never needs one; touching the device always does."}
+								</span>
+							}
+						>
+							<button
+								// Named after the holder, so taking a device from another
+								// session reads as a decision rather than a slip.
+								aria-label={heldByOther ? `Take over from @${device.lease?.holder}` : "Claim to drive"}
+								className="flex h-9 items-center rounded-full border border-border bg-raised px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay disabled:opacity-40 disabled:hover:bg-raised"
+								disabled={claim.isPending}
+								onClick={() => claim.mutate({ udid: device.udid, takeOver: heldByOther ? true : undefined })}
+								type="button"
+							>
+								{heldByOther ? "Take over" : "Claim"}
+							</button>
+						</SimpleTooltip>
+					) : null}
 
 					{heldByThisSession ? (
 						<SimpleTooltip
@@ -690,20 +718,16 @@ function DeviceMenu({
 	device,
 	heldByOther,
 	heldByThisSession,
-	onClaim,
 	onRefresh,
 	onRelease,
-	onTakeOver,
 	sessionId,
 }: {
 	busy: boolean;
 	device: SimDevice | null;
 	heldByOther: boolean;
 	heldByThisSession: boolean;
-	onClaim: () => void;
 	onRefresh: () => void;
 	onRelease: () => void;
-	onTakeOver: () => void;
 	sessionId: string;
 }) {
 	const lease = device?.lease;
@@ -735,25 +759,15 @@ function DeviceMenu({
 								<span className="text-muted-foreground">Lease: unknown - {lease?.reason}</span>
 							)}
 						</div>
+						{/* Claiming and taking over are buttons in the toolbar rather than
+						    items here: they are what a person reaches for first. Releasing
+						    is the opposite - rare, and only ever after driving - so it
+						    stays where it does not compete with them. */}
 						{heldByThisSession ? (
 							<DropdownMenuItem disabled={busy} onSelect={onRelease}>
 								Release
 							</DropdownMenuItem>
-						) : heldByOther ? (
-							/* Taking a device from another session is a decision a human
-							   is allowed to make - the lease exists so two agents do not
-							   drive one device at once, not to lock a person out of their
-							   own machine. Named after the holder so it is a decision and
-							   not a slip, and refused by the daemon while a gesture is
-							   actually in flight. */
-							<DropdownMenuItem disabled={busy} onSelect={onTakeOver}>
-								Take over from @{lease?.holder}
-							</DropdownMenuItem>
-						) : (
-							<DropdownMenuItem disabled={busy} onSelect={onClaim}>
-								Claim to drive
-							</DropdownMenuItem>
-						)}
+						) : null}
 						<DropdownMenuSeparator />
 					</>
 				) : null}
