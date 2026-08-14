@@ -1,0 +1,30 @@
+serve-sim
+Copyright Evan Bacon and the serve-sim contributors.
+
+This product bundles `serve-sim-native-0.1.45.node`, the prebuilt native N-API
+addon published in the npm package `serve-sim` version 0.1.45
+(https://github.com/EvanBacon/serve-sim), licensed under the Apache License,
+Version 2.0. The full licence text is in LICENSE-serve-sim.txt.
+
+sha256 of the vendored file:
+  0ddd5d0080a313c7033245817a97556b97909ed2d4c36a170482d54fb3a4d2f4
+
+The file is a macOS universal (x86_64 + arm64) Mach-O shared library, copied
+byte for byte from `node_modules/serve-sim/dist/native/serve-sim-native.node`
+with no modification. Nothing else from the package is vendored: `ao sim` calls
+only its N-API surface (SimHID, axDescribe, axFrontmost) and none of serve-sim's
+JavaScript, CLI, HTTP server or frame-capture code.
+
+Parts of the addon are, per its own source comments, ported from Meta's idb
+(https://github.com/facebook/idb, MIT) - specifically the accessibility bridge
+(FBSimulatorAccessibilityCommands.m) and the HID injection approach.
+
+Why the binary is vendored rather than installed on demand: `ao sim` must never
+reach for the network or quietly add a package manager's worth of dependencies
+to a developer's machine mid-command. Vendoring pins one auditable, hash-checked
+artifact whose version is visible in the filename and in `git log`.
+
+This addon calls private Apple frameworks. It can break on any Xcode or macOS
+upgrade, which is why `ao sim` isolates it behind one Go interface (see
+bridge.go) and reports a load failure as its own actionable error rather than as
+a generic crash.

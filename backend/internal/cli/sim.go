@@ -109,7 +109,12 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 			"a simulator. Simulators are shared with other AO sessions and with any " +
 			"human using Xcode, so a captured frame may be mid-interaction.",
 	}
-	cmd.AddCommand(newSimListCommand(ctx), newSimShotCommand(ctx), newSimClaimCommand(ctx), newSimReleaseCommand(ctx))
+	cmd.AddCommand(
+		newSimListCommand(ctx), newSimShotCommand(ctx),
+		newSimClaimCommand(ctx), newSimReleaseCommand(ctx),
+		newSimAXCommand(ctx),
+		newSimTapCommand(ctx), newSimSwipeCommand(ctx), newSimTypeCommand(ctx), newSimButtonCommand(ctx),
+	)
 	return cmd
 }
 

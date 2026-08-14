@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,8 +20,22 @@ type simDaemon struct {
 	acquireStatus int
 	acquireBody   string
 
+	// holdStatus/holdBody override the gesture-hold response, so a test can
+	// make the daemon refuse a touch the way contention does.
+	holdStatus int
+	holdBody   string
+
+	mu    sync.Mutex
 	calls []string // "METHOD path"
 	body  string   // last request body
+}
+
+// callLog is every request the CLI made, in order. It is read while a gesture
+// is in flight, so it takes the lock.
+func (d *simDaemon) callLog() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return strings.Join(d.calls, "\n")
 }
 
 func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
@@ -28,10 +43,21 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 	d := &simDaemon{leases: map[string]simLeaseClient{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		d.mu.Lock()
 		d.calls = append(d.calls, r.Method+" "+r.URL.Path)
 		d.body = string(body)
+		d.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/hold"):
+			if d.holdStatus != 0 && d.holdStatus != http.StatusOK {
+				w.WriteHeader(d.holdStatus)
+				_, _ = io.WriteString(w, d.holdBody)
+				return
+			}
+			_, _ = io.WriteString(w, `{"hold":{"udid":"x","sessionId":"mer-9","token":"hold-token-1","expiresAt":"2026-08-13T07:41:32Z"}}`)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/hold/"):
+			_, _ = io.WriteString(w, `{"released":true}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/leases":
 			leases := []simLeaseClient{}
 			for _, l := range d.leases {

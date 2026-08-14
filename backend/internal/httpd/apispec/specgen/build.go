@@ -272,8 +272,13 @@ var schemaNames = map[string]string{
 	"ControllersSimLeaseResponse":        "SimLeaseResponse",
 	"ControllersListSimLeasesResponse":   "ListSimLeasesResponse",
 	"ControllersReleaseSimLeaseResponse": "ReleaseSimLeaseResponse",
+	"ControllersSimHoldParam":            "SimHoldParam",
+	"ControllersAcquireSimHoldInput":     "AcquireSimHoldInput",
+	"ControllersSimHoldResponse":         "SimHoldResponse",
+	"ControllersReleaseSimHoldResponse":  "ReleaseSimHoldResponse",
 	// domain simulator entities
 	"DomainSimLease": "SimLease",
+	"DomainSimHold":  "SimHold",
 	// httpd/controllers — smoke-test wire envelopes
 	"ControllersSmokeCheckParam":         "SmokeCheckParam",
 	"ControllersSmokeEvidenceParam":      "SmokeEvidenceParam",
@@ -781,6 +786,30 @@ func simOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.ReleaseSimLeaseResponse{}},
 				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold", id: "acquireSimHold", tag: "sim",
+			summary:    "Take the gesture hold on a simulator this session already leases",
+			pathParams: []any{controllers.SimLeaseParam{}},
+			reqBody:    controllers.AcquireSimHoldInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimHoldResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold/{token}", id: "releaseSimHold", tag: "sim",
+			summary:    "Release the gesture hold, keeping the lease",
+			pathParams: []any{controllers.SimHoldParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseSimHoldResponse{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

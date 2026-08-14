@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 // Execute runs the ao CLI with process stdio.
@@ -78,6 +79,11 @@ type Deps struct {
 	DoctorGitLabRESTBase string
 	Now                  func() time.Time
 	Sleep                func(time.Duration)
+	// SimDriver builds the iOS Simulator screen driver. Injectable so the
+	// `ao sim` screen commands can be tested without Node, the vendored native
+	// bridge, Xcode or a device - and so a future Apple-supported driver can
+	// replace the mechanism without touching a command.
+	SimDriver func(dataDir string) (simbridge.Driver, error)
 }
 
 // DefaultDeps returns production dependencies.

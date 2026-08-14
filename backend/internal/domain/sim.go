@@ -41,6 +41,47 @@ type SimLease struct {
 // evaluated on read - there is no sweeper and no background watcher.
 func (l SimLease) Live(now time.Time) bool { return l.ExpiresAt.After(now) }
 
+// SimHold is the finger: one caller's exclusive right to inject HID events on
+// one device for the length of a single gesture. It is strictly narrower than a
+// SimLease and cannot exist without one.
+//
+// The lease answers "which session may drive this device"; the hold answers "is
+// a gesture in flight". Both are needed because the lease's owner is a session,
+// and one session can run two commands at once - which on a device with a
+// single, caller-less finger merges into one teleporting touch whose first
+// release lifts the other's finger.
+//
+// The TTL is short by design (seconds, not minutes). It is not a working
+// window: it is the ceiling on how long a command that died mid-gesture can
+// keep the device to itself.
+type SimHold struct {
+	UDID      string    `json:"udid"`
+	SessionID SessionID `json:"sessionId"`
+	// Token identifies this hold so a command can only ever release its own -
+	// a stale caller must not be able to drop the live gesture's hold.
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// Live reports whether the hold still owns the finger at now. Expiry is read at
+// query time; nothing sweeps.
+func (h SimHold) Live(now time.Time) bool { return h.ExpiresAt.After(now) }
+
+// SimHoldOutcome is what the database decided about a hold request, and enough
+// context to explain a refusal without a second, racy read.
+type SimHoldOutcome struct {
+	// Granted: the caller owns the finger until Hold.ExpiresAt.
+	Granted bool
+	Hold    SimHold
+	// Lease/Leased describe the live lease on the device at the time of the
+	// decision, so a refusal can name the holder.
+	Lease  SimLease
+	Leased bool
+	// Busy: a live hold owns the finger, so this is "mid-gesture", not "not
+	// yours". The two need different advice, so they are reported apart.
+	Busy bool
+}
+
 // NormalizeSimUDID canonicalizes a simulator udid for storage and comparison.
 // simctl reports udids upper-cased but accepts either case, and the udid is the
 // primary key that enforces the lease's exclusion - an un-normalized "abc"
