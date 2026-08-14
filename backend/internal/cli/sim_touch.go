@@ -14,6 +14,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 )
 
 // The commands that touch the screen.
@@ -46,8 +47,13 @@ type simGestureResult struct {
 	// Rescued: the bridge had to release a touch the gesture left down. The
 	// command succeeded, but the device was recovered rather than driven
 	// cleanly, and that is never hidden.
-	Rescued bool   `json:"rescued,omitempty"`
-	Note    string `json:"note"`
+	Rescued bool `json:"rescued,omitempty"`
+	// Keyboard is the simulator input mode `type` verified before sending
+	// anything, e.g. "en_US@sw=QWERTY;hw=Automatic". Empty for the gestures that
+	// do not depend on one, and for `--raw-keys`, which promises nothing about
+	// what the key presses become.
+	Keyboard string `json:"keyboard,omitempty"`
+	Note     string `json:"note"`
 }
 
 // acquireSimHoldRequest mirrors controllers.AcquireSimHoldInput.
@@ -193,35 +199,102 @@ func newSimDragCommand(ctx *commandContext) *cobra.Command {
 
 func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 	opts := simTouchOptions{}
+	var rawKeys bool
 	cmd := &cobra.Command{
 		Use:   "type <text>",
 		Short: "Type text into a claimed simulator's focused field",
 		Long: "Send text to whatever has keyboard focus.\n\n" +
-			"Tap the field first: this types, it does not choose where the text goes. " +
-			"The keys sent are US-keyboard key presses, so anything a US keyboard cannot " +
-			"send is refused rather than silently dropped - but the simulator's own active " +
-			"input source decides what those key presses produce. If the device is set to a " +
-			"non-US keyboard the characters that appear will differ, so read the field back " +
-			"with `ao sim ax` rather than assuming.\n\n" +
+			"Tap the field first: this types, it does not choose where the text goes.\n\n" +
+			"What reaches the device is US-keyboard key presses, and the SIMULATOR decides " +
+			"what each one produces. Simulator.app ships with I/O > Keyboard > \"Use the Same " +
+			"Keyboard Language as macOS\" ticked, so a Mac on a Thai input source gives the " +
+			"simulator one, and `type \"fa12345\"` would arrive as \"\u0e14\u0e1f\u0e45/_\u0e20\u0e16\". This command " +
+			"therefore asks the device which input mode it is using and REFUSES to send " +
+			"anything it cannot promise, rather than reporting characters it did not type. " +
+			"It is worth knowing why that matters: the same text goes in correctly through a " +
+			"field that forces an ASCII keyboard (an email or URL field) and incorrectly " +
+			"through an ordinary or secure one, and a secure field hides the damage.\n\n" +
+			"`--raw-keys` sends the key presses regardless - which is how Thai text is " +
+			"entered on a Thai guest in the first place - and then promises key presses " +
+			"rather than characters.\n\n" +
 			"The device must be claimed by this session (`ao sim claim`) first.",
 		Example: `  ao sim tap 0.5 0.125
-  ao sim type "hello@example.com"`,
+  ao sim type "hello@example.com"
+  ao sim type "fa12345" --raw-keys`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args, " ")
-			events, err := simbridge.Type(text)
+			// The device is resolved here rather than inside the shared
+			// sequence because what may be typed depends on which device it is.
+			device, err := ctx.resolveBootedSimDevice(cmd.Context(), opts.udid)
 			if err != nil {
-				return usageError{err}
+				return err
 			}
-			return ctx.runSimGesture(cmd, opts, simGesture{
-				action: "type",
-				detail: strconv.Itoa(len([]rune(text))) + " characters",
-				events: events,
+			events, mode, err := ctx.composeSimType(cmd.Context(), device, text, rawKeys)
+			if err != nil {
+				return err
+			}
+			runes := strconv.Itoa(len([]rune(text)))
+			detail := runes + " characters"
+			if rawKeys {
+				detail = runes + " key presses (--raw-keys: the simulator decides what they produce)"
+			}
+			return ctx.runSimGestureOn(cmd, opts, device, simGesture{
+				action:   "type",
+				detail:   detail,
+				events:   events,
+				keyboard: mode.Identifier,
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&rawKeys, "raw-keys", false,
+		"Send the key presses even when the simulator would turn them into other characters")
 	opts.bind(cmd)
 	return cmd
+}
+
+// composeSimType turns text into key events, having first established what the
+// device will make of them.
+//
+// The order is the whole fix. Establishing the mapping BEFORE composing means a
+// device set to a keyboard we cannot speak for is refused with nothing sent -
+// no half-typed field to clean up, and no "Typed 7 characters" over a field
+// holding something else. `--raw-keys` skips the question entirely, because a
+// caller who has accepted whatever the guest produces has nothing to establish
+// and should not pay a subprocess to be told.
+func (c *commandContext) composeSimType(ctx context.Context, device simDevice, text string, rawKeys bool) (
+	[]simbridge.Event, simkeyboard.Mode, error,
+) {
+	if rawKeys {
+		events, err := simbridge.TypeRaw(text)
+		if err != nil {
+			return nil, simkeyboard.Mode{}, usageError{err}
+		}
+		return events, simkeyboard.Mode{}, nil
+	}
+
+	mode, err := simkeyboard.Probe(ctx, c.deps.CommandOutput, device.UDID)
+	if err != nil {
+		return nil, mode, fmt.Errorf("could not read %s's keyboard input mode, so `type` cannot promise the keys "+
+			"will arrive as the characters you asked for - nothing was sent: %w\n"+
+			"A simulator that has not shown a keyboard yet has nothing to report: tap the field first with "+
+			"`ao sim tap`, which is the order this command expects anyway, then run this again. "+
+			"To send the key presses regardless of what the simulator makes of them, add `--raw-keys`",
+			device.Label(), err)
+	}
+
+	events, err := simbridge.Type(text, mode)
+	var remap *simbridge.RemapError
+	switch {
+	case errors.As(err, &remap):
+		return nil, mode, fmt.Errorf("%w.\nTo send these key presses anyway and accept whatever the simulator "+
+			"produces - which is how Thai text is entered on a Thai guest - add `--raw-keys`", err)
+	case err != nil:
+		// The text itself is unsendable: the caller's own mistake, not the
+		// machine's state.
+		return nil, mode, usageError{err}
+	}
+	return events, mode, nil
 }
 
 func newSimButtonCommand(ctx *commandContext) *cobra.Command {
@@ -266,6 +339,9 @@ type simGesture struct {
 	action string
 	detail string
 	events []simbridge.Event
+	// keyboard is the simulator input mode `type` established before composing
+	// these events. Empty for every other gesture, none of which depends on one.
+	keyboard string
 	// last is where the finger would be if the gesture died in flight, and so
 	// where a recovery lift has to land.
 	last simbridge.Point
@@ -277,12 +353,23 @@ type simGesture struct {
 // Simulator tab goes through the same sequence from the daemon side, so a click
 // there is arbitrated exactly like this command.
 func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions, gesture simGesture) error {
-	ctx := cmd.Context()
-	sessionID, err := simSessionID("`ao sim " + gesture.action + "`")
+	device, err := c.resolveBootedSimDevice(cmd.Context(), opts.udid)
 	if err != nil {
 		return err
 	}
-	device, err := c.resolveBootedSimDevice(ctx, opts.udid)
+	return c.runSimGestureOn(cmd, opts, device, gesture)
+}
+
+// runSimGestureOn is runSimGesture for a device the caller has already
+// resolved. `type` needs that split: it has to ask the device which keyboard it
+// is using before it knows whether there is a gesture to run at all, and
+// resolving the device twice would pay for a second `simctl list` - the single
+// most expensive thing in a touch.
+func (c *commandContext) runSimGestureOn(
+	cmd *cobra.Command, opts simTouchOptions, device simDevice, gesture simGesture,
+) error {
+	ctx := cmd.Context()
+	sessionID, err := simSessionID("`ao sim " + gesture.action + "`")
 	if err != nil {
 		return err
 	}
@@ -305,6 +392,7 @@ func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions,
 		Action:            gesture.action,
 		Detail:            gesture.detail,
 		Rescued:           result.Lifted,
+		Keyboard:          gesture.keyboard,
 		Note:              simSharedDeviceNote,
 	}
 	if opts.json {

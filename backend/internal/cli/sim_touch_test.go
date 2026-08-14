@@ -184,6 +184,167 @@ func TestSimType_SendsKeysAndNoTouches(t *testing.T) {
 	assertHoldTakenAndReleased(t, daemon)
 }
 
+// --- the keyboard layout the guest, not we, decide ------------------------
+
+func TestSimType_RefusesWhenTheGuestWouldRemapTheKeys(t *testing.T) {
+	// The reported bug, end to end: on a Mac set to Thai the guest is set to
+	// Thai too, `ao sim type "fa12345"` put "ดฟๅ/_ภถ" in the field, and the
+	// command said "Typed 7 characters". Nothing may reach the device now.
+	driver := &fakeSimDriver{}
+	deps, daemon := touchDeps(t, driver)
+	deps = withSimKeyboard(deps, simKeyboardThai, nil)
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	if err == nil {
+		t.Fatalf("typing onto a guest that remaps the keys must fail; output=%s", out)
+	}
+	if ExitCode(err) != 1 {
+		t.Errorf("exit code = %d, want 1", ExitCode(err))
+	}
+	if got := driver.calls(); len(got) != 0 {
+		t.Fatalf("%d gesture(s) reached the device, want none - a refusal must not half-type", len(got))
+	}
+	// Refusing costs nothing on the device, so it must not take the finger
+	// either: another session's gesture is not blocked by our bad keyboard.
+	if log := daemon.callLog(); strings.Contains(log, "/hold") {
+		t.Errorf("took the gesture hold to refuse; nothing was going to be sent:\n%s", log)
+	}
+	for _, want := range []string{"th_TH", "Ctrl-Space", "--raw-keys"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must mention %q so it can be acted on:\n%v", want, err)
+		}
+	}
+}
+
+func TestSimType_RefusesWhenTheInputModeCannotBeRead(t *testing.T) {
+	// A device that has never shown a keyboard has nothing to report. Unknown
+	// is not US: reporting success here is the exact failure being fixed.
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+	deps = withSimKeyboard(deps, "The domain/default pair does not exist", errors.New("exit status 1"))
+
+	_, _, err := executeCLI(t, deps, "sim", "type", "hunter2")
+	if err == nil {
+		t.Fatal("an unreadable input mode must be refused, not assumed to be US")
+	}
+	if len(driver.calls()) != 0 {
+		t.Fatal("nothing may reach the device when the mapping is unknown")
+	}
+	// This one is recoverable by doing the thing the workflow asks for anyway,
+	// so the refusal says how rather than just what.
+	for _, want := range []string{"ao sim tap", "--raw-keys"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must mention %q:\n%v", want, err)
+		}
+	}
+}
+
+func TestSimType_RawKeysSendsAnywayAndPromisesKeysNotCharacters(t *testing.T) {
+	// The escape hatch: on a Thai guest these usages are how Thai text gets
+	// entered at all, so the capability survives - it just has to be asked for.
+	driver := &fakeSimDriver{}
+	deps, daemon := touchDeps(t, driver)
+	deps = withSimKeyboard(deps, simKeyboardThai, nil)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "type", "fa12345", "--raw-keys")
+	if err != nil {
+		t.Fatalf("--raw-keys must send anyway: %v\nstderr=%s", err, errOut)
+	}
+	if len(driver.calls()) != 1 {
+		t.Fatalf("driver saw %d gestures, want 1", len(driver.calls()))
+	}
+	// It must not claim the characters landed - that claim is the bug.
+	if strings.Contains(out, "Typed 7 characters") {
+		t.Errorf("--raw-keys must not report characters it cannot promise:\n%s", out)
+	}
+	if !strings.Contains(out, "key press") {
+		t.Errorf("--raw-keys output must say what it actually did:\n%s", out)
+	}
+	assertHoldTakenAndReleased(t, daemon)
+}
+
+func TestSimType_RawKeysDoesNotProbeTheDeviceAtAll(t *testing.T) {
+	// Nothing is being promised, so nothing needs establishing - and the probe
+	// costs about a second of subprocess on a real machine.
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+	probed := false
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if isSimKeyboardProbe(args) {
+			probed = true
+		}
+		return inner(ctx, name, args...)
+	}
+
+	if _, _, err := executeCLI(t, deps, "sim", "type", "hello", "--raw-keys"); err != nil {
+		t.Fatalf("sim type --raw-keys: %v", err)
+	}
+	if probed {
+		t.Fatal("--raw-keys asked the device about a mapping it had already agreed to ignore")
+	}
+}
+
+func TestSimType_ProbesTheDeviceItIsAboutToType(t *testing.T) {
+	// A mapping read off the wrong device is worse than no mapping at all.
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+	var probedUDID string
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if isSimKeyboardProbe(args) {
+			probedUDID = args[2]
+		}
+		return inner(ctx, name, args...)
+	}
+
+	if _, _, err := executeCLI(t, deps, "sim", "type", "hello"); err != nil {
+		t.Fatalf("sim type: %v", err)
+	}
+	if probedUDID != simUDIDProMax {
+		t.Fatalf("probed %q, want the device being typed into (%s)", probedUDID, simUDIDProMax)
+	}
+}
+
+func TestSimType_ReportsTheKeyboardItVerified(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "hello", "--json")
+	if err != nil {
+		t.Fatalf("sim type --json: %v", err)
+	}
+	var result simGestureResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if result.Keyboard != "en_US@sw=QWERTY;hw=Automatic" {
+		t.Fatalf("keyboard = %q, want the mode that was checked", result.Keyboard)
+	}
+}
+
+func TestSimTap_DoesNotProbeTheKeyboard(t *testing.T) {
+	// Only typing depends on the mapping. Paying a subprocess for every tap
+	// would make the pane feel like a request rather than a touch.
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+	probed := false
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if isSimKeyboardProbe(args) {
+			probed = true
+		}
+		return inner(ctx, name, args...)
+	}
+
+	if _, _, err := executeCLI(t, deps, "sim", "tap", "0.5", "0.5"); err != nil {
+		t.Fatalf("sim tap: %v", err)
+	}
+	if probed {
+		t.Fatal("a tap asked the device about the keyboard")
+	}
+}
+
 func TestSimSwipe_MovesAndAlwaysLifts(t *testing.T) {
 	driver := &fakeSimDriver{}
 	deps, _ := touchDeps(t, driver)

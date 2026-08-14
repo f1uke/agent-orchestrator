@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 )
 
 // Gestures are composed here, in Go, and not in the bridge script: this is
@@ -20,7 +22,8 @@ import (
 //   - anything the device would silently ignore (a coordinate off the screen, a
 //     character a US keyboard cannot send, a button name the addon does not
 //     know) is refused here rather than reported as a success that changed
-//     nothing.
+//     nothing - and so is the subtler version of the same sin, a key press the
+//     guest would deliver as a DIFFERENT character (see Type).
 
 // Timings, chosen to match what the simulator's HID layer actually responds to.
 const (
@@ -177,8 +180,53 @@ func shareSteps(points []Point, steps int) []int {
 	return share
 }
 
-// Type sends text as US-keyboard key events.
-func Type(text string) ([]Event, error) {
+// RemapError is `type` refusing to send keys the guest would turn into
+// different characters. It carries the mode that was in the way so each surface
+// can name its own way past it - `--raw-keys` for the CLI, `rawKeys` for the
+// daemon route - without either restating what the problem is.
+type RemapError struct{ Mode simkeyboard.Mode }
+
+func (e *RemapError) Error() string {
+	return fmt.Sprintf("this simulator's keyboard input mode is %s, so the key presses `type` sends "+
+		"would arrive as different characters - nothing was sent.\n"+
+		"The keys are US-keyboard key presses and the GUEST decides what each one produces. "+
+		"Simulator.app ships with I/O > Keyboard > \"Use the Same Keyboard Language as macOS\" ticked, "+
+		"so a Mac on a non-US input source gives the simulator one too.\n"+
+		"Fix it in the Simulator window - press Ctrl-Space until the input mode is English, or untick "+
+		"that menu item, or switch the Mac's own input source - then run this again",
+		e.Mode.Describe())
+}
+
+// Type sends text as US-keyboard key events, and refuses when the guest would
+// turn those key presses into something else.
+//
+// The mode has to be passed in rather than looked up here because this package
+// composes events and never talks to a device. Making it a parameter is the
+// point: both surfaces that type - the CLI and the daemon's gesture route -
+// have to have established the mapping before they can call this at all, so
+// "we forgot to check" is not a state the code can be in.
+func Type(text string, mode simkeyboard.Mode) ([]Event, error) {
+	events, err := TypeRaw(text)
+	if err != nil {
+		return nil, err
+	}
+	// After composing, not before: a payload this keyboard could never send is
+	// the caller's own mistake and stays the first thing they are told about,
+	// whatever the guest is set to.
+	if !mode.SendsUSASCII() {
+		return nil, &RemapError{Mode: mode}
+	}
+	return events, nil
+}
+
+// TypeRaw sends the key presses without promising what they will produce.
+//
+// It exists because on a guest set to Thai these usages ARE how Thai text is
+// entered, and a QA session driving a Thai app may want exactly that. What it
+// does not waive is the HID path's own limit: a character no US keyboard can
+// send has no usage to send it with, so it is still refused rather than
+// dropped.
+func TypeRaw(text string) ([]Event, error) {
 	if text == "" {
 		return nil, fmt.Errorf("nothing to type")
 	}
@@ -276,7 +324,9 @@ type keystroke struct {
 }
 
 // usKeyboard maps a character to the USB HID keyboard usage that produces it on
-// a US layout - the only layout the simulator's HID path speaks.
+// a US layout - the only layout this table can speak for. Whether the guest
+// reading these usages agrees is a separate question, and the one Type asks
+// before sending any of them.
 var usKeyboard = buildUSKeyboard()
 
 func buildUSKeyboard() map[rune]keystroke {

@@ -6732,6 +6732,8 @@ components:
           type: string
         name:
           type: string
+        rawKeys:
+          type: boolean
         text:
           type: string
         toX:

@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -177,6 +178,7 @@ type SimScreen interface {
 	Devices(ctx context.Context) (simctl.Listing, error)
 	Subscribe(ctx context.Context, udid string) (<-chan simstream.Event, error)
 	Driver(ctx context.Context) (simbridge.Driver, error)
+	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
 }
 
 // screenProvider converts a nil interface value to a nil controller dependency.

@@ -1,11 +1,22 @@
 package simbridge
 
 import (
+	"errors"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
+)
+
+// The two guest keyboard mappings that matter: one that turns the usages we
+// send into the characters they stand for, and one that does not. Both
+// identifiers were read off a real device.
+var (
+	usMode   = simkeyboard.ParseMode("en_US@sw=QWERTY;hw=Automatic")
+	thaiMode = simkeyboard.ParseMode("th_TH@sw=Thai;hw=Automatic")
 )
 
 func TestTap_IsAMatchedDownAndUp(t *testing.T) {
@@ -68,7 +79,7 @@ func TestSwipe_DurationBounds(t *testing.T) {
 }
 
 func TestType_ProducesShiftedAndUnshiftedKeys(t *testing.T) {
-	events, err := Type("aA1!\n\t")
+	events, err := Type("aA1!\n\t", usMode)
 	if err != nil {
 		t.Fatalf("type: %v", err)
 	}
@@ -105,7 +116,7 @@ func TestType_RefusesWhatTheKeyboardCannotSend(t *testing.T) {
 	// The HID path is a US keyboard. Silently dropping a character would type
 	// something different from what was asked for - worse than refusing.
 	for _, text := range []string{"ก", "café", "emoji 🎉"} {
-		_, err := Type(text)
+		_, err := Type(text, usMode)
 		if err == nil {
 			t.Fatalf("Type(%q) must be refused", text)
 		}
@@ -113,8 +124,71 @@ func TestType_RefusesWhatTheKeyboardCannotSend(t *testing.T) {
 			t.Fatalf("Type(%q) error must explain the limit, got %v", text, err)
 		}
 	}
-	if _, err := Type(""); err == nil {
+	if _, err := Type("", usMode); err == nil {
 		t.Fatal("typing nothing is a mistake worth reporting, not a no-op")
+	}
+}
+
+func TestType_RefusesWhenTheGuestWouldRemapTheKeys(t *testing.T) {
+	// The bug this whole change exists for. Sending these usages to a guest on
+	// a Thai input mode puts "ดฟๅ/_ภถ" in the field and reports seven
+	// characters typed, so the refusal has to happen before any event is
+	// composed - there is nothing to half-send.
+	events, err := Type("fa12345", thaiMode)
+	if err == nil {
+		t.Fatal("typing into a guest that remaps the keys must be refused, not reported as done")
+	}
+	if events != nil {
+		t.Fatalf("a refused type must compose no events, got %d", len(events))
+	}
+	var remap *RemapError
+	if !errors.As(err, &remap) {
+		t.Fatalf("err = %v, want a *RemapError callers can phrase for their own audience", err)
+	}
+	if remap.Mode.Identifier != thaiMode.Identifier {
+		t.Fatalf("error carries mode %q, want the one that was in the way", remap.Mode.Identifier)
+	}
+	// A refusal that does not name the thing to change is a dead end.
+	for _, want := range []string{"th_TH", "input mode"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q must mention %q", err, want)
+		}
+	}
+}
+
+func TestType_RefusesAModeItCouldNotRead(t *testing.T) {
+	// Probing can fail - a device that has never shown a keyboard has nothing
+	// to report. "Unknown" must never be read as "US".
+	if _, err := Type("hunter2", simkeyboard.Mode{}); err == nil {
+		t.Fatal("an unknown input mode must be refused, not assumed safe")
+	}
+}
+
+func TestTypeRaw_SendsTheSameKeysWithoutTheLayoutCheck(t *testing.T) {
+	// The deliberate escape hatch: on a Thai guest these usages are how Thai
+	// text is produced at all, so the capability stays - what changes is that
+	// it has to be asked for.
+	raw, err := TypeRaw("fa12345")
+	if err != nil {
+		t.Fatalf("TypeRaw: %v", err)
+	}
+	checked, err := Type("fa12345", usMode)
+	if err != nil {
+		t.Fatalf("Type on a US guest: %v", err)
+	}
+	if !reflect.DeepEqual(raw, checked) {
+		t.Fatal("the escape hatch must send exactly the same keys, only without the promise")
+	}
+}
+
+func TestTypeRaw_StillRefusesWhatTheKeyboardCannotSend(t *testing.T) {
+	// --raw-keys waives the guest's mapping, not the limits of the HID path
+	// itself: there is no usage that sends "ก", so it is still refused.
+	if _, err := TypeRaw("ก"); err == nil {
+		t.Fatal("a character no US keyboard can send has no usage to send it with")
+	}
+	if _, err := TypeRaw(""); err == nil {
+		t.Fatal("typing nothing is still a mistake worth reporting")
 	}
 }
 
@@ -192,7 +266,7 @@ func TestDuration_CoversEveryGesture(t *testing.T) {
 		t.Fatalf("swipe duration = %s, want at least the 2s it was asked for", got)
 	}
 
-	typing, err := Type(strings.Repeat("a", 500))
+	typing, err := Type(strings.Repeat("a", 500), usMode)
 	if err != nil {
 		t.Fatalf("type: %v", err)
 	}
@@ -202,14 +276,14 @@ func TestDuration_CoversEveryGesture(t *testing.T) {
 }
 
 func TestType_RefusesTextLongerThanAGestureHoldCanCover(t *testing.T) {
-	_, err := Type(strings.Repeat("a", MaxTypeRunes+1))
+	_, err := Type(strings.Repeat("a", MaxTypeRunes+1), usMode)
 	if err == nil {
 		t.Fatal("text long enough to outlive its own gesture hold must be refused, not sent")
 	}
 	if !strings.Contains(err.Error(), "shorter") {
 		t.Fatalf("the refusal must say what to do, got %v", err)
 	}
-	if _, err := Type(strings.Repeat("a", MaxTypeRunes)); err != nil {
+	if _, err := Type(strings.Repeat("a", MaxTypeRunes), usMode); err != nil {
 		t.Fatalf("text at the limit must still be typable: %v", err)
 	}
 }

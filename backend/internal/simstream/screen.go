@@ -10,6 +10,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simchrome"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 )
 
 // Screen is the daemon's machine-local simulator surface: what simulators exist,
@@ -210,6 +211,17 @@ func (s *Screen) Driver(context.Context) (simbridge.Driver, error) {
 		}
 	}
 	return s.driver, s.drvErr
+}
+
+// Keyboard asks a device which input mode it will read key presses through.
+//
+// Unlike the device listing, this is NOT cached. The mode follows the Mac's own
+// input source while Simulator.app's "Use the Same Keyboard Language as macOS"
+// is ticked, so it can change between one gesture and the next - and a cached
+// "US" that outlived the change is precisely the silent corruption that made
+// this worth asking about at all.
+func (s *Screen) Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error) {
+	return simkeyboard.Probe(ctx, s.run, udid)
 }
 
 // Shutdown stops every running capture and the resident gesture bridge. The

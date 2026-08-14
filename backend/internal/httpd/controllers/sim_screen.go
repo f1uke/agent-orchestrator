@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -37,6 +38,11 @@ type SimScreenProvider interface {
 	Devices(ctx context.Context) (simctl.Listing, error)
 	Subscribe(ctx context.Context, udid string) (<-chan simstream.Event, error)
 	Driver(ctx context.Context) (simbridge.Driver, error)
+	// Keyboard is what the device will turn key presses into. Only `type` needs
+	// it, and it is asked per gesture rather than cached: the mode changes
+	// whenever the Mac's input source does, and a cached "US" outliving that
+	// change is the silent corruption this exists to prevent.
+	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
 }
 
 // SimDeviceLeaseView is what AO knows about who is driving one device. The
@@ -96,9 +102,14 @@ type SimGestureInput struct {
 	ToX        float64 `json:"toX,omitempty"`
 	ToY        float64 `json:"toY,omitempty"`
 	DurationMS int     `json:"durationMs,omitempty" description:"Swipe duration in milliseconds. Omit for 300."`
-	// type: the text to send. What the keys produce is decided by the guest's
-	// own active input source, so read the result back rather than assuming.
+	// type: the text to send. The keys are US-keyboard key presses and the
+	// GUEST turns them into characters using its own input mode, so this route
+	// asks the device which mode that is and refuses text it cannot promise.
 	Text string `json:"text,omitempty"`
+	// type: send the key presses even when the simulator would turn them into
+	// other characters - which is how Thai text is entered on a Thai guest.
+	// What is then promised is key presses, not characters.
+	RawKeys bool `json:"rawKeys,omitempty"`
 	// button: home or app-switcher.
 	Name string `json:"name,omitempty"`
 	// drag-begin, drag-move and drag-end are one touch spread over several
@@ -254,7 +265,23 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gesture, err := composeSimGesture(in)
+	// Typing is the one gesture whose meaning the device decides: it reads the
+	// key presses through whichever input mode it has selected, so a guest set
+	// to Thai turns "fa12345" into "ดฟๅ/_ภถ". The mode is established before
+	// anything is composed, and a device that cannot say is refused rather than
+	// typed at hopefully.
+	var keyboard simkeyboard.Mode
+	if in.Kind == "type" && !in.RawKeys {
+		keyboard, err = c.Screen.Keyboard(r.Context(), device.UDID)
+		if err != nil {
+			envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID",
+				err.Error()+". Send rawKeys to type the key presses regardless of what the simulator makes of them",
+				nil)
+			return
+		}
+	}
+
+	gesture, err := composeSimGesture(in, keyboard)
 	if err != nil {
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
 		return
@@ -365,7 +392,11 @@ func (h *leaseHolder) Release(ctx context.Context, udid, token string) {
 // composeSimGesture turns a request into events. Every gesture is composed by
 // internal/simbridge, the same code the CLI composes with, so a click and a
 // command produce byte-identical event streams.
-func composeSimGesture(in SimGestureInput) (simgesture.Gesture, error) {
+//
+// keyboard is the input mode the device reported, and only `type` reads it: the
+// guest turns the key presses we send into characters using that mode, so text
+// cannot be composed honestly without it.
+func composeSimGesture(in SimGestureInput, keyboard simkeyboard.Mode) (simgesture.Gesture, error) {
 	switch in.Kind {
 	case "tap":
 		at := simbridge.Point{X: in.X, Y: in.Y}
@@ -393,7 +424,19 @@ func composeSimGesture(in SimGestureInput) (simgesture.Gesture, error) {
 			Events: events, Last: to,
 		}, nil
 	case "type":
-		events, err := simbridge.Type(in.Text)
+		if in.RawKeys {
+			events, err := simbridge.TypeRaw(in.Text)
+			if err != nil {
+				return simgesture.Gesture{}, err
+			}
+			return simgesture.Gesture{
+				Action: "type", Detail: fmt.Sprintf("%d key presses", len([]rune(in.Text))), Events: events,
+			}, nil
+		}
+		// keyboard is the zero Mode when the caller did not establish one, and
+		// the zero Mode promises nothing - so a route that forgot to ask the
+		// device refuses rather than types hopefully.
+		events, err := simbridge.Type(in.Text, keyboard)
 		if err != nil {
 			return simgesture.Gesture{}, err
 		}

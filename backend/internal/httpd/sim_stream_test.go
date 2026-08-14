@@ -20,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -66,6 +67,10 @@ func (s *streamScreen) Subscribe(ctx context.Context, udid string) (<-chan simst
 
 func (s *streamScreen) Driver(context.Context) (simbridge.Driver, error) {
 	return nil, errors.New("not used")
+}
+
+func (s *streamScreen) Keyboard(context.Context, string) (simkeyboard.Mode, error) {
+	return simkeyboard.Mode{}, errors.New("not used")
 }
 
 func (s *streamScreen) subscribedUDID() string {

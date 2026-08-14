@@ -275,7 +275,7 @@ All of them take a `--udid` and a `--json` flag, resolve the device exactly like
 | `ao sim tap <x> <y>` | Press and release one point |
 | `ao sim swipe <x1> <y1> <x2> <y2> [--duration 300ms]` | Drag between two points - how you scroll a list or dismiss a sheet |
 | `ao sim drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--duration 600ms]` | Hold one finger through a route of points without lifting. Two points is exactly a swipe; more is a path an app can tell apart from a flick - a scroll that changes direction, a drag onto a target. Sending the same route as separate swipes lifts between them, which reads as several gestures. |
-| `ao sim type <text>` | Send text to whatever has keyboard focus (tap the field first) |
+| `ao sim type <text>` | Send text to whatever has keyboard focus (tap the field first). Refuses when the simulator's keyboard would turn the keys into other characters - see below. `--raw-keys` sends them anyway. |
 | `ao sim button <name>` | `home` (the swipe-up home gesture - your way back to a known screen) or `app-switcher`. The list is short on purpose: only buttons observably verified to change a real device are offered, because the mechanism reports success for ones that do nothing. |
 
 ```bash
@@ -301,6 +301,15 @@ ao sim ax                              # confirm what actually happened
 | `... is not booted` | Boot it yourself in Xcode or Simulator.app. AO never boots a device. |
 | exit 2 | Bad arguments (a coordinate outside 0..1, an unknown button, a character a US keyboard cannot type). Nothing reached the device. |
 
-- **Typing sends US-keyboard key presses, and the SIMULATOR decides what they produce.** Characters a US keyboard cannot send are refused rather than silently dropped, but if the simulator's own active input source is not US English (a Thai or Japanese keyboard, say), the letters that appear will not be the ones you typed. This is a real, observed outcome - always re-read the field with `ao sim ax` and check the value, never assume.
+- **Typing sends US-keyboard key presses, and the SIMULATOR decides what they produce.** Simulator.app ships with *I/O > Keyboard > "Use the Same Keyboard Language as macOS"* ticked, so a Mac set to Thai gives the simulator a Thai keyboard and `ao sim type "fa12345"` would arrive as `ดฟๅ/_ภถ`. `type` therefore **asks the device which input mode it is using and refuses to send anything it cannot promise** - so this now fails loudly instead of reporting "Typed 7 characters" over a field holding something else.
+
+  Two things are worth knowing about the failure it prevents, because they are why it was so expensive to diagnose: it is **selective** (fields that force an ASCII keyboard - email, URL - come out right, while ordinary and secure fields do not, so it looks like bad test data rather than a broken tool), and in a **secure field the characters are hidden behind dots**, so the corruption cannot be seen when it happens and cannot be read back afterwards either. A worker has already lost time concluding a perfectly good QA account was invalid.
+
+  | You see | Do this |
+  |---|---|
+  | `this simulator's keyboard input mode is th_TH ...` | In the Simulator window press **Ctrl-Space** until the input mode is English, or untick that menu item, or switch the Mac's input source. Then run the command again. Nothing was sent. |
+  | `could not read ... keyboard input mode` | The device has not shown a keyboard yet. `ao sim tap` the field first - the order this command expects anyway - then retry. |
+
+  `--raw-keys` sends the key presses regardless and then promises **key presses, not characters** - which is how you deliberately enter Thai text on a Thai guest. With `--raw-keys`, re-reading the field with `ao sim ax` is the only way to know what landed.
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.

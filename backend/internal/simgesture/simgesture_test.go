@@ -173,7 +173,7 @@ func TestRun_LiftThatAlsoFailsIsReportedAsSuch(t *testing.T) {
 // A gesture that never touched the screen has no finger to lift, and attempting
 // one would send a stray touch to a device nobody touched.
 func TestRun_NonTouchGestureIsNotFollowedByALift(t *testing.T) {
-	events, err := simbridge.Type("hi")
+	events, err := simbridge.TypeRaw("hi")
 	if err != nil {
 		t.Fatalf("Type: %v", err)
 	}

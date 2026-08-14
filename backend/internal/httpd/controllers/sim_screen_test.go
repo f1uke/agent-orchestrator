@@ -22,6 +22,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -39,6 +40,19 @@ type fakeScreen struct {
 	listed     atomic.Int64
 	subscribed []string
 	subErr     error
+
+	// The guest keyboard the device reports, and what was asked about it.
+	mu            sync.Mutex
+	keyboard      string
+	keyboardErr   error
+	keyboardUDID  string
+	keyboardCalls int
+}
+
+func (f *fakeScreen) keyboardAsked() (string, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.keyboardUDID, f.keyboardCalls
 }
 
 func (f *fakeScreen) Devices(context.Context) (simctl.Listing, error) {
@@ -63,6 +77,23 @@ func (f *fakeScreen) Driver(context.Context) (simbridge.Driver, error) {
 		return nil, f.driverErr
 	}
 	return f.driver, nil
+}
+
+// Keyboard is what the guest would turn key presses into. A US keyboard by
+// default, which is the setup where typing has always worked; the tests about
+// the other setups set keyboard/keyboardErr themselves.
+func (f *fakeScreen) Keyboard(_ context.Context, udid string) (simkeyboard.Mode, error) {
+	f.mu.Lock()
+	f.keyboardUDID = udid
+	f.keyboardCalls++
+	f.mu.Unlock()
+	if f.keyboardErr != nil {
+		return simkeyboard.Mode{}, f.keyboardErr
+	}
+	if f.keyboard == "" {
+		return simkeyboard.ParseMode("en_US@sw=QWERTY;hw=Automatic"), nil
+	}
+	return simkeyboard.ParseMode(f.keyboard), nil
 }
 
 // fakeDriver records the events that reached the device.
@@ -279,6 +310,117 @@ func TestSimGesture_TapTakesTheHoldAndReachesTheDevice(t *testing.T) {
 	}
 	if svc.gotToken != "tok-fake" {
 		t.Fatalf("the hold must be given back, released token %q", svc.gotToken)
+	}
+}
+
+// Typing is arbitrated like every other gesture, but it has one extra
+// question to settle first, and the daemon route has to settle it the same way
+// the CLI does: the guest decides what a key press becomes.
+func TestSimGesture_TypeRefusesAGuestThatWouldRemapTheKeys(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver, keyboard: "th_TH@sw=Thai;hw=Automatic"}
+	srv := newScreenTestServer(t, svc, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422: %v", code, out)
+	}
+	if len(driver.events) != 0 {
+		t.Fatalf("%d gesture(s) reached the device, want none", len(driver.events))
+	}
+	if svc.gotUDID != "" {
+		t.Fatalf("the gesture hold was taken to refuse, for %s", svc.gotUDID)
+	}
+	if udid, calls := screen.keyboardAsked(); udid != testSimUDID || calls != 1 {
+		t.Fatalf("asked %q about its keyboard %d time(s), want %s once", udid, calls, testSimUDID)
+	}
+}
+
+func TestSimGesture_TypeOnAUSGuestReachesTheDevice(t *testing.T) {
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver, keyboard: "en_US@sw=QWERTY;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345"})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	var keys int
+	for _, sent := range driver.sent() {
+		if strings.HasPrefix(sent, "key:") {
+			keys++
+		}
+	}
+	if keys == 0 {
+		t.Fatalf("no key events reached the device: %v", driver.sent())
+	}
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "7 characters") {
+		t.Fatalf("detail = %q, want the characters it can now promise", detail)
+	}
+}
+
+func TestSimGesture_TypeRefusesAKeyboardItCouldNotRead(t *testing.T) {
+	// Unknown is not US: a device that cannot say what it will do with the keys
+	// is refused, and told how to say so anyway.
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver, keyboardErr: errors.New("device is not booted")}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "hunter2"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422: %v", code, out)
+	}
+	if len(driver.events) != 0 {
+		t.Fatal("nothing may reach the device when the mapping is unknown")
+	}
+	if message, _ := out["message"].(string); !strings.Contains(message, "rawKeys") {
+		t.Fatalf("message %q does not say how to send the keys anyway", message)
+	}
+}
+
+func TestSimGesture_TypeWithRawKeysSendsWithoutAskingTheDevice(t *testing.T) {
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver, keyboard: "th_TH@sw=Thai;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345", "rawKeys": true})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if len(driver.events) != 1 {
+		t.Fatalf("want one gesture on the device, got %d", len(driver.events))
+	}
+	if _, calls := screen.keyboardAsked(); calls != 0 {
+		t.Fatalf("asked the device about a mapping it had agreed to ignore (%d time(s))", calls)
+	}
+	// The response must not claim characters it cannot promise.
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "key presses") {
+		t.Fatalf("detail = %q, want it to say key presses", detail)
+	}
+}
+
+func TestSimGesture_OnlyTypingAsksAboutTheKeyboard(t *testing.T) {
+	// The probe is a subprocess on a real machine. Paying it for every tap in a
+	// drag is what this route already learned not to do with `simctl list`.
+	screen := &fakeScreen{listing: oneBooted(), driver: &fakeDriver{}}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	for _, body := range []map[string]any{
+		{"kind": "tap", "x": 0.5, "y": 0.5},
+		{"kind": "swipe", "x": 0.5, "y": 0.8, "toX": 0.5, "toY": 0.2},
+		{"kind": "button", "name": "home"},
+	} {
+		if code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture", body); code != http.StatusOK {
+			t.Fatalf("%v: status %d: %v", body, code, out)
+		}
+	}
+	if _, calls := screen.keyboardAsked(); calls != 0 {
+		t.Fatalf("a gesture that sends no keys asked about the keyboard %d time(s)", calls)
 	}
 }
 
