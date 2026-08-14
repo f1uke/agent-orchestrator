@@ -189,11 +189,13 @@ type RemapError struct{ Mode simkeyboard.Mode }
 func (e *RemapError) Error() string {
 	return fmt.Sprintf("this simulator's keyboard input mode is %s, so the key presses `type` sends "+
 		"would arrive as different characters - nothing was sent.\n"+
-		"The keys are US-keyboard key presses and the GUEST decides what each one produces. "+
-		"Simulator.app ships with I/O > Keyboard > \"Use the Same Keyboard Language as macOS\" ticked, "+
-		"so a Mac on a non-US input source gives the simulator one too.\n"+
-		"Fix it in the Simulator window - press Ctrl-Space until the input mode is English, or untick "+
-		"that menu item, or switch the Mac's own input source - then run this again",
+		"The keys are US-keyboard key presses and the GUEST decides what each one produces, so only a US "+
+		"hardware layout is promised - even a UK one turns shift-2 into a quote rather than an at-sign, "+
+		"which is enough to corrupt every email address. Simulator.app ships with I/O > Keyboard > "+
+		"\"Use the Same Keyboard Language as macOS\" ticked, so a Mac on any other input source gives the "+
+		"simulator one too.\n"+
+		"Fix it in the Simulator window - press Ctrl-Space until the input mode is U.S. English (en_US), "+
+		"or untick that menu item, or switch the Mac's own input source - then run this again",
 		e.Mode.Describe())
 }
 

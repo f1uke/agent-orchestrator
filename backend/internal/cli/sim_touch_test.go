@@ -602,11 +602,48 @@ func TestSimTouch_CoordinatesOffTheScreenAreUsageErrors(t *testing.T) {
 func TestSimTouch_RequiresASession(t *testing.T) {
 	driver := &fakeSimDriver{}
 	deps, _ := touchDeps(t, driver)
+	probed := false
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if isSimKeyboardProbe(args) {
+			probed = true
+		}
+		return inner(ctx, name, args...)
+	}
 	t.Setenv("AO_SESSION_ID", "")
 
-	_, _, err := executeCLI(t, deps, "sim", "tap", "0.5", "0.5")
-	if err == nil || !strings.Contains(err.Error(), "AO_SESSION_ID") {
-		t.Fatalf("err = %v, want a refusal naming AO_SESSION_ID", err)
+	for _, command := range [][]string{
+		{"sim", "tap", "0.5", "0.5"},
+		{"sim", "type", "hello"},
+	} {
+		_, _, err := executeCLI(t, deps, command...)
+		if err == nil || !strings.Contains(err.Error(), "AO_SESSION_ID") {
+			t.Fatalf("%v: err = %v, want a refusal naming AO_SESSION_ID", command, err)
+		}
+	}
+	// A caller who may not drive the device must not make us spawn a process on
+	// it just to answer a question we are not allowed to act on.
+	if probed {
+		t.Fatal("`sim type` asked the device about its keyboard before checking it was allowed to type at all")
+	}
+}
+
+func TestSimTouch_MissingSessionIsReportedBeforeTheMachineIsAsked(t *testing.T) {
+	// Two things are wrong at once. The one worth naming is the one the caller
+	// can fix, and it must not be buried under "this machine has no simulator".
+	setConfigEnv(t)
+	deps, _ := simDeps(t, simDevicesJSON(t, simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Shutdown")), fakePNG)
+	deps.SimDriver = func(string) (simbridge.Driver, error) { return &fakeSimDriver{}, nil }
+	t.Setenv("AO_SESSION_ID", "")
+
+	for _, command := range [][]string{
+		{"sim", "tap", "0.5", "0.5"},
+		{"sim", "type", "hello"},
+	} {
+		_, _, err := executeCLI(t, deps, command...)
+		if err == nil || !strings.Contains(err.Error(), "AO_SESSION_ID") {
+			t.Fatalf("%v: err = %v, want the refusal to name AO_SESSION_ID rather than the missing device", command, err)
+		}
 	}
 }
 

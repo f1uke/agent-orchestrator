@@ -224,6 +224,14 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args, " ")
+			// Checked here as well as in the shared sequence, and before the
+			// device is approached at all: a caller with no session is not
+			// allowed to drive anything, and asking the guest what keyboard it
+			// has would spawn a process on a device this command may not use.
+			// runSimGestureOn remains the enforcement point for every gesture.
+			if _, err := simSessionID("`ao sim type`"); err != nil {
+				return err
+			}
 			// The device is resolved here rather than inside the shared
 			// sequence because what may be typed depends on which device it is.
 			device, err := ctx.resolveBootedSimDevice(cmd.Context(), opts.udid)
@@ -353,6 +361,12 @@ type simGesture struct {
 // Simulator tab goes through the same sequence from the daemon side, so a click
 // there is arbitrated exactly like this command.
 func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions, gesture simGesture) error {
+	// Before the machine is asked anything, for the same reason `ao sim type`
+	// checks first: a caller with no session may not drive a device, and
+	// "there is no simulator" is the wrong thing to tell them about.
+	if _, err := simSessionID("`ao sim " + gesture.action + "`"); err != nil {
+		return err
+	}
 	device, err := c.resolveBootedSimDevice(cmd.Context(), opts.udid)
 	if err != nil {
 		return err

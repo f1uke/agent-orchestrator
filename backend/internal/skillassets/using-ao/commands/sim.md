@@ -311,5 +311,7 @@ ao sim ax                              # confirm what actually happened
   | `could not read ... keyboard input mode` | The device has not shown a keyboard yet. `ao sim tap` the field first - the order this command expects anyway - then retry. |
 
   `--raw-keys` sends the key presses regardless and then promises **key presses, not characters** - which is how you deliberately enter Thai text on a Thai guest. With `--raw-keys`, re-reading the field with `ao sim ax` is the only way to know what landed.
+
+  Only a **US** hardware layout is promised, so a simulator on `en_GB` is refused too even though its letters and digits are identical - a UK layout puts a quote where the at-sign is, which is enough to corrupt every email address. That refusal is deliberate rather than a guess about how close a layout is.
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
