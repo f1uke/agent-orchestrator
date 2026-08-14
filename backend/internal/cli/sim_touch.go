@@ -137,6 +137,60 @@ func newSimSwipeCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
+func newSimDragCommand(ctx *commandContext) *cobra.Command {
+	opts := simTouchOptions{}
+	var duration time.Duration
+	cmd := &cobra.Command{
+		Use:   "drag <x1> <y1> <x2> <y2> [<x3> <y3> ...]",
+		Short: "Drag through a route of points on a claimed simulator, without lifting",
+		Long: "Hold one finger down and move it through every point given, in order.\n\n" +
+			"This is the gesture a human makes by holding the pointer down in the desktop " +
+			"app's Device tab and moving it: the finger stays down for the whole route, so " +
+			"an app sees one drag. Sending the same route as separate `swipe` commands lifts " +
+			"between them, which reads as several flicks instead - the difference between " +
+			"dragging something onto a target and throwing it three times.\n\n" +
+			"Two points is a swipe. The coordinates are the same normalized 0..1 values " +
+			"`ao sim ax` prints for each element.\n\n" +
+			"The device must be claimed by this session (`ao sim claim`) first.",
+		Example: `  ao sim drag 0.5 0.8 0.5 0.2
+  ao sim drag 0.5 0.8 0.5 0.5 0.2 0.5 --duration 1s`,
+		// The arity rule is "pairs, at least two of them", which cobra has no
+		// matcher for - and getting it wrong is a mistyped coordinate, so it is
+		// refused as a usage error (exit 2) rather than a failure of the run.
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) < 4 || len(args)%2 != 0 {
+				return usageError{fmt.Errorf("a drag takes pairs of coordinates - at least a start and an end - "+
+					"got %d value(s)", len(args))}
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			points := make([]simbridge.Point, 0, len(args)/2)
+			for i := 0; i < len(args); i += 2 {
+				at, err := parseSimPoint(args[i], args[i+1])
+				if err != nil {
+					return err
+				}
+				points = append(points, at)
+			}
+			events, err := simbridge.Path(points, duration)
+			if err != nil {
+				return usageError{err}
+			}
+			last := points[len(points)-1]
+			return ctx.runSimGesture(cmd, opts, simGesture{
+				action: "drag",
+				detail: fmt.Sprintf("%d points ending at (%.3f, %.3f) over %s", len(points), last.X, last.Y, duration),
+				events: events,
+				last:   last,
+			})
+		},
+	}
+	cmd.Flags().DurationVar(&duration, "duration", 600*time.Millisecond, "How long the whole route takes")
+	opts.bind(cmd)
+	return cmd
+}
+
 func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 	opts := simTouchOptions{}
 	cmd := &cobra.Command{

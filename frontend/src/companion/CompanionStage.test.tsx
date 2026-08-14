@@ -680,13 +680,23 @@ describe("shaking the Orchestrator to call its project in", () => {
 		Number(/transition-duration:\s*([\d.]+)ms/.exec(node.getAttribute("style") ?? "")?.[1] ?? "0");
 
 	/** Wiggle the pointer: `legs` fast reversals, which is what a shake actually is. */
+	// The samples carry their own timestamps rather than landing on whatever the
+	// wall clock says. A shake is defined by speed, so a loaded machine that took
+	// too long to dispatch sixteen synthetic moves turned a real shake into a
+	// slow drag and this test failed for a reason that had nothing to do with the
+	// code - about one run in three. The gesture is the same shape either way;
+	// only the clock is now the test's.
 	function shakeOver(node: Element, legs: number, amplitude = 40) {
 		let x = 600;
+		let at = 1_000;
 		for (let leg = 0; leg < legs; leg++) {
 			const step = (leg % 2 === 0 ? amplitude : -amplitude) / 4;
 			for (let i = 0; i < 4; i++) {
 				x += step;
-				fireEvent.pointerMove(node, { bubbles: true, clientX: x, clientY: 300 });
+				// 10px in 8ms is 1.25px/ms - a flick of the wrist, well over the
+				// speed a leg has to beat, and far under the window a shake fits in.
+				at += 8;
+				fireEvent.pointerMove(node, { bubbles: true, clientX: x, clientY: 300, timeStamp: at });
 			}
 		}
 	}

@@ -143,6 +143,7 @@ beforeEach(() => {
 			}
 		},
 	);
+	sessionStorage.clear();
 	vi.spyOn(document, "hasFocus").mockReturnValue(true);
 	// jsdom has no 2d context; the panel only needs the call not to throw.
 	HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage: vi.fn() });
@@ -198,6 +199,69 @@ describe("SimulatorPanel device selection", () => {
 		expect(await screen.findByText(/2 simulators are booted/i)).toBeInTheDocument();
 		expect(openSockets()).toHaveLength(0);
 		expect(screen.getByText(/choose which booted simulator/i)).toBeInTheDocument();
+	});
+});
+
+describe("SimulatorPanel remembering a worker", () => {
+	const leased = () =>
+		devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator");
+
+	// Switching to another worker and back remounts this panel. Picking the
+	// device again and opting in to driving again every time was the complaint.
+	it("comes back to the device and the driving it was left with", async () => {
+		getMock.mockResolvedValue(leased());
+		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await userEvent.click(await screen.findByRole("button", { name: /drive this device/i }));
+		first.unmount();
+
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		expect(openSockets()[0].url).toContain("/sim-stream/UDID-A");
+		const toggle = await screen.findByRole("button", { name: /drive this device/i });
+		await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+	});
+
+	// What comes back is a device this session still owns. Remembering that
+	// driving was on is not the same as still being allowed to drive.
+	it("does not hand driving back when the lease has moved on", async () => {
+		getMock.mockResolvedValue(leased());
+		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await userEvent.click(await screen.findByRole("button", { name: /drive this device/i }));
+		first.unmount();
+
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
+		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
+	});
+
+	// One worker's choice is not another's.
+	it("keeps each worker's device separate", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload(
+				[device(), device({ udid: "UDID-B", name: "iPhone 17 Pro" })],
+				null,
+				"2 simulators are booted, so there is no unambiguous default",
+			),
+		);
+		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await screen.findByText(/2 simulators are booted/i);
+		await userEvent.click(screen.getByRole("combobox", { name: /simulator to watch/i }));
+		await userEvent.click(await screen.findByRole("option", { name: /iPhone 17 Pro ·/i }));
+		await waitFor(() => expect(openSockets()[0]?.url).toContain("/sim-stream/UDID-B"));
+		first.unmount();
+
+		// A different worker starts where it always did: with the refusal.
+		render(<SimulatorPanel isActive sessionId="p-2" />, { wrapper });
+		expect(await screen.findByText(/2 simulators are booted/i)).toBeInTheDocument();
+		expect(openSockets()).toHaveLength(0);
 	});
 });
 
@@ -390,7 +454,7 @@ function makeLive() {
 }
 
 describe("SimulatorPanel lease truth", () => {
-	it("says unknown with the reason, never free, and offers to claim", async () => {
+	it("says unknown with the reason, never free", async () => {
 		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
@@ -398,13 +462,12 @@ describe("SimulatorPanel lease truth", () => {
 		expect(within(menu).getByText(/Lease: unknown/i)).toBeInTheDocument();
 		expect(within(menu).getByText(/cannot see whether a human is driving it/i)).toBeInTheDocument();
 		expect(within(menu).queryByText(/free/i)).not.toBeInTheDocument();
-		expect(within(menu).getByRole("menuitem", { name: /claim to drive/i })).toBeInTheDocument();
 	});
 
 	// The one place the lease is enforced in the UI is what is offered: a
 	// session that does not hold the device is never given the control that
 	// turns driving on, and the effect below switches it off if the lease moves.
-	it("names the other holder and offers no way to drive", async () => {
+	it("names the other holder and offers no way to drive until it is taken over", async () => {
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
@@ -413,7 +476,98 @@ describe("SimulatorPanel lease truth", () => {
 		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
 		const menu = await openMenu();
 		expect(within(menu).getByText(/Leased by @other-7/i)).toBeInTheDocument();
-		expect(within(menu).queryByRole("menuitem", { name: /claim to drive/i })).not.toBeInTheDocument();
+	});
+
+	// Taking the device was two presses - the options menu, then the item in it -
+	// which is one too many for the thing a person does before they can touch the
+	// screen at all. It is a button in the toolbar, so no menu is involved.
+	it("claims in a single press, with no menu to open first", async () => {
+		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("button", { name: /claim to drive/i }));
+
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/sim-leases",
+				expect.objectContaining({ body: { udid: "UDID-A", takeOver: undefined } }),
+			),
+		);
+	});
+
+	// The lease stops two agents driving one device at once; it is not there to
+	// lock a person out of their own machine. One press here too - and still
+	// named after the holder, so it reads as a decision rather than a slip.
+	it("takes the device over in a single press, naming who has it", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("button", { name: /take over from @other-7/i }));
+
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/sim-leases",
+				expect.objectContaining({ body: { udid: "UDID-A", takeOver: true } }),
+			),
+		);
+	});
+
+	// An ordinary claim on a device nobody holds must not ask to take anything
+	// over: the two refuse for different reasons and mean different things.
+	it("never offers to take over a device nobody holds", async () => {
+		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await screen.findByRole("button", { name: /claim to drive/i });
+		expect(screen.queryByRole("button", { name: /take over/i })).not.toBeInTheDocument();
+	});
+
+	// One control in that slot or none, never two: an offer to claim a device
+	// this session already holds is nonsense, and a second button appearing
+	// beside the first is the row growing again.
+	it("keeps one lease control in the toolbar whatever the lease says", async () => {
+		const controls = [/claim to drive/i, /take over from @other-7/i, /drive this device/i];
+		for (const [lease, expected] of [
+			[undefined, /claim to drive/i],
+			[{ state: "held", holder: "other-7" }, /take over from @other-7/i],
+			[{ state: "held", holder: "p-1" }, /drive this device/i],
+		] as const) {
+			getMock.mockResolvedValue(
+				devicesPayload([device(lease ? { lease } : {})], "UDID-A", "the only booted simulator"),
+			);
+			const view = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+			expect(await screen.findByRole("button", { name: expected })).toBeInTheDocument();
+			// Exactly one: two of these at once would be both a wider row and an
+			// offer to claim a device this session already holds.
+			for (const other of controls.filter((c) => c.source !== expected.source)) {
+				expect(screen.queryByRole("button", { name: other })).not.toBeInTheDocument();
+			}
+			view.unmount();
+			sessionStorage.clear();
+		}
+	});
+
+	// The daemon refuses a takeover while a touch is actually happening, and the
+	// human has to be told why rather than left with a button that did nothing.
+	it("says why a takeover was refused mid-gesture", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		postMock.mockImplementation(async (path: string) => {
+			if (path.endsWith("/sim-leases")) {
+				return { error: { message: "UDID-A has a gesture in flight from @other-7: retry in a moment" } };
+			}
+			return { error: undefined };
+		});
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("button", { name: /take over from @other-7/i }));
+
+		expect(await screen.findByText(/gesture in flight from @other-7/i)).toBeInTheDocument();
 	});
 
 	it("offers driving only once this session holds the lease, and never pre-enabled", async () => {
@@ -503,14 +657,16 @@ describe("SimulatorPanel driving", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
-		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeEnabled();
 
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		await refresh();
 
-		await waitFor(() => expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument());
+		// The controls stay where they are - a row that grows and shrinks moves
+		// the screen under the pointer - but nothing on them can fire.
+		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
 		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
 	});
 
@@ -522,20 +678,20 @@ describe("SimulatorPanel driving", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
-		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeEnabled();
 
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		await refresh();
-		await waitFor(() => expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
 
 		getMock.mockResolvedValue(leased());
 		await refresh();
 
 		const toggle = await screen.findByRole("button", { name: /drive this device/i });
 		expect(toggle).toHaveAttribute("aria-pressed", "false");
-		expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled();
 	});
 
 	// The complaint this answers: a drag used to be replayed as one swipe after
@@ -580,6 +736,158 @@ describe("SimulatorPanel driving", () => {
 
 		// And never as one swipe after the fact.
 		expect(gestureKinds()).not.toContain("swipe");
+	});
+
+	// The bug: a press was refused outright while any other gesture was still in
+	// flight, so the drag vanished with nothing to show it had been asked for.
+	// The device's own arbitration may still refuse it - and says so when it
+	// does - but this side must not swallow it.
+	it("starts a drag on a press even while another gesture is still in flight", async () => {
+		// A box rather than a `let`: TypeScript narrows a variable only assigned
+		// inside a callback to `never`, and the assignment really does happen.
+		const pending: { settleHome: (() => void) | null } = { settleHome: null };
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+
+		// A home press that has not come back yet.
+		postMock.mockImplementation(
+			(path: string) =>
+				new Promise((resolve) => {
+					if (String(path).endsWith("/gesture")) pending.settleHome = () => resolve({ error: undefined });
+					else resolve({ error: undefined });
+				}),
+		);
+		await userEvent.click(screen.getByRole("button", { name: /^home$/i }));
+
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+		pending.settleHome?.();
+	});
+
+	// The one that made it feel random: clicking into the app from another
+	// window loses and regains focus, which rebuilds the frame socket, and every
+	// press in the few hundred milliseconds before the first new frame decodes
+	// used to be dropped. That is exactly when a human clicks.
+	it("drives a press made while the stream is reconnecting after a refocus", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+
+		// The window loses focus and gets it straight back, as it does when the
+		// human clicks into the app. The socket is torn down and rebuilt.
+		vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		window.dispatchEvent(new Event("blur"));
+		await waitFor(() => expect(openSockets()).toHaveLength(0));
+		sessionStorage.clear();
+		vi.spyOn(document, "hasFocus").mockReturnValue(true);
+		window.dispatchEvent(new Event("focus"));
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		// Deliberately no frame yet: this is the reconnecting window.
+		expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/connecting/i);
+
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+	});
+
+	// A stream that has actually ended is different: the picture will never
+	// update again, so a click on it would be a click made blind.
+	it("refuses to drive a stream that has ended", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+
+		openSockets()[0].onmessage?.({
+			data: JSON.stringify({ type: "ended", message: "the device is gone" }),
+		} as MessageEvent);
+		await screen.findByText(/the device is gone/i);
+
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(gestureKinds()).toEqual([]);
+	});
+
+	// A pointer capture the browser takes back must end the touch, or this side
+	// believes a finger is down and ignores every drag after it.
+	it("ends the drag when the browser takes the pointer back", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+
+		fireEvent.lostPointerCapture(canvas, { pointerId: 1 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-end"));
+
+		// And the next drag still works rather than being swallowed.
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds().filter((k) => k === "drag-begin")).toHaveLength(2));
 	});
 
 	// A press that does not move is still a tap, which holds the finger down for

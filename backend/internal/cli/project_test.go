@@ -435,3 +435,32 @@ func TestProjectRemove_YesSkipsConfirmationAndSupportsBackendRemoveEnvelope(t *t
 		t.Fatalf("--yes output should skip prompt and print removal:\n%s", out)
 	}
 }
+
+// The two facts that decide which inspector tabs a project gets - a web UI to
+// preview, an iOS Simulator to watch - are part of the config the daemon
+// stores, but the CLI's mirror of that config did not have them: passing them
+// in --config-json printed the updated project and changed nothing, which is
+// the "reports success, changed nothing" failure this surface exists to avoid.
+func TestProjectSetConfig_CarriesTheTabFacts(t *testing.T) {
+	for name, args := range map[string][]string{
+		"flags": {"project", "set-config", "demo", "--ios-simulator", "--web-ui"},
+		"json":  {"project", "set-config", "demo", "--config-json", `{"hasIOSSimulator":true,"hasWebUI":true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := setConfigEnv(t)
+			srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+			writeRunFileFor(t, cfg, srv)
+
+			if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, args...); err != nil {
+				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+			}
+			var got setConfigRequest
+			if err := json.Unmarshal(capture.body, &got); err != nil {
+				t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+			}
+			if !got.Config.HasIOSSimulator || !got.Config.HasWebUI {
+				t.Fatalf("config = %#v, want both tab facts carried to the daemon", got.Config)
+			}
+		})
+	}
+}

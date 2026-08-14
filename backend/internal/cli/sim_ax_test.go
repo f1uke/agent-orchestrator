@@ -18,25 +18,44 @@ func fixtureSnapshot() simbridge.Snapshot {
 		Elements: []simbridge.Element{{
 			Path: "0", Type: "Application", Enabled: true,
 			Frame: simbridge.Rect{Width: 440, Height: 956},
-			Tap:   simbridge.Point{X: 0.5, Y: 0.5},
+			Tap:   &simbridge.Point{X: 0.5, Y: 0.5},
+			Box:   &simbridge.Box{X2: 1, Y2: 1},
 			Children: []simbridge.Element{
 				{
 					Path: "0.0", Type: "TextField", Role: "text field", Label: "Search", ID: "search-field",
 					Enabled: true,
 					Frame:   simbridge.Rect{X: 20, Y: 100, Width: 400, Height: 40},
-					Tap:     simbridge.Point{X: 0.5, Y: 0.12552301255230125},
+					Tap:     &simbridge.Point{X: 0.5, Y: 0.12552301255230125},
+					Box:     &simbridge.Box{X1: 20.0 / 440, Y1: 100.0 / 956, X2: 420.0 / 440, Y2: 140.0 / 956},
 				},
 				{
 					Path: "0.1", Type: "Button", Role: "button", Label: "Continue", Value: "disabled",
 					Enabled: false,
 					Frame:   simbridge.Rect{X: 20, Y: 800, Width: 400, Height: 50},
-					Tap:     simbridge.Point{X: 0.5, Y: 0.8629707112970712},
+					Tap:     &simbridge.Point{X: 0.5, Y: 0.8629707112970712},
+					Box:     &simbridge.Box{X1: 20.0 / 440, Y1: 800.0 / 956, X2: 420.0 / 440, Y2: 850.0 / 956},
 				},
 			},
 		}},
 		NodeCount:      3,
 		TotalNodeCount: 3,
+		OnScreenCount:  3,
 	}
+}
+
+// scrolledSnapshot is the ordinary case on a real app: a row on screen and one
+// below the fold, which has edges but nowhere to touch.
+func scrolledSnapshot() simbridge.Snapshot {
+	snap := fixtureSnapshot()
+	snap.Elements[0].Children = append(snap.Elements[0].Children, simbridge.Element{
+		Path: "0.2", Type: "Button", Role: "button", Label: "See all", Enabled: true,
+		Frame:     simbridge.Rect{X: 340, Y: 1300, Width: 80, Height: 30},
+		Box:       &simbridge.Box{X1: 340.0 / 440, Y1: 1300.0 / 956, X2: 420.0 / 440, Y2: 1330.0 / 956},
+		OffScreen: true,
+	})
+	snap.NodeCount, snap.TotalNodeCount = 4, 4
+	snap.OnScreenCount, snap.OffScreenCount = 3, 1
+	return snap
 }
 
 func TestSimAX_JSONCarriesTapPointsAndTheTree(t *testing.T) {
@@ -195,5 +214,111 @@ func TestSimAX_MaxNodesMustBePositive(t *testing.T) {
 	_, _, err := executeCLI(t, deps, "sim", "ax", "--max-nodes", "0")
 	if !errors.As(err, &usageError{}) {
 		t.Fatalf("err = %v, want a usage error", err)
+	}
+}
+
+// Measured on a real app screen: 60 of 103 elements were off screen and every
+// one still printed a tap point, clamped onto the screen's edge. A tap meant
+// for a row below the fold went to the bottom row of pixels instead. The line
+// has to say there is nowhere to touch - and still say where the thing is, so
+// the answer "scroll down" is available without a second read.
+func TestSimAX_OffScreenElementsSayThereIsNowhereToTap(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: scrolledSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatalf("sim ax failed: %v\nstderr=%s", err, errOut)
+	}
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "See all") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("the off-screen element must still be listed:\n%s", out)
+	}
+	if strings.Contains(line, "tap ") {
+		t.Fatalf("an element that cannot be touched must not offer a tap point: %q", line)
+	}
+	if !strings.Contains(line, "off screen") {
+		t.Fatalf("line = %q, want it to say the element is off screen", line)
+	}
+	if !strings.Contains(line, "box ") {
+		t.Fatalf("line = %q, want the edges so the caller knows how far to scroll", line)
+	}
+}
+
+// An element is a rectangle; its edges are what say whether a target is a whole
+// card or a chevron at the end of one.
+func TestSimAX_EveryLineCarriesTheElementsEdges(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatalf("sim ax failed: %v", err)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if !strings.Contains(l, "Search") {
+			continue
+		}
+		// left,top->right,bottom in the same 0..1 units as the tap point.
+		if !strings.Contains(l, "box 0.045,0.105->0.955,0.146") {
+			t.Fatalf("line = %q, want the element's four edges", l)
+		}
+		return
+	}
+	t.Fatalf("no line for the search field:\n%s", out)
+}
+
+// Without the split, nothing on a scrolling screen says there is more below.
+func TestSimAX_SaysHowMuchOfTheScreenIsWithinReach(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: scrolledSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatalf("sim ax failed: %v", err)
+	}
+	if !strings.Contains(out, "3 on screen") || !strings.Contains(out, "1 off screen") {
+		t.Fatalf("output does not say what is reachable:\n%s", out)
+	}
+}
+
+// Observed on a real device: for a second after an app is brought to the front
+// the tree is the status bar and nothing else. Reported as an ordinary read, an
+// agent concludes the app is blank. One more read is what it costs to find out.
+func TestSimAX_ReadsAgainWhenOnlyTheStatusBarCameBack(t *testing.T) {
+	settling := fixtureSnapshot()
+	settling.OnlyStatusBar = true
+	driver := &fakeSimDriver{snapshotQueue: []simbridge.Snapshot{settling}, snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatalf("sim ax failed: %v", err)
+	}
+	if driver.reads() != 2 {
+		t.Fatalf("reads = %d, want a second read after a status-bar-only tree", driver.reads())
+	}
+	if strings.Contains(out, "status bar") {
+		t.Fatalf("the second read settled, so nothing needs saying:\n%s", out)
+	}
+}
+
+func TestSimAX_SaysSoWhenTheScreenNeverSettles(t *testing.T) {
+	settling := fixtureSnapshot()
+	settling.OnlyStatusBar = true
+	driver := &fakeSimDriver{snapshot: settling}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatalf("sim ax failed: %v", err)
+	}
+	if !strings.Contains(out, "status bar") || !strings.Contains(out, "ao sim shot") {
+		t.Fatalf("a tree of nothing but furniture must say so, and what to do:\n%s", out)
 	}
 }

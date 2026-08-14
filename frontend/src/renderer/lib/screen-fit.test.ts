@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { devicePoint, fitScreen } from "./screen-fit";
+import { devicePoint, fitDevice, fitScreen } from "./screen-fit";
 
 // 280px is the inspector rail's real content floor, so it is the width the pane
 // has to stay usable at rather than a round number.
@@ -102,5 +102,78 @@ describe("devicePoint", () => {
 
 	it("refuses a click before the pane has a size", () => {
 		expect(devicePoint({ width: 0, height: 0 }, portrait, { x: 1, y: 1 })).toBeNull();
+	});
+});
+
+describe("fitDevice", () => {
+	// The bug this exists to make impossible: the screen was fitted into a box
+	// that reserved a fixed four pixels for the body while the body drew a
+	// thickness of its own, so the whole thing came out bigger than the space,
+	// got clamped by CSS, and the picture letterboxed inside it with dark bands.
+	it("never draws a device larger than the space it was given", () => {
+		const frames = [
+			{ thickness: 0.045, radius: 0.155 },
+			{ thickness: 0.0411, radius: 0.1416 },
+			{ thickness: 0.12, radius: 0.35 },
+			{ thickness: 0, radius: 0 },
+		];
+		const stages = [
+			{ width: NARROW, height: 640 },
+			{ width: NARROW, height: 200 },
+			{ width: 900, height: 400 },
+			{ width: 420, height: 1200 },
+		];
+		for (const frame of frames) {
+			for (const stage of stages) {
+				for (const screen of [portrait, landscape, watch]) {
+					const drawn = fitDevice(stage, screen, frame);
+					if (!drawn) continue;
+					const outerWidth = drawn.screen.width + drawn.bezel * 2;
+					const outerHeight = drawn.screen.height + drawn.bezel * 2;
+					expect(outerWidth).toBeLessThanOrEqual(stage.width + 1);
+					expect(outerHeight).toBeLessThanOrEqual(stage.height + 1);
+				}
+			}
+		}
+	});
+
+	it("keeps the screen's own shape whatever the body around it", () => {
+		for (const screen of [portrait, landscape, watch]) {
+			const drawn = fitDevice({ width: NARROW, height: 640 }, screen, { thickness: 0.045, radius: 0.155 });
+			expect(drawn).not.toBeNull();
+			expect(drawn!.screen.width / drawn!.screen.height).toBeCloseTo(screen.width / screen.height, 4);
+		}
+	});
+
+	// A device this machine has no artwork for is drawn without a body, rather
+	// than with a guessed one - a guess was visibly wrong twice.
+	it("draws no body for a device with no frame of its own", () => {
+		const drawn = fitDevice({ width: NARROW, height: 640 }, portrait, null);
+		expect(drawn?.bezel).toBe(0);
+		expect(drawn?.radius).toBe(0);
+		expect(drawn?.screen.width).toBeCloseTo(NARROW, 5);
+	});
+
+	// The body and the corners are the device's own proportions, not a constant,
+	// and the body is the one the picture it surrounds actually calls for -
+	// within the pixel that rounding costs.
+	it("takes the body and the corners from the device's own proportions", () => {
+		for (const stage of [
+			{ width: 400, height: 2000 },
+			{ width: NARROW, height: 640 },
+			{ width: 900, height: 400 },
+		]) {
+			const drawn = fitDevice(stage, portrait, { thickness: 0.045, radius: 0.155 });
+			expect(drawn).not.toBeNull();
+			expect(Math.abs(drawn!.bezel - drawn!.screen.width * 0.045)).toBeLessThanOrEqual(1);
+			expect(drawn!.radius).toBe(Math.round(drawn!.screen.width * 0.155));
+			expect(drawn!.outerRadius).toBe(drawn!.radius + drawn!.bezel);
+		}
+	});
+
+	it("has nothing to draw before the pane or the screen is known", () => {
+		expect(fitDevice(null, portrait, null)).toBeNull();
+		expect(fitDevice({ width: NARROW, height: 640 }, null, null)).toBeNull();
+		expect(fitDevice({ width: 0, height: 0 }, portrait, null)).toBeNull();
 	});
 });

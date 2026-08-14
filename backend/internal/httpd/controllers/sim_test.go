@@ -25,6 +25,8 @@ type fakeSimService struct {
 
 	holdErr        error
 	releaseHoldErr error
+	takeOverErr    error
+	tookOver       bool
 
 	gotSession domain.SessionID
 	gotUDID    string
@@ -54,6 +56,18 @@ func (f *fakeSimService) Acquire(_ context.Context, sessionID domain.SessionID, 
 	f.gotSession, f.gotUDID, f.gotTTL = sessionID, udid, ttl
 	if f.acquireErr != nil {
 		return domain.SimLease{}, f.acquireErr
+	}
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	return domain.SimLease{UDID: udid, SessionID: sessionID, AcquiredAt: now, ExpiresAt: now.Add(ttl)}, nil
+}
+
+// TakeOver records that the takeover path was the one taken, which is what the
+// route has to get right: the two refuse for different reasons.
+func (f *fakeSimService) TakeOver(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimLease, error) {
+	f.gotSession, f.gotUDID, f.gotTTL = sessionID, udid, ttl
+	f.tookOver = true
+	if f.takeOverErr != nil {
+		return domain.SimLease{}, f.takeOverErr
 	}
 	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
 	return domain.SimLease{UDID: udid, SessionID: sessionID, AcquiredAt: now, ExpiresAt: now.Add(ttl)}, nil
@@ -188,4 +202,33 @@ func TestSimReleaseByNonHolderIs409(t *testing.T) {
 	srv := newSimTestServer(t, svc)
 	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/mer-7/sim-leases/"+testSimUDID, "")
 	assertErrorCode(t, body, status, http.StatusConflict, "SIM_DEVICE_LEASED")
+}
+
+// The route has to take the right path: an ordinary claim and a takeover refuse
+// for different reasons, so which one ran is not a detail.
+func TestAcquireSimLease_TakeOverGoesThroughTheTakeoverPath(t *testing.T) {
+	svc := &fakeSimService{}
+	srv := newSimTestServer(t, svc)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-leases",
+		map[string]any{"udid": testSimUDID, "takeOver": true})
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %v", code, out)
+	}
+	if !svc.tookOver {
+		t.Fatal("takeOver must claim a device another session holds, not make an ordinary claim that is refused")
+	}
+}
+
+func TestAcquireSimLease_WithoutTakeOverMakesAnOrdinaryClaim(t *testing.T) {
+	svc := &fakeSimService{}
+	srv := newSimTestServer(t, svc)
+
+	if code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-leases",
+		map[string]any{"udid": testSimUDID}); code != http.StatusOK {
+		t.Fatalf("status %d: %v", code, out)
+	}
+	if svc.tookOver {
+		t.Fatal("a claim that did not ask to take over must not take one")
+	}
 }

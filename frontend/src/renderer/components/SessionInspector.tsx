@@ -208,6 +208,11 @@ export function SessionInspector({
 						key={entry.id}
 						type="button"
 						role="tab"
+						// The breakpoints below hide the label with `display: none`,
+						// which removes it from the accessibility tree too - so on a
+						// narrow rail every tab was an unnamed icon. Naming the tab
+						// itself keeps it addressable at every width.
+						aria-label={entry.label}
 						aria-selected={view === entry.id}
 						className={cn("session-inspector__tab", view === entry.id && "is-active")}
 						onClick={() => setView(entry.id)}

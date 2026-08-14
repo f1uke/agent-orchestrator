@@ -1,6 +1,8 @@
 package simbridge
 
 import (
+	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -209,5 +211,104 @@ func TestType_RefusesTextLongerThanAGestureHoldCanCover(t *testing.T) {
 	}
 	if _, err := Type(strings.Repeat("a", MaxTypeRunes)); err != nil {
 		t.Fatalf("text at the limit must still be typable: %v", err)
+	}
+}
+
+// A path is one touch, not several. Composing a route as back-to-back swipes
+// lifts the finger between legs, and an app reads that as three separate flicks
+// rather than one drag - which is exactly the difference between "scrolls" and
+// "scrolls, stops, scrolls, stops".
+func TestPath_IsOneFingerThroughEveryWaypoint(t *testing.T) {
+	points := []Point{{X: 0.5, Y: 0.8}, {X: 0.5, Y: 0.5}, {X: 0.2, Y: 0.5}}
+	events, err := Path(points, 600*time.Millisecond)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	types := touchTypes(events)
+	if strings.Count(types, "begin") != 1 || strings.Count(types, "end") != 1 {
+		t.Fatalf("a path must put the finger down once and lift it once: %q", types)
+	}
+	if !strings.HasPrefix(types, "begin,move") || !strings.HasSuffix(types, "end") {
+		t.Fatalf("path sequence = %q, want begin, moves, end", types)
+	}
+	touches := touchEvents(events)
+	if touches[0] != (Event{Kind: "touch", Type: "begin", X: points[0].X, Y: points[0].Y}) {
+		t.Fatalf("path must start at %+v: %+v", points[0], touches[0])
+	}
+	last := touches[len(touches)-1]
+	if last.X != points[2].X || last.Y != points[2].Y {
+		t.Fatalf("path must lift at %+v: %+v", points[2], last)
+	}
+	// Every waypoint is actually visited: a route that cuts the corner is not
+	// the route that was asked for.
+	for _, want := range points[1:] {
+		visited := false
+		for _, e := range touches {
+			if math.Abs(e.X-want.X) < 1e-9 && math.Abs(e.Y-want.Y) < 1e-9 {
+				visited = true
+			}
+		}
+		if !visited {
+			t.Fatalf("waypoint %+v was never reached: %+v", want, touches)
+		}
+	}
+}
+
+// The hold is sized from Duration, so a path that takes longer than it was
+// asked for would outlive the exclusivity that protects it.
+func TestPath_KeepsToTheTimeItWasGiven(t *testing.T) {
+	events, err := Path([]Point{{X: 0.1, Y: 0.1}, {X: 0.9, Y: 0.9}, {X: 0.1, Y: 0.9}}, time.Second)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	var slept time.Duration
+	for _, e := range events {
+		if e.Kind == "sleep" {
+			slept += time.Duration(e.MS) * time.Millisecond
+		}
+	}
+	if slept > time.Second {
+		t.Fatalf("path slept %s for a 1s drag", slept)
+	}
+	if slept < 900*time.Millisecond {
+		t.Fatalf("path slept %s: a drag that finishes early is not the drag that was asked for", slept)
+	}
+}
+
+// Two points is a swipe. They are the same gesture, so they are the same code -
+// a second implementation is a second set of timings to keep in step.
+func TestPath_OfTwoPointsIsExactlyASwipe(t *testing.T) {
+	from, to := Point{X: 0.5, Y: 0.8}, Point{X: 0.5, Y: 0.2}
+	swipe, err := Swipe(from, to, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("swipe: %v", err)
+	}
+	path, err := Path([]Point{from, to}, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	if !reflect.DeepEqual(swipe, path) {
+		t.Fatalf("a two-point path and a swipe must be one gesture:\nswipe=%+v\npath =%+v", swipe, path)
+	}
+}
+
+func TestPath_RefusesWhatWouldNotLand(t *testing.T) {
+	ok := []Point{{X: 0.5, Y: 0.5}, {X: 0.5, Y: 0.2}}
+	for name, bad := range map[string][]Point{
+		"nothing at all":  {},
+		"a single point":  {{X: 0.5, Y: 0.5}},
+		"off the screen":  {{X: 0.5, Y: 0.5}, {X: 0.5, Y: 1.5}},
+		"a start off it":  {{X: -0.1, Y: 0.5}, {X: 0.5, Y: 0.5}},
+		"a middle off it": {{X: 0.5, Y: 0.5}, {X: 2, Y: 0.5}, {X: 0.5, Y: 0.5}},
+	} {
+		if _, err := Path(bad, 300*time.Millisecond); err == nil {
+			t.Fatalf("%s must be refused", name)
+		}
+	}
+	if _, err := Path(ok, MaxSwipeDuration+time.Second); err == nil {
+		t.Fatal("a path longer than its own hold must be refused")
+	}
+	if _, err := Path(ok, 0); err == nil {
+		t.Fatal("a path with no duration must be refused")
 	}
 }

@@ -18,6 +18,11 @@ import (
 type AcquireSimLeaseInput struct {
 	UDID       string `json:"udid" description:"Simulator udid to claim (case-insensitive)."`
 	TTLSeconds int    `json:"ttlSeconds,omitempty" description:"How long to hold it, in seconds. Omit for the 10 minute default; the caller may hold for as little as a second (one gesture) and at most an hour."`
+	// TakeOver claims a device another session already holds. A gesture in
+	// flight is still left alone, and the request is refused while one is - the
+	// lease says who may drive, and a human may decide that is now them, but a
+	// touch that is happening is not interruptible.
+	TakeOver bool `json:"takeOver,omitempty" description:"Claim the device even if another session holds it. Refused while a gesture is in flight."`
 }
 
 // SimLeaseResponse is the { lease } body returned by acquire.
@@ -107,7 +112,15 @@ func (c *SimController) acquire(w http.ResponseWriter, r *http.Request) {
 	}
 	// A zero TTL is passed through untouched so the default lives in exactly one
 	// place (the service), not once per caller.
-	lease, err := c.Svc.Acquire(r.Context(), sessionID(r), in.UDID, time.Duration(in.TTLSeconds)*time.Second)
+	//
+	// Taking over is a separate call rather than a flag on the same one, because
+	// they refuse for different reasons: an ordinary claim is refused because
+	// somebody holds the device, a takeover only because a touch is in flight.
+	claim := c.Svc.Acquire
+	if in.TakeOver {
+		claim = c.Svc.TakeOver
+	}
+	lease, err := claim(r.Context(), sessionID(r), in.UDID, time.Duration(in.TTLSeconds)*time.Second)
 	if err != nil {
 		writeSimError(w, r, err)
 		return

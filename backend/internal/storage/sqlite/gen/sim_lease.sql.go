@@ -196,3 +196,50 @@ func (q *Queries) ReleaseSimLease(ctx context.Context, arg ReleaseSimLeaseParams
 	}
 	return result.RowsAffected()
 }
+
+const takeOverSimLease = `-- name: TakeOverSimLease :execrows
+INSERT INTO sim_lease (udid, session_id, acquired_at, expires_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (udid) DO UPDATE SET
+    session_id = excluded.session_id,
+    acquired_at = excluded.acquired_at,
+    expires_at = excluded.expires_at,
+    updated_at = excluded.updated_at,
+    hold_token = NULL,
+    hold_expires_at = NULL
+WHERE sim_lease.hold_expires_at IS NULL
+   OR sim_lease.hold_expires_at <= excluded.acquired_at
+`
+
+type TakeOverSimLeaseParams struct {
+	Udid       string
+	SessionID  domain.SessionID
+	AcquiredAt time.Time
+	ExpiresAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Taking a device from another session, as ONE statement, for the same reason
+// AcquireSimLease is one: a check followed by an act is the race this file
+// exists to avoid.
+//
+// The one thing a takeover may NOT do is interrupt a touch that is happening.
+// The lease says who is driving and a human may decide that is now them; the
+// hold says a finger is on the screen right now, and taking the device out from
+// under it is how a gesture ends up half-sent and a finger left down. So the
+// update is refused while a hold is live - which lapses within seconds - and
+// clears the previous holder's hold token when it does go through, so a token
+// issued to the old holder can never be redeemed against the new lease.
+func (q *Queries) TakeOverSimLease(ctx context.Context, arg TakeOverSimLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, takeOverSimLease,
+		arg.Udid,
+		arg.SessionID,
+		arg.AcquiredAt,
+		arg.ExpiresAt,
+		arg.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,6 +36,12 @@ import (
 // accident. Unlike upstream, a truncated read says how many elements the device
 // really reported and how to ask for them.
 const defaultSimAXMaxNodes = 500
+
+// simAXSettleDelay is how long to wait before reading a screen again when the
+// first read came back as nothing but status bar. Long enough for an app that
+// has just been foregrounded to publish its screen, short enough that a caller
+// does not notice - and only ever paid in that one case.
+var simAXSettleDelay = 600 * time.Millisecond
 
 // simAXResult is the `ao sim ax --json` payload: the snapshot, plus which
 // device it came from and who holds it.
@@ -100,6 +107,19 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 	if err != nil {
 		return simAXResult{}, err
 	}
+	// For a second after an app comes to the front, the tree is the clock and
+	// the battery and nothing else. One more read is cheaper than an agent
+	// concluding the app is blank and acting on it.
+	if snapshot.OnlyStatusBar {
+		select {
+		case <-ctx.Done():
+			return simAXResult{}, ctx.Err()
+		case <-time.After(simAXSettleDelay):
+		}
+		if second, retryErr := driver.AX(ctx, device.UDID); retryErr == nil {
+			snapshot = second
+		}
+	}
 	if !snapshot.Usable() {
 		return simAXResult{}, emptySimTreeError(device, snapshot.Frontmost)
 	}
@@ -158,8 +178,11 @@ func (c *commandContext) simDriver() (simbridge.Driver, error) {
 }
 
 func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
-	if _, err := fmt.Fprintf(out, "%s - %.0fx%.0f points, %d elements\n",
-		result.Name, result.Screen.Width, result.Screen.Height, result.NodeCount); err != nil {
+	// The split, not just the total: on a scrolling screen most of the tree is
+	// usually below the fold, and nothing else on this page says so.
+	if _, err := fmt.Fprintf(out, "%s - %.0fx%.0f points, %d elements (%d on screen, %d off screen)\n",
+		result.Name, result.Screen.Width, result.Screen.Height, result.NodeCount,
+		result.OnScreenCount, result.OffScreenCount); err != nil {
 		return err
 	}
 	if result.Frontmost.BundleID != "" {
@@ -167,7 +190,19 @@ func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(out, "Device: %s\nLease: %s\n\n", result.UDID, result.Lease.captureLine(sessionID)); err != nil {
+	if _, err := fmt.Fprintf(out, "Device: %s\nLease: %s\n", result.UDID, result.Lease.captureLine(sessionID)); err != nil {
+		return err
+	}
+	if result.OnlyStatusBar {
+		// Said as a possibility, because a genuinely blank screen looks the same
+		// from here - and read twice already, so the caller knows it is not a
+		// timing accident.
+		if _, err := fmt.Fprint(out, "Note: the tree is the status bar and nothing else, read twice. "+
+			"The app may not have published its screen yet - run `ao sim shot` to see what is actually there.\n"); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(out); err != nil {
 		return err
 	}
 	if err := writeSimAXElements(out, result.Elements, 0); err != nil {
@@ -198,8 +233,21 @@ func writeSimAXElements(out io.Writer, elements []simbridge.Element, depth int) 
 		if !e.Enabled {
 			line += " (disabled)"
 		}
-		if _, err := fmt.Fprintf(out, "%s%s  tap %.3f %.3f  [%s]\n",
-			strings.Repeat("  ", depth), line, e.Tap.X, e.Tap.Y, e.Path); err != nil {
+		// Where to touch it, or that there is nowhere to - never a coordinate
+		// that reaches something else.
+		switch {
+		case e.Tap != nil:
+			line += fmt.Sprintf("  tap %.3f %.3f", e.Tap.X, e.Tap.Y)
+		case e.OffScreen:
+			line += "  off screen"
+		}
+		// The element's own rectangle, in the tap point's units: left,top to
+		// right,bottom. For something below the fold it is also the distance -
+		// a top edge of 1.36 is a third of a screen further down.
+		if e.Box != nil {
+			line += fmt.Sprintf("  box %.3f,%.3f->%.3f,%.3f", e.Box.X1, e.Box.Y1, e.Box.X2, e.Box.Y2)
+		}
+		if _, err := fmt.Fprintf(out, "%s%s  [%s]\n", strings.Repeat("  ", depth), line, e.Path); err != nil {
 			return err
 		}
 		if err := writeSimAXElements(out, e.Children, depth+1); err != nil {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getApiBaseUrl, subscribeApiBaseUrl } from "../lib/api-client";
 
 /**
@@ -114,10 +114,17 @@ export function useSimulatorStream({
 }): SimStreamStatus {
 	const [status, setStatus] = useState<SimStreamStatus>(PAUSED);
 	const baseUrl = useSyncExternalStore(subscribeApiBaseUrl, getApiBaseUrl, getApiBaseUrl);
+	// A device's framebuffer size belongs to the device, not to the connection.
+	// Throwing it away every time the socket is rebuilt - which happens whenever
+	// the window loses and regains focus - made the pane unable to turn a click
+	// into a coordinate for the first few hundred milliseconds after a human
+	// clicked into the app, which is exactly when they click.
+	const known = useRef<{ udid: string; size: { width: number; height: number } } | null>(null);
 
 	useEffect(() => {
+		const remembered = known.current?.udid === udid ? known.current.size : null;
 		if (!udid || !active || !baseUrl) {
-			setStatus(PAUSED);
+			setStatus({ ...PAUSED, size: remembered });
 			return;
 		}
 		if (typeof VideoDecoder === "undefined") {
@@ -125,12 +132,14 @@ export function useSimulatorStream({
 				state: "unsupported",
 				message: "This build cannot decode the simulator's video stream.",
 				lastFrameAt: null,
-				size: null,
+				size: remembered,
 			});
 			return;
 		}
 		let closed = false;
-		setStatus({ state: "connecting", message: "", lastFrameAt: null, size: null });
+		// The size is carried across: the last frame is still on the canvas and
+		// the device has not changed shape because a socket was rebuilt.
+		setStatus({ state: "connecting", message: "", lastFrameAt: null, size: remembered });
 
 		// A decoder exists exactly while it is usable: it is created by the first
 		// parameter set and dropped again if that set will not configure it. One
@@ -212,6 +221,7 @@ export function useSimulatorStream({
 			const payload = new Uint8Array(buffer, HEADER_BYTES);
 
 			if (width > 0 && height > 0) {
+				known.current = { udid, size: { width, height } };
 				setStatus((prev) =>
 					prev.size?.width === width && prev.size.height === height ? prev : { ...prev, size: { width, height } },
 				);

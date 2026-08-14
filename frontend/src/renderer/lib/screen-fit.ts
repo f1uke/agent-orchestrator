@@ -66,3 +66,42 @@ export function devicePoint(box: Box, frame: Box, point: { x: number; y: number 
 function clamp01(n: number): number {
 	return Math.min(1, Math.max(0, n));
 }
+
+/**
+ * fitDevice works out how big the screen may be drawn and how thick its own
+ * body is around it - together, because they depend on each other.
+ *
+ * They were computed apart, and disagreed: the fit reserved a fixed four pixels
+ * for the body while the body drew a thickness of its own, so the frame came
+ * out larger than the space it was fitted into, got clamped, and the picture
+ * letterboxed inside it with dark bands top and bottom. One function returns
+ * both so they cannot drift again.
+ *
+ * The proportions are the device's own, read from the artwork Xcode ships (see
+ * internal/simchrome) - an iPhone 17 Pro's body is 4.5% of its screen's width
+ * and its display's corners 15.5%, and both differ per model. A device this
+ * machine has no artwork for gets no body at all, because a guessed one was
+ * visibly wrong.
+ */
+export function fitDevice(
+	stage: { width: number; height: number } | null,
+	screen: { width: number; height: number } | null,
+	frame: { thickness: number; radius: number } | null,
+) {
+	if (!stage || !screen) return null;
+	const thickness = frame?.thickness ?? 0;
+	// The body is a fraction of the screen's width, and the screen is what is
+	// left of the stage once the body is taken off it - so each depends on the
+	// other. Solved rather than iterated: rounding gives the iteration no fixed
+	// point (18, 16, 17, 16, … for one real case), so it would end wherever it
+	// was stopped.
+	//
+	// With w the picture's width unconstrained by any body, b = w·t/(1 + 2t) is
+	// the body that leaves exactly the picture it was measured from.
+	const bare = Math.min(stage.width, (stage.height * screen.width) / screen.height);
+	const bezel = Math.max(0, Math.round((bare * thickness) / (1 + 2 * thickness)));
+	const fitted = fitScreen({ width: stage.width - bezel * 2, height: stage.height - bezel * 2 }, screen);
+	if (fitted.width <= 0 || fitted.height <= 0) return null;
+	const radius = Math.round(fitted.width * (frame?.radius ?? 0));
+	return { screen: fitted, bezel, radius, outerRadius: radius + bezel };
+}

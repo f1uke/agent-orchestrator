@@ -93,7 +93,10 @@ export default defineConfig({
 		// vitest's default "**/node_modules/**" and only matches the root, so the
 		// tracked src/landing preview app's nested node_modules would otherwise
 		// have its vendored third-party test suites collected and run.
-		exclude: ["**/node_modules/**", "dist/**", "dist-electron/**", "e2e/**"],
+		// e2e/** and e2e-device/** are Playwright suites: one drives the renderer in a
+		// browser, the other the packaged app against a real simulator. Neither is a
+		// unit test and both hang if vitest picks them up.
+		exclude: ["**/node_modules/**", "dist/**", "dist-electron/**", "e2e/**", "e2e-device/**"],
 		globals: true,
 		setupFiles: "./src/renderer/test/setup.ts",
 	},

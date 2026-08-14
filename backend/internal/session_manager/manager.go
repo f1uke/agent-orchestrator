@@ -2455,6 +2455,11 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	// base, same as the reference convention.
 	if kind == domain.KindWorker {
 		base += prompts.SmokeChecklistProtocol()
+		// A project that targets iOS has a device its workers can look at. Only
+		// they are told: the orchestrator dispatches rather than drives.
+		if cfg.HasIOSSimulator {
+			base += prompts.SimulatorGuidance()
+		}
 		// The task-size directive right-sizes ceremony: a mechanical worker is
 		// authorized to skip the process skills. Only mechanical renders anything;
 		// standard/deep add nothing. Injected here (not the editable base) so it

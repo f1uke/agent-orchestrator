@@ -34,6 +34,8 @@ export class DragStream {
 	private pending: DragPoint | null = null;
 	/** Where the finger came up, once it has. */
 	private closing: DragPoint | null = null;
+	/** The last position this side sent or was asked to send. */
+	private last: DragPoint | null = null;
 
 	constructor(send: DragSender, onError: (error: unknown) => void = () => {}) {
 		this.send = send;
@@ -45,8 +47,15 @@ export class DragStream {
 	}
 
 	begin(point: DragPoint): void {
-		if (this.active) return;
+		// A touch still open here means the last one's end never happened - a
+		// pointer the browser took back, a window switch mid-drag. Silently
+		// ignoring the new press is how a pane stops responding to drags until
+		// it is remounted, so the old touch is closed and this one starts. The
+		// daemon recovers the same way, and its watchdog is the backstop if even
+		// this end does not arrive.
+		if (this.active) this.end(this.last ?? point);
 		this.active = true;
+		this.last = point;
 		this.opening = point;
 		this.closing = null;
 		this.pending = null;
@@ -55,12 +64,14 @@ export class DragStream {
 
 	move(point: DragPoint): void {
 		if (!this.active) return;
+		this.last = point;
 		this.pending = point;
 		void this.pump();
 	}
 
 	end(point: DragPoint): void {
 		if (!this.active) return;
+		this.last = point;
 		this.closing = point;
 		// A drag that ends before its last move went out ends where the finger
 		// actually left, so a move still pending is not worth sending.
@@ -78,6 +89,7 @@ export class DragStream {
 		this.opening = null;
 		this.pending = null;
 		this.closing = null;
+		this.last = null;
 	}
 
 	private async pump(): Promise<void> {

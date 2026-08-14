@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -507,18 +508,13 @@ func TestScreen_ShutdownClosesTheGestureBridge(t *testing.T) {
 }
 
 // `xcrun simctl list` costs most of a second, and the gesture route reads the
-// device list before every touch to refuse a device that is not booted. Paying
-// that per click is what a human feels as lag, so a listing this recent is
-// reused.
+// device list before a touch. Paying that per event is what a human feels as
+// lag, so a listing this recent is reused outright.
 func TestScreen_DeviceListingIsReusedForABurstOfGestures(t *testing.T) {
 	var runs atomic.Int64
 	clock := time.Now()
 	now := func() time.Time { return clock }
-	screen := simstream.NewScreenForTest(nil, func(context.Context, string, ...string) ([]byte, error) {
-		runs.Add(1)
-		return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
-			`{"udid":"UDID-A","name":"iPhone","state":"Booted","isAvailable":true}]}}`), nil
-	}, now)
+	screen := simstream.NewScreenForTest(nil, countingLister(&runs, nil), now)
 
 	for range 6 {
 		if _, err := screen.Devices(context.Background()); err != nil {
@@ -528,15 +524,84 @@ func TestScreen_DeviceListingIsReusedForABurstOfGestures(t *testing.T) {
 	if runs.Load() != 1 {
 		t.Fatalf("simctl ran %d times for six reads inside the cache window, want 1", runs.Load())
 	}
+}
 
-	// And a listing old enough to have missed a simulator being booted is not
-	// reused: the cache is a burst filter, not a memory.
-	clock = clock.Add(simstream.DevicesTTL + time.Millisecond)
+// The bug this shape exists to avoid: a plain expiry makes whichever caller
+// arrives just after it pay the whole second. During a drag that was a visible
+// stall every couple of seconds. A listing that is merely getting old is served
+// at once and refreshed behind the caller.
+func TestScreen_AStaleListingIsServedAtOnceAndRefreshedBehind(t *testing.T) {
+	var runs atomic.Int64
+	release := make(chan struct{})
+	// started carries one value per refresh that actually began, so "only one
+	// runs at a time" can be checked without racing the goroutine that runs it.
+	started := make(chan int64, 16)
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	// Every read after the first blocks until the test lets it go, standing in
+	// for the second `xcrun simctl list` really takes.
+	screen := simstream.NewScreenForTest(nil, countingLister(&runs, func(n int64) {
+		if n > 1 {
+			started <- n
+			<-release
+		}
+	}), now)
+
 	if _, err := screen.Devices(context.Background()); err != nil {
-		t.Fatalf("devices: %v", err)
+		t.Fatalf("first: %v", err)
+	}
+	clock = clock.Add(simstream.DevicesTTL + time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := screen.Devices(context.Background()); err != nil {
+			t.Errorf("stale read: %v", err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a caller waited on a refresh instead of being served the listing it already had")
+	}
+
+	// And the refresh really was started, exactly once however many callers
+	// arrive while it is running.
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stale listing was served but never refreshed behind the caller")
+	}
+	for range 5 {
+		if _, err := screen.Devices(context.Background()); err != nil {
+			t.Fatalf("during refresh: %v", err)
+		}
+	}
+	select {
+	case n := <-started:
+		t.Fatalf("refresh %d started while one was already running: a burst of callers must share one", n)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+}
+
+// Old enough and there is nothing worth serving: the caller waits rather than
+// being told about simulators that may all be gone.
+func TestScreen_AListingPastItsMaxAgeIsFetchedBeforeAnswering(t *testing.T) {
+	var runs atomic.Int64
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	screen := simstream.NewScreenForTest(nil, countingLister(&runs, nil), now)
+
+	if _, err := screen.Devices(context.Background()); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	clock = clock.Add(simstream.DevicesMaxAge + time.Second)
+	if _, err := screen.Devices(context.Background()); err != nil {
+		t.Fatalf("second: %v", err)
 	}
 	if runs.Load() != 2 {
-		t.Fatalf("simctl ran %d times, want a second run once the listing went stale", runs.Load())
+		t.Fatalf("simctl ran %d times, want a listing this old fetched before answering", runs.Load())
 	}
 }
 
@@ -557,5 +622,18 @@ func TestScreen_AFailedListingIsNotCached(t *testing.T) {
 	}
 	if runs.Load() != 3 {
 		t.Fatalf("simctl ran %d times, want every failed read retried", runs.Load())
+	}
+}
+
+// countingLister stands in for `xcrun simctl list`, counting calls and letting
+// a test hold one open the way the real one holds a caller for most of a second.
+func countingLister(runs *atomic.Int64, block func(int64)) simctl.Runner {
+	return func(context.Context, string, ...string) ([]byte, error) {
+		n := runs.Add(1)
+		if block != nil {
+			block(n)
+		}
+		return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+			`{"udid":"UDID-A","name":"iPhone","state":"Booted","isAvailable":true}]}}`), nil
 	}
 }

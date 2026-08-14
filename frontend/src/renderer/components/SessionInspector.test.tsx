@@ -842,6 +842,16 @@ describe("SessionInspector tab-strip width class", () => {
 		expect(strip).toHaveAttribute("data-tab-count", expected);
 		expect(screen.getAllByRole("tab")).toHaveLength(Number(expected));
 	});
+
+	// Those same breakpoints hide the label with `display: none`, which takes it
+	// out of the accessibility tree as well as off the screen: at a narrow rail
+	// every tab was an unnamed icon. The name has to be on the tab itself.
+	it("names every tab even where the strip is too narrow to show the label", () => {
+		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator session={session([])} />);
+		for (const label of ["Summary", "Reviews", "Files", "Tests", "Device", "Browser"]) {
+			expect(screen.getByRole("tab", { name: label })).toHaveAttribute("aria-label", label);
+		}
+	});
 });
 
 // The Simulator tab is opt-in per project, for the same reason the Browser tab
