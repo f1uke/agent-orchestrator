@@ -255,6 +255,37 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 
 Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`<project>-<num>`" + `.`
 
+// SimulatorGuidance is what a worker in a project that targets iOS is told
+// about the device it can actually look at. Injected only when the project has
+// opted in (ProjectConfig.HasIOSSimulator), for the same reason the desktop
+// app's Device tab is: on a project with no simulator the commands fail on
+// every machine, and an instruction an agent cannot follow is worse than none.
+//
+// It is short on purpose - the full catalog is in the ao skill the prompt
+// already points at. What is here is the part an agent gets wrong without
+// being told: that reading the screen is free but touching it needs a claim,
+// that half of a scrolling screen's elements cannot be tapped from where they
+// are, and that the device is shared and never to be booted or erased.
+func SimulatorGuidance() string { return simulatorGuidance }
+
+const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
+
+This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
+
+` + "```bash\n" + `ao sim list                    # what is booted
+ao sim claim                   # required before ANY touch; reading never needs it
+ao sim ax                      # the screen as elements: label, state, box, tap point
+ao sim tap 0.5 0.93            # the point ` + "`ao sim ax`" + ` printed - never one estimated from a screenshot
+ao sim drag 0.5 0.8 0.5 0.4    # hold one finger through a route (scrolling); ` + "`swipe`" + ` is the two-point case
+ao sim shot                    # a PNG to actually look at, for what the tree cannot say
+ao sim release` + "\n```" + `
+
+- **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and AO **never boots, shuts down, reboots or erases** a simulator - if none is booted, say so and ask.
+- **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
+- **Read the tree, not the picture.** ` + "`ao sim ax`" + ` says what is there, whether it is enabled, and exactly where to touch it; the screenshot is for what the tree cannot express.
+
+Everything else - the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
+
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of
 // every template and brief), so the default agent path is byte-for-byte

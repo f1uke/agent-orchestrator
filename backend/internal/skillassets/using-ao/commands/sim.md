@@ -8,7 +8,7 @@ Simulators are shared: another AO session, or a human working in Xcode, may be d
 
 **Claim a device before you drive it.** A simulator has one finger and no per-caller state, so two sessions interacting at once merge into a single teleporting touch, and one session's release lifts the other's finger. A lost release wedges the device's input until somebody reboots it - which breaks whoever else is mid-test. The commands that touch the screen refuse to run unless this session holds the device, and refuse again while another gesture is in flight. Reading (`ao sim list`, `ao sim shot`, `ao sim ax`) never needs a claim.
 
-**Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. After any interaction, read again: a tap that reports success has not necessarily changed anything.
+**Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element that is actually on the screen a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. An element that has scrolled out of view is still listed, marked `off screen`, and carries **no** tap point - scroll it into view with `ao sim drag` and read again. After any interaction, read again: a tap that reports success has not necessarily changed anything.
 
 Requires macOS with the Xcode command line tools (`xcrun` on PATH). The interaction commands additionally need Node.js 20+ on PATH; `ao sim list` and `ao sim shot` do not.
 
@@ -22,6 +22,7 @@ ao sim claim   [flags]
 ao sim release [flags]
 ao sim tap    <x> <y>          [flags]
 ao sim swipe  <x1> <y1> <x2> <y2> [flags]
+ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
 ao sim type   <text>           [flags]
 ao sim button <name>           [flags]
 ```
@@ -30,7 +31,7 @@ ao sim button <name>           [flags]
 
 ```bash
 ao sim claim                 # once, before you drive anything
-ao sim ax                    # read the screen; every element carries its tap point
+ao sim ax                    # read the screen; what is on it carries a tap point
 ao sim tap 0.5 0.934         # act on a point the tree gave you
 ao sim ax                    # read again to confirm what actually changed
 ao sim release               # when you are done
@@ -156,15 +157,18 @@ The device is resolved exactly like `ao sim shot`. Reading takes no lease and is
 Text output is one line per element, indented by nesting:
 
 ```
-iPhone 17 Pro Max - 440x956 points, 22 elements
+iPhone 17 Pro Max - 440x956 points, 24 elements (18 on screen, 6 off screen)
 Foreground app: com.example.app (pid 42)
 Device: 00000000-0000-0000-0000-000000000000
 Lease: You hold this device until 2026-08-13T07:51:02Z. ...
 
-Application  tap 0.500 0.500  [0]
-  TextField "Search"  tap 0.500 0.126  [0.0]
-  Button "Continue" (disabled)  tap 0.500 0.863  [0.1]
+Application  tap 0.500 0.500  box 0.000,0.000->1.000,1.000  [0]
+  TextField "Search"  tap 0.500 0.126  box 0.045,0.105->0.955,0.146  [0.0]
+  Button "Continue" (disabled)  tap 0.500 0.863  box 0.045,0.837->0.955,0.889  [0.1]
+  Button "See all"  off screen  box 0.802,1.010->0.964,1.040  [0.2]
 ```
+
+The header splits the count: how much of the screen you can touch now, and how much is only reachable after scrolling. On a real app screen most of the tree is often the second kind.
 
 JSON shape (`--json`):
 
@@ -183,12 +187,15 @@ JSON shape (`--json`):
       "enabled": true,
       "frame": { "x": 20, "y": 100, "width": 400, "height": 40 },
       "tap": { "x": 0.5, "y": 0.1255 },
+      "box": { "x1": 0.0454, "y1": 0.1046, "x2": 0.9545, "y2": 0.1464 },
       "children": []
     }
   ],
-  "nodeCount": 22,
-  "totalNodeCount": 22,
+  "nodeCount": 24,
+  "totalNodeCount": 24,
   "truncated": false,
+  "onScreenCount": 18,
+  "offScreenCount": 6,
   "udid": "00000000-0000-0000-0000-000000000000",
   "name": "iPhone 17 Pro Max",
   "lease": { "state": "held", "holder": "your-project-12" }
@@ -196,10 +203,13 @@ JSON shape (`--json`):
 ```
 
 - **`tap` is the whole point.** Feed `tap.x` and `tap.y` straight into `ao sim tap`. Never estimate a coordinate from a screenshot.
+- **No `tap` means there is nowhere to touch it.** The element is on the page but off the screen (`"offScreen": true`). It used to report the nearest edge instead, which put a finger on whatever really is at that edge - most often the tab bar. Scroll to it and read again.
+- **`box` is the element's four edges** (left, top, right, bottom) in the same 0..1 units, and is **not clipped to the screen**: a `y1` of 1.36 means "a third of a screen further down", which is how far to scroll. It also tells you the size and shape of a target - whether a row is a whole card or the chevron at the end of one.
 - **`path`** (`0.1.2`) is the index path in this tree. It always exists; `id` (the app's own accessibility identifier) often does not.
 - **`enabled: false`** means tapping it does nothing. Check it before blaming a tap that "did not work".
 - **`truncated: true`** means the cap cut the tree; `totalNodeCount` is the real size and `--max-nodes` raises the cap. Nothing is ever dropped silently.
 - **An empty tree fails** rather than reporting "no elements": the error names the frontmost bundle, which is usually the explanation (`com.apple.springboard` means you are looking at the home screen, not your app).
+- **A tree that is only the status bar** (the clock and the battery) is what a read returns for about a second after an app comes to the front. It is read once more automatically before being reported, and says so if it stays that way - so treat it as "the app has not drawn yet", not "the app is blank".
 
 ---
 
@@ -264,6 +274,7 @@ All of them take a `--udid` and a `--json` flag, resolve the device exactly like
 |---|---|
 | `ao sim tap <x> <y>` | Press and release one point |
 | `ao sim swipe <x1> <y1> <x2> <y2> [--duration 300ms]` | Drag between two points - how you scroll a list or dismiss a sheet |
+| `ao sim drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--duration 600ms]` | Hold one finger through a route of points without lifting. Two points is exactly a swipe; more is a path an app can tell apart from a flick - a scroll that changes direction, a drag onto a target. Sending the same route as separate swipes lifts between them, which reads as several gestures. |
 | `ao sim type <text>` | Send text to whatever has keyboard focus (tap the field first) |
 | `ao sim button <name>` | `home` (the swipe-up home gesture - your way back to a known screen) or `app-switcher`. The list is short on purpose: only buttons observably verified to change a real device are offered, because the mechanism reports success for ones that do nothing. |
 
@@ -273,6 +284,7 @@ ao sim ax                              # find the field's tap point
 ao sim tap 0.5 0.126                   # focus it
 ao sim type "hello@example.com"
 ao sim swipe 0.5 0.8 0.5 0.2           # scroll down
+ao sim drag 0.5 0.8 0.5 0.5 0.2 0.5    # one finger, three points, never lifting
 ao sim button home                     # back to a known screen
 ao sim ax                              # confirm what actually happened
 ```

@@ -4603,3 +4603,53 @@ func TestSystemPrompt_SkillPointerFollowsProjectWebUI(t *testing.T) {
 		})
 	}
 }
+
+// TestSystemPrompt_SimulatorGuidance: a worker in a project that targets iOS
+// has a simulator it can read and drive, and no way to know that unless it is
+// told. The commands existed and were documented in the ao skill catalog, but
+// nothing pointed an agent at them - so a worker on an iOS task reasoned about
+// the app without ever looking at it. It is injected only for projects that opt
+// in, for the same reason the Device tab is: an instruction an agent cannot
+// follow is worse than none.
+func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
+	build := func(t *testing.T, cfg domain.ProjectConfig, kind domain.SessionKind) string {
+		t.Helper()
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	sp := build(t, domain.ProjectConfig{HasIOSSimulator: true}, domain.KindWorker)
+	for _, want := range []string{
+		"iOS Simulator",
+		"ao sim claim",
+		"ao sim ax",
+		// The two rules that keep a shared device usable: claim before driving,
+		// and never change what the device is.
+		"never boots",
+		// The defect an agent would otherwise walk into: an element the tree
+		// lists but cannot be touched from here.
+		"off screen",
+	} {
+		if !strings.Contains(sp, want) {
+			t.Fatalf("worker prompt for an iOS project is missing %q:\n%s", want, sp)
+		}
+	}
+
+	// A project with no simulator gets nothing: the commands would fail on every
+	// machine its agents run on.
+	if plain := build(t, domain.ProjectConfig{}, domain.KindWorker); strings.Contains(plain, "ao sim claim") {
+		t.Fatalf("a project that has not opted into iOS must not be told to drive a simulator:\n%s", plain)
+	}
+
+	// The orchestrator dispatches; it does not drive devices.
+	if orch := build(t, domain.ProjectConfig{HasIOSSimulator: true}, domain.KindOrchestrator); strings.Contains(orch, "ao sim claim") {
+		t.Fatalf("the orchestrator does not drive simulators:\n%s", orch)
+	}
+}
