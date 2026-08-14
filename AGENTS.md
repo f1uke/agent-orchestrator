@@ -48,13 +48,15 @@ Driving an iOS Simulator (mac with Xcode only; AO never boots, shuts down or era
 ```bash
 ao sim list                          # what is booted, and which one an unqualified command means
 ao sim claim                         # take the lease that keeps other AO sessions off it
-ao sim ax                            # the screen as elements, each with the point to tap
+ao sim ax                            # the screen as elements: label, box, and the point to tap
 ao sim tap 0.5 0.93                  # normalized 0..1 coordinates, straight from `ao sim ax`
 ao sim drag 0.5 0.8 0.5 0.5 0.2 0.5  # one finger through a route, never lifting between legs
 ao sim release
 ```
 
 `swipe` is two points and lifts at the end; `drag` holds the finger through every waypoint, which is what an app distinguishes from a flick.
+
+`ao sim ax` reports each element's edges (`box left,top->right,bottom`, same 0..1 units as the tap point) and says which are **off screen** - those carry no tap point at all, because a coordinate clamped onto the screen's edge lands on whatever is really there. The header counts both (`99 elements (39 on screen, 60 off screen)`), and a box past 1.0 is how far to scroll: `ao sim drag` up, read again, then tap.
 
 To play the desktop app's own Device tab - press its buttons, drag on the screen it draws - `cd frontend && npm run package && npm run test:device`. It runs the real Electron build against a throwaway AO (its own daemon, data and profile) and a real simulator; `frontend/e2e-device/sandbox.ts` is the harness to reuse for a one-off. It skips, with the reason, on a machine that cannot run it - and refuses to start while the live AO holds a simulator lease, since two daemons cannot arbitrate one device.
 

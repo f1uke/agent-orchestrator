@@ -32,6 +32,9 @@ type fakeSimDriver struct {
 	// onPerform runs inside Perform, for tests that need to observe the world
 	// while a gesture is in flight.
 	onPerform func()
+	// snapshotQueue is handed out one per AX call before snapshot is used.
+	snapshotQueue []simbridge.Snapshot
+	axReads       int
 }
 
 // Hold is the desktop pane's drag, which the CLI has no command for: `ao sim`
@@ -44,7 +47,23 @@ func (f *fakeSimDriver) AX(context.Context, string) (simbridge.Snapshot, error) 
 	if f.axErr != nil {
 		return simbridge.Snapshot{}, f.axErr
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.axReads++
+	// snapshotQueue lets a test hand out a different tree per read, which is how
+	// "the app had not published its screen yet, so read again" is exercised.
+	if len(f.snapshotQueue) > 0 {
+		next := f.snapshotQueue[0]
+		f.snapshotQueue = f.snapshotQueue[1:]
+		return next, nil
+	}
 	return f.snapshot, nil
+}
+
+func (f *fakeSimDriver) reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.axReads
 }
 
 func (f *fakeSimDriver) Perform(_ context.Context, _ string, events []simbridge.Event) (simbridge.PerformResult, error) {
