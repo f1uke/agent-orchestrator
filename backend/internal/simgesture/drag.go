@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +60,12 @@ var ErrNoDrag = errors.New("no drag is in progress on this device")
 // allowed; taking the finger out from under someone is not.
 var ErrDragHeldByOther = errors.New("another session is mid-drag on this device")
 
+// key normalizes a udid so a drag can be found without asking the machine what
+// devices it has. A move belongs to a touch that is already down, and that
+// touch was opened against a device this daemon resolved moments ago - asking
+// again per move is what put a `xcrun simctl list` in the middle of a drag.
+func key(udid string) string { return strings.ToUpper(udid) }
+
 // Drags is every touch currently held down, one per device.
 type Drags struct {
 	idle    time.Duration
@@ -98,7 +105,7 @@ func (d *Drags) Begin(
 	udid, sessionID string, at simbridge.Point,
 ) error {
 	d.mu.Lock()
-	existing := d.open[udid]
+	existing := d.open[key(udid)]
 	if existing != nil && existing.sessionID != sessionID {
 		d.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrDragHeldByOther, udid)
@@ -130,7 +137,7 @@ func (d *Drags) Begin(
 		udid: udid, at: at, started: time.Now(),
 	}
 	d.mu.Lock()
-	d.open[udid] = held
+	d.open[key(udid)] = held
 	d.mu.Unlock()
 	d.arm(held)
 	return nil
@@ -141,7 +148,7 @@ func (d *Drags) Begin(
 // Begin and has not been given back.
 func (d *Drags) Move(ctx context.Context, driver simbridge.Driver, udid, sessionID string, at simbridge.Point) error {
 	d.mu.Lock()
-	held := d.open[udid]
+	held := d.open[key(udid)]
 	switch {
 	case held == nil:
 		d.mu.Unlock()
@@ -180,7 +187,7 @@ func (d *Drags) Move(ctx context.Context, driver simbridge.Driver, udid, session
 // a touch that completed into a failure the human has to read.
 func (d *Drags) End(ctx context.Context, udid, sessionID string, at simbridge.Point) error {
 	d.mu.Lock()
-	held := d.open[udid]
+	held := d.open[key(udid)]
 	if held == nil || held.sessionID != sessionID {
 		d.mu.Unlock()
 		return nil
@@ -231,8 +238,8 @@ func (d *Drags) finish(ctx context.Context, held *drag, at simbridge.Point) erro
 	if held.watchdog != nil {
 		held.watchdog.Stop()
 	}
-	if d.open[held.udid] == held {
-		delete(d.open, held.udid)
+	if d.open[key(held.udid)] == held {
+		delete(d.open, key(held.udid))
 	}
 	d.mu.Unlock()
 

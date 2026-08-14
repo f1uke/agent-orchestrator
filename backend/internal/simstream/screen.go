@@ -34,9 +34,10 @@ type Screen struct {
 	// request rather than touching a screen. It is cached for long enough to
 	// cover a burst of gestures and not long enough for a human to notice a
 	// simulator they just booted is missing.
-	listMu   sync.Mutex
-	listing  simctl.Listing
-	listedAt time.Time
+	listMu     sync.Mutex
+	listing    simctl.Listing
+	listedAt   time.Time
+	refreshing bool
 
 	mu       sync.Mutex
 	hub      *Hub
@@ -47,10 +48,22 @@ type Screen struct {
 	newDrive func(dataDir string, lookPath func(string) (string, error)) (simbridge.Driver, error)
 }
 
-// DevicesTTL is how long a device listing is reused. Short enough that a
-// simulator booted from Xcode shows up while the human is still reaching for
-// the mouse; long enough that a drag does not shell out per gesture.
-const DevicesTTL = 2 * time.Second
+const (
+	// DevicesTTL is how long a device listing is reused without being refreshed
+	// at all. Short enough that a simulator booted from Xcode shows up while the
+	// human is still reaching for the mouse.
+	DevicesTTL = 2 * time.Second
+	// DevicesMaxAge is how old a listing may be and still be served while a
+	// fresh one is fetched behind it. Past this, a caller waits.
+	//
+	// The two exist because `xcrun simctl list` takes most of a second and this
+	// is on an interactive path. A plain expiry made every caller unlucky enough
+	// to arrive just after it pay that second - which during a drag meant a
+	// visible stall roughly every two seconds, measured at 0.43-0.71 s each.
+	// Serving the recent answer and refreshing behind it means nobody waits
+	// except the first caller of all.
+	DevicesMaxAge = 30 * time.Second
+)
 
 // NewScreen builds the surface. Nothing is started here.
 func NewScreen(dataDir string) *Screen {
@@ -89,27 +102,55 @@ func NewScreenForTest(driver simbridge.Driver, run simctl.Runner, now func() tim
 // Devices lists this machine's simulators with the default an unqualified
 // request resolves to - or the reason there is none.
 //
-// A listing this recent is reused. A failure is never cached: a machine that
-// could not answer is asked again rather than remembered as broken.
+// A recent listing is served at once; one that is getting old is served at once
+// too and refreshed behind the caller. Only a caller with nothing usable waits.
+// A failure is never cached: a machine that could not answer is asked again
+// rather than remembered as broken.
+//
+// The refresh is demand-driven, never a timer. Nothing here runs when nobody is
+// asking, which is the rule this repo learned twice from pollers that burned a
+// core.
 func (s *Screen) Devices(ctx context.Context) (simctl.Listing, error) {
 	s.listMu.Lock()
-	if !s.listedAt.IsZero() && s.now().Sub(s.listedAt) < DevicesTTL {
-		cached := s.listing
+	age := s.now().Sub(s.listedAt)
+	cached, have := s.listing, !s.listedAt.IsZero()
+	switch {
+	case have && age < DevicesTTL:
 		s.listMu.Unlock()
+		return cached, nil
+	case have && age < DevicesMaxAge:
+		start := !s.refreshing
+		s.refreshing = true
+		s.listMu.Unlock()
+		if start {
+			// Detached from this request: the caller is being answered now, and
+			// a refresh that died with them would never land. A refresh that
+			// fails leaves the previous listing in place and is retried by the
+			// next caller, which is the same thing a failed read has always done.
+			go func() { _, _ = s.refresh(context.WithoutCancel(ctx)) }()
+		}
 		return cached, nil
 	}
 	s.listMu.Unlock()
 
-	// Deliberately outside the lock: holding it across a subprocess that takes
-	// most of a second would serialize every caller behind the slowest one.
+	return s.refresh(ctx)
+}
+
+// refresh reads the machine and stores what it found. Deliberately not holding
+// the lock across the subprocess: it takes most of a second, and holding it
+// would serialize every caller behind the slowest one.
+func (s *Screen) refresh(ctx context.Context) (simctl.Listing, error) {
 	devices, err := simctl.List(ctx, s.lookPath, s.run)
 	if err != nil {
+		s.listMu.Lock()
+		s.refreshing = false
+		s.listMu.Unlock()
 		return simctl.Listing{}, err
 	}
 	listing := simctl.Summarize(devices)
 
 	s.listMu.Lock()
-	s.listing, s.listedAt = listing, s.now()
+	s.listing, s.listedAt, s.refreshing = listing, s.now(), false
 	s.listMu.Unlock()
 	return listing, nil
 }

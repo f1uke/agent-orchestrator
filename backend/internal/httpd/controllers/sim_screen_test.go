@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,17 +30,23 @@ const otherSimUDID = "C4764B41-8F74-49C6-8766-A20EA46125BF"
 // fakeScreen stands in for the machine: what simulators it has, whether it can
 // capture, and whether it can touch a screen.
 type fakeScreen struct {
-	listing    simctl.Listing
-	listErr    error
-	driver     simbridge.Driver
-	driverErr  error
+	listing   simctl.Listing
+	listErr   error
+	driver    simbridge.Driver
+	driverErr error
+	// listed counts device-list reads. Reading it per drag move is what put a
+	// `xcrun simctl list` in the middle of a drag, so it is counted.
+	listed     atomic.Int64
 	subscribed []string
 	subErr     error
 }
 
 func (f *fakeScreen) Devices(context.Context) (simctl.Listing, error) {
+	f.listed.Add(1)
 	return f.listing, f.listErr
 }
+
+func (f *fakeScreen) listings() int64 { return f.listed.Load() }
 
 func (f *fakeScreen) Subscribe(_ context.Context, udid string) (<-chan simstream.Event, error) {
 	f.subscribed = append(f.subscribed, udid)
@@ -458,5 +465,53 @@ func TestSimGesture_ADragOffTheScreenIsRefusedBeforeTheHold(t *testing.T) {
 	}
 	if got := driver.sent(); len(got) != 0 {
 		t.Fatalf("a refused drag reached the device: %v", got)
+	}
+}
+
+// A drag must not shell out to `xcrun simctl list` per move. It did, and the
+// listing cache expiring mid-drag was felt as the picture stalling for most of
+// a second every couple of seconds. A move belongs to a touch already down, so
+// there is nothing left to resolve.
+func TestSimGesture_ADragStepDoesNotReadTheDeviceList(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver}
+	srv := newScreenTestServer(t, svc, screen)
+	url := srv.URL + "/api/v1/sessions/p-1/sim-devices/" + testSimUDID + "/gesture"
+
+	if code, out := postJSON(t, url, map[string]any{"kind": "drag-begin", "x": 0.5, "y": 0.8}); code != http.StatusOK {
+		t.Fatalf("begin: status %d: %v", code, out)
+	}
+	listedAfterBegin := screen.listings()
+
+	for range 20 {
+		if code, out := postJSON(t, url, map[string]any{"kind": "drag-move", "x": 0.5, "y": 0.5}); code != http.StatusOK {
+			t.Fatalf("move: status %d: %v", code, out)
+		}
+	}
+	if code, out := postJSON(t, url, map[string]any{"kind": "drag-end", "x": 0.5, "y": 0.5}); code != http.StatusOK {
+		t.Fatalf("end: status %d: %v", code, out)
+	}
+
+	if got := screen.listings(); got != listedAfterBegin {
+		t.Fatalf("the device list was read %d times during the drag, want none after the begin",
+			got-listedAfterBegin)
+	}
+}
+
+// And a move for a device with no drag open is still refused, without the
+// listing being what refuses it.
+func TestSimGesture_ADragStepForAnUnknownDeviceIsStillRefused(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/NOT-A-DEVICE/gesture",
+		map[string]any{"kind": "drag-move", "x": 0.5, "y": 0.5})
+	if code != http.StatusConflict {
+		t.Fatalf("status %d, want 409", code)
+	}
+	if got := driver.sent(); len(got) != 0 {
+		t.Fatalf("a move for an unknown device reached one: %v", got)
 	}
 }

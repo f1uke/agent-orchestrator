@@ -209,10 +209,20 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	device, err := c.resolveDevice(r.Context(), chi.URLParam(r, "udid"))
-	if err != nil {
-		writeSimResolveError(w, r, err)
-		return
+	// A move or an end belongs to a touch that is already down, opened against
+	// a device this daemon resolved when the drag began. Resolving again per
+	// event put `xcrun simctl list` - most of a second - in the middle of a
+	// drag, which is felt as the picture stalling every couple of seconds.
+	// An unknown device is still refused: there is no drag open for it.
+	udid := chi.URLParam(r, "udid")
+	device := simctl.Device{UDID: udid}
+	if !isDragStep(in.Kind) {
+		resolved, err := c.resolveDevice(r.Context(), udid)
+		if err != nil {
+			writeSimResolveError(w, r, err)
+			return
+		}
+		device = resolved
 	}
 	driver, err := c.Screen.Driver(r.Context())
 	if err != nil {
@@ -249,6 +259,10 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 func isDragKind(kind string) bool {
 	return kind == "drag-begin" || kind == "drag-move" || kind == "drag-end"
 }
+
+// isDragStep is a drag event that continues one already open, as opposed to the
+// begin that opens it.
+func isDragStep(kind string) bool { return kind == "drag-move" || kind == "drag-end" }
 
 // drag routes one step of a held touch. The registry owns the hold, the
 // watchdog and the lift; this only says which step it is and turns a refusal
