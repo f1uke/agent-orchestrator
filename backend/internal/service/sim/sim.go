@@ -77,6 +77,11 @@ type Manager interface {
 	Acquire(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimLease, error)
 	Release(ctx context.Context, sessionID domain.SessionID, udid string) error
 	List(ctx context.Context) ([]domain.SimLease, error)
+	// AcquireHold/ReleaseHold bracket one gesture. See hold.go: the lease says
+	// which session may drive the device, the hold says whether a gesture is in
+	// flight, and both are needed because one session can run two commands.
+	AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error)
+	ReleaseHold(ctx context.Context, udid, token string) error
 }
 
 // Store is the persistence surface the service owns; *sqlite.Store satisfies it.
@@ -85,13 +90,16 @@ type Store interface {
 	ReleaseSimLease(ctx context.Context, udid string, sessionID domain.SessionID) (bool, error)
 	GetSimLease(ctx context.Context, udid string, now time.Time) (domain.SimLease, bool, error)
 	ListSimLeases(ctx context.Context, now time.Time) ([]domain.SimLease, error)
+	AcquireSimHold(ctx context.Context, hold domain.SimHold, now time.Time) (domain.SimHoldOutcome, error)
+	ReleaseSimHold(ctx context.Context, udid, token string, now time.Time) (bool, error)
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 }
 
 // Service is the concrete Manager.
 type Service struct {
-	store Store
-	clock func() time.Time
+	store  Store
+	clock  func() time.Time
+	tokens func() string
 }
 
 // Option customizes a Service.
@@ -100,6 +108,11 @@ type Option func(*Service)
 // WithClock overrides the service clock for tests.
 func WithClock(clock func() time.Time) Option {
 	return func(s *Service) { s.clock = clock }
+}
+
+// WithTokenSource overrides hold-token generation for tests.
+func WithTokenSource(tokens func() string) Option {
+	return func(s *Service) { s.tokens = tokens }
 }
 
 // New builds the lease service over a store.

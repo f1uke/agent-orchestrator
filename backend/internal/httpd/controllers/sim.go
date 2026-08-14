@@ -37,6 +37,29 @@ type ReleaseSimLeaseResponse struct {
 	Released bool `json:"released" description:"True when the caller's lease was dropped."`
 }
 
+// AcquireSimHoldInput is the body of POST .../sim-leases/{udid}/hold.
+type AcquireSimHoldInput struct {
+	HoldSeconds int `json:"holdSeconds,omitempty" description:"How long the gesture may hold the device, in seconds (1-60). Omit for the 30 second default. This is not a working window: it only bounds how long a command killed mid-gesture keeps the device."`
+}
+
+// SimHoldResponse is the { hold } body returned by acquiring a gesture hold.
+type SimHoldResponse struct {
+	Hold domain.SimHold `json:"hold"`
+}
+
+// ReleaseSimHoldResponse is the body returned by releasing a gesture hold.
+type ReleaseSimHoldResponse struct {
+	Released bool `json:"released" description:"True when the caller's gesture hold was dropped."`
+}
+
+// SimHoldParam is the {sessionId}/{udid}/{token} path parameters for releasing
+// a gesture hold.
+type SimHoldParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	UDID      string `path:"udid" description:"Simulator udid (matched case-insensitively)."`
+	Token     string `path:"token" description:"The token returned when the hold was taken."`
+}
+
 // SimController owns the simulator device-lease routes. A nil Svc returns 501,
 // mirroring the other optional-service controllers.
 type SimController struct {
@@ -50,6 +73,10 @@ func (c *SimController) Register(r chi.Router) {
 	r.Get("/sim/leases", c.list)
 	r.Post("/sessions/{sessionId}/sim-leases", c.acquire)
 	r.Delete("/sessions/{sessionId}/sim-leases/{udid}", c.release)
+	// The gesture hold hangs off the lease it depends on: it is a second, much
+	// shorter claim on the same device, and it cannot exist without the lease.
+	r.Post("/sessions/{sessionId}/sim-leases/{udid}/hold", c.acquireHold)
+	r.Delete("/sessions/{sessionId}/sim-leases/{udid}/hold/{token}", c.releaseHold)
 }
 
 func (c *SimController) list(w http.ResponseWriter, r *http.Request) {
@@ -100,13 +127,56 @@ func (c *SimController) release(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, ReleaseSimLeaseResponse{Released: true})
 }
 
+func (c *SimController) acquireHold(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold")
+		return
+	}
+	var in AcquireSimHoldInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	hold, err := c.Svc.AcquireHold(r.Context(), sessionID(r), chi.URLParam(r, "udid"), time.Duration(in.HoldSeconds)*time.Second)
+	if err != nil {
+		writeSimError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SimHoldResponse{Hold: hold})
+}
+
+func (c *SimController) releaseHold(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold/{token}")
+		return
+	}
+	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token")); err != nil {
+		writeSimError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ReleaseSimHoldResponse{Released: true})
+}
+
 // writeSimError maps the service sentinels. Contention gets its own 409 with
 // the holder in details: a caller must be able to tell "someone else has this
 // device" apart from a transient failure, and must never be able to read the
 // refusal as permission to proceed.
 func writeSimError(w http.ResponseWriter, r *http.Request, err error) {
-	var held *simsvc.HeldError
+	var (
+		held    *simsvc.HeldError
+		refused *simsvc.HoldRefusedError
+	)
 	switch {
+	case errors.As(err, &refused):
+		// One code with a reason, not three codes: the caller always has to act
+		// on "you may not touch this device right now", and the reason says
+		// which of claim-it / wait-for-them / wait-for-the-gesture applies.
+		details := map[string]any{"udid": refused.UDID, "reason": string(refused.Reason)}
+		if refused.Lease.SessionID != "" {
+			details["holder"] = string(refused.Lease.SessionID)
+			details["expiresAt"] = refused.Lease.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_BUSY", err.Error(), details)
 	case errors.As(err, &held):
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_LEASED", err.Error(), map[string]any{
 			"udid":      held.Lease.UDID,

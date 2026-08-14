@@ -23,9 +23,27 @@ type fakeSimService struct {
 	acquireErr error
 	releaseErr error
 
+	holdErr        error
+	releaseHoldErr error
+
 	gotSession domain.SessionID
 	gotUDID    string
 	gotTTL     time.Duration
+	gotToken   string
+}
+
+func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error) {
+	f.gotSession, f.gotUDID, f.gotTTL = sessionID, udid, ttl
+	if f.holdErr != nil {
+		return domain.SimHold{}, f.holdErr
+	}
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	return domain.SimHold{UDID: udid, SessionID: sessionID, Token: "tok-fake", ExpiresAt: now.Add(ttl)}, nil
+}
+
+func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string) error {
+	f.gotUDID, f.gotToken = udid, token
+	return f.releaseHoldErr
 }
 
 func (f *fakeSimService) Acquire(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimLease, error) {

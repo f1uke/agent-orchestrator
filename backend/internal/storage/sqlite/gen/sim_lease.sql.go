@@ -7,10 +7,51 @@ package gen
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
+
+const acquireSimHold = `-- name: AcquireSimHold :execrows
+UPDATE sim_lease
+SET hold_token = ?1,
+    hold_expires_at = ?2,
+    updated_at = ?3
+WHERE udid = ?4
+  AND session_id = ?5
+  AND expires_at > ?3
+  AND (hold_token IS NULL OR hold_expires_at <= ?3)
+`
+
+type AcquireSimHoldParams struct {
+	HoldToken     sql.NullString
+	HoldExpiresAt sql.NullTime
+	Now           time.Time
+	Udid          string
+	SessionID     domain.SessionID
+}
+
+// The gesture hold - the finger - as ONE statement. Three facts must all hold
+// and the database checks them together: the row exists, the caller's lease is
+// live, and no live hold is in flight. A caller that already holds the lease is
+// refused just the same while a gesture is running, which is the whole point:
+// one session running two commands is exactly how a finger ends up teleporting.
+// 0 rows affected is the contention signal; the caller then reads the row to
+// learn WHICH of the three failed.
+func (q *Queries) AcquireSimHold(ctx context.Context, arg AcquireSimHoldParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, acquireSimHold,
+		arg.HoldToken,
+		arg.HoldExpiresAt,
+		arg.Now,
+		arg.Udid,
+		arg.SessionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
 
 const acquireSimLease = `-- name: AcquireSimLease :execrows
 
@@ -57,7 +98,7 @@ func (q *Queries) AcquireSimLease(ctx context.Context, arg AcquireSimLeaseParams
 }
 
 const getSimLease = `-- name: GetSimLease :one
-SELECT udid, session_id, acquired_at, expires_at, updated_at
+SELECT udid, session_id, acquired_at, expires_at, updated_at, hold_token, hold_expires_at
 FROM sim_lease WHERE udid = ?
 `
 
@@ -70,12 +111,14 @@ func (q *Queries) GetSimLease(ctx context.Context, udid string) (SimLease, error
 		&i.AcquiredAt,
 		&i.ExpiresAt,
 		&i.UpdatedAt,
+		&i.HoldToken,
+		&i.HoldExpiresAt,
 	)
 	return i, err
 }
 
 const listLiveSimLeases = `-- name: ListLiveSimLeases :many
-SELECT udid, session_id, acquired_at, expires_at, updated_at
+SELECT udid, session_id, acquired_at, expires_at, updated_at, hold_token, hold_expires_at
 FROM sim_lease WHERE expires_at > ? ORDER BY udid
 `
 
@@ -96,6 +139,8 @@ func (q *Queries) ListLiveSimLeases(ctx context.Context, expiresAt time.Time) ([
 			&i.AcquiredAt,
 			&i.ExpiresAt,
 			&i.UpdatedAt,
+			&i.HoldToken,
+			&i.HoldExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -108,6 +153,29 @@ func (q *Queries) ListLiveSimLeases(ctx context.Context, expiresAt time.Time) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const releaseSimHold = `-- name: ReleaseSimHold :execrows
+UPDATE sim_lease
+SET hold_token = NULL, hold_expires_at = NULL, updated_at = ?1
+WHERE udid = ?2 AND hold_token = ?3
+`
+
+type ReleaseSimHoldParams struct {
+	Now       time.Time
+	Udid      string
+	HoldToken sql.NullString
+}
+
+// Giving the finger back, never the device: the lease row survives. The token is
+// part of the predicate so a command that already lost its hold (killed, timed
+// out and taken over) cannot release the gesture that replaced it.
+func (q *Queries) ReleaseSimHold(ctx context.Context, arg ReleaseSimHoldParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseSimHold, arg.Now, arg.Udid, arg.HoldToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const releaseSimLease = `-- name: ReleaseSimLease :execrows

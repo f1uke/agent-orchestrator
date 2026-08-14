@@ -302,9 +302,9 @@ func (v simLeaseView) column(now time.Time) string {
 	return fmt.Sprintf("@%s (%s left)", v.Holder, simRemaining(v.ExpiresAt, now))
 }
 
-// captureLine is the lease line `ao sim shot` prints. A capture is read-only,
-// so the point is never to block it: it is to stop an agent reading a frame and
-// then assuming the device is its to drive.
+// captureLine is the lease line the read-only commands print (`ao sim shot` and
+// `ao sim ax`). A read is read-only, so the point is never to block it: it is to
+// stop an agent reading a screen and then assuming the device is its to drive.
 func (v simLeaseView) captureLine(sessionID string) string {
 	switch {
 	case v.State != domain.SimLeaseHeld:
@@ -313,7 +313,7 @@ func (v simLeaseView) captureLine(sessionID string) string {
 		return fmt.Sprintf("You hold this device until %s. Release it with `ao sim release` when you are done",
 			expiresLabel(v.ExpiresAt))
 	default:
-		return fmt.Sprintf("@%s holds this device until %s. The screenshot is read-only and fine; do NOT drive this device",
+		return fmt.Sprintf("@%s holds this device until %s. Reading the device is fine; do NOT drive it",
 			v.Holder, expiresLabel(v.ExpiresAt))
 	}
 }

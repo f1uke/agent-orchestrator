@@ -2779,6 +2779,117 @@ paths:
       summary: Release this session's lease on an iOS Simulator
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-leases/{udid}/hold:
+    post:
+      operationId: acquireSimHold
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcquireSimHoldInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimHoldResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Take the gesture hold on a simulator this session already leases
+      tags:
+      - sim
+  /api/v1/sessions/{sessionId}/sim-leases/{udid}/hold/{token}:
+    delete:
+      operationId: releaseSimHold
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      - description: The token returned when the hold was taken.
+        in: path
+        name: token
+        required: true
+        schema:
+          description: The token returned when the hold was taken.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseSimHoldResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Release the gesture hold, keeping the lease
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/smoke-checks:
     get:
       operationId: listSmokeChecks
@@ -4170,6 +4281,14 @@ components:
       - error
       - code
       - message
+      type: object
+    AcquireSimHoldInput:
+      properties:
+        holdSeconds:
+          description: 'How long the gesture may hold the device, in seconds (1-60).
+            Omit for the 30 second default. This is not a working window: it only
+            bounds how long a command killed mid-gesture keeps the device.'
+          type: integer
       type: object
     AcquireSimLeaseInput:
       properties:
@@ -5620,6 +5739,14 @@ components:
       - enabled
       - graceMinutes
       type: object
+    ReleaseSimHoldResponse:
+      properties:
+        released:
+          description: True when the caller's gesture hold was dropped.
+          type: boolean
+      required:
+      - released
+      type: object
     ReleaseSimLeaseResponse:
       properties:
         released:
@@ -6396,6 +6523,30 @@ components:
           type: string
       required:
       - base
+      type: object
+    SimHold:
+      properties:
+        expiresAt:
+          format: date-time
+          type: string
+        sessionId:
+          type: string
+        token:
+          type: string
+        udid:
+          type: string
+      required:
+      - udid
+      - sessionId
+      - token
+      - expiresAt
+      type: object
+    SimHoldResponse:
+      properties:
+        hold:
+          $ref: '#/components/schemas/SimHold'
+      required:
+      - hold
       type: object
     SimLease:
       properties:

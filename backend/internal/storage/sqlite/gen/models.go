@@ -216,11 +216,13 @@ type SessionWorktree struct {
 }
 
 type SimLease struct {
-	Udid       string
-	SessionID  domain.SessionID
-	AcquiredAt time.Time
-	ExpiresAt  time.Time
-	UpdatedAt  time.Time
+	Udid          string
+	SessionID     domain.SessionID
+	AcquiredAt    time.Time
+	ExpiresAt     time.Time
+	UpdatedAt     time.Time
+	HoldToken     sql.NullString
+	HoldExpiresAt sql.NullTime
 }
 
 type SmokeCheck struct {
