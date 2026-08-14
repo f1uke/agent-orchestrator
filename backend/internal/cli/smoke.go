@@ -38,11 +38,17 @@ type smokeEvidenceClient struct {
 	Kind string `json:"kind"`
 }
 
-// smokeCheckClient mirrors domain.SmokeCheck (display subset).
+// smokeCheckClient mirrors domain.SmokeCheck (display subset). It must carry
+// every author-supplied field: a field missing here is dropped by
+// json.Unmarshal without an error, so the command reports success while losing
+// the part of the case a worker needs in order to play it.
 type smokeCheckClient struct {
 	ID        string                `json:"id"`
 	Seq       int                   `json:"seq"`
 	Name      string                `json:"name"`
+	Why       string                `json:"why"`
+	Steps     []string              `json:"steps"`
+	Expected  string                `json:"expected"`
 	Verdict   string                `json:"verdict"`
 	Note      string                `json:"note"`
 	PRNum     int                   `json:"prNum"`
@@ -174,23 +180,35 @@ func readSmokeCases(cmd *cobra.Command, fromFile string) ([]smokeAuthoredCaseInp
 	return cases, nil
 }
 
+const smokeListLong = `Print a session's smoke-test checklist with its play results.
+
+Each case is printed in full — why it matters, its numbered steps and the
+expected result — so it can be played straight from this output without opening
+the Tests tab or calling the API. Pass --brief for one line per case (plus
+ref/note/evidence) when you only want to scan verdicts.
+
+Verdicts, notes and evidence are the user's to record while playing the case
+live in the app; there is no CLI command that sets them.`
+
 func newSmokeListCommand(ctx *commandContext) *cobra.Command {
 	var session string
-	var asJSON bool
+	var asJSON, brief bool
 	cmd := &cobra.Command{
 		Use:   "list [session]",
 		Short: "Print a session's smoke-test checklist with its play results",
+		Long:  smokeListLong,
 		Args:  atMostOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.listSmokeChecklist(cmd, args, session, asJSON)
+			return ctx.listSmokeChecklist(cmd, args, session, asJSON, brief)
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Print the raw JSON response")
+	cmd.Flags().BoolVar(&brief, "brief", false, "Condense each case to one line, omitting why/steps/expected")
 	return cmd
 }
 
-func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, session string, asJSON bool) error {
+func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, session string, asJSON, brief bool) error {
 	session = resolveSmokeSession(args, session)
 	if session == "" {
 		return usageError{errors.New("usage: session id is required (positional or --session)")}
@@ -215,6 +233,9 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 		lines = append(lines, fmt.Sprintf("  CHECK %d [%s] %s", check.Seq, smokeVerdictLabel(check.Verdict), check.Name))
 		if ref := smokeCaseRef(check); ref != "" {
 			lines = append(lines, "        "+ref)
+		}
+		if !brief {
+			lines = append(lines, smokeCaseBody(check)...)
 		}
 		if note := strings.TrimSpace(check.Note); note != "" {
 			lines = append(lines, "        note: "+note)
@@ -249,6 +270,33 @@ func smokeVerdictLabel(v string) string {
 	default:
 		return "to check"
 	}
+}
+
+// smokeCaseBody renders the author-supplied part of a case — why it matters,
+// the numbered steps and the expected result — so the reader can play it
+// directly. Each field is omitted when the case does not carry it, so an older
+// checklist prints no empty scaffolding.
+func smokeCaseBody(check smokeCheckClient) []string {
+	var lines []string
+	if why := strings.TrimSpace(check.Why); why != "" {
+		lines = append(lines, "        why: "+why)
+	}
+	steps := make([]string, 0, len(check.Steps))
+	for _, step := range check.Steps {
+		if step = strings.TrimSpace(step); step != "" {
+			steps = append(steps, step)
+		}
+	}
+	if len(steps) > 0 {
+		lines = append(lines, "        steps:")
+		for i, step := range steps {
+			lines = append(lines, fmt.Sprintf("          %d. %s", i+1, step))
+		}
+	}
+	if expected := strings.TrimSpace(check.Expected); expected != "" {
+		lines = append(lines, "        expected: "+expected)
+	}
+	return lines
 }
 
 func smokeCaseRef(check smokeCheckClient) string {

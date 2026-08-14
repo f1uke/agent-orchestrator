@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 )
 
 func TestSmokeSetReadsStdinCases(t *testing.T) {
@@ -113,5 +116,160 @@ func TestSmokeListJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `"worker": "w"`) || !strings.Contains(out, `"name": "A"`) {
 		t.Fatalf("json output = %q", out)
+	}
+}
+
+// daemonSmokeBody renders the exact bytes the daemon puts on the wire for
+// GET .../smoke-checks. Building it from the real response DTO (rather than a
+// hand-written string) means a json tag renamed on either side of the wire
+// fails these tests instead of silently dropping the field — which is how
+// why/steps/expected went missing from `ao smoke list` in the first place.
+func daemonSmokeBody(t *testing.T, worker string, checks ...domain.SmokeCheck) string {
+	t.Helper()
+	raw, err := json.Marshal(controllers.ListSmokeChecksResponse{Worker: worker, Checks: checks})
+	if err != nil {
+		t.Fatalf("marshal daemon body: %v", err)
+	}
+	return string(raw)
+}
+
+// playableCase is a fictional case carrying every author-supplied field.
+func playableCase() domain.SmokeCheck {
+	return domain.SmokeCheck{
+		ID:       "widget-label-survives-sort",
+		Seq:      1,
+		Name:     "Sorting a widget keeps its label",
+		Why:      "The relabel path is the one this change rewrote.",
+		Steps:    []string{"Open the Widgets tab.", "Drag widget B above widget A.", "Reload the page."},
+		Expected: "Widget B keeps its label and stays above widget A.",
+		PRNum:    7,
+		FileRef:  "widget.go:42",
+		Verdict:  domain.SmokePending,
+	}
+}
+
+// TestSmokeListPrintsPlayableCase is the core regression test: a worker must be
+// able to play the checklist straight from the command's own output.
+func TestSmokeListPrintsPlayableCase(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := reviewServer(t, 200, daemonSmokeBody(t, "widget sorter", playableCase()))
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "smoke", "list", "w1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	for _, want := range []string{
+		"why: The relabel path is the one this change rewrote.",
+		"steps:",
+		"expected: Widget B keeps its label and stays above widget A.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	// Steps must be numbered and keep the authored order.
+	prev := -1
+	for i, want := range []string{
+		"1. Open the Widgets tab.",
+		"2. Drag widget B above widget A.",
+		"3. Reload the page.",
+	} {
+		at := strings.Index(out, want)
+		if at < 0 {
+			t.Fatalf("output missing step %d %q:\n%s", i+1, want, out)
+		}
+		if at <= prev {
+			t.Fatalf("step %d %q is out of order:\n%s", i+1, want, out)
+		}
+		prev = at
+	}
+}
+
+// TestSmokeListSkipsEmptyAuthoredFields guards the older checklists that carry
+// none of the three fields: no empty scaffolding, no crash.
+func TestSmokeListSkipsEmptyAuthoredFields(t *testing.T) {
+	cfg := setConfigEnv(t)
+	bare := domain.SmokeCheck{ID: "bare", Seq: 1, Name: "A bare case", Verdict: domain.SmokePass}
+	srv, _ := reviewServer(t, 200, daemonSmokeBody(t, "widget sorter", bare))
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "smoke", "list", "w1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "CHECK 1 [PASS] A bare case") {
+		t.Fatalf("output = %q", out)
+	}
+	for _, unwanted := range []string{"why:", "steps:", "expected:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("output has empty scaffolding %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+// TestSmokeListBriefCondenses covers the opt-in one-line-per-case form for
+// scanning verdicts across a long checklist.
+func TestSmokeListBriefCondenses(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := reviewServer(t, 200, daemonSmokeBody(t, "widget sorter", playableCase()))
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "smoke", "list", "w1", "--brief")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "CHECK 1 [to check] Sorting a widget keeps its label") {
+		t.Fatalf("output = %q", out)
+	}
+	if !strings.Contains(out, "PR #7 · widget.go:42") {
+		t.Fatalf("brief output should keep the ref line:\n%s", out)
+	}
+	for _, unwanted := range []string{"why:", "steps:", "expected:", "Reload the page."} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("--brief should not print %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+// TestSmokeListJSONKeepsAuthoredFields pins the --json path: it re-encodes the
+// CLI's own struct, so a field the struct lacks is dropped from the output
+// even though the daemon sent it.
+func TestSmokeListJSONKeepsAuthoredFields(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := reviewServer(t, 200, daemonSmokeBody(t, "widget sorter", playableCase()))
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "smoke", "list", "w1", "--json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	// Decode the printed JSON generically: a field the CLI struct lacks is
+	// simply absent from the output, which a typed decode would hide.
+	var got struct {
+		Checks []map[string]any `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode json output: %v\n%s", err, out)
+	}
+	if len(got.Checks) != 1 {
+		t.Fatalf("checks = %+v", got.Checks)
+	}
+	check := got.Checks[0]
+	want := playableCase()
+	if check["why"] != want.Why {
+		t.Errorf("why = %v, want %q", check["why"], want.Why)
+	}
+	if check["expected"] != want.Expected {
+		t.Errorf("expected = %v, want %q", check["expected"], want.Expected)
+	}
+	steps, _ := check["steps"].([]any)
+	if len(steps) != len(want.Steps) {
+		t.Fatalf("steps = %v, want %v", check["steps"], want.Steps)
+	}
+	for i, step := range want.Steps {
+		if steps[i] != step {
+			t.Errorf("steps[%d] = %v, want %q", i, steps[i], step)
+		}
 	}
 }
