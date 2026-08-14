@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"reflect"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 )
 
 type projectAddOptions struct {
@@ -39,19 +41,11 @@ type projectRemoveOptions struct {
 // addProjectRequest mirrors the daemon's project AddInput body for
 // POST /api/v1/projects. projectId and name are optional (pointers omit them).
 type addProjectRequest struct {
-	Path        string         `json:"path"`
-	ProjectID   *string        `json:"projectId,omitempty"`
-	Name        *string        `json:"name,omitempty"`
-	Config      *projectConfig `json:"config,omitempty"`
-	AsWorkspace bool           `json:"asWorkspace,omitempty"`
-}
-
-type projectSummary struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Kind          string `json:"kind"`
-	SessionPrefix string `json:"sessionPrefix"`
-	ResolveError  string `json:"resolveError,omitempty"`
+	Path        string                `json:"path"`
+	ProjectID   *string               `json:"projectId,omitempty"`
+	Name        *string               `json:"name,omitempty"`
+	Config      *domain.ProjectConfig `json:"config,omitempty"`
+	AsWorkspace bool                  `json:"asWorkspace,omitempty"`
 }
 
 type projectDetails struct {
@@ -62,7 +56,7 @@ type projectDetails struct {
 	Repo           string                 `json:"repo"`
 	DefaultBranch  string                 `json:"defaultBranch"`
 	Agent          string                 `json:"agent,omitempty"`
-	Config         *projectConfig         `json:"config,omitempty"`
+	Config         *domain.ProjectConfig  `json:"config,omitempty"`
 	WorkspaceRepos []workspaceRepoDetails `json:"workspaceRepos,omitempty"`
 	ResolveError   string                 `json:"resolveError,omitempty"`
 }
@@ -73,68 +67,18 @@ type workspaceRepoDetails struct {
 	Repo         string `json:"repo"`
 }
 
-// agentConfig mirrors the daemon's typed domain.AgentConfig for the CLI client.
-type agentConfig struct {
-	Model       string `json:"model,omitempty"`
-	Permissions string `json:"permissions,omitempty"`
-}
-
-// roleOverride mirrors domain.RoleOverride.
-type roleOverride struct {
-	Agent       string      `json:"agent,omitempty"`
-	AgentConfig agentConfig `json:"agentConfig,omitempty"`
-}
-
-// trackerIntakeConfig mirrors domain.TrackerIntakeConfig.
-type trackerIntakeConfig struct {
-	Enabled  bool   `json:"enabled,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	Repo     string `json:"repo,omitempty"`
-	Assignee string `json:"assignee,omitempty"`
-}
-
-// gitConventionConfig mirrors domain.GitConventionConfig.
-type gitConventionConfig struct {
-	Workflow     string `json:"workflow,omitempty"`
-	BranchPrefix string `json:"branchPrefix,omitempty"`
-}
-
-// systemPromptAdditions mirrors domain.SystemPromptAdditions for the CLI client
-// so --config-json round-trips the per-kind additions.
-type systemPromptAdditions struct {
-	Orchestrator string `json:"orchestrator,omitempty"`
-	Worker       string `json:"worker,omitempty"`
-	Reviewer     string `json:"reviewer,omitempty"`
-}
-
-// projectConfig mirrors the daemon's typed domain.ProjectConfig for the CLI
-// client. The CLI sets common fields via flags and the whole object via
-// --config-json.
-type projectConfig struct {
-	DefaultBranch         string                `json:"defaultBranch,omitempty"`
-	SessionPrefix         string                `json:"sessionPrefix,omitempty"`
-	Env                   map[string]string     `json:"env,omitempty"`
-	Symlinks              []string              `json:"symlinks,omitempty"`
-	PostCreate            []string              `json:"postCreate,omitempty"`
-	AgentConfig           agentConfig           `json:"agentConfig,omitempty"`
-	Worker                roleOverride          `json:"worker,omitempty"`
-	Orchestrator          roleOverride          `json:"orchestrator,omitempty"`
-	TrackerIntake         trackerIntakeConfig   `json:"trackerIntake,omitempty"`
-	GitConvention         gitConventionConfig   `json:"gitConvention,omitempty"`
-	SystemPromptAdditions systemPromptAdditions `json:"systemPromptAdditions,omitempty"`
-	// The two facts that decide which inspector tabs the desktop app offers.
-	// They live in the same config object, so leaving them out of this mirror
-	// made --config-json drop them silently - a config that reported success
-	// and changed nothing.
-	HasWebUI        bool `json:"hasWebUI,omitempty"`
-	HasIOSSimulator bool `json:"hasIOSSimulator,omitempty"`
-}
-
-// setConfigRequest mirrors the daemon's SetConfigInput body for
-// PUT /api/v1/projects/{id}/config.
-type setConfigRequest struct {
-	Config projectConfig `json:"config"`
-}
+// The CLI does NOT define its own copy of the project config. It reads and
+// writes domain.ProjectConfig - the daemon's own type - and sends it inside the
+// daemon's own projectsvc.SetConfigInput body.
+//
+// A local mirror of the config is not a style question here, it is a
+// data-integrity bug: `set-config` REPLACES the stored config wholesale, and
+// encoding/json drops object keys the target struct lacks without erroring, so
+// every field the mirror was missing was destroyed by a faithful
+// `project get --json` -> `set-config --config-json` round trip while the
+// command exited 0. Adding the missing names to a mirror only fixes the fields
+// that have already been lost once; sharing the type makes the next field
+// impossible to lose, because there is nothing left to keep in sync.
 
 type projectSetConfigOptions struct {
 	defaultBranch     string
@@ -160,7 +104,7 @@ type projectSetConfigOptions struct {
 }
 
 type projectListResult struct {
-	Projects []projectSummary `json:"projects"`
+	Projects []projectsvc.Summary `json:"projects"`
 }
 
 type projectGetResult struct {
@@ -269,9 +213,9 @@ func newProjectAddCommand(ctx *commandContext) *cobra.Command {
 				req.Name = &opts.name
 			}
 			if opts.workerAgent != "" || opts.orchestratorAgent != "" {
-				req.Config = &projectConfig{
-					Worker:       roleOverride{Agent: opts.workerAgent},
-					Orchestrator: roleOverride{Agent: opts.orchestratorAgent},
+				req.Config = &domain.ProjectConfig{
+					Worker:       domain.RoleOverride{Harness: domain.AgentHarness(opts.workerAgent)},
+					Orchestrator: domain.RoleOverride{Harness: domain.AgentHarness(opts.orchestratorAgent)},
 				}
 			}
 			var res projectResult
@@ -302,7 +246,10 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 			"git convention). The config " +
 			"is resolved when a session spawns.\n\n" +
 			"Set fields via flags, pass the whole object with --config-json, or --clear " +
-			"to remove all config.",
+			"to remove all config.\n\n" +
+			"--config-json REPLACES the stored config, so it must carry every field to keep, " +
+			"exactly as `ao project get <id> --json` reports them. A key that is not part of " +
+			"the config is refused rather than dropped.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if err := cobra.ExactArgs(1)(cmd, args); err != nil {
 				return usageError{err}
@@ -318,7 +265,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req := setConfigRequest{Config: config}
+			req := projectsvc.SetConfigInput{Config: config}
 			var res projectResult
 			if err := ctx.putJSON(cmd.Context(), "projects/"+url.PathEscape(id)+"/config", req, &res); err != nil {
 				return err
@@ -358,43 +305,39 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 // the daemon. --clear empties the config; --config-json supplies the whole
 // object; otherwise the field flags form the config. The daemon validates the
 // values.
-func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
+func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, error) {
 	if opts.clear {
-		return projectConfig{}, nil
+		return domain.ProjectConfig{}, nil
 	}
 	if opts.configJSON != "" {
-		var cfg projectConfig
-		if err := json.Unmarshal([]byte(opts.configJSON), &cfg); err != nil {
-			return projectConfig{}, usageError{fmt.Errorf("--config-json is not a valid JSON object: %w", err)}
-		}
-		return cfg, nil
+		return decodeConfigJSON(opts.configJSON)
 	}
 
 	env, err := parseEnvPairs(opts.env)
 	if err != nil {
-		return projectConfig{}, err
+		return domain.ProjectConfig{}, err
 	}
 	trackerProvider, err := resolveTrackerProvider(opts)
 	if err != nil {
-		return projectConfig{}, err
+		return domain.ProjectConfig{}, err
 	}
-	cfg := projectConfig{
+	cfg := domain.ProjectConfig{
 		DefaultBranch: opts.defaultBranch,
 		SessionPrefix: opts.sessionPrefix,
 		Env:           env,
 		Symlinks:      opts.symlink,
 		PostCreate:    opts.postCreate,
-		AgentConfig:   agentConfig{Model: opts.model, Permissions: opts.permission},
-		Worker:        roleOverride{Agent: opts.workerAgent},
-		Orchestrator:  roleOverride{Agent: opts.orchestratorAgent},
-		TrackerIntake: trackerIntakeConfig{
+		AgentConfig:   domain.AgentConfig{Model: opts.model, Permissions: domain.PermissionMode(opts.permission)},
+		Worker:        domain.RoleOverride{Harness: domain.AgentHarness(opts.workerAgent)},
+		Orchestrator:  domain.RoleOverride{Harness: domain.AgentHarness(opts.orchestratorAgent)},
+		TrackerIntake: domain.TrackerIntakeConfig{
 			Enabled:  opts.trackerIntake,
-			Provider: trackerProvider,
+			Provider: domain.TrackerProvider(trackerProvider),
 			Repo:     opts.trackerRepo,
 			Assignee: opts.trackerAssignee,
 		},
-		GitConvention: gitConventionConfig{
-			Workflow:     strings.ToLower(strings.TrimSpace(opts.gitWorkflow)),
+		GitConvention: domain.GitConventionConfig{
+			Workflow:     domain.GitWorkflow(strings.ToLower(strings.TrimSpace(opts.gitWorkflow))),
 			BranchPrefix: opts.branchPrefix,
 		},
 		HasWebUI:        opts.hasWebUI,
@@ -405,8 +348,35 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 	if cfg.GitConvention.Workflow == "none" {
 		cfg.GitConvention.Workflow = ""
 	}
-	if reflect.DeepEqual(cfg, projectConfig{}) {
-		return projectConfig{}, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}
+	if cfg.IsZero() {
+		return domain.ProjectConfig{}, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}
+	}
+	return cfg, nil
+}
+
+// decodeConfigJSON decodes --config-json strictly: a key that is not part of
+// the config is refused instead of dropped. set-config REPLACES the stored
+// config, so a key this CLI cannot represent - a typo, or a field a newer
+// daemon knows about - would otherwise be written out of existence by a command
+// that exits 0. Erroring is the only safe answer on a write path.
+//
+// Strictness belongs here and NOT in the shared response decoding: an older CLI
+// has to keep reading a newer daemon's responses, where an unknown field is
+// merely something it cannot display, not something it is about to erase.
+func decodeConfigJSON(raw string) (domain.ProjectConfig, error) {
+	var cfg domain.ProjectConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return domain.ProjectConfig{}, usageError{fmt.Errorf("--config-json is not a valid JSON object: %w", err)}
+	}
+	// Second pass, strict. It runs after the lenient one so the two failures
+	// keep distinct messages: malformed input is reported above, and whatever
+	// only this pass rejects is an unrecognized key - which the error names.
+	var strict domain.ProjectConfig
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&strict); err != nil {
+		return domain.ProjectConfig{}, usageError{fmt.Errorf(
+			"--config-json is refused because set-config replaces the whole config and this field would be dropped instead of stored: %w", err)}
 	}
 	return cfg, nil
 }
@@ -496,7 +466,7 @@ func newProjectRemoveCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-func writeProjectList(cmd *cobra.Command, projects []projectSummary) error {
+func writeProjectList(cmd *cobra.Command, projects []projectsvc.Summary) error {
 	out := cmd.OutOrStdout()
 	if len(projects) == 0 {
 		if _, err := fmt.Fprintln(out, "No projects registered."); err != nil {
@@ -572,7 +542,7 @@ func writeProjectDetails(cmd *cobra.Command, res projectGetResult) error {
 
 // formatProjectConfig renders the per-project config as compact JSON for the
 // `project get` text view. A nil config returns "" so the row is skipped.
-func formatProjectConfig(config *projectConfig) string {
+func formatProjectConfig(config *domain.ProjectConfig) string {
 	if config == nil {
 		return ""
 	}
