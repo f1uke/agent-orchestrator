@@ -5,7 +5,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { usePageActive, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
 import { DragStream } from "../lib/drag-stream";
-import { devicePoint, fitScreen } from "../lib/screen-fit";
+import { devicePoint, fitDevice } from "../lib/screen-fit";
 import { cn } from "../lib/utils";
 import {
 	DropdownMenu,
@@ -359,8 +359,8 @@ export function SimulatorPanel({
 	}, [canDrive]);
 
 	const stageRef = useRef<HTMLDivElement | null>(null);
-	const fitted = useFittedScreen(stageRef, stream.size);
-	const frame = frameFor(fitted);
+	const stage = useStageSize(stageRef);
+	const drawn = fitDevice(stage, stream.size, device?.frame ?? null);
 
 	return (
 		<TooltipProvider delayDuration={200}>
@@ -385,14 +385,17 @@ export function SimulatorPanel({
 				>
 					{chosen ? (
 						<div
-							className="relative max-h-full max-w-full bg-neutral-900 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)]"
+							className={cn(
+								"relative max-h-full max-w-full",
+								drawn && drawn.bezel > 0 ? "bg-neutral-900 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)]" : "",
+							)}
 							style={
-								fitted
+								drawn
 									? {
-											width: fitted.width + frame.bezel * 2,
-											height: fitted.height + frame.bezel * 2,
-											padding: frame.bezel,
-											borderRadius: frame.outerRadius,
+											width: drawn.screen.width + drawn.bezel * 2,
+											height: drawn.screen.height + drawn.bezel * 2,
+											padding: drawn.bezel,
+											borderRadius: drawn.outerRadius,
 										}
 									: undefined
 							}
@@ -406,7 +409,7 @@ export function SimulatorPanel({
 								// net for the frame before the stage has been measured, and
 								// `pointFor` maps a press through the same fit either way.
 								className={cn("block h-full w-full object-contain", canDrive ? "cursor-crosshair" : "cursor-default")}
-								style={{ borderRadius: frame.screenRadius }}
+								style={{ borderRadius: drawn?.radius ?? 0 }}
 								onLostPointerCapture={onLostPointerCapture}
 								onPointerCancel={onPointerCancel}
 								onPointerDown={onPointerDown}
@@ -504,27 +507,7 @@ export function SimulatorPanel({
 }
 
 /**
- * frameFor sizes the frame around the screen from the screen itself.
- *
- * A fixed radius and a fixed thickness were wrong at every size but one: at the
- * rail's narrowest the corners read as square, which is not what the device
- * looks like. A phone's display corners are a little over an eighth of its
- * width, and the frame around them a small fraction of it - so both are taken
- * from the picture's shorter side and follow it as the pane is resized.
- */
-function frameFor(fitted: { width: number; height: number } | null) {
-	const shortest = fitted ? Math.min(fitted.width, fitted.height) : 0;
-	const bezel = Math.max(3, Math.round(shortest * 0.028));
-	const screenRadius = Math.round(shortest * 0.135);
-	return { bezel, screenRadius, outerRadius: screenRadius + bezel };
-}
-
-/** The frame thickness used before the stage has been measured. */
-const BEZEL = 4;
-
-/**
- * useFittedScreen measures the space the screen may have and works out the
- * largest box of the device's own shape that fits in it.
+ * useStageSize measures the space the screen may have.
  *
  * Sizing in JS rather than CSS because no CSS rule both fills the space and
  * keeps the shape for every framebuffer: `max-width/max-height` refuses to
@@ -533,12 +516,8 @@ const BEZEL = 4;
  * picture's edges somewhere other than the element's. The arithmetic itself
  * lives in `screen-fit`, where it is tested without a layout engine.
  */
-function useFittedScreen(
-	stageRef: React.RefObject<HTMLDivElement | null>,
-	frame: { width: number; height: number } | null,
-): { width: number; height: number } | null {
+function useStageSize(stageRef: React.RefObject<HTMLDivElement | null>): { width: number; height: number } | null {
 	const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
-
 	useEffect(() => {
 		const el = stageRef.current;
 		// jsdom has no ResizeObserver, and a pane with no measurement falls back
@@ -552,10 +531,7 @@ function useFittedScreen(
 		observer.observe(el);
 		return () => observer.disconnect();
 	}, [stageRef]);
-
-	if (!stage || !frame) return null;
-	const fit = fitScreen({ width: stage.width - BEZEL * 2, height: stage.height - BEZEL * 2 }, frame);
-	return fit.width > 0 && fit.height > 0 ? fit : null;
+	return stage;
 }
 
 function PillButton({

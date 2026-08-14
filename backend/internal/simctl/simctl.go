@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simchrome"
 )
 
 // Binary and BootedState are simctl's own vocabulary.
@@ -54,9 +56,18 @@ type Device struct {
 	RuntimeIdentifier string `json:"runtimeIdentifier"`
 	State             string `json:"state"`
 	Available         bool   `json:"available"`
+	// DeviceTypeIdentifier is the model, e.g.
+	// "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro". It is what the
+	// desktop pane looks a device's own frame up by.
+	DeviceTypeIdentifier string `json:"deviceTypeIdentifier,omitempty"`
 	// Default marks the device an unqualified request would resolve to. It is
 	// set by Summarize, and is false whenever there is no unambiguous answer.
 	Default bool `json:"default"`
+	// Frame is what the device's body looks like around its screen, in
+	// multiples of the screen's width, read from the artwork Xcode ships. Nil
+	// for a device this machine has no artwork for, and then the pane draws the
+	// screen without a body rather than guessing one.
+	Frame *simchrome.Frame `json:"frame,omitempty"`
 }
 
 // Booted reports whether the device can be captured or driven at all.
@@ -96,10 +107,11 @@ type LookPath func(file string) (string, error)
 // listing mirrors the part of `simctl list devices --json` we read.
 type listing struct {
 	Devices map[string][]struct {
-		UDID        string `json:"udid"`
-		Name        string `json:"name"`
-		State       string `json:"state"`
-		IsAvailable bool   `json:"isAvailable"`
+		UDID                 string `json:"udid"`
+		Name                 string `json:"name"`
+		State                string `json:"state"`
+		IsAvailable          bool   `json:"isAvailable"`
+		DeviceTypeIdentifier string `json:"deviceTypeIdentifier"`
 	} `json:"devices"`
 }
 
@@ -131,12 +143,13 @@ func List(ctx context.Context, lookPath LookPath, run Runner) ([]Device, error) 
 	for _, runtime := range runtimes {
 		for _, d := range parsed.Devices[runtime] {
 			devices = append(devices, Device{
-				UDID:              d.UDID,
-				Name:              d.Name,
-				Runtime:           RuntimeLabel(runtime),
-				RuntimeIdentifier: runtime,
-				State:             d.State,
-				Available:         d.IsAvailable,
+				UDID:                 d.UDID,
+				Name:                 d.Name,
+				Runtime:              RuntimeLabel(runtime),
+				RuntimeIdentifier:    runtime,
+				State:                d.State,
+				Available:            d.IsAvailable,
+				DeviceTypeIdentifier: d.DeviceTypeIdentifier,
 			})
 		}
 	}

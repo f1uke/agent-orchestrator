@@ -4875,6 +4875,20 @@ components:
       - status
       - prs
       type: object
+    ControllersSimDeviceFrameView:
+      properties:
+        radius:
+          description: The display's own corner radius, as a fraction of screen width.
+          format: double
+          type: number
+        thickness:
+          description: Body around the screen, as a fraction of screen width.
+          format: double
+          type: number
+      required:
+      - thickness
+      - radius
+      type: object
     ControllersWorkspaceResolveCandidateDTO:
       properties:
         inWorkspace:
@@ -6678,6 +6692,8 @@ components:
           description: True for the one device an unqualified request resolves to.
             Never set when several are booted.
           type: boolean
+        frame:
+          $ref: '#/components/schemas/ControllersSimDeviceFrameView'
         lease:
           $ref: '#/components/schemas/SimDeviceLeaseView'
         name:

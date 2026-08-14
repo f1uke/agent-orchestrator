@@ -50,16 +50,27 @@ type SimDeviceLeaseView struct {
 	Reason     string               `json:"reason,omitempty" description:"Why the state is unknown."`
 }
 
+// SimDeviceFrameView is what a device's body looks like around its screen, in
+// multiples of the screen's width, so the pane can draw it at whatever size the
+// screen is being shown. Read from the artwork Xcode ships; absent for a device
+// this machine has none for, and then the pane draws no body rather than
+// inventing one.
+type SimDeviceFrameView struct {
+	Thickness float64 `json:"thickness" description:"Body around the screen, as a fraction of screen width."`
+	Radius    float64 `json:"radius" description:"The display's own corner radius, as a fraction of screen width."`
+}
+
 // SimDeviceView is one simulator plus its lease state.
 type SimDeviceView struct {
-	UDID              string             `json:"udid"`
-	Name              string             `json:"name"`
-	Runtime           string             `json:"runtime" description:"Human-readable runtime, e.g. iOS 26.3."`
-	RuntimeIdentifier string             `json:"runtimeIdentifier"`
-	State             string             `json:"state" description:"simctl's own state, e.g. Booted or Shutdown."`
-	Available         bool               `json:"available"`
-	Default           bool               `json:"default" description:"True for the one device an unqualified request resolves to. Never set when several are booted."`
-	Lease             SimDeviceLeaseView `json:"lease"`
+	UDID              string              `json:"udid"`
+	Name              string              `json:"name"`
+	Runtime           string              `json:"runtime" description:"Human-readable runtime, e.g. iOS 26.3."`
+	RuntimeIdentifier string              `json:"runtimeIdentifier"`
+	State             string              `json:"state" description:"simctl's own state, e.g. Booted or Shutdown."`
+	Available         bool                `json:"available"`
+	Default           bool                `json:"default" description:"True for the one device an unqualified request resolves to. Never set when several are booted."`
+	Lease             SimDeviceLeaseView  `json:"lease"`
+	Frame             *SimDeviceFrameView `json:"frame,omitempty"`
 }
 
 // ListSimDevicesResponse is the body of GET /sim/devices.
@@ -177,6 +188,9 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 			UDID: d.UDID, Name: d.Name, Runtime: d.Runtime, RuntimeIdentifier: d.RuntimeIdentifier,
 			State: d.State, Available: d.Available, Default: d.Default,
 			Lease: SimDeviceLeaseView{State: domain.SimLeaseUnknown, Reason: reason},
+		}
+		if d.Frame != nil {
+			view.Frame = &SimDeviceFrameView{Thickness: d.Frame.Thickness, Radius: d.Frame.Radius}
 		}
 		if lease, ok := held[domain.NormalizeSimUDID(d.UDID)]; ok {
 			acquired, expires := lease.AcquiredAt.UTC(), lease.ExpiresAt.UTC()

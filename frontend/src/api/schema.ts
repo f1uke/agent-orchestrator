@@ -1717,6 +1717,18 @@ export interface components {
             updatedAt: string;
             workspacePath?: string;
         };
+        ControllersSimDeviceFrameView: {
+            /**
+             * Format: double
+             * @description The display's own corner radius, as a fraction of screen width.
+             */
+            radius: number;
+            /**
+             * Format: double
+             * @description Body around the screen, as a fraction of screen width.
+             */
+            thickness: number;
+        };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
             path: string;
@@ -2441,6 +2453,7 @@ export interface components {
             available: boolean;
             /** @description True for the one device an unqualified request resolves to. Never set when several are booted. */
             default: boolean;
+            frame?: components["schemas"]["ControllersSimDeviceFrameView"];
             lease: components["schemas"]["SimDeviceLeaseView"];
             name: string;
             /** @description Human-readable runtime, e.g. iOS 26.3. */

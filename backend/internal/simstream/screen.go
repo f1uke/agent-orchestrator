@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simchrome"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 )
 
@@ -136,6 +137,25 @@ func (s *Screen) Devices(ctx context.Context) (simctl.Listing, error) {
 	return s.refresh(ctx)
 }
 
+// withFrames attaches each device's own frame, read from the artwork Xcode
+// ships. Done here so it rides the same cache the listing does: it is a handful
+// of small file reads, and doing them per request would put them back on the
+// interactive path the cache exists to keep clear.
+//
+// A device with no frame on this machine simply has none; the pane draws the
+// screen without a body rather than inventing one.
+func withFrames(listing simctl.Listing) simctl.Listing {
+	roots := simchrome.DefaultRoots()
+	for i, device := range listing.Devices {
+		frame, err := simchrome.Lookup(roots, device.DeviceTypeIdentifier)
+		if err != nil {
+			continue
+		}
+		listing.Devices[i].Frame = &frame
+	}
+	return listing
+}
+
 // refresh reads the machine and stores what it found. Deliberately not holding
 // the lock across the subprocess: it takes most of a second, and holding it
 // would serialize every caller behind the slowest one.
@@ -147,7 +167,7 @@ func (s *Screen) refresh(ctx context.Context) (simctl.Listing, error) {
 		s.listMu.Unlock()
 		return simctl.Listing{}, err
 	}
-	listing := simctl.Summarize(devices)
+	listing := withFrames(simctl.Summarize(devices))
 
 	s.listMu.Lock()
 	s.listing, s.listedAt, s.refreshing = listing, s.now(), false
