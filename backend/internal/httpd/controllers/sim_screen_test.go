@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -58,16 +60,41 @@ func (f *fakeScreen) Driver(context.Context) (simbridge.Driver, error) {
 
 // fakeDriver records the events that reached the device.
 type fakeDriver struct {
+	mu      sync.Mutex
 	events  [][]simbridge.Event
 	err     error
 	liftErr error
+	holdErr error
 }
 
 func (d *fakeDriver) AX(context.Context, string) (simbridge.Snapshot, error) {
 	return simbridge.Snapshot{}, errors.New("not used")
 }
 
+func (d *fakeDriver) Hold(_ context.Context, _ string, events []simbridge.Event) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.events = append(d.events, events)
+	return d.holdErr
+}
+
+// sent is the flat list of touch types that reached the device, which is what
+// every test here is really asserting about.
+func (d *fakeDriver) sent() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := []string{}
+	for _, batch := range d.events {
+		for _, e := range batch {
+			out = append(out, e.Kind+":"+e.Type+e.Name)
+		}
+	}
+	return out
+}
+
 func (d *fakeDriver) Perform(_ context.Context, _ string, events []simbridge.Event) (simbridge.PerformResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.events = append(d.events, events)
 	if len(events) == 1 && events[0].Type == "end" {
 		return simbridge.PerformResult{}, d.liftErr
@@ -93,7 +120,7 @@ func newScreenTestServer(t *testing.T, svc simsvc.Manager, screen httpd.SimScree
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil,
-		httpd.APIDeps{Sim: svc, SimScreen: screen}, httpd.ControlDeps{}))
+		httpd.APIDeps{Sim: svc, SimScreen: screen, SimDrags: simgesture.NewDrags()}, httpd.ControlDeps{}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -334,5 +361,102 @@ func TestSimGesture_FailedGestureWhoseLiftAlsoFailedSaysTheDeviceMayBeWedged(t *
 	}
 	if svc.gotToken != "tok-fake" {
 		t.Fatal("the hold must come back even when the gesture failed")
+	}
+}
+
+// A drag is one touch spread over three requests. What has to hold is that it
+// takes exactly one hold for the whole thing, follows the finger while it is
+// down, and gives the hold back once.
+func TestSimGesture_ADragIsOneTouchUnderOneHold(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+	url := srv.URL + "/api/v1/sessions/p-1/sim-devices/" + testSimUDID + "/gesture"
+
+	for _, body := range []map[string]any{
+		{"kind": "drag-begin", "x": 0.5, "y": 0.8},
+		{"kind": "drag-move", "x": 0.5, "y": 0.6},
+		{"kind": "drag-move", "x": 0.5, "y": 0.4},
+		{"kind": "drag-end", "x": 0.5, "y": 0.4},
+	} {
+		if code, out := postJSON(t, url, body); code != http.StatusOK {
+			t.Fatalf("%s: status %d: %v", body["kind"], code, out)
+		}
+	}
+
+	want := []string{"touch:begin", "touch:move", "touch:move", "touch:end"}
+	got := driver.sent()
+	if len(got) != len(want) {
+		t.Fatalf("events on the device = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("events on the device = %v, want %v", got, want)
+		}
+	}
+	if svc.holds != 1 {
+		t.Fatalf("the drag took %d holds, want exactly one for the whole touch", svc.holds)
+	}
+	if svc.gotToken != "tok-fake" {
+		t.Fatalf("the hold must be given back once the drag ends, released token %q", svc.gotToken)
+	}
+}
+
+// The move is the one call that reaches a device without taking a hold of its
+// own, so a move with no begin before it must reach nothing.
+func TestSimGesture_ADragMoveWithNoDragIsRefused(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "drag-move", "x": 0.5, "y": 0.5})
+	if code != http.StatusConflict {
+		t.Fatalf("status %d, want 409", code)
+	}
+	if got := driver.sent(); len(got) != 0 {
+		t.Fatalf("a stray move reached the device: %v", got)
+	}
+}
+
+// A drag another session started may not be moved out from under it - the same
+// refusal a single gesture gets, for the same reason.
+func TestSimGesture_ADragCannotBeMovedByAnotherSession(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+	base := srv.URL + "/api/v1/sessions/"
+
+	if code, out := postJSON(t, base+"p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "drag-begin", "x": 0.5, "y": 0.8}); code != http.StatusOK {
+		t.Fatalf("begin: status %d: %v", code, out)
+	}
+	code, _ := postJSON(t, base+"other-7/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "drag-move", "x": 0.1, "y": 0.1})
+	if code != http.StatusConflict {
+		t.Fatalf("status %d, want 409", code)
+	}
+	if got := driver.sent(); len(got) != 1 {
+		t.Fatalf("another session reached the device mid-drag: %v", got)
+	}
+}
+
+// Off-screen coordinates are refused for a drag by the same rule as for a tap,
+// before anything is held or sent.
+func TestSimGesture_ADragOffTheScreenIsRefusedBeforeTheHold(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "drag-begin", "x": 1.5, "y": 0.5})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422", code)
+	}
+	if svc.holds != 0 {
+		t.Fatalf("a refused drag took %d holds, want none", svc.holds)
+	}
+	if got := driver.sent(); len(got) != 0 {
+		t.Fatalf("a refused drag reached the device: %v", got)
 	}
 }

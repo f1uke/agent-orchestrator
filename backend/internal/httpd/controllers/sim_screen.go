@@ -76,7 +76,7 @@ type ListSimDevicesResponse struct {
 // carries every gesture on purpose: the arbitration around them is identical,
 // and five routes would be five places to forget the hold.
 type SimGestureInput struct {
-	Kind string `json:"kind" description:"tap, swipe, type or button."`
+	Kind string `json:"kind" description:"tap, swipe, type, button, drag-begin, drag-move or drag-end."`
 	// tap and swipe: normalized 0..1 screen coordinates, the same numbers
 	// `ao sim ax` reports per element.
 	X float64 `json:"x,omitempty"`
@@ -90,6 +90,10 @@ type SimGestureInput struct {
 	Text string `json:"text,omitempty"`
 	// button: home or app-switcher.
 	Name string `json:"name,omitempty"`
+	// drag-begin, drag-move and drag-end are one touch spread over several
+	// requests, for a drag that follows a finger instead of being replayed once
+	// it has been let go. They use X and Y, take one hold across the whole drag,
+	// and the touch is lifted by a watchdog if the moves stop arriving.
 }
 
 // SimGestureResponse says what happened on the device.
@@ -118,6 +122,9 @@ type SimSessionDeviceParam struct {
 type SimScreenController struct {
 	Screen SimScreenProvider
 	Leases simsvc.Manager
+	// Drags is the touches currently held down. It is per-daemon rather than
+	// per-request because a drag is one touch spanning several requests.
+	Drags *simgesture.Drags
 }
 
 // Register mounts the routes. The live frame stream is not here: it is a
@@ -207,18 +214,28 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 		writeSimResolveError(w, r, err)
 		return
 	}
-	gesture, err := composeSimGesture(in)
-	if err != nil {
-		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
-		return
-	}
 	driver, err := c.Screen.Driver(r.Context())
 	if err != nil {
 		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "SIM_DRIVER_UNAVAILABLE", err.Error(), nil)
 		return
 	}
+	sessionID := chi.URLParam(r, "sessionId")
+	holder := &leaseHolder{leases: c.Leases, sessionID: domain.SessionID(sessionID)}
 
-	holder := &leaseHolder{leases: c.Leases, sessionID: domain.SessionID(chi.URLParam(r, "sessionId"))}
+	// A drag is the one gesture that is not known before it starts, so it is
+	// not composed - it is opened, followed and closed. Everything about the
+	// arbitration is the same; only the shape of the hold's lifetime differs.
+	if isDragKind(in.Kind) {
+		c.drag(w, r, in, driver, holder, device.UDID, sessionID)
+		return
+	}
+
+	gesture, err := composeSimGesture(in)
+	if err != nil {
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
+		return
+	}
+
 	result, err := simgesture.Run(r.Context(), holder, driver, device.UDID, gesture)
 	if err != nil {
 		writeSimGestureError(w, r, err)
@@ -227,6 +244,58 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, SimGestureResponse{
 		UDID: device.UDID, Kind: gesture.Action, Detail: gesture.Detail, Rescued: result.Lifted,
 	})
+}
+
+func isDragKind(kind string) bool {
+	return kind == "drag-begin" || kind == "drag-move" || kind == "drag-end"
+}
+
+// drag routes one step of a held touch. The registry owns the hold, the
+// watchdog and the lift; this only says which step it is and turns a refusal
+// into words.
+func (c *SimScreenController) drag(
+	w http.ResponseWriter, r *http.Request, in SimGestureInput,
+	driver simbridge.Driver, holder simgesture.Holder, udid, sessionID string,
+) {
+	if c.Drags == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture")
+		return
+	}
+	point := simbridge.Point{X: in.X, Y: in.Y}
+	if err := simbridge.ValidatePoint(in.Kind, point); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
+		return
+	}
+
+	var err error
+	switch in.Kind {
+	case "drag-begin":
+		err = c.Drags.Begin(r.Context(), holder, driver, udid, sessionID, point)
+	case "drag-move":
+		err = c.Drags.Move(r.Context(), driver, udid, sessionID, point)
+	default:
+		err = c.Drags.End(r.Context(), udid, sessionID, point)
+	}
+	if err != nil {
+		writeSimDragError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SimGestureResponse{UDID: udid, Kind: in.Kind, Detail: "drag"})
+}
+
+// writeSimDragError keeps a drag's refusals in the same shape a single
+// gesture's are, so a client has one way to read "the device said no".
+func writeSimDragError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, simgesture.ErrDragHeldByOther):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_BUSY", err.Error(), nil)
+	case errors.Is(err, simgesture.ErrNoDrag):
+		// Not an error the human caused: a drag the watchdog already lifted, or
+		// a move that outran its own begin.
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DRAG_ENDED", err.Error(), nil)
+	default:
+		writeSimGestureError(w, r, err)
+	}
 }
 
 // resolveDevice refuses a device this machine does not have or has not booted,

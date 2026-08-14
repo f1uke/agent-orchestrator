@@ -1,38 +1,57 @@
 // Streams one iOS Simulator's screen for a human to watch.
 //
 // It is the long-lived sibling of bridge.mjs and follows the same rules: it
-// transports, it does not decide. Every policy that needs testing - which frames
-// are worth forwarding, how fast, who is allowed to look - lives in Go.
+// transports, it does not decide. Every policy that needs testing - who is
+// allowed to look, who gets which frame, when a picture group has to restart -
+// lives in Go.
 //
-// Three things here are load-bearing:
+// Four things here are load-bearing:
 //
 //  1. Frames go out on descriptor 3, never stdout. The native addon writes to
 //     stdout itself ("[capture] Framebuffer: 1320x2868 ..."), and one stray line
 //     on a shared channel would desynchronize a binary stream permanently rather
 //     than merely garbling one message.
-//  2. stdin is the heartbeat. When the parent dies its end of the pipe closes,
-//     this process reads EOF and shuts the capture down. A capture that outlived
-//     its parent would keep a video encoder running with nobody watching, which
-//     is the whole failure this design exists to prevent.
-//  3. Frames are dropped, never queued. If the reader falls behind, the newest
-//     frame matters and the backlog does not; queueing would turn a slow viewer
-//     into unbounded memory.
+//  2. stdin is the heartbeat AND the control channel. When the parent dies its
+//     end of the pipe closes, this process reads EOF and shuts the capture down.
+//     A capture that outlived its parent would keep a video encoder running with
+//     nobody watching, which is the whole failure this design exists to prevent.
+//  3. The codec is H.264 (kind 1), not JPEG (kind 0). Measured on the same
+//     device under the same activity: same frame rate, a twenty-fifth of the
+//     bytes, less than half the CPU. An earlier reading that H.264 "reports
+//     encodingFailed" came from the single frame the encoder drops while
+//     VideoToolbox builds its session; every frame after it encodes.
+//  4. Frames are dropped, never queued, but only whole ones. A delta means
+//     nothing without the frames before it, so the reader is told which kind
+//     each chunk is and Go decides who may receive it.
 
 import { createRequire } from "node:module";
 import { createWriteStream } from "node:fs";
 
 const require = createRequire(import.meta.url);
 
-// MJPEG. The addon's other encoder (1, AVCC/H.264) reports `encodingFailed` on
-// the hardware this was built against, so the one that works is the one used.
-const KIND_MJPEG = 0;
+// 0 is MJPEG, 1 is H.264 in AVCC framing.
+const KIND_AVCC = 1;
+
+// The addon's own envelope: a 4-byte big-endian length covering the tag byte,
+// then the tag, then the payload. The tag is redundant with the flags argument,
+// so the envelope is stripped here and the kind travels in our own header.
+const ENVELOPE_PREFIX = 5;
+
+// Flags the addon sets on a chunk. Anything else is a delta.
+const FLAG_DESCRIPTION = 1 << 0;
+const FLAG_KEYFRAME = 1 << 1;
+
+// What Go reads in the header's kind byte.
+const FRAME_DESCRIPTION = 1;
+const FRAME_KEYFRAME = 2;
+const FRAME_DELTA = 3;
 
 // Above this many bytes buffered for the reader, frames are dropped rather than
-// queued. One full-screen frame is around 430 KB, so this is a couple of frames
-// of slack and no more.
+// queued. H.264 deltas are a few KB and a keyframe a few hundred, so this is
+// far more slack than a healthy reader ever needs.
 const MAX_PENDING_BYTES = 2 * 1024 * 1024;
 
-const FRAME_HEADER_SIZE = 8;
+const FRAME_HEADER_SIZE = 10;
 
 const frames = createWriteStream(null, { fd: 3 });
 let pending = 0;
@@ -43,44 +62,62 @@ function fail(message) {
   process.exit(1);
 }
 
-function readRequest() {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    const onData = (chunk) => {
-      raw += chunk;
+// Reads newline-delimited JSON from stdin: the first line is the capture
+// request, every line after it is a command.
+function readLines(onLine) {
+  let raw = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    raw += chunk;
+    for (;;) {
       const newline = raw.indexOf("\n");
       if (newline === -1) return;
-      process.stdin.off("data", onData);
-      try {
-        resolve(JSON.parse(raw.slice(0, newline)));
-      } catch (err) {
-        reject(err);
-      }
-    };
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", onData);
-    process.stdin.on("end", () => reject(new Error("no capture request on stdin")));
+      const line = raw.slice(0, newline).trim();
+      raw = raw.slice(newline + 1);
+      if (line) onLine(line);
+    }
   });
 }
 
-function writeFrame(payload, width, height) {
+function writeFrame(payload, width, height, kind) {
   if (pending > MAX_PENDING_BYTES) {
     dropped++;
     return;
   }
   const head = Buffer.allocUnsafe(FRAME_HEADER_SIZE);
-  head.writeUInt32BE(payload.length, 0);
+  head.writeUInt32BE(payload.byteLength, 0);
   head.writeUInt16BE(width & 0xffff, 4);
   head.writeUInt16BE(height & 0xffff, 6);
-  pending += payload.length;
+  head.writeUInt8(kind, 8);
+  head.writeUInt8(0, 9);
+  const bytes = Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
+  pending += bytes.length;
   frames.write(head);
-  frames.write(Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength), () => {
-    pending -= payload.length;
+  frames.write(bytes, () => {
+    pending -= bytes.length;
   });
 }
 
+function kindOf(flags) {
+  if (flags & FLAG_DESCRIPTION) return FRAME_DESCRIPTION;
+  if (flags & FLAG_KEYFRAME) return FRAME_KEYFRAME;
+  return FRAME_DELTA;
+}
+
 async function main() {
-  const request = await readRequest();
+  const request = await new Promise((resolve, reject) => {
+    let first = true;
+    readLines((line) => {
+      if (!first) return void handleCommand(line);
+      first = false;
+      try {
+        resolve(JSON.parse(line));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    process.stdin.on("end", () => reject(new Error("no capture request on stdin")));
+  });
   const { addonPath, udid } = request;
   if (!addonPath || !udid) fail("addonPath and udid are required");
 
@@ -95,14 +132,53 @@ async function main() {
   }
 
   const capture = new addon.SimCapture(udid);
+  let stopping = false;
+
+  // subscribe() hands back the function that undoes it. Each subscription gets
+  // its own encoder, so re-subscribing is how a fresh picture group - avcC
+  // description followed by a keyframe - is produced for a viewer that joined
+  // after the stream started.
+  //
   // The kind is a required Int and a callback-only call rejects asynchronously
   // with "Could not convert parameter 0 to type Int" - which subscribes nothing
   // and delivers no frames, silently. Passing it explicitly is not optional.
-  capture.subscribe(KIND_MJPEG, (payload, width, height) => {
-    writeFrame(payload, width, height);
-  });
+  let unsubscribe = null;
+  let restarting = false;
 
-  let stopping = false;
+  const subscribe = async () => {
+    unsubscribe = await capture.subscribe(KIND_AVCC, (payload, width, height, flags) => {
+      writeFrame(payload.subarray(ENVELOPE_PREFIX), width, height, kindOf(flags));
+    });
+  };
+
+  // Restarting the subscription is cheap but not free, and two viewers joining
+  // together only need one fresh group between them, so a request that arrives
+  // mid-restart is folded into the one already running.
+  const restart = async () => {
+    if (restarting || stopping) return;
+    restarting = true;
+    try {
+      const previous = unsubscribe;
+      unsubscribe = null;
+      if (previous) await previous();
+      if (!stopping) await subscribe();
+    } catch (err) {
+      process.stderr.write(`keyframe restart failed: ${err?.message ?? err}\n`);
+    } finally {
+      restarting = false;
+    }
+  };
+
+  function handleCommand(line) {
+    let command;
+    try {
+      command = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (command?.op === "keyframe") void restart();
+  }
+
   const shutdown = async (why) => {
     if (stopping) return;
     stopping = true;
@@ -125,6 +201,7 @@ async function main() {
   // A frame reader that goes away mid-write must not become an unhandled error.
   frames.on("error", () => void shutdown("frame reader gone"));
 
+  await subscribe();
   await capture.start();
   process.stdin.resume();
 }

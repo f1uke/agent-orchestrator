@@ -37,6 +37,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
@@ -127,6 +128,12 @@ func Run() error {
 	// what guarantees no capture process outlives the daemon.
 	simScreen := simstream.NewScreen(cfg.DataDir)
 	defer simScreen.Shutdown()
+	// The touches the desktop pane currently holds down. A drag spans several
+	// requests, so it outlives any one of them - and a finger left down wedges a
+	// device's input until it is rebooted, so the daemon lifts them on the way
+	// out rather than leaving it to the watchdog it will not be alive to run.
+	simDrags := simgesture.NewDrags()
+	defer simDrags.Shutdown()
 
 	// The agent messenger sends validated user input to the session's live
 	// runtime pane. Keep this path small until durable inbox semantics are needed.
@@ -290,6 +297,7 @@ func Run() error {
 		Smoke:              smokeSvc,
 		Sim:                simsvc.New(store),
 		SimScreen:          simScreen,
+		SimDrags:           simDrags,
 		Notifications:      notifier,
 		NotificationStream: notificationHub,
 		ActivityFeed:       activityHub,

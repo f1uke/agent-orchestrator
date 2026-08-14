@@ -20,6 +20,7 @@ import (
 	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -38,7 +39,11 @@ type APIDeps struct {
 	// Simulator tab: device discovery, the live frame stream, and the driver a
 	// click goes through. nil on a machine that cannot capture or touch a
 	// simulator, and every route then answers 501.
-	SimScreen          SimScreen
+	SimScreen SimScreen
+	// SimDrags is the touches currently held down by the desktop pane. It is
+	// per-daemon because one drag spans several requests, and the daemon owns
+	// its lifetime so no finger is left down when the process goes away.
+	SimDrags           *simgesture.Drags
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -103,7 +108,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
 		sim:           &controllers.SimController{Svc: deps.Sim},
-		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim},
+		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},

@@ -169,6 +169,10 @@ func ButtonNames() []string {
 	return names
 }
 
+// ValidatePoint is exported because a drag's points arrive one at a time rather
+// than inside a composed gesture, and they have to be refused by the same rule.
+func ValidatePoint(what string, p Point) error { return validatePoint(what, p) }
+
 func validatePoint(what string, p Point) error {
 	if p.X < 0 || p.X > 1 || p.Y < 0 || p.Y > 1 {
 		return fmt.Errorf("%s coordinates must be normalized 0..1 of the screen (the `tap` values `ao sim ax` "+

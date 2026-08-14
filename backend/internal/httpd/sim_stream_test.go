@@ -2,6 +2,7 @@ package httpd_test
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -119,7 +120,9 @@ func TestSimStream_ForwardsFramesAsBinaryMessages(t *testing.T) {
 	if got := screen.subscribedUDID(); got != "UDID-A" {
 		t.Fatalf("subscribed to %q", got)
 	}
-	screen.events <- simstream.Event{Frame: &simbridge.Frame{JPEG: []byte("jpeg-bytes"), Width: 100, Height: 200}}
+	screen.events <- simstream.Event{Frame: &simbridge.Frame{
+		Data: []byte("nal-bytes"), Kind: simbridge.FrameKeyframe, Width: 1320, Height: 2868,
+	}}
 
 	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
 	defer done()
@@ -130,8 +133,22 @@ func TestSimStream_ForwardsFramesAsBinaryMessages(t *testing.T) {
 	if kind != websocket.MessageBinary {
 		t.Fatalf("frames must be binary, got %v", kind)
 	}
-	if string(data) != "jpeg-bytes" {
-		t.Fatalf("frame body %q", data)
+	// A viewer that cannot tell a keyframe from a delta cannot decode the
+	// stream at all, so the kind and the framebuffer size lead every message.
+	if len(data) < 5 {
+		t.Fatalf("frame message is too short to carry its header: %d bytes", len(data))
+	}
+	if data[0] != byte(simbridge.FrameKeyframe) {
+		t.Fatalf("frame kind byte %d, want %d", data[0], simbridge.FrameKeyframe)
+	}
+	if w := binary.BigEndian.Uint16(data[1:3]); w != 1320 {
+		t.Fatalf("frame width %d, want 1320", w)
+	}
+	if h := binary.BigEndian.Uint16(data[3:5]); h != 2868 {
+		t.Fatalf("frame height %d, want 2868", h)
+	}
+	if string(data[5:]) != "nal-bytes" {
+		t.Fatalf("frame body %q", data[5:])
 	}
 }
 

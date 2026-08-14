@@ -2,13 +2,17 @@ package httpd
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"net/http"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 // The live simulator screen, as binary WebSocket frames.
@@ -25,10 +29,20 @@ import (
 //
 // Frames go out as binary messages; anything the client needs to be told in
 // words goes out as one JSON text message. Nothing is ever written to disk.
+//
+// Each binary message carries a five-byte header before the encoded bytes:
+//
+//	[u8 kind][u16 width][u16 height] payload
+//
+// The kind is what tells a viewer whether the payload configures its decoder,
+// starts a picture group, or continues one - an H.264 stream is unreadable
+// without it. The size is the device's own framebuffer size, which lets the
+// pane hold the right aspect ratio from the first message rather than after the
+// first frame decodes.
 
 // simStreamWriteTimeout bounds one frame write. A viewer whose socket has
-// stopped draining must not pin a frame - and the drop-not-queue rule in the
-// hub already means the next frame is the one worth having.
+// stopped draining must not pin this handler; giving up on it ends the
+// subscription, which is also what stops the capture when it was the last one.
 const simStreamWriteTimeout = 5 * time.Second
 
 // simStreamStatus is the one JSON message this socket sends: why the stream is
@@ -96,7 +110,7 @@ func simStreamHandler(screen SimScreen, log *slog.Logger) http.HandlerFunc {
 				continue
 			}
 			writeCtx, done := context.WithTimeout(ctx, simStreamWriteTimeout)
-			writeErr := conn.Write(writeCtx, websocket.MessageBinary, event.Frame.JPEG)
+			writeErr := conn.Write(writeCtx, websocket.MessageBinary, simStreamMessage(*event.Frame))
 			done()
 			if writeErr != nil {
 				return
@@ -104,6 +118,34 @@ func simStreamHandler(screen SimScreen, log *slog.Logger) http.HandlerFunc {
 		}
 		_ = conn.Close(websocket.StatusNormalClosure, "stream ended")
 	}
+}
+
+// simStreamHeaderSize is the kind byte plus the framebuffer's width and height.
+const simStreamHeaderSize = 5
+
+// simStreamMessage puts one frame on the wire. The header is built into the
+// same allocation as the payload so a 60 fps stream does not spend a second
+// buffer per frame.
+func simStreamMessage(frame simbridge.Frame) []byte {
+	out := make([]byte, simStreamHeaderSize+len(frame.Data))
+	out[0] = byte(frame.Kind)
+	binary.BigEndian.PutUint16(out[1:3], pixels(frame.Width))
+	binary.BigEndian.PutUint16(out[3:5], pixels(frame.Height))
+	copy(out[simStreamHeaderSize:], frame.Data)
+	return out
+}
+
+// pixels narrows a framebuffer dimension to the two bytes the header has for
+// it. No simulator is anywhere near the limit; clamping is only here so a
+// nonsense size cannot become a different nonsense size.
+func pixels(n int) uint16 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxUint16 {
+		return math.MaxUint16
+	}
+	return uint16(n)
 }
 
 func writeSimStreamStatus(ctx context.Context, conn *websocket.Conn, kind, message string) {

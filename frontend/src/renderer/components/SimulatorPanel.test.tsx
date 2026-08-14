@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +44,58 @@ class MockWebSocket {
 
 const openSockets = () => sockets.filter((s) => !s.closed);
 
+// The wire the daemon writes: a kind byte, the framebuffer size, then the
+// encoded bytes.
+const KIND_DESCRIPTION = 1;
+const KIND_KEYFRAME = 2;
+const KIND_DELTA = 3;
+
+function message(kind: number, payload: number[], width = 1320, height = 2868): ArrayBuffer {
+	const out = new Uint8Array(5 + payload.length);
+	const view = new DataView(out.buffer);
+	view.setUint8(0, kind);
+	view.setUint16(1, width);
+	view.setUint16(3, height);
+	out.set(payload, 5);
+	return out.buffer;
+}
+
+// An avcC blob whose bytes 1..3 are the profile/constraints/level the codec
+// string is built from - High profile, level 5.1, exactly what the device
+// encoder emits.
+const AVCC = [0x01, 0x64, 0x00, 0x33, 0xff, 0xe1];
+
+type DecoderCall = { codec: string; description: unknown };
+const decoderCalls: DecoderCall[] = [];
+const decodedKinds: string[] = [];
+
+class MockVideoDecoder {
+	static instances: MockVideoDecoder[] = [];
+	state = "unconfigured";
+	output: (frame: { displayWidth: number; displayHeight: number; close: () => void }) => void;
+	constructor(init: {
+		output: (frame: { displayWidth: number; displayHeight: number; close: () => void }) => void;
+		error: (err: Error) => void;
+	}) {
+		this.output = init.output;
+		MockVideoDecoder.instances.push(this);
+	}
+	static refuseConfigure = false;
+	configure(config: DecoderCall) {
+		decoderCalls.push(config);
+		if (MockVideoDecoder.refuseConfigure) throw new Error("this build will not decode avc1.640033");
+		this.state = "configured";
+	}
+	decode(chunk: { type: string }) {
+		decodedKinds.push(chunk.type);
+		// A real decoder emits a frame; the panel only needs one to go live.
+		this.output({ displayWidth: 1320, displayHeight: 2868, close: () => {} });
+	}
+	close() {
+		this.state = "closed";
+	}
+}
+
 const device = (overrides: Partial<Record<string, unknown>> = {}) => ({
 	udid: "UDID-A",
 	name: "iPhone 17 Pro Max",
@@ -65,13 +117,35 @@ function wrapper({ children }: { children: ReactNode }) {
 	return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+/** Opens the panel's options menu, where the lease's own words live. */
+async function openMenu() {
+	await userEvent.click(await screen.findByRole("button", { name: /simulator and lease options/i }));
+	return screen.findByRole("menu");
+}
+
 beforeEach(() => {
 	sockets.length = 0;
+	decoderCalls.length = 0;
+	decodedKinds.length = 0;
+	MockVideoDecoder.instances.length = 0;
+	MockVideoDecoder.refuseConfigure = false;
 	getMock.mockReset();
 	postMock.mockReset().mockResolvedValue({ error: undefined });
 	deleteMock.mockReset().mockResolvedValue({ error: undefined });
 	vi.stubGlobal("WebSocket", MockWebSocket);
+	vi.stubGlobal("VideoDecoder", MockVideoDecoder);
+	vi.stubGlobal(
+		"EncodedVideoChunk",
+		class {
+			type: string;
+			constructor(init: { type: string }) {
+				this.type = init.type;
+			}
+		},
+	);
 	vi.spyOn(document, "hasFocus").mockReturnValue(true);
+	// jsdom has no 2d context; the panel only needs the call not to throw.
+	HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage: vi.fn() });
 });
 
 afterEach(() => {
@@ -100,23 +174,6 @@ describe("SimulatorPanel device selection", () => {
 		expect(screen.queryByText(/No simulator is booted/i)).not.toBeInTheDocument();
 	});
 
-	// With two booted there is nothing preselected, and the label has to say what
-	// to do rather than "not watching", which reads like a failure.
-	it("asks for a choice rather than reporting that it is not watching", async () => {
-		getMock.mockResolvedValue(
-			devicesPayload(
-				[device(), device({ udid: "UDID-B", name: "iPhone 17 Pro" })],
-				null,
-				"2 simulators are booted, so there is no unambiguous default",
-			),
-		);
-		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
-
-		await waitFor(() =>
-			expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/choose a simulator above to start watching/i),
-		);
-	});
-
 	it("watches the one booted simulator without being asked", async () => {
 		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -141,6 +198,56 @@ describe("SimulatorPanel device selection", () => {
 		expect(await screen.findByText(/2 simulators are booted/i)).toBeInTheDocument();
 		expect(openSockets()).toHaveLength(0);
 		expect(screen.getByText(/choose which booted simulator/i)).toBeInTheDocument();
+	});
+});
+
+describe("SimulatorPanel layout", () => {
+	beforeEach(() => {
+		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+	});
+
+	// The complaint this rework answers: a picker, a freshness line, a lease row,
+	// a checkbox and two paragraphs of guidance all competed with the screen.
+	// Whatever else the toolbar grows, the screen has to be the thing that gets
+	// the pane's remaining space.
+	it("gives the screen every row the toolbar does not take", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		const canvas = await screen.findByTestId("sim-canvas");
+
+		const stage = screen.getByTestId("sim-stage");
+		expect(stage.className).toContain("flex-1");
+		expect(stage.className).toContain("min-h-0");
+		expect(stage).toContainElement(canvas);
+		// The stage holds nothing but the screen: the device pill sits above it
+		// and the control pills below, so every row the chrome does not take is
+		// the screen's.
+		expect(stage.querySelectorAll("button")).toHaveLength(0);
+		// The box is fitted to the device's own shape, and object-contain is the
+		// safety net for the frame before the stage has been measured.
+		expect(canvas.className).toContain("object-contain");
+		expect(canvas.className).toContain("h-full");
+		expect(canvas.className).toContain("w-full");
+	});
+
+	// The panel offers no way to type. `ao sim type` and the daemon's type
+	// gesture both still exist; what went is a field, a Send button and a
+	// paragraph of keyboard caveat spent inside a pane whose whole point is the
+	// screen. Driving a simulator by hand is tapping and swiping.
+	it("offers no text field, and no paragraph explaining one", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await userEvent.click(await screen.findByRole("button", { name: /drive this device/i }));
+
+		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /type into the focused field/i })).not.toBeInTheDocument();
+		expect(screen.queryByText(/US-keyboard presses/i)).not.toBeInTheDocument();
+		// The gestures a person actually reaches for are still one click away.
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /app switcher/i })).toBeInTheDocument();
 	});
 });
 
@@ -180,6 +287,18 @@ describe("SimulatorPanel capture lifetime", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(0));
 	});
 
+	// The decoder holds a hardware session for as long as it is open, so a tab
+	// that stops being looked at has to close it as well as the socket.
+	it("closes the decoder as well as the socket when nobody is looking", async () => {
+		const { rerender } = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		expect(MockVideoDecoder.instances).toHaveLength(1);
+
+		rerender(<SimulatorPanel isActive={false} sessionId="p-1" />);
+		await waitFor(() => expect(MockVideoDecoder.instances[0].state).toBe("closed"));
+	});
+
 	// A device that disappears mid-view has to say so rather than leaving a stale
 	// frame that reads as live.
 	it("reports a stream that ended instead of showing a frozen screen as live", async () => {
@@ -193,26 +312,108 @@ describe("SimulatorPanel capture lifetime", () => {
 	});
 });
 
+describe("SimulatorPanel decoding", () => {
+	beforeEach(() => {
+		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+	});
+
+	// The codec string is not a constant: it is the profile and level the device
+	// encoder actually chose, read back out of the parameter set it sent.
+	it("configures the decoder from the parameter set the device sent", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+		openSockets()[0].onmessage?.({ data: message(KIND_DESCRIPTION, AVCC) } as MessageEvent);
+		expect(decoderCalls).toHaveLength(1);
+		expect(decoderCalls[0].codec).toBe("avc1.640033");
+	});
+
+	// A delta that reaches a decoder with nothing configured fails the whole
+	// stream rather than one frame, so it has to be dropped instead.
+	it("decodes nothing before the decoder has a parameter set", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+		openSockets()[0].onmessage?.({ data: message(KIND_DELTA, [0x41]) } as MessageEvent);
+		expect(decodedKinds).toHaveLength(0);
+
+		openSockets()[0].onmessage?.({ data: message(KIND_DESCRIPTION, AVCC) } as MessageEvent);
+		openSockets()[0].onmessage?.({ data: message(KIND_KEYFRAME, [0x42]) } as MessageEvent);
+		openSockets()[0].onmessage?.({ data: message(KIND_DELTA, [0x43]) } as MessageEvent);
+		expect(decodedKinds).toEqual(["key", "delta"]);
+	});
+
+	// A daemon newer than this renderer could put a kind on the wire this build
+	// has no meaning for. Decoding it as an ordinary frame would corrupt the
+	// picture; ignoring it costs one frame.
+	it("ignores a frame kind this build does not know", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		decodedKinds.length = 0;
+
+		openSockets()[0].onmessage?.({ data: message(9, [0x44]) } as MessageEvent);
+		expect(decodedKinds).toHaveLength(0);
+	});
+
+	// The decoder is dropped when it will not take a parameter set, because
+	// everything after that set is encoded against it. Handing chunks to a
+	// decoder that never configured fails the stream one frame at a time.
+	it("stops decoding, and says why, when the parameter set is refused", async () => {
+		MockVideoDecoder.refuseConfigure = true;
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+		openSockets()[0].onmessage?.({ data: message(KIND_DESCRIPTION, AVCC) } as MessageEvent);
+		openSockets()[0].onmessage?.({ data: message(KIND_KEYFRAME, [0x42]) } as MessageEvent);
+		openSockets()[0].onmessage?.({ data: message(KIND_DELTA, [0x43]) } as MessageEvent);
+
+		expect(decodedKinds).toHaveLength(0);
+		expect(await screen.findByText(/will not decode/i)).toBeInTheDocument();
+	});
+
+	// A build without WebCodecs would otherwise show a black rectangle for ever.
+	it("says so rather than showing a dead screen when this build cannot decode", async () => {
+		vi.stubGlobal("VideoDecoder", undefined);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		expect(await screen.findByText(/cannot decode the simulator's video stream/i)).toBeInTheDocument();
+		expect(openSockets()).toHaveLength(0);
+	});
+});
+
+/** Gives the stream a complete starting point, which is what "live" means. */
+function makeLive() {
+	const socket = openSockets()[0];
+	socket.onmessage?.({ data: message(KIND_DESCRIPTION, AVCC) } as MessageEvent);
+	socket.onmessage?.({ data: message(KIND_KEYFRAME, [0x42]) } as MessageEvent);
+}
+
 describe("SimulatorPanel lease truth", () => {
 	it("says unknown with the reason, never free, and offers to claim", async () => {
 		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
-		expect(await screen.findByText(/Lease: unknown/i)).toBeInTheDocument();
-		expect(screen.getByText(/cannot see whether a human is driving it/i)).toBeInTheDocument();
-		expect(screen.queryByText(/free/i)).not.toBeInTheDocument();
-		expect(screen.getByRole("button", { name: /claim to drive/i })).toBeInTheDocument();
+		const menu = await openMenu();
+		expect(within(menu).getByText(/Lease: unknown/i)).toBeInTheDocument();
+		expect(within(menu).getByText(/cannot see whether a human is driving it/i)).toBeInTheDocument();
+		expect(within(menu).queryByText(/free/i)).not.toBeInTheDocument();
+		expect(within(menu).getByRole("menuitem", { name: /claim to drive/i })).toBeInTheDocument();
 	});
 
+	// The one place the lease is enforced in the UI is what is offered: a
+	// session that does not hold the device is never given the control that
+	// turns driving on, and the effect below switches it off if the lease moves.
 	it("names the other holder and offers no way to drive", async () => {
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
-		expect(await screen.findByText(/Leased by @other-7/i)).toBeInTheDocument();
-		expect(screen.queryByRole("checkbox", { name: /drive this device/i })).not.toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: /claim to drive/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
+		const menu = await openMenu();
+		expect(within(menu).getByText(/Leased by @other-7/i)).toBeInTheDocument();
+		expect(within(menu).queryByRole("menuitem", { name: /claim to drive/i })).not.toBeInTheDocument();
 	});
 
 	it("offers driving only once this session holds the lease, and never pre-enabled", async () => {
@@ -221,8 +422,8 @@ describe("SimulatorPanel lease truth", () => {
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
-		const toggle = await screen.findByRole("checkbox", { name: /drive this device/i });
-		expect(toggle).not.toBeChecked();
+		const toggle = await screen.findByRole("button", { name: /drive this device/i });
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
 	});
 });
 
@@ -231,22 +432,34 @@ describe("SimulatorPanel driving", () => {
 		devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator");
 
 	async function turnDrivingOn() {
-		const toggle = await screen.findByRole("checkbox", { name: /drive this device/i });
+		const toggle = await screen.findByRole("button", { name: /drive this device/i });
 		await userEvent.click(toggle);
 		return toggle;
 	}
 
-	function makeLive() {
-		// A tap is only accepted on a live screen, so give the stream one frame.
-		const socket = openSockets()[0];
-		socket.onmessage?.({ data: new ArrayBuffer(8) } as MessageEvent);
+	/** Every gesture kind that reached the daemon, in order. */
+	function gestureKinds(): string[] {
+		return postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body?: { kind?: string } })?.body?.kind ?? "");
+	}
+
+	/** The y of every gesture of one kind that reached the daemon, in order. */
+	function gesturePoints(kind: string): number[] {
+		return postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body?: { kind?: string; y?: number } })?.body)
+			.filter((body): body is { kind: string; y: number } => body?.kind === kind)
+			.map((body) => body.y);
+	}
+
+	async function refresh() {
+		const menu = await openMenu();
+		await userEvent.click(within(menu).getByRole("menuitem", { name: /refresh simulators/i }));
 	}
 
 	beforeEach(() => {
 		getMock.mockResolvedValue(leased());
-		vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ width: 100, height: 200, close: () => {} }));
-		// jsdom has no 2d context; the panel only needs the call not to throw.
-		HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage: vi.fn() });
 	});
 
 	it("sends nothing to the device while driving is off", async () => {
@@ -276,9 +489,7 @@ describe("SimulatorPanel driving", () => {
 		makeLive();
 		await turnDrivingOn();
 
-		await userEvent.click(screen.getByRole("button", { name: /home/i }));
-		// Matched exactly: the panel's own guidance also mentions mid-gesture, and
-		// a loose matcher here would pass on the help text alone.
+		await userEvent.click(screen.getByRole("button", { name: /^home$/i }));
 		expect(
 			await screen.findByText("UDID-A is mid-gesture: another command holds the finger right now"),
 		).toBeInTheDocument();
@@ -292,15 +503,15 @@ describe("SimulatorPanel driving", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
-		expect(screen.getByRole("button", { name: /home/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
 
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
-		await userEvent.click(screen.getByRole("button", { name: /refresh simulators/i }));
+		await refresh();
 
-		await waitFor(() => expect(screen.queryByRole("button", { name: /home/i })).not.toBeInTheDocument());
-		expect(screen.queryByRole("checkbox", { name: /drive this device/i })).not.toBeInTheDocument();
+		await waitFor(() => expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument());
+		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
 	});
 
 	// The subtle one: a lease that goes away and comes back must not bring
@@ -311,20 +522,92 @@ describe("SimulatorPanel driving", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
-		expect(screen.getByRole("button", { name: /home/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
 
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
-		await userEvent.click(screen.getByRole("button", { name: /refresh simulators/i }));
-		await waitFor(() => expect(screen.queryByRole("button", { name: /home/i })).not.toBeInTheDocument());
+		await refresh();
+		await waitFor(() => expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument());
 
 		getMock.mockResolvedValue(leased());
-		await userEvent.click(screen.getByRole("button", { name: /refresh simulators/i }));
+		await refresh();
 
-		const toggle = await screen.findByRole("checkbox", { name: /drive this device/i });
-		expect(toggle).not.toBeChecked();
-		expect(screen.queryByRole("button", { name: /home/i })).not.toBeInTheDocument();
+		const toggle = await screen.findByRole("button", { name: /drive this device/i });
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
+	});
+
+	// The complaint this answers: a drag used to be replayed as one swipe after
+	// the finger came up, so the screen started moving once the human had
+	// stopped. It is now sent while the touch is still down.
+	it("streams a drag while the finger is down instead of replaying it after", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		// Nothing may reach the device on the press alone: that is still a tap.
+		expect(gestureKinds()).toEqual([]);
+
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+
+		// The finger keeps going, and every step of it keeps reaching the device -
+		// one move is not "following", it is the drag opening.
+		for (const y of [180, 160, 140, 120]) {
+			fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: y });
+			await waitFor(() => expect(gesturePoints("drag-move").at(-1)).toBeCloseTo(y / 400, 5));
+		}
+		expect(gestureKinds().filter((k) => k === "drag-move").length).toBeGreaterThanOrEqual(4);
+
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 120 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-end"));
+
+		// And never as one swipe after the fact.
+		expect(gestureKinds()).not.toContain("swipe");
+	});
+
+	// A press that does not move is still a tap, which holds the finger down for
+	// a measured moment a drag's begin does not.
+	it("still sends a tap for a press that does not move", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 102, clientY: 301 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 102, clientY: 301 });
+
+		await waitFor(() => expect(gestureKinds()).toEqual(["tap"]));
 	});
 
 	it("sends a home press through the arbitrated gesture route", async () => {
@@ -333,7 +616,7 @@ describe("SimulatorPanel driving", () => {
 		makeLive();
 		await turnDrivingOn();
 
-		await userEvent.click(screen.getByRole("button", { name: /home/i }));
+		await userEvent.click(screen.getByRole("button", { name: /^home$/i }));
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture",
