@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { getApiBaseUrl, subscribeApiBaseUrl } from "../lib/api-client";
 
 /**
@@ -7,15 +7,29 @@ import { getApiBaseUrl, subscribeApiBaseUrl } from "../lib/api-client";
  * The socket IS the subscription. The daemon starts a capture process for a
  * device when its first viewer connects and kills it when the last one leaves,
  * so this hook's only real job is to be honest about when somebody is looking:
- * it connects when the Simulator tab is showing AND the page is visible AND the
+ * it connects when the Device tab is showing AND the page is visible AND the
  * window has focus, and closes the moment any of those stops being true. There
  * is no timer and no heartbeat to forget — closing the socket is what stops the
  * capture.
  *
- * Frames are drawn through `createImageBitmap` into a canvas rather than being
- * turned into an object URL per frame. A URL per frame is an allocation per
- * frame for the GC to chase, and it is the one piece of the reference
- * implementation we deliberately did not copy.
+ * The screen arrives as H.264 and is decoded by WebCodecs. That is what the
+ * reference implementation this addon comes from does, and measuring both on
+ * one device under one activity says why: the same 54 frames a second cost
+ * 0.63 MB/s here against 15.6 MB/s as JPEG-per-frame, for less than half the
+ * CPU. Nothing is fetched as a subresource — the bytes come over the socket the
+ * page already opened — so the app:// CSP is not involved at all.
+ *
+ * Two consequences of H.264 that this file exists to handle:
+ *
+ *  - frames are not independent. A delta is meaningless without the keyframe
+ *    before it, so the daemon sends a viewer nothing until it has an avcC
+ *    description and a keyframe, and each message says which of the three it
+ *    is. This hook trusts that ordering but does not require it: a chunk that
+ *    arrives before the decoder is configured is dropped rather than decoded.
+ *  - a moving screen produces frames far faster than a person reads a status
+ *    line. Telling React about every frame would re-render the pane sixty times
+ *    a second to move a label, so the frame clock is sampled once a second and
+ *    the picture itself is drawn outside React entirely.
  */
 
 export type SimStreamState =
@@ -24,19 +38,33 @@ export type SimStreamState =
 	| "connecting"
 	| "live"
 	/** The stream ended on its own — the device went away, or capture failed. */
-	| "ended";
+	| "ended"
+	/** This build cannot decode the stream at all. */
+	| "unsupported";
 
 export type SimStreamStatus = {
 	state: SimStreamState;
 	/** Why the stream ended, or why it cannot start. Empty while healthy. */
 	message: string;
-	/** When the screen last actually changed, as epoch ms. Null before the first frame. */
+	/** When a frame last arrived, as epoch ms, sampled at most once a second. */
 	lastFrameAt: number | null;
 	/** The device's own framebuffer size, for aspect ratio and hit-testing. */
 	size: { width: number; height: number } | null;
 };
 
 const PAUSED: SimStreamStatus = { state: "paused", message: "", lastFrameAt: null, size: null };
+
+/** The header the daemon puts in front of every frame: kind, width, height. */
+const HEADER_BYTES = 5;
+const KIND_DESCRIPTION = 1;
+const KIND_KEYFRAME = 2;
+const KIND_DELTA = 3;
+
+/** Frame clock for the decoder, in microseconds. Only its ordering matters. */
+const FRAME_INTERVAL_US = 16_666;
+
+/** How often the freshness clock is allowed to re-render the pane. */
+const FRESHNESS_SAMPLE_MS = 1_000;
 
 /**
  * usePageActive reports whether this window is actually being looked at.
@@ -63,6 +91,16 @@ export function usePageActive(): boolean {
 	);
 }
 
+/**
+ * codecFor reads the profile, constraints and level out of an avcC blob and
+ * builds the codec string WebCodecs wants. Hard-coding one would be a guess
+ * about a device's screen; the encoder already said which it used.
+ */
+function codecFor(description: Uint8Array): string {
+	const hex = [...description.subarray(1, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
+	return `avc1.${hex}`;
+}
+
 export function useSimulatorStream({
 	udid,
 	active,
@@ -76,57 +114,83 @@ export function useSimulatorStream({
 }): SimStreamStatus {
 	const [status, setStatus] = useState<SimStreamStatus>(PAUSED);
 	const baseUrl = useSyncExternalStore(subscribeApiBaseUrl, getApiBaseUrl, getApiBaseUrl);
-	// Kept in a ref so a redraw never re-runs the connection effect.
-	const drawing = useRef(false);
-	const queued = useRef<ArrayBuffer | null>(null);
 
 	useEffect(() => {
 		if (!udid || !active || !baseUrl) {
 			setStatus(PAUSED);
 			return;
 		}
+		if (typeof VideoDecoder === "undefined") {
+			setStatus({
+				state: "unsupported",
+				message: "This build cannot decode the simulator's video stream.",
+				lastFrameAt: null,
+				size: null,
+			});
+			return;
+		}
 		let closed = false;
 		setStatus({ state: "connecting", message: "", lastFrameAt: null, size: null });
 
-		const socket = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/sim-stream/${encodeURIComponent(udid)}`);
-		socket.binaryType = "arraybuffer";
+		// A decoder exists exactly while it is usable: it is created by the first
+		// parameter set and dropped again if that set will not configure it. One
+		// variable rather than a decoder plus a "configured" flag, because two
+		// fields for one fact means a mutation can break either and the other
+		// still refuses - which is how a guard survives its own tests.
+		let decoder: VideoDecoder | null = null;
+		let timestamp = 0;
+		let reportedAt = 0;
 
-		// Decoding is async, and a frame that arrives mid-decode makes the one
-		// being decoded stale. Keeping only the newest is the same drop-not-queue
-		// rule the daemon applies, for the same reason: on a live view the latest
-		// frame is the only one worth having.
-		const drawNext = async () => {
-			if (drawing.current) return;
-			const next = queued.current;
-			queued.current = null;
-			if (!next) return;
-			drawing.current = true;
+		const fail = (message: string) => {
+			if (closed) return;
+			setStatus((prev) => (prev.state === "ended" ? prev : { ...prev, state: "ended", message }));
+		};
+
+		const paint = (frame: VideoFrame) => {
 			try {
-				const bitmap = await createImageBitmap(new Blob([next], { type: "image/jpeg" }));
 				const canvas = canvasRef.current;
 				if (canvas && !closed) {
-					canvas.width = bitmap.width;
-					canvas.height = bitmap.height;
-					canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
-					setStatus((prev) => ({
-						state: "live",
-						message: "",
-						lastFrameAt: Date.now(),
-						size:
-							prev.size?.width === bitmap.width && prev.size.height === bitmap.height
-								? prev.size
-								: { width: bitmap.width, height: bitmap.height },
-					}));
+					if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+						canvas.width = frame.displayWidth;
+						canvas.height = frame.displayHeight;
+					}
+					canvas.getContext("2d")?.drawImage(frame, 0, 0);
 				}
-				bitmap.close();
-			} catch {
-				// A frame that will not decode is one lost frame, not a dead
-				// stream: the next one redraws over it.
 			} finally {
-				drawing.current = false;
-				if (queued.current) void drawNext();
+				// A VideoFrame holds a GPU buffer until it is closed, and the decoder
+				// stalls once its pool is exhausted. This is the one line that must
+				// run for every frame, painted or not.
+				frame.close();
+			}
+			const now = Date.now();
+			if (now - reportedAt < FRESHNESS_SAMPLE_MS) return;
+			reportedAt = now;
+			setStatus((prev) => ({ ...prev, state: "live", message: "", lastFrameAt: now }));
+		};
+
+		const configure = (description: Uint8Array) => {
+			// A fresh picture group can carry a different parameter set, so the
+			// decoder is reconfigured rather than assumed to still match.
+			const next =
+				decoder ??
+				new VideoDecoder({
+					output: paint,
+					error: (err) => fail(err.message || "The simulator video stream could not be decoded."),
+				});
+			try {
+				next.configure({ codec: codecFor(description), description, optimizeForLatency: true });
+				decoder = next;
+			} catch (err) {
+				// A parameter set this build will not take is the end of the stream,
+				// not one bad frame: everything after it is encoded against it.
+				decoder = null;
+				if (next.state !== "closed") next.close();
+				fail(err instanceof Error ? err.message : "The simulator video stream could not be decoded.");
 			}
 		};
+
+		const socket = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/sim-stream/${encodeURIComponent(udid)}`);
+		socket.binaryType = "arraybuffer";
 
 		socket.onmessage = (event: MessageEvent) => {
 			if (typeof event.data === "string") {
@@ -136,18 +200,46 @@ export function useSimulatorStream({
 				} catch {
 					parsed = { message: event.data };
 				}
-				setStatus((prev) => ({ ...prev, state: "ended", message: parsed.message ?? "The stream ended." }));
+				fail(parsed.message ?? "The stream ended.");
 				return;
 			}
-			queued.current = event.data as ArrayBuffer;
-			void drawNext();
+			const buffer = event.data as ArrayBuffer;
+			if (buffer.byteLength <= HEADER_BYTES) return;
+			const view = new DataView(buffer);
+			const kind = view.getUint8(0);
+			const width = view.getUint16(1);
+			const height = view.getUint16(3);
+			const payload = new Uint8Array(buffer, HEADER_BYTES);
+
+			if (width > 0 && height > 0) {
+				setStatus((prev) =>
+					prev.size?.width === width && prev.size.height === height ? prev : { ...prev, size: { width, height } },
+				);
+			}
+
+			if (kind === KIND_DESCRIPTION) {
+				configure(payload);
+				return;
+			}
+			// A kind this build does not know is not something to guess at.
+			if (kind !== KIND_KEYFRAME && kind !== KIND_DELTA) return;
+			// Anything before the decoder is configured cannot be decoded, and
+			// feeding it in would fail the whole stream rather than one frame.
+			if (!decoder) return;
+			try {
+				decoder.decode(
+					new EncodedVideoChunk({
+						type: kind === KIND_KEYFRAME ? "key" : "delta",
+						timestamp: (timestamp += FRAME_INTERVAL_US),
+						data: payload,
+					}),
+				);
+			} catch {
+				// One chunk the decoder refused is one lost frame; the next keyframe
+				// recovers, and the daemon resynchronizes a viewer that loses frames.
+			}
 		};
-		socket.onerror = () => {
-			if (closed) return;
-			setStatus((prev) =>
-				prev.state === "ended" ? prev : { ...prev, state: "ended", message: "Lost the connection to the daemon." },
-			);
-		};
+		socket.onerror = () => fail("Lost the connection to the daemon.");
 		socket.onclose = () => {
 			if (closed) return;
 			setStatus((prev) => (prev.state === "ended" ? prev : { ...prev, state: "ended", message: "" }));
@@ -155,10 +247,11 @@ export function useSimulatorStream({
 
 		return () => {
 			closed = true;
-			queued.current = null;
 			// Closing here is the whole CPU story: it is what tells the daemon its
 			// last viewer went away, which is what stops the capture process.
 			socket.close();
+			if (decoder && decoder.state !== "closed") decoder.close();
+			decoder = null;
 		};
 	}, [udid, active, baseUrl, canvasRef]);
 

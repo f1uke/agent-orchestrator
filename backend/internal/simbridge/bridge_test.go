@@ -10,46 +10,76 @@ import (
 	"testing"
 )
 
+// fakeBridge stands in for the resident bridge process: it answers requests the
+// way the real one does, records them, and counts how many times it was
+// started - which is what "the process is kept, not respawned" is made of.
+type fakeBridge struct {
+	t        *testing.T
+	payload  string
+	replyErr error
+	starts   int
+	requests []bridgeRequest
+	closed   int
+}
+
+func (f *fakeBridge) start(context.Context, string, []string) (BridgeSession, error) {
+	f.starts++
+	return f, nil
+}
+
+func (f *fakeBridge) Request(_ context.Context, line []byte) ([]byte, error) {
+	var req bridgeRequest
+	if err := json.Unmarshal(line, &req); err != nil {
+		f.t.Fatalf("the bridge was sent unparsable input %s: %v", line, err)
+	}
+	f.requests = append(f.requests, req)
+	if f.replyErr != nil {
+		return nil, f.replyErr
+	}
+	return []byte(f.payload + "\n"), nil
+}
+
+// Diagnostics is what the real addon prints on stdout unbidden.
+func (f *fakeBridge) Diagnostics() string { return "com.apple.springboard: 97690" }
+
+func (f *fakeBridge) Close() error {
+	f.closed++
+	return nil
+}
+
+func (f *fakeBridge) last() bridgeRequest {
+	f.t.Helper()
+	if len(f.requests) == 0 {
+		f.t.Fatal("the bridge was never asked for anything")
+	}
+	return f.requests[len(f.requests)-1]
+}
+
 // newTestDriver builds a driver over a fake bridge process, so nothing here
 // needs Node, an addon or a mac.
-func newTestDriver(t *testing.T, run Runner) *NodeDriver {
+func newTestDriver(t *testing.T, bridge *fakeBridge) *NodeDriver {
 	t.Helper()
 	tc, err := Install(t.TempDir())
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	return &NodeDriver{Toolchain: tc, NodePath: "node", Run: run}
+	bridge.t = t
+	d := &NodeDriver{Toolchain: tc, NodePath: "node", Start: bridge.start}
+	t.Cleanup(func() { _ = d.Close() })
+	return d
 }
 
-// replyWith fakes the bridge process the way it really behaves: it writes its
-// answer to the reply file it was given, and may print anything at all on
-// stdout - which the real native addon does.
-func replyWith(t *testing.T, payload string, capture *bridgeRequest) Runner {
-	t.Helper()
-	return func(_ context.Context, _ string, args []string, stdin []byte) ([]byte, []byte, error) {
-		if capture != nil {
-			if err := json.Unmarshal(stdin, capture); err != nil {
-				t.Fatalf("the bridge was sent unparsable input %s: %v", stdin, err)
-			}
-		}
-		if len(args) < 2 {
-			t.Fatalf("the bridge was not told where to answer: %v", args)
-		}
-		if err := os.WriteFile(args[1], []byte(payload), 0o600); err != nil {
-			t.Fatalf("write reply: %v", err)
-		}
-		return []byte("com.apple.springboard: 97690\n"), nil, nil
-	}
-}
+func replyWith(payload string) *fakeBridge { return &fakeBridge{payload: payload} }
 
 func TestDriver_AXRequestCarriesTheAddonPath(t *testing.T) {
-	var got bridgeRequest
-	d := newTestDriver(t, replyWith(t, `{"ok":true,"tree":`+rawTree+`,"frontmost":{"bundleId":"com.example.app","pid":7}}`, &got))
+	bridge := replyWith(`{"ok":true,"tree":` + rawTree + `,"frontmost":{"bundleId":"com.example.app","pid":7}}`)
+	d := newTestDriver(t, bridge)
 
 	snap, err := d.AX(context.Background(), "UDID-1")
 	if err != nil {
 		t.Fatalf("ax: %v", err)
 	}
+	got := bridge.last()
 	if got.Op != "ax" || got.UDID != "UDID-1" {
 		t.Fatalf("request = %+v", got)
 	}
@@ -62,8 +92,8 @@ func TestDriver_AXRequestCarriesTheAddonPath(t *testing.T) {
 }
 
 func TestDriver_PerformSendsTheEventsVerbatim(t *testing.T) {
-	var got bridgeRequest
-	d := newTestDriver(t, replyWith(t, `{"ok":true,"lifted":false}`, &got))
+	bridge := replyWith(`{"ok":true,"lifted":false}`)
+	d := newTestDriver(t, bridge)
 	events, err := Tap(Point{X: 0.5, Y: 0.5})
 	if err != nil {
 		t.Fatalf("tap: %v", err)
@@ -72,6 +102,7 @@ func TestDriver_PerformSendsTheEventsVerbatim(t *testing.T) {
 	if _, err := d.Perform(context.Background(), "UDID-1", events); err != nil {
 		t.Fatalf("perform: %v", err)
 	}
+	got := bridge.last()
 	if len(got.Events) != len(events) || got.Events[0].Type != "begin" {
 		t.Fatalf("events = %+v", got.Events)
 	}
@@ -80,7 +111,7 @@ func TestDriver_PerformSendsTheEventsVerbatim(t *testing.T) {
 func TestDriver_ReportsARescuedFinger(t *testing.T) {
 	// A gesture that ended without its own lift is not a success to swallow:
 	// the caller has to be able to say the device was rescued.
-	d := newTestDriver(t, replyWith(t, `{"ok":true,"lifted":true,"liftReason":"gesture ended without a lift"}`, nil))
+	d := newTestDriver(t, replyWith(`{"ok":true,"lifted":true,"liftReason":"gesture ended without a lift"}`))
 
 	res, err := d.Perform(context.Background(), "UDID-1", nil)
 	if err != nil {
@@ -94,7 +125,7 @@ func TestDriver_ReportsARescuedFinger(t *testing.T) {
 func TestDriver_AddonLoadFailureIsExplained(t *testing.T) {
 	// The single most likely real-world failure: an Xcode upgrade moved the
 	// private frameworks the addon dlopens.
-	d := newTestDriver(t, replyWith(t, `{"ok":false,"error":{"code":"addon_load_failed","message":"symbol not found"}}`, nil))
+	d := newTestDriver(t, replyWith(`{"ok":false,"error":{"code":"addon_load_failed","message":"symbol not found"}}`))
 
 	_, err := d.AX(context.Background(), "UDID-1")
 	var bridgeErr *Error
@@ -109,7 +140,7 @@ func TestDriver_AddonLoadFailureIsExplained(t *testing.T) {
 }
 
 func TestDriver_AXUnavailableIsExplained(t *testing.T) {
-	d := newTestDriver(t, replyWith(t, `{"ok":false,"error":{"code":"ax_unavailable","message":"no response"}}`, nil))
+	d := newTestDriver(t, replyWith(`{"ok":false,"error":{"code":"ax_unavailable","message":"no response"}}`))
 
 	_, err := d.AX(context.Background(), "UDID-1")
 	var bridgeErr *Error
@@ -122,7 +153,7 @@ func TestDriver_AddonChatterOnStdoutDoesNotBreakAGesture(t *testing.T) {
 	// The addon prints to stdout itself: `button home` relaunches SpringBoard
 	// and logs its pid. A gesture that completed must not be reported as a
 	// failure because of it.
-	d := newTestDriver(t, replyWith(t, `{"ok":true,"lifted":false}`, nil))
+	d := newTestDriver(t, replyWith(`{"ok":true,"lifted":false}`))
 
 	if _, err := d.Perform(context.Background(), "UDID-1", nil); err != nil {
 		t.Fatalf("perform: %v", err)
@@ -137,7 +168,7 @@ func TestDriver_UnparsableOutputIsNeverSuccess(t *testing.T) {
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
-			d := newTestDriver(t, replyWith(t, payload, nil))
+			d := newTestDriver(t, replyWith(payload))
 			if _, err := d.Perform(context.Background(), "UDID-1", nil); err == nil {
 				t.Fatal("a bridge that said nothing usable must not read as a completed gesture")
 			}
@@ -145,14 +176,80 @@ func TestDriver_UnparsableOutputIsNeverSuccess(t *testing.T) {
 	}
 }
 
-func TestDriver_ProcessFailureCarriesStderr(t *testing.T) {
-	d := newTestDriver(t, func(context.Context, string, []string, []byte) ([]byte, []byte, error) {
-		return nil, []byte("node: command failed"), errors.New("exit status 1")
-	})
+func TestDriver_ProcessFailureCarriesItsDiagnostics(t *testing.T) {
+	bridge := replyWith("")
+	bridge.replyErr = errors.New("EOF")
+	d := newTestDriver(t, bridge)
 
 	_, err := d.AX(context.Background(), "UDID-1")
-	if err == nil || !strings.Contains(err.Error(), "node: command failed") {
+	if err == nil || !strings.Contains(err.Error(), "com.apple.springboard") {
 		t.Fatalf("err = %v, want the child's own diagnostics", err)
+	}
+}
+
+// The reason the bridge is resident at all: the first gesture pays for loading
+// the addon and attaching the injector, and every one after it must not.
+func TestDriver_KeepsOneBridgeProcessAcrossGestures(t *testing.T) {
+	bridge := replyWith(`{"ok":true,"lifted":false}`)
+	d := newTestDriver(t, bridge)
+
+	for range 5 {
+		if _, err := d.Perform(context.Background(), "UDID-1", nil); err != nil {
+			t.Fatalf("perform: %v", err)
+		}
+	}
+	if bridge.starts != 1 {
+		t.Fatalf("the bridge was started %d times for 5 gestures, want 1", bridge.starts)
+	}
+	if len(bridge.requests) != 5 {
+		t.Fatalf("the bridge saw %d requests, want 5", len(bridge.requests))
+	}
+}
+
+// A bridge that stopped answering may have a finger down on the device, and
+// nothing above this layer can know. Reusing it would send the next gesture
+// into an unknown state, so it is dropped and the next call starts a fresh one
+// - which starts with no finger down.
+func TestDriver_ABridgeThatStoppedAnsweringIsNotReused(t *testing.T) {
+	bridge := replyWith(`{"ok":true,"lifted":false}`)
+	bridge.replyErr = errors.New("EOF")
+	d := newTestDriver(t, bridge)
+
+	if _, err := d.Perform(context.Background(), "UDID-1", nil); err == nil {
+		t.Fatal("a bridge that stopped answering must not read as a completed gesture")
+	}
+	if bridge.closed != 1 {
+		t.Fatalf("the failed bridge was closed %d times, want 1", bridge.closed)
+	}
+	bridge.replyErr = nil
+	if _, err := d.Perform(context.Background(), "UDID-1", nil); err != nil {
+		t.Fatalf("the next gesture must start a fresh bridge: %v", err)
+	}
+	if bridge.starts != 2 {
+		t.Fatalf("the bridge was started %d times, want a second one after the failure", bridge.starts)
+	}
+}
+
+// Closing is the daemon going away. A bridge left running would hold an
+// injector attached to a device with nobody able to lift its finger.
+func TestDriver_CloseStopsTheBridge(t *testing.T) {
+	bridge := replyWith(`{"ok":true,"lifted":false}`)
+	d := newTestDriver(t, bridge)
+	if _, err := d.Perform(context.Background(), "UDID-1", nil); err != nil {
+		t.Fatalf("perform: %v", err)
+	}
+
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if bridge.closed != 1 {
+		t.Fatalf("the bridge was closed %d times, want 1", bridge.closed)
+	}
+	if _, err := d.Perform(context.Background(), "UDID-1", nil); err == nil {
+		t.Fatal("a closed driver must refuse rather than start another bridge")
+	}
+	if bridge.starts != 1 {
+		t.Fatalf("a closed driver started %d bridges, want none after Close", bridge.starts)
 	}
 }
 

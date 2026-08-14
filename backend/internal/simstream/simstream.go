@@ -9,39 +9,43 @@
 // walked worktrees four times a second; the fix for both was noticed late,
 // which is why this one is a property of the shape rather than a guard.
 //
-// Two cheap filters sit between the device and the wire:
+// # Why there is no longer a rate cap or a repeat filter
 //
-//   - repeats are dropped. The capture engine re-encodes a still screen at a
-//     5 fps idle floor; measured, eight seconds of a still screen produced 39
-//     frames with one distinct image. Hashing costs 0.32 ms a frame and takes
-//     idle traffic to zero.
-//   - a rate cap bounds what a busy screen can cost, whatever the device does.
+// Both belonged to a JPEG-per-frame stream, where every frame stood alone and
+// dropping one cost nothing but that frame. The stream is H.264 now, measured
+// at a twenty-fifth of the bytes and under half the CPU for the same frames,
+// and its frames are not independent: a delta means nothing without the
+// keyframe before it. Hashing for repeats would find none (a still screen
+// re-encodes to different bytes), and capping the rate would silently corrupt
+// the picture rather than merely thin it.
 //
-// Frames never touch the disk, and only the newest one is retained - handed to
-// a viewer that connects between changes so it sees the screen at once instead
-// of a blank pane.
+// What replaces them is one rule with one field behind it: **a viewer receives
+// frames only from a complete starting point onwards** - the avcC description,
+// then a keyframe. Until it has both it is sent nothing, and anything that
+// could have left it out of step (joining mid-stream, falling behind far enough
+// to lose a frame) puts it back to waiting for one and asks the encoder for a
+// fresh picture group. A viewer is therefore never shown bytes it cannot
+// decode, and no frame is ever dropped from a viewer that is keeping up.
+//
+// Frames never touch the disk. The only frame retained is the current avcC
+// description, a few dozen bytes, so a viewer that connects has something to
+// configure its decoder with without waiting for the next group.
 package simstream
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"sync"
-	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
-// DefaultMinInterval caps forwarding at 10 frames a second. The capture engine
-// idles at 5 and rises above it only while the screen is actually moving, so
-// this bounds the busy case without touching the common one.
-const DefaultMinInterval = 100 * time.Millisecond
-
-// viewerBuffer is how many frames a single viewer may fall behind before its
-// frames start being dropped. Small on purpose: for a live view the newest
-// frame is the only one worth having, and a queue would turn a slow reader into
-// unbounded memory.
-const viewerBuffer = 2
+// viewerBuffer is how many frames a single viewer may fall behind before it
+// loses one. A viewer that loses one is resynchronized rather than fed a gap,
+// so this only has to be deep enough to absorb an ordinary scheduling hiccup on
+// a loopback socket: H.264 deltas are a few KB each, so the whole buffer is
+// smaller than one of the JPEGs this stream used to carry.
+const viewerBuffer = 8
 
 // Event is one thing that happened on a device's stream: a frame, or the reason
 // the stream is ending. Exactly one of the two is set.
@@ -52,31 +56,17 @@ type Event struct {
 
 // Hub owns every running capture.
 type Hub struct {
-	capturer    simbridge.Capturer
-	minInterval time.Duration
+	capturer simbridge.Capturer
 
 	mu      sync.Mutex
 	devices map[string]*device
 	closed  bool
 }
 
-// Option customizes a Hub.
-type Option func(*Hub)
-
-// WithMinInterval sets the shortest gap between forwarded frames. Zero forwards
-// every distinct frame.
-func WithMinInterval(d time.Duration) Option {
-	return func(h *Hub) { h.minInterval = d }
-}
-
 // New builds a hub over a capture mechanism. A nil capturer is a machine that
 // cannot capture at all: Subscribe refuses rather than hanging.
-func New(capturer simbridge.Capturer, opts ...Option) *Hub {
-	h := &Hub{capturer: capturer, minInterval: DefaultMinInterval, devices: map[string]*device{}}
-	for _, opt := range opts {
-		opt(h)
-	}
-	return h
+func New(capturer simbridge.Capturer) *Hub {
+	return &Hub{capturer: capturer, devices: map[string]*device{}}
 }
 
 // ErrUnavailable is a hub with no capture mechanism - a machine that is not a
@@ -89,20 +79,35 @@ type device struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	stopped chan struct{}
+	// keyframes carries requests for a fresh picture group. Depth one on
+	// purpose: two viewers joining together need one group between them, so a
+	// request that arrives while one is pending is the same request.
+	keyframes chan struct{}
 
-	mu       sync.Mutex
-	viewers  map[*viewer]struct{}
-	last     *simbridge.Frame
-	lastHash [sha256.Size]byte
-	lastSent time.Time
-	ended    bool
+	mu          sync.Mutex
+	viewers     map[*viewer]struct{}
+	description *simbridge.Frame
+	ended       bool
 }
+
+// viewerState is how much of a starting point a viewer has been given. It only
+// ever moves forward by receiving frames, and back to the beginning by losing
+// one - which is what keeps "was sent something it cannot decode" impossible.
+type viewerState uint8
+
+const (
+	needsDescription viewerState = iota
+	needsKeyframe
+	ready
+)
 
 type viewer struct {
 	ch chan Event
 	// once because both endings can reach a viewer at the same moment: the
 	// viewer's own context finishing, and the capture failing under it.
 	once sync.Once
+	// state is guarded by the device's mutex, like the viewer set itself.
+	state viewerState
 }
 
 // Subscribe attaches to a device's screen for as long as ctx lives. The
@@ -125,11 +130,12 @@ func (h *Hub) Subscribe(ctx context.Context, udid string) (<-chan Event, error) 
 		// anyone else, so a second subscriber can never find a half-built one.
 		captureCtx, cancel := context.WithCancel(context.Background())
 		dev = &device{
-			udid:    udid,
-			cancel:  cancel,
-			ctx:     captureCtx,
-			viewers: map[*viewer]struct{}{},
-			stopped: make(chan struct{}),
+			udid:      udid,
+			cancel:    cancel,
+			ctx:       captureCtx,
+			viewers:   map[*viewer]struct{}{},
+			stopped:   make(chan struct{}),
+			keyframes: make(chan struct{}, 1),
 		}
 		h.devices[udid] = dev
 	}
@@ -143,14 +149,21 @@ func (h *Hub) Subscribe(ctx context.Context, udid string) (<-chan Event, error) 
 		return v.ch, nil
 	}
 	dev.viewers[v] = struct{}{}
-	// A viewer arriving between changes gets the screen as it is now rather
-	// than a blank pane until something moves.
-	if dev.last != nil {
-		v.ch <- Event{Frame: dev.last}
+	// The description a running encoder has already emitted will not be emitted
+	// again on its own, so a viewer that arrives afterwards is handed the one
+	// that is current.
+	if dev.description != nil {
+		send(dev, v, *dev.description)
 	}
 	dev.mu.Unlock()
 
-	if !existing {
+	if existing {
+		// An encoder already running is somewhere in the middle of a picture
+		// group, and nothing in the middle of one decodes on its own. A capture
+		// that is only just starting opens with a fresh group of its own accord,
+		// so asking would only make it restart one it has not made yet.
+		requestKeyframe(dev)
+	} else {
 		go h.run(dev.ctx, dev)
 	}
 
@@ -161,10 +174,19 @@ func (h *Hub) Subscribe(ctx context.Context, udid string) (<-chan Event, error) 
 	return v.ch, nil
 }
 
+// requestKeyframe asks the capture for a fresh picture group without ever
+// blocking the caller: a pending request already covers this one.
+func requestKeyframe(dev *device) {
+	select {
+	case dev.keyframes <- struct{}{}:
+	default:
+	}
+}
+
 // run streams one device until its last viewer leaves or the capture fails.
 func (h *Hub) run(ctx context.Context, dev *device) {
 	defer close(dev.stopped)
-	err := h.capturer.Capture(ctx, dev.udid, func(frame simbridge.Frame) {
+	err := h.capturer.Capture(ctx, dev.udid, dev.keyframes, func(frame simbridge.Frame) {
 		h.publish(dev, frame)
 	})
 	// A capture that ended on its own - the device went away, the addon stopped
@@ -173,42 +195,62 @@ func (h *Hub) run(ctx context.Context, dev *device) {
 	h.finish(dev, err)
 }
 
-// publish forwards a frame if it is worth forwarding.
+// publish forwards a frame to every viewer that can currently use it.
 func (h *Hub) publish(dev *device, frame simbridge.Frame) {
-	sum := sha256.Sum256(frame.JPEG)
-	now := time.Now()
-
 	dev.mu.Lock()
 	if dev.ended {
 		dev.mu.Unlock()
 		return
 	}
-	// The newest frame is kept whether or not it is forwarded, so a viewer that
-	// connects later is handed the current screen and not a stale one.
 	kept := frame
-	dev.last = &kept
-	if sum == dev.lastHash {
-		dev.mu.Unlock()
-		return
-	}
-	if h.minInterval > 0 && !dev.lastSent.IsZero() && now.Sub(dev.lastSent) < h.minInterval {
-		dev.mu.Unlock()
-		return
-	}
-	dev.lastHash = sum
-	dev.lastSent = now
-	// Sending inside the lock is what stops a frame racing a viewer's close -
-	// a send on a closed channel is a panic, not a dropped frame. It cannot
-	// stall the capture because every send below is non-blocking.
-	for v := range dev.viewers {
-		// Drop, never queue: for a live view the newest frame is the only one
-		// worth having, and a viewer that stalled must not stall the others.
-		select {
-		case v.ch <- Event{Frame: &kept}:
-		default:
+	switch frame.Kind {
+	case simbridge.FrameDescription:
+		// Kept because a viewer that connects later needs it and the encoder
+		// will not repeat it until a group restarts.
+		dev.description = &kept
+		for v := range dev.viewers {
+			if v.state == needsDescription {
+				v.state = needsKeyframe
+			}
+			send(dev, v, kept)
+		}
+	case simbridge.FrameKeyframe:
+		for v := range dev.viewers {
+			// A keyframe without the description that goes with it configures
+			// nothing, so a viewer still waiting for one skips this group.
+			if v.state == needsDescription {
+				continue
+			}
+			v.state = ready
+			send(dev, v, kept)
+		}
+	case simbridge.FrameDelta:
+		for v := range dev.viewers {
+			if v.state != ready {
+				continue
+			}
+			send(dev, v, kept)
 		}
 	}
 	dev.mu.Unlock()
+}
+
+// send hands one frame to one viewer, or - if that viewer has fallen far enough
+// behind to lose it - puts the viewer back to waiting for a starting point and
+// asks for one. Called with the device's mutex held, which is what stops a send
+// racing a viewer's close: a send on a closed channel is a panic, not a dropped
+// frame. It cannot stall the capture because the send is non-blocking.
+func send(dev *device, v *viewer, frame simbridge.Frame) {
+	select {
+	case v.ch <- Event{Frame: &frame}:
+		return
+	default:
+	}
+	// Losing any frame breaks the chain, and the description this viewer holds
+	// may not be the one the next group is encoded against, so it goes all the
+	// way back rather than merely waiting for the next keyframe.
+	v.state = needsDescription
+	requestKeyframe(dev)
 }
 
 // finish ends a device's stream, telling whoever is still attached why.
