@@ -128,6 +128,8 @@ ao project rm agent-orchestrator -y
 
 Replace a project's per-project config (branch, session prefix, env, symlinks, post-create, agent model/permissions, role overrides). The config is resolved when a session spawns. Set fields via flags, pass the whole object with `--config-json`, or `--clear` to remove all config.
 
+`--config-json` **replaces** the stored config rather than patching it, so it must carry every field you want to keep - read the current one with `ao project get <id> --json`, edit that object, and pass it back whole. A key that is not part of the config is refused with a usage error instead of being dropped.
+
 **Syntax:**
 ```
 ao project set-config <id> [flags]
