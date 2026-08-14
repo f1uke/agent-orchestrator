@@ -2471,6 +2471,7 @@ export interface components {
             /** @description tap, swipe, type, button, drag-begin, drag-move or drag-end. */
             kind: string;
             name?: string;
+            paste?: boolean;
             rawKeys?: boolean;
             text?: string;
             /** Format: double */

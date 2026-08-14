@@ -11,6 +11,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simchrome"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 )
 
 // Screen is the daemon's machine-local simulator surface: what simulators exist,
@@ -222,6 +223,12 @@ func (s *Screen) Driver(context.Context) (simbridge.Driver, error) {
 // this worth asking about at all.
 func (s *Screen) Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error) {
 	return simkeyboard.Probe(ctx, s.run, udid)
+}
+
+// Pasteboard is the guest clipboard, which is how `type` reaches a field whose
+// keyboard would remap the key presses.
+func (s *Screen) Pasteboard() simpaste.Pasteboard {
+	return simpaste.Simctl{Run: s.run}
 }
 
 // Shutdown stops every running capture and the resident gesture bridge. The

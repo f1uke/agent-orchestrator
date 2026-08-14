@@ -186,56 +186,57 @@ func TestSimType_SendsKeysAndNoTouches(t *testing.T) {
 
 // --- the keyboard layout the guest, not we, decide ------------------------
 
-func TestSimType_RefusesWhenTheGuestWouldRemapTheKeys(t *testing.T) {
-	// The reported bug, end to end: on a Mac set to Thai the guest is set to
-	// Thai too, `ao sim type "fa12345"` put "ดฟๅ/_ภถ" in the field, and the
-	// command said "Typed 7 characters". Nothing may reach the device now.
+func TestSimType_RefusesLoudlyWhenNeitherRouteCanDeliver(t *testing.T) {
+	// The refusal path, still intact for the cases paste cannot serve. Here the
+	// guest would remap the keys AND its pasteboard cannot be reached, so there
+	// is no honest way to put the characters in the field - and saying so is the
+	// entire point of this change. What must never happen is "Typed 7
+	// characters" over a field holding "ดฟๅ/_ภถ".
 	driver := &fakeSimDriver{}
 	deps, daemon := touchDeps(t, driver)
 	deps = withSimKeyboard(deps, simKeyboardThai, nil)
 
 	out, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
 	if err == nil {
-		t.Fatalf("typing onto a guest that remaps the keys must fail; output=%s", out)
+		t.Fatalf("with both routes unavailable this must fail; output=%s", out)
 	}
 	if ExitCode(err) != 1 {
 		t.Errorf("exit code = %d, want 1", ExitCode(err))
 	}
-	if got := driver.calls(); len(got) != 0 {
-		t.Fatalf("%d gesture(s) reached the device, want none - a refusal must not half-type", len(got))
-	}
-	// Refusing costs nothing on the device, so it must not take the finger
-	// either: another session's gesture is not blocked by our bad keyboard.
-	if log := daemon.callLog(); strings.Contains(log, "/hold") {
-		t.Errorf("took the gesture hold to refuse; nothing was going to be sent:\n%s", log)
-	}
-	for _, want := range []string{"th_TH", "Ctrl-Space", "--raw-keys"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error must mention %q so it can be acted on:\n%v", want, err)
+	// The keys are what would have been wrong, so they must never be the
+	// fallback for a pasteboard that did not work.
+	for _, events := range driver.calls() {
+		for _, e := range events {
+			if e.Kind == "key" && e.Usage != 227 && e.Usage != 25 {
+				t.Fatalf("letter keys reached a guest that remaps them: %+v", events)
+			}
 		}
 	}
+	// The reason the keyboard was abandoned has to survive into the failure, or
+	// the reader cannot tell why a paste was being attempted at all.
+	if !strings.Contains(err.Error(), "th_TH") {
+		t.Errorf("error must still name the keyboard that forced the detour:\n%v", err)
+	}
+	_ = daemon
 }
 
-func TestSimType_RefusesWhenTheInputModeCannotBeRead(t *testing.T) {
-	// A device that has never shown a keyboard has nothing to report. Unknown
-	// is not US: reporting success here is the exact failure being fixed.
+func TestSimType_UnreadableInputModeStillDeliversByPasteboard(t *testing.T) {
+	// A device that has never shown a keyboard cannot say what it would do with
+	// key presses. "Unknown" is not "US" - but it is also not a dead end, because
+	// the pasteboard does not care what the input mode is.
 	driver := &fakeSimDriver{}
-	deps, _ := touchDeps(t, driver)
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "hunter2")
 	deps = withSimKeyboard(deps, "The domain/default pair does not exist", errors.New("exit status 1"))
 
-	_, _, err := executeCLI(t, deps, "sim", "type", "hunter2")
-	if err == nil {
-		t.Fatal("an unreadable input mode must be refused, not assumed to be US")
+	out, _, err := executeCLI(t, deps, "sim", "type", "hunter2")
+	if err != nil {
+		t.Fatalf("an unreadable keyboard must not stop the text getting there: %v", err)
 	}
-	if len(driver.calls()) != 0 {
-		t.Fatal("nothing may reach the device when the mapping is unknown")
+	if len(*pasteboard) == 0 || (*pasteboard)[0] != "hunter2" {
+		t.Fatalf("pasteboard writes = %q", *pasteboard)
 	}
-	// This one is recoverable by doing the thing the workflow asks for anyway,
-	// so the refusal says how rather than just what.
-	for _, want := range []string{"ao sim tap", "--raw-keys"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error must mention %q:\n%v", want, err)
-		}
+	if !strings.Contains(out, "Pasted") {
+		t.Fatalf("output:\n%s", out)
 	}
 }
 
@@ -320,6 +321,160 @@ func TestSimType_ReportsTheKeyboardItVerified(t *testing.T) {
 	}
 	if result.Keyboard != "en_US@sw=QWERTY;hw=Automatic" {
 		t.Fatalf("keyboard = %q, want the mode that was checked", result.Keyboard)
+	}
+}
+
+// --- the pasteboard route --------------------------------------------------
+
+// pasteDeps is a guest whose keyboard would remap the keys, a pasteboard that
+// remembers what it was given, and a screen whose field grows by the payload.
+func pasteDeps(t *testing.T, driver *fakeSimDriver, keyboard string, landed string) (Deps, *simDaemon, *[]string) {
+	t.Helper()
+	deps, daemon := touchDeps(t, driver)
+	deps = withSimKeyboard(deps, keyboard, nil)
+	var pasteboard []string
+	content := "what the human had copied"
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		switch {
+		case len(args) >= 3 && args[1] == "pbpaste":
+			return []byte(content), nil
+		case name == "/bin/sh" && len(args) == 2 && strings.Contains(args[1], "pbcopy"):
+			// The payload is single-quoted into the script; recover it the same
+			// way a shell would so the test asserts on what the device got.
+			// printf '%s' '<payload>' | xcrun simctl pbcopy '<udid>'
+			script := args[1]
+			body := script[:strings.LastIndex(script, "|")]
+			first := strings.Index(body, "'%s'")
+			payload := body[first+len("'%s'"):]
+			payload = strings.TrimSpace(payload)
+			payload = strings.TrimPrefix(payload, "'")
+			payload = strings.TrimSuffix(payload, "'")
+			payload = strings.ReplaceAll(payload, `'\''`, "'")
+			pasteboard = append(pasteboard, payload)
+			content = payload
+			return nil, nil
+		}
+		return inner(ctx, name, args...)
+	}
+	// Before and after the paste: the focused field gains the text.
+	driver.snapshotQueue = []simbridge.Snapshot{
+		{Elements: []simbridge.Element{{Path: "0.1", Value: ""}}},
+		{Elements: []simbridge.Element{{Path: "0.1", Value: landed}}},
+	}
+	return deps, daemon, &pasteboard
+}
+
+func TestSimType_FallsBackToThePasteboardWhenTheGuestWouldRemapTheKeys(t *testing.T) {
+	// The point of the whole change: the characters asked for end up in the
+	// field even on a guest whose keyboard would have mangled the key presses.
+	driver := &fakeSimDriver{}
+	deps, daemon, pasteboard := pasteDeps(t, driver, simKeyboardThai, "fa12345")
+
+	out, errOut, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	if err != nil {
+		t.Fatalf("type must succeed by pasting: %v\nstderr=%s", err, errOut)
+	}
+	if len(*pasteboard) != 2 || (*pasteboard)[0] != "fa12345" {
+		t.Fatalf("pasteboard writes = %q, want the payload then the restore", *pasteboard)
+	}
+	if (*pasteboard)[1] != "what the human had copied" {
+		t.Fatalf("the guest pasteboard was left holding %q", (*pasteboard)[1])
+	}
+	// Command-V, not the letters: the letters are exactly what would be wrong.
+	events := driver.calls()[0]
+	for _, e := range events {
+		if e.Kind == "key" && e.Usage != 227 && e.Usage != 25 {
+			t.Fatalf("a key other than Command-V reached a guest that remaps them: %+v", events)
+		}
+	}
+	if !strings.Contains(out, "Pasted") {
+		t.Fatalf("the output must say which route was taken, so paste is never a surprise:\n%s", out)
+	}
+	assertHoldTakenAndReleased(t, daemon)
+}
+
+func TestSimType_UsesKeysAndNoPasteboardWhenTheGuestIsSafe(t *testing.T) {
+	// Keys stay the default where they work: an app that watches per-keystroke
+	// events (a live validator, a character counter) must not silently start
+	// seeing one paste instead.
+	driver := &fakeSimDriver{}
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "fa12345")
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	if err != nil {
+		t.Fatalf("sim type: %v", err)
+	}
+	if len(*pasteboard) != 0 {
+		t.Fatalf("the guest pasteboard was touched for a keyboard that did not need it: %q", *pasteboard)
+	}
+	if !strings.Contains(out, "Typed") || strings.Contains(out, "Pasted") {
+		t.Fatalf("output should report typing, not pasting:\n%s", out)
+	}
+}
+
+func TestSimType_PasteThatChangedNothingFailsLoudly(t *testing.T) {
+	// The failure that would recreate the original bug: an app that refuses
+	// paste, or a field that never had focus.
+	driver := &fakeSimDriver{}
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardThai, "") // the field never changes
+
+	_, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	if err == nil {
+		t.Fatal("a paste that changed nothing must never be reported as success")
+	}
+	if ExitCode(err) != 1 {
+		t.Errorf("exit code = %d, want 1", ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "ao sim tap") {
+		t.Errorf("the refusal must say how to fix it:\n%v", err)
+	}
+	// Even on failure the payload must not be left on the guest's pasteboard.
+	if len(*pasteboard) != 2 || (*pasteboard)[1] != "what the human had copied" {
+		t.Fatalf("pasteboard writes = %q, want the restore even on failure", *pasteboard)
+	}
+}
+
+func TestSimType_NonAsciiGoesByPasteboard(t *testing.T) {
+	// A capability the key path never had: there is no US keyboard usage that
+	// sends these, but the pasteboard carries text as text.
+	driver := &fakeSimDriver{}
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "สวัสดี")
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "สวัสดี")
+	if err != nil {
+		t.Fatalf("non-ASCII must now work: %v", err)
+	}
+	if len(*pasteboard) == 0 || (*pasteboard)[0] != "สวัสดี" {
+		t.Fatalf("pasteboard writes = %q", *pasteboard)
+	}
+	if !strings.Contains(out, "Pasted") {
+		t.Fatalf("output:\n%s", out)
+	}
+}
+
+func TestSimType_PasteFlagForcesTheRouteEvenOnASafeGuest(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "fa12345")
+
+	if _, _, err := executeCLI(t, deps, "sim", "type", "fa12345", "--paste"); err != nil {
+		t.Fatalf("sim type --paste: %v", err)
+	}
+	if len(*pasteboard) == 0 {
+		t.Fatal("--paste must use the pasteboard even when the keys would have worked")
+	}
+}
+
+func TestSimType_PasteAndRawKeysTogetherIsAMistake(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _, _ := pasteDeps(t, driver, simKeyboardThai, "fa12345")
+
+	_, _, err := executeCLI(t, deps, "sim", "type", "fa12345", "--paste", "--raw-keys")
+	if err == nil {
+		t.Fatal("asking for both routes at once has no answer and must be refused")
+	}
+	if ExitCode(err) != 2 {
+		t.Errorf("exit code = %d, want 2 for CLI misuse", ExitCode(err))
 	}
 }
 

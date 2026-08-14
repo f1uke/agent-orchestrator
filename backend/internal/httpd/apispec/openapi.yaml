@@ -6732,6 +6732,8 @@ components:
           type: string
         name:
           type: string
+        paste:
+          type: boolean
         rawKeys:
           type: boolean
         text:

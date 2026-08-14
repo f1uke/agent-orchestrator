@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 )
 
 // The commands that touch the screen.
@@ -53,7 +54,14 @@ type simGestureResult struct {
 	// do not depend on one, and for `--raw-keys`, which promises nothing about
 	// what the key presses become.
 	Keyboard string `json:"keyboard,omitempty"`
-	Note     string `json:"note"`
+	// Route is why the pasteboard was used instead of key presses. Empty when
+	// the text was typed.
+	Route string `json:"route,omitempty"`
+	// PasteboardLeftBehind: the guest pasteboard could not be put back, so the
+	// text is still on it where any app on the device can read it. Never hidden:
+	// the text is a password often enough that it has to be said out loud.
+	PasteboardLeftBehind bool   `json:"pasteboardLeftBehind,omitempty"`
+	Note                 string `json:"note"`
 }
 
 // acquireSimHoldRequest mirrors controllers.AcquireSimHoldInput.
@@ -199,24 +207,27 @@ func newSimDragCommand(ctx *commandContext) *cobra.Command {
 
 func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 	opts := simTouchOptions{}
-	var rawKeys bool
+	var rawKeys, forcePaste bool
 	cmd := &cobra.Command{
 		Use:   "type <text>",
 		Short: "Type text into a claimed simulator's focused field",
-		Long: "Send text to whatever has keyboard focus.\n\n" +
+		Long: "Put text into whatever has keyboard focus.\n\n" +
 			"Tap the field first: this types, it does not choose where the text goes.\n\n" +
-			"What reaches the device is US-keyboard key presses, and the SIMULATOR decides " +
-			"what each one produces. Simulator.app ships with I/O > Keyboard > \"Use the Same " +
-			"Keyboard Language as macOS\" ticked, so a Mac on a Thai input source gives the " +
-			"simulator one, and `type \"fa12345\"` would arrive as \"\u0e14\u0e1f\u0e45/_\u0e20\u0e16\". This command " +
-			"therefore asks the device which input mode it is using and REFUSES to send " +
-			"anything it cannot promise, rather than reporting characters it did not type. " +
-			"It is worth knowing why that matters: the same text goes in correctly through a " +
-			"field that forces an ASCII keyboard (an email or URL field) and incorrectly " +
-			"through an ordinary or secure one, and a secure field hides the damage.\n\n" +
-			"`--raw-keys` sends the key presses regardless - which is how Thai text is " +
-			"entered on a Thai guest in the first place - and then promises key presses " +
-			"rather than characters.\n\n" +
+			"HOW IT GETS THERE depends on the simulator, and the command says which route it " +
+			"took. Key presses are used wherever they can be trusted, because an app that " +
+			"watches each keystroke - a live validator, a character counter, a masked field - " +
+			"then sees what a person would. But the keys sent are US-keyboard key presses and " +
+			"the SIMULATOR decides what each one produces: Simulator.app ships with I/O > " +
+			"Keyboard > \"Use the Same Keyboard Language as macOS\" ticked, so a Mac on a Thai " +
+			"input source makes `type \"fa12345\"` arrive as \"\u0e14\u0e1f\u0e45/_\u0e20\u0e16\". " +
+			"Where that would happen the text goes through the simulator's PASTEBOARD instead, " +
+			"and is checked on screen afterwards - so the characters asked for are the " +
+			"characters that arrive, including in a secure field, where nothing can be read " +
+			"back to catch a mistake.\n\n" +
+			"Non-ASCII text also goes by pasteboard, because no US keyboard key can send it.\n\n" +
+			"`--paste` always uses the pasteboard. `--raw-keys` always sends key presses and " +
+			"promises only key presses, which is how Thai text is deliberately entered on a " +
+			"Thai guest.\n\n" +
 			"The device must be claimed by this session (`ao sim claim`) first.",
 		Example: `  ao sim tap 0.5 0.125
   ao sim type "hello@example.com"
@@ -238,9 +249,12 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			events, mode, err := ctx.composeSimType(cmd.Context(), device, text, rawKeys)
+			route, err := ctx.planSimType(cmd.Context(), device, text, rawKeys, forcePaste)
 			if err != nil {
 				return err
+			}
+			if route.Paste {
+				return ctx.runSimPaste(cmd, opts, device, text, route)
 			}
 			runes := strconv.Itoa(len([]rune(text)))
 			detail := runes + " characters"
@@ -250,59 +264,95 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			return ctx.runSimGestureOn(cmd, opts, device, simGesture{
 				action:   "type",
 				detail:   detail,
-				events:   events,
-				keyboard: mode.Identifier,
+				events:   route.Events,
+				keyboard: route.Keyboard.Identifier,
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&rawKeys, "raw-keys", false,
 		"Send the key presses even when the simulator would turn them into other characters")
+	cmd.Flags().BoolVar(&forcePaste, "paste", false,
+		"Always deliver the text through the simulator's pasteboard rather than as key presses")
 	opts.bind(cmd)
 	return cmd
 }
 
-// composeSimType turns text into key events, having first established what the
-// device will make of them.
+// planSimType asks the device what it will do with key presses, then hands the
+// decision to internal/simbridge, which is where it lives for both surfaces.
 //
-// The order is the whole fix. Establishing the mapping BEFORE composing means a
-// device set to a keyboard we cannot speak for is refused with nothing sent -
-// no half-typed field to clean up, and no "Typed 7 characters" over a field
-// holding something else. `--raw-keys` skips the question entirely, because a
-// caller who has accepted whatever the guest produces has nothing to establish
-// and should not pay a subprocess to be told.
-func (c *commandContext) composeSimType(ctx context.Context, device simDevice, text string, rawKeys bool) (
-	[]simbridge.Event, simkeyboard.Mode, error,
+// The probe is the only part that differs between a CLI and the daemon: one
+// shells out, the other has a Screen. The DECISION must not differ, because two
+// answers to "is this keyboard safe" means one of them silently types the wrong
+// characters again - the exact bug being fixed.
+func (c *commandContext) planSimType(ctx context.Context, device simDevice, text string, rawKeys, forcePaste bool) (
+	simbridge.TextRoute, error,
 ) {
-	if rawKeys {
-		events, err := simbridge.TypeRaw(text)
-		if err != nil {
-			return nil, simkeyboard.Mode{}, usageError{err}
-		}
-		return events, simkeyboard.Mode{}, nil
+	var keyboard simbridge.ProbedKeyboard
+	// Nothing to establish when the caller has already said which route they
+	// want, and the probe costs a subprocess on the device.
+	if !rawKeys && !forcePaste {
+		keyboard.Mode, keyboard.Err = simkeyboard.Probe(ctx, c.deps.CommandOutput, device.UDID)
 	}
-
-	mode, err := simkeyboard.Probe(ctx, c.deps.CommandOutput, device.UDID)
+	route, err := simbridge.PlanText(text, keyboard, simbridge.TextOptions{RawKeys: rawKeys, Paste: forcePaste})
 	if err != nil {
-		return nil, mode, fmt.Errorf("could not read %s's keyboard input mode, so `type` cannot promise the keys "+
-			"will arrive as the characters you asked for - nothing was sent: %w\n"+
-			"A simulator that has not shown a keyboard yet has nothing to report: tap the field first with "+
-			"`ao sim tap`, which is the order this command expects anyway, then run this again. "+
-			"To send the key presses regardless of what the simulator makes of them, add `--raw-keys`",
-			device.Label(), err)
+		return simbridge.TextRoute{}, usageError{err}
+	}
+	return route, nil
+}
+
+// runSimPaste delivers the text through the guest pasteboard, under the same
+// gesture hold every other way of touching this device takes.
+func (c *commandContext) runSimPaste(
+	cmd *cobra.Command, opts simTouchOptions, device simDevice, text string, route simbridge.TextRoute,
+) error {
+	ctx := cmd.Context()
+	sessionID, err := simSessionID("`ao sim type`")
+	if err != nil {
+		return err
+	}
+	driver, err := c.simDriver()
+	if err != nil {
+		return err
 	}
 
-	events, err := simbridge.Type(text, mode)
-	var remap *simbridge.RemapError
-	switch {
-	case errors.As(err, &remap):
-		return nil, mode, fmt.Errorf("%w.\nTo send these key presses anyway and accept whatever the simulator "+
-			"produces - which is how Thai text is entered on a Thai guest - add `--raw-keys`", err)
-	case err != nil:
-		// The text itself is unsendable: the caller's own mistake, not the
-		// machine's state.
-		return nil, mode, usageError{err}
+	result, err := simpaste.Run(ctx, &cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver,
+		simpaste.Simctl{Run: c.deps.CommandOutput}, device.UDID, text)
+	if err != nil {
+		return c.explainSimPasteFailure(device, route, err)
 	}
-	return events, mode, nil
+
+	out := simGestureResult{
+		UDID:              device.UDID,
+		Name:              device.Name,
+		Runtime:           device.Runtime,
+		RuntimeIdentifier: device.RuntimeIdentifier,
+		Action:            "paste",
+		Detail:            strconv.Itoa(len([]rune(text))) + " characters",
+		Keyboard:          route.Keyboard.Identifier,
+		Route:             route.Why,
+		Note:              simSharedDeviceNote,
+	}
+	if !result.Restored {
+		out.PasteboardLeftBehind = true
+	}
+	if opts.json {
+		return writeJSON(cmd.OutOrStdout(), out)
+	}
+	return writeSimPaste(cmd.OutOrStdout(), out, result.RestoreErr)
+}
+
+// explainSimPasteFailure says what went wrong AND what state the field is in,
+// because those are different questions and the answer to the second decides
+// whether there is anything to clean up.
+func (c *commandContext) explainSimPasteFailure(device simDevice, route simbridge.TextRoute, err error) error {
+	if errors.Is(err, simpaste.ErrNotDelivered) {
+		return fmt.Errorf("nothing was typed into %s (%s, so the text was sent through the pasteboard): %w\n"+
+			"Tap the field first with `ao sim tap` so it has keyboard focus. Some apps refuse paste outright - "+
+			"for those, fix the simulator's input mode and use key presses instead",
+			device.Label(), route.Why, err)
+	}
+	return fmt.Errorf("`ao sim type` failed on %s (%s, so the text was sent through the pasteboard): %w",
+		device.Label(), route.Why, err)
 }
 
 func newSimButtonCommand(ctx *commandContext) *cobra.Command {
@@ -520,6 +570,29 @@ func parseSimPoint(rawX, rawY string) (simbridge.Point, error) {
 		return simbridge.Point{}, usageError{fmt.Errorf("invalid y coordinate %q: use a number between 0 and 1", rawY)}
 	}
 	return simbridge.Point{X: x, Y: y}, nil
+}
+
+// writeSimPaste reports a paste. It says PASTED rather than typed, and says why
+// that route was taken: an app that reacts to each keystroke behaves differently
+// when it receives one paste instead, and a caller who is debugging that needs
+// to know which of the two happened without having to guess.
+func writeSimPaste(out io.Writer, result simGestureResult, restoreErr error) error {
+	if _, err := fmt.Fprintf(out, "Pasted %s into %s (%s, %s)\n%s, so the text went through the simulator's "+
+		"pasteboard rather than its keyboard, and was checked on screen afterwards.\n",
+		result.Detail, result.Name, result.Runtime, result.UDID,
+		strings.ToUpper(result.Route[:1])+result.Route[1:]); err != nil {
+		return err
+	}
+	if result.PasteboardLeftBehind {
+		if _, err := fmt.Fprintf(out, "WARNING: the simulator's pasteboard could NOT be put back (%v), so the "+
+			"text is still on it and any app on that device can read it. Clear it before moving on.\n",
+			restoreErr); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(out,
+		"An app that reacts to each keystroke sees one paste instead - use `--raw-keys` if it needs real key presses.")
+	return err
 }
 
 func writeSimGesture(out io.Writer, result simGestureResult) error {

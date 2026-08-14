@@ -79,7 +79,7 @@ func TestSwipe_DurationBounds(t *testing.T) {
 }
 
 func TestType_ProducesShiftedAndUnshiftedKeys(t *testing.T) {
-	events, err := Type("aA1!\n\t", usMode)
+	events, err := TypeRaw("aA1!\n\t")
 	if err != nil {
 		t.Fatalf("type: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestType_RefusesWhatTheKeyboardCannotSend(t *testing.T) {
 	// The HID path is a US keyboard. Silently dropping a character would type
 	// something different from what was asked for - worse than refusing.
 	for _, text := range []string{"ก", "café", "emoji 🎉"} {
-		_, err := Type(text, usMode)
+		_, err := TypeRaw(text)
 		if err == nil {
 			t.Fatalf("Type(%q) must be refused", text)
 		}
@@ -124,71 +124,145 @@ func TestType_RefusesWhatTheKeyboardCannotSend(t *testing.T) {
 			t.Fatalf("Type(%q) error must explain the limit, got %v", text, err)
 		}
 	}
-	if _, err := Type("", usMode); err == nil {
+	if _, err := TypeRaw(""); err == nil {
 		t.Fatal("typing nothing is a mistake worth reporting, not a no-op")
 	}
 }
 
-func TestType_RefusesWhenTheGuestWouldRemapTheKeys(t *testing.T) {
-	// The bug this whole change exists for. Sending these usages to a guest on
-	// a Thai input mode puts "ดฟๅ/_ภถ" in the field and reports seven
-	// characters typed, so the refusal has to happen before any event is
-	// composed - there is nothing to half-send.
-	events, err := Type("fa12345", thaiMode)
-	if err == nil {
-		t.Fatal("typing into a guest that remaps the keys must be refused, not reported as done")
+func TestPlanText_UsesKeysOnlyWhenTheGuestCanBeTrusted(t *testing.T) {
+	route, err := PlanText("fa12345", ProbedKeyboard{Mode: usMode}, TextOptions{})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
 	}
-	if events != nil {
-		t.Fatalf("a refused type must compose no events, got %d", len(events))
+	if route.Paste {
+		t.Fatal("a guest that sends US ASCII must be typed at, not pasted into: keys are the truer simulation")
 	}
-	var remap *RemapError
-	if !errors.As(err, &remap) {
-		t.Fatalf("err = %v, want a *RemapError callers can phrase for their own audience", err)
-	}
-	if remap.Mode.Identifier != thaiMode.Identifier {
-		t.Fatalf("error carries mode %q, want the one that was in the way", remap.Mode.Identifier)
-	}
-	// A refusal that does not name the thing to change is a dead end.
-	for _, want := range []string{"th_TH", "input mode"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q must mention %q", err, want)
-		}
+	if len(route.Events) == 0 {
+		t.Fatal("the keyboard route must carry its events")
 	}
 }
 
-func TestType_RefusesAModeItCouldNotRead(t *testing.T) {
-	// Probing can fail - a device that has never shown a keyboard has nothing
-	// to report. "Unknown" must never be read as "US".
-	if _, err := Type("hunter2", simkeyboard.Mode{}); err == nil {
-		t.Fatal("an unknown input mode must be refused, not assumed safe")
+func TestPlanText_PastesRatherThanTypingCharactersTheGuestWouldRemap(t *testing.T) {
+	// The bug, and the fix in one assertion: the same call that used to put
+	// "ดฟๅ/_ภถ" in the field now routes around the keyboard entirely.
+	route, err := PlanText("fa12345", ProbedKeyboard{Mode: thaiMode}, TextOptions{})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if !route.Paste {
+		t.Fatal("a guest that would remap the keys must not be typed at")
+	}
+	if !strings.Contains(route.Why, "th_TH") {
+		t.Fatalf("Why = %q, must name what made the keyboard unusable", route.Why)
 	}
 }
 
-func TestTypeRaw_SendsTheSameKeysWithoutTheLayoutCheck(t *testing.T) {
-	// The deliberate escape hatch: on a Thai guest these usages are how Thai
-	// text is produced at all, so the capability stays - what changes is that
-	// it has to be asked for.
-	raw, err := TypeRaw("fa12345")
+func TestPlanText_PastesWhenTheGuestWouldNotSayWhatItsKeyboardIs(t *testing.T) {
+	// Unknown is not US. The pasteboard does not care what the input mode is,
+	// so it is the honest way through rather than a refusal.
+	route, err := PlanText("fa12345", ProbedKeyboard{Err: errors.New("device is not booted")}, TextOptions{})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if !route.Paste {
+		t.Fatal("an unverified keyboard must never be treated as a US one")
+	}
+	// Routing the same way is not the same as diagnosing the same way. "The
+	// device would not answer" and "the device answered th_TH" send a reader to
+	// two different places, and the zero mode reaching the layout check would
+	// silently report the second for the first.
+	if !strings.Contains(route.Why, "would not say") {
+		t.Fatalf("Why = %q, want it to name the unanswered probe rather than a layout", route.Why)
+	}
+}
+
+func TestPlanText_PastesCharactersNoKeyCanSend(t *testing.T) {
+	// A capability the key path never had at all.
+	route, err := PlanText("สวัสดี", ProbedKeyboard{Mode: usMode}, TextOptions{})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if !route.Paste {
+		t.Fatal("there is no US keyboard usage for these, so the pasteboard is the only mechanism")
+	}
+}
+
+func TestPlanText_RawKeysTakesTheKeyboardWhateverTheGuestWouldMakeOfIt(t *testing.T) {
+	route, err := PlanText("fa12345", ProbedKeyboard{Mode: thaiMode}, TextOptions{RawKeys: true})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Paste {
+		t.Fatal("--raw-keys asked for key presses")
+	}
+	keys, err := TypeRaw("fa12345")
 	if err != nil {
 		t.Fatalf("TypeRaw: %v", err)
 	}
-	checked, err := Type("fa12345", usMode)
-	if err != nil {
-		t.Fatalf("Type on a US guest: %v", err)
-	}
-	if !reflect.DeepEqual(raw, checked) {
-		t.Fatal("the escape hatch must send exactly the same keys, only without the promise")
+	if !reflect.DeepEqual(route.Events, keys) {
+		t.Fatal("the escape hatch must send exactly the keys, only without the promise")
 	}
 }
 
-func TestTypeRaw_StillRefusesWhatTheKeyboardCannotSend(t *testing.T) {
-	// --raw-keys waives the guest's mapping, not the limits of the HID path
-	// itself: there is no usage that sends "ก", so it is still refused.
-	if _, err := TypeRaw("ก"); err == nil {
-		t.Fatal("a character no US keyboard can send has no usage to send it with")
+func TestPlanText_RawKeysStillCannotSendWhatHasNoKey(t *testing.T) {
+	// --raw-keys waives the guest's mapping, not the limits of the HID path.
+	if _, err := PlanText("ก", ProbedKeyboard{Mode: usMode}, TextOptions{RawKeys: true}); err == nil {
+		t.Fatal("a character with no usage has no key to send it with")
 	}
-	if _, err := TypeRaw(""); err == nil {
-		t.Fatal("typing nothing is still a mistake worth reporting")
+}
+
+func TestPlanText_PasteFlagForcesTheRoute(t *testing.T) {
+	route, err := PlanText("fa12345", ProbedKeyboard{Mode: usMode}, TextOptions{Paste: true})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if !route.Paste {
+		t.Fatal("--paste must win over a keyboard that would have worked")
+	}
+}
+
+func TestPlanText_RefusesContradictoryRoutesAndEmptyText(t *testing.T) {
+	if _, err := PlanText("hi", ProbedKeyboard{Mode: usMode}, TextOptions{RawKeys: true, Paste: true}); err == nil {
+		t.Fatal("asking for both routes at once has no answer")
+	}
+	if _, err := PlanText("", ProbedKeyboard{Mode: usMode}, TextOptions{}); err == nil {
+		t.Fatal("typing nothing is a mistake worth reporting, not a no-op")
+	}
+}
+
+func TestPaste_IsCommandVWithMatchedReleases(t *testing.T) {
+	// Verified against a real device: the guest matches this shortcut WITHOUT
+	// putting it through the input mode, so it pastes on a Thai guest where the
+	// same `v` key would type "อ". That is the whole reason the paste path can
+	// rescue a keyboard the key path cannot speak for.
+	events := Paste()
+	var keys []Event
+	for _, e := range events {
+		if e.Kind == "key" {
+			keys = append(keys, e)
+		}
+	}
+	want := []struct {
+		usage int
+		typ   string
+	}{
+		{usageLeftGUI, "down"}, {usageV, "down"},
+		{usageV, "up"}, {usageLeftGUI, "up"},
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("got %d key events, want %d: %+v", len(keys), len(want), keys)
+	}
+	for i, w := range want {
+		if keys[i].Usage != w.usage || keys[i].Type != w.typ {
+			t.Fatalf("key %d = usage %d %s, want usage %d %s", i, keys[i].Usage, keys[i].Type, w.usage, w.typ)
+		}
+	}
+	// A modifier left held down is the keyboard's version of a stuck finger:
+	// every later keystroke on that device arrives with Command applied.
+	for _, e := range events {
+		if e.Kind == "touch" {
+			t.Fatalf("pasting must not touch the screen: %+v", events)
+		}
 	}
 }
 
@@ -266,7 +340,7 @@ func TestDuration_CoversEveryGesture(t *testing.T) {
 		t.Fatalf("swipe duration = %s, want at least the 2s it was asked for", got)
 	}
 
-	typing, err := Type(strings.Repeat("a", 500), usMode)
+	typing, err := TypeRaw(strings.Repeat("a", 500))
 	if err != nil {
 		t.Fatalf("type: %v", err)
 	}
@@ -276,14 +350,14 @@ func TestDuration_CoversEveryGesture(t *testing.T) {
 }
 
 func TestType_RefusesTextLongerThanAGestureHoldCanCover(t *testing.T) {
-	_, err := Type(strings.Repeat("a", MaxTypeRunes+1), usMode)
+	_, err := TypeRaw(strings.Repeat("a", MaxTypeRunes+1))
 	if err == nil {
 		t.Fatal("text long enough to outlive its own gesture hold must be refused, not sent")
 	}
 	if !strings.Contains(err.Error(), "shorter") {
 		t.Fatalf("the refusal must say what to do, got %v", err)
 	}
-	if _, err := Type(strings.Repeat("a", MaxTypeRunes), usMode); err != nil {
+	if _, err := TypeRaw(strings.Repeat("a", MaxTypeRunes)); err != nil {
 		t.Fatalf("text at the limit must still be typable: %v", err)
 	}
 }
