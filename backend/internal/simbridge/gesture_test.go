@@ -168,3 +168,46 @@ func touchTypes(events []Event) string {
 	}
 	return strings.Join(parts, ",")
 }
+
+func TestDuration_CoversEveryGesture(t *testing.T) {
+	// The hold has to outlive the gesture it protects. If it lapses mid-gesture,
+	// another command can take the finger while this one is still touching - the
+	// exact interleave the hold exists to prevent - so the estimate must never
+	// come out under the sleeps the gesture actually performs.
+	tap, err := Tap(Point{X: 0.5, Y: 0.5})
+	if err != nil {
+		t.Fatalf("tap: %v", err)
+	}
+	if got := Duration(tap); got < tapHold {
+		t.Fatalf("tap duration = %s, want at least the %s hold", got, tapHold)
+	}
+
+	swipe, err := Swipe(Point{X: 0.5, Y: 0.8}, Point{X: 0.5, Y: 0.2}, 2*time.Second)
+	if err != nil {
+		t.Fatalf("swipe: %v", err)
+	}
+	if got := Duration(swipe); got < 2*time.Second {
+		t.Fatalf("swipe duration = %s, want at least the 2s it was asked for", got)
+	}
+
+	typing, err := Type(strings.Repeat("a", 500))
+	if err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	if got := Duration(typing); got < 500*keyStep {
+		t.Fatalf("typing duration = %s, want at least %s", got, 500*keyStep)
+	}
+}
+
+func TestType_RefusesTextLongerThanAGestureHoldCanCover(t *testing.T) {
+	_, err := Type(strings.Repeat("a", MaxTypeRunes+1))
+	if err == nil {
+		t.Fatal("text long enough to outlive its own gesture hold must be refused, not sent")
+	}
+	if !strings.Contains(err.Error(), "shorter") {
+		t.Fatalf("the refusal must say what to do, got %v", err)
+	}
+	if _, err := Type(strings.Repeat("a", MaxTypeRunes)); err != nil {
+		t.Fatalf("text at the limit must still be typable: %v", err)
+	}
+}

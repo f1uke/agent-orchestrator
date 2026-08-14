@@ -36,7 +36,30 @@ const (
 	MaxSwipeDuration = 5 * time.Second
 	// maxSwipeSteps caps event count for long swipes.
 	maxSwipeSteps = 120
+	// MaxTypeRunes bounds one `type` so the gesture cannot outlive the hold that
+	// makes it exclusive: a hold that lapses mid-gesture is a window for another
+	// command to take the finger while this one is still using it. At keyStep a
+	// run this long takes a few seconds, well inside the hold's ceiling.
+	MaxTypeRunes = 2000
+	// perEventOverhead is the allowance added per non-sleep event when estimating
+	// how long a gesture will take. Deliberately generous: an estimate that comes
+	// out short is the failure that matters.
+	perEventOverhead = 2 * time.Millisecond
 )
+
+// Duration estimates how long a gesture will take on the device. Callers size
+// the gesture hold from it, so it must never be optimistic.
+func Duration(events []Event) time.Duration {
+	var total time.Duration
+	for _, e := range events {
+		if e.Kind == "sleep" {
+			total += time.Duration(e.MS) * time.Millisecond
+			continue
+		}
+		total += perEventOverhead
+	}
+	return total
+}
 
 // Tap presses and releases one point.
 func Tap(at Point) ([]Event, error) {
@@ -90,6 +113,10 @@ func Swipe(from, to Point, duration time.Duration) ([]Event, error) {
 func Type(text string) ([]Event, error) {
 	if text == "" {
 		return nil, fmt.Errorf("nothing to type")
+	}
+	if n := len([]rune(text)); n > MaxTypeRunes {
+		return nil, fmt.Errorf("cannot type %d characters at once: keep it to %d or shorter, "+
+			"so one `type` stays inside the gesture hold that keeps other commands off the device", n, MaxTypeRunes)
 	}
 	events := make([]Event, 0, len(text)*4)
 	for _, r := range text {

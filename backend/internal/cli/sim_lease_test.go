@@ -25,9 +25,22 @@ type simDaemon struct {
 	holdStatus int
 	holdBody   string
 
-	mu    sync.Mutex
-	calls []string // "METHOD path"
-	body  string   // last request body
+	mu          sync.Mutex
+	calls       []string // "METHOD path"
+	body        string   // last request body
+	holdRequest string   // body of the last gesture-hold request
+}
+
+// requestedHoldSeconds is the TTL the CLI asked the gesture hold for.
+func (d *simDaemon) requestedHoldSeconds(t *testing.T) int {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var in acquireSimHoldRequest
+	if err := json.Unmarshal([]byte(d.holdRequest), &in); err != nil {
+		t.Fatalf("hold body %q: %v", d.holdRequest, err)
+	}
+	return in.HoldSeconds
 }
 
 // callLog is every request the CLI made, in order. It is read while a gesture
@@ -50,6 +63,9 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/hold"):
+			d.mu.Lock()
+			d.holdRequest = string(body)
+			d.mu.Unlock()
 			if d.holdStatus != 0 && d.holdStatus != http.StatusOK {
 				w.WriteHeader(d.holdStatus)
 				_, _ = io.WriteString(w, d.holdBody)

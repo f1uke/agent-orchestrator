@@ -129,11 +129,10 @@ func newSimSwipeCommand(ctx *commandContext) *cobra.Command {
 				return usageError{err}
 			}
 			return ctx.runSimGesture(cmd, opts, simGesture{
-				action:   "swipe",
-				detail:   fmt.Sprintf("(%.3f, %.3f) to (%.3f, %.3f) over %s", from.X, from.Y, to.X, to.Y, duration),
-				events:   events,
-				last:     to,
-				duration: duration,
+				action: "swipe",
+				detail: fmt.Sprintf("(%.3f, %.3f) to (%.3f, %.3f) over %s", from.X, from.Y, to.X, to.Y, duration),
+				events: events,
+				last:   to,
 			})
 		},
 	}
@@ -219,8 +218,7 @@ type simGesture struct {
 	events []simbridge.Event
 	// last is where the finger would be if the gesture died in flight, and so
 	// where a recovery lift has to land.
-	last     simbridge.Point
-	duration time.Duration
+	last simbridge.Point
 }
 
 // runSimGesture is the one path every touch takes: resolve the device, take the
@@ -241,7 +239,10 @@ func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions,
 		return err
 	}
 
-	token, err := c.acquireSimHold(ctx, sessionID, device, gesture.duration)
+	// The hold is sized from the gesture itself, not from a flag: a hold that
+	// lapsed mid-gesture would be exactly the window another command needs to
+	// take the finger while this one is still touching the screen.
+	token, err := c.acquireSimHold(ctx, sessionID, device, simbridge.Duration(gesture.events))
 	if err != nil {
 		return err
 	}

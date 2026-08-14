@@ -272,6 +272,28 @@ func TestSimTouch_HoldIsTakenBeforeTheFirstEventAndHeldUntilTheLast(t *testing.T
 	assertHoldTakenAndReleased(t, daemon)
 }
 
+func TestSimTouch_TheHoldIsSizedToOutliveItsOwnGesture(t *testing.T) {
+	// A hold that lapsed mid-gesture would be exactly the window another command
+	// needs to take the finger while this one is still touching the screen, so
+	// the TTL is sized from the gesture rather than from a fixed guess.
+	driver := &fakeSimDriver{}
+	deps, daemon := touchDeps(t, driver)
+
+	if _, _, err := executeCLI(t, deps, "sim", "swipe", "0.5", "0.8", "0.5", "0.2", "--duration", "4s"); err != nil {
+		t.Fatalf("sim swipe: %v", err)
+	}
+	if got := daemon.requestedHoldSeconds(t); got < 4 {
+		t.Fatalf("hold ttl = %ds, want it to cover the 4s swipe", got)
+	}
+
+	if _, _, err := executeCLI(t, deps, "sim", "type", strings.Repeat("a", 1500)); err != nil {
+		t.Fatalf("sim type: %v", err)
+	}
+	if got := daemon.requestedHoldSeconds(t); got < 6 {
+		t.Fatalf("hold ttl = %ds, want it to cover a long run of keystrokes", got)
+	}
+}
+
 // --- a gesture that fails midway -------------------------------------------
 
 func TestSimTouch_AFailedGestureLiftsTheFingerAndSaysSo(t *testing.T) {
