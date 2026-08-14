@@ -4,6 +4,7 @@ import { House, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { usePageActive, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
+import { DragStream } from "../lib/drag-stream";
 import { devicePoint, fitScreen } from "../lib/screen-fit";
 import { cn } from "../lib/utils";
 import {
@@ -70,16 +71,15 @@ function emptyReason(watching: boolean, looked: boolean, bootedCount: number, de
 	return "Choose which booted simulator to watch.";
 }
 
-/** A drag shorter than this is a tap, not a swipe. */
-const SWIPE_THRESHOLD_PX = 8;
+/** A press that moves less than this is a tap, not a drag. */
+const DRAG_THRESHOLD_PX = 8;
 
 /** Beyond this long without a frame, a stream that says it is live is not. */
 const STALE_AFTER_MS = 2_000;
 
-type GestureBody =
-	| { kind: "tap"; x: number; y: number }
-	| { kind: "swipe"; x: number; y: number; toX: number; toY: number; durationMs: number }
-	| { kind: "button"; name: string };
+// What this panel sends one-shot. A drag is not here: it is several requests
+// under one hold, and lives in DragStream.
+type GestureBody = { kind: "tap"; x: number; y: number } | { kind: "button"; name: string };
 
 export function SimulatorPanel({
 	sessionId,
@@ -181,6 +181,29 @@ export function SimulatorPanel({
 
 	const pressed = useRef<{ x: number; y: number; at: number } | null>(null);
 
+	// A drag is streamed while the finger is still down rather than replayed
+	// after it comes up. Sending one swipe on release - which is what this did -
+	// means the screen starts moving after the human has stopped, which is the
+	// lag they reported against serve-sim, where the content tracks the finger.
+	const drag = useRef<DragStream | null>(null);
+	if (!drag.current) {
+		drag.current = new DragStream(
+			async (step, point) => {
+				if (!chosenRef.current) throw new Error("No simulator is selected");
+				const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture", {
+					params: { path: { sessionId, udid: chosenRef.current } },
+					body: { kind: step, x: point.x, y: point.y },
+				});
+				if (error) throw error;
+			},
+			(error) => setProblem(apiErrorMessage(error, "The drag did not reach the device")),
+		);
+	}
+	// The sender is built once and outlives any particular device, so it reads
+	// the current one rather than closing over the one chosen when it was made.
+	const chosenRef = useRef(chosen);
+	chosenRef.current = chosen;
+
 	// The canvas fills the pane and letterboxes the picture inside it, so a
 	// pointer position is only a device coordinate after it has been mapped
 	// through that letterbox - and a press in the bars is not on the device.
@@ -194,36 +217,68 @@ export function SimulatorPanel({
 		});
 	};
 
+	/** Pixels moved since the press, which is what tells a tap from a drag. */
+	const movedPx = (event: React.PointerEvent<HTMLCanvasElement>, point: { x: number; y: number }) => {
+		const start = pressed.current;
+		if (!start) return 0;
+		const rect = event.currentTarget.getBoundingClientRect();
+		return Math.hypot((point.x - start.x) * rect.width, (point.y - start.y) * rect.height);
+	};
+
 	const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
 		if (!canDrive || busy) return;
 		const point = pointFor(event);
 		if (!point) return;
 		event.currentTarget.setPointerCapture(event.pointerId);
+		// Nothing is sent yet: a press that never moves is a tap, and a tap holds
+		// the finger down for a measured moment that a drag's begin does not.
 		pressed.current = { x: point.x, y: point.y, at: Date.now() };
+	};
+
+	const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+		const start = pressed.current;
+		if (!start || !canDrive) return;
+		const point = pointFor(event);
+		if (!point) return;
+		if (drag.current?.isDragging) {
+			drag.current.move(point);
+			return;
+		}
+		// The touch goes down where the press was, not where the pointer has got
+		// to, so the drag starts from the point the human actually aimed at.
+		if (movedPx(event, point) >= DRAG_THRESHOLD_PX) {
+			drag.current?.begin({ x: start.x, y: start.y });
+			drag.current?.move(point);
+		}
 	};
 
 	const onPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
 		const start = pressed.current;
 		pressed.current = null;
-		if (!canDrive || busy || !start) return;
 		const point = pointFor(event);
-		if (!point) return;
-		const rect = event.currentTarget.getBoundingClientRect();
-		const movedPx = Math.hypot((point.x - start.x) * rect.width, (point.y - start.y) * rect.height);
-		if (movedPx < SWIPE_THRESHOLD_PX) {
-			gesture.mutate({ kind: "tap", x: start.x, y: start.y });
+		if (drag.current?.isDragging) {
+			drag.current.end(point ?? { x: start?.x ?? 0.5, y: start?.y ?? 0.5 });
 			return;
 		}
-		gesture.mutate({
-			kind: "swipe",
-			x: start.x,
-			y: start.y,
-			toX: point.x,
-			toY: point.y,
-			// The real drag time, so a slow drag scrolls and a flick flicks.
-			durationMs: Math.min(3_000, Math.max(80, Date.now() - start.at)),
-		});
+		if (!canDrive || busy || !start || !point) return;
+		gesture.mutate({ kind: "tap", x: start.x, y: start.y });
 	};
+
+	// A pointer the browser took away (a window switch, a gesture the OS
+	// claimed) has to end the touch too, or the finger stays down until the
+	// daemon's watchdog lifts it.
+	const onPointerCancel = () => {
+		pressed.current = null;
+		const held = drag.current;
+		if (held?.isDragging) held.end({ x: 0.5, y: 0.5 });
+	};
+
+	// Leaving the pane, or losing the lease, must not leave a finger down.
+	useEffect(() => {
+		if (canDrive) return;
+		const held = drag.current;
+		if (held?.isDragging) held.cancel();
+	}, [canDrive]);
 
 	const stageRef = useRef<HTMLDivElement | null>(null);
 	const fitted = useFittedScreen(stageRef, stream.size);
@@ -266,7 +321,9 @@ export function SimulatorPanel({
 									"block h-full w-full rounded-[1.7rem] object-contain",
 									canDrive ? "cursor-crosshair" : "cursor-default",
 								)}
+								onPointerCancel={onPointerCancel}
 								onPointerDown={onPointerDown}
+								onPointerMove={onPointerMove}
 								onPointerUp={onPointerUp}
 							/>
 						</div>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -437,6 +437,22 @@ describe("SimulatorPanel driving", () => {
 		return toggle;
 	}
 
+	/** Every gesture kind that reached the daemon, in order. */
+	function gestureKinds(): string[] {
+		return postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body?: { kind?: string } })?.body?.kind ?? "");
+	}
+
+	/** The y of every gesture of one kind that reached the daemon, in order. */
+	function gesturePoints(kind: string): number[] {
+		return postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body?: { kind?: string; y?: number } })?.body)
+			.filter((body): body is { kind: string; y: number } => body?.kind === kind)
+			.map((body) => body.y);
+	}
+
 	async function refresh() {
 		const menu = await openMenu();
 		await userEvent.click(within(menu).getByRole("menuitem", { name: /refresh simulators/i }));
@@ -520,6 +536,78 @@ describe("SimulatorPanel driving", () => {
 		const toggle = await screen.findByRole("button", { name: /drive this device/i });
 		expect(toggle).toHaveAttribute("aria-pressed", "false");
 		expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
+	});
+
+	// The complaint this answers: a drag used to be replayed as one swipe after
+	// the finger came up, so the screen started moving once the human had
+	// stopped. It is now sent while the touch is still down.
+	it("streams a drag while the finger is down instead of replaying it after", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		// Nothing may reach the device on the press alone: that is still a tap.
+		expect(gestureKinds()).toEqual([]);
+
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+
+		// The finger keeps going, and every step of it keeps reaching the device -
+		// one move is not "following", it is the drag opening.
+		for (const y of [180, 160, 140, 120]) {
+			fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: y });
+			await waitFor(() => expect(gesturePoints("drag-move").at(-1)).toBeCloseTo(y / 400, 5));
+		}
+		expect(gestureKinds().filter((k) => k === "drag-move").length).toBeGreaterThanOrEqual(4);
+
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 120 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-end"));
+
+		// And never as one swipe after the fact.
+		expect(gestureKinds()).not.toContain("swipe");
+	});
+
+	// A press that does not move is still a tap, which holds the finger down for
+	// a measured moment a drag's begin does not.
+	it("still sends a tap for a press that does not move", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 102, clientY: 301 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 102, clientY: 301 });
+
+		await waitFor(() => expect(gestureKinds()).toEqual(["tap"]));
 	});
 
 	it("sends a home press through the arbitrated gesture route", async () => {

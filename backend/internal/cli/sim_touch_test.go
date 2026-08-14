@@ -34,6 +34,12 @@ type fakeSimDriver struct {
 	onPerform func()
 }
 
+// Hold is the desktop pane's drag, which the CLI has no command for: `ao sim`
+// composes whole gestures, so a touch that outlives one call never happens here.
+func (f *fakeSimDriver) Hold(context.Context, string, []simbridge.Event) error {
+	return errors.New("the CLI composes whole gestures; a held touch is the desktop pane's drag")
+}
+
 func (f *fakeSimDriver) AX(context.Context, string) (simbridge.Snapshot, error) {
 	if f.axErr != nil {
 		return simbridge.Snapshot{}, f.axErr

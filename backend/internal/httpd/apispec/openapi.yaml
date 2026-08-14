@@ -6708,7 +6708,7 @@ components:
           description: Swipe duration in milliseconds. Omit for 300.
           type: integer
         kind:
-          description: tap, swipe, type or button.
+          description: tap, swipe, type, button, drag-begin, drag-move or drag-end.
           type: string
         name:
           type: string

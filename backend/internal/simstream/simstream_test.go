@@ -470,6 +470,8 @@ func (c *closableDriver) AX(context.Context, string) (simbridge.Snapshot, error)
 	return simbridge.Snapshot{}, nil
 }
 
+func (c *closableDriver) Hold(context.Context, string, []simbridge.Event) error { return nil }
+
 func (c *closableDriver) Perform(context.Context, string, []simbridge.Event) (simbridge.PerformResult, error) {
 	return simbridge.PerformResult{}, nil
 }

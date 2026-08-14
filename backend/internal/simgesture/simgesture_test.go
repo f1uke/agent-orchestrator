@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ type step struct {
 // recorder captures the exact order of hold and device operations, which is the
 // only thing this package exists to get right.
 type recorder struct {
+	mu         sync.Mutex
+	holdErr    error
 	steps      []step
 	acquireErr error
 	performErr error
@@ -28,6 +31,8 @@ type recorder struct {
 }
 
 func (r *recorder) Acquire(_ context.Context, udid string, ttl time.Duration) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.steps = append(r.steps, step{"acquire", udid})
 	r.ttl = ttl
 	if r.acquireErr != nil {
@@ -37,6 +42,8 @@ func (r *recorder) Acquire(_ context.Context, udid string, ttl time.Duration) (s
 }
 
 func (r *recorder) Release(_ context.Context, udid, token string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.steps = append(r.steps, step{"release", udid + "/" + token})
 }
 
@@ -45,6 +52,8 @@ func (r *recorder) AX(context.Context, string) (simbridge.Snapshot, error) {
 }
 
 func (r *recorder) Perform(_ context.Context, _ string, events []simbridge.Event) (simbridge.PerformResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.performed = append(r.performed, events)
 	if len(events) == 1 && events[0].Kind == "touch" && events[0].Type == "end" {
 		r.steps = append(r.steps, step{"lift", ""})
@@ -60,7 +69,17 @@ func (r *recorder) Perform(_ context.Context, _ string, events []simbridge.Event
 	return simbridge.PerformResult{}, nil
 }
 
+func (r *recorder) Hold(_ context.Context, _ string, events []simbridge.Event) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.performed = append(r.performed, events)
+	r.steps = append(r.steps, step{"hold", events[0].Type})
+	return r.holdErr
+}
+
 func (r *recorder) order() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	out := []string{}
 	for _, s := range r.steps {
 		out = append(out, s.what)

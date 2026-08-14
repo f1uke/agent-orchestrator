@@ -2453,7 +2453,7 @@ export interface components {
         SimGestureInput: {
             /** @description Swipe duration in milliseconds. Omit for 300. */
             durationMs?: number;
-            /** @description tap, swipe, type or button. */
+            /** @description tap, swipe, type, button, drag-begin, drag-move or drag-end. */
             kind: string;
             name?: string;
             text?: string;

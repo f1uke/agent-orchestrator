@@ -138,7 +138,12 @@ async function liftEverything(reason) {
   }
 }
 
-async function perform(addon, udid, events) {
+// keepDown is the drag case: the events are only half a touch, because the rest
+// of it has not happened yet. The finger stays where it is and the CALLER owns
+// lifting it - the Go side holds the device's gesture hold for the whole drag
+// and lifts on a watchdog if the far end goes quiet. The process-level lifts
+// (signal, stdin closing, reply channel gone) still cover this process dying.
+async function perform(addon, udid, events, keepDown = false) {
   const { hid, finger } = injectorFor(addon, udid);
 
   try {
@@ -161,7 +166,7 @@ async function perform(addon, udid, events) {
       }
     }
   } finally {
-    await finger.lift("gesture ended without a lift");
+    if (!keepDown) await finger.lift("gesture ended without a lift");
   }
   const result = { lifted: finger.lifted, liftReason: finger.liftReason };
   // The flags describe this gesture, not the process: a resident bridge that
@@ -198,6 +203,11 @@ async function handle(request) {
       }
       case "perform": {
         const result = await perform(addon, udid, request.events ?? []);
+        reply({ ok: true, ...result });
+        return;
+      }
+      case "hold": {
+        const result = await perform(addon, udid, request.events ?? [], true);
         reply({ ok: true, ...result });
         return;
       }

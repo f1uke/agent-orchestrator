@@ -30,6 +30,9 @@ type fakeSimService struct {
 	gotUDID    string
 	gotTTL     time.Duration
 	gotToken   string
+	// holds counts grants. A drag that took one per move would still look right
+	// on the device and be wrong about arbitration, so it is counted.
+	holds int
 }
 
 func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error) {
@@ -37,6 +40,7 @@ func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.Session
 	if f.holdErr != nil {
 		return domain.SimHold{}, f.holdErr
 	}
+	f.holds++
 	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
 	return domain.SimHold{UDID: udid, SessionID: sessionID, Token: "tok-fake", ExpiresAt: now.Add(ttl)}, nil
 }

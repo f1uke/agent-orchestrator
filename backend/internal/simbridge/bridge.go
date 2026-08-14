@@ -45,6 +45,16 @@ type Driver interface {
 	// to lift a finger the gesture left down, because that is the difference
 	// between "nothing happened" and "the device was rescued".
 	Perform(ctx context.Context, udid string, events []Event) (PerformResult, error)
+	// Hold runs events and leaves the finger exactly where they left it.
+	//
+	// It exists because a drag that tracks a human's finger cannot be one call:
+	// the events are only known as they happen, so the touch has to span several
+	// of them. That makes the caller responsible for lifting it - the bridge's
+	// own "always lift at the end" rule is what this deliberately opts out of -
+	// and is why the only caller is simgesture.Drags, which holds the device's
+	// gesture hold for the whole drag and lifts on a watchdog if the far end
+	// goes quiet.
+	Hold(ctx context.Context, udid string, events []Event) error
 }
 
 // PerformResult is what a gesture did.
@@ -186,6 +196,12 @@ func (d *NodeDriver) Perform(ctx context.Context, udid string, events []Event) (
 		return PerformResult{}, err
 	}
 	return res.PerformResult, nil
+}
+
+// Hold runs events and leaves the finger down.
+func (d *NodeDriver) Hold(ctx context.Context, udid string, events []Event) error {
+	_, err := d.call(ctx, bridgeRequest{Op: "hold", UDID: udid, Events: events})
+	return err
 }
 
 func (d *NodeDriver) call(ctx context.Context, req bridgeRequest) (bridgeResponse, error) {
