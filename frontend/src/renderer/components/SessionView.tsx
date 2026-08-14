@@ -129,6 +129,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// restores it — which is exactly why every consumer has to gate on this and
 	// not on the URL's presence.
 	const hasWebUI = workspace?.hasWebUI ?? false;
+	const hasIOSSimulator = workspace?.hasIOSSimulator ?? false;
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
 	const sessionLoaded = Boolean(session);
@@ -672,6 +673,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 							<div className="h-full min-w-[280px]">
 								<SessionInspector
 									browserPoppedOut={browserPoppedOut}
+									hasIOSSimulator={hasIOSSimulator}
 									hasWebUI={hasWebUI}
 									isInspectorVisible={isInspectorOpen}
 									onOpenReviewerTerminal={({ handleId, harness }) =>

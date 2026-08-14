@@ -14,8 +14,13 @@ type Summary struct {
 	// The desktop inspector reads it from this list to decide whether the session
 	// rail shows a Browser tab, so it is always emitted, never omitempty: absent
 	// and false must not be distinguishable on the wire.
-	HasWebUI     bool   `json:"hasWebUI"`
-	ResolveError string `json:"resolveError,omitempty"`
+	HasWebUI bool `json:"hasWebUI"`
+	// HasIOSSimulator is the project's resolved iOS fact
+	// (ProjectConfig.HasIOSSimulator), read by the desktop inspector for the same
+	// reason and in the same way as HasWebUI: it decides whether the session rail
+	// shows a Simulator tab. Always emitted, never omitempty.
+	HasIOSSimulator bool   `json:"hasIOSSimulator"`
+	ResolveError    string `json:"resolveError,omitempty"`
 }
 
 // Project is the full read-model returned by GET /api/v1/projects/{id}.

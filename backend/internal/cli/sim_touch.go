@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 )
 
 // The commands that touch the screen.
@@ -33,11 +34,6 @@ import (
 // This is also why a touch command REFUSES when the daemon is unreachable,
 // where the read-only commands degrade: without the daemon there is no hold,
 // and without a hold there is nothing to stop two gestures merging.
-
-// gestureHoldSlack is added to a gesture's own duration when asking for the
-// hold. The hold has to outlive the gesture, and only just: it is the ceiling
-// on how long a command killed mid-gesture keeps the device.
-const gestureHoldSlack = 15 * time.Second
 
 // simGestureResult is the `--json` payload of every touch command.
 type simGestureResult struct {
@@ -221,9 +217,11 @@ type simGesture struct {
 	last simbridge.Point
 }
 
-// runSimGesture is the one path every touch takes: resolve the device, take the
-// hold, run the gesture, give the hold back. There is deliberately no second
-// route to the driver.
+// runSimGesture is the one path every touch takes: resolve the device, then
+// hand the gesture to the shared sequence that brackets it with a hold. There
+// is deliberately no second route to the driver - and the desktop app's
+// Simulator tab goes through the same sequence from the daemon side, so a click
+// there is arbitrated exactly like this command.
 func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions, gesture simGesture) error {
 	ctx := cmd.Context()
 	sessionID, err := simSessionID("`ao sim " + gesture.action + "`")
@@ -239,21 +237,10 @@ func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions,
 		return err
 	}
 
-	// The hold is sized from the gesture itself, not from a flag: a hold that
-	// lapsed mid-gesture would be exactly the window another command needs to
-	// take the finger while this one is still touching the screen.
-	token, err := c.acquireSimHold(ctx, sessionID, device, simbridge.Duration(gesture.events))
+	result, err := simgesture.Run(ctx, &cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver, device.UDID,
+		simgesture.Gesture{Action: gesture.action, Detail: gesture.detail, Events: gesture.events, Last: gesture.last})
 	if err != nil {
-		return err
-	}
-	// The hold is given back on every path out of here, including a panic, so a
-	// failed gesture can never leave the device claimed by a command that is
-	// already gone.
-	defer c.releaseSimHold(ctx, sessionID, device.UDID, token)
-
-	result, performErr := driver.Perform(ctx, device.UDID, gesture.events)
-	if performErr != nil {
-		return c.recoverSimGesture(ctx, driver, device, gesture, performErr)
+		return c.explainSimGestureFailure(device, err)
 	}
 
 	out := simGestureResult{
@@ -272,59 +259,61 @@ func (c *commandContext) runSimGesture(cmd *cobra.Command, opts simTouchOptions,
 	return writeSimGesture(cmd.OutOrStdout(), out)
 }
 
-// recoverSimGesture makes sure a gesture that failed in flight does not leave a
-// finger down. A release with nothing held is harmless; a finger left down
-// wedges the device until it is rebooted, so the lift is always attempted and
-// its outcome is always reported.
-func (c *commandContext) recoverSimGesture(ctx context.Context, driver simbridge.Driver, device simDevice, gesture simGesture, cause error) error {
-	if !gestureTouches(gesture.events) {
-		return fmt.Errorf("`ao sim %s` failed on %s: %w", gesture.action, device.label(), cause)
+// explainSimGestureFailure phrases the shared sequence's outcome for a person
+// reading a terminal. What it may never do is lose the distinction the sequence
+// draws: a gesture whose recovery release also failed leaves a device that may
+// be wedged, and that has to be the loudest thing on screen.
+func (c *commandContext) explainSimGestureFailure(device simDevice, err error) error {
+	var failed *simgesture.FailedError
+	if !errors.As(err, &failed) {
+		return err
 	}
-	if _, liftErr := driver.Perform(ctx, device.UDID, simbridge.Lift(gesture.last)); liftErr != nil {
+	if !failed.Lifted {
+		return fmt.Errorf("`ao sim %s` failed on %s: %w", failed.Action, device.Label(), failed.Cause)
+	}
+	if failed.LiftErr != nil {
 		return fmt.Errorf("`ao sim %s` failed on %s: %w\n"+
 			"The follow-up release ALSO failed (%v), so the device may have a finger held down: "+
 			"a stuck touch wedges input until the simulator is rebooted. Check it before using it again",
-			gesture.action, device.label(), cause, liftErr)
+			failed.Action, device.Label(), failed.Cause, failed.LiftErr)
 	}
 	return fmt.Errorf("`ao sim %s` failed on %s: %w\n"+
 		"The touch was released afterwards, so the device is not left with a finger down. "+
 		"Run `ao sim ax` to see where the screen ended up",
-		gesture.action, device.label(), cause)
+		failed.Action, device.Label(), failed.Cause)
 }
 
-func gestureTouches(events []simbridge.Event) bool {
-	for _, e := range events {
-		if e.Kind == "touch" {
-			return true
-		}
-	}
-	return false
+// cliSimHolder takes the gesture hold the way a CLI must: over the daemon's
+// HTTP API, because the CLI is a thin client and the hold lives in the daemon's
+// database. A refusal is turned into advice here rather than in the shared
+// sequence, which has no business knowing about terminals.
+type cliSimHolder struct {
+	ctx       *commandContext
+	sessionID string
+	device    simDevice
 }
 
-// acquireSimHold takes the finger for this gesture and turns a refusal into
-// advice. The refusal is never something a caller can proceed past: no hold, no
-// events.
-func (c *commandContext) acquireSimHold(ctx context.Context, sessionID string, device simDevice, gestureDuration time.Duration) (string, error) {
-	path := "sessions/" + url.PathEscape(sessionID) + "/sim-leases/" + url.PathEscape(device.UDID) + "/hold"
-	body := acquireSimHoldRequest{HoldSeconds: int((gestureDuration + gestureHoldSlack).Seconds())}
+func (h *cliSimHolder) Acquire(ctx context.Context, udid string, ttl time.Duration) (string, error) {
+	path := "sessions/" + url.PathEscape(h.sessionID) + "/sim-leases/" + url.PathEscape(udid) + "/hold"
+	body := acquireSimHoldRequest{HoldSeconds: int(ttl.Seconds())}
 	var res simHoldResponse
-	if err := c.postJSON(ctx, path, body, &res); err != nil {
-		return "", c.explainSimHoldRefusal(device, err)
+	if err := h.ctx.postJSON(ctx, path, body, &res); err != nil {
+		return "", h.ctx.explainSimHoldRefusal(h.device, err)
 	}
 	return res.Hold.Token, nil
 }
 
-// releaseSimHold gives the finger back. A failure here is worth saying out loud
-// but must not fail a gesture that already happened: the hold lapses on its own
+// Release gives the finger back. A failure here is worth saying out loud but
+// must not fail a gesture that already happened: the hold lapses on its own
 // within a minute either way.
-func (c *commandContext) releaseSimHold(ctx context.Context, sessionID, udid, token string) {
+func (h *cliSimHolder) Release(ctx context.Context, udid, token string) {
 	if token == "" {
 		return
 	}
-	path := "sessions/" + url.PathEscape(sessionID) + "/sim-leases/" + url.PathEscape(udid) +
+	path := "sessions/" + url.PathEscape(h.sessionID) + "/sim-leases/" + url.PathEscape(udid) +
 		"/hold/" + url.PathEscape(token)
-	if err := c.deleteJSON(ctx, path, nil); err != nil {
-		_, _ = fmt.Fprintf(c.deps.Err, "warning: could not hand the device's gesture hold back (%v); it lapses on its own shortly.\n", err)
+	if err := h.ctx.deleteJSON(ctx, path, nil); err != nil {
+		_, _ = fmt.Fprintf(h.ctx.deps.Err, "warning: could not hand the device's gesture hold back (%v); it lapses on its own shortly.\n", err)
 	}
 }
 
@@ -335,14 +324,14 @@ func (c *commandContext) explainSimHoldRefusal(device simDevice, err error) erro
 	var apiErr apiResponseError
 	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != "SIM_DEVICE_BUSY" {
 		return fmt.Errorf("could not take the gesture hold on %s, so nothing was sent to the device: %w",
-			device.label(), err)
+			device.Label(), err)
 	}
 	reason, _ := apiErr.ErrorBody.Details["reason"].(string)
 	switch reason {
 	case "busy":
 		return fmt.Errorf("%s is mid-gesture: another command holds the finger right now, and nothing was sent.\n"+
 			"Two overlapping gestures merge into one touch on this device, so this command waits for nobody. Retry in a moment",
-			device.label())
+			device.Label())
 	case "leased_by_other":
 		holder, _ := apiErr.ErrorBody.Details["holder"].(string)
 		left := ""
@@ -354,12 +343,12 @@ func (c *commandContext) explainSimHoldRefusal(device simDevice, err error) erro
 		}
 		return fmt.Errorf("%s is leased by @%s%s, so nothing was sent to the device.\n"+
 			"`ao sim ax` and `ao sim shot` are read-only and still work. Wait for the lease to lapse, or ask @%s to run `ao sim release`",
-			device.label(), holder, left, holder)
+			device.Label(), holder, left, holder)
 	default:
 		return fmt.Errorf("this session has not claimed %s, so nothing was sent to the device.\n"+
 			"Run `ao sim claim` first - AO cannot see whether a human is driving the same simulator from Xcode, "+
 			"so it never takes a device on your behalf",
-			device.label())
+			device.Label())
 	}
 }
 

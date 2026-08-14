@@ -24,6 +24,7 @@ import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget } from "./FilesPanel";
 import { SmokeTestView } from "./SmokeTestView";
+import { SimulatorPanel } from "./SimulatorPanel";
 import { JiraIssueSection } from "./JiraIssueSection";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
@@ -32,7 +33,7 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "tests" | "browser";
+export type InspectorView = "summary" | "reviews" | "files" | "tests" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -79,6 +80,19 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		),
 	},
 	{
+		id: "simulator",
+		// "Device" and not "Simulator": the tab-strip breakpoints in styles.css
+		// are derived from the widest label, and a longer one there would move
+		// every count's threshold.
+		label: "Device",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<rect x="6" y="2" width="12" height="20" rx="2.5" />
+				<line x1="10.5" y1="5" x2="13.5" y2="5" />
+			</svg>
+		),
+	},
+	{
 		id: "browser",
 		label: "Browser",
 		icon: (
@@ -105,6 +119,7 @@ export function SessionInspector({
 	session,
 	onOpenReviewerTerminal,
 	hasWebUI = false,
+	hasIOSSimulator = false,
 	browserPoppedOut = false,
 	isInspectorVisible = true,
 	onToggleBrowserPopOut,
@@ -125,6 +140,13 @@ export function SessionInspector({
 	 * permanently empty.
 	 */
 	hasWebUI?: boolean;
+	/**
+	 * Whether this session's project targets iOS
+	 * (ProjectConfig.hasIOSSimulator). Opt-in for the same reason as hasWebUI:
+	 * a project with no simulator to watch is not given a tab that could only
+	 * ever be empty.
+	 */
+	hasIOSSimulator?: boolean;
 	browserPoppedOut?: boolean;
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
@@ -153,7 +175,12 @@ export function SessionInspector({
 	const showFiles = session?.kind !== "orchestrator";
 	// A project with no web UI has nothing to preview, so the Browser tab is not
 	// offered at all — an always-empty tab is worse than one tab fewer.
-	const views = VIEWS.filter((v) => (v.id === "files" ? showFiles : v.id === "browser" ? hasWebUI : true));
+	const views = VIEWS.filter((v) => {
+		if (v.id === "files") return showFiles;
+		if (v.id === "browser") return hasWebUI;
+		if (v.id === "simulator") return hasIOSSimulator;
+		return true;
+	});
 	// The requested tab can name a view this session does not show: a remembered
 	// Browser tab in a project that has since switched the web UI off, or Files on
 	// an orchestrator. Without this the strip would render with nothing selected
@@ -207,6 +234,9 @@ export function SessionInspector({
 					// Files owns its own scroll (segmented control + summary pinned,
 					// list scrolling beneath), so it renders flush too.
 					view === "files" && "session-inspector__body--files",
+					// The Simulator tab owns its own full-height layout (picker,
+					// screen, controls), so it renders flush.
+					view === "simulator" && "session-inspector__body--simulator",
 				)}
 			>
 				{view === "summary" ? <SummaryView session={session} /> : null}
@@ -223,6 +253,24 @@ export function SessionInspector({
 				) : null}
 				{view === "tests" ? (
 					<SmokeTestView sessionId={session.id} worker={session.title} issueId={session.issueId} />
+				) : null}
+				{/* The Simulator panel stays mounted while its tab is off so the chosen
+				    device survives a trip to another tab - with two simulators booted
+				    there is no default to fall back on, and re-picking on every tab
+				    switch would be the price of a refusal that is otherwise free. It
+				    costs nothing to keep: isActive false closes the socket, which is
+				    what stops the capture, and gates the device query too.
+				    Keyed by session so switching sessions tears the stream down and
+				    resets driving to off, rather than carrying a live socket - and a
+				    drivable device - across to a session that did not ask for it. */}
+				{hasIOSSimulator ? (
+					<div className="contents" hidden={view !== "simulator"}>
+						<SimulatorPanel
+							isActive={view === "simulator" && isInspectorVisible}
+							key={session.id}
+							sessionId={session.id}
+						/>
+					</div>
 				) : null}
 				{view === "browser" ? (
 					<BrowserView

@@ -28,15 +28,19 @@ const Version = "0.1.45"
 
 const addonAsset = "assets/serve-sim-native-" + Version + ".node"
 
-//go:embed assets/bridge.mjs assets/serve-sim-native-0.1.45.node assets/LICENSE-serve-sim.txt assets/NOTICE-serve-sim.txt
+//go:embed assets/bridge.mjs assets/capture.mjs assets/serve-sim-native-0.1.45.node assets/LICENSE-serve-sim.txt assets/NOTICE-serve-sim.txt
 var assets embed.FS
 
 // Toolchain is where an installed bridge lives on disk.
 type Toolchain struct {
 	// Dir is the versioned directory holding every file below.
 	Dir string
-	// Script is our own bridge.mjs.
+	// Script is our own bridge.mjs: one gesture or one read, then it exits.
 	Script string
+	// Capture is our own capture.mjs: the long-lived frame stream a human
+	// watches. It is installed alongside the one-shot bridge because they share
+	// the addon, and one copy of a vendored native binary on disk is the point.
+	Capture string
 	// Addon is the vendored serve-sim native addon.
 	Addon string
 }
@@ -55,9 +59,10 @@ func Install(dataDir string) (Toolchain, error) {
 		return Toolchain{}, fmt.Errorf("create simulator bridge directory: %w", err)
 	}
 	tc := Toolchain{
-		Dir:    dir,
-		Script: filepath.Join(dir, "bridge.mjs"),
-		Addon:  filepath.Join(dir, filepath.Base(addonAsset)),
+		Dir:     dir,
+		Script:  filepath.Join(dir, "bridge.mjs"),
+		Capture: filepath.Join(dir, "capture.mjs"),
+		Addon:   filepath.Join(dir, filepath.Base(addonAsset)),
 	}
 	files := []struct {
 		asset string
@@ -65,6 +70,7 @@ func Install(dataDir string) (Toolchain, error) {
 		mode  os.FileMode
 	}{
 		{"assets/bridge.mjs", tc.Script, 0o640},
+		{"assets/capture.mjs", tc.Capture, 0o640},
 		{addonAsset, tc.Addon, 0o750},
 		{"assets/LICENSE-serve-sim.txt", filepath.Join(dir, "LICENSE-serve-sim.txt"), 0o640},
 		{"assets/NOTICE-serve-sim.txt", filepath.Join(dir, "NOTICE-serve-sim.txt"), 0o640},

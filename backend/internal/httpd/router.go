@@ -61,6 +61,7 @@ func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal
 
 	mountHealth(r)
 	mountTerminalMux(r, termMgr, log)
+	mountSimStream(r, deps.SimScreen, log)
 	mountControl(r, control)
 	mountTelemetry(r, deps.Telemetry)
 	NewAPI(cfg, deps).Register(r)

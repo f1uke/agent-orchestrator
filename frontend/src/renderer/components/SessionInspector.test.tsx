@@ -17,7 +17,12 @@ vi.mock("../lib/api-client", () => ({
 		GET: getMock,
 		POST: postMock,
 		PUT: putMock,
+		DELETE: vi.fn(),
 	},
+	// The Simulator panel is mounted (hidden) whenever the project targets iOS,
+	// so its base-URL subscription has to exist even in tests that never open it.
+	getApiBaseUrl: () => "http://127.0.0.1:3001",
+	subscribeApiBaseUrl: () => () => {},
 	apiErrorMessage: (error: unknown, fallback = "Request failed") => {
 		if (error instanceof Error) return error.message;
 		if (typeof error === "object" && error !== null && "message" in error) {
@@ -818,17 +823,38 @@ describe("SessionInspector target branch", () => {
 // breakpoint, which truncates 5 tabs and needlessly hides 4 that would fit.
 describe("SessionInspector tab-strip width class", () => {
 	it.each([
+		{ name: "worker with a web UI and iOS", props: { hasWebUI: true, hasIOSSimulator: true }, expected: "6" },
 		{ name: "worker with a web UI", props: { hasWebUI: true }, expected: "5" },
+		{ name: "worker with iOS only", props: { hasIOSSimulator: true }, expected: "5" },
 		{ name: "worker with no web UI", props: {}, expected: "4" },
 		{ name: "orchestrator with a web UI", props: { hasWebUI: true, orchestrator: true }, expected: "4" },
 		{ name: "orchestrator with no web UI", props: { orchestrator: true }, expected: "3" },
 	])("reports $expected tabs to the stylesheet for a $name", ({ props, expected }) => {
-		const { orchestrator, ...rest } = props as { hasWebUI?: boolean; orchestrator?: boolean };
+		const { orchestrator, ...rest } = props as {
+			hasWebUI?: boolean;
+			hasIOSSimulator?: boolean;
+			orchestrator?: boolean;
+		};
 		renderWithQuery(
 			<SessionInspector session={orchestrator ? { ...session([]), kind: "orchestrator" } : session([])} {...rest} />,
 		);
 		const strip = screen.getByRole("tablist");
 		expect(strip).toHaveAttribute("data-tab-count", expected);
 		expect(screen.getAllByRole("tab")).toHaveLength(Number(expected));
+	});
+});
+
+// The Simulator tab is opt-in per project, for the same reason the Browser tab
+// is: a project with no simulator to watch would get a tab that can only ever be
+// empty, on every one of its sessions.
+describe("SessionInspector Simulator tab visibility", () => {
+	it("is absent for a project that has not opted into iOS", () => {
+		renderWithQuery(<SessionInspector session={session([])} />);
+		expect(screen.queryByRole("tab", { name: /device/i })).not.toBeInTheDocument();
+	});
+
+	it("is offered for a project that targets iOS", () => {
+		renderWithQuery(<SessionInspector hasIOSSimulator session={session([])} />);
+		expect(screen.getByRole("tab", { name: /device/i })).toBeInTheDocument();
 	});
 });

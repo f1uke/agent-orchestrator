@@ -118,6 +118,7 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 			SessionPrefix:     resolveSessionPrefix(row),
 			OrchestratorAgent: row.Config.Orchestrator.Harness,
 			HasWebUI:          row.Config.HasWebUI,
+			HasIOSSimulator:   row.Config.HasIOSSimulator,
 		})
 	}
 	return out, nil

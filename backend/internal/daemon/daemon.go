@@ -37,6 +37,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -119,6 +120,13 @@ func Run() error {
 	gatedRuntime := newGatedRuntime(runtimeAdapter, inputGate)
 	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log, terminal.WithInputRecorder(inputGate))
 	defer termMgr.Close()
+
+	// The simulator screen surface behind the desktop app's Simulator tab.
+	// Nothing here starts a process: device discovery shells out on demand, and
+	// a capture exists only while somebody is watching one. Shutting it down is
+	// what guarantees no capture process outlives the daemon.
+	simScreen := simstream.NewScreen(cfg.DataDir)
+	defer simScreen.Shutdown()
 
 	// The agent messenger sends validated user input to the session's live
 	// runtime pane. Keep this path small until durable inbox semantics are needed.
@@ -281,6 +289,7 @@ func Run() error {
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		Sim:                simsvc.New(store),
+		SimScreen:          simScreen,
 		Notifications:      notifier,
 		NotificationStream: notificationHub,
 		ActivityFeed:       activityHub,

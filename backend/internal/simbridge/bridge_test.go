@@ -219,8 +219,8 @@ func TestInstall_ConcurrentCallersAllSucceed(t *testing.T) {
 			t.Fatalf("a staging file was left behind: %s", e.Name())
 		}
 	}
-	if len(entries) != 4 {
-		t.Fatalf("dir holds %d files, want exactly the 4 installed assets", len(entries))
+	if len(entries) != 5 {
+		t.Fatalf("dir holds %d files, want exactly the 5 installed assets", len(entries))
 	}
 }
 

@@ -121,6 +121,23 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 				</p>
 			</SettingsGroup>
 
+			<SettingsGroup title="iOS Simulator">
+				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
+					<input
+						type="checkbox"
+						className="h-4 w-4 accent-accent"
+						checked={draft.hasIOSSimulator}
+						onChange={(e) => setField("hasIOSSimulator", e.target.checked)}
+					/>
+					This project targets iOS
+				</label>
+				<p className="text-[11px] text-passive">
+					Off by default. When on, a session's inspector gains a Simulator tab that shows a booted iOS Simulator's
+					screen live and can drive it under the same lease and gesture hold <code>ao sim tap</code> uses. Nothing
+					captures unless that tab is open and this window is focused.
+				</p>
+			</SettingsGroup>
+
 			<SettingsGroup title="Worktrees">
 				<SettingsField label="Default branch" htmlFor="defaultBranch" modified={isFieldDirty("defaultBranch")}>
 					<input

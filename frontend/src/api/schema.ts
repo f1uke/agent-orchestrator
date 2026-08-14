@@ -916,6 +916,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Touch a simulator screen as this session, under the same lease and gesture hold `ao sim tap` uses */
+        post: operations["performSimGesture"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/sim-leases": {
         parameters: {
             query?: never;
@@ -1452,6 +1469,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sim/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List this machine's iOS Simulators with their lease state */
+        get: operations["listSimDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sim/leases": {
         parameters: {
             query?: never;
@@ -1922,6 +1956,12 @@ export interface components {
         ListSessionsResponse: {
             sessions: components["schemas"]["ControllersSessionView"][];
         };
+        ListSimDevicesResponse: {
+            /** @description Why that device is the default, or why there is none. */
+            defaultReason: string;
+            defaultUdid: null | string;
+            devices: components["schemas"]["SimDeviceView"][];
+        };
         ListSimLeasesResponse: {
             leases: components["schemas"]["SimLease"][];
         };
@@ -2042,6 +2082,7 @@ export interface components {
                 [key: string]: string;
             };
             gitConvention?: components["schemas"]["GitConventionConfig"];
+            hasIOSSimulator?: boolean;
             hasWebUI?: boolean;
             orchestrator?: components["schemas"]["RoleOverride"];
             postCreate?: string[];
@@ -2063,6 +2104,7 @@ export interface components {
             project: components["schemas"]["Project"];
         };
         ProjectSummary: {
+            hasIOSSimulator: boolean;
             hasWebUI: boolean;
             id: string;
             kind: string;
@@ -2382,6 +2424,54 @@ export interface components {
         };
         SetSystemPromptRequest: {
             base: string;
+        };
+        SimDeviceLeaseView: {
+            /** Format: date-time */
+            acquiredAt?: null | string;
+            /** Format: date-time */
+            expiresAt?: null | string;
+            /** @description Session that holds the lease, when the state is held. */
+            holder?: string;
+            /** @description Why the state is unknown. */
+            reason?: string;
+            /** @description held when an AO session holds a live lease; unknown otherwise. Never free - AO cannot see a human driving the device from Xcode. */
+            state: string;
+        };
+        SimDeviceView: {
+            available: boolean;
+            /** @description True for the one device an unqualified request resolves to. Never set when several are booted. */
+            default: boolean;
+            lease: components["schemas"]["SimDeviceLeaseView"];
+            name: string;
+            /** @description Human-readable runtime, e.g. iOS 26.3. */
+            runtime: string;
+            runtimeIdentifier: string;
+            /** @description simctl's own state, e.g. Booted or Shutdown. */
+            state: string;
+            udid: string;
+        };
+        SimGestureInput: {
+            /** @description Swipe duration in milliseconds. Omit for 300. */
+            durationMs?: number;
+            /** @description tap, swipe, type or button. */
+            kind: string;
+            name?: string;
+            text?: string;
+            /** Format: double */
+            toX?: number;
+            /** Format: double */
+            toY?: number;
+            /** Format: double */
+            x?: number;
+            /** Format: double */
+            y?: number;
+        };
+        SimGestureResponse: {
+            /** @description What was done, in the same words the CLI prints. */
+            detail: string;
+            kind: string;
+            rescued?: boolean;
+            udid: string;
         };
         SimHold: {
             /** Format: date-time */
@@ -5899,6 +5989,89 @@ export interface operations {
             };
         };
     };
+    performSimGesture: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. The gesture is arbitrated as this session. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimGestureInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimGestureResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     acquireSimLease: {
         parameters: {
             query?: never;
@@ -7785,6 +7958,44 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listSimDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSimDevicesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -24,12 +24,11 @@ import (
 // its own exclusive lock, which AO has no way to see).
 
 const (
-	// simLeaseUnknownReason is what AO says about a device no AO session holds.
-	// Not "free": AO knows its own leases and nothing else.
-	simLeaseUnknownReason = "no AO session holds this device; AO cannot see whether a human is driving it from Xcode"
-	// simLeaseNoDaemonReason distinguishes "nobody holds it" from "we could not
-	// ask" - both are unknown, for different reasons.
-	simLeaseNoDaemonReason = "the AO daemon is not reachable, so AO cannot tell who holds this device"
+	// The two reasons a device reads as unknown live in domain because the
+	// desktop app's Simulator tab reports the same lease state from the daemon
+	// side and must not word it differently.
+	simLeaseUnknownReason  = domain.SimLeaseUnknownReason
+	simLeaseNoDaemonReason = domain.SimLeaseNoDaemonReason
 	// simLeaseScopeNote is the honest limit of what a claim buys.
 	simLeaseScopeNote = "A lease keeps other AO sessions off this device. It cannot stop a human " +
 		"driving the same simulator from Xcode - Xcode takes its own exclusive lock that AO cannot see."
@@ -384,7 +383,7 @@ func (c *commandContext) explainSimContention(device simDevice, err error) error
 	}
 	return fmt.Errorf("%s is leased by @%s%s, so nothing was claimed.\n"+
 		"`ao sim shot` is read-only and still works. Wait for the lease to lapse, or ask @%s to run `ao sim release`",
-		device.label(), holder, left, holder)
+		device.Label(), holder, left, holder)
 }
 
 func writeSimClaim(out io.Writer, result simClaimResult) error {

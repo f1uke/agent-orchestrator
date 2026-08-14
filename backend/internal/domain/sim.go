@@ -22,6 +22,18 @@ const (
 	SimLeaseUnknown SimLeaseState = "unknown"
 )
 
+// Why a device reads as unknown. Both surfaces that report lease state - the
+// `ao sim` CLI and the desktop app's Simulator tab - say the same sentence,
+// because the honesty is the point: "nobody holds it" and "nobody could be
+// asked" are both unknown, and printing the wrong one states something AO never
+// checked.
+const (
+	// SimLeaseUnknownReason: AO knows its own leases and nothing else.
+	SimLeaseUnknownReason = "no AO session holds this device; AO cannot see whether a human is driving it from Xcode"
+	// SimLeaseNoDaemonReason: AO could not even ask.
+	SimLeaseNoDaemonReason = "the AO daemon is not reachable, so AO cannot tell who holds this device"
+)
+
 // SimLease is one AO session's exclusive claim on one local iOS Simulator, held
 // for a bounded time. It is pure bookkeeping: taking a lease never touches the
 // device (AO never boots, shuts down, reboots or erases a simulator).
