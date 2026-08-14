@@ -22,6 +22,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -39,6 +41,20 @@ type fakeScreen struct {
 	listed     atomic.Int64
 	subscribed []string
 	subErr     error
+
+	// The guest keyboard the device reports, and what was asked about it.
+	mu            sync.Mutex
+	keyboard      string
+	keyboardErr   error
+	keyboardUDID  string
+	keyboardCalls int
+	pasteboard    *fakePasteboard
+}
+
+func (f *fakeScreen) keyboardAsked() (string, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.keyboardUDID, f.keyboardCalls
 }
 
 func (f *fakeScreen) Devices(context.Context) (simctl.Listing, error) {
@@ -65,17 +81,91 @@ func (f *fakeScreen) Driver(context.Context) (simbridge.Driver, error) {
 	return f.driver, nil
 }
 
-// fakeDriver records the events that reached the device.
-type fakeDriver struct {
-	mu      sync.Mutex
-	events  [][]simbridge.Event
-	err     error
-	liftErr error
-	holdErr error
+// Keyboard is what the guest would turn key presses into. A US keyboard by
+// default, which is the setup where typing has always worked; the tests about
+// the other setups set keyboard/keyboardErr themselves.
+func (f *fakeScreen) Keyboard(_ context.Context, udid string) (simkeyboard.Mode, error) {
+	f.mu.Lock()
+	f.keyboardUDID = udid
+	f.keyboardCalls++
+	f.mu.Unlock()
+	if f.keyboardErr != nil {
+		return simkeyboard.Mode{}, f.keyboardErr
+	}
+	if f.keyboard == "" {
+		return simkeyboard.ParseMode("en_US@sw=QWERTY;hw=Automatic"), nil
+	}
+	return simkeyboard.ParseMode(f.keyboard), nil
 }
 
+// Pasteboard is the guest clipboard. nil when a test has not set one up, which
+// is how "this machine cannot paste" is exercised.
+func (f *fakeScreen) Pasteboard() simpaste.Pasteboard {
+	if f.pasteboard == nil {
+		return nil
+	}
+	return f.pasteboard
+}
+
+// fakePasteboard remembers what the guest clipboard was given, so a test can
+// prove the payload was put there and then taken back off.
+type fakePasteboard struct {
+	mu      sync.Mutex
+	content string
+	writes  []string
+}
+
+func (p *fakePasteboard) Read(context.Context, string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.content, nil
+}
+
+func (p *fakePasteboard) Write(_ context.Context, _, text string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.content = text
+	p.writes = append(p.writes, text)
+	return nil
+}
+
+func (p *fakePasteboard) written() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.writes...)
+}
+
+// fakeDriver records the events that reached the device.
+type fakeDriver struct {
+	mu        sync.Mutex
+	events    [][]simbridge.Event
+	err       error
+	liftErr   error
+	holdErr   error
+	snapshots []simbridge.Snapshot
+}
+
+// AX hands out the queued snapshots in order, which is how a paste is proven:
+// the field is empty before and holds the payload after.
 func (d *fakeDriver) AX(context.Context, string) (simbridge.Snapshot, error) {
-	return simbridge.Snapshot{}, errors.New("not used")
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.snapshots) == 0 {
+		return simbridge.Snapshot{}, errors.New("not used")
+	}
+	next := d.snapshots[0]
+	if len(d.snapshots) > 1 {
+		d.snapshots = d.snapshots[1:]
+	}
+	return next, nil
+}
+
+// pasteLands is a driver whose screen gains text where a paste would put it.
+func pasteLands(text string) *fakeDriver {
+	return &fakeDriver{snapshots: []simbridge.Snapshot{
+		{Elements: []simbridge.Element{{Path: "0.1", Value: ""}}},
+		{Elements: []simbridge.Element{{Path: "0.1", Value: text}}},
+	}}
 }
 
 func (d *fakeDriver) Hold(_ context.Context, _ string, events []simbridge.Event) error {
@@ -279,6 +369,141 @@ func TestSimGesture_TapTakesTheHoldAndReachesTheDevice(t *testing.T) {
 	}
 	if svc.gotToken != "tok-fake" {
 		t.Fatalf("the hold must be given back, released token %q", svc.gotToken)
+	}
+}
+
+// Typing is arbitrated like every other gesture, but it has one extra
+// question to settle first, and the daemon route has to settle it the same way
+// the CLI does: the guest decides what a key press becomes.
+func TestSimGesture_TypePastesWhenTheGuestWouldRemapTheKeys(t *testing.T) {
+	// The daemon route reaches the device the same way the CLI does. Two answers
+	// to "is this keyboard safe" would mean one of these surfaces silently types
+	// the wrong characters again, which is the bug being fixed.
+	svc := &fakeSimService{}
+	driver := pasteLands("fa12345")
+	pb := &fakePasteboard{content: "what the human had copied"}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver,
+		keyboard: "th_TH@sw=Thai;hw=Automatic", pasteboard: pb}
+	srv := newScreenTestServer(t, svc, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345"})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if writes := pb.written(); len(writes) != 2 || writes[0] != "fa12345" {
+		t.Fatalf("pasteboard writes = %q, want the payload then the restore", writes)
+	}
+	if pb.content != "what the human had copied" {
+		t.Fatalf("guest pasteboard left holding %q", pb.content)
+	}
+	for _, sent := range driver.sent() {
+		if strings.HasPrefix(sent, "key:") && !strings.Contains(sent, "down") && !strings.Contains(sent, "up") {
+			t.Fatalf("unexpected event %q", sent)
+		}
+	}
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "pasted") {
+		t.Fatalf("detail = %q, must say the route taken", detail)
+	}
+	if udid, calls := screen.keyboardAsked(); udid != testSimUDID || calls != 1 {
+		t.Fatalf("asked %q about its keyboard %d time(s)", udid, calls)
+	}
+}
+
+func TestSimGesture_TypePastesWhenTheKeyboardCouldNotBeRead(t *testing.T) {
+	// Unknown is not US, but it is not a dead end either: the pasteboard does
+	// not care what the input mode is.
+	pb := &fakePasteboard{content: "original"}
+	screen := &fakeScreen{listing: oneBooted(), driver: pasteLands("hunter2"),
+		keyboardErr: errors.New("device has not shown a keyboard"), pasteboard: pb}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "hunter2"})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if writes := pb.written(); len(writes) == 0 || writes[0] != "hunter2" {
+		t.Fatalf("pasteboard writes = %q", writes)
+	}
+}
+
+func TestSimGesture_TypeIs501WhenTheMachineCannotPaste(t *testing.T) {
+	// A daemon with no pasteboard cannot deliver the characters and must say so,
+	// rather than falling back to keys that would arrive as something else.
+	screen := &fakeScreen{listing: oneBooted(), driver: &fakeDriver{}, keyboard: "th_TH@sw=Thai;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345"})
+	if code != http.StatusNotImplemented {
+		t.Fatalf("status %d, want 501: %v", code, out)
+	}
+}
+
+func TestSimGesture_TypeOnAUSGuestReachesTheDevice(t *testing.T) {
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver, keyboard: "en_US@sw=QWERTY;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345"})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	var keys int
+	for _, sent := range driver.sent() {
+		if strings.HasPrefix(sent, "key:") {
+			keys++
+		}
+	}
+	if keys == 0 {
+		t.Fatalf("no key events reached the device: %v", driver.sent())
+	}
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "7 characters") {
+		t.Fatalf("detail = %q, want the characters it can now promise", detail)
+	}
+}
+
+func TestSimGesture_TypeWithRawKeysSendsWithoutAskingTheDevice(t *testing.T) {
+	driver := &fakeDriver{}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver, keyboard: "th_TH@sw=Thai;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "fa12345", "rawKeys": true})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if len(driver.events) != 1 {
+		t.Fatalf("want one gesture on the device, got %d", len(driver.events))
+	}
+	if _, calls := screen.keyboardAsked(); calls != 0 {
+		t.Fatalf("asked the device about a mapping it had agreed to ignore (%d time(s))", calls)
+	}
+	// The response must not claim characters it cannot promise.
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "key presses") {
+		t.Fatalf("detail = %q, want it to say key presses", detail)
+	}
+}
+
+func TestSimGesture_OnlyTypingAsksAboutTheKeyboard(t *testing.T) {
+	// The probe is a subprocess on a real machine. Paying it for every tap in a
+	// drag is what this route already learned not to do with `simctl list`.
+	screen := &fakeScreen{listing: oneBooted(), driver: &fakeDriver{}}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	for _, body := range []map[string]any{
+		{"kind": "tap", "x": 0.5, "y": 0.5},
+		{"kind": "swipe", "x": 0.5, "y": 0.8, "toX": 0.5, "toY": 0.2},
+		{"kind": "button", "name": "home"},
+	} {
+		if code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture", body); code != http.StatusOK {
+			t.Fatalf("%v: status %d: %v", body, code, out)
+		}
+	}
+	if _, calls := screen.keyboardAsked(); calls != 0 {
+		t.Fatalf("a gesture that sends no keys asked about the keyboard %d time(s)", calls)
 	}
 }
 

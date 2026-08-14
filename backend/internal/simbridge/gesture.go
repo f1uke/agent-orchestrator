@@ -1,11 +1,14 @@
 package simbridge
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 )
 
 // Gestures are composed here, in Go, and not in the bridge script: this is
@@ -20,7 +23,8 @@ import (
 //   - anything the device would silently ignore (a coordinate off the screen, a
 //     character a US keyboard cannot send, a button name the addon does not
 //     know) is refused here rather than reported as a success that changed
-//     nothing.
+//     nothing - and so is the subtler version of the same sin, a key press the
+//     guest would deliver as a DIFFERENT character (see Type).
 
 // Timings, chosen to match what the simulator's HID layer actually responds to.
 const (
@@ -42,6 +46,9 @@ const (
 	// command to take the finger while this one is still using it. At keyStep a
 	// run this long takes a few seconds, well inside the hold's ceiling.
 	MaxTypeRunes = 2000
+	// pasteHold is how long Command-V stays down. Long enough that the guest
+	// registers the chord rather than treating it as key noise.
+	pasteHold = 60 * time.Millisecond
 	// perEventOverhead is the allowance added per non-sleep event when estimating
 	// how long a gesture will take. Deliberately generous: an estimate that comes
 	// out short is the failure that matters.
@@ -177,8 +184,137 @@ func shareSteps(points []Point, steps int) []int {
 	return share
 }
 
-// Type sends text as US-keyboard key events.
-func Type(text string) ([]Event, error) {
+// UnsendableError is a character the HID keyboard has no key for. It is a type
+// rather than a message because it is the signal that decides a route: there is
+// no key that sends it, but the PASTEBOARD can carry it, so a caller that has
+// that option should take it instead of giving up.
+type UnsendableError struct{ Rune rune }
+
+func (e *UnsendableError) Error() string {
+	return fmt.Sprintf("cannot type %q with key presses: the simulator's HID keyboard is a US keyboard, so only "+
+		"ASCII letters, digits, space, tab, newline and standard punctuation have a key to send them",
+		string(e.Rune))
+}
+
+// TextRoute is how a piece of text will be delivered to a device.
+//
+// Deciding this is the whole fix, so it is a pure function of what is being
+// sent and what the guest reported - no device access, no I/O, one place. Both
+// surfaces that type (the CLI, and the daemon route behind the Device tab) plan
+// with it, because two implementations of "is the keyboard safe" would
+// eventually disagree, and disagreeing about THIS means one of them silently
+// types the wrong characters again.
+type TextRoute struct {
+	// Paste: deliver through the guest's pasteboard instead of the keyboard.
+	Paste bool
+	// Why names the reason the pasteboard was chosen, for the caller to report.
+	// Taking a different route than expected is fine; doing it silently is not.
+	Why string
+	// Events is the composed keystrokes, when the keyboard route is taken.
+	Events []Event
+	// Keyboard is the input mode that was established, when one was.
+	Keyboard simkeyboard.Mode
+}
+
+// ProbedKeyboard is what a device answered when asked which input mode it uses,
+// or why it would not say.
+//
+// The two travel together as one value on purpose. Held apart, the natural
+// mistake is to read a failed probe as a zero Mode and let it fall through the
+// same branch as a known-bad layout - which routes the same way today but
+// diagnoses it wrongly, telling a person their keyboard is set to something
+// when the truth is the device never answered.
+type ProbedKeyboard struct {
+	Mode simkeyboard.Mode
+	// Err is why the mode is not known. Never nil-checked away into "US": an
+	// unverified keyboard is the thing this whole package refuses to assume.
+	Err error
+}
+
+// TextOptions are the caller's overrides.
+type TextOptions struct {
+	// RawKeys: send the key presses whatever the guest makes of them. On a Thai
+	// guest that is how Thai text is entered at all, so the capability stays -
+	// it just has to be asked for, and then only key presses are promised.
+	RawKeys bool
+	// Paste: use the pasteboard regardless.
+	Paste bool
+}
+
+// PlanText decides how to deliver text so that the characters asked for are the
+// characters that arrive.
+//
+// The default is neither "keys" nor "paste" but "whichever one can tell the
+// truth". Keys are preferred wherever they are provably faithful, because they
+// are the truer simulation: an app watching per-keystroke events - a live
+// validator, a character counter, a masked field - sees what a person would.
+// The pasteboard takes over exactly where keys stop being able to promise
+// anything: a guest whose input mode would remap them, a guest that will not
+// say what its input mode is, or text no US keyboard has a key for at all.
+//
+// keyboard is what the device reported when asked; a caller that could not ask
+// passes the reason, and gets the pasteboard - which does not care what the
+// input mode is.
+func PlanText(text string, keyboard ProbedKeyboard, opts TextOptions) (TextRoute, error) {
+	if opts.RawKeys && opts.Paste {
+		return TextRoute{}, errors.New(
+			"raw keys and paste ask for different routes to the device: raw keys sends the key presses and " +
+				"accepts whatever the simulator makes of them, paste delivers the exact characters through " +
+				"the pasteboard. Pick one")
+	}
+	if text == "" {
+		return TextRoute{}, errors.New("nothing to type")
+	}
+	if opts.Paste {
+		return TextRoute{Paste: true, Why: "the pasteboard was asked for", Keyboard: keyboard.Mode}, nil
+	}
+
+	events, keyErr := TypeRaw(text)
+	if opts.RawKeys {
+		if keyErr != nil {
+			return TextRoute{}, keyErr
+		}
+		return TextRoute{Events: events}, nil
+	}
+
+	// A character with no key at all is the one case where the pasteboard is
+	// not a fallback but the only mechanism that exists.
+	var unsendable *UnsendableError
+	if errors.As(keyErr, &unsendable) {
+		return TextRoute{Paste: true, Keyboard: keyboard.Mode,
+			Why: fmt.Sprintf("no US keyboard key can send %q", string(unsendable.Rune))}, nil
+	}
+	if keyErr != nil {
+		// Anything else wrong with the text is the caller's own mistake and is
+		// not fixed by changing route.
+		return TextRoute{}, keyErr
+	}
+
+	switch {
+	case keyboard.Err != nil:
+		// Deliberately not propagated. A device that would not say which
+		// keyboard it has has not failed this call - it has answered the only
+		// question that matters here, which is "can the key presses be
+		// trusted", and the answer is no. The pasteboard does not care what the
+		// input mode is, so there is a route left to take.
+		//nolint:nilerr // an unknown keyboard selects a route; it is not an error to report
+		return TextRoute{Paste: true, Why: "the simulator would not say which keyboard input mode it is using"}, nil
+	case !keyboard.Mode.SendsUSASCII():
+		return TextRoute{Paste: true, Keyboard: keyboard.Mode,
+			Why: "the simulator's keyboard input mode is " + keyboard.Mode.Describe() +
+				", which would remap the key presses"}, nil
+	}
+	return TextRoute{Events: events, Keyboard: keyboard.Mode}, nil
+}
+
+// TypeRaw sends the key presses without promising what they will produce.
+//
+// It exists because on a guest set to Thai these usages ARE how Thai text is
+// entered, and a QA session driving a Thai app may want exactly that. What it
+// does not waive is the HID path's own limit: a character no US keyboard can
+// send has no usage to send it with, so it is still refused rather than
+// dropped.
+func TypeRaw(text string) ([]Event, error) {
 	if text == "" {
 		return nil, fmt.Errorf("nothing to type")
 	}
@@ -193,8 +329,7 @@ func Type(text string) ([]Event, error) {
 		}
 		key, ok := usKeyboard[r]
 		if !ok {
-			return nil, fmt.Errorf("cannot type %q: the simulator's HID keyboard is a US keyboard, so only "+
-				"ASCII letters, digits, space, tab, newline and standard punctuation can be sent", string(r))
+			return nil, &UnsendableError{Rune: r}
 		}
 		if key.shift {
 			events = append(events, Event{Kind: "key", Type: "down", Usage: usageLeftShift})
@@ -209,6 +344,29 @@ func Type(text string) ([]Event, error) {
 		events = append(events, Event{Kind: "sleep", MS: int(keyStep.Milliseconds())})
 	}
 	return events, nil
+}
+
+// Paste sends Command-V.
+//
+// It is the one keystroke on this device whose meaning does NOT depend on the
+// guest's input mode. Verified on a real device set to Thai: the same `v` usage
+// that types "อ" as a character still pastes when Command is held, because the
+// guest matches keyboard shortcuts against the key rather than the character
+// the layout would produce. That is what makes the pasteboard a way in when the
+// key path has been refused - including into a secure field, which no other
+// mechanism here can fill correctly.
+//
+// The releases are part of the same list for the same reason a touch's lift is:
+// a modifier left held down is the keyboard's stuck finger, and every later
+// keystroke on the device would silently arrive with Command applied.
+func Paste() []Event {
+	return []Event{
+		{Kind: "key", Type: "down", Usage: usageLeftGUI},
+		{Kind: "key", Type: "down", Usage: usageV},
+		{Kind: "sleep", MS: int(pasteHold.Milliseconds())},
+		{Kind: "key", Type: "up", Usage: usageV},
+		{Kind: "key", Type: "up", Usage: usageLeftGUI},
+	}
 }
 
 // Button presses a hardware button.
@@ -267,8 +425,13 @@ var buttons = map[string]string{
 	"app-switcher": "app_switcher",
 }
 
-// usageLeftShift is the USB HID usage for left shift.
-const usageLeftShift = 225
+// USB HID usages for the modifiers and keys composed here by name rather than
+// by number.
+const (
+	usageLeftShift = 225
+	usageLeftGUI   = 227 // Command
+	usageV         = 25
+)
 
 type keystroke struct {
 	usage int
@@ -276,7 +439,9 @@ type keystroke struct {
 }
 
 // usKeyboard maps a character to the USB HID keyboard usage that produces it on
-// a US layout - the only layout the simulator's HID path speaks.
+// a US layout - the only layout this table can speak for. Whether the guest
+// reading these usages agrees is a separate question, and the one Type asks
+// before sending any of them.
 var usKeyboard = buildUSKeyboard()
 
 func buildUSKeyboard() map[rune]keystroke {

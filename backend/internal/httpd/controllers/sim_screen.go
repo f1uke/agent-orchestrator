@@ -17,6 +17,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -37,6 +39,14 @@ type SimScreenProvider interface {
 	Devices(ctx context.Context) (simctl.Listing, error)
 	Subscribe(ctx context.Context, udid string) (<-chan simstream.Event, error)
 	Driver(ctx context.Context) (simbridge.Driver, error)
+	// Keyboard is what the device will turn key presses into. Only `type` needs
+	// it, and it is asked per gesture rather than cached: the mode changes
+	// whenever the Mac's input source does, and a cached "US" outliving that
+	// change is the silent corruption this exists to prevent.
+	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
+	// Pasteboard is the guest clipboard, which is how text reaches a field the
+	// keyboard cannot be trusted to fill.
+	Pasteboard() simpaste.Pasteboard
 }
 
 // SimDeviceLeaseView is what AO knows about who is driving one device. The
@@ -96,9 +106,18 @@ type SimGestureInput struct {
 	ToX        float64 `json:"toX,omitempty"`
 	ToY        float64 `json:"toY,omitempty"`
 	DurationMS int     `json:"durationMs,omitempty" description:"Swipe duration in milliseconds. Omit for 300."`
-	// type: the text to send. What the keys produce is decided by the guest's
-	// own active input source, so read the result back rather than assuming.
+	// type: the text to send. The keys are US-keyboard key presses and the
+	// GUEST turns them into characters using its own input mode, so this route
+	// asks the device which mode that is and refuses text it cannot promise.
 	Text string `json:"text,omitempty"`
+	// type: send the key presses even when the simulator would turn them into
+	// other characters - which is how Thai text is entered on a Thai guest.
+	// What is then promised is key presses, not characters.
+	RawKeys bool `json:"rawKeys,omitempty"`
+	// type: always deliver through the simulator's pasteboard rather than as
+	// key presses. Without it the route is chosen per request: key presses when
+	// the guest will deliver them faithfully, the pasteboard when it would not.
+	Paste bool `json:"paste,omitempty"`
 	// button: home or app-switcher.
 	Name string `json:"name,omitempty"`
 	// drag-begin, drag-move and drag-end are one touch spread over several
@@ -254,9 +273,23 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gesture, err := composeSimGesture(in)
+	// Typing is the one gesture whose meaning the device decides: it reads the
+	// key presses through whichever input mode it has selected, so a guest set
+	// to Thai turns "fa12345" into "ดฟๅ/_ภถ". The mode is established before
+	// anything is composed, and a device that cannot say is refused rather than
+	// typed at hopefully.
+	var keyboard simbridge.ProbedKeyboard
+	if in.Kind == "type" && !in.RawKeys && !in.Paste {
+		keyboard.Mode, keyboard.Err = c.Screen.Keyboard(r.Context(), device.UDID)
+	}
+
+	gesture, err := composeSimGesture(in, keyboard)
 	if err != nil {
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
+		return
+	}
+	if gesture.Action == "paste" {
+		c.paste(w, r, holder, driver, device.UDID, in.Text, gesture.Detail)
 		return
 	}
 
@@ -268,6 +301,40 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, SimGestureResponse{
 		UDID: device.UDID, Kind: gesture.Action, Detail: gesture.Detail, Rescued: result.Lifted,
 	})
+}
+
+// paste delivers text through the guest pasteboard and proves it landed. It is
+// the same sequence `ao sim type` runs, for the same reason every other gesture
+// is shared: a click and a command must reach the device the same way.
+func (c *SimScreenController) paste(
+	w http.ResponseWriter, r *http.Request,
+	holder simgesture.Holder, driver simbridge.Driver, udid, text, why string,
+) {
+	pb := c.Screen.Pasteboard()
+	if pb == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture")
+		return
+	}
+	result, err := simpaste.Run(r.Context(), holder, driver, pb, udid, text)
+	if err != nil {
+		if errors.Is(err, simpaste.ErrNotDelivered) {
+			envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID",
+				err.Error()+" ("+why+", so the text went through the pasteboard)", nil)
+			return
+		}
+		writeSimGestureError(w, r, err)
+		return
+	}
+	response := SimGestureResponse{
+		UDID: udid, Kind: "type",
+		Detail: fmt.Sprintf("%d characters pasted (%s)", len([]rune(text)), why),
+	}
+	if !result.Restored {
+		// The payload is still on the guest pasteboard where any app on the
+		// device can read it, and it is a password often enough to say so.
+		response.Detail += "; WARNING: the simulator pasteboard could not be put back"
+	}
+	envelope.WriteJSON(w, http.StatusOK, response)
 }
 
 func isDragKind(kind string) bool {
@@ -365,7 +432,13 @@ func (h *leaseHolder) Release(ctx context.Context, udid, token string) {
 // composeSimGesture turns a request into events. Every gesture is composed by
 // internal/simbridge, the same code the CLI composes with, so a click and a
 // command produce byte-identical event streams.
-func composeSimGesture(in SimGestureInput) (simgesture.Gesture, error) {
+//
+// keyboard is what the device said when asked, and only `type` reads it: the
+// guest turns the key presses we send into characters using that mode, so text
+// cannot be routed honestly without it. A device that would not say is carried
+// as an error rather than as a mode, because "unknown" and "US" must never
+// collapse into the same value.
+func composeSimGesture(in SimGestureInput, keyboard simbridge.ProbedKeyboard) (simgesture.Gesture, error) {
 	switch in.Kind {
 	case "tap":
 		at := simbridge.Point{X: in.X, Y: in.Y}
@@ -393,13 +466,23 @@ func composeSimGesture(in SimGestureInput) (simgesture.Gesture, error) {
 			Events: events, Last: to,
 		}, nil
 	case "type":
-		events, err := simbridge.Type(in.Text)
+		route, err := simbridge.PlanText(in.Text, keyboard,
+			simbridge.TextOptions{RawKeys: in.RawKeys, Paste: in.Paste})
 		if err != nil {
 			return simgesture.Gesture{}, err
 		}
-		return simgesture.Gesture{
-			Action: "type", Detail: fmt.Sprintf("%d characters", len([]rune(in.Text))), Events: events,
-		}, nil
+		if route.Paste {
+			// Signalled to the caller rather than composed: a paste is not a
+			// list of events, it is a sequence that has to prove itself.
+			return simgesture.Gesture{Action: "paste", Detail: route.Why}, nil
+		}
+		// Key presses, not characters, when the caller waived the promise: the
+		// whole bug was a command claiming characters it had not delivered.
+		detail := fmt.Sprintf("%d characters", len([]rune(in.Text)))
+		if in.RawKeys {
+			detail = fmt.Sprintf("%d key presses", len([]rune(in.Text)))
+		}
+		return simgesture.Gesture{Action: "type", Detail: detail, Events: route.Events}, nil
 	case "button":
 		events, err := simbridge.Button(in.Name)
 		if err != nil {

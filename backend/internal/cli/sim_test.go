@@ -48,6 +48,34 @@ func simDeviceFixture(udid, name, state string) map[string]any {
 	return map[string]any{"udid": udid, "name": name, "state": state, "isAvailable": true}
 }
 
+// What `defaults read com.apple.keyboard.preferences KeyboardsCurrentAndNext`
+// prints in the guest. Both were captured from real devices: the Thai one is
+// the setup that quietly typed "ดฟๅ/_ภถ" for "fa12345".
+const (
+	simKeyboardUS = "(\n    \"en_US@sw=QWERTY;hw=Automatic\"\n)\n"
+	// The array's first entry is the mode in use; the rest is where a
+	// mode-switch would land next, and must not be mistaken for it.
+	simKeyboardThai = "(\n    \"th_TH@sw=Thai;hw=Automatic\",\n    \"en_US@sw=QWERTY;hw=Automatic\"\n)\n"
+)
+
+// isSimKeyboardProbe matches `xcrun simctl spawn <udid> defaults read ...`.
+func isSimKeyboardProbe(args []string) bool {
+	return len(args) >= 5 && args[1] == "spawn" && args[3] == "defaults" && args[4] == "read"
+}
+
+// withSimKeyboard makes the faked simctl report a different guest keyboard,
+// leaving every other command answered as before.
+func withSimKeyboard(deps Deps, out string, err error) Deps {
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if isSimKeyboardProbe(args) {
+			return []byte(out), err
+		}
+		return inner(ctx, name, args...)
+	}
+	return deps
+}
+
 // simDeps builds CLI deps whose simctl boundary is faked: `list devices --json`
 // returns listJSON, and `io <udid> screenshot <path>` writes screenshotBytes to
 // the path simctl was told to write (exactly what the real simctl does — it
@@ -67,6 +95,11 @@ func simDeps(t *testing.T, listJSON string, screenshotBytes []byte) (Deps, *[][]
 			switch {
 			case len(args) >= 3 && args[1] == "list" && args[2] == "devices":
 				return []byte(listJSON), nil
+			case isSimKeyboardProbe(args):
+				// A US guest by default, which is the setup where typing has
+				// always worked. Tests about the other setups say so explicitly
+				// with withSimKeyboard.
+				return []byte(simKeyboardUS), nil
 			case len(args) >= 4 && args[1] == "io" && args[3] == "screenshot":
 				path := args[len(args)-1]
 				if screenshotBytes == nil {

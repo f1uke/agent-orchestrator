@@ -275,7 +275,7 @@ All of them take a `--udid` and a `--json` flag, resolve the device exactly like
 | `ao sim tap <x> <y>` | Press and release one point |
 | `ao sim swipe <x1> <y1> <x2> <y2> [--duration 300ms]` | Drag between two points - how you scroll a list or dismiss a sheet |
 | `ao sim drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--duration 600ms]` | Hold one finger through a route of points without lifting. Two points is exactly a swipe; more is a path an app can tell apart from a flick - a scroll that changes direction, a drag onto a target. Sending the same route as separate swipes lifts between them, which reads as several gestures. |
-| `ao sim type <text>` | Send text to whatever has keyboard focus (tap the field first) |
+| `ao sim type <text>` | Put text into whatever has keyboard focus (tap the field first). Uses key presses when the simulator will deliver them faithfully and the pasteboard when it would not, says which, and fails rather than claiming characters it did not deliver - see below. |
 | `ao sim button <name>` | `home` (the swipe-up home gesture - your way back to a known screen) or `app-switcher`. The list is short on purpose: only buttons observably verified to change a real device are offered, because the mechanism reports success for ones that do nothing. |
 
 ```bash
@@ -299,8 +299,30 @@ ao sim ax                              # confirm what actually happened
 | `node was not found on PATH` | The interaction commands need Node.js 20+. `ao sim shot` and `ao sim list` still work. |
 | `the simulator bridge could not load` | The native bridge calls private Apple frameworks and an Xcode/macOS upgrade broke it. Report it with your Xcode version; screenshots still work. |
 | `... is not booted` | Boot it yourself in Xcode or Simulator.app. AO never boots a device. |
-| exit 2 | Bad arguments (a coordinate outside 0..1, an unknown button, a character a US keyboard cannot type). Nothing reached the device. |
+| exit 2 | Bad arguments (a coordinate outside 0..1, an unknown button, `--paste` and `--raw-keys` together). Nothing reached the device. |
 
-- **Typing sends US-keyboard key presses, and the SIMULATOR decides what they produce.** Characters a US keyboard cannot send are refused rather than silently dropped, but if the simulator's own active input source is not US English (a Thai or Japanese keyboard, say), the letters that appear will not be the ones you typed. This is a real, observed outcome - always re-read the field with `ao sim ax` and check the value, never assume.
+- **`ao sim type` puts the characters you asked for into the field - by whichever route can actually do that, and it tells you which.** The keys it can send are US-keyboard key presses and the SIMULATOR decides what each one produces. Simulator.app ships with *I/O > Keyboard > "Use the Same Keyboard Language as macOS"* ticked, so a Mac set to Thai gives the simulator a Thai keyboard and `ao sim type "fa12345"` would arrive as `ดฟๅ/_ภถ`. So:
+
+  | Situation | What happens | Output says |
+  |---|---|---|
+  | The simulator's keyboard sends US ASCII | Key presses - the truer simulation, since an app sees each keystroke | `Typed …` |
+  | It would remap them, or will not say what it is | The text goes through the simulator's **pasteboard**, and is **checked on screen afterwards** | `Pasted …` + the reason |
+  | The text is non-ASCII (Thai, emoji, accents) | Pasteboard - no US keyboard key can send those at all | `Pasted …` |
+  | Neither route can deliver | **Fails, exit 1** - nothing is claimed that did not happen | - |
+
+  Two things this protects you from, and they are why the command is fussy: the failure is **selective** (fields that force an ASCII keyboard - email, URL - came out right while ordinary and secure fields did not, so it looked like bad test data rather than a broken tool), and in a **secure field the characters are hidden behind dots**, so you cannot see the damage or read it back. A worker already lost time concluding a perfectly good QA account was invalid.
+
+  **The paste is proven, never assumed.** The screen is read before and after, and the field must have grown by exactly the number of characters sent - which works even in a secure field, because it shows one dot per character. If an app refuses paste or the field never had focus, you get a loud failure, not a false success.
+
+  **Two caveats worth knowing.** A pasted field receives one paste, not N keystrokes, so an app with live validation or a character counter behaves differently - use `--raw-keys` when you need real key presses. And while the paste happens, your text sits briefly on the **guest's** pasteboard, where any app on that simulator could read it; it is put back afterwards, and if it cannot be, the command says so loudly.
+
+  | Flag | What it promises |
+  |---|---|
+  | *(none)* | The characters arrive. Route chosen per device, and reported. |
+  | `--paste` | Always the pasteboard. |
+  | `--raw-keys` | Key presses, and only key presses - whatever the simulator makes of them. This is how you deliberately enter Thai text on a Thai guest. |
+
+  A field that reformats what it receives (a phone or card mask) can make the check fail on a paste that actually worked - the message says so and tells you to read it back with `ao sim ax`.
+
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
