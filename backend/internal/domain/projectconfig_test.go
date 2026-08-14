@@ -191,3 +191,38 @@ func TestProjectConfig_HasWebUI_OptInRoundTrip(t *testing.T) {
 		t.Fatalf("hasWebUI is a plain toggle and must validate: %v", err)
 	}
 }
+
+// The Simulator tab is opt-in the same way the Browser tab is: a project that
+// says nothing does not get a tab that could never show it anything, and a
+// project that opts in must survive the round-trip through the JSON blob.
+func TestProjectConfig_HasIOSSimulator_OptInRoundTrip(t *testing.T) {
+	var legacy ProjectConfig
+	if err := json.Unmarshal([]byte(`{"defaultBranch":"main"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.HasIOSSimulator {
+		t.Fatal("a config with no hasIOSSimulator key must decode as opt-out (no Simulator tab)")
+	}
+	if legacy.WithDefaults().HasIOSSimulator {
+		t.Fatal("WithDefaults must not enable a Simulator tab a project never asked for")
+	}
+
+	cfg := ProjectConfig{HasIOSSimulator: true}
+	if cfg.IsZero() {
+		t.Fatal("a config that enables the Simulator tab must not be zero, or storage would persist SQL NULL and lose it")
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back ProjectConfig
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.HasIOSSimulator {
+		t.Fatalf("round-trip lost hasIOSSimulator: %s", b)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("hasIOSSimulator is a plain toggle and must validate: %v", err)
+	}
+}

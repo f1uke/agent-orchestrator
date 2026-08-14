@@ -121,7 +121,7 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 // one on screen.
 func emptySimTreeError(device simDevice, front simbridge.Frontmost) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s reported no accessibility elements, so there is nothing to act on.", device.label())
+	fmt.Fprintf(&b, "%s reported no accessibility elements, so there is nothing to act on.", device.Label())
 	if front.BundleID != "" {
 		fmt.Fprintf(&b, "\nThe app in the foreground is %s", front.BundleID)
 		if front.BundleID == "com.apple.springboard" {

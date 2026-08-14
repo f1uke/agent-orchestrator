@@ -73,6 +73,17 @@ type ProjectConfig struct {
 	// permanently empty panel.
 	HasWebUI bool `json:"hasWebUI,omitempty"`
 
+	// HasIOSSimulator records whether this project targets iOS, and is the single
+	// fact behind the desktop inspector's Simulator tab.
+	//
+	// It is opt-in (false) for the same reason HasWebUI is: the tab is only
+	// useful where there is an iOS Simulator to watch, and putting it on every
+	// session of every project on a machine that happens to have Xcode would be
+	// clutter nobody asked for. Auto-detecting an .xcodeproj was considered and
+	// rejected - a tab that appears and disappears from a filesystem probe is
+	// harder to reason about than a switch, and gets monorepos wrong.
+	HasIOSSimulator bool `json:"hasIOSSimulator,omitempty"`
+
 	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
 	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
 	// condition onto the existing ready-to-merge conditions. Approvals are only

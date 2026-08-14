@@ -258,3 +258,32 @@ describe("useWorkspaceQuery", () => {
 		expect(result.current.error).toBe(failure);
 	});
 });
+
+// The per-project capability flags decide which inspector tabs a session shows.
+// A flag that is correct on the wire but dropped here is invisible to every
+// component test and only shows up as a tab that never appears - which is
+// exactly how the Simulator tab was first shipped.
+describe("useWorkspaceQuery capability flags", () => {
+	it("carries hasWebUI and hasIOSSimulator through to the workspace summary", async () => {
+		respondWith({
+			projects: {
+				data: {
+					projects: [
+						{ id: "ios", name: "iOS", kind: "single_repo", path: "/tmp/ios", hasWebUI: false, hasIOSSimulator: true },
+						{ id: "web", name: "Web", kind: "single_repo", path: "/tmp/web", hasWebUI: true, hasIOSSimulator: false },
+					],
+				},
+				error: undefined,
+			},
+		});
+
+		const { result } = renderHook(() => useWorkspaceQuery(), { wrapper });
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		const byId = Object.fromEntries((result.current.data ?? []).map((w) => [w.id, w]));
+		expect(byId.ios.hasIOSSimulator).toBe(true);
+		expect(byId.ios.hasWebUI).toBe(false);
+		expect(byId.web.hasIOSSimulator).toBe(false);
+		expect(byId.web.hasWebUI).toBe(true);
+	});
+});

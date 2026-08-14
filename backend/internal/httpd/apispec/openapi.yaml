@@ -2669,6 +2669,79 @@ paths:
       summary: Send a message to a running session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture:
+    post:
+      operationId: performSimGesture
+      parameters:
+      - description: Session identifier, e.g. project-1. The gesture is arbitrated
+          as this session.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1. The gesture is arbitrated
+            as this session.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimGestureInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimGestureResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Touch a simulator screen as this session, under the same lease and
+        gesture hold `ao sim tap` uses
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-leases:
     post:
       operationId: acquireSimLease
@@ -4237,6 +4310,31 @@ paths:
       summary: Replace the spawn-confirmation gate setting
       tags:
       - settings
+  /api/v1/sim/devices:
+    get:
+      operationId: listSimDevices
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSimDevicesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List this machine's iOS Simulators with their lease state
+      tags:
+      - sim
   /api/v1/sim/leases:
     get:
       operationId: listSimLeases
@@ -5351,6 +5449,24 @@ components:
       required:
       - sessions
       type: object
+    ListSimDevicesResponse:
+      properties:
+        defaultReason:
+          description: Why that device is the default, or why there is none.
+          type: string
+        defaultUdid:
+          type:
+          - "null"
+          - string
+        devices:
+          items:
+            $ref: '#/components/schemas/SimDeviceView'
+          type: array
+      required:
+      - devices
+      - defaultUdid
+      - defaultReason
+      type: object
     ListSimLeasesResponse:
       properties:
         leases:
@@ -5651,6 +5767,8 @@ components:
           type: object
         gitConvention:
           $ref: '#/components/schemas/GitConventionConfig'
+        hasIOSSimulator:
+          type: boolean
         hasWebUI:
           type: boolean
         orchestrator:
@@ -5705,6 +5823,8 @@ components:
       type: object
     ProjectSummary:
       properties:
+        hasIOSSimulator:
+          type: boolean
         hasWebUI:
           type: boolean
         id:
@@ -5728,6 +5848,7 @@ components:
       - kind
       - sessionPrefix
       - hasWebUI
+      - hasIOSSimulator
       type: object
     ReclaimSettingsResponse:
       properties:
@@ -6523,6 +6644,106 @@ components:
           type: string
       required:
       - base
+      type: object
+    SimDeviceLeaseView:
+      properties:
+        acquiredAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        expiresAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        holder:
+          description: Session that holds the lease, when the state is held.
+          type: string
+        reason:
+          description: Why the state is unknown.
+          type: string
+        state:
+          description: held when an AO session holds a live lease; unknown otherwise.
+            Never free - AO cannot see a human driving the device from Xcode.
+          type: string
+      required:
+      - state
+      type: object
+    SimDeviceView:
+      properties:
+        available:
+          type: boolean
+        default:
+          description: True for the one device an unqualified request resolves to.
+            Never set when several are booted.
+          type: boolean
+        lease:
+          $ref: '#/components/schemas/SimDeviceLeaseView'
+        name:
+          type: string
+        runtime:
+          description: Human-readable runtime, e.g. iOS 26.3.
+          type: string
+        runtimeIdentifier:
+          type: string
+        state:
+          description: simctl's own state, e.g. Booted or Shutdown.
+          type: string
+        udid:
+          type: string
+      required:
+      - udid
+      - name
+      - runtime
+      - runtimeIdentifier
+      - state
+      - available
+      - default
+      - lease
+      type: object
+    SimGestureInput:
+      properties:
+        durationMs:
+          description: Swipe duration in milliseconds. Omit for 300.
+          type: integer
+        kind:
+          description: tap, swipe, type or button.
+          type: string
+        name:
+          type: string
+        text:
+          type: string
+        toX:
+          format: double
+          type: number
+        toY:
+          format: double
+          type: number
+        x:
+          format: double
+          type: number
+        "y":
+          format: double
+          type: number
+      required:
+      - kind
+      type: object
+    SimGestureResponse:
+      properties:
+        detail:
+          description: What was done, in the same words the CLI prints.
+          type: string
+        kind:
+          type: string
+        rescued:
+          type: boolean
+        udid:
+          type: string
+      required:
+      - udid
+      - kind
+      - detail
       type: object
     SimHold:
       properties:

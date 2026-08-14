@@ -644,6 +644,12 @@ export type WorkspaceSummary = {
 	 * Browser tab and its agents no `ao preview` guidance.
 	 */
 	hasWebUI?: boolean;
+	/**
+	 * Whether this project targets iOS (ProjectConfig.hasIOSSimulator). Opt-in
+	 * for the same reason as hasWebUI: without it there is no simulator worth
+	 * watching, so its sessions get no Simulator tab.
+	 */
+	hasIOSSimulator?: boolean;
 	accentColor?: string;
 	diff?: {
 		additions: number;

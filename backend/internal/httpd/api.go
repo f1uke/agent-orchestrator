@@ -1,6 +1,7 @@
 package httpd
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -17,19 +18,27 @@ import (
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
 // APIDeps bundles every service the API layer's controllers depend on.
 type APIDeps struct {
-	Agents             controllers.AgentCatalog
-	Projects           projectsvc.Manager
-	Sessions           controllers.SessionService
-	Activity           controllers.ActivityRecorder
-	Jira               controllers.JiraService
-	PRs                prsvc.ActionManager
-	Reviews            reviewsvc.Manager
-	Smoke              smokesvc.Manager
-	Sim                simsvc.Manager
+	Agents   controllers.AgentCatalog
+	Projects projectsvc.Manager
+	Sessions controllers.SessionService
+	Activity controllers.ActivityRecorder
+	Jira     controllers.JiraService
+	PRs      prsvc.ActionManager
+	Reviews  reviewsvc.Manager
+	Smoke    smokesvc.Manager
+	Sim      simsvc.Manager
+	// SimScreen is the machine-local simulator surface behind the desktop app's
+	// Simulator tab: device discovery, the live frame stream, and the driver a
+	// click goes through. nil on a machine that cannot capture or touch a
+	// simulator, and every route then answers 501.
+	SimScreen          SimScreen
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -63,6 +72,7 @@ type API struct {
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
 	sim           *controllers.SimController
+	simScreen     *controllers.SimScreenController
 	notifications *controllers.NotificationsController
 	activity      *controllers.ActivityController
 	imports       *controllers.ImportController
@@ -93,6 +103,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
 		sim:           &controllers.SimController{Svc: deps.Sim},
+		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -124,6 +135,7 @@ func (a *API) Register(root chi.Router) {
 			a.reviews.Register(r)
 			a.smoke.Register(r)
 			a.sim.Register(r)
+			a.simScreen.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)
@@ -151,4 +163,23 @@ func notFoundJSON(w http.ResponseWriter, r *http.Request) {
 func methodNotAllowedJSON(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteAPIError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "METHOD_NOT_ALLOWED",
 		r.Method+" not allowed on "+r.URL.Path, nil)
+}
+
+// SimScreen is the daemon-side simulator screen surface. It is declared here
+// rather than taken from the controller package so wiring code and tests name
+// one type; *simstream.Screen satisfies it.
+type SimScreen interface {
+	Devices(ctx context.Context) (simctl.Listing, error)
+	Subscribe(ctx context.Context, udid string) (<-chan simstream.Event, error)
+	Driver(ctx context.Context) (simbridge.Driver, error)
+}
+
+// screenProvider converts a nil interface value to a nil controller dependency.
+// A typed nil hiding inside a non-nil interface would make the 501 checks pass
+// and then panic, which is the opposite of degrading honestly.
+func screenProvider(s SimScreen) controllers.SimScreenProvider {
+	if s == nil {
+		return nil
+	}
+	return s
 }
