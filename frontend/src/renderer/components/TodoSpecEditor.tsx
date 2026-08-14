@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Play, RotateCcw, Trash2, X } from "lucide-react";
+import { CircleDashed, Loader2, Play, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -183,7 +183,9 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 						className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em]"
 						style={{ color: "var(--lane-todo-bright)" }}
 					>
-						<span className="size-2 rounded-full border-[1.5px]" style={{ borderColor: "var(--lane-todo-bright)" }} />
+						{/* The board's queued silhouette, so this surface and the TODO card
+						    read as the same thing. */}
+						<CircleDashed className="size-3" aria-hidden="true" />
 						TODO · not started
 					</span>
 					<span className="font-mono text-[10.5px] text-passive">{session.id}</span>

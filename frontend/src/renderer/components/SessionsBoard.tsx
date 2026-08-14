@@ -7,6 +7,7 @@ import {
 	Check,
 	ChevronDown,
 	CircleCheck,
+	CircleDashed,
 	Flame,
 	MoreHorizontal,
 	Play,
@@ -31,7 +32,6 @@ import {
 	isMergeSuspended,
 	jiraKeyFromIssueId,
 	orchestratorHealth,
-	primaryPR,
 	workerSessions,
 } from "../types/workspace";
 import { JiraKeyBadge } from "./JiraKeyBadge";
@@ -45,17 +45,11 @@ import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
-import {
-	approvalProgress,
-	prBrowserUrl,
-	prKindLabel,
-	prRef,
-	providerFromPRURL,
-	sessionPRDisplaySummaries,
-} from "../lib/pr-display";
+import { approvalProgress, prBrowserUrl, prKindLabel, prRef, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { ApprovalMeter } from "./ApprovalMeter";
 import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
 import { LANE_ORDER, LANES, type LaneConfig } from "../lib/lane-indicator";
+import { statusGlyph } from "../lib/status-glyph";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 
@@ -470,35 +464,25 @@ function ZoneColumn({
 	onStarted: (sessionId: string) => void;
 }) {
 	const isTodo = col.key === "todo";
-	const { hueVar, dotVar } = col;
+	const { dotVar, Icon } = col;
 	return (
 		<section
-			className="flex min-w-0 flex-col overflow-hidden rounded-[12px]"
-			style={{
-				// The lane's hue lands in five places (top border, top-down tint,
-				// header dot+label, count badge, and each card's left accent) so it is
-				// unmistakable. The tint fades out by ~240px so long lanes go dark.
-				border: "1px solid var(--kanban-col-border)",
-				borderTop: `3px solid ${hueVar}`,
-				background: `linear-gradient(180deg, color-mix(in srgb, ${hueVar} 11%, transparent) 0%, transparent 240px), var(--kanban-column-bg)`,
-			}}
+			// No painted edges: the lane's identity is carried by the header's shape
+			// glyph + label, and each card repeats its own status as a glyph in the
+			// card gutter. The column itself is a plain neutral surface, so nothing
+			// competes with the cards standing on it.
+			className="flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--kanban-col-border)] bg-[var(--kanban-column-bg)]"
 		>
 			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
-				<span
-					className="h-[9px] w-[9px] shrink-0 rounded-full"
-					style={{ background: dotVar, boxShadow: `0 0 10px color-mix(in srgb, ${dotVar} 70%, transparent)` }}
+				<Icon
+					className="h-[13px] w-[13px] shrink-0"
+					style={{ color: dotVar, ...(col.filled ? { fill: "currentColor" } : {}) }}
+					aria-hidden="true"
 				/>
-				<span className="text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: dotVar }}>
+				<span className="truncate text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: dotVar }}>
 					{col.label}
 				</span>
-				<span
-					className="ml-auto min-w-[22px] rounded-full px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5]"
-					style={{
-						color: dotVar,
-						background: `color-mix(in srgb, ${hueVar} 16%, transparent)`,
-						border: `1px solid color-mix(in srgb, ${hueVar} 34%, transparent)`,
-					}}
-				>
+				<span className="ml-auto min-w-[22px] rounded-full border border-border-strong bg-interactive-hover px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5] text-muted-foreground">
 					{sessions.length}
 				</span>
 			</div>
@@ -758,24 +742,35 @@ function TodoCard({
 			style={{
 				background: "var(--kanban-card-bg)",
 				border: "1px solid var(--kanban-card-border)",
-				borderLeft: `3px solid ${col.hueVar}`,
 			}}
 		>
-			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0} className="cursor-pointer">
-				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
-					<span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: col.dotVar }}>
-						{/* Ring (not filled) dot: queued, not live. */}
-						<span className="size-2 shrink-0 rounded-full border-[1.5px]" style={{ borderColor: col.dotVar }} />
-						Queued
-					</span>
-					<span className="ml-auto font-mono text-[10.5px] tracking-[0.04em] text-passive">
-						{agentLabel(session.provider)}
-					</span>
+			<div
+				onClick={onOpen}
+				onKeyDown={handleKeyDown}
+				role="button"
+				tabIndex={0}
+				className="flex cursor-pointer gap-2 px-[13px] pt-3"
+			>
+				{/* Same status gutter as a live card, so a queued task lines up with its
+				    neighbours; the dashed ring reads as "not real work yet". */}
+				<span className="flex w-[18px] shrink-0 justify-center pt-px" style={{ color: col.dotVar }}>
+					<CircleDashed className="h-[15px] w-[15px]" aria-hidden="true" />
+				</span>
+				<div className="min-w-0 flex-1">
+					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-[7px]">
+						<span data-status="Queued" className="text-[12px] font-semibold" style={{ color: col.dotVar }}>
+							Queued
+						</span>
+						<span className="ml-auto font-mono text-[10.5px] tracking-[0.04em] text-passive">
+							{agentLabel(session.provider)}
+						</span>
+					</div>
+					{/* Margin, not padding — see the note on the live card's title. */}
+					<div className="mb-2 line-clamp-2 overflow-hidden text-[13px] font-medium leading-[1.42] tracking-[-0.01em] text-foreground">
+						{session.title}
+					</div>
+					{showBranch && <div className="truncate pb-2.5 font-mono text-[10.5px] text-passive">{branchLabel}</div>}
 				</div>
-				<div className="line-clamp-2 overflow-hidden px-[13px] pb-2 text-[13px] font-medium leading-[1.42] tracking-[-0.01em] text-foreground">
-					{session.title}
-				</div>
-				{showBranch && <div className="px-[13px] pb-2.5 font-mono text-[10.5px] text-passive">{branchLabel}</div>}
 			</div>
 			<div
 				className="flex items-center justify-end px-[13px] py-2"
@@ -828,7 +823,7 @@ function TodoCard({
 }
 
 function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col: LaneConfig; onOpen: () => void }) {
-	const badge = sessionBadge(session);
+	const { Icon, filled, label: statusText } = statusGlyph(session);
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	// A Jira-linked session gets the richer display-only Jira badge (KEY · type ·
 	// status) below the branch instead of the raw provider-prefixed intake chip.
@@ -852,64 +847,81 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 			style={{
 				background: "var(--kanban-card-bg)",
 				border: "1px solid var(--kanban-card-border)",
-				// The lane hue repeats on the card's left edge so a card is tied to its
-				// lane even once scrolled away from the column header.
-				borderLeft: `3px solid ${col.hueVar}`,
 			}}
 		>
-			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0}>
-				<div className="flex items-center gap-2 px-[13px] pb-[9px] pt-3">
-					{/* Status dot + label take the lane's colour so every card in a lane
-					    reads as one status group; the dot pulses only for genuinely-live
-					    WORKING sessions (per DESIGN.md motion). */}
-					<span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: col.dotVar }}>
+			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0} className="flex gap-2 px-[13px] pt-3">
+				{/* Status gutter. The glyph is the silhouette of this card's EXACT
+				    status, not its lane — so the four NEEDS YOU statuses stay four
+				    distinct marks instead of one coral bar. Every card's glyph sits on
+				    the same x, so a column scans as a vertical run of shapes. It is
+				    decorative (aria-hidden): the status text beside it is the
+				    accessible carrier, and colour is the third, redundant channel. */}
+				<span className="flex w-[18px] shrink-0 justify-center pt-px" style={{ color: col.dotVar }}>
+					<Icon
+						className={cn("h-[15px] w-[15px]", col.key === "working" && "animate-status-pulse")}
+						style={filled ? { fill: "currentColor" } : undefined}
+						aria-hidden="true"
+					/>
+				</span>
+				<div className="min-w-0 flex-1">
+					{/* flex-wrap, and the status is the one item that never shrinks. At the
+					    app's 960px minimum a board column is ~157px wide; with everything on
+					    one shrinkable line the status got squeezed to 3px and clipped to
+					    "C." — destroying the exact fact the retired bar was meant to carry.
+					    Here the secondary cluster (agent, chips, menu) drops to its own line
+					    instead, and the status keeps every character. */}
+					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-[7px]">
 						<span
-							className={cn("h-2 w-2 shrink-0 rounded-full", col.key === "working" && "animate-status-pulse")}
-							style={{
-								background: col.dotVar,
-								boxShadow: `0 0 8px color-mix(in srgb, ${col.dotVar} 65%, transparent)`,
-							}}
-						/>
-						{badge.label}
-					</span>
-					{issueId && !jiraKey && (
-						<span
-							className="inline-flex max-w-[13rem] items-center truncate rounded-[4px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-1.5 py-0.5 font-mono text-[10px] text-accent"
-							title={`Intake issue: ${issueId}`}
+							data-status={statusText}
+							className="text-[12px] font-semibold leading-[1.3]"
+							style={{ color: col.dotVar }}
 						>
-							{issueId}
+							{statusText}
 						</span>
-					)}
-					<div className="ml-auto flex shrink-0 items-center gap-1.5">
-						{isMergeSuspended(session) ? <MergeSuspendChip session={session} /> : <IdleStatusChip session={session} />}
-						<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
-							{agentLabel(session.provider)}
-						</span>
-						<SessionCardMenu session={session} />
+						{issueId && !jiraKey && (
+							<span
+								className="inline-flex max-w-[13rem] items-center truncate rounded-[4px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-1.5 py-0.5 font-mono text-[10px] text-accent"
+								title={`Intake issue: ${issueId}`}
+							>
+								{issueId}
+							</span>
+						)}
+						<div className="ml-auto flex shrink-0 items-center gap-1.5">
+							{isMergeSuspended(session) ? (
+								<MergeSuspendChip session={session} />
+							) : (
+								<IdleStatusChip session={session} />
+							)}
+							<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
+								{agentLabel(session.provider)}
+							</span>
+							<SessionCardMenu session={session} />
+						</div>
 					</div>
-				</div>
-				<div
-					className={cn(
-						"px-[13px] text-[13px] font-medium leading-[1.42] tracking-[-0.01em] text-foreground",
-						showBranch ? "pb-2" : "pb-3",
-						"line-clamp-2 overflow-hidden",
-					)}
-				>
-					{session.title}
-				</div>
-				{showBranch && <div className="px-[13px] pb-2.5 font-mono text-[10.5px] text-passive">{branch}</div>}
-				{jiraKey && (
-					<div className="px-[13px] pb-2.5">
-						<JiraKeyBadge sessionId={session.id} issueKey={jiraKey} variant="card" />
+					{/* MARGIN, not padding. Bottom padding on a `overflow-hidden` clamped
+					    box is inside the clip region, so the clamped third line bleeds
+					    into it as a sliver of half-height letters — visible on any title
+					    long enough to wrap three times. Margin sits outside the clip. */}
+					<div
+						className={cn(
+							"text-[13px] font-medium leading-[1.42] tracking-[-0.01em] text-foreground",
+							showBranch || jiraKey ? "mb-2" : "mb-3",
+							"line-clamp-2 overflow-hidden",
+						)}
+					>
+						{session.title}
 					</div>
-				)}
+					{showBranch && <div className="truncate pb-2.5 font-mono text-[10.5px] text-passive">{branch}</div>}
+					{jiraKey && (
+						<div className="pb-2.5">
+							<JiraKeyBadge sessionId={session.id} issueKey={jiraKey} variant="card" />
+						</div>
+					)}
+				</div>
 			</div>
 			<div
 				className="flex items-start justify-between gap-2 px-[13px] py-2"
-				style={{
-					borderTop: "1px solid var(--kanban-card-divider)",
-					background: `color-mix(in srgb, ${col.hueVar} 3%, transparent)`,
-				}}
+				style={{ borderTop: "1px solid var(--kanban-card-divider)" }}
 				onClick={(event) => event.stopPropagation()}
 			>
 				<div className="min-w-0 flex-1 font-mono text-[10.5px] text-passive">
@@ -1009,37 +1021,5 @@ function agentLabel(provider: WorkspaceSession["provider"]): string {
 			return "OpenCode";
 		default:
 			return provider;
-	}
-}
-
-function sessionBadge(session: WorkspaceSession): { label: string; className: string } {
-	// "PR"/"MR" follows the session's primary change request; other statuses are
-	// provider-neutral.
-	const kind = prKindLabel(providerFromPRURL(primaryPR(session)?.url));
-	switch (session.status) {
-		case "needs_input":
-			return { label: "Input needed", className: "text-warning" };
-		case "no_signal":
-			return { label: "No signal", className: "text-passive" };
-		case "ci_failed":
-			return { label: "CI failed", className: "text-error" };
-		case "changes_requested":
-			return { label: "Changes requested", className: "text-warning" };
-		case "review_pending":
-			return { label: "Review pending", className: "text-muted-foreground" };
-		case "draft":
-			return { label: `Draft ${kind}`, className: "text-muted-foreground" };
-		case "pr_open":
-			return { label: `${kind} open`, className: "text-muted-foreground" };
-		case "approved":
-			return { label: "Approved", className: "text-success" };
-		case "mergeable":
-			return { label: "Ready", className: "text-success" };
-		case "merged":
-			return { label: "Merged", className: "text-passive" };
-		case "terminated":
-			return { label: "Terminated", className: "text-passive" };
-		default:
-			return { label: "Working", className: "text-working" };
 	}
 }

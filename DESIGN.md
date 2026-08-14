@@ -91,6 +91,38 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   agent-orchestrator analogue and are **user-approved** (settings-redesign proposal
   §9, decisions 2026-07-12); everything else is stock `components/ui/*`. QA/review:
   treat these three as **sanctioned, not drift**; still flag any _further_ divergence.
+- **Approved deviation (2026-08-14) — no coloured edge bars anywhere.** The user
+  called the board's left/top accent stripes "very dated" and asked for them to be
+  removed **app-wide** and redesigned. This **narrows the 2026-07-10 lane-colour
+  entry above**: the 4-hue lane system stays, but its "column top border" and
+  "card accent" clauses are **retired**. What was approved (option **C — glyph
+  gutter**, chosen by the user from a four-way visual comparison):
+  - **Gone:** the board column's 3px hue top rail + top-down hue wash, every
+    card's 3px hue left edge, the card footer's hue wash, the inspector Readiness
+    strip's 3px left strap + hue border/wash, and the three modal top-edge
+    accents (TODO detail, TODO pane, New task).
+  - **In their place:** a fixed leading **status gutter** on every card holding a
+    glyph whose **shape is the exact status** (`lib/status-glyph.ts`), with the
+    status word beside it in text and the lane hue only as reinforcement — three
+    independent channels, never colour alone. The lane now shows itself only in
+    the column header. The same map drives the sidebar `SessionGlyph` and the
+    Readiness verdict, so a session reads identically in all three places.
+  - **Why per-status, not per-lane:** NEEDS YOU alone holds four statuses (input
+    needed / no signal / CI failed / changes requested) that one coral bar
+    flattened into one mark. A lane glyph would have re-collapsed them.
+  - **Deliberately untouched:** left rails that convey _selection, focus,
+    quotation or hierarchy_ rather than status — selected file-panel/file-tree
+    row, Browse-Jira "assigned to me" + focus rows, ADF blockquote, anchored diff
+    comment, smoke "why" callout, subtask indent. Those are a live convention,
+    not the dated thing; the user confirmed leaving them.
+  - Light-theme lane hues were darkened at the same time
+    (`--lane-working-bright` 4.09:1 → 5.14:1, `--lane-needs-bright` 4.44:1 →
+    5.44:1); both were failing the 4.5:1 text floor **before** this change.
+    Measured from canvas pixels, both themes. Keep any new lane hue above 4.5:1
+    on the light card surface (`#ffffff`).
+
+  QA/review: treat the absence of these bars as **sanctioned**, and flag any new
+  status-carrying painted edge as drift.
 
 ## Product Context
 
@@ -257,32 +289,54 @@ Board chrome surfaces (darker than the app hairline family, per the handoff):
 #212129`, `--kanban-card-divider #1b1b21`. Light-mode `--lane-*` fall back to darker,
 legible variants (the handoff is dark-only). Tokens live in both `:root` blocks.
 
-**Where each hue lands** (one lane hue, applied consistently so the lane is unmistakable):
+**Where each hue lands** — rewritten 2026-08-14 when the painted edges were retired
+(see the _no coloured edge bars_ bullet in the banner). The lane used to repeat
+itself in six places; it now appears **once per column**, in the header only.
 
-- **Base hue** → column top border (`3px`); top-down background tint
-  (`hue @ 11% → transparent` by ~240px so long lanes go dark); count-badge fill
-  (`@16%`) + border (`@34%`); each card's **left accent bar** (`3px`); card footer
-  tint (`@3%`). The **empty-lane placeholder carries NO lane hue** — a neutral
-  dashed `--border` hairline + passive text at `opacity-60`, so an empty lane
-  recedes and a single real card dominates (was lane-tinted; de-emphasised
-  2026-07-11 so placeholders stop reading as cards).
-- **Bright variant** → header status dot (`9px`, glow `@70%`) + header label text +
-  count-badge text; card status dot (`8px`, glow `@65%`) + card status label text;
-  the sidebar glyph.
+- **Base hue** → nothing. The column's 3px top border, its top-down tint, the
+  card's 3px left accent and the card-footer tint are all **gone**; the column and
+  card are plain neutral surfaces (`--kanban-column-bg`, `--kanban-card-bg`) with
+  hairline borders, and the count badge is neutral too. `LaneConfig` no longer
+  carries a `hueVar` field at all — the type change is the guard.
+- **Bright variant** → the column header's shape glyph + label, and each card's
+  **status glyph + status text** in the card gutter. Nothing else.
+- The **empty-lane placeholder carries NO lane hue** — a neutral dashed `--border`
+  hairline + passive text at `opacity-60`, so an empty lane recedes and a single
+  real card dominates (de-emphasised 2026-07-11 so placeholders stop reading as
+  cards).
 
-Motion: the card status dot pulses (`--animate-status-pulse`) **only in WORKING** —
+**Card status gutter** (`lib/status-glyph.ts`): a fixed 18px leading column holds a
+glyph whose **silhouette is the session's exact status**, not its lane — a lane is
+coarser than a status, and NEEDS YOU alone holds four (speech bubble = input
+needed, empty signal bars = no signal, octagon-X = CI failed, warning triangle =
+changes requested). Shape is the primary channel, the visible status text is the
+accessible one, and the lane hue is a third, redundant reinforcement, so the board
+still reads with colour removed entirely. The glyph is `aria-hidden`; the text
+beside it carries the fact. Status text **wraps, never truncates** — at the app's
+960px minimum a column is ~157px wide and an ellipsis would turn "Changes
+requested" back into a single uninformative mark, which is the failure this whole
+design exists to avoid.
+
+Motion: the card status glyph pulses (`--animate-status-pulse`) **only in WORKING** —
 per the Motion rule that pulse means a genuinely-live session — not in every lane.
-Card status dot **and label take the lane colour**, not the per-sub-status colour, so
+Card status glyph **and label take the lane colour**, not a per-sub-status colour, so
 a `ci_failed` card reads **coral** within NEEDS YOU rather than red (deliberate, to
-keep lanes visually unified).
+keep lanes visually unified) — its _shape_ is what distinguishes it.
+
+**Contrast floor:** every lane hue must clear **4.5:1** as text on the card surface
+in BOTH themes. Measure by painting the colour into a `<canvas>` and reading the
+pixel — parsing Tailwind v4's `oklch()` output as rgb yields a fake 1.00 for
+everything. Measured 2026-08-14: dark 7.44–10.12:1, light 4.74–5.44:1.
 
 **Project-sidebar session glyphs** (`Sidebar.tsx`, `SessionGlyph`): each session row
-carries a **distinct lane-shape glyph** (lucide equivalents of the handoff's unicode
-glyphs) tinted by the lane's bright variant with a soft `drop-shadow` glow, so the
-list is scannable by **shape and hue** without opening the board:
+carries a **distinct status-shape glyph** tinted by the lane's bright variant with a
+soft `drop-shadow` glow, so the list is scannable by **shape and hue** without
+opening the board:
 
-- **● Working** — `Circle` (filled) · **◎ Needs you** — `CircleDot` ·
-  **◐ In review** — `Contrast` · **✓ Ready** — `Check`.
+- It reads from the **same `lib/status-glyph.ts` map as the board card gutter and
+  the Readiness verdict** (2026-08-14), so one session shows the same silhouette in
+  the sidebar, on the board and in the inspector. Before that it used the coarser
+  per-lane shape, which disagreed with the board once the board went per-status.
 - The session list is **sorted by state** (working → needs → review → merge), the same
   flow as the lanes, so a session sits at the same rank in the sidebar as in its board
   lane. This refines the "name-only worker rows" rule: rows are still name + a single

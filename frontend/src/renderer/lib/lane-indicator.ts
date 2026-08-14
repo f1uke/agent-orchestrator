@@ -2,22 +2,22 @@ import { Check, Circle, CircleDot, CircleDashed, Contrast, type LucideIcon } fro
 import type { AttentionZone } from "../types/workspace";
 
 // The four board lanes, each owning one hue in a 4-color semantic system
-// (design handoff Board.dc.html). A lane is identified across the board (column
-// top border, tint, header dot/label, count badge, card accent) and the sidebar
-// (a distinct glyph shape) by the same hue, so a session reads the same in both
-// places. NEEDS YOU is coral — moved off amber so it no longer collides with
-// WORKING. The glyph shapes (filled dot ● / ring ◎ / half ◐ / check ✓) make the
-// sidebar scannable by shape as well as hue, using lucide equivalents of the
-// design's unicode glyphs.
+// (design handoff Board.dc.html). The lane now shows itself ONLY in the column
+// header — its shape glyph and label — never as a painted edge or wash; the
+// coloured top rails, hue tints and card left-accents that used to repeat it
+// five times per column are retired. NEEDS YOU is coral — moved off amber so it
+// no longer collides with WORKING.
+//
+// Per-CARD status shapes live in lib/status-glyph: a lane is coarser than a
+// status (NEEDS YOU alone holds four), so the lane glyph identifies the column
+// while each card draws its own.
 export type LaneKey = "todo" | "working" | "action" | "pending" | "merge";
 
 export type LaneConfig = {
 	key: LaneKey;
 	/** Board column header label. */
 	label: string;
-	/** Base hue: column top border, background tint, count badge. */
-	hueVar: string;
-	/** Brighter variant: status dot, header label, card accent, sidebar glyph. */
+	/** The lane's hue: column header label + glyph, and every card's status glyph. */
 	dotVar: string;
 	/** Sidebar / empty-lane glyph shape. */
 	Icon: LucideIcon;
@@ -31,7 +31,6 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 	todo: {
 		key: "todo",
 		label: "Todo",
-		hueVar: "var(--lane-todo)",
 		dotVar: "var(--lane-todo-bright)",
 		Icon: CircleDashed,
 		filled: false,
@@ -40,7 +39,6 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 	working: {
 		key: "working",
 		label: "Working",
-		hueVar: "var(--lane-working)",
 		dotVar: "var(--lane-working-bright)",
 		Icon: Circle,
 		filled: true,
@@ -49,7 +47,6 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 	action: {
 		key: "action",
 		label: "Needs you",
-		hueVar: "var(--lane-needs)",
 		dotVar: "var(--lane-needs-bright)",
 		Icon: CircleDot,
 		filled: false,
@@ -58,7 +55,6 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 	pending: {
 		key: "pending",
 		label: "In review",
-		hueVar: "var(--lane-review)",
 		dotVar: "var(--lane-review-bright)",
 		Icon: Contrast,
 		filled: false,
@@ -67,7 +63,6 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 	merge: {
 		key: "merge",
 		label: "Ready to merge",
-		hueVar: "var(--lane-merge)",
 		dotVar: "var(--lane-merge-bright)",
 		Icon: Check,
 		filled: false,

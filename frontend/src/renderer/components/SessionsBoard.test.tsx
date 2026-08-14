@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
@@ -66,7 +66,7 @@ function renderBoard() {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	});
-	render(
+	return render(
 		<QueryClientProvider client={queryClient}>
 			<SessionsBoard />
 		</QueryClientProvider>,
@@ -294,5 +294,81 @@ describe("SessionsBoard", () => {
 		renderBoard();
 
 		expect(screen.queryByLabelText(/^Auto-suspends in/)).not.toBeInTheDocument();
+	});
+});
+
+// The board used to say "which status is this?" with a 3px coloured left edge on
+// each card (plus a coloured rail and a hue wash on the column). Those are
+// retired: a card now leads with a status glyph whose SHAPE is the status, and
+// the status word beside it in text. These tests pin the replacement — the fact
+// must survive with colour removed, which is exactly what the bar could not do.
+describe("SessionsBoard status conveyance", () => {
+	// status → the words a human must be able to read off the card.
+	const STATUS_TEXT: [WorkspaceSession["status"], string][] = [
+		["working", "Working"],
+		["idle", "Working"],
+		["needs_input", "Input needed"],
+		["no_signal", "No signal"],
+		["ci_failed", "CI failed"],
+		["changes_requested", "Changes requested"],
+		["review_pending", "Review pending"],
+		["pr_open", "PR open"],
+		["draft", "Draft PR"],
+		["approved", "Approved"],
+		["mergeable", "Ready"],
+	];
+
+	it.each(STATUS_TEXT)("states %s as readable text on the card, not only as a colour", (status, text) => {
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-1", status)] }],
+			isError: false,
+		});
+		renderBoard();
+
+		// Scoped to the card, so a column header that happens to share the word
+		// (WORKING) cannot stand in for the card stating its own status.
+		const card = screen.getByText("active sess-1").closest("div.group");
+		expect(card).not.toBeNull();
+		expect(within(card as HTMLElement).getByText(text)).toBeInTheDocument();
+	});
+
+	it("keeps the four NEEDS YOU statuses apart instead of collapsing them into one lane colour", () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [
+				{
+					id: "proj-1",
+					sessions: [
+						activeSession("sess-1", "needs_input"),
+						activeSession("sess-2", "no_signal"),
+						activeSession("sess-3", "ci_failed"),
+						activeSession("sess-4", "changes_requested"),
+					],
+				},
+			],
+			isError: false,
+		});
+		renderBoard();
+
+		for (const text of ["Input needed", "No signal", "CI failed", "Changes requested"]) {
+			expect(screen.getByText(text), text).toBeInTheDocument();
+		}
+	});
+
+	it("paints no coloured edge on a card or a column", () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-1", "needs_input")] }],
+			isError: false,
+		});
+		const { container } = renderBoard();
+
+		// The retired bars were inline styles, so their absence is checkable here.
+		// (Whether the NEW glyph is actually visible is a paint question jsdom
+		// cannot answer — that is verified in a real browser, not here.)
+		for (const el of container.querySelectorAll<HTMLElement>("[style]")) {
+			expect(el.style.borderLeftWidth, el.className).not.toBe("3px");
+			expect(el.style.borderTopWidth, el.className).not.toBe("3px");
+			expect(el.style.borderLeft).toBe("");
+			expect(el.style.borderTop).not.toMatch(/lane-/);
+		}
 	});
 });

@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { Check, Circle, CircleDashed, CircleDot, Contrast, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import type { Readiness, ReadinessGate, ReadinessHue, ReadinessTone } from "../lib/readiness";
 
@@ -11,6 +12,18 @@ const HUE_VAR: Record<ReadinessHue, string> = {
 	needs: "var(--lane-needs)",
 	merge: "var(--lane-merge)",
 	todo: "var(--lane-todo)",
+};
+
+// Verdict hue → the same lane silhouette the board columns and the sidebar use,
+// so the strip speaks one shape vocabulary with the rest of the app. This
+// replaces the retired coloured strap down the block's left edge: shape leads,
+// the hue only reinforces, and the verdict word beside it is the accessible fact.
+const HUE_ICON: Record<ReadinessHue, { Icon: LucideIcon; filled?: boolean }> = {
+	working: { Icon: Circle, filled: true },
+	review: { Icon: Contrast },
+	needs: { Icon: CircleDot },
+	merge: { Icon: Check },
+	todo: { Icon: CircleDashed },
 };
 
 // Per-gate tone → semantic status token.
@@ -29,6 +42,7 @@ const TONE_VAR: Record<ReadinessTone, string> = {
  */
 export function ReadinessStrip({ readiness }: { readiness: Readiness }) {
 	const { verdict, gates, currentKey, contextLabel } = readiness;
+	const { Icon, filled } = HUE_ICON[verdict.hue];
 	return (
 		<div
 			className="readiness"
@@ -37,7 +51,11 @@ export function ReadinessStrip({ readiness }: { readiness: Readiness }) {
 			aria-label={`Merge readiness: ${verdict.word}. ${verdict.caption}`}
 		>
 			<div className="readiness__verdict">
-				<span className={cn("readiness__dot", verdict.pulse && "readiness__dot--pulse")} aria-hidden="true" />
+				<Icon
+					className={cn("readiness__glyph", verdict.pulse && "readiness__glyph--pulse")}
+					style={filled ? { fill: "currentColor" } : undefined}
+					aria-hidden="true"
+				/>
 				<span className="readiness__headline">{verdict.word}</span>
 				{contextLabel ? <span className="readiness__ctx">{contextLabel}</span> : null}
 			</div>
