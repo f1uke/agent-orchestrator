@@ -21,6 +21,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -28,6 +29,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -222,11 +225,19 @@ func authorizedCodexInventory() agentsvc.Inventory {
 	}
 }
 
-// fakeProjectManager captures the project.AddInput the controller decodes from
-// the CLI's request body. Every other method is a no-op so it satisfies the
+// fakeProjectManager captures the project.AddInput and project.SetConfigInput
+// the controller decodes from the CLI's request body, and serves the config the
+// CLI reads back. Every other method is a no-op so it satisfies the
 // projectsvc.Manager interface.
 type fakeProjectManager struct {
 	added projectsvc.AddInput
+	// stored is the config GET /projects/{id} serves. nil keeps the project
+	// config-less, which is what every test that does not care about config wants.
+	stored *domain.ProjectConfig
+	// setConfig is the config the daemon was asked to persist, and setConfigCalls
+	// counts the PUTs, so a test can assert no write was attempted at all.
+	setConfig      domain.ProjectConfig
+	setConfigCalls int
 }
 
 var _ projectsvc.Manager = (*fakeProjectManager)(nil)
@@ -236,7 +247,7 @@ func (f *fakeProjectManager) List(context.Context) ([]projectsvc.Summary, error)
 }
 
 func (f *fakeProjectManager) Get(_ context.Context, id domain.ProjectID) (projectsvc.GetResult, error) {
-	project := projectsvc.Project{ID: id, Path: "/repo/" + string(id)}
+	project := projectsvc.Project{ID: id, Path: "/repo/" + string(id), Config: f.stored}
 	return projectsvc.GetResult{Status: "ok", Project: &project}, nil
 }
 
@@ -251,6 +262,8 @@ func (f *fakeProjectManager) Add(_ context.Context, in projectsvc.AddInput) (pro
 
 func (f *fakeProjectManager) SetConfig(_ context.Context, id domain.ProjectID, in projectsvc.SetConfigInput) (projectsvc.Project, error) {
 	cfg := in.Config
+	f.setConfig = cfg
+	f.setConfigCalls++
 	return projectsvc.Project{ID: id, Config: &cfg}, nil
 }
 
@@ -421,4 +434,182 @@ func TestE2E_PreviewRefusedWhenProjectHasNoWebUI(t *testing.T) {
 	if !strings.Contains(msg, "Web UI") {
 		t.Errorf("error should name the setting to turn on, got: %s", msg)
 	}
+}
+
+// TestE2E_ProjectSetConfigRoundTripKeepsEveryField is the DTO-drift guard for
+// the `ao project set-config` WRITE path. `set-config` replaces the stored
+// config wholesale, so the read side and the write side have to agree on every
+// field: a key the CLI cannot represent is not merely unprinted, it is
+// destroyed, and the command still exits 0.
+//
+// The assertion is a PROPERTY, not a field list: a config in which every field
+// of domain.ProjectConfig is populated (by reflection, so a field added
+// tomorrow is populated too) is read back through the real `ao project get
+// --json` and PUT back through the real `ao project set-config --config-json`.
+// What the daemon is asked to store must equal what it served. Listing today's
+// field names here would pass while the next field added to ProjectConfig died
+// silently - which is exactly how this bug shipped.
+func TestE2E_ProjectSetConfigRoundTripKeepsEveryField(t *testing.T) {
+	full := filledProjectConfig(t)
+
+	t.Run("unmodified round trip loses nothing", func(t *testing.T) {
+		projects := &fakeProjectManager{stored: &full}
+		startDriftTestDaemon(t, &fakeSessionService{}, projects)
+
+		got := runProjectConfigRoundTrip(t, projects, nil)
+		if !reflect.DeepEqual(got, full) {
+			t.Fatalf("round trip changed the config.\nlost/changed keys: %v\n served: %s\nstored: %s",
+				changedConfigKeys(t, full, got), mustJSON(t, full), mustJSON(t, got))
+		}
+	})
+
+	t.Run("an explicit edit applies and nothing else is lost", func(t *testing.T) {
+		projects := &fakeProjectManager{stored: &full}
+		startDriftTestDaemon(t, &fakeSessionService{}, projects)
+
+		got := runProjectConfigRoundTrip(t, projects, func(cfg map[string]any) {
+			cfg["defaultBranch"] = "release/2.0"
+		})
+		if got.DefaultBranch != "release/2.0" {
+			t.Errorf("DefaultBranch = %q, want the edit %q to be applied", got.DefaultBranch, "release/2.0")
+		}
+		want := full
+		want.DefaultBranch = "release/2.0"
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("edit round trip changed more than the edit.\nlost/changed keys: %v\nwant: %s\ngot:  %s",
+				changedConfigKeys(t, want, got), mustJSON(t, want), mustJSON(t, got))
+		}
+	})
+}
+
+// runProjectConfigRoundTrip drives the two real CLI commands a human uses to
+// edit a project config - `ao project get --json`, then `ao project set-config
+// --config-json` with what the first one printed - and returns the config the
+// daemon was asked to persist. edit, when non-nil, mutates the JSON object in
+// between, standing in for the human's edit.
+func runProjectConfigRoundTrip(t *testing.T, projects *fakeProjectManager, edit func(map[string]any)) domain.ProjectConfig {
+	t.Helper()
+
+	var out bytes.Buffer
+	root := NewRootCommand(Deps{Out: &out, Err: &out, HTTPClient: &http.Client{}, ProcessAlive: func(int) bool { return true }})
+	root.SetArgs([]string{"project", "get", "demo", "--json"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("project get execute: %v\noutput: %s", err, out.String())
+	}
+
+	var read struct {
+		Project struct {
+			Config map[string]any `json:"config"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &read); err != nil {
+		t.Fatalf("decode `project get --json` output: %v\noutput: %s", err, out.String())
+	}
+	if len(read.Project.Config) == 0 {
+		t.Fatalf("`project get --json` printed no config at all; output: %s", out.String())
+	}
+	if edit != nil {
+		edit(read.Project.Config)
+	}
+
+	out.Reset()
+	root = NewRootCommand(Deps{Out: &out, Err: &out, HTTPClient: &http.Client{}, ProcessAlive: func(int) bool { return true }})
+	root.SetArgs([]string{"project", "set-config", "demo", "--config-json", string(mustJSON(t, read.Project.Config))})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("project set-config execute: %v\noutput: %s", err, out.String())
+	}
+	if projects.setConfigCalls != 1 {
+		t.Fatalf("SetConfig called %d times, want exactly 1", projects.setConfigCalls)
+	}
+	return projects.setConfig
+}
+
+// filledProjectConfig returns a domain.ProjectConfig with every field - and
+// every field of every nested struct - set to a distinctive non-zero value. It
+// walks the type by reflection on purpose: the point of the round-trip guard is
+// that it covers fields nobody has written yet.
+func filledProjectConfig(t *testing.T) domain.ProjectConfig {
+	t.Helper()
+	var cfg domain.ProjectConfig
+	fillEveryField(t, reflect.ValueOf(&cfg).Elem(), "config")
+	return cfg
+}
+
+// fillEveryField sets v, and everything reachable from it, to a non-zero value
+// derived from its path so a value landing in the wrong field is visible. It
+// fails the test on a kind it does not know how to fill rather than leaving a
+// silent hole in the guard.
+func fillEveryField(t *testing.T, v reflect.Value, path string) {
+	t.Helper()
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString(path)
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(7)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(7)
+	case reflect.Pointer:
+		v.Set(reflect.New(v.Type().Elem()))
+		fillEveryField(t, v.Elem(), path)
+	case reflect.Slice:
+		elem := reflect.New(v.Type().Elem()).Elem()
+		fillEveryField(t, elem, path+"[0]")
+		v.Set(reflect.Append(reflect.MakeSlice(v.Type(), 0, 1), elem))
+	case reflect.Map:
+		key := reflect.New(v.Type().Key()).Elem()
+		fillEveryField(t, key, path+".key")
+		val := reflect.New(v.Type().Elem()).Elem()
+		fillEveryField(t, val, path+".value")
+		m := reflect.MakeMap(v.Type())
+		m.SetMapIndex(key, val)
+		v.Set(m)
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if !v.Type().Field(i).IsExported() {
+				continue
+			}
+			fillEveryField(t, v.Field(i), path+"."+v.Type().Field(i).Name)
+		}
+	default:
+		t.Fatalf("fillEveryField: unhandled kind %s at %s - teach the filler about it so the round-trip guard stays complete", v.Kind(), path)
+	}
+}
+
+// changedConfigKeys names the top-level config keys that differ between want
+// and got, so a failure says WHICH field the round trip dropped.
+func changedConfigKeys(t *testing.T, want, got domain.ProjectConfig) []string {
+	t.Helper()
+	var wantMap, gotMap map[string]any
+	if err := json.Unmarshal(mustJSON(t, want), &wantMap); err != nil {
+		t.Fatalf("decode want config: %v", err)
+	}
+	if err := json.Unmarshal(mustJSON(t, got), &gotMap); err != nil {
+		t.Fatalf("decode got config: %v", err)
+	}
+	seen := map[string]bool{}
+	var keys []string
+	for k := range wantMap {
+		seen[k] = true
+		if !reflect.DeepEqual(wantMap[k], gotMap[k]) {
+			keys = append(keys, k)
+		}
+	}
+	for k := range gotMap {
+		if !seen[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return data
 }

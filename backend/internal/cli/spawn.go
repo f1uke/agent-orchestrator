@@ -360,7 +360,7 @@ func (c *commandContext) resolveProjectFromCWD(ctx context.Context) (projectDeta
 	bestLen := -1
 	ambiguous := false
 	for _, summary := range list.Projects {
-		project, err := c.fetchProjectDetails(ctx, summary.ID)
+		project, err := c.fetchProjectDetails(ctx, string(summary.ID))
 		if err != nil {
 			return projectDetails{}, false, err
 		}
@@ -420,7 +420,7 @@ func resolveSpawnHarness(explicit string, project projectDetails) (string, error
 		return harness, nil
 	}
 	if project.Config != nil {
-		if harness := strings.TrimSpace(project.Config.Worker.Agent); harness != "" {
+		if harness := strings.TrimSpace(string(project.Config.Worker.Harness)); harness != "" {
 			return harness, nil
 		}
 	}

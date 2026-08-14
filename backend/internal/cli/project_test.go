@@ -5,14 +5,22 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 )
 
 type projectCapture struct {
 	method string
 	path   string
 	body   []byte
+	// configPuts counts writes to the set-config endpoint specifically. The
+	// fields above hold the LAST request only, and every CLI run also posts a
+	// telemetry ping, so "was the config written?" needs its own counter.
+	configPuts int
 }
 
 func projectServer(t *testing.T, status int, respBody string) (*httptest.Server, *projectCapture) {
@@ -22,6 +30,9 @@ func projectServer(t *testing.T, status int, respBody string) (*httptest.Server,
 		capture.method = r.Method
 		capture.path = r.URL.Path
 		capture.body, _ = io.ReadAll(r.Body)
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/config") {
+			capture.configPuts++
+		}
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/projects") {
 			http.NotFound(w, r)
 			return
@@ -48,7 +59,7 @@ func TestProjectSetConfig_TrackerIntakeFlags(t *testing.T) {
 	if capture.method != http.MethodPut || capture.path != "/api/v1/projects/demo/config" {
 		t.Fatalf("request = %s %s, want PUT /api/v1/projects/demo/config", capture.method, capture.path)
 	}
-	var got setConfigRequest
+	var got projectsvc.SetConfigInput
 	if err := json.Unmarshal(capture.body, &got); err != nil {
 		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
 	}
@@ -68,7 +79,7 @@ func TestProjectSetConfig_TrackerIntakeJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
 	}
-	var got setConfigRequest
+	var got projectsvc.SetConfigInput
 	if err := json.Unmarshal(capture.body, &got); err != nil {
 		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
 	}
@@ -124,7 +135,7 @@ func TestProjectSetConfig_GitConventionFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
 	}
-	var got setConfigRequest
+	var got projectsvc.SetConfigInput
 	if err := json.Unmarshal(capture.body, &got); err != nil {
 		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
 	}
@@ -454,7 +465,7 @@ func TestProjectSetConfig_CarriesTheTabFacts(t *testing.T) {
 			if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, args...); err != nil {
 				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
 			}
-			var got setConfigRequest
+			var got projectsvc.SetConfigInput
 			if err := json.Unmarshal(capture.body, &got); err != nil {
 				t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
 			}
@@ -462,5 +473,91 @@ func TestProjectSetConfig_CarriesTheTabFacts(t *testing.T) {
 				t.Fatalf("config = %#v, want both tab facts carried to the daemon", got.Config)
 			}
 		})
+	}
+}
+
+// A key the CLI does not recognize must be refused, not swallowed. `set-config`
+// replaces the whole stored config, so a typo (or a config produced by a newer
+// daemon than this CLI) that decodes "successfully" into a struct without that
+// field writes the key out of existence and still exits 0. Erroring is the only
+// safe answer on a write path.
+func TestProjectSetConfig_RefusesUnknownConfigJSONField(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "project", "set-config", "demo", "--config-json", `{"defaultBranch":"main","responseLanguag":"Thai"}`)
+	if err == nil {
+		t.Fatalf("unknown config key must fail; stdout=%s", out)
+	}
+	if ExitCode(err) != 2 {
+		t.Errorf("exit code = %d, want 2 (usage error)", ExitCode(err))
+	}
+	msg := err.Error() + errOut
+	if !strings.Contains(msg, "responseLanguag") {
+		t.Errorf("error should name the unrecognized key, got: %s", msg)
+	}
+	if !strings.Contains(msg, "--config-json") {
+		t.Errorf("error should name the flag at fault, got: %s", msg)
+	}
+	if capture.configPuts != 0 {
+		t.Errorf("a rejected config must not be written; got %d PUTs to the config endpoint", capture.configPuts)
+	}
+}
+
+// Malformed JSON keeps failing as a plain usage error - the strict decoding
+// added for unknown keys must not blur the message for input that is not JSON
+// at all.
+func TestProjectSetConfig_MalformedConfigJSONErrorsClearly(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "project", "set-config", "demo", "--config-json", `{"defaultBranch":`)
+	if err == nil {
+		t.Fatalf("malformed --config-json must fail; stdout=%s", out)
+	}
+	if ExitCode(err) != 2 {
+		t.Errorf("exit code = %d, want 2 (usage error)", ExitCode(err))
+	}
+	msg := err.Error() + errOut
+	if !strings.Contains(msg, "--config-json") || !strings.Contains(msg, "valid JSON object") {
+		t.Errorf("error should say --config-json is not a valid JSON object, got: %s", msg)
+	}
+	if capture.configPuts != 0 {
+		t.Errorf("a rejected config must not be written; got %d PUTs to the config endpoint", capture.configPuts)
+	}
+}
+
+// A config that leaves optional fields out must be sent as-is: set-config
+// replaces the stored config, so inventing defaults here would write settings
+// the human never asked for.
+func TestProjectSetConfig_ConfigJSONAddsNoDefaults(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "project", "set-config", "demo", "--config-json", `{"sessionPrefix":"demo","trackerIntake":{"enabled":true}}`); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var got projectsvc.SetConfigInput
+	if err := json.Unmarshal(capture.body, &got); err != nil {
+		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+	}
+	// Deliberately omits defaultBranch and the tracker provider: those are the
+	// two fields the daemon's WithDefaults() would fill in. Filling them here
+	// would store settings the human never wrote.
+	want := domain.ProjectConfig{
+		SessionPrefix: "demo",
+		TrackerIntake: domain.TrackerIntakeConfig{Enabled: true},
+	}
+	if !reflect.DeepEqual(got.Config, want) {
+		t.Fatalf("config = %#v, want exactly %#v (no invented defaults)", got.Config, want)
 	}
 }
