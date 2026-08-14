@@ -625,6 +625,80 @@ describe("SimulatorPanel driving", () => {
 		pending.settleHome?.();
 	});
 
+	// The one that made it feel random: clicking into the app from another
+	// window loses and regains focus, which rebuilds the frame socket, and every
+	// press in the few hundred milliseconds before the first new frame decodes
+	// used to be dropped. That is exactly when a human clicks.
+	it("drives a press made while the stream is reconnecting after a refocus", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+
+		// The window loses focus and gets it straight back, as it does when the
+		// human clicks into the app. The socket is torn down and rebuilt.
+		vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		window.dispatchEvent(new Event("blur"));
+		await waitFor(() => expect(openSockets()).toHaveLength(0));
+		vi.spyOn(document, "hasFocus").mockReturnValue(true);
+		window.dispatchEvent(new Event("focus"));
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		// Deliberately no frame yet: this is the reconnecting window.
+		expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/connecting/i);
+
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+	});
+
+	// A stream that has actually ended is different: the picture will never
+	// update again, so a click on it would be a click made blind.
+	it("refuses to drive a stream that has ended", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+
+		openSockets()[0].onmessage?.({
+			data: JSON.stringify({ type: "ended", message: "the device is gone" }),
+		} as MessageEvent);
+		await screen.findByText(/the device is gone/i);
+
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(gestureKinds()).toEqual([]);
+	});
+
 	// A pointer capture the browser takes back must end the touch, or this side
 	// believes a finger is down and ignores every drag after it.
 	it("ends the drag when the browser takes the pointer back", async () => {

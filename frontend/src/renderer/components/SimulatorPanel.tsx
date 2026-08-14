@@ -177,7 +177,15 @@ export function SimulatorPanel({
 	// the lease here as well would be the same rule enforced twice - which is
 	// how the last version of this panel got a mutation through: break one copy
 	// and the other still refuses, so no test notices either is gone.
-	const canDrive = driving && stream.state === "live";
+	//
+	// The stream only has to be one that could still be showing the truth, not
+	// one that is mid-frame. Requiring "live" meant every press in the few
+	// hundred milliseconds after the socket was rebuilt was dropped - and the
+	// socket is rebuilt whenever the window regains focus, which is precisely
+	// when a human who just clicked into the app tries to drag. A stream that
+	// has actually ended is a different thing: the picture will never update
+	// again, so driving on it would be driving blind.
+	const canDrive = driving && stream.state !== "ended" && stream.state !== "unsupported";
 
 	const pressed = useRef<{ x: number; y: number; at: number } | null>(null);
 
