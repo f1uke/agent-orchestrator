@@ -288,13 +288,17 @@
 	--kanban-column-bg: rgb(0 0 0 / 0.02);
 	--kanban-pending-glow: rgb(0 0 0 / 0.03);
 	/* Light-mode lane hues: darker/saturated so they stay legible on white; the
-	   design handoff is dark-only, these keep the 4-hue system readable in light. */
-	--lane-todo: #6b6b85;
+	   design handoff is dark-only, these keep the 4-hue system readable in light.
+	   Every value is measured against the light card surface (#ffffff) and clears
+	   the 4.5:1 text floor — WORKING and NEEDS YOU were previously #b06f15 (4.09:1)
+	   and #d1493a (4.44:1), i.e. both failing, so they are darkened to 5.14:1 and
+	   5.44:1. Keep any future change above 4.5:1 on white. */
+	--lane-todo: #6b6b85; /* 5.16:1 */
 	--lane-todo-bright: #6b6b85;
-	--lane-working: #b06f15;
-	--lane-working-bright: #b06f15;
-	--lane-needs: #d1493a;
-	--lane-needs-bright: #d1493a;
+	--lane-working: #9a6100; /* 5.14:1 */
+	--lane-working-bright: #9a6100;
+	--lane-needs: #c0392b; /* 5.44:1 */
+	--lane-needs-bright: #c0392b;
 	--lane-review: #2563eb;
 	--lane-review-bright: #2563eb;
 	--lane-merge: #1a7f37;
@@ -4117,27 +4121,17 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 /* Summary-tab readiness / gating strip — a merge-pipeline "spine" pinned to the
    top of the Summary tab. `--rs-hue` (a board lane hue) is set inline per verdict;
    `--tone` per gate. See components/ReadinessStrip.tsx + lib/readiness.ts. */
+/* No painted edge and no hue wash: the verdict is carried by its glyph's SHAPE
+   plus the headline word, so it survives greyscale and does not repeat the same
+   fact as a stripe the eye has to decode. The container is a plain neutral card. */
 .readiness {
 	position: relative;
 	margin-bottom: 18px;
 	padding: 13px 14px 14px;
-	border: 1px solid var(--rs-edge, var(--border));
-	--rs-edge: color-mix(in oklab, var(--rs-hue) 34%, var(--border));
+	border: 1px solid var(--border);
 	border-radius: 11px;
-	background: linear-gradient(180deg, color-mix(in oklab, var(--rs-hue) 7%, transparent), transparent 46%), var(--bg-1);
+	background: var(--bg-1);
 	overflow: hidden;
-}
-
-/* A thin colored strap down the left edge → the block is color-coded even in
-   peripheral vision. */
-.readiness::before {
-	content: "";
-	position: absolute;
-	left: 0;
-	top: 0;
-	bottom: 0;
-	width: 3px;
-	background: var(--rs-hue);
 }
 
 .readiness__verdict {
@@ -4146,27 +4140,18 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	gap: 9px;
 }
 
-.readiness__dot {
+/* The verdict glyph — same shape vocabulary as the board columns and the sidebar,
+   so one session reads identically in all three places. Decorative: the block's
+   role="status" aria-label carries the verdict word and caption. */
+.readiness__glyph {
 	flex: none;
-	width: 9px;
-	height: 9px;
-	border-radius: 50%;
-	background: var(--rs-hue);
-	box-shadow: 0 0 0 4px color-mix(in oklab, var(--rs-hue) 18%, transparent);
+	width: 15px;
+	height: 15px;
+	color: var(--rs-hue);
 }
 
-.readiness__dot--pulse {
-	animation: readiness-pulse 1.9s ease-in-out infinite;
-}
-
-@keyframes readiness-pulse {
-	0%,
-	100% {
-		box-shadow: 0 0 0 3px color-mix(in oklab, var(--rs-hue) 26%, transparent);
-	}
-	50% {
-		box-shadow: 0 0 0 7px color-mix(in oklab, var(--rs-hue) 4%, transparent);
-	}
+.readiness__glyph--pulse {
+	animation: status-pulse 1.8s ease-in-out infinite;
 }
 
 .readiness__headline {
@@ -4186,7 +4171,8 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 }
 
 .readiness__caption {
-	margin: 4px 0 0 18px;
+	/* Aligns under the headline: glyph (15px) + the verdict row's 9px gap. */
+	margin: 4px 0 0 24px;
 	font-size: 12px;
 	line-height: 1.35;
 	color: var(--fg-muted);
@@ -4297,7 +4283,7 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.readiness__dot--pulse {
+	.readiness__glyph--pulse {
 		animation: none;
 	}
 }

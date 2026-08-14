@@ -24,11 +24,9 @@ export function TodoSessionPane({ session }: TodoSessionPaneProps) {
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background">
 			<div className="mx-auto flex min-h-0 w-full max-w-[680px] flex-1 flex-col p-4 sm:p-6">
-				<div
-					className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-sm"
-					// Grey top accent, mirroring the Board TODO modal's identity.
-					style={{ borderTopColor: "var(--lane-todo)", borderTopWidth: 3 }}
-				>
+				{/* No coloured top edge: the editor's "TODO · not started" eyebrow carries
+				    the identity in shape + words, the same way the Board TODO modal does. */}
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-sm">
 					<TodoSpecEditor
 						session={session}
 						onDeleted={() => void navigate({ to: "/projects/$projectId", params: { projectId } })}

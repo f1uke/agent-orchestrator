@@ -248,9 +248,9 @@ export function NewTaskDialog({
 					// trigger. Falls back to Radix's default focus return when no terminal
 					// is mounted (e.g. opened from the board).
 					onCloseAutoFocus={returnFocusToTerminal}
-					// Blue top accent marks the create modal (vs the TODO detail modal's
-					// grey), echoing the design handoff.
-					style={{ borderTopColor: "var(--accent)", borderTopWidth: 2 }}
+					// No coloured top edge: the "New task" title and its description name
+					// this modal outright, so a stripe would only repeat them in a form the
+					// reader has to learn.
 					className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-32px)] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in"
 				>
 					<div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">

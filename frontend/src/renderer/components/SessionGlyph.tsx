@@ -1,16 +1,16 @@
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
-import { attentionZone, type WorkspaceSession } from "../types/workspace";
-import { laneForZone } from "../lib/lane-indicator";
+import type { WorkspaceSession } from "../types/workspace";
+import { statusGlyph } from "../lib/status-glyph";
 import { cn } from "../lib/utils";
 
-// Session status glyph: a distinct lane shape (filled dot ● / ring ◎ / half ◐ /
-// check ✓) tinted by the lane hue with a soft glow, so a session list is
-// scannable by shape AND colour — the same 4-hue semantic system the board
-// uses (lib/lane-indicator, design handoff Board.dc.html). Shared by the
-// sidebar rows, the split-pane toolbars, and the split session picker.
+// Session status glyph: the silhouette of the session's exact status, tinted by
+// its lane hue. Shape leads and colour only reinforces, so a list is scannable
+// without separating the hues. It reads from the one shared status→glyph map
+// (lib/status-glyph) that the board's card gutter also uses, so a session looks
+// the same in the sidebar and on the board. Shared by the sidebar rows, the
+// split-pane toolbars, and the split session picker.
 export function SessionGlyph({ session }: { session: WorkspaceSession }) {
-	const lane = laneForZone(attentionZone(session));
-	const { Icon } = lane;
+	const { Icon, filled, lane } = statusGlyph(session);
 	// The glyph gently breathes (opacity pulse, the shared 1.8s status-pulse) ONLY
 	// while the session is actively working, so a live worker is glanceable in the
 	// list; every other lane keeps a static glyph. Disabled under reduced-motion.
@@ -22,7 +22,7 @@ export function SessionGlyph({ session }: { session: WorkspaceSession }) {
 				className={cn("h-[13px] w-[13px]", breathe && "animate-status-pulse")}
 				style={{
 					filter: `drop-shadow(0 0 5px color-mix(in srgb, ${lane.dotVar} 70%, transparent))`,
-					...(lane.filled ? { fill: "currentColor" } : {}),
+					...(filled ? { fill: "currentColor" } : {}),
 				}}
 				aria-hidden="true"
 			/>

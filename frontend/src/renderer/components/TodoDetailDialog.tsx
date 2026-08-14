@@ -14,9 +14,9 @@ type TodoDetailDialogProps = {
  * The Board's TODO detail modal: a Radix dialog wrapping the shared
  * {@link TodoSpecEditor}. The editor owns every field and the Start / Delete /
  * autosave behaviour; this component only supplies the modal chrome (overlay,
- * centered card, grey TODO accent) and closes the dialog when the editor
- * finishes. The same editor renders as a first-class page in the session-detail
- * route ({@link TodoSessionPane}).
+ * centered card) and closes the dialog when the editor finishes. The same editor
+ * renders as a first-class page in the session-detail route
+ * ({@link TodoSessionPane}).
  */
 export function TodoDetailDialog({ session, onOpenChange, onStarted }: TodoDetailDialogProps) {
 	if (!session) return null;
@@ -27,8 +27,9 @@ export function TodoDetailDialog({ session, onOpenChange, onStarted }: TodoDetai
 				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-overlay-in" />
 				<Dialog.Content
 					aria-describedby={undefined}
-					// Grey top accent marks the TODO detail modal (vs the create modal's blue).
-					style={{ borderTopColor: "var(--lane-todo)", borderTopWidth: 3 }}
+					// No coloured top edge: the editor's own "TODO · not started" eyebrow —
+					// dashed-ring glyph plus words — already says which modal this is, in
+					// text rather than in a stripe the reader has to decode.
 					className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-32px)] w-[min(600px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in"
 				>
 					{/* Radix requires a Title for the dialog's accessible name; the visible
