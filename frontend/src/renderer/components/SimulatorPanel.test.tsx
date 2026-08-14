@@ -143,6 +143,7 @@ beforeEach(() => {
 			}
 		},
 	);
+	sessionStorage.clear();
 	vi.spyOn(document, "hasFocus").mockReturnValue(true);
 	// jsdom has no 2d context; the panel only needs the call not to throw.
 	HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage: vi.fn() });
@@ -198,6 +199,69 @@ describe("SimulatorPanel device selection", () => {
 		expect(await screen.findByText(/2 simulators are booted/i)).toBeInTheDocument();
 		expect(openSockets()).toHaveLength(0);
 		expect(screen.getByText(/choose which booted simulator/i)).toBeInTheDocument();
+	});
+});
+
+describe("SimulatorPanel remembering a worker", () => {
+	const leased = () =>
+		devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator");
+
+	// Switching to another worker and back remounts this panel. Picking the
+	// device again and opting in to driving again every time was the complaint.
+	it("comes back to the device and the driving it was left with", async () => {
+		getMock.mockResolvedValue(leased());
+		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await userEvent.click(await screen.findByRole("button", { name: /drive this device/i }));
+		first.unmount();
+
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		expect(openSockets()[0].url).toContain("/sim-stream/UDID-A");
+		const toggle = await screen.findByRole("button", { name: /drive this device/i });
+		await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+	});
+
+	// What comes back is a device this session still owns. Remembering that
+	// driving was on is not the same as still being allowed to drive.
+	it("does not hand driving back when the lease has moved on", async () => {
+		getMock.mockResolvedValue(leased());
+		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await userEvent.click(await screen.findByRole("button", { name: /drive this device/i }));
+		first.unmount();
+
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
+		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
+	});
+
+	// One worker's choice is not another's.
+	it("keeps each worker's device separate", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload(
+				[device(), device({ udid: "UDID-B", name: "iPhone 17 Pro" })],
+				null,
+				"2 simulators are booted, so there is no unambiguous default",
+			),
+		);
+		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await screen.findByText(/2 simulators are booted/i);
+		await userEvent.click(screen.getByRole("combobox", { name: /simulator to watch/i }));
+		await userEvent.click(await screen.findByRole("option", { name: /iPhone 17 Pro ·/i }));
+		await waitFor(() => expect(openSockets()[0]?.url).toContain("/sim-stream/UDID-B"));
+		first.unmount();
+
+		// A different worker starts where it always did: with the refusal.
+		render(<SimulatorPanel isActive sessionId="p-2" />, { wrapper });
+		expect(await screen.findByText(/2 simulators are booted/i)).toBeInTheDocument();
+		expect(openSockets()).toHaveLength(0);
 	});
 });
 
@@ -503,14 +567,16 @@ describe("SimulatorPanel driving", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
-		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeEnabled();
 
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		await refresh();
 
-		await waitFor(() => expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument());
+		// The controls stay where they are - a row that grows and shrinks moves
+		// the screen under the pointer - but nothing on them can fire.
+		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
 		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
 	});
 
@@ -522,20 +588,20 @@ describe("SimulatorPanel driving", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
-		expect(screen.getByRole("button", { name: /^home$/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeEnabled();
 
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		await refresh();
-		await waitFor(() => expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
 
 		getMock.mockResolvedValue(leased());
 		await refresh();
 
 		const toggle = await screen.findByRole("button", { name: /drive this device/i });
 		expect(toggle).toHaveAttribute("aria-pressed", "false");
-		expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled();
 	});
 
 	// The complaint this answers: a drag used to be replayed as one swipe after
@@ -640,6 +706,7 @@ describe("SimulatorPanel driving", () => {
 		vi.spyOn(document, "hasFocus").mockReturnValue(false);
 		window.dispatchEvent(new Event("blur"));
 		await waitFor(() => expect(openSockets()).toHaveLength(0));
+		sessionStorage.clear();
 		vi.spyOn(document, "hasFocus").mockReturnValue(true);
 		window.dispatchEvent(new Event("focus"));
 		await waitFor(() => expect(openSockets()).toHaveLength(1));

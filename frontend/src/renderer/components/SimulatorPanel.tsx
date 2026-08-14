@@ -74,6 +74,50 @@ function emptyReason(watching: boolean, looked: boolean, bootedCount: number, de
 /** A press that moves less than this is a tap, not a drag. */
 const DRAG_THRESHOLD_PX = 8;
 
+/**
+ * What each session was last doing with a simulator, so coming back to a worker
+ * puts you where you left off instead of asking again.
+ *
+ * The panel is keyed by session and remounts when you switch between them, so
+ * without this every trip back meant picking the device again and opting in to
+ * driving again.
+ *
+ * In session storage rather than a module variable or local storage, because
+ * that is exactly the lifetime this wants: it survives switching workers and a
+ * reload, and it is gone when the window is. A remembered "driving" that came
+ * back days later would be a setting nobody chose.
+ *
+ * Remembering that driving was on does NOT re-grant it. The lease still does:
+ * the effect below switches driving off the moment this session is not the
+ * holder, so what comes back is only ever a device this session still owns.
+ */
+type Remembered = { udid: string | null; driving: boolean };
+
+function rememberedKey(sessionId: string): string {
+	return `ao.sim.lastUsed.${sessionId}`;
+}
+
+function recall(sessionId: string): Remembered | null {
+	try {
+		const raw = sessionStorage.getItem(rememberedKey(sessionId));
+		if (!raw) return null;
+		const parsed = JSON.parse(raw) as Partial<Remembered>;
+		return { udid: typeof parsed.udid === "string" ? parsed.udid : null, driving: parsed.driving === true };
+	} catch {
+		// Storage a build or a policy took away is a reason to ask again, not to
+		// fail to show a screen.
+		return null;
+	}
+}
+
+function remember(sessionId: string, value: Remembered): void {
+	try {
+		sessionStorage.setItem(rememberedKey(sessionId), JSON.stringify(value));
+	} catch {
+		// As above: forgetting is survivable.
+	}
+}
+
 /** Beyond this long without a frame, a stream that says it is live is not. */
 const STALE_AFTER_MS = 2_000;
 
@@ -93,10 +137,8 @@ export function SimulatorPanel({
 	const watching = isActive && pageActive;
 
 	const devices = useSimDevices(watching);
-	const [chosen, setChosen] = useState<string | null>(null);
-	// Driving is never sticky. A remembered "on" would let a click land on a
-	// device the human forgot they had left drivable.
-	const [driving, setDriving] = useState(false);
+	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
+	const [driving, setDriving] = useState(() => recall(sessionId)?.driving ?? false);
 	const [problem, setProblem] = useState("");
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const queryClient = useQueryClient();
@@ -104,23 +146,37 @@ export function SimulatorPanel({
 	const booted = useMemo(() => (devices.data?.devices ?? []).filter((d) => d.state === "Booted"), [devices.data]);
 	const defaultUdid = devices.data?.defaultUdid ?? null;
 
-	// Preselect only what the daemon was willing to resolve. With several booted
-	// it hands back null, and null is what the picker shows.
+	// Preselect only what the daemon was willing to resolve, or what this session
+	// was last watching. With several booted the daemon hands back null, and null
+	// is what the picker shows - remembering a choice the human made is not the
+	// same as guessing one they did not.
 	useEffect(() => {
 		if (chosen && booted.some((d) => d.udid === chosen)) return;
+		if (booted.length === 0 && !devices.isSuccess) return;
 		setChosen(defaultUdid && booted.some((d) => d.udid === defaultUdid) ? defaultUdid : null);
-	}, [chosen, booted, defaultUdid]);
+	}, [chosen, booted, defaultUdid, devices.isSuccess]);
 
 	const device = booted.find((d) => d.udid === chosen) ?? null;
 	const lease = device?.lease;
 	const heldByThisSession = lease?.state === "held" && lease.holder === sessionId;
 	const heldByOther = lease?.state === "held" && lease.holder !== sessionId;
 
-	// Switching device or losing the lease has to switch driving back off, not
-	// leave a toggle that is on for a device it no longer applies to.
+	// Losing the lease switches driving back off. Deliberately conditional on
+	// the device being known: on a remount the lease state has not arrived yet,
+	// and clearing on "not held" before anyone has looked would wipe what this
+	// session was doing a moment ago rather than reflect anything true.
 	useEffect(() => {
-		if (!heldByThisSession) setDriving(false);
-	}, [heldByThisSession, chosen]);
+		if (!chosen) {
+			setDriving(false);
+			return;
+		}
+		if (device && !heldByThisSession) setDriving(false);
+	}, [chosen, device, heldByThisSession]);
+
+	// Remembered per session, not per mount.
+	useEffect(() => {
+		remember(sessionId, { udid: chosen, driving });
+	}, [sessionId, chosen, driving]);
 
 	// `active` is the only gate, and it is passed whole rather than also being
 	// folded into the udid: two guards for one rule means a mutation can break
@@ -304,13 +360,15 @@ export function SimulatorPanel({
 
 	const stageRef = useRef<HTMLDivElement | null>(null);
 	const fitted = useFittedScreen(stageRef, stream.size);
+	const frame = frameFor(fitted);
 
 	return (
 		<TooltipProvider delayDuration={200}>
-			{/* Black ground, device centred, chrome floating clear of it - the shape
-			    the human asked for by pointing at serve-sim's own preview. The pane
-			    is the screen; everything else is a pill that gets out of its way. */}
-			<div className="relative flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden bg-black py-2">
+			{/* Device centred, chrome floating clear of it. The ground is the app's
+			    own, not pure black: a black panel inside a near-black app reads as a
+			    hole rather than a surface, and it forced every label on it to use
+			    fixed colours that could not follow the theme. */}
+			<div className="relative flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden bg-background py-2">
 				<DevicePill
 					booted={booted}
 					chosen={chosen}
@@ -327,10 +385,18 @@ export function SimulatorPanel({
 				>
 					{chosen ? (
 						<div
-							className="relative max-h-full max-w-full rounded-[1.9rem] bg-neutral-950 p-[3px] shadow-[0_20px_60px_-20px_rgba(0,0,0,0.95)] ring-1 ring-white/15"
-							style={fitted ? { width: fitted.width + BEZEL * 2, height: fitted.height + BEZEL * 2 } : undefined}
+							className="relative max-h-full max-w-full bg-neutral-900 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)]"
+							style={
+								fitted
+									? {
+											width: fitted.width + frame.bezel * 2,
+											height: fitted.height + frame.bezel * 2,
+											padding: frame.bezel,
+											borderRadius: frame.outerRadius,
+										}
+									: undefined
+							}
 						>
-							<Nubs />
 							<canvas
 								ref={canvasRef}
 								aria-label="Live simulator screen"
@@ -339,10 +405,8 @@ export function SimulatorPanel({
 								// nothing to letterbox in the ordinary case - it is the safety
 								// net for the frame before the stage has been measured, and
 								// `pointFor` maps a press through the same fit either way.
-								className={cn(
-									"block h-full w-full rounded-[1.7rem] object-contain",
-									canDrive ? "cursor-crosshair" : "cursor-default",
-								)}
+								className={cn("block h-full w-full object-contain", canDrive ? "cursor-crosshair" : "cursor-default")}
+								style={{ borderRadius: frame.screenRadius }}
 								onLostPointerCapture={onLostPointerCapture}
 								onPointerCancel={onPointerCancel}
 								onPointerDown={onPointerDown}
@@ -372,23 +436,24 @@ export function SimulatorPanel({
 				</div>
 
 				<div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
-					<div className="flex items-center gap-0.5 rounded-full border border-white/12 bg-white/8 p-1">
-						{driving ? (
-							<>
-								<PillButton
-									disabled={busy}
-									icon={House}
-									label="Home"
-									onClick={() => gesture.mutate({ kind: "button", name: "home" })}
-								/>
-								<PillButton
-									disabled={busy}
-									icon={Layers}
-									label="App switcher"
-									onClick={() => gesture.mutate({ kind: "button", name: "app-switcher" })}
-								/>
-							</>
-						) : null}
+					{/* Always the same size. The row used to grow and shrink as driving
+					    was switched on and off, which moved the screen under the
+					    human's pointer; the buttons are simply disabled until a touch
+					    is allowed to reach the device. Disabled is enforcement, not
+					    decoration: nothing here can fire while driving is off. */}
+					<div className="flex items-center gap-0.5 rounded-full border border-border bg-raised p-1">
+						<PillButton
+							disabled={!driving || busy}
+							icon={House}
+							label="Home"
+							onClick={() => gesture.mutate({ kind: "button", name: "home" })}
+						/>
+						<PillButton
+							disabled={!driving || busy}
+							icon={Layers}
+							label="App switcher"
+							onClick={() => gesture.mutate({ kind: "button", name: "app-switcher" })}
+						/>
 						<DeviceMenu
 							busy={claim.isPending || release.isPending}
 							device={device}
@@ -416,15 +481,14 @@ export function SimulatorPanel({
 							<button
 								aria-label={`Drive this device as @${sessionId}`}
 								aria-pressed={driving}
-								// The ground under this control is black in both themes, so
-								// its "on" colours are fixed rather than tokens: `text-foreground`
-								// over `bg-accent-weak` measures 16.45:1 on dark and 1.12:1 on
-								// light, which is an icon that disappears for half the users.
+								// Pressed is a filled accent with its own foreground token, plus
+								// a border: a state carried by more than colour alone survives
+								// being colour-blind, and aria-pressed carries it to a reader.
 								className={cn(
 									"flex h-9 w-9 items-center justify-center rounded-full border transition-colors",
 									driving
-										? "border-accent bg-accent/30 text-white"
-										: "border-white/12 bg-white/8 text-white/70 hover:text-white",
+										? "border-accent bg-accent text-accent-foreground"
+										: "border-border bg-raised text-muted-foreground hover:text-foreground",
 								)}
 								onClick={() => setDriving((on) => !on)}
 								type="button"
@@ -439,7 +503,23 @@ export function SimulatorPanel({
 	);
 }
 
-/** The bezel's own thickness, taken off the stage before the screen is fitted. */
+/**
+ * frameFor sizes the frame around the screen from the screen itself.
+ *
+ * A fixed radius and a fixed thickness were wrong at every size but one: at the
+ * rail's narrowest the corners read as square, which is not what the device
+ * looks like. A phone's display corners are a little over an eighth of its
+ * width, and the frame around them a small fraction of it - so both are taken
+ * from the picture's shorter side and follow it as the pane is resized.
+ */
+function frameFor(fitted: { width: number; height: number } | null) {
+	const shortest = fitted ? Math.min(fitted.width, fitted.height) : 0;
+	const bezel = Math.max(3, Math.round(shortest * 0.028));
+	const screenRadius = Math.round(shortest * 0.135);
+	return { bezel, screenRadius, outerRadius: screenRadius + bezel };
+}
+
+/** The frame thickness used before the stage has been measured. */
 const BEZEL = 4;
 
 /**
@@ -478,18 +558,6 @@ function useFittedScreen(
 	return fit.width > 0 && fit.height > 0 ? fit : null;
 }
 
-/** The nubs down a phone's sides. Decoration, and the reason a bezel reads as one. */
-function Nubs() {
-	return (
-		<span aria-hidden>
-			<span className="absolute -left-[2px] top-[16%] h-[5%] w-[3px] rounded-l-sm bg-neutral-700" />
-			<span className="absolute -left-[2px] top-[26%] h-[8%] w-[3px] rounded-l-sm bg-neutral-700" />
-			<span className="absolute -left-[2px] top-[37%] h-[8%] w-[3px] rounded-l-sm bg-neutral-700" />
-			<span className="absolute -right-[2px] top-[28%] h-[12%] w-[3px] rounded-r-sm bg-neutral-700" />
-		</span>
-	);
-}
-
 function PillButton({
 	disabled,
 	icon: Icon,
@@ -505,7 +573,7 @@ function PillButton({
 		<SimpleTooltip label={label}>
 			<button
 				aria-label={label}
-				className="flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+				className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
 				disabled={disabled}
 				onClick={onClick}
 				type="button"
@@ -538,11 +606,11 @@ function DevicePill({
 	watching: boolean;
 }) {
 	return (
-		<div className="flex shrink-0 items-center gap-1 rounded-full border border-white/12 bg-white/8 py-0.5 pl-1 pr-2.5">
+		<div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-raised py-0.5 pl-1 pr-2.5">
 			<Select disabled={booted.length === 0} onValueChange={onChoose} value={chosen ?? ""}>
 				<SelectTrigger
 					aria-label="Simulator to watch"
-					className="h-7 max-w-[190px] border-0 bg-transparent px-2 text-[12px] font-medium text-white/90 shadow-none focus:ring-0"
+					className="h-7 max-w-[190px] border-0 bg-transparent px-2 text-[12px] font-medium text-foreground shadow-none focus:ring-0"
 					size="sm"
 				>
 					<SelectValue placeholder={loading ? "Looking for simulators…" : "Choose a simulator"} />
@@ -586,37 +654,37 @@ function Freshness({ status, watching, chosen }: { status: SimStreamStatus; watc
 	if (!watching) {
 		label = "paused";
 		tone = "bg-passive";
-		text = "text-white/60";
+		text = "text-muted-foreground";
 		title = "This window is not focused, so nothing is being captured.";
 	} else if (!chosen) {
 		label = "idle";
 		tone = "bg-passive";
-		text = "text-white/60";
+		text = "text-muted-foreground";
 		title = "Choose a simulator to start watching.";
 	} else if (status.state === "connecting") {
 		label = "connecting";
 		tone = "bg-warning";
-		text = "text-amber-300";
+		text = "text-muted-foreground";
 		title = "Connecting to the device…";
 	} else if (status.state === "ended" || status.state === "unsupported") {
 		label = "ended";
 		tone = "bg-error";
-		text = "text-rose-300";
+		text = "text-error";
 		title = status.message || "The stream ended.";
 	} else if (stalled) {
 		label = `no frames ${Math.round((age ?? 0) / 1000)}s`;
 		tone = "bg-warning";
-		text = "text-amber-300";
+		text = "text-muted-foreground";
 		title = "The device has sent no frames for a while, even though the stream is open.";
 	} else if (status.state === "live") {
 		label = "live";
 		tone = "bg-success";
-		text = "text-emerald-300";
+		text = "text-success-strong";
 		title = "Frames are arriving from the device.";
 	} else {
 		label = "idle";
 		tone = "bg-passive";
-		text = "text-white/60";
+		text = "text-muted-foreground";
 		title = "Nothing is being captured.";
 	}
 
@@ -664,7 +732,7 @@ function DeviceMenu({
 			<DropdownMenuTrigger asChild>
 				<button
 					aria-label="Simulator and lease options"
-					className="flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+					className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground"
 					type="button"
 				>
 					<MoreHorizontal aria-hidden className="h-4 w-4" />
