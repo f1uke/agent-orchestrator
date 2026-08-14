@@ -457,3 +457,56 @@ func assertHoldTakenAndReleased(t *testing.T, daemon *simDaemon) {
 		t.Fatalf("the gesture hold was never released: %s", log)
 	}
 }
+
+// A drag through several points is the gesture the desktop pane sends when a
+// human holds the pointer down and moves it. Before this the CLI could only
+// send whole swipes, so an agent could not follow a route at all - and a route
+// composed of separate swipes lifts between legs, which an app reads as several
+// flicks rather than one drag.
+func TestSimDrag_IsOneTouchThroughEveryPoint(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, daemon := touchDeps(t, driver)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "drag", "0.5", "0.8", "0.5", "0.4", "0.2", "0.4"); err != nil {
+		t.Fatalf("sim drag failed: %v\nstderr=%s", err, errOut)
+	}
+	events := driver.calls()[0]
+	types := touchTypesOf(events)
+	if strings.Count(types, "begin") != 1 || strings.Count(types, "end") != 1 {
+		t.Fatalf("drag = %q, want one begin and one end", types)
+	}
+	visited := false
+	for _, e := range events {
+		if e.Kind == "touch" && e.X == 0.5 && e.Y == 0.4 {
+			visited = true
+		}
+	}
+	if !visited {
+		t.Fatalf("the middle waypoint was never reached: %+v", events)
+	}
+	assertHoldTakenAndReleased(t, daemon)
+}
+
+// The arguments are points, so an odd count is a point with no Y - refused as a
+// usage error rather than sent as something the human did not mean.
+func TestSimDrag_RefusesArgumentsThatAreNotPoints(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+
+	for _, args := range [][]string{
+		{"sim", "drag", "0.5", "0.8", "0.5"},
+		{"sim", "drag", "0.5", "0.8"},
+		{"sim", "drag", "0.5", "0.8", "0.5", "1.4"},
+	} {
+		_, _, err := executeCLI(t, deps, args...)
+		if err == nil {
+			t.Fatalf("%v must be refused", args)
+		}
+		if !errors.As(err, &usageError{}) {
+			t.Fatalf("%v: err = %v, want a usage error (exit 2)", args, err)
+		}
+	}
+	if len(driver.calls()) != 0 {
+		t.Fatalf("a rejected drag must never reach the device: %+v", driver.calls())
+	}
+}

@@ -122,6 +122,12 @@ type projectConfig struct {
 	TrackerIntake         trackerIntakeConfig   `json:"trackerIntake,omitempty"`
 	GitConvention         gitConventionConfig   `json:"gitConvention,omitempty"`
 	SystemPromptAdditions systemPromptAdditions `json:"systemPromptAdditions,omitempty"`
+	// The two facts that decide which inspector tabs the desktop app offers.
+	// They live in the same config object, so leaving them out of this mirror
+	// made --config-json drop them silently - a config that reported success
+	// and changed nothing.
+	HasWebUI        bool `json:"hasWebUI,omitempty"`
+	HasIOSSimulator bool `json:"hasIOSSimulator,omitempty"`
 }
 
 // setConfigRequest mirrors the daemon's SetConfigInput body for
@@ -146,6 +152,8 @@ type projectSetConfigOptions struct {
 	trackerAssignee   string
 	gitWorkflow       string
 	branchPrefix      string
+	hasWebUI          bool
+	hasIOSSimulator   bool
 	configJSON        string
 	clear             bool
 	json              bool
@@ -333,6 +341,8 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable)")
 	f.StringArrayVar(&opts.postCreate, "post-create", nil, "Command to run after workspace creation (repeatable)")
 	f.BoolVar(&opts.trackerIntake, "tracker-intake", false, "Enable issue-tracker intake for matching issues (see --tracker-provider)")
+	f.BoolVar(&opts.hasWebUI, "web-ui", false, "This project has a web UI, so sessions get the Browser tab")
+	f.BoolVar(&opts.hasIOSSimulator, "ios-simulator", false, "This project targets iOS, so sessions get the Device tab")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
@@ -387,6 +397,8 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 			Workflow:     strings.ToLower(strings.TrimSpace(opts.gitWorkflow)),
 			BranchPrefix: opts.branchPrefix,
 		},
+		HasWebUI:        opts.hasWebUI,
+		HasIOSSimulator: opts.hasIOSSimulator,
 	}
 	// "none" is the CLI-friendly spelling of the default (empty) workflow; the
 	// daemon stores it as unset. Normalize so `--git-workflow none` round-trips.

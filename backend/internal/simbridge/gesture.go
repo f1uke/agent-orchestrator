@@ -2,6 +2,7 @@ package simbridge
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -75,15 +76,34 @@ func Tap(at Point) ([]Event, error) {
 
 // Swipe drags from one point to another over duration.
 func Swipe(from, to Point, duration time.Duration) ([]Event, error) {
-	if err := validatePoint("swipe start", from); err != nil {
-		return nil, err
+	return Path([]Point{from, to}, duration)
+}
+
+// Path drags through a route of points, holding one finger down the whole way.
+//
+// It is what a swipe cannot express: a scroll that changes direction, a drag
+// onto a target, anything an app distinguishes from a flick. Composing it as
+// back-to-back swipes would lift between legs, and an app reads three lifts as
+// three separate gestures - so a route is one gesture here, with a single
+// matched begin and end, and every waypoint actually visited rather than cut
+// across.
+//
+// Two points is a swipe, and Swipe is exactly this: one implementation means
+// one set of timings to keep in step with what the device responds to.
+func Path(points []Point, duration time.Duration) ([]Event, error) {
+	if len(points) < 2 {
+		return nil, fmt.Errorf("a drag needs at least a start and an end, got %d point(s)", len(points))
 	}
-	if err := validatePoint("swipe end", to); err != nil {
-		return nil, err
+	for i, p := range points {
+		if err := validatePoint(fmt.Sprintf("drag point %d", i+1), p); err != nil {
+			return nil, err
+		}
 	}
 	if duration <= 0 || duration > MaxSwipeDuration {
-		return nil, fmt.Errorf("swipe duration must be above zero and at most %s, got %s", MaxSwipeDuration, duration)
+		return nil, fmt.Errorf("drag duration must be above zero and at most %s, got %s", MaxSwipeDuration, duration)
 	}
+
+	legs := len(points) - 1
 	steps := int(duration / swipeStep)
 	if steps < 3 {
 		steps = 3
@@ -91,22 +111,70 @@ func Swipe(from, to Point, duration time.Duration) ([]Event, error) {
 	if steps > maxSwipeSteps {
 		steps = maxSwipeSteps
 	}
+	// Every leg needs a step of its own, or a waypoint would be skipped.
+	if steps < legs {
+		steps = legs
+	}
 	pause := int((duration / time.Duration(steps)).Milliseconds())
 	if pause < 1 {
 		pause = 1
 	}
 
-	events := []Event{{Kind: "touch", Type: "begin", X: from.X, Y: from.Y}}
-	for i := 1; i <= steps; i++ {
-		fraction := float64(i) / float64(steps)
-		events = append(events,
-			Event{Kind: "sleep", MS: pause},
-			Event{Kind: "touch", Type: "move",
-				X: from.X + (to.X-from.X)*fraction,
-				Y: from.Y + (to.Y-from.Y)*fraction,
-			})
+	events := []Event{{Kind: "touch", Type: "begin", X: points[0].X, Y: points[0].Y}}
+	for leg, stepsHere := range shareSteps(points, steps) {
+		from, to := points[leg], points[leg+1]
+		for i := 1; i <= stepsHere; i++ {
+			fraction := float64(i) / float64(stepsHere)
+			events = append(events,
+				Event{Kind: "sleep", MS: pause},
+				Event{Kind: "touch", Type: "move",
+					X: from.X + (to.X-from.X)*fraction,
+					Y: from.Y + (to.Y-from.Y)*fraction,
+				})
+		}
 	}
-	return append(events, Event{Kind: "touch", Type: "end", X: to.X, Y: to.Y}), nil
+	last := points[len(points)-1]
+	return append(events, Event{Kind: "touch", Type: "end", X: last.X, Y: last.Y}), nil
+}
+
+// shareSteps splits a step budget between the legs of a route by how far each
+// one travels, so the finger moves at one speed rather than crawling across a
+// long leg and jumping a short one. Every leg keeps at least one step: the last
+// step of a leg is what lands exactly on its waypoint.
+func shareSteps(points []Point, steps int) []int {
+	legs := len(points) - 1
+	lengths := make([]float64, legs)
+	var total float64
+	for i := range lengths {
+		dx, dy := points[i+1].X-points[i].X, points[i+1].Y-points[i].Y
+		lengths[i] = math.Hypot(dx, dy)
+		total += lengths[i]
+	}
+
+	share := make([]int, legs)
+	assigned := 0
+	for i := range share {
+		share[i] = 1
+		if total > 0 {
+			// -1 because the step every leg already has is part of its share.
+			if extra := int(float64(steps)*lengths[i]/total) - 1; extra > 0 {
+				share[i] += extra
+			}
+		}
+		assigned += share[i]
+	}
+	// Rounding leaves a few steps unspent - fewer than there are legs. They go
+	// to the longest legs first, which is where one more step is least visible.
+	order := make([]int, legs)
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return lengths[order[a]] > lengths[order[b]] })
+	for i := 0; assigned < steps; i++ {
+		share[order[i%legs]]++
+		assigned++
+	}
+	return share
 }
 
 // Type sends text as US-keyboard key events.
