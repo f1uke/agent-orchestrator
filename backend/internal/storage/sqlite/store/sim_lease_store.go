@@ -15,26 +15,53 @@ import (
 // has it. granted=true means the caller now holds the device (a fresh claim, a
 // renewal of its own lease, or a takeover of an expired one); granted=false
 // returns the CURRENT holder so the refusal can name them.
-//
-// The exclusion is the database's, not this function's: udid is the primary key
-// and AcquireSimLease is a single conditional upsert, so simultaneous callers
-// resolve to exactly one winner even though nothing here holds a lock. The
-// transaction exists only so the losing caller reads the holder that beat it.
 func (s *Store) AcquireSimLease(ctx context.Context, lease domain.SimLease) (domain.SimLease, bool, error) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	var (
-		granted bool
-		holder  domain.SimLease
-	)
-	err := s.inTx(ctx, "acquire sim lease", func(q *gen.Queries) error {
-		rows, err := q.AcquireSimLease(ctx, gen.AcquireSimLeaseParams{
+	return s.claimSimLease(ctx, "acquire", lease, func(q *gen.Queries) (int64, error) {
+		return q.AcquireSimLease(ctx, gen.AcquireSimLeaseParams{
 			Udid:       lease.UDID,
 			SessionID:  lease.SessionID,
 			AcquiredAt: lease.AcquiredAt,
 			ExpiresAt:  lease.ExpiresAt,
 			UpdatedAt:  lease.AcquiredAt,
 		})
+	})
+}
+
+// TakeOverSimLease claims a simulator another session holds. granted=false
+// means a gesture is in flight on it, and returns the holder so the refusal can
+// say whose.
+func (s *Store) TakeOverSimLease(ctx context.Context, lease domain.SimLease) (domain.SimLease, bool, error) {
+	return s.claimSimLease(ctx, "take over", lease, func(q *gen.Queries) (int64, error) {
+		return q.TakeOverSimLease(ctx, gen.TakeOverSimLeaseParams{
+			Udid:       lease.UDID,
+			SessionID:  lease.SessionID,
+			AcquiredAt: lease.AcquiredAt,
+			ExpiresAt:  lease.ExpiresAt,
+			UpdatedAt:  lease.AcquiredAt,
+		})
+	})
+}
+
+// claimSimLease is the shape both claims share: run one conditional upsert and,
+// if it changed nothing, read the row to learn who won.
+//
+// The exclusion is the database's, not this function's: udid is the primary key
+// and each statement is a single conditional upsert, so simultaneous callers
+// resolve to exactly one winner even though nothing here holds a lock. The
+// transaction exists only so the losing caller reads the holder that beat it.
+// What differs between the two is only WHICH condition decides, which is why
+// that is the one thing passed in.
+func (s *Store) claimSimLease(
+	ctx context.Context, what string, lease domain.SimLease, upsert func(*gen.Queries) (int64, error),
+) (domain.SimLease, bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var (
+		granted bool
+		holder  domain.SimLease
+	)
+	err := s.inTx(ctx, what+" sim lease", func(q *gen.Queries) error {
+		rows, err := upsert(q)
 		if err != nil {
 			return err
 		}
@@ -50,7 +77,7 @@ func (s *Store) AcquireSimLease(ctx context.Context, lease domain.SimLease) (dom
 		return nil
 	})
 	if err != nil {
-		return domain.SimLease{}, false, fmt.Errorf("acquire sim lease on %s for %s: %w", lease.UDID, lease.SessionID, err)
+		return domain.SimLease{}, false, fmt.Errorf("%s sim lease on %s for %s: %w", what, lease.UDID, lease.SessionID, err)
 	}
 	return holder, granted, nil
 }

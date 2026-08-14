@@ -1521,6 +1521,8 @@ export interface components {
             holdSeconds?: number;
         };
         AcquireSimLeaseInput: {
+            /** @description Claim the device even if another session holds it. Refused while a gesture is in flight. */
+            takeOver?: boolean;
             /** @description How long to hold it, in seconds. Omit for the 10 minute default; the caller may hold for as little as a second (one gesture) and at most an hour. */
             ttlSeconds?: number;
             /** @description Simulator udid to claim (case-insensitive). */

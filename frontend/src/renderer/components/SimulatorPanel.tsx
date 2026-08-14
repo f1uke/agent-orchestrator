@@ -189,13 +189,14 @@ export function SimulatorPanel({
 	}, [queryClient]);
 
 	const claim = useMutation({
-		mutationFn: async (udid: string) => {
+		mutationFn: async ({ udid, takeOver }: { udid: string; takeOver?: boolean }) => {
 			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/sim-leases", {
 				params: { path: { sessionId } },
-				body: { udid },
+				body: { udid, takeOver },
 			});
 			if (error) throw error;
 		},
+		onMutate: () => setProblem(""),
 		onSuccess: refreshDevices,
 		onError: (error) => setProblem(apiErrorMessage(error, "Could not claim the simulator")),
 	});
@@ -462,7 +463,8 @@ export function SimulatorPanel({
 							device={device}
 							heldByOther={Boolean(heldByOther)}
 							heldByThisSession={heldByThisSession}
-							onClaim={() => device && claim.mutate(device.udid)}
+							onClaim={() => device && claim.mutate({ udid: device.udid })}
+							onTakeOver={() => device && claim.mutate({ udid: device.udid, takeOver: true })}
 							onRefresh={refreshDevices}
 							onRelease={() => device && release.mutate(device.udid)}
 							sessionId={sessionId}
@@ -691,6 +693,7 @@ function DeviceMenu({
 	onClaim,
 	onRefresh,
 	onRelease,
+	onTakeOver,
 	sessionId,
 }: {
 	busy: boolean;
@@ -700,6 +703,7 @@ function DeviceMenu({
 	onClaim: () => void;
 	onRefresh: () => void;
 	onRelease: () => void;
+	onTakeOver: () => void;
 	sessionId: string;
 }) {
 	const lease = device?.lease;
@@ -725,9 +729,7 @@ function DeviceMenu({
 							{heldByThisSession ? (
 								<span className="text-success">Leased by this session (@{sessionId})</span>
 							) : heldByOther ? (
-								<span className="text-warning">
-									Leased by @{lease?.holder}. Watching is always allowed; driving is not, until they release it.
-								</span>
+								<span className="text-warning">Leased by @{lease?.holder}. Watching is always allowed.</span>
 							) : (
 								/* Never "free": AO knows its own leases and nothing else. */
 								<span className="text-muted-foreground">Lease: unknown - {lease?.reason}</span>
@@ -737,7 +739,17 @@ function DeviceMenu({
 							<DropdownMenuItem disabled={busy} onSelect={onRelease}>
 								Release
 							</DropdownMenuItem>
-						) : heldByOther ? null : (
+						) : heldByOther ? (
+							/* Taking a device from another session is a decision a human
+							   is allowed to make - the lease exists so two agents do not
+							   drive one device at once, not to lock a person out of their
+							   own machine. Named after the holder so it is a decision and
+							   not a slip, and refused by the daemon while a gesture is
+							   actually in flight. */
+							<DropdownMenuItem disabled={busy} onSelect={onTakeOver}>
+								Take over from @{lease?.holder}
+							</DropdownMenuItem>
+						) : (
 							<DropdownMenuItem disabled={busy} onSelect={onClaim}>
 								Claim to drive
 							</DropdownMenuItem>

@@ -4390,6 +4390,10 @@ components:
       type: object
     AcquireSimLeaseInput:
       properties:
+        takeOver:
+          description: Claim the device even if another session holds it. Refused
+            while a gesture is in flight.
+          type: boolean
         ttlSeconds:
           description: How long to hold it, in seconds. Omit for the 10 minute default;
             the caller may hold for as little as a second (one gesture) and at most

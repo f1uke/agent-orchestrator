@@ -468,7 +468,7 @@ describe("SimulatorPanel lease truth", () => {
 	// The one place the lease is enforced in the UI is what is offered: a
 	// session that does not hold the device is never given the control that
 	// turns driving on, and the effect below switches it off if the lease moves.
-	it("names the other holder and offers no way to drive", async () => {
+	it("names the other holder and offers no way to drive until it is taken over", async () => {
 		getMock.mockResolvedValue(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
@@ -477,7 +477,65 @@ describe("SimulatorPanel lease truth", () => {
 		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
 		const menu = await openMenu();
 		expect(within(menu).getByText(/Leased by @other-7/i)).toBeInTheDocument();
-		expect(within(menu).queryByRole("menuitem", { name: /claim to drive/i })).not.toBeInTheDocument();
+		expect(within(menu).queryByRole("menuitem", { name: /^claim to drive$/i })).not.toBeInTheDocument();
+	});
+
+	// The lease stops two agents driving one device at once; it is not there to
+	// lock a person out of their own machine. Taking over is named after the
+	// holder so it reads as a decision rather than a slip.
+	it("offers to take the device over, naming who has it", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		const menu = await openMenu();
+		const takeOver = within(menu).getByRole("menuitem", { name: /take over from @other-7/i });
+		await userEvent.click(takeOver);
+
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/sim-leases",
+				expect.objectContaining({ body: { udid: "UDID-A", takeOver: true } }),
+			),
+		);
+	});
+
+	// An ordinary claim on a device nobody holds must not ask to take anything
+	// over: the two refuse for different reasons and mean different things.
+	it("claims without taking over when nobody holds the device", async () => {
+		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		const menu = await openMenu();
+		await userEvent.click(within(menu).getByRole("menuitem", { name: /claim to drive/i }));
+
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/sim-leases",
+				expect.objectContaining({ body: { udid: "UDID-A", takeOver: undefined } }),
+			),
+		);
+	});
+
+	// The daemon refuses a takeover while a touch is actually happening, and the
+	// human has to be told why rather than left with a button that did nothing.
+	it("says why a takeover was refused mid-gesture", async () => {
+		getMock.mockResolvedValue(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		postMock.mockImplementation(async (path: string) => {
+			if (path.endsWith("/sim-leases")) {
+				return { error: { message: "UDID-A has a gesture in flight from @other-7: retry in a moment" } };
+			}
+			return { error: undefined };
+		});
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		const menu = await openMenu();
+		await userEvent.click(within(menu).getByRole("menuitem", { name: /take over from @other-7/i }));
+
+		expect(await screen.findByText(/gesture in flight from @other-7/i)).toBeInTheDocument();
 	});
 
 	it("offers driving only once this session holds the lease, and never pre-enabled", async () => {

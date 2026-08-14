@@ -273,3 +273,110 @@ func TestLease_ReleasedWhenTheOwningSessionEnds(t *testing.T) {
 		t.Fatalf("device must be claimable after its holder ended: %v", err)
 	}
 }
+
+// A human deciding they want the device is allowed. The lease is there so two
+// agents do not drive one simulator at once, not to lock a person out of their
+// own machine - which is what refusing every claim on a held device did.
+func TestTakeOver_ClaimsADeviceAnotherSessionHolds(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	svc, store := newService(t, fixedClock(now))
+	first, second := newSession(t, store, now), newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), first, udidProMax, 0); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	// An ordinary claim is still refused - taking over has to be asked for.
+	if _, err := svc.Acquire(context.Background(), second, udidProMax, 0); err == nil {
+		t.Fatal("an ordinary claim on a held device must still be refused")
+	}
+
+	lease, err := svc.TakeOver(context.Background(), second, udidProMax, 0)
+	if err != nil {
+		t.Fatalf("take over: %v", err)
+	}
+	if lease.SessionID != second {
+		t.Fatalf("lease holder = %s, want the session that took it over", lease.SessionID)
+	}
+
+	// And the session it was taken from no longer holds it, so its next gesture
+	// is refused the ordinary way rather than reaching the device.
+	if _, err := svc.AcquireHold(context.Background(), first, udidProMax, 0); err == nil {
+		t.Fatal("the previous holder must not still be able to take the finger")
+	}
+}
+
+// The one part of the arbitration a human may NOT override: a touch that is
+// happening. Taking the device out from under a gesture in flight is how one
+// ends up half-sent, with a finger left down on a device nobody owns.
+func TestTakeOver_LeavesAGestureInFlightAlone(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	svc, store := newService(t, fixedClock(now))
+	first, second := newSession(t, store, now), newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), first, udidProMax, 0); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	hold, err := svc.AcquireHold(context.Background(), first, udidProMax, 0)
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+
+	_, err = svc.TakeOver(context.Background(), second, udidProMax, 0)
+	var held *sim.HeldError
+	if !errors.As(err, &held) {
+		t.Fatalf("err = %v, want a refusal naming the holder", err)
+	}
+	if !held.MidGesture {
+		t.Fatal("the refusal must say a gesture is in flight, not that the device is leased")
+	}
+	if !strings.Contains(err.Error(), "retry in a moment") {
+		t.Fatalf("error %q must say what to do about it", err)
+	}
+
+	// The gesture finishes and the device can then be taken.
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token); err != nil {
+		t.Fatalf("release hold: %v", err)
+	}
+	if _, err := svc.TakeOver(context.Background(), second, udidProMax, 0); err != nil {
+		t.Fatalf("take over once the gesture finished: %v", err)
+	}
+}
+
+// A hold token issued to the previous holder must not survive the takeover, or
+// it could be redeemed against the new holder's lease.
+func TestTakeOver_RetiresThePreviousHoldersToken(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	clock := now
+	svc, store := newService(t, func() time.Time { return clock })
+	first, second := newSession(t, store, now), newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), first, udidProMax, 0); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	hold, err := svc.AcquireHold(context.Background(), first, udidProMax, time.Second)
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	// The gesture's hold lapses on its own, which is what lets the takeover
+	// through.
+	clock = clock.Add(2 * time.Second)
+	if _, err := svc.TakeOver(context.Background(), second, udidProMax, 0); err != nil {
+		t.Fatalf("take over: %v", err)
+	}
+
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token); err == nil {
+		t.Fatal("a token from before the takeover must not be redeemable against the new lease")
+	}
+}
+
+// Taking over a device nobody holds is just a claim.
+func TestTakeOver_OnAFreeDeviceIsAnOrdinaryClaim(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	svc, store := newService(t, fixedClock(now))
+	owner := newSession(t, store, now)
+
+	lease, err := svc.TakeOver(context.Background(), owner, udidProMax, 0)
+	if err != nil {
+		t.Fatalf("take over: %v", err)
+	}
+	if lease.SessionID != owner || !lease.ExpiresAt.After(now) {
+		t.Fatalf("lease = %+v", lease)
+	}
+}

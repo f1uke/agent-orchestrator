@@ -56,9 +56,17 @@ const maxUDIDLen = 64
 type HeldError struct {
 	Lease domain.SimLease
 	Now   time.Time
+	// MidGesture: the refusal is a touch in flight rather than the lease
+	// itself. It says what to do about it - wait a moment - where "leased by
+	// somebody" says wait for them to finish with the device.
+	MidGesture bool
 }
 
 func (e *HeldError) Error() string {
+	if e.MidGesture {
+		return fmt.Sprintf("simulator %s has a gesture in flight from @%s: retry in a moment",
+			e.Lease.UDID, e.Lease.SessionID)
+	}
 	return fmt.Sprintf("simulator %s is leased by @%s for another %s",
 		e.Lease.UDID, e.Lease.SessionID, humanizeDuration(e.Lease.ExpiresAt.Sub(e.Now)))
 }
@@ -75,6 +83,10 @@ func humanizeDuration(d time.Duration) string {
 // Manager is the lease surface the HTTP controller depends on.
 type Manager interface {
 	Acquire(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimLease, error)
+	// TakeOver claims a device another session holds. It leaves a gesture that
+	// is in flight alone; see the method for why that is the one part of the
+	// arbitration a human may not override.
+	TakeOver(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimLease, error)
 	Release(ctx context.Context, sessionID domain.SessionID, udid string) error
 	List(ctx context.Context) ([]domain.SimLease, error)
 	// AcquireHold/ReleaseHold bracket one gesture. See hold.go: the lease says
@@ -87,6 +99,7 @@ type Manager interface {
 // Store is the persistence surface the service owns; *sqlite.Store satisfies it.
 type Store interface {
 	AcquireSimLease(ctx context.Context, lease domain.SimLease) (domain.SimLease, bool, error)
+	TakeOverSimLease(ctx context.Context, lease domain.SimLease) (domain.SimLease, bool, error)
 	ReleaseSimLease(ctx context.Context, udid string, sessionID domain.SessionID) (bool, error)
 	GetSimLease(ctx context.Context, udid string, now time.Time) (domain.SimLease, bool, error)
 	ListSimLeases(ctx context.Context, now time.Time) ([]domain.SimLease, error)
@@ -154,6 +167,47 @@ func (s *Service) Acquire(ctx context.Context, sessionID domain.SessionID, udid 
 	}
 	if !granted {
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now}
+	}
+	return holder, nil
+}
+
+// TakeOver claims a device another session holds.
+//
+// The lease says who is driving; a human deciding that is now them is a
+// legitimate thing to want, and refusing it made the pane feel locked to
+// whichever worker got there first. What is NOT negotiable is a touch that is
+// happening: a gesture in flight - a tap, or a drag with the finger still down
+// - is left alone, and this is refused until it finishes, which takes seconds.
+// The previous holder finds out the ordinary way: its next gesture is refused
+// because it no longer holds the lease, and the desktop pane switches its own
+// driving off within a poll.
+func (s *Service) TakeOver(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimLease, error) {
+	key, err := s.leaseKey(udid)
+	if err != nil {
+		return domain.SimLease{}, err
+	}
+	if ttl == 0 {
+		ttl = DefaultTTL
+	}
+	if ttl < MinTTL || ttl > MaxTTL {
+		return domain.SimLease{}, fmt.Errorf("%w: ttl must be between %s and %s, got %s", ErrInvalid, MinTTL, MaxTTL, ttl)
+	}
+	if err := s.requireLiveSession(ctx, sessionID); err != nil {
+		return domain.SimLease{}, err
+	}
+
+	now := s.now()
+	holder, granted, err := s.store.TakeOverSimLease(ctx, domain.SimLease{
+		UDID:       key,
+		SessionID:  sessionID,
+		AcquiredAt: now,
+		ExpiresAt:  now.Add(ttl),
+	})
+	if err != nil {
+		return domain.SimLease{}, err
+	}
+	if !granted {
+		return domain.SimLease{}, &HeldError{Lease: holder, Now: now, MidGesture: true}
 	}
 	return holder, nil
 }
