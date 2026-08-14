@@ -543,14 +543,21 @@ func TestProjectSetConfig_ConfigJSONAddsNoDefaults(t *testing.T) {
 
 	if _, errOut, err := executeCLI(t, Deps{
 		ProcessAlive: func(int) bool { return true },
-	}, "project", "set-config", "demo", "--config-json", `{"defaultBranch":"release/2.0"}`); err != nil {
+	}, "project", "set-config", "demo", "--config-json", `{"sessionPrefix":"demo","trackerIntake":{"enabled":true}}`); err != nil {
 		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
 	}
 	var got projectsvc.SetConfigInput
 	if err := json.Unmarshal(capture.body, &got); err != nil {
 		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
 	}
-	if want := (domain.ProjectConfig{DefaultBranch: "release/2.0"}); !reflect.DeepEqual(got.Config, want) {
+	// Deliberately omits defaultBranch and the tracker provider: those are the
+	// two fields the daemon's WithDefaults() would fill in. Filling them here
+	// would store settings the human never wrote.
+	want := domain.ProjectConfig{
+		SessionPrefix: "demo",
+		TrackerIntake: domain.TrackerIntakeConfig{Enabled: true},
+	}
+	if !reflect.DeepEqual(got.Config, want) {
 		t.Fatalf("config = %#v, want exactly %#v (no invented defaults)", got.Config, want)
 	}
 }
