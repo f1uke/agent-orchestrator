@@ -582,6 +582,83 @@ describe("SimulatorPanel driving", () => {
 		expect(gestureKinds()).not.toContain("swipe");
 	});
 
+	// The bug: a press was refused outright while any other gesture was still in
+	// flight, so the drag vanished with nothing to show it had been asked for.
+	// The device's own arbitration may still refuse it - and says so when it
+	// does - but this side must not swallow it.
+	it("starts a drag on a press even while another gesture is still in flight", async () => {
+		// A box rather than a `let`: TypeScript narrows a variable only assigned
+		// inside a callback to `never`, and the assignment really does happen.
+		const pending: { settleHome: (() => void) | null } = { settleHome: null };
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+
+		// A home press that has not come back yet.
+		postMock.mockImplementation(
+			(path: string) =>
+				new Promise((resolve) => {
+					if (String(path).endsWith("/gesture")) pending.settleHome = () => resolve({ error: undefined });
+					else resolve({ error: undefined });
+				}),
+		);
+		await userEvent.click(screen.getByRole("button", { name: /^home$/i }));
+
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+		pending.settleHome?.();
+	});
+
+	// A pointer capture the browser takes back must end the touch, or this side
+	// believes a finger is down and ignores every drag after it.
+	it("ends the drag when the browser takes the pointer back", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		canvas.setPointerCapture = () => {};
+		canvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 200,
+			height: 400,
+			right: 200,
+			bottom: 400,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		});
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+
+		fireEvent.lostPointerCapture(canvas, { pointerId: 1 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-end"));
+
+		// And the next drag still works rather than being swallowed.
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds().filter((k) => k === "drag-begin")).toHaveLength(2));
+	});
+
 	// A press that does not move is still a tap, which holds the finger down for
 	// a measured moment a drag's begin does not.
 	it("still sends a tap for a press that does not move", async () => {

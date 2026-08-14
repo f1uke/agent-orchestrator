@@ -118,14 +118,26 @@ describe("DragStream", () => {
 		expect(send.mock.calls).toHaveLength(before);
 	});
 
-	it("does not start a second touch while one is already down", async () => {
+	// The bug this answers: a pointer the browser took back leaves this side
+	// believing a finger is still down, and every drag after it was silently
+	// ignored - "sometimes I have to do it twice".
+	it("closes a touch whose end never arrived rather than ignoring the next press", async () => {
 		const t = controllable();
 		const drag = new DragStream(t.send);
 
 		drag.begin({ x: 0.5, y: 0.9 });
-		drag.begin({ x: 0.1, y: 0.1 });
-		await t.settle(2);
+		await t.settle();
+		drag.move({ x: 0.5, y: 0.6 });
+		await t.settle();
+		// The pointer-up never happens. The next press must still start a drag.
+		drag.begin({ x: 0.2, y: 0.2 });
+		await t.settle(3);
 
-		expect(steps(t.sent)).toEqual(["drag-begin"]);
+		expect(steps(t.sent)).toEqual(["drag-begin", "drag-move", "drag-end", "drag-begin"]);
+		// The abandoned touch is closed where it actually got to, not where the
+		// new press landed.
+		expect(t.sent[2].point.y).toBeCloseTo(0.6, 5);
+		expect(t.sent[3].point.y).toBeCloseTo(0.2, 5);
+		expect(drag.isDragging).toBe(true);
 	});
 });

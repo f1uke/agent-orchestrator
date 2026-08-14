@@ -225,14 +225,28 @@ export function SimulatorPanel({
 		return Math.hypot((point.x - start.x) * rect.width, (point.y - start.y) * rect.height);
 	};
 
+	// Deliberately not gated on `busy`. Refusing the press while some other
+	// gesture is still in flight made a drag vanish with no sign it had been
+	// asked for - which is what "sometimes I have to do it twice" was. The
+	// device's own arbitration is what may refuse this, and when it does it says
+	// so; silence here said nothing.
 	const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-		if (!canDrive || busy) return;
+		if (!canDrive) return;
 		const point = pointFor(event);
 		if (!point) return;
 		event.currentTarget.setPointerCapture(event.pointerId);
 		// Nothing is sent yet: a press that never moves is a tap, and a tap holds
 		// the finger down for a measured moment that a drag's begin does not.
 		pressed.current = { x: point.x, y: point.y, at: Date.now() };
+	};
+
+	// A pointer capture the browser takes back - a window switch, a gesture the
+	// OS claimed - ends the touch here too. Without it this side believes a
+	// finger is still down and ignores every drag after it.
+	const onLostPointerCapture = () => {
+		pressed.current = null;
+		const held = drag.current;
+		if (held?.isDragging) held.end({ x: 0.5, y: 0.5 });
 	};
 
 	const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -321,6 +335,7 @@ export function SimulatorPanel({
 									"block h-full w-full rounded-[1.7rem] object-contain",
 									canDrive ? "cursor-crosshair" : "cursor-default",
 								)}
+								onLostPointerCapture={onLostPointerCapture}
 								onPointerCancel={onPointerCancel}
 								onPointerDown={onPointerDown}
 								onPointerMove={onPointerMove}
