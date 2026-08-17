@@ -1540,8 +1540,12 @@ export interface components {
             durationMs?: number;
             /** @description How long the gesture may hold the device, in seconds (1-60). Omit for the 30 second default. This is not a working window: it only bounds how long a command killed mid-gesture keeps the device. */
             holdSeconds?: number;
+            /** @description tap: the element's accessibility identifier, the other way a by-name tap may target it. */
+            id?: string;
             /** @description tap, swipe, type, button, drag-begin, drag-move or drag-end - the gesture this hold covers. */
             kind?: string;
+            /** @description tap: the element label this hold's gesture is about to tap, when acquired for a by-name tap. */
+            label?: string;
             /** @description button: home or app-switcher. */
             name?: string;
             /** @description The text a type gesture sends. */
@@ -2603,6 +2607,8 @@ export interface components {
             offScreen?: boolean;
             screenChange?: boolean;
             selector?: string;
+            /** Format: int64 */
+            selectorIndex?: number;
             /** Format: int64 */
             selectorRung?: number;
             /** Format: int64 */

@@ -128,10 +128,15 @@ type SimRecordingStep struct {
 	// Selector identifies the element the step targeted, when one could be
 	// resolved. SelectorRung records which selector strategy produced it (a
 	// coarser rung means a weaker match), and Ambiguity>0 means more than one
-	// element on screen matched it.
-	Selector     string `json:"selector,omitempty"`
-	SelectorRung int64  `json:"selectorRung,omitempty"`
-	Ambiguity    int64  `json:"ambiguity,omitempty"`
+	// element on screen matched it. SelectorIndex is which of those Ambiguity
+	// matches this step resolved to, in tree order (0 when there is no
+	// ambiguity) - without it, re-emitting a flow from this step would always
+	// address the FIRST element sharing the selector, even when a later one is
+	// the one that was actually tapped.
+	Selector      string `json:"selector,omitempty"`
+	SelectorRung  int64  `json:"selectorRung,omitempty"`
+	SelectorIndex int64  `json:"selectorIndex,omitempty"`
+	Ambiguity     int64  `json:"ambiguity,omitempty"`
 	// OffScreen: the step's target was outside the visible viewport.
 	OffScreen bool `json:"offScreen,omitempty"`
 	// ScreenChange: this step caused a screen transition, so an emitted flow

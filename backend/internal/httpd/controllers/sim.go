@@ -48,10 +48,10 @@ type ReleaseSimLeaseResponse struct {
 type AcquireSimHoldInput struct {
 	HoldSeconds int `json:"holdSeconds,omitempty" description:"How long the gesture may hold the device, in seconds (1-60). Omit for the 30 second default. This is not a working window: it only bounds how long a command killed mid-gesture keeps the device."`
 	// Intent describes the gesture this hold is about to bracket, mirroring
-	// SimGestureInput's own fields one-for-one: it is what a session recording
-	// gestures on this device needs in order to capture the step, and is
-	// optional so a caller with nothing to record (or one that predates this
-	// field) still gets the hold.
+	// SimGestureInput's own coordinate/text/name fields one-for-one: it is what
+	// a session recording gestures on this device needs in order to capture
+	// the step, and is optional so a caller with nothing to record (or one
+	// that predates this field) still gets the hold.
 	Kind       string  `json:"kind,omitempty" description:"tap, swipe, type, button, drag-begin, drag-move or drag-end - the gesture this hold covers."`
 	X          float64 `json:"x,omitempty" description:"Normalized 0..1 screen coordinates, for tap/swipe/drag."`
 	Y          float64 `json:"y,omitempty"`
@@ -60,6 +60,15 @@ type AcquireSimHoldInput struct {
 	DurationMS int     `json:"durationMs,omitempty" description:"Swipe duration in milliseconds."`
 	Text       string  `json:"text,omitempty" description:"The text a type gesture sends."`
 	Name       string  `json:"name,omitempty" description:"button: home or app-switcher."`
+	// Label and ID are the one pair with no SimGestureInput counterpart: a tap
+	// that named its target (`ao sim tap --label`/`--id`) rather than pointing
+	// at one. When either is set, a recording open on this device resolves the
+	// step by that name against the screen it already reads, instead of
+	// hit-testing X/Y - the name is what the caller actually asked for, and
+	// hit-testing a coordinate to rediscover it would recover a worse answer
+	// to a question already answered.
+	Label string `json:"label,omitempty" description:"tap: the element label this hold's gesture is about to tap, when acquired for a by-name tap."`
+	ID    string `json:"id,omitempty" description:"tap: the element's accessibility identifier, the other way a by-name tap may target it."`
 }
 
 // SimHoldResponse is the { hold } body returned by acquiring a gesture hold.
@@ -208,6 +217,7 @@ func (c *SimController) acquireHold(w http.ResponseWriter, r *http.Request) {
 	intent := simsvc.GestureIntent{
 		Kind: in.Kind, X: in.X, Y: in.Y, ToX: in.ToX, ToY: in.ToY,
 		DurationMS: in.DurationMS, Text: in.Text, Name: in.Name,
+		Label: in.Label, ID: in.ID,
 	}
 	hold, err := c.Svc.AcquireHold(r.Context(), sessionID(r), chi.URLParam(r, "udid"), time.Duration(in.HoldSeconds)*time.Second, intent)
 	if err != nil {

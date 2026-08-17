@@ -25,6 +25,20 @@ type simDaemon struct {
 	holdStatus int
 	holdBody   string
 
+	// recordStartStatus/recordStartBody, recordGetStatus/recordGetBody and
+	// recordStopStatus/recordStopBody override the recording routes' response
+	// the same way holdStatus/holdBody do for the gesture hold: a non-zero,
+	// non-200 status writes that status and body verbatim (a refusal), and an
+	// explicit body with a zero/200 status stands in for a specific success
+	// payload (e.g. the steps a test wants `stop` to convert). An empty body
+	// with no status falls back to a minimal canned success response.
+	recordStartStatus int
+	recordStartBody   string
+	recordGetStatus   int
+	recordGetBody     string
+	recordStopStatus  int
+	recordStopBody    string
+
 	mu          sync.Mutex
 	calls       []string // "METHOD path"
 	body        string   // last request body
@@ -100,6 +114,42 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 			udid := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 			delete(d.leases, udid)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"released": true})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/sim-recordings/"):
+			if d.recordStartStatus != 0 && d.recordStartStatus != http.StatusOK {
+				w.WriteHeader(d.recordStartStatus)
+				_, _ = io.WriteString(w, d.recordStartBody)
+				return
+			}
+			respBody := d.recordStartBody
+			if respBody == "" {
+				respBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"",` +
+					`"startedAt":"2026-08-13T07:41:02Z","updatedAt":"2026-08-13T07:41:02Z"}}`
+			}
+			_, _ = io.WriteString(w, respBody)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/sim-recordings/"):
+			if d.recordGetStatus != 0 && d.recordGetStatus != http.StatusOK {
+				w.WriteHeader(d.recordGetStatus)
+				_, _ = io.WriteString(w, d.recordGetBody)
+				return
+			}
+			respBody := d.recordGetBody
+			if respBody == "" {
+				respBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"",` +
+					`"startedAt":"2026-08-13T07:41:02Z","updatedAt":"2026-08-13T07:41:02Z"},"steps":[]}`
+			}
+			_, _ = io.WriteString(w, respBody)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/sim-recordings/"):
+			if d.recordStopStatus != 0 && d.recordStopStatus != http.StatusOK {
+				w.WriteHeader(d.recordStopStatus)
+				_, _ = io.WriteString(w, d.recordStopBody)
+				return
+			}
+			respBody := d.recordStopBody
+			if respBody == "" {
+				respBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"",` +
+					`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},"steps":[]}`
+			}
+			_, _ = io.WriteString(w, respBody)
 		default:
 			http.NotFound(w, r)
 		}

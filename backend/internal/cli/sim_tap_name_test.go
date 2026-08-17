@@ -276,6 +276,24 @@ func TestSimTap_TheScreenIsReadUnderTheHold(t *testing.T) {
 	}
 }
 
+// Recording is almost never open, and a by-name tap is the common way to
+// drive - so it must cost exactly the one read under the hold above, never a
+// second, earlier one taken solely to feed a recording's intent. The hold's
+// intent instead carries the label/id itself (see runSimTapByName and
+// TestRecordIntent_ByNameTapRecordsTheRequestedSelector), so there is nothing
+// left for an extra read to discover.
+func TestSimTapByName_DoesNotReadTheScreenBeforeAcquiringTheHold(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: namedScreen()}
+	deps, _ := touchDeps(t, driver)
+
+	if _, _, err := executeCLI(t, deps, "sim", "tap", "--label", "Continue"); err != nil {
+		t.Fatalf("sim tap: %v", err)
+	}
+	if driver.reads() != 1 {
+		t.Fatalf("screen was read %d time(s), want exactly 1", driver.reads())
+	}
+}
+
 func TestSimTap_UsageErrors(t *testing.T) {
 	tests := []struct {
 		name string

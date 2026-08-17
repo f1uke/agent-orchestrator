@@ -30,6 +30,9 @@ ao sim type   <text>           [flags]
 ao sim button <name>           [flags]
 ao sim flow check <file>       [flags]
 ao sim flow run   <file>       [flags]
+ao sim record start            [flags]
+ao sim record status           [flags]
+ao sim record stop             [flags]
 ```
 
 ## The loop that works
@@ -407,6 +410,12 @@ ao sim ax                              # confirm what actually happened
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
 - **If a tap seems to do nothing AND `ao sim ax` comes back empty, the app itself may be stuck.** `ao sim ax` samples the foreground app's main thread before it reports an empty tree, and says so when that thread is blocked - with the frames that name what it is stuck in. A blocked main thread answers no accessibility query and processes no touch, so both symptoms have one cause and it is not accessibility. The usual cause is a pipe on the app's stdout that nobody is draining.
+
+---
+
+### ao sim record
+
+Capture the gestures this session drives on a claimed simulator and turn them into a Maestro flow: `ao sim record start` opens the capture, `ao sim record status` reports what it has captured so far, and `ao sim record stop` closes it and writes the flow. It requires a live claim on the device (`ao sim claim`) and never claims one itself.
 
 ---
 

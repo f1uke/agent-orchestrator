@@ -14,7 +14,7 @@ import (
 const appendSimRecordingStep = `-- name: AppendSimRecordingStep :one
 INSERT INTO sim_recording_step (
     udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen,
-    screen_change, x, y, to_x, to_y, duration_ms, text, detail
+    screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index
 )
 SELECT
     ?1,
@@ -32,30 +32,32 @@ SELECT
     ?12,
     ?13,
     ?14,
-    ?15
+    ?15,
+    ?16
 WHERE EXISTS (
     SELECT 1 FROM sim_recording
     WHERE sim_recording.udid = ?1 AND sim_recording.stopped_at IS NULL
 )
-RETURNING udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen, screen_change, x, y, to_x, to_y, duration_ms, text, detail
+RETURNING udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen, screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index
 `
 
 type AppendSimRecordingStepParams struct {
-	Udid         string
-	At           time.Time
-	Kind         string
-	Selector     string
-	SelectorRung int64
-	Ambiguity    int64
-	OffScreen    int64
-	ScreenChange int64
-	X            float64
-	Y            float64
-	ToX          float64
-	ToY          float64
-	DurationMs   int64
-	Text         string
-	Detail       string
+	Udid          string
+	At            time.Time
+	Kind          string
+	Selector      string
+	SelectorRung  int64
+	Ambiguity     int64
+	OffScreen     int64
+	ScreenChange  int64
+	X             float64
+	Y             float64
+	ToX           float64
+	ToY           float64
+	DurationMs    int64
+	Text          string
+	Detail        string
+	SelectorIndex int64
 }
 
 // The step number is assigned by the database, not the caller, and the whole
@@ -66,6 +68,11 @@ type AppendSimRecordingStepParams struct {
 // round trip, and no rows (sql.ErrNoRows) is the refusal signal - no separate
 // SELECT to explain it, because there is only one reason: no recording is
 // open on this device.
+// Column lists below put selector_index LAST, matching where
+// 0039_sim_recording_step_index.sql's ALTER TABLE ADD COLUMN physically put
+// it: that keeps every explicit column list here in the table's own natural
+// order, so sqlc maps these queries onto the plain SimRecordingStep model
+// instead of minting a second, near-identical row type for one query.
 func (q *Queries) AppendSimRecordingStep(ctx context.Context, arg AppendSimRecordingStepParams) (SimRecordingStep, error) {
 	row := q.db.QueryRowContext(ctx, appendSimRecordingStep,
 		arg.Udid,
@@ -83,6 +90,7 @@ func (q *Queries) AppendSimRecordingStep(ctx context.Context, arg AppendSimRecor
 		arg.DurationMs,
 		arg.Text,
 		arg.Detail,
+		arg.SelectorIndex,
 	)
 	var i SimRecordingStep
 	err := row.Scan(
@@ -102,6 +110,7 @@ func (q *Queries) AppendSimRecordingStep(ctx context.Context, arg AppendSimRecor
 		&i.DurationMs,
 		&i.Text,
 		&i.Detail,
+		&i.SelectorIndex,
 	)
 	return i, err
 }
@@ -127,7 +136,7 @@ func (q *Queries) GetSimRecording(ctx context.Context, udid string) (SimRecordin
 
 const listSimRecordingSteps = `-- name: ListSimRecordingSteps :many
 SELECT udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen,
-    screen_change, x, y, to_x, to_y, duration_ms, text, detail
+    screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index
 FROM sim_recording_step WHERE udid = ? ORDER BY seq
 `
 
@@ -158,6 +167,7 @@ func (q *Queries) ListSimRecordingSteps(ctx context.Context, udid string) ([]Sim
 			&i.DurationMs,
 			&i.Text,
 			&i.Detail,
+			&i.SelectorIndex,
 		); err != nil {
 			return nil, err
 		}

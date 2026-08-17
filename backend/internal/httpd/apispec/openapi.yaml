@@ -4534,9 +4534,17 @@ components:
             Omit for the 30 second default. This is not a working window: it only
             bounds how long a command killed mid-gesture keeps the device.'
           type: integer
+        id:
+          description: 'tap: the element''s accessibility identifier, the other way
+            a by-name tap may target it.'
+          type: string
         kind:
           description: tap, swipe, type, button, drag-begin, drag-move or drag-end
             - the gesture this hold covers.
+          type: string
+        label:
+          description: 'tap: the element label this hold''s gesture is about to tap,
+            when acquired for a by-name tap.'
           type: string
         name:
           description: 'button: home or app-switcher.'
@@ -7102,6 +7110,9 @@ components:
           type: boolean
         selector:
           type: string
+        selectorIndex:
+          format: int64
+          type: integer
         selectorRung:
           format: int64
           type: integer

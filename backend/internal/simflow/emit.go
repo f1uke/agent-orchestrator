@@ -77,6 +77,15 @@ type Step struct {
 // be worse than no field at all. If a bundle id ever needs to be explained to
 // a reader, it belongs in the header's own comment where a reader of the flow
 // sees it, not in a struct field nobody reads.
+//
+// There is also deliberately no Frontmost field. A "frontmost at start" line
+// sounds useful, but nothing upstream of this package persists which app was
+// in the foreground when a recording began (that would need a column on
+// sim_recording, which no caller has today), so the only honest value any
+// caller could pass is a permanent "unknown" - and a header line that always
+// reads "unknown" is noise a reader learns to skip past, which is exactly
+// where the entry-point instruction lives. If provenance turns out to matter,
+// it is a migration and a real value, not a placeholder shipped ahead of one.
 type EmitOptions struct {
 	// Device and Runtime describe the simulator the recording ran on, e.g.
 	// "iPhone 17 Pro Max" and "iOS 18.4".
@@ -85,12 +94,6 @@ type EmitOptions struct {
 	// RecordedAt is an already-formatted RFC3339 timestamp - Emit does not
 	// format one itself, so it stays a pure function of what it is given.
 	RecordedAt string
-	// Frontmost is the bundle id that was in the foreground when the
-	// recording started. The header states this; it is the whole of what
-	// Emit says about how the flow should begin, because a recording begins
-	// wherever the app already was and Emit must not invent the step that got
-	// it there.
-	Frontmost string
 	// Entry, when set, is a path to a shared entry-point flow. It becomes
 	// `- runFlow: <Entry>` as the very first step, in place of the comment
 	// that otherwise tells a human to add their own.
@@ -116,7 +119,6 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 
 	b.WriteString("appId: ${APP_ID}\n---\n")
 	fmt.Fprintf(&b, "# recorded by ao sim at %s, device %s (%s)\n", opts.RecordedAt, opts.Device, opts.Runtime)
-	fmt.Fprintf(&b, "# frontmost at start: %s\n", opts.Frontmost)
 	if opts.Entry != "" {
 		fmt.Fprintf(&b, "- runFlow: %s\n", opts.Entry)
 	} else {

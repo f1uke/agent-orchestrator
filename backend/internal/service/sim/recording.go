@@ -16,6 +16,13 @@ import (
 // gesture route already accepts, because that is exactly the information a
 // recorded step needs and inventing a second vocabulary for it would be two
 // things to keep in step.
+//
+// Label and ID are set only by a tap that named its target rather than
+// pointing at one (`ao sim tap --label`/`--id`) - every other caller leaves
+// both empty. recordIntent prefers them over X/Y when present: a by-name tap
+// already knows exactly what it targeted, and hit-testing a coordinate to
+// rediscover that would both throw the caller's own answer away and pay for
+// an accessibility read to recover a worse one.
 type GestureIntent struct {
 	Kind       string
 	X, Y       float64
@@ -23,6 +30,8 @@ type GestureIntent struct {
 	DurationMS int
 	Text       string
 	Name       string
+	Label      string
+	ID         string
 }
 
 // ScreenReader is the recorder's view of a device. It is an interface, and
@@ -216,7 +225,7 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		return
 	}
 
-	el, found := hitTest(snap.Elements, intent.X, intent.Y)
+	el, found := elementFor(snap, intent)
 	choice := simflow.Choice{Rung: simflow.RungNone}
 	if found {
 		choice = simflow.For(snap, el)
@@ -241,19 +250,20 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	}
 
 	step := domain.SimRecordingStep{
-		At:           s.now(),
-		Kind:         intent.Kind,
-		SelectorRung: int64(choice.Rung),
-		Ambiguity:    int64(choice.Ambiguity),
-		OffScreen:    choice.OffScreen,
-		ScreenChange: screenChange,
-		X:            intent.X,
-		Y:            intent.Y,
-		ToX:          intent.ToX,
-		ToY:          intent.ToY,
-		DurationMS:   int64(intent.DurationMS),
-		Text:         intent.Text,
-		Detail:       intent.Name,
+		At:            s.now(),
+		Kind:          intent.Kind,
+		SelectorRung:  int64(choice.Rung),
+		SelectorIndex: int64(choice.Index),
+		Ambiguity:     int64(choice.Ambiguity),
+		OffScreen:     choice.OffScreen,
+		ScreenChange:  screenChange,
+		X:             intent.X,
+		Y:             intent.Y,
+		ToX:           intent.ToX,
+		ToY:           intent.ToY,
+		DurationMS:    int64(intent.DurationMS),
+		Text:          intent.Text,
+		Detail:        intent.Name,
 	}
 	switch choice.Rung {
 	case simflow.RungText, simflow.RungTextIndex:
@@ -337,6 +347,33 @@ func recordingRefusedReason(outcome domain.SimRecordingOutcome, caller domain.Se
 // text inside it are the same real control, and the child is what a tap
 // actually lands on. Later siblings are tried first because on a real screen
 // later usually means drawn on top.
+// elementFor resolves what a step targeted: by the name the caller gave when
+// there is one (Label wins over ID, matching the CLI's own exclusivity - the
+// two are never both set in practice, but preferring one deterministically
+// costs nothing), falling back to hit-testing the point otherwise. Both
+// answers come from the SAME snap this call already read, so ambiguity and
+// index still reflect what was actually on screen at record time either way.
+//
+// A selector that resolves to nothing (no match, or an ambiguous one) reports
+// not-found rather than an error: the gesture already happened, and this is
+// only the recorder's best account of what it hit, never a gate on it.
+func elementFor(snap simbridge.Snapshot, intent GestureIntent) (simbridge.Element, bool) {
+	switch {
+	case intent.Label != "":
+		if match, err := simbridge.Select(snap, simbridge.Selector{Kind: simbridge.SelectByLabel, Text: intent.Label}); err == nil {
+			return match.Element, true
+		}
+		return simbridge.Element{}, false
+	case intent.ID != "":
+		if match, err := simbridge.Select(snap, simbridge.Selector{Kind: simbridge.SelectByID, Text: intent.ID}); err == nil {
+			return match.Element, true
+		}
+		return simbridge.Element{}, false
+	default:
+		return hitTest(snap.Elements, intent.X, intent.Y)
+	}
+}
+
 func hitTest(elements []simbridge.Element, x, y float64) (simbridge.Element, bool) {
 	for i := len(elements) - 1; i >= 0; i-- {
 		el := elements[i]

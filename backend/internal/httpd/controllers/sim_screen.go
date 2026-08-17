@@ -443,6 +443,10 @@ func (h *leaseHolder) Release(ctx context.Context, udid, token string, performed
 // know about it. It mirrors SimGestureInput's own fields one-for-one, because
 // that is exactly the information a recorded step needs and inventing a
 // second vocabulary for it would be two things to keep in step.
+//
+// It never sets GestureIntent's Label/ID: the Device tab's click is always a
+// point on screen, never a name, so there is nothing in SimGestureInput to
+// carry - that pair has no counterpart here by construction, not by omission.
 func gestureIntentFrom(in SimGestureInput) simsvc.GestureIntent {
 	return simsvc.GestureIntent{
 		Kind:       in.Kind,

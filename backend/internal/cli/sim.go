@@ -92,6 +92,7 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 		newSimTapCommand(ctx), newSimSwipeCommand(ctx), newSimDragCommand(ctx),
 		newSimTypeCommand(ctx), newSimButtonCommand(ctx),
 		newSimFlowCommand(ctx),
+		newSimRecordCommand(ctx),
 	)
 	return cmd
 }

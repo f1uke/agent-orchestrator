@@ -52,9 +52,14 @@ FROM sim_recording WHERE udid = ?;
 -- round trip, and no rows (sql.ErrNoRows) is the refusal signal - no separate
 -- SELECT to explain it, because there is only one reason: no recording is
 -- open on this device.
+-- Column lists below put selector_index LAST, matching where
+-- 0039_sim_recording_step_index.sql's ALTER TABLE ADD COLUMN physically put
+-- it: that keeps every explicit column list here in the table's own natural
+-- order, so sqlc maps these queries onto the plain SimRecordingStep model
+-- instead of minting a second, near-identical row type for one query.
 INSERT INTO sim_recording_step (
     udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen,
-    screen_change, x, y, to_x, to_y, duration_ms, text, detail
+    screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index
 )
 SELECT
     sqlc.arg(udid),
@@ -72,7 +77,8 @@ SELECT
     sqlc.arg(to_y),
     sqlc.arg(duration_ms),
     sqlc.arg(text),
-    sqlc.arg(detail)
+    sqlc.arg(detail),
+    sqlc.arg(selector_index)
 WHERE EXISTS (
     SELECT 1 FROM sim_recording
     WHERE sim_recording.udid = sqlc.arg(udid) AND sim_recording.stopped_at IS NULL
@@ -82,5 +88,5 @@ RETURNING *;
 -- name: ListSimRecordingSteps :many
 -- Ordered by seq so the caller gets the flow back in the order it happened.
 SELECT udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen,
-    screen_change, x, y, to_x, to_y, duration_ms, text, detail
+    screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index
 FROM sim_recording_step WHERE udid = ? ORDER BY seq;

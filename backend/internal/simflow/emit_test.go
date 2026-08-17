@@ -14,7 +14,6 @@ func baseOpts() simflow.EmitOptions {
 		Device:     "iPhone 17 Pro Max",
 		Runtime:    "iOS 18.4",
 		RecordedAt: "2026-08-17T10:00:00Z",
-		Frontmost:  "com.example.app",
 	}
 }
 
@@ -29,16 +28,15 @@ func TestEmit_HeaderCarriesAppIDPlaceholderAndProvenance(t *testing.T) {
 	if !strings.HasPrefix(got, "appId: ${APP_ID}\n---\n") {
 		t.Fatalf("missing the appId placeholder header, got:\n%s", got)
 	}
-	if strings.Contains(got, "com.example.app") == false {
-		t.Fatalf("expected the frontmost bundle id to appear as provenance, got:\n%s", got)
+	if want := "# recorded by ao sim at 2026-08-17T10:00:00Z, device iPhone 17 Pro Max (iOS 18.4)\n"; !strings.Contains(got, want) {
+		t.Errorf("missing %q in:\n%s", want, got)
 	}
-	for _, want := range []string{
-		"# recorded by ao sim at 2026-08-17T10:00:00Z, device iPhone 17 Pro Max (iOS 18.4)\n",
-		"# frontmost at start: com.example.app\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in:\n%s", want, got)
-		}
+	// There is deliberately no "frontmost at start" line: nothing upstream of
+	// this package persists which app was in the foreground when a recording
+	// began, and a header line that would always read "unknown" is noise a
+	// reader learns to skip - see EmitOptions' own doc comment.
+	if strings.Contains(got, "frontmost") {
+		t.Fatalf("must not print a frontmost line nobody can honestly fill in, got:\n%s", got)
 	}
 }
 
@@ -68,9 +66,9 @@ func TestEmit_EntryOptionEmitsRunFlowAsTheFirstStep(t *testing.T) {
 	if strings.Contains(got, "add your own entry point") {
 		t.Fatalf("the guidance comment must be replaced, not merely joined by runFlow, got:\n%s", got)
 	}
-	headerEnd := strings.Index(got, "# frontmost at start:")
+	headerEnd := strings.Index(got, "# recorded by ao sim at")
 	if headerEnd < 0 {
-		t.Fatalf("missing frontmost comment, got:\n%s", got)
+		t.Fatalf("missing the provenance comment, got:\n%s", got)
 	}
 	afterHeader := got[headerEnd:]
 	nl := strings.Index(afterHeader, "\n")

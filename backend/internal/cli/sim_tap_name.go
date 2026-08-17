@@ -71,9 +71,29 @@ func (c *commandContext) runSimTapByName(cmd *cobra.Command, opts simTouchOption
 		return err
 	}
 
+	// The gesture hold's intent travels in the SAME call that acquires it
+	// (acquireSimHoldRequest / cliSimHolder.intent) - there is no later call
+	// that could hand the daemon a point discovered afterward, and the point
+	// for a by-name tap is not known until the screen is read under the hold,
+	// below. That could mean paying for an extra, EARLIER read just to feed
+	// the recorder a point - but a by-name tap does not need one: it already
+	// knows exactly what it targeted, the label or id right here, and sending
+	// that instead of a point lets a recording open on the device resolve the
+	// step from the SAME name, against the screen it reads for itself,
+	// without this command reading anything twice. Recording is almost never
+	// open, and by-name is the common way to drive, so paying an extra read on
+	// every call to cover the rare one would be exactly backwards.
+	intent := acquireSimHoldRequest{Kind: "tap"}
+	switch selector.Kind {
+	case simbridge.SelectByLabel:
+		intent.Label = selector.Text
+	case simbridge.SelectByID:
+		intent.ID = selector.Text
+	}
+
 	var matched simbridge.Match
 	gesture, _, err := simgesture.RunComposed(ctx,
-		&cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver, device.UDID,
+		&cliSimHolder{ctx: c, sessionID: sessionID, device: device, intent: intent}, driver, device.UDID,
 		func(ctx context.Context) (simgesture.Gesture, error) {
 			// Under the hold, deliberately: reading first and holding second
 			// leaves a window in which another command moves the screen, and

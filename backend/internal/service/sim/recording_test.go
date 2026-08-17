@@ -137,6 +137,82 @@ func TestAcquireHold_ReadsTheScreenAndResolvesASelectorWhenRecording(t *testing.
 	}
 }
 
+// The recorded selector for a by-name tap is the name the caller gave, not
+// whatever a coordinate hit-test rediscovered - here there IS no coordinate
+// at all (Label is the only thing the intent carries), so a step only comes
+// out right if recordIntent actually resolves by name rather than falling
+// through to hitTest(0, 0).
+func TestRecordIntent_ByNameTapRecordsTheRequestedSelector(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{Kind: "tap", Label: "Continue"})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != "Continue" {
+		t.Fatalf("selector = %q, want %q (the requested label, not a hit-tested coordinate)", steps[0].Selector, "Continue")
+	}
+	if steps[0].SelectorRung != int64(simflow.RungText) {
+		t.Fatalf("rung = %d, want RungText (%d)", steps[0].SelectorRung, simflow.RungText)
+	}
+}
+
+// The id form of the same path, over a screen with no label at all - proving
+// elementFor's ID branch is exercised too, not just Label's.
+func TestRecordIntent_ByIDTapRecordsTheRequestedSelector(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.app.a"},
+		Elements: []simbridge.Element{{
+			Path: "0", ID: "continue-button",
+			Box: &simbridge.Box{X1: 0.1, Y1: 0.1, X2: 0.5, Y2: 0.3},
+			Tap: &simbridge.Point{X: 0.3, Y: 0.2},
+		}},
+	}}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{Kind: "tap", ID: "continue-button"})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != "continue-button" {
+		t.Fatalf("selector = %q, want %q", steps[0].Selector, "continue-button")
+	}
+	if steps[0].SelectorRung != int64(simflow.RungID) {
+		t.Fatalf("rung = %d, want RungID (%d)", steps[0].SelectorRung, simflow.RungID)
+	}
+}
+
 // A gesture that was attempted and failed is not a step. Recording at acquire
 // alone would write it down as if it had happened.
 func TestReleaseHold_PerformedFalseAppendsNothing(t *testing.T) {
