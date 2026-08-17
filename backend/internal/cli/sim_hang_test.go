@@ -202,3 +202,51 @@ func TestSimAX_BlockedAppWithNoPidToSampleKeepsTodaysMessage(t *testing.T) {
 		t.Fatalf("probes = %d with no pid to sample, want none", *probes)
 	}
 }
+
+func TestSimType_PasteThatChangedNothingNamesTheBlockedMainThread(t *testing.T) {
+	// The one place a gesture command knows for a fact that it changed nothing:
+	// the paste route reads the screen before and after and compares. An app
+	// that cannot answer looks exactly like a field that never had focus, and
+	// sending an agent to check the field would be the same wrong path again.
+	driver := &fakeSimDriver{snapshot: simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.example.nimbus", PID: 4242},
+	}}
+	deps, _, _ := pasteDeps(t, driver, simKeyboardUS, "hunter2")
+	// A screen that never changes, however many times it is read.
+	driver.snapshotQueue = nil
+	deps, probes := withSampler(deps, blockedSampleReport, nil)
+
+	_, _, err := executeCLI(t, deps, "sim", "type", "hunter2", "--paste")
+	if err == nil {
+		t.Fatal("a paste that changed nothing must fail")
+	}
+	got := err.Error()
+	for _, want := range []string{"main thread", "com.example.nimbus", "_Stdout.write", "ao sim log"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error must mention %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Tap the field first") {
+		t.Fatalf("a blocked app must not be reported as a focus problem:\n%s", got)
+	}
+	if *probes == 0 {
+		t.Fatal("the probe never ran")
+	}
+}
+
+func TestSimType_PasteThatChangedNothingOnAHealthyAppStillBlamesTheField(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.example.nimbus", PID: 4242},
+	}}
+	deps, _, _ := pasteDeps(t, driver, simKeyboardUS, "hunter2")
+	driver.snapshotQueue = nil
+	deps, _ = withSampler(deps, healthySampleReport, nil)
+
+	_, _, err := executeCLI(t, deps, "sim", "type", "hunter2", "--paste")
+	if err == nil {
+		t.Fatal("a paste that changed nothing must fail")
+	}
+	if !strings.Contains(err.Error(), "Tap the field first") {
+		t.Fatalf("a healthy app keeps the focus advice:\n%v", err)
+	}
+}

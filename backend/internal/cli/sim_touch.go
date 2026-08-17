@@ -318,7 +318,7 @@ func (c *commandContext) runSimPaste(
 	result, err := simpaste.Run(ctx, &cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver,
 		simpaste.Simctl{Run: c.deps.CommandOutput}, device.UDID, text)
 	if err != nil {
-		return c.explainSimPasteFailure(device, route, err)
+		return c.explainSimPasteFailure(ctx, device, route, err)
 	}
 
 	out := simGestureResult{
@@ -344,8 +344,18 @@ func (c *commandContext) runSimPaste(
 // explainSimPasteFailure says what went wrong AND what state the field is in,
 // because those are different questions and the answer to the second decides
 // whether there is anything to clean up.
-func (c *commandContext) explainSimPasteFailure(device simDevice, route simbridge.TextRoute, err error) error {
+func (c *commandContext) explainSimPasteFailure(
+	ctx context.Context, device simDevice, route simbridge.TextRoute, err error,
+) error {
 	if errors.Is(err, simpaste.ErrNotDelivered) {
+		// "Nothing on screen changed" is the one place a gesture command knows
+		// for a fact that it changed nothing, and an app that cannot answer at
+		// all looks exactly like a field that never had focus. Ask before
+		// sending the caller to check the field.
+		if note := c.blockedSimAppNote(ctx, device); note != "" {
+			return fmt.Errorf("nothing was typed into %s, and the field is not the reason.\n%s",
+				device.Label(), note)
+		}
 		return fmt.Errorf("nothing was typed into %s (%s, so the text was sent through the pasteboard): %w\n"+
 			"Tap the field first with `ao sim tap` so it has keyboard focus. Some apps refuse paste outright - "+
 			"for those, fix the simulator's input mode and use key presses instead",
