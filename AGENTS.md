@@ -49,10 +49,13 @@ Driving an iOS Simulator (mac with Xcode only; AO never boots, shuts down or era
 ao sim list                          # what is booted, and which one an unqualified command means
 ao sim claim                         # take the lease that keeps other AO sessions off it
 ao sim ax                            # the screen as elements: label, box, and the point to tap
+ao sim log --process MyApp           # what the app SAYS (NSLog/os_log); never pipe its stdout
 ao sim tap 0.5 0.93                  # normalized 0..1 coordinates, straight from `ao sim ax`
 ao sim drag 0.5 0.8 0.5 0.5 0.2 0.5  # one finger through a route, never lifting between legs
 ao sim release
 ```
+
+Never read an app's output with `xcrun simctl launch --console-pipe`: a pipe nobody drains fills after 64 KB and blocks the app in `write()` on its main thread, which looks like a broken screen rather than a broken capture. `ao sim log` reads the unified log and cannot do that - and `print`/`debugPrint` do not reach it at all, so add a temporary `NSLog` probe when you need a payload.
 
 `swipe` is two points and lifts at the end; `drag` holds the finger through every waypoint, which is what an app distinguishes from a flick.
 

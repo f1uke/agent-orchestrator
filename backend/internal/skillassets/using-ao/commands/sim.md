@@ -1,12 +1,14 @@
 # ao sim
 
-Local iOS Simulators on this machine: list them, read what is on a booted one's screen (as an accessibility tree or a PNG), drive it with taps, swipes, typing and hardware buttons, and claim one so other AO sessions keep off it while you work.
+Local iOS Simulators on this machine: list them, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, and claim one so other AO sessions keep off it while you work.
 
 `ao sim` never boots, shuts down, reboots or erases a simulator. It runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator.
 
 Simulators are shared: another AO session, or a human working in Xcode, may be driving the same device. A captured frame can therefore be mid-interaction and is not proof that you put the app in that state.
 
 **Claim a device before you drive it.** A simulator has one finger and no per-caller state, so two sessions interacting at once merge into a single teleporting touch, and one session's release lifts the other's finger. A lost release wedges the device's input until somebody reboots it - which breaks whoever else is mid-test. The commands that touch the screen refuse to run unless this session holds the device, and refuse again while another gesture is in flight. Reading (`ao sim list`, `ao sim shot`, `ao sim ax`) never needs a claim.
+
+**Never attach a pipe to an app's stdout.** `xcrun simctl launch --console-pipe` looks like the way to read an app's output. It is a trap: as soon as anything stops draining that pipe the 64 KB buffer fills and the app blocks in `write()` **on its main thread**. The app is then wedged - `ao sim ax` returns nothing, `ao sim tap` reports success and changes nothing, the screen looks frozen - and none of those symptoms points back at your capture. Use `ao sim log`, which reads the unified log and cannot block the app.
 
 **Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element that is actually on the screen a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. An element that has scrolled out of view is still listed, marked `off screen`, and carries **no** tap point - scroll it into view with `ao sim drag` and read again. After any interaction, read again: a tap that reports success has not necessarily changed anything.
 
@@ -18,6 +20,7 @@ Requires macOS with the Xcode command line tools (`xcrun` on PATH). The interact
 ao sim list    [flags]
 ao sim shot    [flags]
 ao sim ax      [flags]
+ao sim log     [flags]
 ao sim claim   [flags]
 ao sim release [flags]
 ao sim tap    <x> <y>          [flags]
@@ -209,7 +212,59 @@ JSON shape (`--json`):
 - **`enabled: false`** means tapping it does nothing. Check it before blaming a tap that "did not work".
 - **`truncated: true`** means the cap cut the tree; `totalNodeCount` is the real size and `--max-nodes` raises the cap. Nothing is ever dropped silently.
 - **An empty tree fails** rather than reporting "no elements": the error names the frontmost bundle, which is usually the explanation (`com.apple.springboard` means you are looking at the home screen, not your app).
+- **An empty tree is also checked against the app itself.** Before reporting one, `ao sim ax` samples the foreground app's main thread. If that thread never moves and is not in its run loop's own wait, the error says the app has a **blocked main thread**, names the frames it is stuck in, and says a tap will report success and change nothing too - because the same block eats touches. Accessibility is not the problem in that case. The check costs nothing on a read that worked, and falls back to the ordinary message whenever it cannot tell.
 - **A tree that is only the status bar** (the clock and the battery) is what a read returns for about a second after an app comes to the front. It is read once more automatically before being reported, and says so if it stays that way - so treat it as "the app has not drawn yet", not "the app is blank".
+
+---
+
+### ao sim log
+
+Read the device's unified log: what an app **says**, as opposed to what its screen shows. This is how you check a payload, an error, or a request that the UI does not put on screen.
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--udid <udid>` | Read this simulator instead of the booted one |
+| `--process <name>` | Only entries from this process - the **executable's** name (`Nimbus`), not the bundle id |
+| `--grep <regex>` | Only entries matching this regular expression, applied to the whole entry |
+| `--since <duration>` | How far back to read (`30s`, `2m`, `1h`). Default 2m. Not valid with `--follow` |
+| `--follow`, `-f` | Stream entries as they happen instead of reading history |
+| `--max-lines <n>` | Keep at most this many of the most recent entries (default 200) |
+| `--json` | Output entries as JSON - one object per line with `--follow` |
+
+The device is resolved exactly like `ao sim shot`. Reading a log takes no lease and is never blocked by one, and the output reports who holds the device.
+
+```bash
+# What the app said in the last two minutes
+ao sim log --process Nimbus
+```
+
+```bash
+# Watch it live while you drive the screen from another command
+ao sim log --follow --process Nimbus --grep "checkout|payment"
+```
+
+```bash
+# Machine-readable, over a longer window
+ao sim log --since 10m --process Nimbus --json
+```
+
+**⚠ `print` and `debugPrint` are NOT in this log, and never will be.** They write to the app's stdout, and an app launched by SpringBoard (tapped on the home screen, or started with `simctl launch`) has its stdout **discarded**. The output does not exist anywhere on the device. If you can see it in Xcode's console that is because Xcode drains the pipe itself - nothing else does.
+
+So an empty `ao sim log` for a `print` you expected is the command working correctly. To read a payload:
+
+| What the app uses | Reaches `ao sim log` |
+|---|---|
+| `NSLog(...)` | yes |
+| `os_log` / `Logger` | yes |
+| `print` / `debugPrint` | **no** - goes to a stdout nobody keeps |
+
+**Add a temporary `NSLog("resp: \(body)")` probe, run the flow, read it here, and take the probe out again.** That is the supported way to see a body, and it costs one line.
+
+**There is no `--stdout` mode, on purpose.** The only way to capture stdout is to launch the app with a pipe attached, and a pipe nobody drains wedges the app's main thread (see the warning at the top of this page). AO will not ship a mode whose failure mode is a hung app under test.
+
+**Nothing matched?** The command says so and lists which processes *did* log in that window with their entry counts - a `--process` that matches nothing is nearly always the bundle id instead of the executable name. It exits 0: an empty log is an answer, not a failure.
 
 ---
 
@@ -326,3 +381,4 @@ ao sim ax                              # confirm what actually happened
 
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
+- **If a tap seems to do nothing AND `ao sim ax` comes back empty, the app itself may be stuck.** `ao sim ax` samples the foreground app's main thread before it reports an empty tree, and says so when that thread is blocked - with the frames that name what it is stuck in. A blocked main thread answers no accessibility query and processes no touch, so both symptoms have one cause and it is not accessibility. The usual cause is a pipe on the app's stdout that nobody is draining.
