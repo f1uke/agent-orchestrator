@@ -230,6 +230,34 @@ type SimLease struct {
 	HoldExpiresAt sql.NullTime
 }
 
+type SimRecording struct {
+	Udid      string
+	SessionID string
+	Name      string
+	StartedAt time.Time
+	StoppedAt sql.NullTime
+	UpdatedAt time.Time
+}
+
+type SimRecordingStep struct {
+	Udid         string
+	Seq          int64
+	At           time.Time
+	Kind         string
+	Selector     string
+	SelectorRung int64
+	Ambiguity    int64
+	OffScreen    int64
+	ScreenChange int64
+	X            float64
+	Y            float64
+	ToX          float64
+	ToY          float64
+	DurationMs   int64
+	Text         string
+	Detail       string
+}
+
 type SmokeCheck struct {
 	ID         string
 	SessionID  domain.SessionID
