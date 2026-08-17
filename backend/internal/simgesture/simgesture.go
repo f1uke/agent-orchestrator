@@ -36,9 +36,15 @@ const HoldSlack = 15 * time.Second
 // returns nothing on purpose: a hold that could not be handed back has already
 // stopped mattering (it lapses within a minute) and must never turn a gesture
 // that happened into a reported failure.
+//
+// performed says whether the gesture this hold covered actually reached the
+// device - not merely whether it was attempted. It is what a session recording
+// gestures on this device uses to decide whether to keep the step it stashed
+// when the hold was taken: a gesture that failed, or a drag abandoned rather
+// than completed, must not leave a step behind that never really happened.
 type Holder interface {
 	Acquire(ctx context.Context, udid string, ttl time.Duration) (token string, err error)
-	Release(ctx context.Context, udid, token string)
+	Release(ctx context.Context, udid, token string, performed bool)
 }
 
 // Gesture is one composed gesture, ready to run.
@@ -114,7 +120,13 @@ func run(
 	if err != nil {
 		return Gesture{}, simbridge.PerformResult{}, err
 	}
-	defer holder.Release(ctx, udid, token)
+	// performed starts false and is only ever raised on the one path where the
+	// gesture actually reached the device: driver.Perform returning cleanly. A
+	// gesture that failed - even one that touched the screen and had to be
+	// recovered - never earns a recorded step, because it is not the gesture a
+	// caller asked for.
+	performed := false
+	defer func() { holder.Release(ctx, udid, token, performed) }()
 
 	gesture, err := compose(ctx)
 	if err != nil {
@@ -125,6 +137,7 @@ func run(
 
 	result, performErr := driver.Perform(ctx, udid, gesture.Events)
 	if performErr == nil {
+		performed = true
 		return gesture, result, nil
 	}
 

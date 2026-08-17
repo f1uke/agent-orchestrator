@@ -263,7 +263,7 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := chi.URLParam(r, "sessionId")
-	holder := &leaseHolder{leases: c.Leases, sessionID: domain.SessionID(sessionID)}
+	holder := &leaseHolder{leases: c.Leases, sessionID: domain.SessionID(sessionID), intent: gestureIntentFrom(in)}
 
 	// A drag is the one gesture that is not known before it starts, so it is
 	// not composed - it is opened, followed and closed. Everything about the
@@ -410,28 +410,50 @@ func (c *SimScreenController) resolveDevice(ctx context.Context, udid string) (s
 type leaseHolder struct {
 	leases    simsvc.Manager
 	sessionID domain.SessionID
+	// intent is what this gesture request said it was about to do, resolved
+	// once (from the request body) when the holder is built. Acquire carries it
+	// straight to AcquireHold: it is the same information a recorded step
+	// needs, and the gesture that will run is exactly the one this hold was
+	// asked for.
+	intent simsvc.GestureIntent
 }
 
 func (h *leaseHolder) Acquire(ctx context.Context, udid string, ttl time.Duration) (string, error) {
-	// GestureIntent{} for now: simgesture.Holder's own interface has no room
-	// for one yet. A later task carries the caller's intent through here.
-	hold, err := h.leases.AcquireHold(ctx, h.sessionID, udid, ttl, simsvc.GestureIntent{})
+	hold, err := h.leases.AcquireHold(ctx, h.sessionID, udid, ttl, h.intent)
 	if err != nil {
 		return "", err
 	}
 	return hold.Token, nil
 }
 
-func (h *leaseHolder) Release(ctx context.Context, udid, token string) {
+func (h *leaseHolder) Release(ctx context.Context, udid, token string, performed bool) {
 	if token == "" {
 		return
 	}
-	// A hold that could not be handed back lapses on its own within a minute,
-	// and must never turn a gesture that happened into a reported failure.
-	// performed: true for now, matching this caller's previous behaviour - a
-	// later task teaches simgesture.Holder to say whether the gesture actually
-	// happened.
-	_ = h.leases.ReleaseHold(ctx, udid, token, true)
+	// performed is simgesture's own verdict on whether the gesture actually
+	// reached the device (see internal/simgesture.Holder) - carried straight
+	// through, not overridden. A hold that could not be handed back lapses on
+	// its own within a minute either way, so this never turns a gesture that
+	// happened into a reported failure; it only ever affects what gets
+	// recorded.
+	_ = h.leases.ReleaseHold(ctx, udid, token, performed)
+}
+
+// gestureIntentFrom turns a gesture request into what the recorder needs to
+// know about it. It mirrors SimGestureInput's own fields one-for-one, because
+// that is exactly the information a recorded step needs and inventing a
+// second vocabulary for it would be two things to keep in step.
+func gestureIntentFrom(in SimGestureInput) simsvc.GestureIntent {
+	return simsvc.GestureIntent{
+		Kind:       in.Kind,
+		X:          in.X,
+		Y:          in.Y,
+		ToX:        in.ToX,
+		ToY:        in.ToY,
+		DurationMS: in.DurationMS,
+		Text:       in.Text,
+		Name:       in.Name,
+	}
 }
 
 // composeSimGesture turns a request into events. Every gesture is composed by

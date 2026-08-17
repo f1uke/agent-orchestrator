@@ -1001,6 +1001,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-recordings/{udid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a simulator's recording, open or stopped, and the steps captured so far */
+        get: operations["getSimRecording"];
+        put?: never;
+        /** Start capturing this session's gestures on a simulator it already leases */
+        post: operations["startSimRecording"];
+        /** Stop this session's open recording on a simulator and return everything it captured */
+        delete: operations["stopSimRecording"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/smoke-checks": {
         parameters: {
             query?: never;
@@ -1517,8 +1536,30 @@ export interface components {
             requestId?: string;
         };
         AcquireSimHoldInput: {
+            /** @description Swipe duration in milliseconds. */
+            durationMs?: number;
             /** @description How long the gesture may hold the device, in seconds (1-60). Omit for the 30 second default. This is not a working window: it only bounds how long a command killed mid-gesture keeps the device. */
             holdSeconds?: number;
+            /** @description tap, swipe, type, button, drag-begin, drag-move or drag-end - the gesture this hold covers. */
+            kind?: string;
+            /** @description button: home or app-switcher. */
+            name?: string;
+            /** @description The text a type gesture sends. */
+            text?: string;
+            /**
+             * Format: double
+             * @description Where a swipe or drag ends.
+             */
+            toX?: number;
+            /** Format: double */
+            toY?: number;
+            /**
+             * Format: double
+             * @description Normalized 0..1 screen coordinates, for tap/swipe/drag.
+             */
+            x?: number;
+            /** Format: double */
+            y?: number;
         };
         AcquireSimLeaseInput: {
             /** @description Claim the device even if another session holds it. Refused while a gesture is in flight. */
@@ -2536,6 +2577,50 @@ export interface components {
         SimLeaseResponse: {
             lease: components["schemas"]["SimLease"];
         };
+        SimRecording: {
+            name: string;
+            sessionId: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            stoppedAt?: null | string;
+            udid: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SimRecordingResponse: {
+            recording: components["schemas"]["SimRecording"];
+        };
+        SimRecordingStep: {
+            /** Format: int64 */
+            ambiguity?: number;
+            /** Format: date-time */
+            at: string;
+            detail?: string;
+            /** Format: int64 */
+            durationMs?: number;
+            kind: string;
+            offScreen?: boolean;
+            screenChange?: boolean;
+            selector?: string;
+            /** Format: int64 */
+            selectorRung?: number;
+            /** Format: int64 */
+            seq: number;
+            text?: string;
+            /** Format: double */
+            toX: number;
+            /** Format: double */
+            toY: number;
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        };
+        SimRecordingWithStepsResponse: {
+            recording: components["schemas"]["SimRecording"];
+            steps: components["schemas"]["SimRecordingStep"][];
+        };
         SmokeAuthoredCaseInput: {
             /** @description Expected result. */
             expected?: string;
@@ -2623,6 +2708,10 @@ export interface components {
             startImmediately?: null | boolean;
             /** @enum {string} */
             taskSize?: "mechanical" | "standard" | "deep";
+        };
+        StartSimRecordingInput: {
+            /** @description Optional label for the recording, e.g. the flow it will become. */
+            name?: string;
         };
         SubmitReviewInput: {
             /** @description Review body recorded by AO. Required for changes_requested. */
@@ -6348,6 +6437,166 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSimRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimRecordingWithStepsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startSimRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartSimRecordingInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimRecordingResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopSimRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimRecordingWithStepsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -578,12 +578,19 @@ func (h *cliSimHolder) Acquire(ctx context.Context, udid string, ttl time.Durati
 // Release gives the finger back. A failure here is worth saying out loud but
 // must not fail a gesture that already happened: the hold lapses on its own
 // within a minute either way.
-func (h *cliSimHolder) Release(ctx context.Context, udid, token string) {
+//
+// performed is passed on as the `performed` query parameter, which the daemon
+// defaults to true when it is absent - so it is only sent when false, keeping
+// the common case's request unchanged.
+func (h *cliSimHolder) Release(ctx context.Context, udid, token string, performed bool) {
 	if token == "" {
 		return
 	}
 	path := "sessions/" + url.PathEscape(h.sessionID) + "/sim-leases/" + url.PathEscape(udid) +
 		"/hold/" + url.PathEscape(token)
+	if !performed {
+		path += "?performed=false"
+	}
 	if err := h.ctx.deleteJSON(ctx, path, nil); err != nil {
 		_, _ = fmt.Fprintf(h.ctx.deps.Err, "warning: could not hand the device's gesture hold back (%v); it lapses on its own shortly.\n", err)
 	}

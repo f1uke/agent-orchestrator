@@ -28,6 +28,9 @@ type recorder struct {
 	liftErr    error
 	ttl        time.Duration
 	performed  [][]simbridge.Event
+	// releasedPerformed is what each Release call was told about whether the
+	// gesture it covered actually happened, in call order.
+	releasedPerformed []bool
 }
 
 func (r *recorder) Acquire(_ context.Context, udid string, ttl time.Duration) (string, error) {
@@ -41,10 +44,22 @@ func (r *recorder) Acquire(_ context.Context, udid string, ttl time.Duration) (s
 	return "token-1", nil
 }
 
-func (r *recorder) Release(_ context.Context, udid, token string) {
+func (r *recorder) Release(_ context.Context, udid, token string, performed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.steps = append(r.steps, step{"release", udid + "/" + token})
+	r.releasedPerformed = append(r.releasedPerformed, performed)
+}
+
+// lastReleasePerformed is what the most recent Release call was told, and
+// whether there has been one at all.
+func (r *recorder) lastReleasePerformed() (bool, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.releasedPerformed) == 0 {
+		return false, false
+	}
+	return r.releasedPerformed[len(r.releasedPerformed)-1], true
 }
 
 func (r *recorder) AX(context.Context, string) (simbridge.Snapshot, error) {
@@ -104,6 +119,41 @@ func TestRun_HoldsForTheWholeGestureAndGivesItBack(t *testing.T) {
 	}
 	if got := rec.order(); got != "acquire,perform,release" {
 		t.Fatalf("order was %q; the hold must bracket the gesture", got)
+	}
+}
+
+// A gesture that reached the device is the one case Release must be told
+// happened - this is what lets a session recording gestures keep the step.
+func TestRun_ASuccessfulGestureReleasesTheHoldAsPerformed(t *testing.T) {
+	rec := &recorder{}
+	if _, err := simgesture.Run(context.Background(), rec, rec, "UDID-A", tapGesture(t)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	performed, ok := rec.lastReleasePerformed()
+	if !ok {
+		t.Fatal("Release was never called")
+	}
+	if !performed {
+		t.Fatal("a gesture that reached the device must be released as performed")
+	}
+}
+
+// A gesture whose perform failed must not be recorded as one that happened -
+// even though the hold is still always given back. Without this, a session
+// recording gestures on the Device tab would write down a step that never
+// actually reached the screen.
+func TestRun_AFailedGestureReleasesTheHoldAsNotPerformed(t *testing.T) {
+	rec := &recorder{performErr: errors.New("bridge exploded")}
+	_, err := simgesture.Run(context.Background(), rec, rec, "UDID-A", tapGesture(t))
+	if err == nil {
+		t.Fatal("want the failure surfaced")
+	}
+	performed, ok := rec.lastReleasePerformed()
+	if !ok {
+		t.Fatal("the hold must still be released even though the gesture failed")
+	}
+	if performed {
+		t.Fatal("a gesture whose perform failed must be released as not performed, so a recording writes nothing down for it")
 	}
 }
 

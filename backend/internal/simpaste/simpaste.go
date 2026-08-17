@@ -125,7 +125,12 @@ func Run(
 	if err != nil {
 		return result, err
 	}
-	defer holder.Release(ctx, udid, token)
+	// err is a named return, so by the time this runs it holds whatever the
+	// function is actually about to return - nil only when the paste was
+	// written, sent and verified on screen. That is what "performed" means
+	// here: a write that failed, a keystroke that failed, or a paste that could
+	// not be verified must not be recorded as one that happened.
+	defer func() { holder.Release(ctx, udid, token, err == nil) }()
 
 	if err := pb.Write(ctx, udid, text); err != nil {
 		return result, err
