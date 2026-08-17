@@ -43,6 +43,7 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
 import { sessionRefLabel } from "../lib/session-ref";
 import { useEventsConnection } from "../hooks/useEventsConnection";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { useResizable } from "../hooks/useResizable";
 import {
 	DropdownMenu,
@@ -135,6 +136,25 @@ const SEG_CLASS =
 const SEG_ACTIVE_CLASS =
 	"border-accent bg-accent-weak text-accent hover:bg-accent-weak hover:text-accent " +
 	"shadow-[0_0_0_1px_var(--accent),0_0_12px_-1px_color-mix(in_srgb,var(--accent)_55%,transparent)]";
+
+// Only the Orchestrator segment can carry the busy dot, and the dot is pinned to
+// the segment's corner — so that segment (and only that segment) is the
+// positioning context. Applied UNCONDITIONALLY, in both the busy and idle states:
+// a `position: relative` box with no offsets paints exactly where a static one
+// does, so the idle look is untouched, and keeping the class list identical
+// across the toggle means going busy cannot reflow the row.
+const ORCHESTRATOR_SEG_CLASS = "relative";
+
+// The busy dot itself: a 5px disc tucked into the segment's top-right corner,
+// clear of the label's glyph band and comfortably inside the 9px corner radius.
+// `--color-working` is the status token that already maps 1:1 to the daemon's
+// working status (orange), so the sidebar agrees with the board's working lane and
+// the topbar pill instead of inventing a hue. Presence — not colour, not motion —
+// is the primary channel: the dot exists only while the orchestrator is working,
+// which is why dropping the animation under prefers-reduced-motion still leaves
+// the two states plainly distinguishable.
+const ORCHESTRATOR_BUSY_DOT_CLASS =
+	"pointer-events-none absolute top-[5px] right-[6px] size-[5px] rounded-full bg-working";
 
 // Mirrors the daemon's display-name cap (maxDisplayNameLen) and the spawn
 // `--name` flag, so inline edits never round-trip a value the API would reject.
@@ -574,6 +594,23 @@ function ProjectItem({
 	// button: navigate to it when present, otherwise spawn one first.
 	const orchestrator = newestActiveOrchestrator(workspace.sessions);
 
+	// Is the orchestrator working RIGHT NOW? Read from the daemon's DERIVED
+	// status, never from the raw `activity.state`. The raw reading is persisted
+	// verbatim and never aged, so a lost Stop hook (a hung agent, a dropped
+	// callback, a daemon restart mid-turn) strands it on "active" forever — and an
+	// indicator stuck on busy is worse than none, since the whole point is to
+	// answer "is it working, or is it my turn?" without opening the session.
+	// `status === "working"` is the daemon's own rescued reading (deriveStatusDetail
+	// in backend/internal/service/session/status.go): it means active AND heartbeat
+	// fresh, and it self-heals to needs_input once the reading goes stale. Every
+	// flavour of waiting-for-the-human — the agent's own question, the aged-idle
+	// guess, the stale-active guess — lands on needs_input, i.e. NOT busy, which is
+	// the honest answer. Terminated and merged orchestrators never get here at all
+	// (newestActiveOrchestrator drops them), and a project with no orchestrator has
+	// nothing to be busy about.
+	const orchestratorBusy = orchestrator?.status === "working";
+	const prefersReducedMotion = usePrefersReducedMotion();
+
 	// Active-view glow: mark which of Dashboard / Orchestrator is the view
 	// currently open, read from the REAL route state (useSelection → URL params).
 	// This project must be the active one, then the Dashboard route (project, no
@@ -818,14 +855,34 @@ function ProjectItem({
 						</button>
 						<button
 							aria-current={orchestratorActive ? "page" : undefined}
-							aria-label={orchestrator ? `Open ${workspace.name} orchestrator` : `Spawn ${workspace.name} orchestrator`}
-							className={cn(SEG_CLASS, orchestratorActive && SEG_ACTIVE_CLASS)}
+							aria-label={
+								(orchestrator ? `Open ${workspace.name} orchestrator` : `Spawn ${workspace.name} orchestrator`) +
+								// Busy rides the button's NAME rather than a live region: the
+								// sidebar is persistent navigation, so announcing every
+								// project's orchestrator on every state flip would interrupt
+								// the user constantly. aria-busy is wrong here too — it tells
+								// AT this widget's own content is mid-update and to hold
+								// announcements, which is neither true nor helpful. The name is
+								// read when the user asks for it, on focus.
+								(orchestratorBusy ? ", working" : "")
+							}
+							className={cn(SEG_CLASS, ORCHESTRATOR_SEG_CLASS, orchestratorActive && SEG_ACTIVE_CLASS)}
 							disabled={isSpawning || isProjectRestarting}
 							onClick={() => void openOrchestrator()}
 							type="button"
 						>
 							<OrchestratorIcon aria-hidden="true" />
 							<span className="truncate">Orchestrator</span>
+							{/* Busy dot: out of flow, so toggling it never resizes the button,
+							re-wraps the label or shifts the header. Decorative — the state is
+							already on the button's accessible name above. */}
+							{orchestratorBusy && (
+								<span
+									aria-hidden="true"
+									className={cn(ORCHESTRATOR_BUSY_DOT_CLASS, !prefersReducedMotion && "animate-status-pulse")}
+									data-testid="orchestrator-busy"
+								/>
+							)}
 						</button>
 					</div>
 				)}
