@@ -43,9 +43,20 @@ const (
 // (adapters/agent/toolcurate) — the raw agent payload is never forwarded, so a
 // file body or an inline token cannot cross this boundary. A harness with no
 // per-tool hook simply omits it and the session stays status-only.
+//
+// End is the optional account of an ENDING signal. It carries the harness's own
+// reason for stopping and nothing else from the ending payload, so a session
+// that stops by itself can say why without the raw payload crossing this
+// boundary.
 type setActivityAPIRequest struct {
 	State  string                 `json:"state"`
 	Detail *domain.ActivityDetail `json:"detail,omitempty"`
+	End    *sessionEndAPIPayload  `json:"end,omitempty"`
+}
+
+// sessionEndAPIPayload mirrors the daemon's SessionEndPayload.
+type sessionEndAPIPayload struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 // preToolUseDenial is the native PreToolUse hook response that refuses a tool
@@ -121,6 +132,13 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 	}
 
 	req := setActivityAPIRequest{State: string(state)}
+	// An ending reports WHO ended the session by arriving at all, and why when
+	// the harness says. Attached only for a terminal signal, and only from the
+	// bounded reason token — never the rest of the ending payload.
+	if state == domain.ActivityExited {
+		reason, _ := activitydispatch.DeriveEndReason(agent, event, payload)
+		req.End = &sessionEndAPIPayload{Reason: reason}
+	}
 	// Curate the payload into the small, whitelisted detail the activity feed
 	// may carry. This must happen HERE, before the loopback POST, so the raw
 	// payload never reaches the daemon, the store, or a log. A harness with no

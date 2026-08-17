@@ -1,7 +1,7 @@
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { SmokeProgress } from "./smoke-test";
 import { approvalLabel, approvalProgress, prTitleLabel } from "./pr-display";
-import type { SessionActivityState, SessionStatus } from "../types/workspace";
+import type { SessionActivityState, SessionStatus, SessionTermination } from "../types/workspace";
 
 /**
  * The Summary-tab "readiness / gating" strip derivation.
@@ -56,6 +56,9 @@ export type Readiness = {
 type SessionFacts = {
 	activity?: { state?: SessionActivityState } | null;
 	status?: SessionStatus;
+	/** How the session ended, when it has. Read only to caption a stopped
+	 * session with who ended it. */
+	termination?: SessionTermination | null;
 };
 
 const gate = (key: ReadinessGateKey, label: string, tone: ReadinessTone, state: string): ReadinessGate => ({
@@ -74,6 +77,10 @@ function primaryPR(prs: SessionPRSummary[]): SessionPRSummary | undefined {
 function workGate(session: SessionFacts, hasPR: boolean, merged: boolean): ReadinessGate {
 	if (merged || hasPR) return gate("work", "Work", "pass", "done");
 	if (session.activity?.state === "active") return gate("work", "Work", "wait", "working");
+	// Ended with no pull request to show for it. "done" would assert that the
+	// work landed, which is precisely what did not happen — and it is the reading
+	// that let a worker stop mid-task without anyone noticing.
+	if (session.status === "terminated") return gate("work", "Work", "block", "stopped");
 	return gate("work", "Work", "pass", "done");
 }
 
@@ -169,6 +176,22 @@ function contextLabel(pr: SessionPRSummary | undefined): string {
 	return `${prTitleLabel(pr.provider, pr.number)} · ${pr.state}`;
 }
 
+/** Who ended a session that stopped without opening a pull request. An ending
+ * with no recorded source (a session that ended before AO kept an account) says
+ * only that it stopped, rather than guessing at a culprit. */
+function stoppedCaption(source: string | undefined): string {
+	switch (source) {
+		case "agent":
+			return "The agent ended this session itself — no pull request was opened.";
+		case "ao":
+			return "AO tore this session down — no pull request was opened.";
+		case "runtime_gone":
+			return "This session's terminal disappeared — no pull request was opened.";
+		default:
+			return "This session ended without opening a pull request.";
+	}
+}
+
 /** The gate the verdict points at: the first blocker, else the first waiter. */
 function currentGate(gates: ReadinessGate[]): ReadinessGate | undefined {
 	return gates.find((g) => g.tone === "block") ?? gates.find((g) => g.tone === "wait");
@@ -188,13 +211,21 @@ function deriveVerdict(
 	// No PR yet — the merge pipeline isn't active, so pipeline blockers (a failed
 	// smoke check, etc.) never headline over the fact that work is still underway.
 	const hasPR = pr?.state === "open" || pr?.state === "draft";
-	if (!hasPR)
+	if (!hasPR) {
+		// ...unless the session has ENDED. It opened no PR and it is not coming
+		// back, so "agent is still working" is not merely stale, it is the false
+		// reassurance that lets a worker vanish unnoticed: a session that quietly
+		// stopped reads exactly like one still thinking. Say it stopped, and say
+		// who stopped it.
+		if (session.status === "terminated")
+			return { hue: "todo", word: "Stopped", caption: stoppedCaption(session.termination?.source) };
 		return {
 			hue: "working",
 			word: "Working",
 			caption: "Agent is still working — no pull request yet.",
 			pulse: session.activity?.state === "active",
 		};
+	}
 
 	// Blockers (needs-you) — ordered by how much a human is on the hook.
 	if (gates.review.tone === "block")

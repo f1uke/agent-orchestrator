@@ -1714,6 +1714,7 @@ export interface components {
             /** @enum {string} */
             targetSource?: "pr" | "session_pr_target" | "session_base" | "project";
             terminalHandleId?: string;
+            termination?: components["schemas"]["SessionTermination"];
             tokenUsage?: components["schemas"]["SessionTokenUsage"];
             /** Format: date-time */
             updatedAt: string;
@@ -2237,6 +2238,10 @@ export interface components {
             ok: boolean;
             sessionId: string;
         };
+        SessionEndPayload: {
+            /** @description The harness's own end reason, e.g. prompt_input_exit. Empty when the harness reports none. */
+            reason?: string;
+        };
         SessionPRCISummary: {
             failingChecks: components["schemas"]["SessionPRFailingCheck"][];
             /** @enum {string} */
@@ -2360,6 +2365,20 @@ export interface components {
         SessionResponse: {
             session: components["schemas"]["ControllersSessionView"];
         };
+        SessionTermination: {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            lastState?: "active" | "idle" | "waiting_input" | "blocked" | "exited";
+            /** @description The harness's own end reason when source is agent, or the named AO cause otherwise. 'unknown' when the ending is real but unexplained. */
+            reason: string;
+            /**
+             * @description Who ended the session: the agent reported it, AO tore it down, or AO inferred it from a missing runtime.
+             * @enum {string}
+             */
+            source: "agent" | "ao" | "runtime_gone";
+            transcriptPath?: string;
+        };
         SessionTokenUsage: {
             /** Format: int64 */
             cacheCreation: number;
@@ -2382,6 +2401,8 @@ export interface components {
         SetActivityRequest: {
             /** @description Optional curated detail of the action behind this signal. */
             detail?: components["schemas"]["ActivityDetail"];
+            /** @description Present on a terminal signal: the agent reported the ending, with the harness's own reason. */
+            end?: components["schemas"]["SessionEndPayload"];
             /**
              * @description Agent activity state reported by an agent hook.
              * @enum {string}

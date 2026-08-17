@@ -763,6 +763,21 @@ func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 		{"workspace", sess.WorkspacePath},
 		{"terminated", fmt.Sprintf("%t", sess.IsTerminated)},
 	}
+	// A session that has ended accounts for itself here rather than leaving the
+	// reader to correlate the change log, the daemon log and the reclaim log.
+	// Absent for a live session, and for one that ended before AO kept an
+	// account — silence there is honest, an invented ending would not be.
+	if t := sess.Termination; t != nil {
+		fields = append(fields,
+			[2]string{"ended by", t.Source},
+			[2]string{"end reason", t.Reason},
+			[2]string{"was", t.LastState},
+			[2]string{"transcript", t.TranscriptPath},
+		)
+		if !t.At.IsZero() {
+			fields = append(fields, [2]string{"ended", t.At.Format(time.RFC3339)})
+		}
+	}
 	for _, field := range fields {
 		if field[1] == "" {
 			continue

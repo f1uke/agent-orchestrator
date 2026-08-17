@@ -181,6 +181,8 @@ var schemaNames = map[string]string{
 	"ControllersClaimPRRequest":                   "ClaimPRRequest",
 	"ControllersSessionPRFacts":                   "SessionPRFacts",
 	"ControllersSessionTokenUsage":                "SessionTokenUsage",
+	"ControllersSessionTermination":               "SessionTermination",
+	"ControllersSessionEndPayload":                "SessionEndPayload",
 	"ControllersSessionPRSummary":                 "SessionPRSummary",
 	"ControllersSessionPRCISummary":               "SessionPRCISummary",
 	"ControllersSessionPRFailingCheck":            "SessionPRFailingCheck",

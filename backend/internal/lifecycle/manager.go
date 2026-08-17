@@ -61,6 +61,19 @@ func WithMessageRenderer(r *messagetemplates.Renderer) Option {
 	return func(m *Manager) { m.renderer = r }
 }
 
+// WithTranscriptLocator wires the lookup that finds a session's agent transcript
+// on disk, so a termination can snapshot the pointer to it. Lifecycle is a pure
+// fact layer with no harness knowledge, and transcript layout is harness-specific,
+// so the daemon injects it. A Manager built without one simply records no
+// transcript pointer — the rest of the account still stands.
+func WithTranscriptLocator(fn func(domain.SessionRecord) string) Option {
+	return func(m *Manager) {
+		if fn != nil {
+			m.transcriptFor = fn
+		}
+	}
+}
+
 // WithAutoNudgeDefault wires the global default for auto-nudging a worker when
 // its PR has unresolved review comments (used when a session has no per-session
 // override). A nil fn leaves the safe "off" default in place.
@@ -89,6 +102,9 @@ type Manager struct {
 	// unresolved PR review comments, read when a session has no per-session
 	// override. Never nil after New (defaults to "off").
 	autoNudgeDefault func() bool
+	// transcriptFor locates a session's agent transcript for the termination
+	// account. Nil until wired; a nil locator records an empty pointer.
+	transcriptFor func(domain.SessionRecord) string
 	// runtimeSuspender tears a worker's tmux down when its PR merges
 	// (feature/merge-suspend-in-place), mirroring the idle sweep's reap. Lifecycle
 	// is a pure fact layer with no runtime access, so the session manager injects
@@ -164,6 +180,27 @@ func (m *Manager) mutate(ctx context.Context, id domain.SessionID, fn func(domai
 	return nil
 }
 
+// termination builds the account of an ending from the record as it stood
+// BEFORE the terminal write, so LastState is what the session was actually doing
+// when it stopped rather than the "exited" it is about to become. An unnamed
+// reason is recorded as unknown: the ending is a fact even when its cause is not.
+func (m *Manager) termination(before domain.SessionRecord, src domain.TerminationSource, reason string, now time.Time) domain.Termination {
+	if reason == "" {
+		reason = domain.TerminationReasonUnknown
+	}
+	transcript := ""
+	if m.transcriptFor != nil {
+		transcript = m.transcriptFor(before)
+	}
+	return domain.Termination{
+		Source:         src,
+		Reason:         reason,
+		LastState:      before.Activity.State,
+		TranscriptPath: transcript,
+		At:             now,
+	}
+}
+
 // ApplyRuntimeObservation only writes when runtime liveness is unambiguous. A
 // failed probe or liveness disagreement is ignored; no transient lifecycle state is stored.
 func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.SessionID, f ports.RuntimeFacts) error {
@@ -178,6 +215,9 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		next := cur
 		next.IsTerminated = true
 		next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: timeOr(f.ObservedAt, now)}
+		// Nobody reported this ending: the runtime was simply not there. Recording
+		// it as inference keeps it from being read as an agent's own report.
+		next.Termination = m.termination(cur, domain.TerminationSourceRuntimeGone, domain.TerminationCauseRuntimeMissing, timeOr(f.ObservedAt, now))
 		return next, true
 	})
 }
@@ -240,6 +280,14 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 	}
 	if s.State == domain.ActivityExited {
 		next.IsTerminated = true
+		// The agent ended itself. Whatever it said about why is the ONLY account
+		// of an ending AO did not order, so it is recorded here rather than
+		// consumed and dropped by the state derivation upstream.
+		reason := ""
+		if s.End != nil {
+			reason = s.End.Reason
+		}
+		next.Termination = m.termination(rec, domain.TerminationSourceAgent, reason, timeOr(s.Timestamp, now))
 	}
 	next.UpdatedAt = now
 	if err := m.store.UpdateSession(ctx, next); err != nil {
@@ -359,6 +407,9 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 	// the recreated sessions_cdc_update trigger fans the transition out.
 	rec.IsTodo = false
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}
+	// The session is live again, so last time's account of how it ended must go:
+	// left in place it would read as current and misattribute the running session.
+	rec.Termination = domain.Termination{}
 	// Each spawn/restore must re-prove its hook pipeline: clear the receipt so
 	// a relaunch with broken hooks degrades to no_signal instead of inheriting
 	// a stale "signals worked once" fact.
@@ -368,15 +419,21 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 	return m.store.UpdateSession(ctx, rec)
 }
 
-// MarkTerminated marks a session terminated without tearing down external resources.
-func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID) error {
+// MarkTerminated marks a session terminated without tearing down external
+// resources. cause names the AO operation that ordered it (domain's
+// TerminationCause* constants) and is recorded on the row, so an AO-initiated
+// ending can be attributed to the operation behind it instead of appearing as an
+// anonymous "exited".
+func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID, cause string) error {
 	return m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated {
 			return cur, false
 		}
-		cur.IsTerminated = true
-		cur.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: now}
-		return cur, true
+		next := cur
+		next.IsTerminated = true
+		next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: now}
+		next.Termination = m.termination(cur, domain.TerminationSourceAO, cause, now)
+		return next, true
 	})
 }
 

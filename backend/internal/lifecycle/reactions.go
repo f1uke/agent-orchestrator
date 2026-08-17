@@ -179,7 +179,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			}
 			return nil
 		}
-		return m.MarkTerminated(ctx, id)
+		return m.MarkTerminated(ctx, id, domain.TerminationCauseWorkComplete)
 	}
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil || !ok {
@@ -693,7 +693,7 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 		return nil
 	}
 	if isTerminalTrackerState(o.Issue.State) {
-		return m.MarkTerminated(ctx, id)
+		return m.MarkTerminated(ctx, id, domain.TerminationCauseIssueClosed)
 	}
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil || !ok {

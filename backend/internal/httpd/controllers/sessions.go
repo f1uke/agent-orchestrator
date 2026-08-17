@@ -947,7 +947,14 @@ func (c *SessionsController) activity(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_ACTIVITY_STATE", "Unknown activity state", nil)
 		return
 	}
-	if err := c.Activity.ApplyActivitySignal(r.Context(), sessionID(r), ports.ActivitySignal{Valid: true, State: state}); err != nil {
+	signal := ports.ActivitySignal{Valid: true, State: state}
+	// Only an ending carries an end block, and only from the hook that reported
+	// the ending: attaching one to any other state would stamp a cause on a
+	// session that has not stopped.
+	if in.End != nil && state == domain.ActivityExited {
+		signal.End = &ports.SessionEnd{Reason: in.End.Reason}
+	}
+	if err := c.Activity.ApplyActivitySignal(r.Context(), sessionID(r), signal); err != nil {
 		if errors.Is(err, ports.ErrSessionNotFound) {
 			envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SESSION_NOT_FOUND", "Unknown session", nil)
 			return
@@ -1178,7 +1185,25 @@ func sessionView(s domain.Session) SessionView {
 	if s.IsTodo {
 		prompt = s.Metadata.Prompt
 	}
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s)}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s)}
+}
+
+// sessionTermination builds the curated ending wire object. It returns nil (so
+// the field is omitted) when no ending has been recorded — a live session, or
+// one that ended before AO kept this account — because an empty ending object
+// would read as "it ended, and nothing is known", which is a different and
+// falser claim than "there is no record".
+func sessionTermination(s domain.Session) *SessionTermination {
+	if s.Termination.IsZero() {
+		return nil
+	}
+	return &SessionTermination{
+		Source:         string(s.Termination.Source),
+		Reason:         s.Termination.Reason,
+		LastState:      string(s.Termination.LastState),
+		At:             s.Termination.At,
+		TranscriptPath: s.Termination.TranscriptPath,
+	}
 }
 
 // sessionTokenUsage builds the curated token-telemetry wire object, deriving the raw

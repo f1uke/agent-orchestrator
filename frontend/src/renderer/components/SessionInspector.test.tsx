@@ -868,3 +868,52 @@ describe("SessionInspector Simulator tab visibility", () => {
 		expect(screen.getByRole("tab", { name: /device/i })).toBeInTheDocument();
 	});
 });
+
+// A worker that stops mid-task looks, in the app, exactly like one still
+// thinking. When it does stop, the inspector must say who ended it and why —
+// that question is the whole reason the daemon records an ending at all.
+describe("SessionInspector ending section", () => {
+	it("says the agent ended the session itself, and what it was doing", () => {
+		mockCommonGets();
+		renderWithQuery(
+			<SessionInspector
+				session={session([], {
+					status: "terminated",
+					termination: {
+						source: "agent",
+						reason: "prompt_input_exit",
+						lastState: "active",
+						at: "2026-08-17T09:36:05Z",
+						transcriptPath: "/transcripts/sess-1.jsonl",
+					},
+				})}
+			/>,
+		);
+		const ended = within(screen.getByText("Ended").closest("section.inspector-section") as HTMLElement);
+		expect(ended.getByText("The agent ended it")).toBeInTheDocument();
+		expect(ended.getByText("prompt_input_exit")).toBeInTheDocument();
+		expect(ended.getByText("Working")).toBeInTheDocument();
+		expect(ended.getByText("/transcripts/sess-1.jsonl")).toBeInTheDocument();
+	});
+
+	it("distinguishes a teardown AO ordered from one the agent chose", () => {
+		mockCommonGets();
+		renderWithQuery(
+			<SessionInspector
+				session={session([], {
+					status: "terminated",
+					termination: { source: "ao", reason: "auto_reclaim", lastState: "idle", at: "2026-08-17T09:36:05Z" },
+				})}
+			/>,
+		);
+		const ended = within(screen.getByText("Ended").closest("section.inspector-section") as HTMLElement);
+		expect(ended.getByText("AO tore it down")).toBeInTheDocument();
+		expect(ended.getByText("auto_reclaim")).toBeInTheDocument();
+	});
+
+	it("shows no ending section for a live session", () => {
+		mockCommonGets();
+		renderWithQuery(<SessionInspector session={session([pr(7, "open")])} />);
+		expect(screen.queryByText("Ended")).not.toBeInTheDocument();
+	});
+});

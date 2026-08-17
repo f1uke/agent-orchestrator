@@ -148,6 +148,9 @@ type fakeLCM struct {
 	completed int
 	// terminated counts MarkTerminated calls per session id.
 	terminated map[domain.SessionID]int
+	// terminationCauses records the AO cause each MarkTerminated named, so a
+	// test can assert WHICH operation tore a session down.
+	terminationCauses map[domain.SessionID][]string
 	// suspended counts MarkSuspended calls per session id.
 	suspended map[domain.SessionID]int
 	// touched counts TouchIdleClose calls per session id.
@@ -167,11 +170,15 @@ func (l *fakeLCM) MarkSpawned(_ context.Context, id domain.SessionID, metadata d
 	l.store.sessions[id] = rec
 	return nil
 }
-func (l *fakeLCM) MarkTerminated(_ context.Context, id domain.SessionID) error {
+func (l *fakeLCM) MarkTerminated(_ context.Context, id domain.SessionID, cause string) error {
 	if l.terminated == nil {
 		l.terminated = map[domain.SessionID]int{}
 	}
+	if l.terminationCauses == nil {
+		l.terminationCauses = map[domain.SessionID][]string{}
+	}
 	l.terminated[id]++
+	l.terminationCauses[id] = append(l.terminationCauses[id], cause)
 	rec := l.store.sessions[id]
 	rec.IsTerminated = true
 	rec.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: time.Now()}

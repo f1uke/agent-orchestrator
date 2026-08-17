@@ -356,3 +356,80 @@ describe("deriveReadiness — Review gate approval progress", () => {
 		expect(stateOf(r, "review")).toBe("approved");
 	});
 });
+
+// The false reassurance behind the incident this branch fixes: a worker that had
+// stopped mid-task still headlined "Working — agent is still working", so 14
+// minutes of nothing looked exactly like 14 minutes of thinking.
+describe("a session that stopped before opening a PR", () => {
+	it("headlines that it stopped, not that the agent is still working", () => {
+		const readiness = deriveReadiness(
+			{
+				status: "terminated",
+				activity: { state: "exited" },
+				termination: { source: "agent", reason: "other", at: "2026-08-17T09:36:05Z" },
+			},
+			[],
+			smoke(),
+		);
+		expect(readiness.verdict.word).toBe("Stopped");
+		expect(readiness.verdict.caption).toContain("agent");
+		expect(readiness.verdict.pulse).toBeFalsy();
+	});
+
+	it("says so when AO was the one that ended it", () => {
+		const readiness = deriveReadiness(
+			{
+				status: "terminated",
+				activity: { state: "exited" },
+				termination: { source: "ao", reason: "auto_reclaim", at: "2026-08-17T09:36:05Z" },
+			},
+			[],
+			smoke(),
+		);
+		expect(readiness.verdict.word).toBe("Stopped");
+		expect(readiness.verdict.caption).toContain("AO");
+	});
+
+	// A live session with no PR is genuinely still working — the fix must not
+	// turn every pre-PR session into a stopped one.
+	it("still reads as working while the session is live", () => {
+		const readiness = deriveReadiness({ status: "working", activity: { state: "active" } }, [], smoke());
+		expect(readiness.verdict.word).toBe("Working");
+	});
+
+	// A session that ended AFTER its work merged is finished, not stopped: the
+	// merged verdict is the more useful headline.
+	it("keeps the merged verdict for a terminated session whose PR merged", () => {
+		const readiness = deriveReadiness(
+			{
+				status: "merged",
+				activity: { state: "exited" },
+				termination: { source: "ao", reason: "work_complete", at: "2026-08-17T09:36:05Z" },
+			},
+			[pr({ state: "merged" })],
+			smoke(),
+		);
+		expect(readiness.verdict.word).toBe("Merged");
+	});
+});
+
+// The Work gate is the pipeline's first claim about what happened. Calling it
+// "done" on a session that stopped without producing a pull request tells the
+// reader the work landed, which is the opposite of what occurred.
+describe("the Work gate on a session that stopped with nothing to show", () => {
+	it("does not claim the work is done", () => {
+		const r = deriveReadiness({ status: "terminated", activity: { state: "exited" } }, [], smoke());
+		const work = r.gates.find((g) => g.key === "work")!;
+		expect(work.state).toBe("stopped");
+		expect(work.tone).toBe("block");
+	});
+
+	it("still reads done once a pull request exists, however the session ended", () => {
+		const r = deriveReadiness(
+			{ status: "terminated", activity: { state: "exited" } },
+			[pr({ state: "open" })],
+			smoke(),
+		);
+		expect(r.gates.find((g) => g.key === "work")!.state).toBe("done");
+	});
+});

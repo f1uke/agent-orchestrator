@@ -80,7 +80,7 @@ type commander interface {
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	// Teardown is Kill reporting the full outcome, including WHY a workspace was
 	// preserved. The auto-reclaim loop needs that distinction; Kill's bool loses it.
-	Teardown(ctx context.Context, id domain.SessionID) (sessionmanager.TeardownResult, error)
+	Teardown(ctx context.Context, id domain.SessionID, cause string) (sessionmanager.TeardownResult, error)
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error)
@@ -546,6 +546,14 @@ func (s *Service) ListKnownWorkspacePaths(ctx context.Context) ([]string, error)
 // log, because nothing happened.
 const ReasonAlreadyGone = "already_gone"
 
+// ReasonNotTerminated means the session was still live when the teardown was
+// asked for, so nothing was touched. Eligibility is decided by ListReclaimable,
+// but a session can come back between that listing and this call — a restore, a
+// resume, a TODO started — and a reclaim loop that tore down a live agent's
+// worktree would be the worst failure this feature has. Refusing here means the
+// eligibility filter is not the only thing standing in the way.
+const ReasonNotTerminated = "not_terminated"
+
 // ReclaimOutcome is the auto-reclaim loop's record of one attempt: enough to
 // write a truthful log line and to decide whether the attempt needs retrying.
 type ReclaimOutcome struct {
@@ -574,15 +582,31 @@ type ReclaimOutcome struct {
 // refusal as a success, then never retried it.
 func (s *Service) Reclaim(ctx context.Context, id domain.SessionID) (ReclaimOutcome, error) {
 	out := ReclaimOutcome{}
+	// Re-read the record at the moment of teardown. Eligibility was decided by
+	// ListReclaimable, but a session can come back between that listing and this
+	// call — a restore, a resume, a TODO started — and tearing the worktree out
+	// from under a working agent is the worst thing this loop could do.
+	//
+	// An unreadable record stops the teardown as an ERROR rather than a quiet
+	// refusal: it is not proof the session is finished, and the repo's standing
+	// rule is that an inconclusive reading is never treated as proof of death.
+	// The caller logs it loudly and retries on the next pass — a store that will
+	// not answer is an operator problem, not the routine "still running" case.
+	rec, ok, err := s.getSessionRecord(ctx, id)
+	if err != nil {
+		return out, toAPIError(err)
+	}
+	if !ok || !rec.IsTerminated {
+		out.Reason = ReasonNotTerminated
+		return out, nil
+	}
 	// The descriptive fields are for the log only: failing to read them must
-	// never stop the teardown, so every lookup here is best-effort.
-	if rec, ok, err := s.getSessionRecord(ctx, id); err == nil && ok {
-		out.ProjectID = string(rec.ProjectID)
-		out.Branch = rec.Metadata.Branch
-		out.WorkspacePath = rec.Metadata.WorkspacePath
-		if sess, sErr := s.toSession(ctx, rec); sErr == nil {
-			out.Qualified = string(sess.Status)
-		}
+	// never stop the teardown, so the status lookup below stays best-effort.
+	out.ProjectID = string(rec.ProjectID)
+	out.Branch = rec.Metadata.Branch
+	out.WorkspacePath = rec.Metadata.WorkspacePath
+	if sess, sErr := s.toSession(ctx, rec); sErr == nil {
+		out.Qualified = string(sess.Status)
 	}
 	// A session keeps its WorkspacePath after teardown (Restore needs it), so it
 	// stays on the candidate list forever and every daemon restart would tear it
@@ -598,7 +622,7 @@ func (s *Service) Reclaim(ctx context.Context, id domain.SessionID) (ReclaimOutc
 	// Measure before teardown: afterwards there is nothing left to measure.
 	size := dirSize(out.WorkspacePath)
 
-	res, err := s.manager.Teardown(ctx, id)
+	res, err := s.manager.Teardown(ctx, id, domain.TerminationCauseAutoReclaim)
 	if err != nil {
 		return out, toAPIError(err)
 	}
