@@ -119,8 +119,7 @@ func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/reclaim")
 		return
 	}
-	s := c.Svc.Get()
-	envelope.WriteJSON(w, http.StatusOK, ReclaimSettingsResponse{Enabled: s.Enabled, GraceMinutes: s.GraceMinutes})
+	envelope.WriteJSON(w, http.StatusOK, ReclaimSettingsResponse{Settings: c.Svc.Get()})
 }
 
 func (c *SettingsController) set(w http.ResponseWriter, r *http.Request) {
@@ -128,17 +127,21 @@ func (c *SettingsController) set(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/reclaim")
 		return
 	}
-	var in SetReclaimSettingsRequest
+	// Decode ONTO the current settings, so a client that sends only the keys it
+	// cares about does not blank the rest. Set is a whole-value replace, so a
+	// key absent from the body would otherwise be written back as its zero
+	// value — silently switching a feature off that nobody touched. A key the
+	// body DOES carry still wins, including an explicit false.
+	in := SetReclaimSettingsRequest{Settings: c.Svc.Get()}
 	if err := decodeJSON(r, &in); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
-	next := reclaimsettings.Settings{Enabled: in.Enabled, GraceMinutes: in.GraceMinutes}
-	if err := c.Svc.Set(next); err != nil {
+	if err := c.Svc.Set(in.Settings); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, ReclaimSettingsResponse{Enabled: next.Enabled, GraceMinutes: next.GraceMinutes})
+	envelope.WriteJSON(w, http.StatusOK, ReclaimSettingsResponse{Settings: c.Svc.Get()})
 }
 
 func (c *SettingsController) getSpawnConfirm(w http.ResponseWriter, r *http.Request) {

@@ -56,6 +56,21 @@ func statusPorcelainArgs(path string) []string {
 	return []string{"-C", path, "status", "--porcelain"}
 }
 
+// statusPorcelainZArgs is the NUL-separated form of the same probe. -z is what
+// the artefact classifier reads: unlike plain --porcelain it never C-quotes a
+// path, so a path containing a space or a non-ASCII byte survives parsing
+// intact. See artifacts.go.
+func statusPorcelainZArgs(path string) []string {
+	return []string{"-C", path, "status", "--porcelain", "-z"}
+}
+
+// revParseGitPathArgs resolves a name inside the worktree's own git directory
+// (e.g. MERGE_HEAD, rebase-merge). A worktree's git dir is not `<path>/.git`,
+// so the location has to come from git rather than be assembled by hand.
+func revParseGitPathArgs(path, name string) []string {
+	return []string{"-C", path, "rev-parse", "--git-path", name}
+}
+
 func worktreeListPorcelainArgs(repo string) []string {
 	return []string{"-C", repo, "worktree", "list", "--porcelain"}
 }

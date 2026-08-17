@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
@@ -99,7 +100,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, reclaimSettings func() reclaimsettings.Settings, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -116,6 +117,14 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// session spawned for a registered project materialises its worktree off
 		// that repo. Unregistered projects fail loudly.
 		RepoResolver: projectRepoResolver{store: store},
+		// Read through the settings store on every teardown so toggling
+		// artefact clearing takes effect without a daemon restart.
+		ArtifactPatterns: func() []string {
+			if reclaimSettings == nil {
+				return nil
+			}
+			return reclaimSettings().Patterns()
+		},
 	})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("session workspace: %w", err)

@@ -5870,6 +5870,12 @@ components:
       type: object
     ReclaimSettingsResponse:
       properties:
+        artifactPatterns:
+          items:
+            type: string
+          type: array
+        artifactsEnabled:
+          type: boolean
         enabled:
           type: boolean
         graceMinutes:
@@ -5877,6 +5883,7 @@ components:
       required:
       - enabled
       - graceMinutes
+      - artifactsEnabled
       type: object
     ReleaseSimHoldResponse:
       properties:
@@ -6601,6 +6608,12 @@ components:
       type: object
     SetReclaimSettingsRequest:
       properties:
+        artifactPatterns:
+          items:
+            type: string
+          type: array
+        artifactsEnabled:
+          type: boolean
         enabled:
           type: boolean
         graceMinutes:
@@ -6608,6 +6621,7 @@ components:
       required:
       - enabled
       - graceMinutes
+      - artifactsEnabled
       type: object
     SetResponseLanguageSettingsRequest:
       properties:

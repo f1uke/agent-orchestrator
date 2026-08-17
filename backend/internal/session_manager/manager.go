@@ -945,12 +945,49 @@ func (m *Manager) RollbackSpawn(ctx context.Context, id domain.SessionID) (delet
 // available destroy steps are skipped so it can be cleaned up from the
 // dashboard.
 func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
+	res, err := m.Teardown(ctx, id)
+	return res.Freed, err
+}
+
+// TeardownResult reports what a teardown attempt actually did to the session's
+// workspace, and why.
+//
+// Kill collapses this to a bool, which is enough for an interactive caller
+// standing in front of the result. The auto-reclaim loop is not: it has to
+// distinguish "the disk is now free" from "the workspace was preserved" so it
+// can retry the second case instead of recording a success that never happened.
+type TeardownResult struct {
+	// Freed is true only when the workspace is actually gone from disk.
+	Freed bool
+	// Reason names why the workspace survived when Freed is false. Empty when
+	// Freed is true or when there was no workspace to begin with.
+	Reason string
+	// WorkspacePath is where the workspace was, for the reclaim log.
+	WorkspacePath string
+}
+
+// Teardown reasons.
+const (
+	// ReasonWorkspaceDirty means the worktree held uncommitted or untracked work
+	// that is not regenerable build output, so removal was refused.
+	ReasonWorkspaceDirty = "workspace_dirty"
+	// ReasonNoWorkspace means the session had no workspace path recorded.
+	ReasonNoWorkspace = "no_workspace"
+	// ReasonSessionGone means the session row disappeared before teardown.
+	ReasonSessionGone = "session_gone"
+)
+
+// Teardown is Kill's implementation, reporting the full outcome. Kill and the
+// auto-reclaim loop share it so there is exactly one teardown code path and no
+// second, divergent reclaimer to keep in step.
+func (m *Manager) Teardown(ctx context.Context, id domain.SessionID) (TeardownResult, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
-		return false, fmt.Errorf("kill %s: %w", id, err)
+		return TeardownResult{}, fmt.Errorf("kill %s: %w", id, err)
 	}
 	if !ok {
-		return false, nil // already gone: benign race
+		// already gone: benign race
+		return TeardownResult{Reason: ReasonSessionGone}, nil
 	}
 	handle := runtimeHandle(rec.Metadata)
 	ws := workspaceInfo(rec)
@@ -958,7 +995,7 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 	var workspaceProjectRows []ports.WorkspaceRepoInfo
 	workspaceProject := false
 	if rows, ok, rowErr := m.workspaceProjectRows(ctx, rec); rowErr != nil {
-		return false, fmt.Errorf("kill %s: workspace rows: %w", id, rowErr)
+		return TeardownResult{}, fmt.Errorf("kill %s: workspace rows: %w", id, rowErr)
 	} else if ok {
 		workspaceProjectRows = rows
 		workspaceProject = true
@@ -966,7 +1003,7 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 
 	if handle.ID != "" {
 		if err := m.runtime.Destroy(ctx, handle); err != nil {
-			return false, fmt.Errorf("kill %s: runtime: %w", id, err)
+			return TeardownResult{}, fmt.Errorf("kill %s: runtime: %w", id, err)
 		}
 	}
 	// Rescue any stray planning docs left in the worktree into the private
@@ -977,24 +1014,31 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 	// (possibly refused) workspace teardown so a preserved dirty worktree still
 	// reaps the reviewer.
 	m.reapReviewer(ctx, id)
-	freed := false
+	res := TeardownResult{WorkspacePath: ws.Path}
 	if workspaceProject {
 		cleaned, err := m.destroyWorkspaceProjectRows(ctx, workspaceProjectRows)
 		if err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
-				return false, nil
+				res.Reason = ReasonWorkspaceDirty
+				return res, nil
 			}
-			return false, fmt.Errorf("kill %s: workspace: %w", id, err)
+			return TeardownResult{}, fmt.Errorf("kill %s: workspace: %w", id, err)
 		}
-		freed = cleaned
+		res.Freed = cleaned
+		if !cleaned {
+			res.Reason = ReasonWorkspaceDirty
+		}
 	} else if ws.Path != "" {
 		if err := m.workspace.Destroy(ctx, ws); err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
-				return false, nil
+				res.Reason = ReasonWorkspaceDirty
+				return res, nil
 			}
-			return false, fmt.Errorf("kill %s: workspace: %w", id, err)
+			return TeardownResult{}, fmt.Errorf("kill %s: workspace: %w", id, err)
 		}
-		freed = true
+		res.Freed = true
+	} else {
+		res.Reason = ReasonNoWorkspace
 	}
 	// Clear the restore marker so the next boot's RestoreAll cannot resurrect a
 	// killed session (#2319). For workspace projects this must happen after
@@ -1004,9 +1048,9 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 		m.logger.Warn("kill: delete restore marker failed", "sessionID", id, "error", err)
 	}
 	if err := m.lcm.MarkTerminated(ctx, id); err != nil {
-		return false, fmt.Errorf("kill %s: %w", id, err)
+		return TeardownResult{}, fmt.Errorf("kill %s: %w", id, err)
 	}
-	return freed, nil
+	return res, nil
 }
 
 // PurgeSession tears the session down like Kill, then hard-deletes its row and

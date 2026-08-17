@@ -79,13 +79,13 @@ func writeOrchestratorList(cmd *cobra.Command, sessions []sessionDTO) error {
 	}
 	currentProject := ""
 	for _, sess := range sessions {
-		if sess.ProjectID != currentProject {
+		if string(sess.ProjectID) != currentProject {
 			if currentProject != "" {
 				if _, err := fmt.Fprintln(out); err != nil {
 					return err
 				}
 			}
-			currentProject = sess.ProjectID
+			currentProject = string(sess.ProjectID)
 			if _, err := fmt.Fprintf(out, "%s:\n", currentProject); err != nil {
 				return err
 			}
@@ -112,7 +112,7 @@ func orchestratorLineParts(sess sessionDTO) []string {
 		parts = append(parts, "("+formatSessionAge(time.Since(sess.Activity.LastActivityAt))+")")
 	}
 	if sess.Status != "" {
-		parts = append(parts, "["+sess.Status+"]")
+		parts = append(parts, "["+string(sess.Status)+"]")
 	}
 	if sess.IsTerminated {
 		parts = append(parts, "terminated")

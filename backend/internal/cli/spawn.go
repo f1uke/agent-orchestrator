@@ -332,10 +332,10 @@ func (c *commandContext) resolveProjectFromSession(ctx context.Context, sessionI
 	if err != nil {
 		return projectDetails{}, usageError{fmt.Errorf("project could not be resolved from AO_SESSION_ID %q; pass --project", sessionID)}
 	}
-	if strings.TrimSpace(sess.ProjectID) == "" {
+	if strings.TrimSpace(string(sess.ProjectID)) == "" {
 		return projectDetails{}, usageError{fmt.Errorf("project could not be resolved from AO_SESSION_ID %q; pass --project", sessionID)}
 	}
-	return c.fetchProjectDetails(ctx, sess.ProjectID)
+	return c.fetchProjectDetails(ctx, string(sess.ProjectID))
 }
 
 func (c *commandContext) resolveProjectFromCWD(ctx context.Context) (projectDetails, bool, error) {

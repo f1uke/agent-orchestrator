@@ -70,6 +70,12 @@ type Options struct {
 	ManagedRoot   string
 	DefaultBranch string
 	RepoResolver  RepoResolver
+	// ArtifactPatterns names untracked paths that Destroy may clear out of its
+	// own way (regenerable build output — see artifacts.go). It is read through
+	// a function rather than stored as a slice so the live user setting applies
+	// without rebuilding the adapter. Nil, or a nil return, disables the
+	// behaviour entirely and Destroy refuses every dirty worktree as before.
+	ArtifactPatterns func() []string
 }
 
 // Workspace creates per-session git worktrees under a managed root. It
@@ -80,6 +86,16 @@ type Workspace struct {
 	defaultBranch string
 	repos         RepoResolver
 	run           commandRunner
+	artifacts     func() []string
+}
+
+// artifactPatterns returns the currently configured regenerable-artefact
+// patterns, or nil when the behaviour is not configured.
+func (w *Workspace) artifactPatterns() []string {
+	if w.artifacts == nil {
+		return nil
+	}
+	return w.artifacts()
 }
 
 type commandRunner func(ctx context.Context, binary string, args ...string) ([]byte, error)
@@ -114,6 +130,7 @@ func New(opts Options) (*Workspace, error) {
 		defaultBranch: branch,
 		repos:         opts.RepoResolver,
 		run:           runCommand,
+		artifacts:     opts.ArtifactPatterns,
 	}, nil
 }
 
@@ -273,6 +290,14 @@ func (w *Workspace) Destroy(ctx context.Context, info ports.WorkspaceInfo) error
 	// wedge Kill/Restart. Clear it first so a clean worktree tears down; a dirty
 	// one is still caught by the non-force remove below (ErrWorkspaceDirty).
 	w.unlockWorktreeIfLocked(ctx, repo, path)
+	// Clear regenerable build output out of the way FIRST, but only when it is
+	// the sole reason the worktree is dirty. Without this a native-app worktree
+	// is pinned on disk forever by the `derivedDataPath/` its first build left
+	// behind. This never reaches for --force: it makes the tree genuinely clean
+	// so the ordinary refusing remove below can succeed on its own merits, and
+	// the bytes it deletes are inside a directory that is about to be removed
+	// wholesale anyway.
+	w.clearRegenerableArtifacts(ctx, path)
 	_, removeErr := w.run(ctx, w.binary, worktreeRemoveArgs(repo, path)...)
 	if _, err := w.run(ctx, w.binary, worktreePruneArgs(repo)...); err != nil {
 		return fmt.Errorf("gitworktree: worktree prune: %w", err)

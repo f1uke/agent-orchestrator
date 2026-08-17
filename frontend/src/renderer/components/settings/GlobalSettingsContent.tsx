@@ -217,6 +217,27 @@ function AutomationSection({ form }: { form: GlobalForm }) {
 						onChange={(e) => setField("reclaimGrace", Math.max(0, Number(e.target.value) || 0))}
 					/>
 				</SettingsField>
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					A worktree with uncommitted or untracked changes is never reclaimed. Build output is the exception: an
+					untracked <code>derivedDataPath</code>, <code>Pods</code> or <code>node_modules</code> would otherwise keep a
+					finished worktree on disk forever, so AO clears those out of the way — and only ever when nothing else in the
+					worktree has changed. Turn this off to treat build output as work too.
+				</p>
+				<SettingsField
+					label="Clear build output"
+					htmlFor="reclaimArtifacts"
+					modified={isFieldDirty("reclaimArtifacts")}
+				>
+					<OnOffSelect
+						id="reclaimArtifacts"
+						value={draft.reclaimArtifacts}
+						onChange={(v) => setField("reclaimArtifacts", v)}
+					/>
+				</SettingsField>
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					Every reclaim and every refusal is recorded in <code>~/.ao/data/reclaim.jsonl</code>, with what was removed,
+					why it qualified, how much it freed, and the branch it left behind.
+				</p>
 			</SettingsGroup>
 
 			<SettingsGroup title="Smoke-test evidence retention">
