@@ -251,11 +251,27 @@ func TestSimRecordingNilServiceReturns501(t *testing.T) {
 
 // The recording routes' whole point is exposing Task 2's recorder: a Svc that
 // satisfies simsvc.Manager but not the recording methods (any ordinary
-// fakeSimService) must answer 501 too, the same as a nil one.
+// fakeSimService) must answer 501 too, the same as a nil one. All three verbs
+// share the simRecorder helper in sim.go, but that is exactly the kind of
+// assumption that stops being true the moment one route gets its own path -
+// so each is asserted here, not just POST.
 func TestSimRecordingServiceWithoutRecordingSupportReturns501(t *testing.T) {
-	srv := newSimTestServer(t, &fakeSimService{})
-	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/sim-recordings/"+testSimUDID, `{}`); status != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501", status)
+	path := "/api/v1/sessions/mer-1/sim-recordings/" + testSimUDID
+	for _, tc := range []struct {
+		name   string
+		method string
+		body   string
+	}{
+		{"start", http.MethodPost, `{"name":"flow"}`},
+		{"get", http.MethodGet, ""},
+		{"stop", http.MethodDelete, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newSimTestServer(t, &fakeSimService{})
+			if _, status, _ := doRequest(t, srv, tc.method, path, tc.body); status != http.StatusNotImplemented {
+				t.Fatalf("%s status = %d, want 501", tc.method, status)
+			}
+		})
 	}
 }
 

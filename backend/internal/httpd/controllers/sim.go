@@ -226,7 +226,9 @@ func (c *SimController) releaseHold(w http.ResponseWriter, r *http.Request) {
 	// package takes its arguments from the path or query, and a body here would
 	// be the first exception. It defaults to true when absent, so a client that
 	// has not been updated to send it keeps recording the gestures it actually
-	// performs.
+	// performs. An unparseable value also falls back to that same default,
+	// deliberately: a gesture that already happened must not be refused over a
+	// malformed query string.
 	performed := true
 	if v := r.URL.Query().Get("performed"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
