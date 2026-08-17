@@ -150,7 +150,10 @@ func (c *SimController) acquireHold(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
 		return
 	}
-	hold, err := c.Svc.AcquireHold(r.Context(), sessionID(r), chi.URLParam(r, "udid"), time.Duration(in.HoldSeconds)*time.Second)
+	// GestureIntent{} for now: this route does not yet tell the recorder what
+	// gesture is about to happen. A later task fills it in from the request
+	// body once this endpoint carries that information.
+	hold, err := c.Svc.AcquireHold(r.Context(), sessionID(r), chi.URLParam(r, "udid"), time.Duration(in.HoldSeconds)*time.Second, simsvc.GestureIntent{})
 	if err != nil {
 		writeSimError(w, r, err)
 		return
@@ -163,7 +166,9 @@ func (c *SimController) releaseHold(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold/{token}")
 		return
 	}
-	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token")); err != nil {
+	// performed: true for now, matching this route's previous behaviour. A
+	// later task teaches it to say whether the gesture actually happened.
+	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token"), true); err != nil {
 		writeSimError(w, r, err)
 		return
 	}

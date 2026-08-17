@@ -413,7 +413,9 @@ type leaseHolder struct {
 }
 
 func (h *leaseHolder) Acquire(ctx context.Context, udid string, ttl time.Duration) (string, error) {
-	hold, err := h.leases.AcquireHold(ctx, h.sessionID, udid, ttl)
+	// GestureIntent{} for now: simgesture.Holder's own interface has no room
+	// for one yet. A later task carries the caller's intent through here.
+	hold, err := h.leases.AcquireHold(ctx, h.sessionID, udid, ttl, simsvc.GestureIntent{})
 	if err != nil {
 		return "", err
 	}
@@ -426,7 +428,10 @@ func (h *leaseHolder) Release(ctx context.Context, udid, token string) {
 	}
 	// A hold that could not be handed back lapses on its own within a minute,
 	// and must never turn a gesture that happened into a reported failure.
-	_ = h.leases.ReleaseHold(ctx, udid, token)
+	// performed: true for now, matching this caller's previous behaviour - a
+	// later task teaches simgesture.Holder to say whether the gesture actually
+	// happened.
+	_ = h.leases.ReleaseHold(ctx, udid, token, true)
 }
 
 // composeSimGesture turns a request into events. Every gesture is composed by

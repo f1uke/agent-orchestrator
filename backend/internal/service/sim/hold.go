@@ -73,7 +73,12 @@ func (e *HoldRefusedError) Error() string {
 // AcquireHold takes the finger on a device for one gesture. It is refused - it
 // never waits and never shares - because two overlapping gestures on a device
 // with one caller-less finger do not queue, they merge.
-func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error) {
+//
+// intent is what the caller is about to do. It travels here, not with
+// ReleaseHold, because this is the only moment the screen still shows the
+// gesture's "before" state and the only moment the caller knows what it is
+// about to attempt.
+func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, intent GestureIntent) (domain.SimHold, error) {
 	key, err := s.leaseKey(udid)
 	if err != nil {
 		return domain.SimHold{}, err
@@ -107,6 +112,9 @@ func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, u
 			Now:    now,
 		}
 	}
+	if s.recorder != nil {
+		s.recordIntent(ctx, key, outcome.Hold.Token, intent)
+	}
 	return outcome.Hold, nil
 }
 
@@ -114,7 +122,12 @@ func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, u
 // owns the hold is ErrNotFound rather than a misleading success: the caller has
 // to know its gesture was already taken over, because that is the case where a
 // finger can have been left down.
-func (s *Service) ReleaseHold(ctx context.Context, udid, token string) error {
+//
+// performed says whether the gesture this hold covered actually happened. It
+// is what turns the step AcquireHold stashed into a recorded one - see
+// recording.go: a gesture that was attempted and failed must not be written
+// down as if it had happened.
+func (s *Service) ReleaseHold(ctx context.Context, udid, token string, performed bool) error {
 	key, err := s.leaseKey(udid)
 	if err != nil {
 		return err
@@ -125,6 +138,9 @@ func (s *Service) ReleaseHold(ctx context.Context, udid, token string) error {
 	released, err := s.store.ReleaseSimHold(ctx, key, token, s.now())
 	if err != nil {
 		return err
+	}
+	if s.recorder != nil {
+		s.finishRecording(ctx, token, released && performed)
 	}
 	if !released {
 		return fmt.Errorf("%w: no live hold with that token on simulator %s; it may have lapsed and been taken over", ErrNotFound, key)

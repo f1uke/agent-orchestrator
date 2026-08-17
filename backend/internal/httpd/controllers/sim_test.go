@@ -37,7 +37,7 @@ type fakeSimService struct {
 	holds int
 }
 
-func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error) {
+func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, _ simsvc.GestureIntent) (domain.SimHold, error) {
 	f.gotSession, f.gotUDID, f.gotTTL = sessionID, udid, ttl
 	if f.holdErr != nil {
 		return domain.SimHold{}, f.holdErr
@@ -47,7 +47,7 @@ func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.Session
 	return domain.SimHold{UDID: udid, SessionID: sessionID, Token: "tok-fake", ExpiresAt: now.Add(ttl)}, nil
 }
 
-func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string) error {
+func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string, _ bool) error {
 	f.gotUDID, f.gotToken = udid, token
 	return f.releaseHoldErr
 }

@@ -299,7 +299,7 @@ func TestTakeOver_ClaimsADeviceAnotherSessionHolds(t *testing.T) {
 
 	// And the session it was taken from no longer holds it, so its next gesture
 	// is refused the ordinary way rather than reaching the device.
-	if _, err := svc.AcquireHold(context.Background(), first, udidProMax, 0); err == nil {
+	if _, err := svc.AcquireHold(context.Background(), first, udidProMax, 0, sim.GestureIntent{}); err == nil {
 		t.Fatal("the previous holder must not still be able to take the finger")
 	}
 }
@@ -314,7 +314,7 @@ func TestTakeOver_LeavesAGestureInFlightAlone(t *testing.T) {
 	if _, err := svc.Acquire(context.Background(), first, udidProMax, 0); err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
-	hold, err := svc.AcquireHold(context.Background(), first, udidProMax, 0)
+	hold, err := svc.AcquireHold(context.Background(), first, udidProMax, 0, sim.GestureIntent{})
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestTakeOver_LeavesAGestureInFlightAlone(t *testing.T) {
 	}
 
 	// The gesture finishes and the device can then be taken.
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
 		t.Fatalf("release hold: %v", err)
 	}
 	if _, err := svc.TakeOver(context.Background(), second, udidProMax, 0); err != nil {
@@ -350,7 +350,7 @@ func TestTakeOver_RetiresThePreviousHoldersToken(t *testing.T) {
 	if _, err := svc.Acquire(context.Background(), first, udidProMax, 0); err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
-	hold, err := svc.AcquireHold(context.Background(), first, udidProMax, time.Second)
+	hold, err := svc.AcquireHold(context.Background(), first, udidProMax, time.Second, sim.GestureIntent{})
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestTakeOver_RetiresThePreviousHoldersToken(t *testing.T) {
 		t.Fatalf("take over: %v", err)
 	}
 
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token); err == nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err == nil {
 		t.Fatal("a token from before the takeover must not be redeemable against the new lease")
 	}
 }
