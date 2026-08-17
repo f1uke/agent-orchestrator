@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -225,11 +226,7 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		return
 	}
 
-	el, found := elementFor(snap, intent)
-	choice := simflow.Choice{Rung: simflow.RungNone}
-	if found {
-		choice = simflow.For(snap, el)
-	}
+	choice, el, found := elementFor(snap, intent)
 
 	s.recMu.Lock()
 	prev, hasPrev := s.screens[udid]
@@ -347,31 +344,63 @@ func recordingRefusedReason(outcome domain.SimRecordingOutcome, caller domain.Se
 // text inside it are the same real control, and the child is what a tap
 // actually lands on. Later siblings are tried first because on a real screen
 // later usually means drawn on top.
-// elementFor resolves what a step targeted: by the name the caller gave when
-// there is one (Label wins over ID, matching the CLI's own exclusivity - the
-// two are never both set in practice, but preferring one deterministically
-// costs nothing), falling back to hit-testing the point otherwise. Both
-// answers come from the SAME snap this call already read, so ambiguity and
-// index still reflect what was actually on screen at record time either way.
+// elementFor resolves what a step targeted into the Choice it should be
+// recorded as, plus a representative element for screen-change fingerprinting
+// (fingerprintKeyFor, below) when there is one. Both answers come from the
+// SAME snap this call already read, so ambiguity and index still reflect what
+// was actually on screen at record time.
 //
-// A selector that resolves to nothing (no match, or an ambiguous one) reports
-// not-found rather than an error: the gesture already happened, and this is
-// only the recorder's best account of what it hit, never a gate on it.
-func elementFor(snap simbridge.Snapshot, intent GestureIntent) (simbridge.Element, bool) {
+// By the name the caller gave when there is one (Label wins over ID, matching
+// the CLI's own exclusivity - the two are never both set in practice, but
+// preferring one deterministically costs nothing), falling back to
+// hit-testing the point otherwise.
+func elementFor(snap simbridge.Snapshot, intent GestureIntent) (simflow.Choice, simbridge.Element, bool) {
 	switch {
 	case intent.Label != "":
-		if match, err := simbridge.Select(snap, simbridge.Selector{Kind: simbridge.SelectByLabel, Text: intent.Label}); err == nil {
-			return match.Element, true
-		}
-		return simbridge.Element{}, false
+		return selectorChoice(snap, simbridge.Selector{Kind: simbridge.SelectByLabel, Text: intent.Label})
 	case intent.ID != "":
-		if match, err := simbridge.Select(snap, simbridge.Selector{Kind: simbridge.SelectByID, Text: intent.ID}); err == nil {
-			return match.Element, true
-		}
-		return simbridge.Element{}, false
+		return selectorChoice(snap, simbridge.Selector{Kind: simbridge.SelectByID, Text: intent.ID})
 	default:
-		return hitTest(snap.Elements, intent.X, intent.Y)
+		el, found := hitTest(snap.Elements, intent.X, intent.Y)
+		if !found {
+			return simflow.Choice{Rung: simflow.RungNone}, simbridge.Element{}, false
+		}
+		return simflow.For(snap, el), el, true
 	}
+}
+
+// selectorChoice resolves a by-name selector against snap.
+//
+// A unique match goes through simflow.For exactly like a coordinate hit does.
+// An ambiguous match is NOT reported as not-found: there were reachable
+// candidates, they just could not be told apart, so this records the name
+// that was searched for and how many things answered to it - a RungText (or,
+// for an id, RungID) Choice with Ambiguity > 1 and no Index. Render's
+// RungText branch turns that into a warning rather than the false "cannot be
+// addressed" comment an unaddressable (RungNone) step would get. Guessing
+// which candidate was meant, instead, would reintroduce the exact
+// wrong-element bug 0039_sim_recording_step_index.sql exists to fix, so no
+// index is ever invented here - only Emit or a human adds one, deliberately.
+//
+// Anything else (no match at all, an empty selector) resolves to not-found,
+// same as before: the gesture already happened, and this is only the
+// recorder's best account of what it hit, never a gate on it.
+func selectorChoice(snap simbridge.Snapshot, selector simbridge.Selector) (simflow.Choice, simbridge.Element, bool) {
+	match, err := simbridge.Select(snap, selector)
+	if err == nil {
+		return simflow.For(snap, match.Element), match.Element, true
+	}
+	var ambiguous *simbridge.AmbiguousMatchError
+	if errors.As(err, &ambiguous) {
+		text := strings.TrimSpace(selector.Text)
+		if selector.Kind == simbridge.SelectByID {
+			return simflow.Choice{Rung: simflow.RungID, ID: text, Ambiguity: len(ambiguous.Matches)},
+				simbridge.Element{ID: text}, true
+		}
+		return simflow.Choice{Rung: simflow.RungText, Text: text, Ambiguity: len(ambiguous.Matches)},
+			simbridge.Element{Label: text}, true
+	}
+	return simflow.Choice{Rung: simflow.RungNone}, simbridge.Element{}, false
 }
 
 func hitTest(elements []simbridge.Element, x, y float64) (simbridge.Element, bool) {

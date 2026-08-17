@@ -213,6 +213,65 @@ func TestRecordIntent_ByIDTapRecordsTheRequestedSelector(t *testing.T) {
 	}
 }
 
+// An ambiguous by-name tap is under-determined, not unaddressable. The
+// recorded step must say so: the name searched for, the count of candidates,
+// and NO invented index - guessing one would be exactly the wrong-element bug
+// 0039_sim_recording_step_index.sql exists to fix. Before this, the step came
+// back as RungNone (Ambiguity 0), which Emit renders as "this element cannot
+// be addressed" - false; there were two reachable candidates, they just could
+// not be told apart.
+func TestRecordIntent_AmbiguousByNameTapRecordsTheNameAndTheCount(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.app.a"},
+		Elements: []simbridge.Element{
+			{
+				Path: "0", Label: "Continue", Enabled: true,
+				Box: &simbridge.Box{X1: 0.1, Y1: 0.1, X2: 0.5, Y2: 0.3},
+				Tap: &simbridge.Point{X: 0.3, Y: 0.2},
+			},
+			{
+				Path: "1", Label: "Continue", Enabled: true,
+				Box: &simbridge.Box{X1: 0.1, Y1: 0.5, X2: 0.5, Y2: 0.7},
+				Tap: &simbridge.Point{X: 0.3, Y: 0.6},
+			},
+		},
+	}}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{Kind: "tap", Label: "Continue"})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	step := steps[0]
+	if step.Selector != "Continue" {
+		t.Fatalf("selector = %q, want %q - the name searched for must not be dropped", step.Selector, "Continue")
+	}
+	if step.SelectorRung != int64(simflow.RungText) {
+		t.Fatalf("rung = %d, want RungText (%d) - under-determined, not RungNone/unaddressable", step.SelectorRung, simflow.RungText)
+	}
+	if step.Ambiguity != 2 {
+		t.Fatalf("ambiguity = %d, want 2", step.Ambiguity)
+	}
+	if step.SelectorIndex != 0 {
+		t.Fatalf("selectorIndex = %d, want 0 - no index may ever be invented here", step.SelectorIndex)
+	}
+}
+
 // A gesture that was attempted and failed is not a step. Recording at acquire
 // alone would write it down as if it had happened.
 func TestReleaseHold_PerformedFalseAppendsNothing(t *testing.T) {

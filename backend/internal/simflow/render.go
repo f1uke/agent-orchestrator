@@ -40,11 +40,26 @@ func Render(c Choice, plain string) string {
 
 	switch c.Rung {
 	case RungText:
+		// RungText otherwise means "this text is unique" - but a by-name tap
+		// recorded against several candidates (see selectorChoice in
+		// internal/service/sim/recording.go) is stored this way too, on
+		// purpose, with no Index: there was no way to tell which candidate was
+		// actually tapped, and guessing one would be worse than not knowing.
+		// The warning only fires when that is true (Ambiguity > 1); a genuinely
+		// unique label still gets none, so this stays a comment worth reading
+		// rather than one every step carries.
+		if c.Ambiguity > 1 {
+			fmt.Fprintf(&b, "# %d elements share this text - index picks one, verify it is the one you mean\n", c.Ambiguity)
+			b.WriteString("# which one was tapped could not be determined - verify this selector, or add your own index\n")
+		}
 		if c.Escaped {
 			b.WriteString("# escaped: the label contains regex characters, and Maestro matches text as a regex\n")
 		}
 		fmt.Fprintf(&b, "- tapOn: %q\n", c.Text)
 	case RungTextIndex:
+		// Unlike RungText above, an index WAS picked - at record time, from the
+		// same tree this Choice was resolved against - so the warning here is
+		// "verify the index is still the one you mean", not "no index exists".
 		fmt.Fprintf(&b, "# %d elements share this text - index picks one, verify it is the one you mean\n", c.Ambiguity)
 		if c.Escaped {
 			b.WriteString("# escaped: the label contains regex characters, and Maestro matches text as a regex\n")
