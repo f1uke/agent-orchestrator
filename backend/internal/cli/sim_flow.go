@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // `ao sim flow` is the seam between what a session explored and what the team's
@@ -41,6 +43,7 @@ func newSimFlowCommand(ctx *commandContext) *cobra.Command {
 			"AO never installs `maestro`.",
 	}
 	cmd.AddCommand(newSimFlowCheckCommand(ctx))
+	cmd.AddCommand(newSimFlowRunCommand(ctx))
 	return cmd
 }
 
@@ -65,6 +68,65 @@ func newSimFlowCheckCommand(ctx *commandContext) *cobra.Command {
 	}
 }
 
+func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
+	var udid string
+	cmd := &cobra.Command{
+		Use:   "run <file>",
+		Short: "Run a Maestro flow against a simulator this session holds",
+		Long: "Run a Maestro flow on a booted simulator.\n\n" +
+			"The device is always pinned explicitly, so Maestro can never fall back to " +
+			"picking one - left to choose, it takes the only connected simulator, which " +
+			"is whichever one a human is using.\n\n" +
+			"A claim is required. A flow relaunches the app under test and resets its " +
+			"privacy permissions; that is what a regression test wants on a device set " +
+			"aside for it, and damage anywhere else. " + simNeverBootsNote,
+		Example: `  ao sim claim --udid <test-device>
+  ao sim flow run flow.yaml --udid <test-device>`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			device, err := ctx.resolveBootedSimDevice(cmd.Context(), udid)
+			if err != nil {
+				return err
+			}
+			if err := ctx.requireSimLeaseForFlow(cmd.Context(), device); err != nil {
+				return err
+			}
+			out, err := ctx.runMaestro(cmd.Context(), "test", "--device", device.UDID, args[0])
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), out)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&udid, "udid", "", "Run against this simulator instead of the booted one")
+	return cmd
+}
+
+// requireSimLeaseForFlow refuses unless this session already holds the device.
+//
+// It never claims one. Running a flow relaunches the app and rewrites its
+// permissions, and taking a device in order to do that to it is precisely the
+// "succeed quietly and carry on" behaviour the lease exists to prevent.
+func (c *commandContext) requireSimLeaseForFlow(ctx context.Context, device simDevice) error {
+	sessionID := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+	if sessionID == "" {
+		return errors.New("`ao sim flow run` runs as an AO session so the device can be arbitrated, but AO_SESSION_ID is not set")
+	}
+	views, reachable := c.simLeaseViews(ctx)
+	if !reachable {
+		return errors.New("the daemon is not reachable, so AO cannot tell who holds this device - refusing to drive it")
+	}
+	view := simLeaseFor(views, device.UDID, true)
+	if view.State != domain.SimLeaseHeld {
+		return fmt.Errorf("%s is not claimed by this session; run `ao sim claim --udid %s` first", device.Label(), device.UDID)
+	}
+	if view.Holder != sessionID {
+		return fmt.Errorf("%s is held by @%s, not this session; a flow would relaunch the app under test on their device", device.Label(), view.Holder)
+	}
+	return nil
+}
+
 // maestroBinary resolves the tool, or explains that AO will not fetch it.
 func (c *commandContext) maestroBinary() (string, error) {
 	lookPath := c.deps.LookPath
@@ -81,6 +143,11 @@ func (c *commandContext) maestroBinary() (string, error) {
 // runMaestro checks the flow file exists, then runs maestro on it. The file is
 // checked here rather than left to maestro because a missing path should not
 // cost a JVM start, and because maestro's own message for it is worse.
+//
+// The flow file must be the last argument: that is what gets stat-ed before a
+// JVM is started. Every caller in this package satisfies that by construction
+// (`check-syntax <file>`, `test --device <udid> <file>`); a caller that puts
+// something else last will have the wrong path checked.
 func (c *commandContext) runMaestro(ctx context.Context, args ...string) (string, error) {
 	file := args[len(args)-1]
 	if _, err := os.Stat(file); err != nil {

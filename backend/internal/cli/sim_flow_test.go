@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recordedCommand struct {
@@ -144,5 +145,132 @@ func TestSimFlowCheck_MissingFileIsRefusedBeforeRunningAnything(t *testing.T) {
 	}
 	if len(rec) != 0 {
 		t.Errorf("must not run maestro for a file that is not there, ran %v", rec)
+	}
+}
+
+// --- ao sim flow run --------------------------------------------------------
+
+// flowRunDeps is touchDeps (a booted-only device listing, a fake driver and a
+// live fake daemon) plus maestro faked the same way flowTestDeps fakes it for
+// `check`: LookPath composes onto touchDeps' own (xcrun must still resolve),
+// and CommandOutputWithEnv records every invocation.
+func flowRunDeps(t *testing.T, found bool, out []byte, runErr error, rec *[]recordedCommand) (Deps, *simDaemon) {
+	t.Helper()
+	deps, daemon := touchDeps(t, &fakeSimDriver{})
+	lookXcrun := deps.LookPath
+	deps.LookPath = func(file string) (string, error) {
+		if file != "maestro" {
+			return lookXcrun(file)
+		}
+		if !found {
+			return "", errors.New("not found")
+		}
+		return "/usr/local/bin/maestro", nil
+	}
+	deps.CommandOutputWithEnv = func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
+		*rec = append(*rec, recordedCommand{env: env, name: name, args: args})
+		return out, runErr
+	}
+	return deps, daemon
+}
+
+// grantSimLease makes daemon report udid as held by holder, the same shape
+// sim_lease_test.go's own tests use.
+func grantSimLease(daemon *simDaemon, udid, holder string) {
+	daemon.leases[udid] = simLeaseClient{
+		UDID: udid, SessionID: holder,
+		AcquiredAt: simFixedNow, ExpiresAt: simFixedNow.Add(10 * time.Minute),
+	}
+}
+
+// The whole point of the command: Maestro must never be left to pick a device.
+// Without --device it takes the single connected simulator - the one a human is
+// working on - or boots one and reboots it after rewriting its locale.
+func TestSimFlowRun_AlwaysPassesDeviceExplicitly(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "mer-9") // touchDeps sets AO_SESSION_ID=mer-9
+	path := writeFlowFile(t)
+
+	if _, _, err := executeCLI(t, deps, "sim", "flow", "run", path, "--udid", simUDIDProMax); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	args := strings.Join(rec[0].args, " ")
+	if !strings.Contains(args, "--device "+simUDIDProMax) {
+		t.Fatalf("args = %q, must pin --device %s", args, simUDIDProMax)
+	}
+	if !strings.HasPrefix(args, "test ") {
+		t.Errorf("args = %q, want the `test` subcommand", args)
+	}
+	if !strings.HasSuffix(args, path) {
+		t.Errorf("args = %q, want the flow file last", args)
+	}
+}
+
+func TestSimFlowRun_RefusesWhenThisSessionHasNoLease(t *testing.T) {
+	var rec []recordedCommand
+	deps, _ := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec) // nobody holds it
+
+	_, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), "--udid", simUDIDProMax)
+	if err == nil {
+		t.Fatal("want a refusal without a lease")
+	}
+	if !strings.Contains(err.Error(), "ao sim claim") {
+		t.Errorf("must say how to fix it, got %q", err)
+	}
+	if len(rec) != 0 {
+		t.Errorf("must not run maestro, ran %v", rec)
+	}
+}
+
+func TestSimFlowRun_RefusesWhenAnotherSessionHoldsTheDevice(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "other-7") // touchDeps' session is mer-9
+
+	_, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), "--udid", simUDIDProMax)
+	if err == nil {
+		t.Fatal("want a refusal when someone else holds it")
+	}
+	if !strings.Contains(err.Error(), "other-7") {
+		t.Errorf("must name the holder, got %q", err)
+	}
+	if len(rec) != 0 {
+		t.Errorf("must not run maestro, ran %v", rec)
+	}
+}
+
+func TestSimFlowRun_FailingFlowSurfacesMaestrosOutput(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true,
+		[]byte("Assert that id: NOPE is visible... FAILED\nAssertion is false: id: NOPE is visible\n"),
+		errors.New("exit status 1"), &rec)
+	grantSimLease(daemon, simUDIDProMax, "mer-9")
+
+	_, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), "--udid", simUDIDProMax)
+	if err == nil {
+		t.Fatal("a failing flow must fail the command")
+	}
+	if !strings.Contains(err.Error(), "Assertion is false") {
+		t.Errorf("must surface maestro's own failure, got %q", err)
+	}
+}
+
+func TestSimFlowRun_DisablesMaestroAnalytics(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "mer-9")
+
+	if _, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), "--udid", simUDIDProMax); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var found bool
+	for _, e := range rec[0].env {
+		if e == "MAESTRO_CLI_NO_ANALYTICS=1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("MAESTRO_CLI_NO_ANALYTICS=1 not in env %v", rec[0].env)
 	}
 }
