@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
@@ -34,11 +35,20 @@ type ScreenReader interface {
 // pending is a step that has been resolved but not yet earned. It lives in
 // memory keyed by hold token: if the daemon restarts, the hold dies with it
 // and so should the half-recorded gesture.
+//
+// expiresAt is the owning hold's own ExpiresAt, copied in verbatim rather than
+// picked as a separate TTL: a stash entry must not outlive the hold it
+// belongs to, and the hold's own expiry is the one number that is already
+// correct by construction. A client that dies mid-gesture never calls
+// ReleaseHold, so nothing would otherwise ever remove this entry; recordIntent
+// sweeps expired entries on every write so the map cannot grow past one entry
+// per device actually being driven right now, with no background goroutine.
 type pending struct {
 	udid        string
 	step        domain.SimRecordingStep
 	frontmost   string
 	fingerprint map[string]struct{}
+	expiresAt   time.Time
 }
 
 // screenState is the cheap memory of what the last RECORDED step (the last one
@@ -176,13 +186,14 @@ func (s *Service) GetRecording(ctx context.Context, udid string) (domain.SimReco
 }
 
 // recordIntent is what AcquireHold calls, once the hold itself is granted, to
-// resolve intent into a step and stash it under token.
+// resolve intent into a step and stash it under token. expiresAt is the
+// hold's own expiry, carried through so the stash entry cannot outlive it.
 //
 // The recording row is read first, and that read - a single indexed lookup -
 // is the ONLY cost paid when nothing is being recorded. The screen is read
 // only once a recording is confirmed open; the overwhelming majority of
 // gestures never reach that call.
-func (s *Service) recordIntent(ctx context.Context, udid, token string, intent GestureIntent) {
+func (s *Service) recordIntent(ctx context.Context, udid, token string, intent GestureIntent, expiresAt time.Time) {
 	rec, ok, err := s.store.GetSimRecording(ctx, udid)
 	if err != nil {
 		slog.WarnContext(ctx, "sim recorder: could not check for an open recording; skipping this step",
@@ -252,13 +263,32 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	}
 
 	s.recMu.Lock()
+	s.sweepExpiredPendingLocked(s.now())
 	s.pending[token] = pending{
 		udid:        udid,
 		step:        step,
 		frontmost:   snap.Frontmost.BundleID,
 		fingerprint: fingerprintOf(snap),
+		expiresAt:   expiresAt,
 	}
 	s.recMu.Unlock()
+}
+
+// sweepExpiredPendingLocked drops every stash entry whose owning hold has
+// expired as of now. It must be called with recMu already held.
+//
+// AcquireHold is the only path that grows the map, so it is the only path
+// that needs to shrink it: a stash entry for a hold that lapsed without a
+// ReleaseHold (a client that died mid-gesture) would otherwise sit forever in
+// a daemon that stays up for weeks. This is O(entries) over a map that holds
+// at most one entry per device currently being driven, so it costs nothing
+// worth a background sweeper for.
+func (s *Service) sweepExpiredPendingLocked(now time.Time) {
+	for token, p := range s.pending {
+		if !p.expiresAt.After(now) {
+			delete(s.pending, token)
+		}
+	}
 }
 
 // finishRecording is what ReleaseHold calls once the hold itself has been

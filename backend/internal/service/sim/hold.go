@@ -113,7 +113,7 @@ func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, u
 		}
 	}
 	if s.recorder != nil {
-		s.recordIntent(ctx, key, outcome.Hold.Token, intent)
+		s.recordIntent(ctx, key, outcome.Hold.Token, intent, outcome.Hold.ExpiresAt)
 	}
 	return outcome.Hold, nil
 }
