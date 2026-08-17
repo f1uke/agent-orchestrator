@@ -2,8 +2,10 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import {
+	Check,
 	ChevronRight,
 	CheckCircle2,
+	Copy,
 	Folder,
 	FolderPlus,
 	GitPullRequest,
@@ -21,7 +23,7 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
@@ -918,26 +920,48 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 		);
 	}
 
+	// Drag the row onto a pane to add/rearrange it in the split view; a plain click
+	// (no drag past the threshold) still opens the session. consumeSplitDragClick
+	// eats the click that a drag's pointerup emits.
+	const openPointerDown = (event: React.PointerEvent) =>
+		startSplitDrag({ kind: "session", sessionId: session.id }, session.title, event);
+	const openClick = () => {
+		if (consumeSplitDragClick()) return;
+		onOpen();
+	};
+
 	return (
 		<SidebarMenuSubItem>
+			{/* The `@id` line now carries its own copy button, and HTML forbids a button
+			inside a button — so the row's content no longer lives inside the open
+			button. Instead the open button is a TRANSPARENT LAYER under the content
+			(it owns the accessible name, the keyboard focus, the focus ring and the
+			active accent strap; geometry is unchanged), and the content div repeats
+			the same pointer handlers so a mouse click anywhere on the row still opens
+			the session exactly as before — including over the Jira chip and the id,
+			which keep their own hover tooltips. The copy button stops the click and
+			the pointerdown, so it neither opens the row nor starts a split drag. */}
 			<button
 				aria-current={active ? "page" : undefined}
 				aria-label={`Open ${session.title}`}
 				className={cn(
-					"relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[5px] pl-2.5 pr-7 text-left outline-hidden transition-[color]",
+					"absolute inset-0 rounded-[4px] outline-hidden",
 					"before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-px before:rounded-full before:bg-transparent",
-					"hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-					active && "text-foreground before:bg-accent",
+					"focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+					active && "before:bg-accent",
 				)}
-				// Drag the row onto a pane to add/rearrange it in the split view; a
-				// plain click (no drag past the threshold) still opens the session.
-				// consumeSplitDragClick eats the click that a drag's pointerup emits.
-				onPointerDown={(event) => startSplitDrag({ kind: "session", sessionId: session.id }, session.title, event)}
-				onClick={() => {
-					if (consumeSplitDragClick()) return;
-					onOpen();
-				}}
+				onPointerDown={openPointerDown}
+				onClick={openClick}
 				type="button"
+			/>
+			<div
+				className={cn(
+					"relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[5px] pl-2.5 pr-7 text-left transition-[color]",
+					"group-hover/menu-sub-item:text-foreground",
+					active && "text-foreground",
+				)}
+				onPointerDown={openPointerDown}
+				onClick={openClick}
 			>
 				<SessionGlyph session={session} />
 				<span className="min-w-0 flex-1">
@@ -964,10 +988,13 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 					muted PLAIN subordinate line — NOT a link. The whole row is already
 					the click target, so the id drops the #58 refined-blue/link look
 					(no accent colour, no underline, no hover change) and is just quiet
-					mono secondary text (decision 2026-07-11). Ellipsized when tight;
-					full id on hover via the native title. */}
-					<span className="block truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
-						{sessionRef}
+					mono secondary text (decision 2026-07-11). Ellipsized when tight; full
+					id on hover via the native title, and on the copy button beside it. */}
+					<span className="flex items-center gap-1">
+						<span className="min-w-0 truncate font-mono text-[10.5px] leading-tight text-passive" title={sessionRef}>
+							{sessionRef}
+						</span>
+						<CopySessionIdButton sessionId={session.id} />
 					</span>
 				</span>
 				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
@@ -981,7 +1008,7 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 						<IdleStatusChip session={session} compact />
 					)}
 				</span>
-			</button>
+			</div>
 			{/* Pencil reveals on row hover/focus (named group on SidebarMenuSubItem);
 			it sits beside the row button rather than nested inside it. */}
 			<button
@@ -997,6 +1024,75 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 				<Pencil aria-hidden="true" />
 			</button>
 		</SidebarMenuSubItem>
+	);
+}
+
+// How long the icon stays a check after a successful copy.
+const COPIED_FEEDBACK_MS = 1200;
+
+/**
+ * Click-to-copy for a session's canonical id, sitting beside the `@id` line.
+ *
+ * It copies the BARE id (`agent-orchestrator-47`), NOT the `@`-prefixed display
+ * form. The `@` is a prose sigil for referring to a session in writing; the value
+ * this button exists to save you retyping is the CLI argument — `ao send --session
+ * <id>`, `ao session get <id>` — which takes the bare canonical id. Pasting the
+ * sigil into a shell would just produce a wrong-session error, which is the exact
+ * mistake this affordance is here to prevent.
+ *
+ * Revealed on row hover, and on keyboard focus anywhere in the row (it stays in
+ * the tab order at all times, so Tab reaches it and Enter/Space fires it). Sized
+ * to the id line's own line box so revealing it cannot resize the row, and the
+ * check swap reuses the same box for the same reason.
+ */
+function CopySessionIdButton({ sessionId }: { sessionId: string }) {
+	const [copied, setCopied] = useState(false);
+	const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+	useEffect(() => () => clearTimeout(resetTimer.current), []);
+
+	const copy = (event: React.MouseEvent) => {
+		// The row's content div carries the open-the-session click, so this click
+		// MUST NOT bubble — copying an id that also navigated away would be a worse
+		// papercut than the retyping it saves. (The matching pointerdown stop below
+		// keeps the click from being read as the start of a split-drag.)
+		event.stopPropagation();
+		void aoBridge.clipboard
+			.writeText(sessionId)
+			.then(() => {
+				setCopied(true);
+				clearTimeout(resetTimer.current);
+				resetTimer.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+			})
+			.catch((error) => {
+				console.warn("Unable to copy session id", error);
+			});
+	};
+
+	return (
+		<button
+			aria-label={copied ? `Copied session id ${sessionId}` : `Copy session id ${sessionId}`}
+			className={cn(
+				// `before:` widens the hit area to ~21px without adding layout width,
+				// so the 13px glyph stays proportionate to 10.5px mono text.
+				"relative grid size-[13px] shrink-0 place-items-center rounded-[3px]",
+				"before:absolute before:-inset-1 before:content-['']",
+				"text-muted-foreground transition-[opacity,color]",
+				"opacity-0 group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100",
+				"focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sidebar-ring focus-visible:outline-none",
+				// The hover tint is dropped while confirming: a `hover:` variant always
+				// outranks a base utility in Tailwind, and the pointer is by definition
+				// still on the button right after a click — so keeping it would repaint
+				// the green check plain foreground exactly when it is meant to be read.
+				copied ? "text-success opacity-100" : "hover:text-foreground",
+			)}
+			onClick={copy}
+			onPointerDown={(event) => event.stopPropagation()}
+			title={`Copy session id ${sessionId}`}
+			type="button"
+		>
+			{copied ? <Check className="size-3" aria-hidden="true" /> : <Copy className="size-3" aria-hidden="true" />}
+		</button>
 	);
 }
 
