@@ -207,6 +207,54 @@ func TestSimFlowRun_AlwaysPassesDeviceExplicitly(t *testing.T) {
 	}
 }
 
+// touchDeps always sets AO_SESSION_ID, and flowRunDeps always stands up a live
+// fake daemon - so nothing else in this file exercises either refusal branch of
+// requireSimLeaseForFlow on its own. These two do, by knocking out exactly one
+// precondition each.
+
+// If the AO_SESSION_ID check were ever dropped, an unset session id would fall
+// through to the holder comparison as the empty string - and a lease somehow
+// held by "" (matching what an unset id would compare equal to) would then
+// read as "this session holds it" and let the flow run. Granting the lease to
+// "" is what isolates the empty-check from the holder check below it: with the
+// check in place this refuses on AO_SESSION_ID before ever reaching the holder
+// comparison; without it, holder ("") == sessionID ("") and it would proceed.
+func TestSimFlowRun_RefusesWhenSessionIDIsUnset(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "")
+	t.Setenv("AO_SESSION_ID", "") // flowRunDeps (via touchDeps) sets it; unset it again
+
+	_, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), "--udid", simUDIDProMax)
+	if err == nil {
+		t.Fatal("want a refusal when AO_SESSION_ID is unset")
+	}
+	if !strings.Contains(err.Error(), "AO_SESSION_ID") {
+		t.Errorf("must name the missing env var, got %q", err)
+	}
+	if len(rec) != 0 {
+		t.Errorf("must not run maestro, ran %v", rec)
+	}
+}
+
+func TestSimFlowRun_RefusesWhenDaemonIsUnreachable(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "mer-9")
+	deps.ProcessAlive = func(int) bool { return false } // same pattern as TestSimAX_WorksWithoutADaemon
+
+	_, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), "--udid", simUDIDProMax)
+	if err == nil {
+		t.Fatal("want a refusal when the daemon is not reachable")
+	}
+	if !strings.Contains(err.Error(), "daemon is not reachable") {
+		t.Errorf("must say the daemon could not be asked, got %q", err)
+	}
+	if len(rec) != 0 {
+		t.Errorf("must not run maestro, ran %v", rec)
+	}
+}
+
 func TestSimFlowRun_RefusesWhenThisSessionHasNoLease(t *testing.T) {
 	var rec []recordedCommand
 	deps, _ := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec) // nobody holds it

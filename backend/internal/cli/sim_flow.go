@@ -29,7 +29,7 @@ const maestroEnvNoAnalytics = "MAESTRO_CLI_NO_ANALYTICS=1"
 // maestroMissing says what is absent, and - just as important - what is not.
 const maestroMissing = "`maestro` is not on PATH. `ao sim flow` shells out to it and AO never " +
 	"installs, downloads or vendors it: install it yourself if you want this command. " +
-	"Everything else still works, including `ao sim ax --format maestro`, which needs no binary."
+	"Everything else still works, including `ao sim ax --format maestro`, which needs no binary"
 
 func newSimFlowCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{

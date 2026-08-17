@@ -29,6 +29,7 @@ ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
 ao sim type   <text>           [flags]
 ao sim button <name>           [flags]
 ao sim flow check <file>       [flags]
+ao sim flow run   <file>       [flags]
 ```
 
 ## The loop that works
@@ -151,11 +152,12 @@ Read what is on a booted simulator's screen as a structured accessibility tree. 
 
 **Flags:**
 
-| Flag              | Description                                   |
-| ----------------- | --------------------------------------------- |
-| `--udid <udid>`   | Read this simulator instead of the booted one |
-| `--max-nodes <n>` | Stop after this many elements (default 500)   |
-| `--json`          | Output the tree as JSON                       |
+| Flag                             | Description                                                                                                                                                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--udid <udid>`                  | Read this simulator instead of the booted one                                                                                                                                                                                      |
+| `--max-nodes <n>`                | Stop after this many elements (default 500)                                                                                                                                                                                        |
+| `--json`                         | Output the tree as JSON                                                                                                                                                                                                            |
+| `--format <text\|json\|maestro>` | Output format. `text` (default) and `json` are the tree above; `maestro` prints a Maestro selector per element instead - see below. Passing both `--json` and a disagreeing `--format` is refused rather than silently picking one. |
 
 The device is resolved exactly like `ao sim shot`. Reading takes no lease and is never blocked by one, but the output always reports who holds the device.
 
@@ -408,10 +410,53 @@ ao sim ax                              # confirm what actually happened
 
 ---
 
+## Turning what you explored into a Maestro flow
+
+`ao sim ax --format maestro` prints a Maestro selector for every element on the
+screen, with the caveat attached to each one:
+
+    ao sim ax --format maestro
+
+- A bare `- tapOn: "Some label"` means the label is unique in the tree.
+- `text:` plus `index:` means several elements share that text. The comment says
+  how many. Check you indexed the one you meant.
+- `id:` means the element has no label and was matched on its accessibility id.
+- `point:` means neither existed. A coordinate breaks on any layout change -
+  treat it as a last resort, not a selector.
+- `scrollUntilVisible` appears instead of a tap when the element is off screen.
+  An off-screen element has no point that reaches it.
+
+These are selectors, not a flow. You decide which steps belong in the test, in
+what order, and behind which waits.
+
+⚠ The ambiguity count is a lower bound. It is counted against the tree `ao sim
+ax` reads; Maestro walks the XCUITest hierarchy, which reports far more nodes for
+the same screen because one label commonly sits on both a container and its
+child. A selector reported as unique can still match several nodes for Maestro.
+The only way to know is to run it.
+
 ### ao sim flow
 
-Work with Maestro flow files. `ao sim flow check <file>` parses a flow and needs no device at all - it reports the first syntax error and cannot tell you whether a selector matches anything on screen. `ao sim flow` shells out to the external `maestro` binary on `PATH`; AO never installs, downloads or vendors it. If `maestro` is missing, the command fails and says so - everything else in `ao sim`, including `ao sim ax --format maestro`, is unaffected.
+Work with Maestro flow files.
 
 ```bash
-ao sim flow check flow.yaml
+ao sim flow check flow.yaml            # parses it - no device involved
+ao sim claim --udid <test-device>
+ao sim flow run flow.yaml --udid <test-device>
+ao sim release --udid <test-device>
 ```
+
+`ao sim flow check` is a pure parse. It catches unknown commands and malformed
+structure. It does NOT check that a selector matches anything, and it does not
+check values - an out-of-range `point:` passes the parse and fails at run time.
+
+`ao sim flow run` requires a claim on the target device and always pins
+`--device` for you. Both refuse loudly if `maestro` is not installed; AO never
+installs it - everything else in `ao sim`, including `ao sim ax --format
+maestro`, is unaffected.
+
+⚠ Run flows on a simulator set aside for testing, never on the one a human is
+working on. A Maestro flow's `launchApp` terminates the app under test and
+resets its privacy permissions to allow-everything. That is what a regression
+test wants, and it is destructive anywhere else. AO cannot tell the two devices
+apart - the lease is what you have, so claim deliberately.

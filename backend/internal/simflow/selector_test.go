@@ -90,6 +90,21 @@ func TestFor_NoLabelNoIDFallsBackToPoint(t *testing.T) {
 	}
 }
 
+// The coordinate must be rounded to the nearest percent, not truncated: 0.865
+// is 86.5%, which truncation and rounding disagree on (86 vs 87). Every other
+// case in this file happens to land below the .5 boundary, where the two
+// agree - this is the one that would not catch a truncating regression.
+func TestFor_PointRoundsHalfwayToNearestPercent(t *testing.T) {
+	el := simbridge.Element{Path: "0.0", Tap: at(0.865, 0.995)}
+	got := simflow.For(tree(el), el)
+	if got.Rung != simflow.RungPoint {
+		t.Fatalf("rung = %v, want RungPoint", got.Rung)
+	}
+	if got.PercentX != 87 || got.PercentY != 100 {
+		t.Errorf("percent = %d,%d want 87,100 (rounded, not truncated)", got.PercentX, got.PercentY)
+	}
+}
+
 // An off-screen element has no Tap by construction, so the coordinate rung is
 // unreachable for it: with no label and no id there is nothing to address.
 func TestFor_OffScreenWithoutLabelOrIDIsRungNone(t *testing.T) {

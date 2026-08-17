@@ -23,15 +23,15 @@ import (
 type Rung int
 
 const (
-	// RungNone: nothing on this element can address it.
+	// RungNone means nothing on this element can address it.
 	RungNone Rung = iota
-	// RungText: the label is unique. The house style of a Maestro suite.
+	// RungText is a unique label - the house style of a Maestro suite.
 	RungText
-	// RungTextIndex: the label repeats, so an index picks one of them.
+	// RungTextIndex is a label that repeats, so an index picks one of them.
 	RungTextIndex
-	// RungID: no label, but the app set an accessibility identifier.
+	// RungID is no label, but the app set an accessibility identifier.
 	RungID
-	// RungPoint: neither - a screen coordinate, which is brittle.
+	// RungPoint is neither - a screen coordinate, which is brittle.
 	RungPoint
 )
 
