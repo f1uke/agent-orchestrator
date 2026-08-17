@@ -57,6 +57,10 @@ type simGestureResult struct {
 	// Route is why the pasteboard was used instead of key presses. Empty when
 	// the text was typed.
 	Route string `json:"route,omitempty"`
+	// Target is what a tap by name resolved to. Absent for a tap by
+	// coordinate, which has no name to report - the shipped shape is unchanged
+	// for the form that shipped with it.
+	Target *simTapMatch `json:"target,omitempty"`
 	// PasteboardLeftBehind: the guest pasteboard could not be put back, so the
 	// text is still on it where any app on the device can read it. Never hidden:
 	// the text is a password often enough that it has to be said out loud.
@@ -81,18 +85,31 @@ type simHoldResponse struct {
 
 func newSimTapCommand(ctx *commandContext) *cobra.Command {
 	opts := simTouchOptions{}
+	target := simTapTarget{}
 	cmd := &cobra.Command{
-		Use:   "tap <x> <y>",
-		Short: "Tap a point on a claimed simulator",
-		Long: "Tap the screen at a normalized 0..1 coordinate.\n\n" +
+		Use:   "tap <x> <y> | --label <name> | --id <identifier>",
+		Short: "Tap a point, or the element with a given name, on a claimed simulator",
+		Long: "Tap the screen at a normalized 0..1 coordinate, or name the element to tap.\n\n" +
 			"The coordinates are exactly the `tap` values `ao sim ax` prints for each " +
 			"element, so the way to tap something is to read the tree and copy its point - " +
 			"never to estimate one from a screenshot.\n\n" +
+			"--label and --id skip the copying: they take the name `ao sim ax` shows for an " +
+			"element (its label, or its value when it has none) and its accessibility " +
+			"identifier. The screen is read first, so this costs one accessibility read - and " +
+			"replaces the `ao sim ax` you would have run anyway. Matching ignores case, prefers " +
+			"an exact name, and falls back to a name that CONTAINS the text, saying which it " +
+			"did. Two different elements answering to one name is refused rather than guessed, " +
+			"and so is an element that is off screen or disabled - each with what to do about it.\n\n" +
 			"The device must be claimed by this session (`ao sim claim`) first.",
 		Example: `  ao sim ax
-  ao sim tap 0.5 0.934`,
-		Args: cobra.ExactArgs(2),
+  ao sim tap 0.5 0.934
+  ao sim tap --label "Continue"
+  ao sim tap --id sign-in-button`,
+		Args: func(_ *cobra.Command, args []string) error { return target.validate(args) },
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if selector, named := target.selector(); named {
+				return ctx.runSimTapByName(cmd, opts, selector)
+			}
 			at, err := parseSimPoint(args[0], args[1])
 			if err != nil {
 				return err
@@ -109,8 +126,47 @@ func newSimTapCommand(ctx *commandContext) *cobra.Command {
 			})
 		},
 	}
+	f := cmd.Flags()
+	f.StringVar(&target.label, "label", "", "Tap the element with this name instead of a point")
+	f.StringVar(&target.id, "id", "", "Tap the element with this accessibility identifier instead of a point")
 	opts.bind(cmd)
 	return cmd
+}
+
+// simTapTarget is the two ways of naming what to tap. They are flags rather
+// than a positional argument so a name can never be mistaken for a coordinate,
+// or the other way round.
+type simTapTarget struct {
+	label string
+	id    string
+}
+
+func (t simTapTarget) selector() (simbridge.Selector, bool) {
+	switch {
+	case strings.TrimSpace(t.label) != "":
+		return simbridge.Selector{Kind: simbridge.SelectByLabel, Text: t.label}, true
+	case strings.TrimSpace(t.id) != "":
+		return simbridge.Selector{Kind: simbridge.SelectByID, Text: t.id}, true
+	default:
+		return simbridge.Selector{}, false
+	}
+}
+
+// validate refuses every way of asking for two targets at once, or none. All of
+// it is CLI misuse (exit 2) and is caught before the device is approached.
+func (t simTapTarget) validate(args []string) error {
+	named := t.label != "" || t.id != ""
+	switch {
+	case t.label != "" && t.id != "":
+		return usageError{errors.New("--label and --id name the same tap two different ways; pass one")}
+	case named && len(args) > 0:
+		return usageError{fmt.Errorf("--label/--id name what to tap, so there is no coordinate to give as well - got %d", len(args))}
+	case named && strings.TrimSpace(t.label+t.id) == "":
+		return usageError{errors.New("--label/--id need something to match; an empty name matches every element on the screen")}
+	case !named && len(args) != 2:
+		return usageError{fmt.Errorf("`ao sim tap` takes an x and a y, or --label/--id - got %d argument(s)", len(args))}
+	}
+	return nil
 }
 
 func newSimSwipeCommand(ctx *commandContext) *cobra.Command {
@@ -318,7 +374,7 @@ func (c *commandContext) runSimPaste(
 	result, err := simpaste.Run(ctx, &cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver,
 		simpaste.Simctl{Run: c.deps.CommandOutput}, device.UDID, text)
 	if err != nil {
-		return c.explainSimPasteFailure(device, route, err)
+		return c.explainSimPasteFailure(ctx, device, route, err)
 	}
 
 	out := simGestureResult{
@@ -344,8 +400,18 @@ func (c *commandContext) runSimPaste(
 // explainSimPasteFailure says what went wrong AND what state the field is in,
 // because those are different questions and the answer to the second decides
 // whether there is anything to clean up.
-func (c *commandContext) explainSimPasteFailure(device simDevice, route simbridge.TextRoute, err error) error {
+func (c *commandContext) explainSimPasteFailure(
+	ctx context.Context, device simDevice, route simbridge.TextRoute, err error,
+) error {
 	if errors.Is(err, simpaste.ErrNotDelivered) {
+		// "Nothing on screen changed" is the one place a gesture command knows
+		// for a fact that it changed nothing, and an app that cannot answer at
+		// all looks exactly like a field that never had focus. Ask before
+		// sending the caller to check the field.
+		if note := c.blockedSimAppNote(ctx, device); note != "" {
+			return fmt.Errorf("nothing was typed into %s, and the field is not the reason.\n%s",
+				device.Label(), note)
+		}
 		return fmt.Errorf("nothing was typed into %s (%s, so the text was sent through the pasteboard): %w\n"+
 			"Tap the field first with `ao sim tap` so it has keyboard focus. Some apps refuse paste outright - "+
 			"for those, fix the simulator's input mode and use key presses instead",
@@ -606,6 +672,9 @@ func writeSimGesture(out io.Writer, result simGestureResult) error {
 		verb, result.Detail, result.Name, result.Runtime, result.UDID); err != nil {
 		return err
 	}
+	if err := writeSimTapMatch(out, result.Target); err != nil {
+		return err
+	}
 	if result.Rescued {
 		if _, err := fmt.Fprintln(out,
 			"Note: the bridge released a touch this gesture left down. The device is fine, but the gesture did not end cleanly."); err != nil {
@@ -613,5 +682,22 @@ func writeSimGesture(out io.Writer, result simGestureResult) error {
 		}
 	}
 	_, err := fmt.Fprintln(out, "Read the result with `ao sim ax` - never assume a touch changed what you expected.")
+	return err
+}
+
+// writeSimTapMatch says how the name became this element. A contains-match is
+// the tool's inference rather than the name the caller gave, and reading
+// "Tapped ..." without that distinction is how a caller concludes the thing
+// they named was found.
+func writeSimTapMatch(out io.Writer, target *simTapMatch) error {
+	if target == nil {
+		return nil
+	}
+	if target.MatchedBy == string(simbridge.MatchExact) {
+		_, err := fmt.Fprintf(out, "Matched the %s %q exactly  [%s]\n", target.Kind, target.Selector, target.Path)
+		return err
+	}
+	_, err := fmt.Fprintf(out, "No element has the %s %q exactly; this was the only one containing it  [%s]\n",
+		target.Kind, target.Selector, target.Path)
 	return err
 }

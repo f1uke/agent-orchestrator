@@ -71,6 +71,10 @@ type Deps struct {
 	LookPath           func(file string) (string, error)
 	CommandOutput      func(ctx context.Context, name string, args ...string) ([]byte, error)
 	CommandOutputInDir func(ctx context.Context, dir, name string, args ...string) ([]byte, error)
+	// StartStream runs a child process whose output is read as it arrives and
+	// which may have to be stopped rather than waited for. `ao sim log --follow`
+	// is the only caller: a `log stream` never ends on its own.
+	StartStream func(ctx context.Context, name string, args ...string) (ProcessStream, error)
 	// DoctorGitHubRESTBase lets tests point the doctor GitHub token probe at
 	// httptest without mutating package-global state.
 	DoctorGitHubRESTBase string
@@ -99,6 +103,7 @@ func DefaultDeps() Deps {
 		LookPath:             exec.LookPath,
 		CommandOutput:        commandOutput,
 		CommandOutputInDir:   commandOutputInDir,
+		StartStream:          startProcessStream,
 		DoctorGitHubRESTBase: defaultDoctorGitHubRESTBase,
 		Now:                  time.Now,
 		Sleep:                time.Sleep,
@@ -146,6 +151,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.CommandOutputInDir == nil {
 		d.CommandOutputInDir = def.CommandOutputInDir
+	}
+	if d.StartStream == nil {
+		d.StartStream = def.StartStream
 	}
 	if d.DoctorGitHubRESTBase == "" {
 		d.DoctorGitHubRESTBase = def.DoctorGitHubRESTBase

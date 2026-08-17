@@ -72,6 +72,13 @@ func (e *FailedError) Error() string {
 
 func (e *FailedError) Unwrap() error { return e.Cause }
 
+// ScreenRead is the allowance a composed gesture's hold gets for reading the
+// screen before it knows what it is going to do. The first accessibility read
+// on a device can take a second or two while the translator attaches, and a
+// hold that lapsed halfway through would hand the device away between the read
+// and the touch it decided on.
+const ScreenRead = 10 * time.Second
+
 // Run performs one gesture under a hold. Nothing reaches the device unless the
 // hold was granted, and the hold is given back on every path out - including
 // one where the gesture failed and had to be recovered from.
@@ -79,15 +86,46 @@ func Run(ctx context.Context, holder Holder, driver simbridge.Driver, udid strin
 	// The hold is sized from the gesture itself, not from a flag: a hold that
 	// lapsed mid-gesture would be exactly the window another caller needs to
 	// take the finger while this one is still touching the screen.
-	token, err := holder.Acquire(ctx, udid, simbridge.Duration(gesture.Events)+HoldSlack)
+	_, result, err := run(ctx, holder, driver, udid, simbridge.Duration(gesture.Events)+HoldSlack,
+		func(context.Context) (Gesture, error) { return gesture, nil })
+	return result, err
+}
+
+// RunComposed is Run for a gesture that cannot be composed until the device has
+// been looked at - a tap on an element named rather than pointed at.
+//
+// The composing happens UNDER the hold, and that ordering is the whole reason
+// this exists: reading the screen first and taking the hold second leaves a
+// window in which another command moves the screen, and the coordinate this one
+// then touches belongs to a screen that is no longer there. It returns the
+// gesture it composed so the caller can report what it actually did.
+func RunComposed(
+	ctx context.Context, holder Holder, driver simbridge.Driver, udid string,
+	compose func(context.Context) (Gesture, error),
+) (Gesture, simbridge.PerformResult, error) {
+	return run(ctx, holder, driver, udid, ScreenRead+HoldSlack, compose)
+}
+
+func run(
+	ctx context.Context, holder Holder, driver simbridge.Driver, udid string,
+	ttl time.Duration, compose func(context.Context) (Gesture, error),
+) (Gesture, simbridge.PerformResult, error) {
+	token, err := holder.Acquire(ctx, udid, ttl)
 	if err != nil {
-		return simbridge.PerformResult{}, err
+		return Gesture{}, simbridge.PerformResult{}, err
 	}
 	defer holder.Release(ctx, udid, token)
 
+	gesture, err := compose(ctx)
+	if err != nil {
+		// Nothing was sent: composing is what decides whether there is anything
+		// to send at all.
+		return gesture, simbridge.PerformResult{}, err
+	}
+
 	result, performErr := driver.Perform(ctx, udid, gesture.Events)
 	if performErr == nil {
-		return result, nil
+		return gesture, result, nil
 	}
 
 	failed := &FailedError{Action: gesture.Action, Cause: performErr}
@@ -95,7 +133,7 @@ func Run(ctx context.Context, holder Holder, driver simbridge.Driver, udid strin
 		// Nothing was pressed, so there is nothing to release - and sending a
 		// stray touch to recover from a keyboard gesture would be worse than the
 		// failure it is recovering from.
-		return simbridge.PerformResult{}, failed
+		return gesture, simbridge.PerformResult{}, failed
 	}
 	// A release with nothing held is harmless; a finger left down wedges the
 	// device until it is rebooted, so the lift is always attempted and its
@@ -104,7 +142,7 @@ func Run(ctx context.Context, holder Holder, driver simbridge.Driver, udid strin
 	if _, liftErr := driver.Perform(ctx, udid, simbridge.Lift(gesture.Last)); liftErr != nil {
 		failed.LiftErr = liftErr
 	}
-	return simbridge.PerformResult{}, failed
+	return gesture, simbridge.PerformResult{}, failed
 }
 
 func touches(events []simbridge.Event) bool {

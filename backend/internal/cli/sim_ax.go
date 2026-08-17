@@ -12,6 +12,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simhang"
 )
 
 // `ao sim ax` is how a session actually checks a screen.
@@ -121,7 +122,7 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 		}
 	}
 	if !snapshot.Usable() {
-		return simAXResult{}, emptySimTreeError(device, snapshot.Frontmost)
+		return simAXResult{}, c.explainEmptySimTree(ctx, device, snapshot.Frontmost)
 	}
 
 	views, reachable := c.simLeaseViews(ctx)
@@ -133,6 +134,80 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		Lease:             simLeaseFor(views, device.UDID, reachable),
 	}, nil
+}
+
+// explainEmptySimTree decides WHICH empty-tree message to send.
+//
+// The tree can be empty because the app has nothing to show, or because the app
+// cannot answer at all - and those need opposite responses. Only the second one
+// is worth a probe, and only after the read has already failed, so nothing on a
+// working command's path pays for it. A probe that cannot tell says so by
+// returning nothing, and the caller says exactly what it said before.
+func (c *commandContext) explainEmptySimTree(ctx context.Context, device simDevice, front simbridge.Frontmost) error {
+	if diag, ok := simhang.Diagnose(ctx, c.deps.LookPath, c.deps.CommandOutput, front.PID); ok && diag.Blocked {
+		return blockedSimAppError(device, front, diag)
+	}
+	return emptySimTreeError(device, front)
+}
+
+// blockedSimAppError is the message that replaces several rounds of reading the
+// wrong code.
+func blockedSimAppError(device simDevice, front simbridge.Frontmost, diag simhang.Diagnosis) error {
+	return fmt.Errorf("%s returned an empty accessibility tree because the app in the foreground cannot answer.\n%s",
+		device.Label(), blockedSimAppReport(front, diag))
+}
+
+// blockedSimAppNote is the same finding for a command that does NOT already
+// have a tree in its hands: it reads the screen once to learn which process is
+// in front, then asks whether that process can answer at all.
+//
+// Failure paths only. It costs a screen read and a second of sampling, and no
+// command that is about to report success may pay either.
+func (c *commandContext) blockedSimAppNote(ctx context.Context, device simDevice) string {
+	driver, err := c.simDriver()
+	if err != nil {
+		return ""
+	}
+	snapshot, err := driver.AX(ctx, device.UDID)
+	if err != nil {
+		return ""
+	}
+	diag, ok := simhang.Diagnose(ctx, c.deps.LookPath, c.deps.CommandOutput, snapshot.Frontmost.PID)
+	if !ok || !diag.Blocked {
+		return ""
+	}
+	return blockedSimAppReport(snapshot.Frontmost, diag)
+}
+
+// blockedSimAppReport names the thread, shows the samples that agree, and -
+// when the stack says so - names the one cause AO can both explain and offer a
+// way out of. Shared by every command that finds an app which cannot answer,
+// because the finding is the same one however it was reached.
+func blockedSimAppReport(front simbridge.Frontmost, diag simhang.Diagnosis) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (pid %d) has a BLOCKED MAIN THREAD: %d of %d samples were in this same stack, and it is not the run loop's wait.\n",
+		frontmostLabel(front), front.PID, diag.Samples, diag.Samples)
+	fmt.Fprintf(&b, "  %s\n", strings.Join(diag.Frames, " <- "))
+	b.WriteString("A blocked main thread answers no accessibility query and processes no touch, " +
+		"so `ao sim tap` will report success and change nothing. Accessibility is not the problem here.\n")
+	if diag.StdoutWrite {
+		b.WriteString("That stack is a write to the app's own stdout. Something attached a pipe to it " +
+			"(`xcrun simctl launch --console-pipe`) and stopped draining it, so the 64 KB pipe buffer filled and " +
+			"`print` will never return. Stop whatever is holding that pipe and relaunch the app without one.\n" +
+			"Read the app's output with `ao sim log` instead: it goes through the unified log, which never blocks the app.")
+	} else {
+		fmt.Fprintf(&b, "Find out what that call is waiting for; `sample %d` prints the whole stack again.", front.PID)
+	}
+	return b.String()
+}
+
+// frontmostLabel names the app for a message about it, without pretending to
+// know a bundle id the device did not report.
+func frontmostLabel(front simbridge.Frontmost) string {
+	if front.BundleID == "" {
+		return "The foreground app"
+	}
+	return front.BundleID
 }
 
 // emptySimTreeError refuses to report "no elements" as a finding. An empty tree

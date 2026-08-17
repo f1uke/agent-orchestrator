@@ -35,6 +35,9 @@ type fakeSimDriver struct {
 	// snapshotQueue is handed out one per AX call before snapshot is used.
 	snapshotQueue []simbridge.Snapshot
 	axReads       int
+	// onAX runs inside AX, for tests that need to observe the world at the
+	// moment the screen is read.
+	onAX func()
 }
 
 // Hold is the desktop pane's drag, which the CLI has no command for: `ao sim`
@@ -44,6 +47,9 @@ func (f *fakeSimDriver) Hold(context.Context, string, []simbridge.Event) error {
 }
 
 func (f *fakeSimDriver) AX(context.Context, string) (simbridge.Snapshot, error) {
+	if f.onAX != nil {
+		f.onAX()
+	}
 	if f.axErr != nil {
 		return simbridge.Snapshot{}, f.axErr
 	}
