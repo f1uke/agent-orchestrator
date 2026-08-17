@@ -258,12 +258,108 @@ describe("Sidebar", () => {
 		});
 	});
 
+	// Click-to-copy beside the @<project>-<num> line. The value that reaches the
+	// clipboard is the BARE canonical id — the `@` is a prose sigil, while every
+	// CLI that takes a session (`ao send --session <id>`, `ao session get <id>`)
+	// wants `<project>-<num>`. Copying the sigil would be worse than useless: it
+	// would paste into a shell and fail.
+	describe("copy session id", () => {
+		function copyButton(sessionId = "proj-1-1"): HTMLElement {
+			return screen.getByRole("button", { name: `Copy session id ${sessionId}` });
+		}
+
+		it("puts the BARE canonical id on the clipboard — no @ sigil", async () => {
+			const writeText = vi.fn().mockResolvedValue(undefined);
+			window.ao!.clipboard.writeText = writeText;
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+			await userEvent.click(copyButton());
+
+			expect(writeText).toHaveBeenCalledWith("proj-1-1");
+			// Explicitly not the display form, and not the row's work name.
+			expect(writeText).not.toHaveBeenCalledWith("@proj-1-1");
+			expect(writeText).not.toHaveBeenCalledWith("fix login");
+		});
+
+		// Positive controls for the "does not navigate" assertions below: the row
+		// still opens on click, or those assertions would pass vacuously. The second
+		// case guards the regression the restructure could introduce — the row's
+		// content is no longer inside the open button, so clicking the id text (or
+		// the Jira chip) must still reach the row's own handler rather than land in
+		// a dead zone.
+		it("still opens the session when the row itself is clicked", async () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+			await userEvent.click(screen.getByRole("button", { name: "Open fix login" }));
+
+			expect(navigateMock).toHaveBeenCalledWith({
+				to: "/projects/$projectId/sessions/$sessionId",
+				params: { projectId: "proj-1", sessionId: "proj-1-1" },
+			});
+		});
+
+		it("still opens the session when the @id text beside the icon is clicked", async () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+			await userEvent.click(screen.getByText("@proj-1-1"));
+
+			expect(navigateMock).toHaveBeenCalledWith({
+				to: "/projects/$projectId/sessions/$sessionId",
+				params: { projectId: "proj-1", sessionId: "proj-1-1" },
+			});
+		});
+
+		it("does not open or select the row when copying", async () => {
+			window.ao!.clipboard.writeText = vi.fn().mockResolvedValue(undefined);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+			await userEvent.click(copyButton());
+
+			expect(navigateMock).not.toHaveBeenCalled();
+		});
+
+		it("names itself after what it will copy, so it is not an unlabelled icon", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+			const button = copyButton();
+			expect(button).toHaveAccessibleName("Copy session id proj-1-1");
+			// The icon itself carries no accessible text of its own.
+			expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+		});
+
+		it("copies on keyboard activation and stays reachable by Tab", async () => {
+			const writeText = vi.fn().mockResolvedValue(undefined);
+			window.ao!.clipboard.writeText = writeText;
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+			copyButton().focus();
+			expect(copyButton()).toHaveFocus();
+			await userEvent.keyboard("{Enter}");
+
+			expect(writeText).toHaveBeenCalledWith("proj-1-1");
+			expect(navigateMock).not.toHaveBeenCalled();
+		});
+
+		it("confirms the copy with a check that reverts to the copy icon", async () => {
+			window.ao!.clipboard.writeText = vi.fn().mockResolvedValue(undefined);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
+
+			await userEvent.click(copyButton());
+			const copied = await screen.findByRole("button", { name: "Copied session id proj-1-1" });
+			// Feedback must not resize the row: the same box, with the glyph swapped.
+			expect(copied.className).toContain("size-[13px]");
+
+			await waitFor(() => expect(copyButton()).toBeInTheDocument(), { timeout: 3000 });
+		});
+	});
+
 	// Breathing status dot (decision 2026-07-11): the lane glyph gently pulses
 	// ONLY while the session is working; every other state is static; and the
 	// pulse is disabled under prefers-reduced-motion.
 	describe("working status dot breathing", () => {
 		function glyphOf(title: string): SVGElement | null {
-			return screen.getByLabelText(`Open ${title}`).querySelector("svg");
+			// The open target is a transparent layer over the row, so the glyph lives
+			// beside it in the row's content — it is the row's first svg.
+			return screen.getByLabelText(`Open ${title}`).closest("li")?.querySelector("svg") ?? null;
 		}
 
 		it("breathes the status glyph while the session is working", () => {
