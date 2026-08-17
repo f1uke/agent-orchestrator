@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Status glyph gallery</title>
+	</head>
+	<body>
+		<!--
+			Dev-only harness for e2e/status-glyph.spec.ts. It is served by the Vite dev
+			server (root = frontend/) but is deliberately NOT one of the build's rollup
+			inputs, so it never ships in the packaged renderer.
+
+			It exists because the thing worth guarding — "does this status's glyph draw
+			a shape a human can actually read?" — is invisible to jsdom and only
+			partially reachable from the demo board, which shows some statuses and not
+			others. Rendering every SessionStatus through the real shared map, in a real
+			browser, with the real stylesheet, is the only place `getBBox()` can answer.
+		-->
+		<div id="root"></div>
+		<script type="module" src="./glyph-gallery.tsx"></script>
+	</body>
+</html>

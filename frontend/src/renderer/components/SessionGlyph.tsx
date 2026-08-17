@@ -17,7 +17,12 @@ export function SessionGlyph({ session }: { session: WorkspaceSession }) {
 	const prefersReducedMotion = usePrefersReducedMotion();
 	const breathe = lane.key === "working" && !prefersReducedMotion;
 	return (
-		<span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center" style={{ color: lane.dotVar }}>
+		<span
+			aria-hidden="true"
+			data-session-glyph={session.status}
+			className="flex w-4 shrink-0 items-center justify-center"
+			style={{ color: lane.dotVar }}
+		>
 			<Icon
 				className={cn("h-[13px] w-[13px]", breathe && "animate-status-pulse")}
 				style={{

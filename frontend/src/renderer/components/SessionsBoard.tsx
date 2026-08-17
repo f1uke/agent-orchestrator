@@ -475,6 +475,7 @@ function ZoneColumn({
 		>
 			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
 				<Icon
+					data-lane-glyph={col.key}
 					className="h-[13px] w-[13px] shrink-0"
 					style={{ color: dotVar, ...(col.filled ? { fill: "currentColor" } : {}) }}
 					aria-hidden="true"
@@ -753,7 +754,11 @@ function TodoCard({
 			>
 				{/* Same status gutter as a live card, so a queued task lines up with its
 				    neighbours; the dashed ring reads as "not real work yet". */}
-				<span className="flex w-[18px] shrink-0 justify-center pt-px" style={{ color: col.dotVar }}>
+				<span
+					data-card-status-glyph="todo"
+					className="flex w-[18px] shrink-0 justify-center pt-px"
+					style={{ color: col.dotVar }}
+				>
 					<CircleDashed className="h-[15px] w-[15px]" aria-hidden="true" />
 				</span>
 				<div className="min-w-0 flex-1">
@@ -856,7 +861,11 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 				    the same x, so a column scans as a vertical run of shapes. It is
 				    decorative (aria-hidden): the status text beside it is the
 				    accessible carrier, and colour is the third, redundant channel. */}
-				<span className="flex w-[18px] shrink-0 justify-center pt-px" style={{ color: col.dotVar }}>
+				<span
+					data-card-status-glyph={session.status}
+					className="flex w-[18px] shrink-0 justify-center pt-px"
+					style={{ color: col.dotVar }}
+				>
 					<Icon
 						className={cn("h-[15px] w-[15px]", col.key === "working" && "animate-status-pulse")}
 						style={filled ? { fill: "currentColor" } : undefined}

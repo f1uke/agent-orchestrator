@@ -39,3 +39,35 @@ jobs:
 
       - name: Run vitest suite
         run: npx vitest run
+
+  # Browser-rendered assertions that jsdom structurally cannot make: the status
+  # glyph gutter shipped with `no_signal` drawing a zero-length path in the corner
+  # of its viewBox — a ~1px speck on screen — while every jsdom test stayed green,
+  # because the <svg> was present, sized, coloured and labelled. Only a real
+  # browser's getBBox() can tell "draws a shape" from "draws nothing".
+  #
+  # Scoped to this one spec on purpose. The rest of frontend/e2e/ still targets the
+  # `api-gateway` demo fixtures that 2cb20c23e replaced with `ao-demo`, so those
+  # six specs have been dead since — never noticed, because no workflow has ever
+  # run Playwright. Repairing them is its own task; widen this glob once it is done.
+  glyph-legibility:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Measure the status glyphs in a real browser
+        run: npx playwright test e2e/status-glyph.spec.ts
