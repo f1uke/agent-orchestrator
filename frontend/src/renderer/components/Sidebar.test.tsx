@@ -119,20 +119,27 @@ function renderSidebar({
 			],
 		});
 	}
-	render(
+	const tree = (ws: WorkspaceSummary[]) => (
 		<QueryClientProvider client={queryClient}>
 			<SidebarProvider>
 				<Sidebar
 					daemonStatus={{ state: "running" }}
 					onCreateProject={onCreateProject}
 					onRemoveProject={onRemoveProject}
-					workspaces={workspaces}
+					workspaces={ws}
 				/>
 			</SidebarProvider>
-		</QueryClientProvider>,
+		</QueryClientProvider>
 	);
+	const result = render(tree(workspaces));
+	// Re-render the SAME tree with new workspace data, so a test can drive a live
+	// state transition (e.g. the orchestrator going busy → idle) the way a refetch
+	// does, instead of mounting a second sidebar.
+	rerenderWorkspaces = (ws) => result.rerender(tree(ws));
 	return onRemoveProject;
 }
+
+let rerenderWorkspaces: (workspaces: WorkspaceSummary[]) => void = () => undefined;
 
 async function chooseOption(trigger: HTMLElement, optionName: string) {
 	await userEvent.click(trigger);
@@ -389,6 +396,144 @@ describe("Sidebar", () => {
 			expect(dashboardBtn("Project One")).not.toHaveAttribute("aria-current");
 			expect(dashboardBtn("Project One").className).not.toContain(glow);
 			expect(orchestratorBtn("Project One")).not.toHaveAttribute("aria-current");
+		});
+	});
+
+	// The project header's Orchestrator button carries a busy dot while the
+	// project's live orchestrator is working, so "is it working, or is it my
+	// turn?" is answerable from the sidebar alone. Busy is the daemon's DERIVED
+	// status ("working"), never the raw activity reading — the raw one is stranded
+	// forever by a lost Stop hook, and an indicator stuck on busy is worse than no
+	// indicator. Everything else, including every flavour of waiting-for-the-human,
+	// must fall back to today's exact idle look.
+	describe("orchestrator busy indicator", () => {
+		function orchestratorBtn(name = "Project One") {
+			return screen.getByLabelText(new RegExp(`(Open|Spawn) ${name} orchestrator`));
+		}
+		function busyDot() {
+			return screen.queryByTestId("orchestrator-busy");
+		}
+		const orch = (status: WorkspaceSession["status"], extra: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
+			...orchestratorSession,
+			status,
+			...extra,
+		});
+		function mockReducedMotion(reduce: boolean) {
+			vi.spyOn(window, "matchMedia").mockImplementation(
+				(query: string) =>
+					({
+						matches: reduce && query.includes("prefers-reduced-motion"),
+						media: query,
+						onchange: null,
+						addEventListener: () => undefined,
+						removeEventListener: () => undefined,
+						addListener: () => undefined,
+						removeListener: () => undefined,
+						dispatchEvent: () => false,
+					}) as unknown as MediaQueryList,
+			);
+		}
+
+		it("shows a breathing dot while the orchestrator is working", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
+
+			const dot = busyDot();
+			expect(dot).toBeInTheDocument();
+			expect(orchestratorBtn()).toContainElement(dot);
+			// Tinted with the status token that already maps 1:1 to the daemon's
+			// working status, and breathing with the app's one status animation.
+			expect(dot?.className).toContain("bg-working");
+			expect(dot?.className).toContain("animate-status-pulse");
+		});
+
+		it("leaves the idle button exactly as it is today", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("idle")] }] });
+
+			expect(busyDot()).not.toBeInTheDocument();
+			// Nothing but the icon and the label — the dot is not rendered hidden,
+			// it is not rendered at all.
+			expect(orchestratorBtn().children).toHaveLength(2);
+			expect(orchestratorBtn()).toHaveAccessibleName("Open Project One orchestrator");
+		});
+
+		it("keeps the button's own classes identical in both states, so nothing reflows", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("idle")] }] });
+			const idleClass = orchestratorBtn().className;
+
+			rerenderWorkspaces([{ ...workspace, sessions: [orch("working")] }]);
+
+			// The indicator is out of flow: going busy must not add, drop or swap a
+			// single utility on the button, or the label re-wraps/re-truncates and
+			// the header jumps every time the orchestrator starts thinking.
+			expect(orchestratorBtn().className).toBe(idleClass);
+		});
+
+		it("clears the dot when the orchestrator stops working", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
+			expect(busyDot()).toBeInTheDocument();
+
+			rerenderWorkspaces([{ ...workspace, sessions: [orch("idle")] }]);
+
+			expect(busyDot()).not.toBeInTheDocument();
+			expect(orchestratorBtn()).toHaveAccessibleName("Open Project One orchestrator");
+		});
+
+		// Every non-working state the daemon can report. None of them may leave the
+		// indicator stuck on busy — that is the whole correctness bar for this
+		// feature. active_stale/idle_aged are the daemon's own timeout guesses that
+		// rescue a lost Stop hook, and both mean "your turn", not "working".
+		it.each([
+			["the agent asked a question", orch("needs_input", { statusReason: "waiting_input" })],
+			["a lost Stop hook aged the active reading out", orch("needs_input", { statusReason: "active_stale" })],
+			["the turn ended and went quiet", orch("needs_input", { statusReason: "idle_aged" })],
+			["no hook has ever reported", orch("no_signal", { statusReason: "no_signal" })],
+			["the session is idle", orch("idle", { statusReason: "idle" })],
+			["the session was terminated", orch("terminated", { statusReason: "terminated" })],
+			["the session is suspended", orch("idle", { isSuspended: true })],
+		])("stays idle when %s", (_case, orchestrator) => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orchestrator] }] });
+
+			expect(busyDot()).not.toBeInTheDocument();
+		});
+
+		it("stays idle when the project has no orchestrator at all", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [] }] });
+
+			expect(busyDot()).not.toBeInTheDocument();
+			expect(orchestratorBtn()).toHaveAccessibleName("Spawn Project One orchestrator");
+		});
+
+		it("ignores a working orchestrator that belongs to another project", () => {
+			const workspace2: WorkspaceSummary = { ...workspace, id: "proj-2", name: "Project Two", sessions: [] };
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }, workspace2] });
+
+			expect(orchestratorBtn("Project One").querySelector("[data-testid='orchestrator-busy']")).toBeInTheDocument();
+			expect(orchestratorBtn("Project Two").querySelector("[data-testid='orchestrator-busy']")).toBeNull();
+		});
+
+		it("keeps the dot but drops the breathing under prefers-reduced-motion", () => {
+			mockReducedMotion(true);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
+
+			// Presence, not motion, is what separates busy from idle — so the two
+			// states stay distinguishable with the animation switched off.
+			expect(busyDot()).toBeInTheDocument();
+			expect(busyDot()?.className).toContain("bg-working");
+			expect(busyDot()?.className).not.toContain("animate-status-pulse");
+		});
+
+		it("exposes busy on the button's name and adds no live region", () => {
+			mockReducedMotion(false);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
+
+			expect(orchestratorBtn()).toHaveAccessibleName("Open Project One orchestrator, working");
+			// The dot is decorative: the name already carries the state.
+			expect(busyDot()).toHaveAttribute("aria-hidden", "true");
+			// Deliberately NOT a live region: the sidebar is persistent navigation,
+			// and announcing every project's orchestrator on every flip would
+			// interrupt the user constantly. The name is read when they ask for it.
+			expect(document.querySelectorAll("[aria-live]")).toHaveLength(0);
+			expect(orchestratorBtn()).not.toHaveAttribute("aria-busy");
 		});
 	});
 
