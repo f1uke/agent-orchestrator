@@ -12,6 +12,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simflow"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simhang"
 )
 
@@ -60,6 +61,7 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 		udid     string
 		maxNodes int
 		json     bool
+		format   string
 	}
 	cmd := &cobra.Command{
 		Use:   "ax",
@@ -75,6 +77,10 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
   ao sim ax --max-nodes 2000 --udid 00000000-0000-0000-0000-000000000000`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := resolveSimAXFormat(cmd, opts.format, opts.json)
+			if err != nil {
+				return err
+			}
 			if opts.maxNodes <= 0 {
 				return usageError{fmt.Errorf("--max-nodes must be positive, got %d", opts.maxNodes)}
 			}
@@ -82,17 +88,78 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if opts.json {
+			switch format {
+			case "json":
 				return writeJSON(cmd.OutOrStdout(), result)
+			case "maestro":
+				return writeSimAXMaestro(cmd.OutOrStdout(), result)
+			default:
+				return writeSimAX(cmd.OutOrStdout(), result, strings.TrimSpace(os.Getenv("AO_SESSION_ID")))
 			}
-			return writeSimAX(cmd.OutOrStdout(), result, strings.TrimSpace(os.Getenv("AO_SESSION_ID")))
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&opts.udid, "udid", "", "Read this simulator instead of the booted one")
 	f.IntVar(&opts.maxNodes, "max-nodes", defaultSimAXMaxNodes, "Stop after this many elements")
 	f.BoolVar(&opts.json, "json", false, "Output the tree as JSON")
+	f.StringVar(&opts.format, "format", "text", "Output format: text, json, or maestro (Maestro selectors, one block per element)")
 	return cmd
+}
+
+// resolveSimAXFormat folds the older --json flag into --format without letting
+// the two disagree silently. A caller who passes both and means different
+// things by them has a bug, and printing one of the two anyway would hide it.
+func resolveSimAXFormat(cmd *cobra.Command, format string, jsonFlag bool) (string, error) {
+	formatSet := cmd.Flags().Changed("format")
+	switch format {
+	case "text", "json", "maestro":
+	default:
+		return "", usageError{fmt.Errorf("--format must be text, json or maestro, got %q", format)}
+	}
+	if jsonFlag {
+		if formatSet && format != "json" {
+			return "", usageError{fmt.Errorf("--json and --format %s disagree; pass only --format", format)}
+		}
+		return "json", nil
+	}
+	return format, nil
+}
+
+// writeSimAXMaestro prints one Maestro block per element, in tree order.
+//
+// It is a starting point, not a flow: the selectors are real and the caveats
+// are attached, but which of them belong in a test, in what order, and behind
+// which waits is a judgement the caller makes. Emitting a runnable flow from a
+// single screen would be inventing intent nobody expressed.
+func writeSimAXMaestro(out io.Writer, result simAXResult) error {
+	if _, err := fmt.Fprintf(out, "# %s - %.0fx%.0f points, %d elements (%d on screen, %d off screen)\n",
+		result.Name, result.Screen.Width, result.Screen.Height,
+		result.NodeCount, result.OnScreenCount, result.OffScreenCount); err != nil {
+		return err
+	}
+	if result.Frontmost.BundleID != "" {
+		if _, err := fmt.Fprintf(out, "# foreground app: %s\n", result.Frontmost.BundleID); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(out, "# device: %s\n#\n# selectors only - assemble the flow yourself, and check it with `ao sim flow check`\n\n", result.UDID); err != nil {
+		return err
+	}
+
+	var walk func(els []simbridge.Element) error
+	walk = func(els []simbridge.Element) error {
+		for _, el := range els {
+			block := simflow.Render(simflow.For(result.Snapshot, el), el.Label)
+			if _, err := io.WriteString(out, block); err != nil {
+				return err
+			}
+			if err := walk(el.Children); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(result.Elements)
 }
 
 func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes int) (simAXResult, error) {
