@@ -665,3 +665,79 @@ func TestMessageTemplates_StubbedWithoutService501(t *testing.T) {
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/message-templates", "")
 	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
 }
+
+// TestSettingsController_PutKeepsFieldsTheBodyOmits is the regression test for
+// the field-dropping class of bug on this path.
+//
+// PUT /settings/reclaim is a whole-value replace, so a client that sends only
+// the keys it knows about would otherwise write every other knob back as its
+// zero value — silently switching off a feature nobody touched. That is exactly
+// how a settings write path erases a field added after the client was written.
+func TestSettingsController_PutKeepsFieldsTheBodyOmits(t *testing.T) {
+	svc := &fakeSettingsSvc{cur: reclaimsettings.Settings{
+		Enabled:          true,
+		GraceMinutes:     60,
+		ArtifactsEnabled: true,
+		ArtifactPatterns: []string{"custom-artifact-dir"},
+	}}
+	srv := newSettingsTestServer(t, svc)
+
+	// An older client that only knows the two original knobs.
+	body, status, headers := doRequest(t, srv, "PUT", "/api/v1/settings/reclaim",
+		`{"enabled":true,"graceMinutes":120}`)
+	assertJSON(t, headers)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+
+	if svc.saved.GraceMinutes != 120 {
+		t.Errorf("the key the body carried must win, got %d", svc.saved.GraceMinutes)
+	}
+	if !svc.saved.ArtifactsEnabled {
+		t.Error("an omitted artifactsEnabled must keep its stored value, not decode as false")
+	}
+	if len(svc.saved.ArtifactPatterns) != 1 || svc.saved.ArtifactPatterns[0] != "custom-artifact-dir" {
+		t.Errorf("omitted artifactPatterns must survive, got %v", svc.saved.ArtifactPatterns)
+	}
+}
+
+// TestSettingsController_PutHonoursAnExplicitFalse: the other half of the merge
+// contract. Absent keys are kept, but a key the body DOES carry always wins —
+// otherwise the feature could not be switched off.
+func TestSettingsController_PutHonoursAnExplicitFalse(t *testing.T) {
+	svc := &fakeSettingsSvc{cur: reclaimsettings.Settings{
+		Enabled: true, GraceMinutes: 60, ArtifactsEnabled: true,
+	}}
+	srv := newSettingsTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/reclaim",
+		`{"enabled":false,"graceMinutes":60,"artifactsEnabled":false}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	if svc.saved.Enabled {
+		t.Error("explicit enabled:false must switch auto-reclaim off")
+	}
+	if svc.saved.ArtifactsEnabled {
+		t.Error("explicit artifactsEnabled:false must switch artefact clearing off")
+	}
+}
+
+// TestSettingsController_GetExposesEveryKnob: a knob the API does not report is
+// a knob no UI can offer, and this feature deletes files — it must be visible.
+func TestSettingsController_GetExposesEveryKnob(t *testing.T) {
+	svc := &fakeSettingsSvc{cur: reclaimsettings.Settings{
+		Enabled: true, GraceMinutes: 1440, ArtifactsEnabled: true,
+	}}
+	srv := newSettingsTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/reclaim", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	for _, key := range []string{`"enabled"`, `"graceMinutes"`, `"artifactsEnabled"`} {
+		if !strings.Contains(string(body), key) {
+			t.Errorf("response is missing %s: %s", key, body)
+		}
+	}
+}

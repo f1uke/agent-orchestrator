@@ -351,6 +351,7 @@ type fakeCommander struct {
 	purged          []domain.SessionID
 	purgedForce     []bool
 	killErr         error
+	teardownResult  *sessionmanager.TeardownResult
 	restartErr      error
 	retireErr       error
 	sendErr         error
@@ -408,12 +409,22 @@ func (f *fakeCommander) Wake(_ context.Context, id domain.SessionID) (domain.Ses
 	f.woken = append(f.woken, id)
 	return f.wakeRecord, nil
 }
-func (f *fakeCommander) Kill(_ context.Context, id domain.SessionID) (bool, error) {
+func (f *fakeCommander) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
+	res, err := f.Teardown(ctx, id)
+	return res.Freed, err
+}
+
+// teardownResult, when set, is what Teardown reports instead of a clean free.
+// It is how a test stands in a dirty worktree that refuses removal.
+func (f *fakeCommander) Teardown(_ context.Context, id domain.SessionID) (sessionmanager.TeardownResult, error) {
 	if f.killErr != nil {
-		return false, f.killErr
+		return sessionmanager.TeardownResult{}, f.killErr
 	}
 	f.killed = append(f.killed, id)
-	return true, nil
+	if f.teardownResult != nil {
+		return *f.teardownResult, nil
+	}
+	return sessionmanager.TeardownResult{Freed: true}, nil
 }
 func (f *fakeCommander) Restart(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	if f.restartErr != nil {
@@ -1228,10 +1239,92 @@ func TestListReclaimable_SelectsFinishedWorkersWithResources(t *testing.T) {
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want keys %v", got, want)
 	}
-	for _, id := range got {
-		if !want[id] {
-			t.Fatalf("unexpected candidate %s", id)
+	for _, c := range got {
+		if !want[c.ID] {
+			t.Fatalf("unexpected candidate %s", c.ID)
 		}
+	}
+}
+
+// TestListReclaimable_NeverTakesALiveWorkerWhosePRMerged is the "do not take out
+// an active participant" rule.
+//
+// A worker that is STILL RUNNING but whose PR has merged derives the display
+// status "merged" (deriveStatusDetail's anyMerged branch is reached with
+// IsTerminated false) — the exact shape of a keep-warm worker that merged one
+// PR and is already building the next. Selecting on that status would pull the
+// worktree out from under an agent mid-task, so eligibility keys off the
+// record's own IsTerminated flag instead.
+func TestListReclaimable_NeverTakesALiveWorkerWhosePRMerged(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-live-merged"] = domain.SessionRecord{
+		ID: "sess-live-merged", ProjectID: "mer", Kind: domain.KindWorker,
+		IsTerminated: false, // still alive
+		Activity:     domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()},
+		Metadata:     domain.SessionMetadata{WorkspacePath: "/tmp/live"},
+	}
+	st.pr["sess-live-merged"] = domain.PRFacts{URL: "pr1", Merged: true}
+
+	svc := &Service{store: st}
+	// Guard the premise: this session really does read as merged.
+	sess, err := svc.Get(context.Background(), "sess-live-merged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.Status != domain.StatusMerged {
+		t.Fatalf("premise broken: want a live session displaying merged, got %q", sess.Status)
+	}
+
+	got, err := svc.ListReclaimable(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a live worker must never be reclaimable, got %+v", got)
+	}
+}
+
+// TestListReclaimable_NeverTakesASuspendedSession: a suspended (sleeping)
+// session holds no tmux and shows no activity, yet is fully alive — one sitting
+// at needs_input for days is the case that a "no tmux means dead" rule would
+// wrongly delete. IsTerminated is what excludes it.
+func TestListReclaimable_NeverTakesASuspendedSession(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-asleep"] = domain.SessionRecord{
+		ID: "sess-asleep", ProjectID: "mer", Kind: domain.KindWorker,
+		IsSuspended: true, IsTerminated: false,
+		Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/asleep"},
+	}
+
+	svc := &Service{store: st}
+	got, err := svc.ListReclaimable(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a suspended session must never be reclaimable, got %+v", got)
+	}
+}
+
+// TestListReclaimable_TakesASuspendedSessionOnceTerminated is the other side of
+// that rule, and the reason suspension is not a second gate: IsSuspended is
+// orthogonal to IsTerminated, so a session that was paused and later finished is
+// genuinely done. Gating on suspension too would strand its worktree forever.
+func TestListReclaimable_TakesASuspendedSessionOnceTerminated(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-was-asleep"] = domain.SessionRecord{
+		ID: "sess-was-asleep", ProjectID: "mer", Kind: domain.KindWorker,
+		IsSuspended: true, IsTerminated: true,
+		Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/was-asleep"},
+	}
+
+	svc := &Service{store: st}
+	got, err := svc.ListReclaimable(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "sess-was-asleep" {
+		t.Fatalf("a terminated session must be reclaimable even if it was suspended, got %+v", got)
 	}
 }
 
@@ -1241,11 +1334,42 @@ func TestListReclaimable_SelectsFinishedWorkersWithResources(t *testing.T) {
 func TestReclaim_DelegatesToKill(t *testing.T) {
 	fc := &fakeCommander{}
 	svc := &Service{manager: fc}
-	if err := svc.Reclaim(context.Background(), "sess-1"); err != nil {
+	out, err := svc.Reclaim(context.Background(), "sess-1")
+	if err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 	if len(fc.killed) != 1 || fc.killed[0] != "sess-1" {
 		t.Fatalf("killed = %v, want [sess-1]", fc.killed)
+	}
+	if !out.Freed {
+		t.Fatal("a successful teardown must report Freed")
+	}
+}
+
+// TestReclaim_ReportsAPreservedWorkspaceAsNotFreed is the core of the bug this
+// feature fixes: a worktree kept because it holds uncommitted work used to come
+// back from Reclaim indistinguishable from one that was deleted, so the reclaim
+// loop recorded a success that never happened and never retried.
+func TestReclaim_ReportsAPreservedWorkspaceAsNotFreed(t *testing.T) {
+	fc := &fakeCommander{teardownResult: &sessionmanager.TeardownResult{
+		Freed:         false,
+		Reason:        sessionmanager.ReasonWorkspaceDirty,
+		WorkspacePath: "/tmp/dirty",
+	}}
+	svc := &Service{manager: fc}
+
+	out, err := svc.Reclaim(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("a refusal is not an error: %v", err)
+	}
+	if out.Freed {
+		t.Fatal("a preserved workspace must NOT report Freed")
+	}
+	if out.Reason != sessionmanager.ReasonWorkspaceDirty {
+		t.Fatalf("reason = %q, want %q", out.Reason, sessionmanager.ReasonWorkspaceDirty)
+	}
+	if out.BytesFreed != 0 {
+		t.Fatalf("nothing was freed, so BytesFreed must be 0, got %d", out.BytesFreed)
 	}
 }
 

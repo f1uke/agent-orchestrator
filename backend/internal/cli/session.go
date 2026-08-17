@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 )
 
 type sessionOptions struct {
@@ -39,25 +41,18 @@ type sessionRenameRequest struct {
 	DisplayName string `json:"displayName"`
 }
 
-type sessionDTO struct {
-	ID           string          `json:"id"`
-	ProjectID    string          `json:"projectId"`
-	IssueID      string          `json:"issueId,omitempty"`
-	Kind         string          `json:"kind"`
-	Harness      string          `json:"harness,omitempty"`
-	DisplayName  string          `json:"displayName,omitempty"`
-	Activity     sessionActivity `json:"activity"`
-	IsTerminated bool            `json:"isTerminated"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
-	Status       string          `json:"status"`
-	StatusReason string          `json:"statusReason,omitempty"`
-}
-
-type sessionActivity struct {
-	State          string    `json:"state"`
-	LastActivityAt time.Time `json:"lastActivityAt"`
-}
+// sessionDTO IS the daemon's own session wire shape, not a copy of it.
+//
+// The hand-written mirror this replaces listed 12 of the type's fields and
+// silently dropped the rest — including `branch` and `workspacePath`, which
+// meant `ao session get --json` could not tell you where a session's worktree
+// was. Anything wanting to map a worktree back to its session had to fall back
+// on matching directory names, which is wrong: a worktree directory is named at
+// spawn and never renamed when its branch is, so a session whose branch changed
+// mid-flight looks like a different session forever.
+//
+// Sharing the definition means the compiler carries the next field for free.
+type sessionDTO = controllers.SessionView
 
 type sessionListResponse struct {
 	Sessions []sessionDTO `json:"sessions"`
@@ -361,7 +356,7 @@ func (c *commandContext) claimSessionPR(ctx context.Context, cmd *cobra.Command,
 	if err != nil {
 		return err
 	}
-	project, err := c.fetchProjectDetails(ctx, sess.ProjectID)
+	project, err := c.fetchProjectDetails(ctx, string(sess.ProjectID))
 	if err != nil {
 		return err
 	}
@@ -619,7 +614,7 @@ func (c *commandContext) fetchScopedSession(ctx context.Context, id, project str
 	if err := c.getJSON(ctx, "sessions/"+url.PathEscape(id), &res); err != nil {
 		return sessionDTO{}, err
 	}
-	if project != "" && res.Session.ProjectID != project {
+	if project != "" && string(res.Session.ProjectID) != project {
 		return sessionDTO{}, usageError{fmt.Errorf("session %s is not in project %s", id, project)}
 	}
 	return res.Session, nil
@@ -651,12 +646,12 @@ func sessionListEntries(sessions []sessionDTO) []sessionListEntry {
 			last = &activity
 		}
 		entries = append(entries, sessionListEntry{
-			ID:             sess.ID,
-			ProjectID:      sess.ProjectID,
+			ID:             string(sess.ID),
+			ProjectID:      string(sess.ProjectID),
 			Role:           sessionRole(sess),
-			Status:         sess.Status,
-			IssueID:        sess.IssueID,
-			Harness:        sess.Harness,
+			Status:         string(sess.Status),
+			IssueID:        string(sess.IssueID),
+			Harness:        string(sess.Harness),
 			IsTerminated:   sess.IsTerminated,
 			LastActivityAt: last,
 			CreatedAt:      sess.CreatedAt,
@@ -677,16 +672,16 @@ func cleanupLabels(sessions []sessionDTO, scopedProject string) []string {
 func cleanupLabelByID(sessions []sessionDTO, scopedProject string) map[string]string {
 	labels := make(map[string]string, len(sessions))
 	for _, sess := range sessions {
-		labels[sess.ID] = cleanupLabel(sess, scopedProject)
+		labels[string(sess.ID)] = cleanupLabel(sess, scopedProject)
 	}
 	return labels
 }
 
 func cleanupLabel(sess sessionDTO, scopedProject string) string {
 	if scopedProject == "" && sess.ProjectID != "" {
-		return sess.ProjectID + ":" + sess.ID
+		return string(sess.ProjectID) + ":" + string(sess.ID)
 	}
-	return sess.ID
+	return string(sess.ID)
 }
 
 func writeSessionList(cmd *cobra.Command, sessions []sessionDTO, hiddenTerminatedCount int) error {
@@ -698,13 +693,13 @@ func writeSessionList(cmd *cobra.Command, sessions []sessionDTO, hiddenTerminate
 	} else {
 		currentProject := ""
 		for _, sess := range sessions {
-			if sess.ProjectID != currentProject {
+			if string(sess.ProjectID) != currentProject {
 				if currentProject != "" {
 					if _, err := fmt.Fprintln(out); err != nil {
 						return err
 					}
 				}
-				currentProject = sess.ProjectID
+				currentProject = string(sess.ProjectID)
 				if _, err := fmt.Fprintf(out, "%s:\n", currentProject); err != nil {
 					return err
 				}
@@ -736,13 +731,13 @@ func sessionLineParts(sess sessionDTO) []string {
 		parts = append(parts, "("+formatSessionAge(time.Since(sess.Activity.LastActivityAt))+")")
 	}
 	if sess.Status != "" {
-		parts = append(parts, "["+sess.Status+"]")
+		parts = append(parts, "["+string(sess.Status)+"]")
 	}
 	if sess.Kind != "" {
-		parts = append(parts, sess.Kind)
+		parts = append(parts, string(sess.Kind))
 	}
 	if sess.IssueID != "" {
-		parts = append(parts, sess.IssueID)
+		parts = append(parts, string(sess.IssueID))
 	}
 	return parts
 }
@@ -750,15 +745,22 @@ func sessionLineParts(sess sessionDTO) []string {
 func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 	out := cmd.OutOrStdout()
 	fields := [][2]string{
-		{"id", sess.ID},
-		{"project", sess.ProjectID},
+		{"id", string(sess.ID)},
+		{"project", string(sess.ProjectID)},
 		{"name", sess.DisplayName},
 		{"role", sessionRole(sess)},
-		{"status", sess.Status},
-		{"reason", sess.StatusReason},
-		{"activity", sess.Activity.State},
-		{"harness", sess.Harness},
-		{"issue", sess.IssueID},
+		{"status", string(sess.Status)},
+		{"reason", string(sess.StatusReason)},
+		{"activity", string(sess.Activity.State)},
+		{"harness", string(sess.Harness)},
+		{"issue", string(sess.IssueID)},
+		// branch and workspace are the answer to "which session owns this
+		// worktree?". They were absent from the CLI's own copy of the session
+		// shape, so the only way to link a directory back to a session was to
+		// match its name — which is wrong whenever a branch was renamed after
+		// spawn, because the directory keeps its original name forever.
+		{"branch", sess.Branch},
+		{"workspace", sess.WorkspacePath},
 		{"terminated", fmt.Sprintf("%t", sess.IsTerminated)},
 	}
 	for _, field := range fields {

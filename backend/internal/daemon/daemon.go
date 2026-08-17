@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimlog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
@@ -228,7 +230,20 @@ func Run() error {
 	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, log)
+	// Auto-reclaim settings are read BEFORE the session service because the
+	// workspace adapter consults them during teardown, to decide whether
+	// untracked build output may be cleared out of a finished worktree's way.
+	reclaimSettings, err := reclaimsettings.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("reclaim settings: %w", err)
+	}
+
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -241,18 +256,18 @@ func Run() error {
 
 	// Auto-reclaim: a settings-backed poll loop that tears down finished worker
 	// sessions (tmux + worktree, branch kept) once they have sat past the
-	// configured grace period. Constructed here so a settings-store failure is
-	// cleaned up the same way the session-wiring failure above is.
-	reclaimSettings, err := reclaimsettings.NewStore(cfg.DataDir)
+	// configured grace period. Every decision it makes — reclaim or refusal — is
+	// appended to the durable log under the data dir.
+	reclaimAudit, err := reclaimlog.New(cfg.DataDir)
 	if err != nil {
 		stop()
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
 		}
-		return fmt.Errorf("reclaim settings: %w", err)
+		return fmt.Errorf("reclaim log: %w", err)
 	}
-	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, loopReg, log)
+	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, reclaimAudit, filepath.Join(cfg.DataDir, "worktrees"), loopReg, log)
 
 	// Evidence retention: a settings-backed store + sweeper that purges smoke-test
 	// evidence blobs older than the configured TTL (default 30 days, from each

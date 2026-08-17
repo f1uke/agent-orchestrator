@@ -2129,6 +2129,8 @@ export interface components {
             sessionPrefix: string;
         };
         ReclaimSettingsResponse: {
+            artifactPatterns?: string[];
+            artifactsEnabled: boolean;
             enabled: boolean;
             graceMinutes: number;
         };
@@ -2411,6 +2413,8 @@ export interface components {
             config: components["schemas"]["ProjectConfig"];
         };
         SetReclaimSettingsRequest: {
+            artifactPatterns?: string[];
+            artifactsEnabled: boolean;
             enabled: boolean;
             graceMinutes: number;
         };

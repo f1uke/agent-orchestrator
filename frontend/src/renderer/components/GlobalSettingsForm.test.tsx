@@ -134,7 +134,7 @@ function mockGet(importPayload: unknown, promptOverrides: Record<string, string>
 			case "/api/v1/settings/response-language":
 				return { data: { language: "English" }, error: undefined };
 			case "/api/v1/settings/reclaim":
-				return { data: { enabled: true, graceMinutes: 15 }, error: undefined };
+				return { data: { enabled: true, graceMinutes: 1440, artifactsEnabled: true }, error: undefined };
 			case "/api/v1/settings/evidence-retention":
 				return { data: { enabled: true, maxAgeDays: 30 }, error: undefined };
 			case "/api/v1/import":
@@ -234,6 +234,39 @@ describe("GlobalSettingsForm", () => {
 		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 		await waitFor(() =>
 			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/auto-nudge", { body: { enabled: true } }),
+		);
+	});
+
+	// Auto-reclaim deletes worktrees silently, so its knobs must be findable and
+	// switchable off from the UI — including the newer build-output clearing,
+	// which is the part that actually deletes files a rebuild has to recreate.
+	it("routes the build-output clearing toggle through the save bar (PUT reclaim)", async () => {
+		renderForm();
+		await goToSection("Automation");
+		const toggle = await screen.findByRole("combobox", { name: "Clear build output" });
+		expect(toggle).toHaveTextContent("Enabled");
+		await chooseOption(toggle, "Disabled");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/reclaim", {
+				body: { enabled: true, graceMinutes: 1440, artifactsEnabled: false },
+			}),
+		);
+	});
+
+	// The whole feature must be switchable off, and doing so must not quietly
+	// drop the other reclaim settings from the request body.
+	it("switches auto-reclaim off without dropping the other reclaim fields", async () => {
+		renderForm();
+		await goToSection("Automation");
+		const toggle = await screen.findByRole("combobox", { name: "Auto-reclaim" });
+		expect(toggle).toHaveTextContent("Enabled");
+		await chooseOption(toggle, "Disabled");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/reclaim", {
+				body: { enabled: false, graceMinutes: 1440, artifactsEnabled: true },
+			}),
 		);
 	});
 

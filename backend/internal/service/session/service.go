@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -75,6 +78,9 @@ type commander interface {
 	// live session's idle-close countdown; terminated sessions are left untouched.
 	Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
+	// Teardown is Kill reporting the full outcome, including WHY a workspace was
+	// preserved. The auto-reclaim loop needs that distinction; Kill's bool loses it.
+	Teardown(ctx context.Context, id domain.SessionID) (sessionmanager.TeardownResult, error)
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string) error
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error)
@@ -514,37 +520,204 @@ func (s *Service) RollbackSpawn(ctx context.Context, id domain.SessionID) (Rollb
 	return RollbackOutcome{Deleted: deleted, Killed: killed}, nil
 }
 
-// Reclaim tears a finished session down (tmux + worktree) while keeping its
-// branch, so it stays restorable. It reuses Kill's teardown; the auto-reclaim
-// loop is the caller that distinguishes this from a user-initiated kill.
-func (s *Service) Reclaim(ctx context.Context, id domain.SessionID) error {
-	_, err := s.manager.Kill(ctx, id)
-	return toAPIError(err)
-}
-
-// ListReclaimable returns worker sessions whose display status is merged or
-// terminated AND that still hold a runtime handle or worktree — i.e. sessions
-// with resources left to reclaim. Already-torn-down sessions are excluded.
-func (s *Service) ListReclaimable(ctx context.Context) ([]domain.SessionID, error) {
+// ListKnownWorkspacePaths returns every workspace path any session record
+// claims, live or finished.
+//
+// The orphan sweep subtracts this set from what is on disk, so it must be the
+// WHOLE set — filtering it to finished sessions would make every live session's
+// worktree look unowned. Paths are returned verbatim; the caller normalises.
+func (s *Service) ListKnownWorkspacePaths(ctx context.Context) ([]string, error) {
 	recs, err := s.store.ListAllSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.SessionID, 0, len(recs))
+	out := make([]string, 0, len(recs))
+	for _, rec := range recs {
+		if rec.Metadata.WorkspacePath != "" {
+			out = append(out, rec.Metadata.WorkspacePath)
+		}
+	}
+	return out, nil
+}
+
+// ReasonAlreadyGone means the workspace directory no longer exists, so there
+// was nothing to reclaim. It is a quiet, terminal outcome rather than a
+// refusal: the loop stops tracking the session and writes nothing to the audit
+// log, because nothing happened.
+const ReasonAlreadyGone = "already_gone"
+
+// ReclaimOutcome is the auto-reclaim loop's record of one attempt: enough to
+// write a truthful log line and to decide whether the attempt needs retrying.
+type ReclaimOutcome struct {
+	// Freed is true only when the worktree is actually gone from disk.
+	Freed bool
+	// Reason names why the workspace survived, when Freed is false.
+	Reason string
+	// BytesFreed is the measured on-disk size of the worktree, taken BEFORE
+	// teardown. Zero when nothing was freed or the size could not be read.
+	BytesFreed int64
+	// Qualified names the session state that made it a candidate (its display
+	// status: merged or terminated), for the log.
+	Qualified     string
+	ProjectID     string
+	Branch        string
+	WorkspacePath string
+}
+
+// Reclaim tears a finished session down (tmux + worktree) while keeping its
+// branch, so it stays restorable. It reuses Kill's teardown; the auto-reclaim
+// loop is the caller that distinguishes this from a user-initiated kill.
+//
+// It reports whether the disk was ACTUALLY freed. The previous version threw
+// that answer away, so a worktree preserved for holding uncommitted work was
+// indistinguishable from one deleted — and the reclaim loop recorded every such
+// refusal as a success, then never retried it.
+func (s *Service) Reclaim(ctx context.Context, id domain.SessionID) (ReclaimOutcome, error) {
+	out := ReclaimOutcome{}
+	// The descriptive fields are for the log only: failing to read them must
+	// never stop the teardown, so every lookup here is best-effort.
+	if rec, ok, err := s.getSessionRecord(ctx, id); err == nil && ok {
+		out.ProjectID = string(rec.ProjectID)
+		out.Branch = rec.Metadata.Branch
+		out.WorkspacePath = rec.Metadata.WorkspacePath
+		if sess, sErr := s.toSession(ctx, rec); sErr == nil {
+			out.Qualified = string(sess.Status)
+		}
+	}
+	// A session keeps its WorkspacePath after teardown (Restore needs it), so it
+	// stays on the candidate list forever and every daemon restart would tear it
+	// down again — succeeding trivially against an absent directory and writing
+	// a "reclaimed 0 bytes" line into the audit log each time. Recognise that
+	// state instead, so the log records only reclaims that actually happened.
+	if out.WorkspacePath != "" {
+		if _, statErr := os.Stat(out.WorkspacePath); errors.Is(statErr, fs.ErrNotExist) {
+			out.Reason = ReasonAlreadyGone
+			return out, nil
+		}
+	}
+	// Measure before teardown: afterwards there is nothing left to measure.
+	size := dirSize(out.WorkspacePath)
+
+	res, err := s.manager.Teardown(ctx, id)
+	if err != nil {
+		return out, toAPIError(err)
+	}
+	out.Freed = res.Freed
+	out.Reason = res.Reason
+	if res.WorkspacePath != "" {
+		out.WorkspacePath = res.WorkspacePath
+	}
+	if res.Freed {
+		out.BytesFreed = size
+	}
+	return out, nil
+}
+
+// getSessionRecord is a nil-tolerant store read, so a Service assembled without
+// a store (as the manager-only unit tests do) still tears down.
+func (s *Service) getSessionRecord(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	if s.store == nil {
+		return domain.SessionRecord{}, false, nil
+	}
+	return s.store.GetSession(ctx, id)
+}
+
+// dirSize sums the apparent size of the regular files under path. It is a
+// best-effort measurement for the reclaim log: an unreadable entry contributes
+// zero rather than failing the reclaim, because a wrong number in a log is a
+// much smaller problem than a worktree left on disk over it.
+func dirSize(path string) int64 {
+	if path == "" {
+		return 0
+	}
+	var total int64
+	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // an unreadable subtree just contributes 0
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if info, statErr := d.Info(); statErr == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+// ReclaimCandidate is a session the auto-reclaim loop may act on, with the
+// facts the loop needs to age it, guard it and log it — so the loop never has
+// to infer any of them from a directory name.
+type ReclaimCandidate struct {
+	ID        domain.SessionID
+	ProjectID string
+	// Branch is never deleted by reclaim; it is carried for the log so the entry
+	// doubles as recovery instructions.
+	Branch        string
+	WorkspacePath string
+	// Status is the display status that qualified it (merged or terminated).
+	Status string
+	// Since is when the record last changed — the clock the age threshold runs
+	// on. Unlike an in-memory first-seen stamp it survives a daemon restart, so
+	// a machine that restarts more often than the grace period still reclaims.
+	Since time.Time
+}
+
+// ListReclaimable returns worker sessions that are FINISHED and still hold a
+// worktree.
+//
+// Eligibility is `IsTerminated` on the owning record, never the display status
+// alone and never a name match against a directory or a tmux session. Two
+// traps this closes:
+//
+//   - A live worker whose PR has merged derives the display status "merged"
+//     while still running (deriveStatusDetail's anyMerged branch is reached with
+//     IsTerminated false). Keying off that status pulls the worktree out from
+//     under an agent that is mid-task — including a keep-warm worker that merged
+//     one PR and is already building the next.
+//   - A sleeping or suspended session holds no tmux and no activity, and is
+//     fully alive. IsTerminated is false for it, so it is never a candidate.
+//
+// Orchestrators are excluded outright: no project's orchestrator may be taken
+// down to free disk, whatever its age.
+func (s *Service) ListReclaimable(ctx context.Context) ([]ReclaimCandidate, error) {
+	recs, err := s.store.ListAllSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReclaimCandidate, 0, len(recs))
 	for _, rec := range recs {
 		if rec.Kind == domain.KindOrchestrator {
 			continue
 		}
-		if rec.Metadata.RuntimeHandleID == "" && rec.Metadata.WorkspacePath == "" {
+		// The record's own terminal flag is the only trustworthy signal.
+		if !rec.IsTerminated {
 			continue
+		}
+		// Deliberately NOT also gated on IsSuspended. A suspended session is
+		// paused rather than finished, but IsSuspended is orthogonal to
+		// IsTerminated, so the check above already excludes every live one — and
+		// a session suspended and THEN terminated is genuinely finished, so
+		// skipping it would strand its worktree on disk forever.
+		if rec.Metadata.WorkspacePath == "" {
+			continue // nothing on disk left to reclaim
 		}
 		sess, err := s.toSession(ctx, rec)
 		if err != nil {
 			continue // a single unreadable row must not sink the pass
 		}
-		if sess.Status == domain.StatusMerged || sess.Status == domain.StatusTerminated {
-			out = append(out, rec.ID)
+		if sess.Status != domain.StatusMerged && sess.Status != domain.StatusTerminated {
+			continue
 		}
+		out = append(out, ReclaimCandidate{
+			ID:            rec.ID,
+			ProjectID:     string(rec.ProjectID),
+			Branch:        rec.Metadata.Branch,
+			WorkspacePath: rec.Metadata.WorkspacePath,
+			Status:        string(sess.Status),
+			Since:         rec.UpdatedAt,
+		})
 	}
 	return out, nil
 }

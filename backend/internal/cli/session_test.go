@@ -12,6 +12,10 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"path/filepath"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 type sessionRequestLog struct {
@@ -582,18 +586,29 @@ func TestSessionClaimGitLabMR(t *testing.T) {
 	}
 }
 
+// newSessionDTO builds the shared daemon session shape for these tests. The CLI
+// no longer defines its own copy of it (see sessionDTO), so the nested record
+// has to be filled in rather than flattened into one literal.
+func newSessionDTO(id, project, status string) sessionDTO {
+	return sessionDTO{
+		Session: domain.Session{
+			SessionRecord: domain.SessionRecord{
+				ID:        domain.SessionID(id),
+				ProjectID: domain.ProjectID(project),
+				Kind:      domain.KindWorker,
+			},
+			Status: domain.SessionStatus(status),
+		},
+	}
+}
+
 func TestWriteSessionDetailsIncludesReason(t *testing.T) {
 	var buf strings.Builder
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
-	sess := sessionDTO{
-		ID:           "demo-1",
-		ProjectID:    "demo",
-		Kind:         "worker",
-		Status:       "needs_input",
-		StatusReason: "active_stale",
-		Activity:     sessionActivity{State: "active"},
-	}
+	sess := newSessionDTO("demo-1", "demo", "needs_input")
+	sess.StatusReason = "active_stale"
+	sess.Activity = domain.Activity{State: "active"}
 	if err := writeSessionDetails(cmd, sess); err != nil {
 		t.Fatalf("writeSessionDetails: %v", err)
 	}
@@ -607,7 +622,7 @@ func TestWriteSessionDetailsOmitsEmptyReason(t *testing.T) {
 	var buf strings.Builder
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
-	sess := sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "working"}
+	sess := newSessionDTO("demo-1", "demo", "working")
 	if err := writeSessionDetails(cmd, sess); err != nil {
 		t.Fatalf("writeSessionDetails: %v", err)
 	}
@@ -620,7 +635,7 @@ func TestWriteSessionDetailsOmitsEmptyReason(t *testing.T) {
 // pin the omitempty contract: a reason-less session's JSON is byte-identical to
 // before, and a reason is emitted when present.
 func TestSessionDTOJSONOmitsEmptyReason(t *testing.T) {
-	b, err := json.Marshal(sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "working"})
+	b, err := json.Marshal(newSessionDTO("demo-1", "demo", "working"))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -630,11 +645,64 @@ func TestSessionDTOJSONOmitsEmptyReason(t *testing.T) {
 }
 
 func TestSessionDTOJSONIncludesReason(t *testing.T) {
-	b, err := json.Marshal(sessionDTO{ID: "demo-1", ProjectID: "demo", Kind: "worker", Status: "needs_input", StatusReason: "active_stale"})
+	withReason := newSessionDTO("demo-1", "demo", "needs_input")
+	withReason.StatusReason = "active_stale"
+	b, err := json.Marshal(withReason)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(b), `"statusReason":"active_stale"`) {
 		t.Fatalf("reason should be present in JSON:\n%s", b)
+	}
+}
+
+// TestSessionDTOCarriesBranchAndWorkspace closes the gap that made a worktree
+// impossible to map back to its session from the CLI.
+//
+// The CLI used to define its own copy of the session wire shape listing 12
+// fields, silently dropping `branch` and `workspacePath` that the daemon
+// already returns. Anything needing to know which session owned a worktree had
+// to match directory names instead — which is wrong, because a worktree
+// directory is named at spawn and never renamed when its branch is.
+func TestSessionDTOCarriesBranchAndWorkspace(t *testing.T) {
+	sess := newSessionDTO("demo-1", "demo", "terminated")
+	sess.Branch = "feature/renamed-after-spawn"
+	sess.WorkspacePath = filepath.Join(string(filepath.Separator), "wt", "demo", "feature", "original-name")
+
+	b, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var round map[string]any
+	if err := json.Unmarshal(b, &round); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if round["branch"] != "feature/renamed-after-spawn" {
+		t.Fatalf("branch missing from the CLI session shape: %s", b)
+	}
+	if round["workspacePath"] != sess.WorkspacePath {
+		t.Fatalf("workspacePath missing from the CLI session shape: %s", b)
+	}
+}
+
+// TestWriteSessionDetailsShowsBranchAndWorkspace: `ao session get` prints them,
+// so the mapping is available without --json too.
+func TestWriteSessionDetailsShowsBranchAndWorkspace(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	sess := newSessionDTO("demo-1", "demo", "terminated")
+	sess.Branch = "feature/x"
+	sess.WorkspacePath = filepath.Join(string(filepath.Separator), "wt", "demo", "feature", "x")
+
+	if err := writeSessionDetails(cmd, sess); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "branch: feature/x") {
+		t.Fatalf("output missing branch line:\n%s", out)
+	}
+	if !strings.Contains(out, "workspace: "+sess.WorkspacePath) {
+		t.Fatalf("output missing workspace line:\n%s", out)
 	}
 }

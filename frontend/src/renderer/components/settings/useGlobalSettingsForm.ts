@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage } from "../../lib/api-client";
 import { aoBridge } from "../../lib/bridge";
 import type { UpdateChannel, UpdateSettings } from "../../../main/update-settings";
+import type { components } from "../../../api/schema";
 import { updateSettingsQueryKey } from "./SystemActions";
 
 export type PromptKind = "orchestrator" | "worker" | "reviewer";
@@ -34,6 +35,7 @@ export type GlobalDraft = {
 	responseLanguage: string;
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
+	reclaimArtifacts: boolean;
 	evidenceRetentionEnabled: boolean;
 	evidenceRetentionDays: number;
 	updatesEnabled: boolean;
@@ -46,6 +48,7 @@ export type GlobalScalarField =
 	| "responseLanguage"
 	| "reclaimEnabled"
 	| "reclaimGrace"
+	| "reclaimArtifacts"
 	| "evidenceRetentionEnabled"
 	| "evidenceRetentionDays"
 	| "updatesEnabled"
@@ -58,7 +61,8 @@ const EMPTY_DRAFT: GlobalDraft = {
 	autoNudge: false,
 	responseLanguage: "English",
 	reclaimEnabled: true,
-	reclaimGrace: 15,
+	reclaimGrace: 24 * 60,
+	reclaimArtifacts: true,
 	evidenceRetentionEnabled: true,
 	evidenceRetentionDays: 30,
 	updatesEnabled: false,
@@ -127,7 +131,9 @@ export function useGlobalSettingsForm() {
 		queryFn: async () => {
 			const { data, error } = await apiClient.GET("/api/v1/settings/reclaim", {});
 			if (error) throw new Error(apiErrorMessage(error));
-			return data as { enabled: boolean; graceMinutes: number };
+			// Typed from the generated OpenAPI schema, not a hand-written shape: a
+			// local restatement silently omits any settings field added later.
+			return data as components["schemas"]["ReclaimSettingsResponse"];
 		},
 	});
 	const evidenceRetentionQuery = useQuery({
@@ -195,8 +201,22 @@ export function useGlobalSettingsForm() {
 		if (!reclaimQuery.data || seeded.current.has("reclaim")) return;
 		seeded.current.add("reclaim");
 		const { enabled, graceMinutes } = reclaimQuery.data;
-		setDraft((d) => ({ ...d, reclaimEnabled: enabled, reclaimGrace: graceMinutes }));
-		setBaseline((b) => ({ ...b, reclaimEnabled: enabled, reclaimGrace: graceMinutes }));
+		// Default ON when the key is absent, matching the daemon's own default,
+		// so an older daemon's response cannot read as "the user turned it off"
+		// and mark the form permanently dirty.
+		const artifactsEnabled = reclaimQuery.data.artifactsEnabled ?? true;
+		setDraft((d) => ({
+			...d,
+			reclaimEnabled: enabled,
+			reclaimGrace: graceMinutes,
+			reclaimArtifacts: artifactsEnabled,
+		}));
+		setBaseline((b) => ({
+			...b,
+			reclaimEnabled: enabled,
+			reclaimGrace: graceMinutes,
+			reclaimArtifacts: artifactsEnabled,
+		}));
 	}, [reclaimQuery.data]);
 
 	useEffect(() => {
@@ -232,6 +252,7 @@ export function useGlobalSettingsForm() {
 		draft.responseLanguage !== baseline.responseLanguage ||
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
+		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
 		draft.evidenceRetentionEnabled !== baseline.evidenceRetentionEnabled ||
 		draft.evidenceRetentionDays !== baseline.evidenceRetentionDays ||
 		draft.updatesEnabled !== baseline.updatesEnabled ||
@@ -326,11 +347,19 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
-			if (draft.reclaimEnabled !== baseline.reclaimEnabled || draft.reclaimGrace !== baseline.reclaimGrace) {
+			if (
+				draft.reclaimEnabled !== baseline.reclaimEnabled ||
+				draft.reclaimGrace !== baseline.reclaimGrace ||
+				draft.reclaimArtifacts !== baseline.reclaimArtifacts
+			) {
 				ops.push(
 					(async () => {
 						const { error } = await apiClient.PUT("/api/v1/settings/reclaim", {
-							body: { enabled: draft.reclaimEnabled, graceMinutes: draft.reclaimGrace },
+							body: {
+								enabled: draft.reclaimEnabled,
+								graceMinutes: draft.reclaimGrace,
+								artifactsEnabled: draft.reclaimArtifacts,
+							},
 						});
 						if (error) throw new Error(apiErrorMessage(error));
 					})(),

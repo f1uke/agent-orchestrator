@@ -11,6 +11,8 @@ import (
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 )
 
 // HTTP response envelopes for the projects surface — the SINGLE definition of
@@ -1280,17 +1282,21 @@ type ResolveCommentsResponse struct {
 	Resolved int  `json:"resolved"`
 }
 
-// ReclaimSettingsResponse mirrors reclaimsettings.Settings on the wire. It is
-// the body of GET/PUT /api/v1/settings/reclaim.
+// ReclaimSettingsResponse is the body of GET/PUT /api/v1/settings/reclaim.
+//
+// It EMBEDS the daemon's own reclaimsettings.Settings rather than restating its
+// fields. A hand-copied mirror silently drops any knob added to one side and not
+// the other — the settings write path is a full replace, so a dropped field is
+// not merely invisible, it is erased on the next save. With one definition the
+// compiler carries the next knob for free.
 type ReclaimSettingsResponse struct {
-	Enabled      bool `json:"enabled"`
-	GraceMinutes int  `json:"graceMinutes"`
+	reclaimsettings.Settings
 }
 
-// SetReclaimSettingsRequest is the body of PUT /api/v1/settings/reclaim.
+// SetReclaimSettingsRequest is the body of PUT /api/v1/settings/reclaim. Same
+// shared definition, for the same reason.
 type SetReclaimSettingsRequest struct {
-	Enabled      bool `json:"enabled"`
-	GraceMinutes int  `json:"graceMinutes"`
+	reclaimsettings.Settings
 }
 
 // EvidenceRetentionSettingsResponse mirrors evidenceretention.Settings on the
