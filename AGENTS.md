@@ -50,6 +50,7 @@ ao sim list                          # what is booted, and which one an unqualif
 ao sim claim                         # take the lease that keeps other AO sessions off it
 ao sim ax                            # the screen as elements: label, box, and the point to tap
 ao sim log --process MyApp           # what the app SAYS (NSLog/os_log); never pipe its stdout
+ao sim tap --label "Continue"        # tap what you read, by name (or --id for an accessibility id)
 ao sim tap 0.5 0.93                  # normalized 0..1 coordinates, straight from `ao sim ax`
 ao sim drag 0.5 0.8 0.5 0.5 0.2 0.5  # one finger through a route, never lifting between legs
 ao sim release

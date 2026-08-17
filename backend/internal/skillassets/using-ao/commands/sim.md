@@ -23,7 +23,7 @@ ao sim ax      [flags]
 ao sim log     [flags]
 ao sim claim   [flags]
 ao sim release [flags]
-ao sim tap    <x> <y>          [flags]
+ao sim tap    <x> <y> | --label <name> | --id <identifier>  [flags]
 ao sim swipe  <x1> <y1> <x2> <y2> [flags]
 ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
 ao sim type   <text>           [flags]
@@ -35,7 +35,8 @@ ao sim button <name>           [flags]
 ```bash
 ao sim claim                 # once, before you drive anything
 ao sim ax                    # read the screen; what is on it carries a tap point
-ao sim tap 0.5 0.934         # act on a point the tree gave you
+ao sim tap --label "Continue" # act on what you read, by name
+ao sim tap 0.5 0.934         # or by the point the tree gave you
 ao sim ax                    # read again to confirm what actually changed
 ao sim release               # when you are done
 ```
@@ -48,8 +49,8 @@ List every simulator `xcrun simctl` reports, with its udid, state, runtime, name
 
 **Flags:**
 
-| Flag | Description |
-|---|---|
+| Flag     | Description               |
+| -------- | ------------------------- |
 | `--json` | Output simulators as JSON |
 
 **Examples:**
@@ -68,25 +69,25 @@ JSON shape:
 
 ```json
 {
-  "devices": [
-    {
-      "udid": "00000000-0000-0000-0000-000000000000",
-      "name": "iPhone 17 Pro Max",
-      "runtime": "iOS 26.3",
-      "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
-      "state": "Booted",
-      "available": true,
-      "default": true,
-      "lease": {
-        "state": "held",
-        "holder": "your-project-12",
-        "acquiredAt": "2026-08-13T07:41:02Z",
-        "expiresAt": "2026-08-13T07:51:02Z"
-      }
-    }
-  ],
-  "defaultUdid": "00000000-0000-0000-0000-000000000000",
-  "defaultReason": "the only booted simulator"
+	"devices": [
+		{
+			"udid": "00000000-0000-0000-0000-000000000000",
+			"name": "iPhone 17 Pro Max",
+			"runtime": "iOS 26.3",
+			"runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+			"state": "Booted",
+			"available": true,
+			"default": true,
+			"lease": {
+				"state": "held",
+				"holder": "your-project-12",
+				"acquiredAt": "2026-08-13T07:41:02Z",
+				"expiresAt": "2026-08-13T07:51:02Z"
+			}
+		}
+	],
+	"defaultUdid": "00000000-0000-0000-0000-000000000000",
+	"defaultReason": "the only booted simulator"
 }
 ```
 
@@ -102,21 +103,21 @@ Capture a booted simulator's screen to a PNG and print its path. Read that path 
 
 **Flags:**
 
-| Flag | Description |
-|---|---|
-| `--udid <udid>` | Capture this simulator instead of the booted one |
+| Flag              | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| `--udid <udid>`   | Capture this simulator instead of the booted one             |
 | `--output <path>` | Write the PNG here instead of the session artifact directory |
-| `--json` | Output the capture result as JSON |
+| `--json`          | Output the capture result as JSON                            |
 
 **Which device gets captured**
 
-| Situation | Result |
-|---|---|
-| `--udid` given, device booted | that device |
-| `--udid` given, device not found or not booted | fails, exit 1 |
-| no `--udid`, exactly one booted | that device |
-| no `--udid`, none booted | fails, exit 1 - boot one yourself in Xcode or Simulator.app |
-| no `--udid`, several booted | fails, exit 1, listing a `--udid` line per device; it never guesses |
+| Situation                                      | Result                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| `--udid` given, device booted                  | that device                                                         |
+| `--udid` given, device not found or not booted | fails, exit 1                                                       |
+| no `--udid`, exactly one booted                | that device                                                         |
+| no `--udid`, none booted                       | fails, exit 1 - boot one yourself in Xcode or Simulator.app         |
+| no `--udid`, several booted                    | fails, exit 1, listing a `--udid` line per device; it never guesses |
 
 **Where the PNG goes**
 
@@ -149,11 +150,11 @@ Read what is on a booted simulator's screen as a structured accessibility tree. 
 
 **Flags:**
 
-| Flag | Description |
-|---|---|
-| `--udid <udid>` | Read this simulator instead of the booted one |
-| `--max-nodes <n>` | Stop after this many elements (default 500) |
-| `--json` | Output the tree as JSON |
+| Flag              | Description                                   |
+| ----------------- | --------------------------------------------- |
+| `--udid <udid>`   | Read this simulator instead of the booted one |
+| `--max-nodes <n>` | Stop after this many elements (default 500)   |
+| `--json`          | Output the tree as JSON                       |
 
 The device is resolved exactly like `ao sim shot`. Reading takes no lease and is never blocked by one, but the output always reports who holds the device.
 
@@ -177,31 +178,31 @@ JSON shape (`--json`):
 
 ```json
 {
-  "screen": { "width": 440, "height": 956 },
-  "frontmost": { "bundleId": "com.example.app", "pid": 42 },
-  "elements": [
-    {
-      "path": "0.0",
-      "id": "search-field",
-      "role": "text field",
-      "type": "TextField",
-      "label": "Search",
-      "value": "",
-      "enabled": true,
-      "frame": { "x": 20, "y": 100, "width": 400, "height": 40 },
-      "tap": { "x": 0.5, "y": 0.1255 },
-      "box": { "x1": 0.0454, "y1": 0.1046, "x2": 0.9545, "y2": 0.1464 },
-      "children": []
-    }
-  ],
-  "nodeCount": 24,
-  "totalNodeCount": 24,
-  "truncated": false,
-  "onScreenCount": 18,
-  "offScreenCount": 6,
-  "udid": "00000000-0000-0000-0000-000000000000",
-  "name": "iPhone 17 Pro Max",
-  "lease": { "state": "held", "holder": "your-project-12" }
+	"screen": { "width": 440, "height": 956 },
+	"frontmost": { "bundleId": "com.example.app", "pid": 42 },
+	"elements": [
+		{
+			"path": "0.0",
+			"id": "search-field",
+			"role": "text field",
+			"type": "TextField",
+			"label": "Search",
+			"value": "",
+			"enabled": true,
+			"frame": { "x": 20, "y": 100, "width": 400, "height": 40 },
+			"tap": { "x": 0.5, "y": 0.1255 },
+			"box": { "x1": 0.0454, "y1": 0.1046, "x2": 0.9545, "y2": 0.1464 },
+			"children": []
+		}
+	],
+	"nodeCount": 24,
+	"totalNodeCount": 24,
+	"truncated": false,
+	"onScreenCount": 18,
+	"offScreenCount": 6,
+	"udid": "00000000-0000-0000-0000-000000000000",
+	"name": "iPhone 17 Pro Max",
+	"lease": { "state": "held", "holder": "your-project-12" }
 }
 ```
 
@@ -223,15 +224,15 @@ Read the device's unified log: what an app **says**, as opposed to what its scre
 
 **Flags:**
 
-| Flag | Description |
-|---|---|
-| `--udid <udid>` | Read this simulator instead of the booted one |
-| `--process <name>` | Only entries from this process - the **executable's** name (`Nimbus`), not the bundle id |
-| `--grep <regex>` | Only entries matching this regular expression, applied to the whole entry |
-| `--since <duration>` | How far back to read (`30s`, `2m`, `1h`). Default 2m. Not valid with `--follow` |
-| `--follow`, `-f` | Stream entries as they happen instead of reading history |
-| `--max-lines <n>` | Keep at most this many of the most recent entries (default 200) |
-| `--json` | Output entries as JSON - one object per line with `--follow` |
+| Flag                 | Description                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| `--udid <udid>`      | Read this simulator instead of the booted one                                            |
+| `--process <name>`   | Only entries from this process - the **executable's** name (`Nimbus`), not the bundle id |
+| `--grep <regex>`     | Only entries matching this regular expression, applied to the whole entry                |
+| `--since <duration>` | How far back to read (`30s`, `2m`, `1h`). Default 2m. Not valid with `--follow`          |
+| `--follow`, `-f`     | Stream entries as they happen instead of reading history                                 |
+| `--max-lines <n>`    | Keep at most this many of the most recent entries (default 200)                          |
+| `--json`             | Output entries as JSON - one object per line with `--follow`                             |
 
 The device is resolved exactly like `ao sim shot`. Reading a log takes no lease and is never blocked by one, and the output reports who holds the device.
 
@@ -254,17 +255,17 @@ ao sim log --since 10m --process Nimbus --json
 
 So an empty `ao sim log` for a `print` you expected is the command working correctly. To read a payload:
 
-| What the app uses | Reaches `ao sim log` |
-|---|---|
-| `NSLog(...)` | yes |
-| `os_log` / `Logger` | yes |
+| What the app uses      | Reaches `ao sim log`                   |
+| ---------------------- | -------------------------------------- |
+| `NSLog(...)`           | yes                                    |
+| `os_log` / `Logger`    | yes                                    |
 | `print` / `debugPrint` | **no** - goes to a stdout nobody keeps |
 
 **Add a temporary `NSLog("resp: \(body)")` probe, run the flow, read it here, and take the probe out again.** That is the supported way to see a body, and it costs one line.
 
 **There is no `--stdout` mode, on purpose.** The only way to capture stdout is to launch the app with a pipe attached, and a pipe nobody drains wedges the app's main thread (see the warning at the top of this page). AO will not ship a mode whose failure mode is a hung app under test.
 
-**Nothing matched?** The command says so and lists which processes *did* log in that window with their entry counts - a `--process` that matches nothing is nearly always the bundle id instead of the executable name. It exits 0: an empty log is an answer, not a failure.
+**Nothing matched?** The command says so and lists which processes _did_ log in that window with their entry counts - a `--process` that matches nothing is nearly always the bundle id instead of the executable name. It exits 0: an empty log is an answer, not a failure.
 
 ---
 
@@ -274,11 +275,11 @@ Claim a booted simulator for this session, or renew a claim it already holds. Do
 
 **Flags:**
 
-| Flag | Description |
-|---|---|
-| `--udid <udid>` | Claim this simulator instead of the booted one |
+| Flag               | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
+| `--udid <udid>`    | Claim this simulator instead of the booted one                |
 | `--ttl <duration>` | How long to hold it (`30s`, `10m`, `1h`). Default 10m, max 1h |
-| `--json` | Output the claim as JSON |
+| `--json`           | Output the claim as JSON                                      |
 
 The device is resolved exactly like `ao sim shot` (see the table above): with several booted simulators it never guesses.
 
@@ -305,10 +306,10 @@ Hand back the simulator this session holds, immediately.
 
 **Flags:**
 
-| Flag | Description |
-|---|---|
+| Flag            | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
 | `--udid <udid>` | Release this simulator instead of the one this session holds |
-| `--json` | Output the release as JSON |
+| `--json`        | Output the release as JSON                                   |
 
 With no `--udid` it releases the one device you hold, and fails if you hold none or hold several. You cannot release someone else's lease. Releasing does not touch the simulator, so it works even if the device was shut down in the meantime.
 
@@ -325,13 +326,14 @@ The four ways to drive a screen. **All four require this session to hold the dev
 
 All of them take a `--udid` and a `--json` flag, resolve the device exactly like `ao sim shot`, and all coordinates are **normalized 0..1 of the screen** - the values `ao sim ax` prints.
 
-| Command | What it does |
-|---|---|
-| `ao sim tap <x> <y>` | Press and release one point |
-| `ao sim swipe <x1> <y1> <x2> <y2> [--duration 300ms]` | Drag between two points - how you scroll a list or dismiss a sheet |
+| Command                                                              | What it does                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ao sim tap <x> <y>`                                                 | Press and release one point                                                                                                                                                                                                                                                                         |
+| `ao sim tap --label <name>` / `--id <identifier>`                    | Press and release the element with that name. See below.                                                                                                                                                                                                                                            |
+| `ao sim swipe <x1> <y1> <x2> <y2> [--duration 300ms]`                | Drag between two points - how you scroll a list or dismiss a sheet                                                                                                                                                                                                                                  |
 | `ao sim drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--duration 600ms]` | Hold one finger through a route of points without lifting. Two points is exactly a swipe; more is a path an app can tell apart from a flick - a scroll that changes direction, a drag onto a target. Sending the same route as separate swipes lifts between them, which reads as several gestures. |
-| `ao sim type <text>` | Put text into whatever has keyboard focus (tap the field first). Uses key presses when the simulator will deliver them faithfully and the pasteboard when it would not, says which, and fails rather than claiming characters it did not deliver - see below. |
-| `ao sim button <name>` | `home` (the swipe-up home gesture - your way back to a known screen) or `app-switcher`. The list is short on purpose: only buttons observably verified to change a real device are offered, because the mechanism reports success for ones that do nothing. |
+| `ao sim type <text>`                                                 | Put text into whatever has keyboard focus (tap the field first). Uses key presses when the simulator will deliver them faithfully and the pasteboard when it would not, says which, and fails rather than claiming characters it did not deliver - see below.                                       |
+| `ao sim button <name>`                                               | `home` (the swipe-up home gesture - your way back to a known screen) or `app-switcher`. The list is short on purpose: only buttons observably verified to change a real device are offered, because the mechanism reports success for ones that do nothing.                                         |
 
 ```bash
 ao sim claim
@@ -346,24 +348,44 @@ ao sim ax                              # confirm what actually happened
 
 **How these fail, and what each failure means**
 
-| Failure | What it means |
-|---|---|
-| `... is leased by @other-session` | Another AO session holds the device. Nothing was sent. Read-only commands still work; wait, or ask them to release. |
-| `this session has not claimed ...` | Run `ao sim claim` first. AO never takes a device on your behalf. |
-| `... is mid-gesture` | Another command holds the finger right now. Nothing was sent. Retry in a moment - it never queues, because two overlapping gestures merge into one touch. |
-| `node was not found on PATH` | The interaction commands need Node.js 20+. `ao sim shot` and `ao sim list` still work. |
-| `the simulator bridge could not load` | The native bridge calls private Apple frameworks and an Xcode/macOS upgrade broke it. Report it with your Xcode version; screenshots still work. |
-| `... is not booted` | Boot it yourself in Xcode or Simulator.app. AO never boots a device. |
-| exit 2 | Bad arguments (a coordinate outside 0..1, an unknown button, `--paste` and `--raw-keys` together). Nothing reached the device. |
+| Failure                               | What it means                                                                                                                                             |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `... is leased by @other-session`     | Another AO session holds the device. Nothing was sent. Read-only commands still work; wait, or ask them to release.                                       |
+| `this session has not claimed ...`    | Run `ao sim claim` first. AO never takes a device on your behalf.                                                                                         |
+| `... is mid-gesture`                  | Another command holds the finger right now. Nothing was sent. Retry in a moment - it never queues, because two overlapping gestures merge into one touch. |
+| `node was not found on PATH`          | The interaction commands need Node.js 20+. `ao sim shot` and `ao sim list` still work.                                                                    |
+| `the simulator bridge could not load` | The native bridge calls private Apple frameworks and an Xcode/macOS upgrade broke it. Report it with your Xcode version; screenshots still work.          |
+| `... is not booted`                   | Boot it yourself in Xcode or Simulator.app. AO never boots a device.                                                                                      |
+| exit 2                                | Bad arguments (a coordinate outside 0..1, an unknown button, `--paste` and `--raw-keys` together). Nothing reached the device.                            |
 
-- **`ao sim type` puts the characters you asked for into the field - by whichever route can actually do that, and it tells you which.** The keys it can send are US-keyboard key presses and the SIMULATOR decides what each one produces. Simulator.app ships with *I/O > Keyboard > "Use the Same Keyboard Language as macOS"* ticked, so a Mac set to Thai gives the simulator a Thai keyboard and `ao sim type "fa12345"` would arrive as `ดฟๅ/_ภถ`. So:
+- **`ao sim tap` can take the NAME of the element instead of its point.** `--label` matches the name `ao sim ax` prints for an element (its label, or its value when it has none); `--id` matches its accessibility identifier. This reads the screen first, so it costs one accessibility read - and it replaces the `ao sim ax` you would have run anyway, so the loop is shorter, not longer. The coordinate form reads nothing and is unchanged.
 
-  | Situation | What happens | Output says |
-  |---|---|---|
-  | The simulator's keyboard sends US ASCII | Key presses - the truer simulation, since an app sees each keystroke | `Typed …` |
+  ```bash
+  ao sim tap --label "Continue"
+  ao sim tap --id sign-in-button
+  ```
+
+  | Situation                                               | What happens                                                                                                                                                       |
+  | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | One element has that name                               | Tapped, and the output says it matched exactly, with the point it used                                                                                             |
+  | No element has it exactly, one CONTAINS it              | Tapped, and the output says it was a contains-match, not the name you gave                                                                                         |
+  | Two different elements answer to it                     | **Fails, exit 1**, listing each with the `ao sim tap <x> <y>` that picks it. It never guesses.                                                                     |
+  | The name matches a control and the text drawn inside it | One target, not an ambiguity - the outer control is tapped                                                                                                         |
+  | Nothing answers to it                                   | **Fails, exit 1**, listing what CAN be tapped right now, so you can fix the name in one round                                                                      |
+  | It is below the fold                                    | **Fails, exit 1**, with how far down it is - scroll with `ao sim drag`, read again, then tap                                                                       |
+  | It is disabled                                          | **Fails, exit 1** - tapping it would report success and change nothing. The message gives you the coordinate to override with if the app is wrong about the state. |
+  | The app cannot answer at all                            | **Fails, exit 1**, saying its main thread is blocked - the same diagnosis `ao sim ax` gives                                                                        |
+
+  Matching ignores case and surrounding spaces. `--label` and `--id` are separate namespaces: an identifier is set for automation and is stable, a label is copy that changes.
+
+- **`ao sim type` puts the characters you asked for into the field - by whichever route can actually do that, and it tells you which.** The keys it can send are US-keyboard key presses and the SIMULATOR decides what each one produces. Simulator.app ships with _I/O > Keyboard > "Use the Same Keyboard Language as macOS"_ ticked, so a Mac set to Thai gives the simulator a Thai keyboard and `ao sim type "fa12345"` would arrive as `ดฟๅ/_ภถ`. So:
+
+  | Situation                                       | What happens                                                                                  | Output says             |
+  | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
+  | The simulator's keyboard sends US ASCII         | Key presses - the truer simulation, since an app sees each keystroke                          | `Typed …`               |
   | It would remap them, or will not say what it is | The text goes through the simulator's **pasteboard**, and is **checked on screen afterwards** | `Pasted …` + the reason |
-  | The text is non-ASCII (Thai, emoji, accents) | Pasteboard - no US keyboard key can send those at all | `Pasted …` |
-  | Neither route can deliver | **Fails, exit 1** - nothing is claimed that did not happen | - |
+  | The text is non-ASCII (Thai, emoji, accents)    | Pasteboard - no US keyboard key can send those at all                                         | `Pasted …`              |
+  | Neither route can deliver                       | **Fails, exit 1** - nothing is claimed that did not happen                                    | -                       |
 
   Two things this protects you from, and they are why the command is fussy: the failure is **selective** (fields that force an ASCII keyboard - email, URL - came out right while ordinary and secure fields did not, so it looked like bad test data rather than a broken tool), and in a **secure field the characters are hidden behind dots**, so you cannot see the damage or read it back. A worker already lost time concluding a perfectly good QA account was invalid.
 
@@ -371,10 +393,10 @@ ao sim ax                              # confirm what actually happened
 
   **Two caveats worth knowing.** A pasted field receives one paste, not N keystrokes, so an app with live validation or a character counter behaves differently - use `--raw-keys` when you need real key presses. And while the paste happens, your text sits briefly on the **guest's** pasteboard, where any app on that simulator could read it; it is put back afterwards, and if it cannot be, the command says so loudly.
 
-  | Flag | What it promises |
-  |---|---|
-  | *(none)* | The characters arrive. Route chosen per device, and reported. |
-  | `--paste` | Always the pasteboard. |
+  | Flag         | What it promises                                                                                                                        |
+  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+  | _(none)_     | The characters arrive. Route chosen per device, and reported.                                                                           |
+  | `--paste`    | Always the pasteboard.                                                                                                                  |
   | `--raw-keys` | Key presses, and only key presses - whatever the simulator makes of them. This is how you deliberately enter Thai text on a Thai guest. |
 
   A field that reformats what it receives (a phone or card mask) can make the check fail on a paste that actually worked - the message says so and tells you to read it back with `ao sim ax`.
