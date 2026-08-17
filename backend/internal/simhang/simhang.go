@@ -140,19 +140,21 @@ func sampleMainThread(ctx context.Context, run Runner, pid int, duration, interv
 
 // stack is the main thread's dominant call chain in one sample report.
 type stack struct {
-	// frames is leaf first, deepest frames only.
+	// frames is what a caller shows: leaf first, one frame per binary the
+	// stack passes through.
 	frames []string
+	// full is the whole chain, leaf first. Matching is done against this, so
+	// what is recognised does not depend on what is displayed.
+	full []frame
 	// total is how many samples the thread contributed, leafCount how many
 	// ended in this exact chain. They are equal for a thread that never moved.
 	total     int
 	leafCount int
 }
 
-// maxFrames is how much of the chain is kept. The leaf alone is usually a libc
-// primitive - `write` says nothing on its own - and it takes several callers to
-// reach the frame that names the subsystem: write <- _swrite <- fwrite <-
-// _Stdout.write <- _debugPrint_unlocked <- debugPrint is the whole story, and
-// only the last two frames tell it.
+// maxFrames is how many frames are shown. The leaf alone is usually a libc
+// primitive - `write` says nothing on its own - and the frame that names the
+// subsystem can be a long way above it.
 const maxFrames = 6
 
 // runLoopWaitFrames are the frames a healthy iOS main thread is parked in
@@ -165,12 +167,12 @@ var runLoopWaitFrames = []string{
 }
 
 func (s stack) runLoopWait() bool {
-	if len(s.frames) == 0 {
+	if len(s.full) == 0 {
 		return false
 	}
 	leafIsWait := false
-	for _, frame := range runLoopWaitFrames {
-		if s.frames[0] == frame {
+	for _, name := range runLoopWaitFrames {
+		if s.full[0].name == name {
 			leafIsWait = true
 		}
 	}
@@ -180,12 +182,36 @@ func (s stack) runLoopWait() bool {
 	// A main thread can also sit in mach_msg for a synchronous XPC call it will
 	// never get an answer to, which IS blocked. The run loop's own wait is the
 	// one with the run loop in it.
-	for _, frame := range s.frames {
-		if strings.Contains(frame, "CFRunLoop") {
+	for _, f := range s.full {
+		if strings.Contains(f.name, "CFRunLoop") {
 			return true
 		}
 	}
 	return false
+}
+
+// summarize picks the frames worth showing: the leaf, and then one frame each
+// time the stack crosses into another binary.
+//
+// A blocked write is six frames of libc before anything meaningful appears
+// (__write_nocancel <- __swrite <- _swrite <- __sflush <- __sfvwrite <-
+// fwrite), and a caller that shows the first six shows only plumbing. One frame
+// per image reaches the app's OWN code, which is the frame that says which part
+// of the app is stuck.
+func summarize(full []frame) []string {
+	out := make([]string, 0, maxFrames)
+	lastImage := ""
+	for i, f := range full {
+		if len(out) == maxFrames {
+			break
+		}
+		if i > 0 && f.image == lastImage {
+			continue
+		}
+		lastImage = f.image
+		out = append(out, f.name)
+	}
+	return out
 }
 
 // stdoutWriteFrames are the calls a `print` goes through on its way to a pipe
@@ -196,9 +222,9 @@ var stdoutWriteFrames = []string{
 }
 
 func (s stack) stdoutWrite() bool {
-	for _, frame := range s.frames {
+	for _, f := range s.full {
 		for _, marker := range stdoutWriteFrames {
-			if strings.Contains(frame, marker) {
+			if strings.Contains(f.name, marker) {
 				return true
 			}
 		}
@@ -272,7 +298,7 @@ func parseMainThread(report string) (stack, bool) {
 	// current frame are the nodes after it, before the next node at or above
 	// its own indentation.
 	result := stack{total: thread[0].count}
-	var chain []string
+	var chain []frame
 	current := 0
 	for {
 		best, bestCount := -1, -1
@@ -290,7 +316,7 @@ func parseMainThread(report string) (stack, bool) {
 		if best < 0 {
 			break
 		}
-		chain = append(chain, frameName(thread[best].symbol))
+		chain = append(chain, newFrame(thread[best].symbol))
 		result.leafCount = thread[best].count
 		current = best
 	}
@@ -299,30 +325,39 @@ func parseMainThread(report string) (stack, bool) {
 	}
 	// Leaf first: the call that is not returning is the headline, its callers
 	// are the context.
-	for i := len(chain) - 1; i >= 0 && len(result.frames) < maxFrames; i-- {
-		result.frames = append(result.frames, chain[i])
+	for i := len(chain) - 1; i >= 0; i-- {
+		result.full = append(result.full, chain[i])
 	}
+	result.frames = summarize(result.full)
 	return result, true
 }
 
-// frameName is the symbol without sample's own annotations: the image it came
-// from, the offset into it, and the address.
-func frameName(symbol string) string {
+// frame is one call, and which binary it is in. The binary matters as much as
+// the name: it is what separates the app's own code from the plumbing under it.
+type frame struct {
+	name  string
+	image string
+}
+
+// newFrame reads a call graph symbol, dropping sample's own annotations: the
+// offset into the image and the address.
+func newFrame(symbol string) frame {
 	name := symbol
 	if i := strings.Index(name, "  (in "); i >= 0 {
 		image := name[i+len("  (in "):]
+		if end := strings.Index(image, ")"); end >= 0 {
+			image = image[:end]
+		}
 		name = strings.TrimSpace(name[:i])
 		// An unsymbolicated frame is still worth naming by its image: "??? (in
 		// Nimbus)" says the app's own code, which is the useful half.
 		if name == "???" {
-			if end := strings.Index(image, ")"); end >= 0 {
-				name = "??? (in " + image[:end] + ")"
-			}
+			name = "??? (in " + image + ")"
 		}
-		return name
+		return frame{name: name, image: image}
 	}
 	if i := strings.Index(name, "  ["); i >= 0 {
 		name = name[:i]
 	}
-	return strings.TrimSpace(name)
+	return frame{name: strings.TrimSpace(name)}
 }

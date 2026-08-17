@@ -139,13 +139,20 @@ func TestDiagnose_BlockedOnStdoutIsReportedWithTheBlockingFrame(t *testing.T) {
 	if got.Samples != 10 {
 		t.Fatalf("samples = %d, want the confirming run's own count", got.Samples)
 	}
-	// The frames are the evidence: naming only the leaf ("write") says nothing
-	// about which subsystem is stuck.
+	// The frames are the evidence, and they have to reach past the plumbing:
+	// naming only the leaf ("write") says nothing about which subsystem is
+	// stuck, and six frames of libc say no more. One frame per binary reaches
+	// the app's OWN code, which is the frame that identifies the screen.
 	joined := strings.Join(got.Frames, " <- ")
-	for _, want := range []string{"write", "_Stdout.write", "debugPrint"} {
+	for _, want := range []string{"write", "_Stdout.write", "Nimbus.PortfolioView.body.getter"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("frames = %q, want %q in the chain", joined, want)
 		}
+	}
+	// libsystem_c contributes fwrite AND _swrite; only one of them is worth a
+	// line, or the app's own frame never fits.
+	if strings.Contains(joined, "fwrite") && strings.Contains(joined, "_swrite") {
+		t.Fatalf("frames = %q, want one frame per binary rather than a run of plumbing", joined)
 	}
 }
 

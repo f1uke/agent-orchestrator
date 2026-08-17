@@ -69,12 +69,25 @@ type processStream struct {
 
 func (s *processStream) Read(p []byte) (int, error) { return s.out.Read(p) }
 
+// Close stops the child and ends the read.
+//
+// Closing OUR end of the pipe is not tidiness, it is the only thing that ends
+// the read: `simctl spawn` hands this descriptor to the process it starts
+// INSIDE the simulator, which is a child of the guest's launchd. Killing simctl
+// therefore does not close the write end - the guest process still holds it -
+// and a reader waiting for EOF waits forever. Found exactly that way: an
+// interrupted `ao sim log --follow` sat there until it was killed outright.
+//
+// Closing it from another goroutine while a read is in flight is safe; the read
+// returns "file already closed", which the caller treats as the end it asked
+// for. It also ends the guest process, whose next write to the pipe now fails.
 func (s *processStream) Close() error {
 	s.killOnce.Do(func() {
 		s.stopped = true
 		if s.cmd.Process != nil {
 			_ = s.cmd.Process.Kill()
 		}
+		_ = s.out.Close()
 	})
 	s.wait()
 	return nil
