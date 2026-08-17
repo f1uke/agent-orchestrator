@@ -332,7 +332,7 @@ func TestTakeOver_LeavesAGestureInFlightAlone(t *testing.T) {
 	}
 
 	// The gesture finishes and the device can then be taken.
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release hold: %v", err)
 	}
 	if _, err := svc.TakeOver(context.Background(), second, udidProMax, 0); err != nil {
@@ -361,7 +361,7 @@ func TestTakeOver_RetiresThePreviousHoldersToken(t *testing.T) {
 		t.Fatalf("take over: %v", err)
 	}
 
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err == nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err == nil {
 		t.Fatal("a token from before the takeover must not be redeemable against the new lease")
 	}
 }

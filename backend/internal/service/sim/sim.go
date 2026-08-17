@@ -94,7 +94,7 @@ type Manager interface {
 	// which session may drive the device, the hold says whether a gesture is in
 	// flight, and both are needed because one session can run two commands.
 	AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, intent GestureIntent) (domain.SimHold, error)
-	ReleaseHold(ctx context.Context, udid, token string, performed bool) error
+	ReleaseHold(ctx context.Context, udid, token string, outcome GestureOutcome) error
 }
 
 // Store is the persistence surface the service owns; *sqlite.Store satisfies it.

@@ -129,8 +129,8 @@ func (d *Drags) Begin(
 	}); err != nil {
 		// The touch never landed, so there is nothing to lift - but the hold was
 		// granted and must not be kept. Nothing reached the device, so this was
-		// not performed.
-		holder.Release(ctx, udid, token, false)
+		// not performed, and a drag that never started has no end to report.
+		holder.Release(ctx, udid, token, Outcome{})
 		return &FailedError{Action: "drag", Cause: err}
 	}
 
@@ -275,7 +275,15 @@ func (d *Drags) finish(ctx context.Context, held *drag, at simbridge.Point, comp
 	// The hold is given back whether or not the lift worked. A hold kept because
 	// the lift failed would leave the device unusable by anyone, on top of a
 	// finger that is already down.
-	held.holder.Release(ctx, held.udid, held.token, completed)
+	//
+	// at is where the finger actually came up, and it is carried back with the
+	// release because this is the first moment anybody knows it: the hold was
+	// taken on the finger going down, so a recording holds a step with a start
+	// and no end until here. For a completed drag it is the end the caller
+	// asked for; for an abandoned one the release is not performed and the
+	// stashed step is dropped rather than written, so the point is never used
+	// to describe a gesture nobody finished.
+	held.holder.Release(ctx, held.udid, held.token, Outcome{Performed: completed, End: &at})
 	if err != nil {
 		return &FailedError{Action: "drag", Cause: err, LiftErr: err}
 	}

@@ -243,7 +243,7 @@ func TestSimRecordStop_WithEntryPutsRunFlowFirst(t *testing.T) {
 		t.Fatalf("read flow: %v", err)
 	}
 	content := string(data)
-	runFlowIdx := strings.Index(content, "- runFlow: ../flows/sign-in.yaml")
+	runFlowIdx := strings.Index(content, `- runFlow: "../flows/sign-in.yaml"`)
 	tapIdx := strings.Index(content, "tapOn:")
 	if runFlowIdx < 0 {
 		t.Fatalf("flow missing the entry point:\n%s", content)
@@ -309,6 +309,75 @@ func TestSimRecordStop_DuplicateLabelTapKeepsTheRecordedIndex(t *testing.T) {
 	}
 	if strings.Contains(content, "index: 0") {
 		t.Fatalf("flow fell back to index 0 - the wrong element - instead of the recorded index:\n%s", content)
+	}
+}
+
+// A recorded selector is STORED escaped (Maestro matches text as a regex), so
+// re-emitting one has to keep it escaped where it is matched on and unescape
+// it where a human reads it. scrollUntilVisible is the second kind: render.go
+// says the scroll target is the plain label, and feeding it the stored text
+// emitted `element: "See all \\(12\\)"` - a search for backslashes that are
+// not in the label. The tapOn-shaped assertions elsewhere never saw this
+// because no test used a label with metacharacters in it.
+const stopBodyWithOffScreenEscapedTap = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
+	`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
+	`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"See all \\(12\\)","selectorRung":1,` +
+	`"ambiguity":1,"offScreen":true,"x":0.5,"y":0.7}]}`
+
+func TestSimRecordStop_OffScreenEscapedSelectorScrollsToThePlainLabel(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	daemon := newSimDaemon(t, cfg)
+	daemon.recordStopBody = stopBodyWithOffScreenEscapedTap
+
+	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	data, err := os.ReadFile(lines[len(lines)-1])
+	if err != nil {
+		t.Fatalf("read flow: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `    element: "See all (12)"`) {
+		t.Fatalf("scrollUntilVisible must search for the label a human reads:\n%s", content)
+	}
+	if strings.Contains(content, `element: "See all \\(12\\)"`) {
+		t.Fatalf("the escaped pattern reached the scroll target:\n%s", content)
+	}
+}
+
+// The on-screen half: the selector itself stays escaped, because that is what
+// Maestro matches on - and the "# escaped" comment comes back too. Escaped has
+// no column of its own; it is recovered by unescaping the stored text, which
+// is what makes it safe not to persist.
+const stopBodyWithEscapedTap = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
+	`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
+	`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"See all \\(12\\)","selectorRung":1,` +
+	`"ambiguity":1,"x":0.5,"y":0.7}]}`
+
+func TestSimRecordStop_EscapedSelectorKeepsItsEscapingAndExplainsIt(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	daemon := newSimDaemon(t, cfg)
+	daemon.recordStopBody = stopBodyWithEscapedTap
+
+	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	data, err := os.ReadFile(lines[len(lines)-1])
+	if err != nil {
+		t.Fatalf("read flow: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `- tapOn: "See all \\(12\\)"`) {
+		t.Fatalf("the matcher must keep the escaping it was recorded with:\n%s", content)
+	}
+	if !strings.Contains(content, "# escaped: the label contains regex characters") {
+		t.Fatalf("an escaped selector must carry its explanation:\n%s", content)
 	}
 }
 

@@ -149,3 +149,75 @@ func TestFor_ScrollDirectionFollowsTheBox(t *testing.T) {
 		})
 	}
 }
+
+// A by-name tap that matched several elements gets no Index - which candidate
+// was hit is genuinely unknown - but it must still be escaped exactly like a
+// unique match: Maestro matches text as a regex, and this is the one path that
+// already could not tell its candidates apart, so relaxing the escaping here
+// widens a selector that is ambiguous to begin with.
+func TestForAmbiguousText_EscapesLikeForDoes(t *testing.T) {
+	got := simflow.ForAmbiguousText("  Continue.  ", 3)
+	if got.Rung != simflow.RungText {
+		t.Fatalf("Rung = %v, want RungText", got.Rung)
+	}
+	if got.Text != `Continue\.` {
+		t.Fatalf("Text = %q, want the escaped label - an unescaped %q also matches %q", got.Text, "Continue.", "Continue!")
+	}
+	if !got.Escaped {
+		t.Fatal("Escaped must be set, or the flow carries backslashes with no explanation of why")
+	}
+	if got.Ambiguity != 3 {
+		t.Fatalf("Ambiguity = %d, want 3", got.Ambiguity)
+	}
+	if got.Index != 0 {
+		t.Fatalf("Index = %d, want 0 - no index may be invented for a match nobody could tell apart", got.Index)
+	}
+}
+
+func TestForAmbiguousText_LeavesAPlainLabelAlone(t *testing.T) {
+	got := simflow.ForAmbiguousText("Continue", 2)
+	if got.Text != "Continue" || got.Escaped {
+		t.Fatalf("got %+v, want the label untouched and Escaped false", got)
+	}
+}
+
+// Unescape is the inverse of the escaping every stored text selector went
+// through, and is what recovers the label a human reads (scrollUntilVisible
+// searches for that, not for a pattern) plus the fact that it was escaped.
+func TestUnescape_InvertsTheEscaping(t *testing.T) {
+	cases := []struct {
+		name       string
+		label      string
+		wantEscape bool
+	}{
+		{"no metacharacters", "See all", false},
+		{"parens", "See all (12)", true},
+		{"a full stop", "Continue.", true},
+		{"a backslash of its own", `C:\Users`, true},
+		{"every metacharacter", `(){}[].+*?^$|\`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			el := simbridge.Element{Path: "0.0", Label: tc.label}
+			stored := simflow.For(tree(el), el)
+			if stored.Escaped != tc.wantEscape {
+				t.Fatalf("For escaped = %v, want %v for %q", stored.Escaped, tc.wantEscape, tc.label)
+			}
+			plain, escaped := simflow.Unescape(stored.Text)
+			if plain != tc.label {
+				t.Fatalf("Unescape(%q) = %q, want the original label %q", stored.Text, plain, tc.label)
+			}
+			if escaped != tc.wantEscape {
+				t.Fatalf("Unescape reported escaped = %v, want %v", escaped, tc.wantEscape)
+			}
+		})
+	}
+}
+
+// A backslash that escape could not have produced is left exactly as it is
+// rather than guessed at.
+func TestUnescape_LeavesAnUnknownEscapeAlone(t *testing.T) {
+	if plain, escaped := simflow.Unescape(`a\nb`); plain != `a\nb` || escaped {
+		t.Fatalf("Unescape(%q) = %q escaped=%v, want it untouched", `a\nb`, plain, escaped)
+	}
+}

@@ -115,7 +115,7 @@ func TestAcquireHold_ReadsTheScreenAndResolvesASelectorWhenRecording(t *testing.
 	if reader.calls != 1 {
 		t.Fatalf("AX was called %d times with a recording open; want 1", reader.calls)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestRecordIntent_ByNameTapRecordsTheRequestedSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestRecordIntent_ByIDTapRecordsTheRequestedSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -246,7 +246,7 @@ func TestRecordIntent_AmbiguousByNameTapRecordsTheNameAndTheCount(t *testing.T) 
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -272,6 +272,57 @@ func TestRecordIntent_AmbiguousByNameTapRecordsTheNameAndTheCount(t *testing.T) 
 	}
 }
 
+// The escaping half of that rule, which the test above cannot see because
+// "Continue" has no metacharacters in it: an ambiguous by-name tap must go
+// through the SAME escaping a unique match gets. Maestro matches text as a
+// regex, so a stored "Continue." would emit `- tapOn: "Continue."` and also
+// match "Continue!" - over-matching on the one path that already could not
+// tell its candidates apart.
+func TestRecordIntent_AmbiguousByNameTapEscapesTheNameItRecords(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.app.a"},
+		Elements: []simbridge.Element{
+			{
+				Path: "0", Label: "Continue.", Enabled: true,
+				Box: &simbridge.Box{X1: 0.1, Y1: 0.1, X2: 0.5, Y2: 0.3},
+				Tap: &simbridge.Point{X: 0.3, Y: 0.2},
+			},
+			{
+				Path: "1", Label: "Continue.", Enabled: true,
+				Box: &simbridge.Box{X1: 0.1, Y1: 0.5, X2: 0.5, Y2: 0.7},
+				Tap: &simbridge.Point{X: 0.3, Y: 0.6},
+			},
+		},
+	}}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{Kind: "tap", Label: "Continue."})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != `Continue\.` {
+		t.Fatalf("selector = %q, want the escaped name %q", steps[0].Selector, `Continue\.`)
+	}
+	if steps[0].Ambiguity != 2 || steps[0].SelectorRung != int64(simflow.RungText) {
+		t.Fatalf("step = %+v, want RungText with ambiguity 2", steps[0])
+	}
+}
+
 // A gesture that was attempted and failed is not a step. Recording at acquire
 // alone would write it down as if it had happened.
 func TestReleaseHold_PerformedFalseAppendsNothing(t *testing.T) {
@@ -286,7 +337,7 @@ func TestReleaseHold_PerformedFalseAppendsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, false); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -296,6 +347,80 @@ func TestReleaseHold_PerformedFalseAppendsNothing(t *testing.T) {
 	}
 	if len(steps) != 0 {
 		t.Fatalf("steps = %d, want 0 for a gesture that did not happen", len(steps))
+	}
+}
+
+// A drag takes its hold on `drag-begin`, whose intent carries a start and no
+// end at all. Without the release carrying the real end point, the step is
+// appended with ToX/ToY of zero and the emitted flow reads
+// `end: "0%,0%"` - a coordinate nobody ever touched, in the one capability
+// this whole feature exists to serve.
+func TestReleaseHold_ADragsEndPointComesFromTheRelease(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "drag-begin", X: 0.3, Y: 0.2})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	end := simbridge.Point{X: 0.42, Y: 0.88}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token,
+		sim.GestureOutcome{Performed: true, End: &end}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	step := steps[0]
+	if step.X != 0.3 || step.Y != 0.2 {
+		t.Fatalf("start = (%v,%v), want the point the finger went down at (0.3,0.2)", step.X, step.Y)
+	}
+	if step.ToX != end.X || step.ToY != end.Y {
+		t.Fatalf("end = (%v,%v), want the point the release reported (%v,%v) - never a fabricated 0,0",
+			step.ToX, step.ToY, end.X, end.Y)
+	}
+}
+
+// The other half of that rule: a drag that was abandoned rather than ended
+// deliberately is released as not performed, so no step is written at all.
+// There is therefore no case where a recorded step exists without a true end.
+func TestReleaseHold_AnAbandonedDragWritesNoStepAtAll(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "drag-begin", X: 0.3, Y: 0.2})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	// Where the watchdog lifted it is known, but the human never ended the
+	// drag there, so it is not performed.
+	lifted := simbridge.Point{X: 0.31, Y: 0.21}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token,
+		sim.GestureOutcome{End: &lifted}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 0 {
+		t.Fatalf("steps = %d, want 0 for a drag nobody finished", len(steps))
 	}
 }
 
@@ -323,7 +448,7 @@ func TestReleaseHold_PerformedTrueAppendsTheStashedStep(t *testing.T) {
 		t.Fatalf("steps before release = %d, want 0", len(mid))
 	}
 
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -368,7 +493,7 @@ func TestAcquireHold_OneTokenProducesOneStepAcrossManyRequests(t *testing.T) {
 		}
 	}
 
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -395,7 +520,7 @@ func TestAcquireHold_ScreenReadFailureStillGrantsTheHold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a screen-read failure must not fail the hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -436,7 +561,7 @@ func TestStopRecording_ReturnsTheStepsInOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("hold %d: %v", i, err)
 		}
-		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 			t.Fatalf("release %d: %v", i, err)
 		}
 	}
@@ -469,7 +594,7 @@ func TestAcquireHold_MarksScreenChangeWhenTheForegroundAppChanged(t *testing.T) 
 	if err != nil {
 		t.Fatalf("hold 1: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release 1: %v", err)
 	}
 
@@ -479,7 +604,7 @@ func TestAcquireHold_MarksScreenChangeWhenTheForegroundAppChanged(t *testing.T) 
 	if err != nil {
 		t.Fatalf("hold 2: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release 2: %v", err)
 	}
 

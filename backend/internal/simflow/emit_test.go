@@ -73,7 +73,7 @@ func TestEmit_EntryOptionEmitsRunFlowAsTheFirstStep(t *testing.T) {
 	afterHeader := got[headerEnd:]
 	nl := strings.Index(afterHeader, "\n")
 	firstStepLine := strings.TrimSpace(afterHeader[nl+1:])
-	if firstStepLine != "- runFlow: ../flows/login.yaml" {
+	if firstStepLine != `- runFlow: "../flows/login.yaml"` {
 		t.Fatalf("first step after the header must be runFlow, got %q from:\n%s", firstStepLine, got)
 	}
 }
@@ -306,5 +306,142 @@ func TestEmit_EscapedSelectorIsValidYAML(t *testing.T) {
 	}
 	if !strings.Contains(got, `"See all \\(12\\)"`) {
 		t.Fatalf("want the backslash doubled for YAML, got:\n%s", got)
+	}
+}
+
+// The combination neither escaping test covered on its own, and the one that
+// catches an escaped label leaking into the wrong place: a step that BOTH
+// changed screens and resolved to a label full of regex metacharacters. The
+// wait and the tap must both name the escaped text (Maestro matches text as a
+// regex, so an unescaped "See all (12)" would match far more than it should),
+// while the scroll target - which is a search a human reads - stays plain.
+func TestEmit_EscapedSelectorOnAScreenChangeIsEscapedInBothTheWaitAndTheTap(t *testing.T) {
+	steps := []simflow.Step{
+		{
+			Seq: 1, Kind: simflow.StepTap, ScreenChange: true,
+			Choice: simflow.Choice{Rung: simflow.RungText, Text: `See all \(12\)`, Escaped: true, Ambiguity: 1},
+			Plain:  "See all (12)",
+		},
+	}
+	got, err := simflow.Emit(steps, baseOpts())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"- extendedWaitUntil:\n",
+		`    visible: "See all \\(12\\)"` + "\n",
+		`- tapOn: "See all \\(12\\)"` + "\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"See all (12)"`) {
+		t.Fatalf("the raw label reached a matcher, which over-matches, got:\n%s", got)
+	}
+}
+
+// An off-screen escaped label is the other half of that rule: the selector
+// stays escaped, but scrollUntilVisible searches for the label as a human
+// reads it (render.go's own stated rule), so the plain text is what goes in
+// `element:`.
+func TestEmit_OffScreenEscapedSelectorScrollsToThePlainLabel(t *testing.T) {
+	steps := []simflow.Step{
+		{
+			Seq: 1, Kind: simflow.StepTap,
+			Choice: simflow.Choice{
+				Rung: simflow.RungText, Text: `See all \(12\)`, Escaped: true, Ambiguity: 1,
+				OffScreen: true, ScrollDirection: simflow.ScrollDown,
+			},
+			Plain: "See all (12)",
+		},
+	}
+	got, err := simflow.Emit(steps, baseOpts())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, `    element: "See all (12)"`+"\n") {
+		t.Fatalf("the scroll target must be the plain label, got:\n%s", got)
+	}
+	if strings.Contains(got, `element: "See all \\(12\\)"`) {
+		t.Fatalf("an escaped pattern reached the scroll target, got:\n%s", got)
+	}
+}
+
+// A type or a button press carries no coordinates at all, so the selector
+// recorded next to it was hit-tested from (0,0) - whatever sits in the screen's
+// top-left corner, which the step never touched. Waiting for that element is a
+// wait on something unrelated: it passes for the wrong reason or fails for one.
+func TestEmit_ScreenChangeOnAStepWithNoTargetEmitsNoWait(t *testing.T) {
+	cases := []struct {
+		name string
+		step simflow.Step
+		want string // the step itself must still be emitted
+	}{
+		{
+			name: "type",
+			step: simflow.Step{
+				Seq: 1, Kind: simflow.StepType, ScreenChange: true, Text: "hunter2",
+				Choice: simflow.Choice{Rung: simflow.RungText, Text: "9:41", Ambiguity: 1},
+				Plain:  "9:41",
+			},
+			want: `- inputText: "hunter2"`,
+		},
+		{
+			name: "button",
+			step: simflow.Step{
+				Seq: 1, Kind: simflow.StepButton, ScreenChange: true, Detail: "home",
+				Choice: simflow.Choice{Rung: simflow.RungID, ID: "status-bar-clock"},
+			},
+			want: "- pressKey: Home",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := simflow.Emit([]simflow.Step{tc.step}, baseOpts())
+			if err != nil {
+				t.Fatalf("Emit: %v", err)
+			}
+			if strings.Contains(got, "extendedWaitUntil") {
+				t.Fatalf("a %s step targets no element, so it must get no wait, got:\n%s", tc.name, got)
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("the step itself must still be emitted, want %q, got:\n%s", tc.want, got)
+			}
+		})
+	}
+}
+
+// A tap that DID target an element still gets its wait - the gate above must
+// not swallow the case the wait exists for.
+func TestEmit_ScreenChangeOnATapStillWaits(t *testing.T) {
+	steps := []simflow.Step{
+		{
+			Seq: 1, Kind: simflow.StepTap, ScreenChange: true,
+			Choice: simflow.Choice{Rung: simflow.RungText, Text: "Accessibility", Ambiguity: 1},
+			Plain:  "Accessibility",
+		},
+	}
+	got, err := simflow.Emit(steps, baseOpts())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, `    visible: "Accessibility"`) {
+		t.Fatalf("a tap onto a new screen must still wait for it, got:\n%s", got)
+	}
+}
+
+// runFlow is a path, and a path holding a colon or a '#' is ordinary on disk
+// and unparseable as a bare YAML scalar - which would break the whole
+// document, not just this line.
+func TestEmit_EntryPathIsQuoted(t *testing.T) {
+	opts := baseOpts()
+	opts.Entry = "../flows/login: step #1.yaml"
+	got, err := simflow.Emit(nil, opts)
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, `- runFlow: "../flows/login: step #1.yaml"`+"\n") {
+		t.Fatalf("the entry path must be quoted, got:\n%s", got)
 	}
 }

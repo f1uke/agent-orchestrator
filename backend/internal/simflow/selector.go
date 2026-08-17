@@ -78,12 +78,19 @@ type Choice struct {
 	ScrollDirection ScrollDirection
 }
 
-// metacharacter is the set that makes a label behave as a pattern rather than a
-// literal. Maestro compiles the string as a regex and also compares it
+// metacharacters is the set that makes a label behave as a pattern rather than
+// a literal. Maestro compiles the string as a regex and also compares it
 // literally, so an unescaped label still matches itself - but an unescaped
 // "Continue." would ALSO match "Continue!", and tapping the wrong element is
 // worse than an ugly string.
-var metacharacter = regexp.MustCompile(`[(){}\[\].+*?^$|\\]`)
+//
+// It is written once, as the set itself: escape tests a whole label with the
+// character class built from it, and Unescape walks a byte at a time. Two
+// copies of this list would be two things to keep in step, and the failure of
+// disagreeing is silent.
+const metacharacters = `(){}[].+*?^$|\`
+
+var metacharacter = regexp.MustCompile(`[` + regexp.QuoteMeta(metacharacters) + `]`)
 
 // For picks the best selector for el, using snap only to count collisions.
 func For(snap simbridge.Snapshot, el simbridge.Element) Choice {
@@ -115,6 +122,49 @@ func For(snap simbridge.Snapshot, el simbridge.Element) Choice {
 	}
 
 	return c
+}
+
+// ForAmbiguousText is the Choice for a label that WAS searched for by name and
+// matched several elements - the one case a caller cannot get from For,
+// because there is no single element to pass it.
+//
+// It exists so that case cannot skip the escaping every other path gets by
+// going through For. Maestro compiles a text matcher as a regex, so an
+// unescaped "Continue." also matches "Continue!", and tapping the wrong
+// element is precisely the failure escaping exists to prevent - a by-name tap
+// that could not be told apart from its neighbours is the LAST place to relax
+// it. No Index is set, deliberately: which candidate was actually hit is
+// unknown, and inventing one would substitute an element nobody chose.
+func ForAmbiguousText(label string, ambiguity int) Choice {
+	text, escaped := escape(strings.TrimSpace(label))
+	return Choice{Rung: RungText, Text: text, Escaped: escaped, Ambiguity: ambiguity}
+}
+
+// Unescape recovers the plain label from text that went through escape - the
+// form every selector is STORED in (a recorded step keeps Choice.Text, which
+// is already escaped), and the form nothing that reads a label back wants.
+// scrollUntilVisible searches for the label a human reads, not a pattern.
+//
+// It is an exact inverse for anything escape produced: escape only ever
+// inserts a backslash before one of the metacharacters below, and a label
+// containing a backslash is itself escaped (a backslash IS one of them), so a
+// stored selector either has escaped pairs or no backslashes at all. A
+// backslash before anything else is left alone rather than guessed at.
+// escaped reports whether anything was actually unescaped, which is the fact
+// Render's "# escaped: ..." comment is written from.
+func Unescape(text string) (plain string, escaped bool) {
+	var b strings.Builder
+	b.Grow(len(text))
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\\' && i+1 < len(text) && strings.IndexByte(metacharacters, text[i+1]) >= 0 {
+			b.WriteByte(text[i+1])
+			escaped = true
+			i++
+			continue
+		}
+		b.WriteByte(text[i])
+	}
+	return b.String(), escaped
 }
 
 // matchingPaths lists, in tree order, the elements Maestro's text matcher would

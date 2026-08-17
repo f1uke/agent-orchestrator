@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 )
 
@@ -181,9 +182,9 @@ func (h *fakeHolder) Acquire(context.Context, string, time.Duration) (string, er
 	return "tok", nil
 }
 
-func (h *fakeHolder) Release(_ context.Context, _, _ string, performed bool) {
+func (h *fakeHolder) Release(_ context.Context, _, _ string, outcome simgesture.Outcome) {
 	h.released++
-	h.lastPerformed = performed
+	h.lastPerformed = outcome.Performed
 }
 
 func pasted(from, to string) *fakeDriver {

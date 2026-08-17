@@ -637,16 +637,20 @@ func (h *cliSimHolder) Acquire(ctx context.Context, udid string, ttl time.Durati
 // must not fail a gesture that already happened: the hold lapses on its own
 // within a minute either way.
 //
-// performed is passed on as the `performed` query parameter, which the daemon
-// defaults to true when it is absent - so it is only sent when false, keeping
-// the common case's request unchanged.
-func (h *cliSimHolder) Release(ctx context.Context, udid, token string, performed bool) {
+// outcome.Performed is passed on as the `performed` query parameter, which the
+// daemon defaults to true when it is absent - so it is only sent when false,
+// keeping the common case's request unchanged. outcome.End is not sent and has
+// nothing to send: the CLI composes every gesture it runs in full before
+// asking for the hold, so the end already travelled with the intent. Only a
+// drag has an end this side could not know up front, and the CLI drives no
+// drags - the desktop pane's drag never leaves the daemon.
+func (h *cliSimHolder) Release(ctx context.Context, udid, token string, outcome simgesture.Outcome) {
 	if token == "" {
 		return
 	}
 	path := "sessions/" + url.PathEscape(h.sessionID) + "/sim-leases/" + url.PathEscape(udid) +
 		"/hold/" + url.PathEscape(token)
-	if !performed {
+	if !outcome.Performed {
 		path += "?performed=false"
 	}
 	if err := h.ctx.deleteJSON(ctx, path, nil); err != nil {

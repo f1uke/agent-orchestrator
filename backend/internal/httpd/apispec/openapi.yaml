@@ -2935,6 +2935,20 @@ paths:
         schema:
           description: The token returned when the hold was taken.
           type: string
+      - description: 'Whether the gesture this hold covered actually happened. Defaults
+          to true when omitted. A session recording gestures on this device keeps
+          the step only when it did: a gesture that was attempted and failed must
+          not be written into the flow as if it had happened.'
+        in: query
+        name: performed
+        schema:
+          description: 'Whether the gesture this hold covered actually happened. Defaults
+            to true when omitted. A session recording gestures on this device keeps
+            the step only when it did: a gesture that was attempted and failed must
+            not be written into the flow as if it had happened.'
+          type:
+          - "null"
+          - boolean
       responses:
         "200":
           content:

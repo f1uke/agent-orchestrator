@@ -28,9 +28,9 @@ type recorder struct {
 	liftErr    error
 	ttl        time.Duration
 	performed  [][]simbridge.Event
-	// releasedPerformed is what each Release call was told about whether the
-	// gesture it covered actually happened, in call order.
-	releasedPerformed []bool
+	// releasedOutcomes is what each Release call was told about the gesture it
+	// covered - whether it happened, and where it ended - in call order.
+	releasedOutcomes []simgesture.Outcome
 }
 
 func (r *recorder) Acquire(_ context.Context, udid string, ttl time.Duration) (string, error) {
@@ -44,22 +44,29 @@ func (r *recorder) Acquire(_ context.Context, udid string, ttl time.Duration) (s
 	return "token-1", nil
 }
 
-func (r *recorder) Release(_ context.Context, udid, token string, performed bool) {
+func (r *recorder) Release(_ context.Context, udid, token string, outcome simgesture.Outcome) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.steps = append(r.steps, step{"release", udid + "/" + token})
-	r.releasedPerformed = append(r.releasedPerformed, performed)
+	r.releasedOutcomes = append(r.releasedOutcomes, outcome)
 }
 
-// lastReleasePerformed is what the most recent Release call was told, and
-// whether there has been one at all.
-func (r *recorder) lastReleasePerformed() (bool, bool) {
+// lastRelease is the most recent Release call's outcome, and whether there has
+// been one at all.
+func (r *recorder) lastRelease() (simgesture.Outcome, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.releasedPerformed) == 0 {
-		return false, false
+	if len(r.releasedOutcomes) == 0 {
+		return simgesture.Outcome{}, false
 	}
-	return r.releasedPerformed[len(r.releasedPerformed)-1], true
+	return r.releasedOutcomes[len(r.releasedOutcomes)-1], true
+}
+
+// lastReleasePerformed is what the most recent Release call was told about the
+// gesture happening, and whether there has been one at all.
+func (r *recorder) lastReleasePerformed() (bool, bool) {
+	outcome, ok := r.lastRelease()
+	return outcome.Performed, ok
 }
 
 func (r *recorder) AX(context.Context, string) (simbridge.Snapshot, error) {

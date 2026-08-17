@@ -50,6 +50,16 @@ func TestDrags_FollowTheFingerUnderOneHold(t *testing.T) {
 	if performed, ok := rec.lastReleasePerformed(); !ok || !performed {
 		t.Fatalf("a drag the caller ended must be released as performed: performed=%v ok=%v", performed, ok)
 	}
+	// The hold was taken when the finger went down, so nothing upstream knows
+	// where the drag ended until it does. The release is what carries that
+	// back; without it a recording keeps the begin's own point as the end.
+	outcome, ok := rec.lastRelease()
+	if !ok || outcome.End == nil {
+		t.Fatalf("a drag must report where it ended when its hold is released: %+v", outcome)
+	}
+	if *outcome.End != at(0.5, 0.5) {
+		t.Fatalf("released end = %+v, want the point the drag ended at (0.5,0.5)", *outcome.End)
+	}
 }
 
 // A move is the only thing in this package that reaches a device without taking

@@ -89,6 +89,14 @@ type SimHoldParam struct {
 	Token     string `path:"token" description:"The token returned when the hold was taken."`
 }
 
+// ReleaseSimHoldQuery is the query string of DELETE .../hold/{token}. It is a
+// query parameter rather than a body because every DELETE route in this
+// package takes its arguments that way; see releaseHold for why an absent or
+// unparseable value falls back to true.
+type ReleaseSimHoldQuery struct {
+	Performed *bool `query:"performed,omitempty" description:"Whether the gesture this hold covered actually happened. Defaults to true when omitted. A session recording gestures on this device keeps the step only when it did: a gesture that was attempted and failed must not be written into the flow as if it had happened."`
+}
+
 // StartSimRecordingInput is the body of POST .../sim-recordings/{udid}.
 type StartSimRecordingInput struct {
 	Name string `json:"name,omitempty" description:"Optional label for the recording, e.g. the flow it will become."`
@@ -245,7 +253,14 @@ func (c *SimController) releaseHold(w http.ResponseWriter, r *http.Request) {
 			performed = parsed
 		}
 	}
-	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token"), performed); err != nil {
+	// No End: this route releases a hold taken for a gesture that was composed
+	// in full before it started, so its end already travelled with the intent.
+	// A drag - the one gesture whose end is not knowable up front - never
+	// reaches here: it is opened, followed and closed inside the daemon by
+	// internal/simgesture.Drags, which carries the real end point back with its
+	// own release.
+	outcome := simsvc.GestureOutcome{Performed: performed}
+	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token"), outcome); err != nil {
 		writeSimError(w, r, err)
 		return
 	}

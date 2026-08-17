@@ -120,14 +120,16 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 	b.WriteString("appId: ${APP_ID}\n---\n")
 	fmt.Fprintf(&b, "# recorded by ao sim at %s, device %s (%s)\n", opts.RecordedAt, opts.Device, opts.Runtime)
 	if opts.Entry != "" {
-		fmt.Fprintf(&b, "- runFlow: %s\n", opts.Entry)
+		// Quoted like every other scalar this package writes: a path holding a
+		// colon or a '#' is ordinary on disk and unparseable as bare YAML.
+		fmt.Fprintf(&b, "- runFlow: %q\n", opts.Entry)
 	} else {
 		b.WriteString("# add your own entry point above if this flow must start from a cold app,\n")
 		b.WriteString("#   e.g. `- runFlow: ../flows/<entry>.yaml`\n")
 	}
 
 	for _, step := range steps {
-		if step.ScreenChange {
+		if step.ScreenChange && actsOnAnElement(step.Kind) {
 			writeExtendedWait(&b, step.Choice)
 		}
 		if err := writeStep(&b, step); err != nil {
@@ -135,6 +137,22 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// actsOnAnElement says whether a step's Choice describes something the step
+// actually targeted - which is what makes a wait on it honest.
+//
+// A tap and a swipe both go to a place on screen, so the selector recorded for
+// them was resolved from that place. A type and a button press do not: their
+// intent carries no coordinates at all, so the recorder hit-tests (0,0) and
+// resolves whatever happens to sit in the top-left corner - a status bar
+// clock, usually. Waiting for THAT element to appear before typing is a wait
+// on something the step has nothing to do with, which is the same untruth as
+// an invented coordinate: it either passes for the wrong reason or fails for
+// one. The step itself is still emitted; only the wait in front of it is
+// dropped.
+func actsOnAnElement(kind StepKind) bool {
+	return kind == StepTap || kind == StepSwipe
 }
 
 // writeExtendedWait emits the "wait for the new screen" stanza (spec §8.1)

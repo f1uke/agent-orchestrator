@@ -115,6 +115,16 @@ func TestStartSimRecording_AfterStoppingTheFirstIsAllowed(t *testing.T) {
 		t.Fatalf("start first: out=%+v err=%v", out, err)
 	}
 
+	// The first recording captures something. Without this the test passed
+	// while the second recording inherited whatever the first had captured:
+	// the restart reuses this device's one recording row, so its steps outlive
+	// it unless the restart clears them.
+	for _, kind := range []string{"tap", "swipe"} {
+		if _, ok, err := s.AppendSimRecordingStep(ctx, testUDID, simRecordingStep(0, now, kind)); err != nil || !ok {
+			t.Fatalf("append %s to the first recording: ok=%v err=%v", kind, ok, err)
+		}
+	}
+
 	stoppedAt := now.Add(time.Minute)
 	if ok, err := s.StopSimRecording(ctx, testUDID, owner, stoppedAt); err != nil || !ok {
 		t.Fatalf("stop first: ok=%v err=%v", ok, err)
@@ -134,6 +144,29 @@ func TestStartSimRecording_AfterStoppingTheFirstIsAllowed(t *testing.T) {
 	}
 	if rec.Name != "second" || rec.StoppedAt != nil {
 		t.Fatalf("recording after restart = %+v, want the new open recording", rec)
+	}
+
+	// The whole point: a restarted recording starts empty. Inheriting the
+	// previous one's steps would put gestures nobody performed during this
+	// recording into the flow emitted from it - and re-recording is the
+	// sanctioned repair path for a flow that came out wrong, so this is the
+	// common case rather than an edge one.
+	steps, err := s.ListSimRecordingSteps(ctx, testUDID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if len(steps) != 0 {
+		t.Fatalf("steps after restarting = %+v, want none of the first recording's", steps)
+	}
+
+	// And the new recording numbers its own steps from one, rather than
+	// continuing the dead recording's sequence.
+	seq, ok, err := s.AppendSimRecordingStep(ctx, testUDID, simRecordingStep(0, stoppedAt, "tap"))
+	if err != nil || !ok {
+		t.Fatalf("append to the restarted recording: ok=%v err=%v", ok, err)
+	}
+	if seq != 1 {
+		t.Fatalf("first step of the restarted recording = seq %d, want 1", seq)
 	}
 }
 
@@ -355,5 +388,102 @@ func TestStartSimRecording_RaceAcrossStoresProducesExactlyOneWinner(t *testing.T
 		if !out.Granted && !out.Busy {
 			t.Fatalf("racer %d lost but was not told a recording is already open: %+v", i, out)
 		}
+	}
+}
+
+// A recording that outlives its owning session blocks the device for ever:
+// udid is the primary key and StartSimRecording refuses over a live
+// recording, so the next session on that simulator can never start one. Ending
+// the session must close it - enforced by the schema (a trigger on
+// sessions.is_terminated, 0040), not by any caller remembering to do it.
+//
+// Unlike the lease, which vanishes with its owner, the rows are KEPT: a lease
+// is permission and must not outlive the session, a recording is evidence and
+// should, because the flow is emitted from it after the fact (spec 10).
+func TestSimRecording_StoppedWhenOwningSessionTerminates(t *testing.T) {
+	ctx := context.Background()
+	s := newRecordingStore(t)
+	owner := seedSession(t, s, "mer")
+	next := seedSession(t, s, "mer")
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := s.AcquireSimLease(ctx, domain.SimLease{UDID: testUDID, SessionID: owner, AcquiredAt: now, ExpiresAt: now.Add(10 * time.Minute)}); err != nil {
+		t.Fatalf("acquire lease: %v", err)
+	}
+	if out, err := s.StartSimRecording(ctx, simRecording(testUDID, owner, "first", now), now); err != nil || !out.Granted {
+		t.Fatalf("start: out=%+v err=%v", out, err)
+	}
+	if _, ok, err := s.AppendSimRecordingStep(ctx, testUDID, simRecordingStep(0, now, "tap")); err != nil || !ok {
+		t.Fatalf("append: ok=%v err=%v", ok, err)
+	}
+
+	rec, ok, err := s.GetSession(ctx, owner)
+	if err != nil || !ok {
+		t.Fatalf("get session: ok=%v err=%v", ok, err)
+	}
+	endedAt := now.Add(time.Minute)
+	rec.IsTerminated = true
+	rec.UpdatedAt = endedAt
+	if err := s.UpdateSession(ctx, rec); err != nil {
+		t.Fatalf("terminate session: %v", err)
+	}
+
+	stored, ok, err := s.GetSimRecording(ctx, testUDID)
+	if err != nil || !ok {
+		t.Fatalf("the recording's rows must be kept when its session ends: ok=%v err=%v", ok, err)
+	}
+	if stored.StoppedAt == nil {
+		t.Fatalf("ending the owning session must close its recording, still open: %+v", stored)
+	}
+	if !stored.StoppedAt.Equal(endedAt) {
+		t.Fatalf("stoppedAt = %v, want the moment the session ended (%v)", stored.StoppedAt, endedAt)
+	}
+	if steps, err := s.ListSimRecordingSteps(ctx, testUDID); err != nil || len(steps) != 1 {
+		t.Fatalf("the captured steps must survive the session ending, got %+v (err=%v)", steps, err)
+	}
+
+	// And the device is genuinely usable again, not merely reported as closed:
+	// this is the failure the trigger exists to prevent.
+	if _, _, err := s.AcquireSimLease(ctx, domain.SimLease{UDID: testUDID, SessionID: next, AcquiredAt: endedAt, ExpiresAt: endedAt.Add(10 * time.Minute)}); err != nil {
+		t.Fatalf("acquire lease for the next session: %v", err)
+	}
+	out, err := s.StartSimRecording(ctx, simRecording(testUDID, next, "second", endedAt), endedAt)
+	if err != nil {
+		t.Fatalf("start second: %v", err)
+	}
+	if !out.Granted {
+		t.Fatalf("the next session must be able to record this device, got %+v", out)
+	}
+}
+
+// A recording only closes when the session it belongs to ends. Another
+// session ending on the same machine must not touch it.
+func TestSimRecording_AnotherSessionEndingLeavesItOpen(t *testing.T) {
+	ctx := context.Background()
+	s := newRecordingStore(t)
+	owner := seedSession(t, s, "mer")
+	bystander := seedSession(t, s, "mer")
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := s.AcquireSimLease(ctx, domain.SimLease{UDID: testUDID, SessionID: owner, AcquiredAt: now, ExpiresAt: now.Add(10 * time.Minute)}); err != nil {
+		t.Fatalf("acquire lease: %v", err)
+	}
+	if out, err := s.StartSimRecording(ctx, simRecording(testUDID, owner, "first", now), now); err != nil || !out.Granted {
+		t.Fatalf("start: out=%+v err=%v", out, err)
+	}
+
+	rec, _, err := s.GetSession(ctx, bystander)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	rec.IsTerminated = true
+	if err := s.UpdateSession(ctx, rec); err != nil {
+		t.Fatalf("terminate bystander: %v", err)
+	}
+
+	stored, ok, err := s.GetSimRecording(ctx, testUDID)
+	if err != nil || !ok {
+		t.Fatalf("get recording: ok=%v err=%v", ok, err)
+	}
+	if stored.StoppedAt != nil {
+		t.Fatalf("somebody else's session ending closed this recording: %+v", stored)
 	}
 }

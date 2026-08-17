@@ -426,17 +426,22 @@ func (h *leaseHolder) Acquire(ctx context.Context, udid string, ttl time.Duratio
 	return hold.Token, nil
 }
 
-func (h *leaseHolder) Release(ctx context.Context, udid, token string, performed bool) {
+func (h *leaseHolder) Release(ctx context.Context, udid, token string, outcome simgesture.Outcome) {
 	if token == "" {
 		return
 	}
-	// performed is simgesture's own verdict on whether the gesture actually
-	// reached the device (see internal/simgesture.Holder) - carried straight
-	// through, not overridden. A hold that could not be handed back lapses on
-	// its own within a minute either way, so this never turns a gesture that
-	// happened into a reported failure; it only ever affects what gets
-	// recorded.
-	_ = h.leases.ReleaseHold(ctx, udid, token, performed)
+	// The outcome is simgesture's own account of what the gesture did (see
+	// internal/simgesture.Outcome) - carried straight through, not overridden.
+	// Performed is its verdict on whether the gesture actually reached the
+	// device; End is where a drag's finger came up, which nothing knew when
+	// this hold was taken on the finger going down. A hold that could not be
+	// handed back lapses on its own within a minute either way, so this never
+	// turns a gesture that happened into a reported failure; it only ever
+	// affects what gets recorded.
+	_ = h.leases.ReleaseHold(ctx, udid, token, simsvc.GestureOutcome{
+		Performed: outcome.Performed,
+		End:       outcome.End,
+	})
 }
 
 // gestureIntentFrom turns a gesture request into what the recorder needs to

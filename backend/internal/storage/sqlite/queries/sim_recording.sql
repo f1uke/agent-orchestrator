@@ -28,6 +28,20 @@ ON CONFLICT (udid) DO UPDATE SET
     updated_at = excluded.updated_at
 WHERE sim_recording.stopped_at IS NOT NULL;
 
+-- name: DeleteSimRecordingSteps :exec
+-- Clears a device's captured steps. StartSimRecording runs this in the SAME
+-- transaction as the upsert above, and only when the upsert granted, because a
+-- restart REUSES the device's one sim_recording row: without this, the second
+-- recording inherits the first one's steps (AppendSimRecordingStep continues
+-- from MAX(seq) and ListSimRecordingSteps is keyed by udid alone), and the flow
+-- emitted from it silently contains gestures from a recording that ended
+-- before it began. Re-recording is the sanctioned repair path for a flow that
+-- came out wrong (spec 13.4), so that is the common case, not an edge one.
+--
+-- In the transaction rather than as a second round trip: a crash between the
+-- two would leave a recording that reads as fresh over steps that are not.
+DELETE FROM sim_recording_step WHERE udid = ?;
+
 -- name: StopSimRecording :execrows
 -- Ownership and openness are both in the predicate: a caller can only stop a
 -- recording it started, and stopping an already-stopped recording is a no-op

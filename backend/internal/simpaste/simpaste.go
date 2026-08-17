@@ -130,7 +130,7 @@ func Run(
 	// written, sent and verified on screen. That is what "performed" means
 	// here: a write that failed, a keystroke that failed, or a paste that could
 	// not be verified must not be recorded as one that happened.
-	defer func() { holder.Release(ctx, udid, token, err == nil) }()
+	defer func() { holder.Release(ctx, udid, token, simgesture.Outcome{Performed: err == nil}) }()
 
 	if err := pb.Write(ctx, udid, text); err != nil {
 		return result, err

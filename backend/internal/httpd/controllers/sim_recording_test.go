@@ -10,6 +10,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 // fakeSimServiceWithRecording adds the recording surface on top of
@@ -64,13 +65,16 @@ func (f *fakeSimServiceWithRecording) GetRecording(_ context.Context, udid strin
 // intentCapturingSimService wraps fakeSimService to remember the
 // simsvc.GestureIntent an AcquireHold call actually received (which is what
 // proves the gesture route stopped forwarding a zero value) and the
-// `performed` bool a ReleaseHold call actually received (which is what proves
-// the gesture route stopped hardcoding true).
+// simsvc.GestureOutcome a ReleaseHold call actually received: its Performed
+// (which proves the gesture route stopped hardcoding true) and its End (which
+// proves a drag reports where it really ended, rather than leaving the
+// recorded step with the 0,0 its `drag-begin` request never carried).
 type intentCapturingSimService struct {
 	*fakeSimService
 	gotIntent             simsvc.GestureIntent
 	releaseHoldCalls      int
 	lastReleasedPerformed bool
+	lastReleasedEnd       *simbridge.Point
 }
 
 func (f *intentCapturingSimService) AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, intent simsvc.GestureIntent) (domain.SimHold, error) {
@@ -78,10 +82,11 @@ func (f *intentCapturingSimService) AcquireHold(ctx context.Context, sessionID d
 	return f.fakeSimService.AcquireHold(ctx, sessionID, udid, ttl, intent)
 }
 
-func (f *intentCapturingSimService) ReleaseHold(ctx context.Context, udid, token string, performed bool) error {
+func (f *intentCapturingSimService) ReleaseHold(ctx context.Context, udid, token string, outcome simsvc.GestureOutcome) error {
 	f.releaseHoldCalls++
-	f.lastReleasedPerformed = performed
-	return f.fakeSimService.ReleaseHold(ctx, udid, token, performed)
+	f.lastReleasedPerformed = outcome.Performed
+	f.lastReleasedEnd = outcome.End
+	return f.fakeSimService.ReleaseHold(ctx, udid, token, outcome)
 }
 
 func TestStartSimRecording_ReturnsTheRow(t *testing.T) {
@@ -290,6 +295,65 @@ func TestSimGesture_ForwardsARealIntentToTheHold(t *testing.T) {
 	}
 	if svc.gotIntent.Kind != "tap" || svc.gotIntent.X != 0.25 || svc.gotIntent.Y != 0.75 {
 		t.Fatalf("gesture route must forward a real intent, not a zero value: %+v", svc.gotIntent)
+	}
+}
+
+// The drag sibling of the test above, and the defect it closes: a drag's hold
+// is taken on `drag-begin`, whose body has a start and no end, so the intent
+// alone can never describe the gesture. The end has to arrive with the
+// release - otherwise the recorded step keeps ToX/ToY of zero and the emitted
+// flow claims the finger was dragged to the top-left corner of the screen.
+func TestSimGesture_DragReleasesWithItsRealEndPoint(t *testing.T) {
+	svc := &intentCapturingSimService{fakeSimService: &fakeSimService{}}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+	url := srv.URL + "/api/v1/sessions/p-1/sim-devices/" + testSimUDID + "/gesture"
+
+	for _, step := range []map[string]any{
+		{"kind": "drag-begin", "x": 0.5, "y": 0.8},
+		{"kind": "drag-move", "x": 0.5, "y": 0.6},
+		{"kind": "drag-end", "x": 0.5, "y": 0.35},
+	} {
+		if code, _ := postJSON(t, url, step); code != http.StatusOK {
+			t.Fatalf("%v: status %d", step["kind"], code)
+		}
+	}
+
+	// The intent that took the hold is the begin, and it says nothing about
+	// where the drag went - which is exactly why the release has to.
+	if svc.gotIntent.Kind != "drag-begin" || svc.gotIntent.X != 0.5 || svc.gotIntent.Y != 0.8 {
+		t.Fatalf("the drag's hold must be taken with the begin's own intent: %+v", svc.gotIntent)
+	}
+	if svc.releaseHoldCalls != 1 || !svc.lastReleasedPerformed {
+		t.Fatalf("a drag the caller ended must release its one hold as performed: calls=%d performed=%v",
+			svc.releaseHoldCalls, svc.lastReleasedPerformed)
+	}
+	if svc.lastReleasedEnd == nil {
+		t.Fatal("a drag must report where it ended when its hold is released, or the recorded step keeps a fabricated 0,0 end")
+	}
+	if svc.lastReleasedEnd.X != 0.5 || svc.lastReleasedEnd.Y != 0.35 {
+		t.Fatalf("released end = %+v, want the point the drag actually ended at (0.5,0.35)", *svc.lastReleasedEnd)
+	}
+}
+
+// A single gesture's release carries no end: it was composed in full before
+// the hold was taken, so its end already travelled with the intent and a
+// second copy here could only ever disagree with it.
+func TestSimGesture_ASingleGestureReleasesWithoutAnEndPoint(t *testing.T) {
+	svc := &intentCapturingSimService{fakeSimService: &fakeSimService{}}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "swipe", "x": 0.5, "y": 0.8, "toX": 0.5, "toY": 0.2})
+	if code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if svc.gotIntent.ToX != 0.5 || svc.gotIntent.ToY != 0.2 {
+		t.Fatalf("a composed swipe's end belongs in the intent: %+v", svc.gotIntent)
+	}
+	if svc.lastReleasedEnd != nil {
+		t.Fatalf("released end = %+v, want none - the intent already carried it", *svc.lastReleasedEnd)
 	}
 }
 

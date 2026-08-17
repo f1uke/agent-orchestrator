@@ -821,7 +821,7 @@ func simOperations() []operation {
 		{
 			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold/{token}", id: "releaseSimHold", tag: "sim",
 			summary:    "Release the gesture hold, keeping the lease",
-			pathParams: []any{controllers.SimHoldParam{}},
+			pathParams: []any{controllers.SimHoldParam{}, controllers.ReleaseSimHoldQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ReleaseSimHoldResponse{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},

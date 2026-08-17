@@ -37,6 +37,18 @@ func (s *Store) StartSimRecording(ctx context.Context, rec domain.SimRecording, 
 			return err
 		}
 		if rows > 0 {
+			// A restart reuses this device's one recording row, so the steps
+			// already hanging off that udid belong to the recording that just
+			// ended. Clearing them HERE - inside the same transaction as the
+			// upsert, and only once it granted - is what stops the new
+			// recording from silently inheriting them: AppendSimRecordingStep
+			// numbers from MAX(seq) and ListSimRecordingSteps is keyed by udid
+			// alone, so an inherited step is indistinguishable from one this
+			// recording captured. A second round trip would leave a window
+			// where a crash produced exactly that.
+			if err := q.DeleteSimRecordingSteps(ctx, rec.UDID); err != nil {
+				return err
+			}
 			outcome = domain.SimRecordingOutcome{
 				Granted:   true,
 				Recording: rec,

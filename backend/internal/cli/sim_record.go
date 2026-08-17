@@ -436,10 +436,17 @@ func simSessionRecordingPath(recordedAt time.Time, udid string) (string, error) 
 // documented gap.
 //
 // Choice.Escaped - whether the stored selector text needed regex escaping -
-// genuinely IS cosmetic and stays unpersisted: it drives nothing but an
-// explanatory "# escaped: ..." comment Render would otherwise add, and the
-// selector Render emits is already the escaped text exactly as recorded
-// either way.
+// has no column of its own and needs none: it is RECOVERED here rather than
+// remembered, because a stored text selector is always the escaped form, so
+// unescaping it recovers both the plain label and the fact that it was
+// escaped in the first place. Both are used, and neither is cosmetic:
+//
+//   - Plain is what scrollUntilVisible matches on for an off-screen element,
+//     and render.go's rule is that it is the label a human reads. Handing it
+//     the stored (escaped) text emitted `element: "See all \\(12\\)"` for a
+//     label that reads "See all (12)".
+//   - Escaped drives the "# escaped: ..." comment that tells a reader why the
+//     selector above it is full of backslashes.
 func simRecordingStepToFlow(step simRecordingStepClient) simflow.Step {
 	choice := simflow.Choice{
 		Rung:      simflow.Rung(step.SelectorRung),
@@ -447,9 +454,14 @@ func simRecordingStepToFlow(step simRecordingStepClient) simflow.Step {
 		Ambiguity: int(step.Ambiguity),
 		OffScreen: step.OffScreen,
 	}
+	// plain is the label as a human reads it; it stays empty for a rung whose
+	// selector is not text, so Render falls back to the id the way it does for
+	// a Choice that never had a label.
+	var plain string
 	switch choice.Rung {
 	case simflow.RungText, simflow.RungTextIndex:
 		choice.Text = step.Selector
+		plain, choice.Escaped = simflow.Unescape(step.Selector)
 	case simflow.RungID:
 		choice.ID = step.Selector
 	case simflow.RungPoint:
@@ -467,7 +479,7 @@ func simRecordingStepToFlow(step simRecordingStepClient) simflow.Step {
 		Seq:          step.Seq,
 		Kind:         simRecordingStepKind(step.Kind),
 		Choice:       choice,
-		Plain:        step.Selector,
+		Plain:        plain,
 		ScreenChange: step.ScreenChange,
 		X:            step.X, Y: step.Y, ToX: step.ToX, ToY: step.ToY,
 		Text:   step.Text,

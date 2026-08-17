@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 // Gesture-hold TTL bounds.
@@ -118,16 +119,32 @@ func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, u
 	return outcome.Hold, nil
 }
 
+// GestureOutcome is what a release says about the gesture its hold covered.
+//
+// Performed says whether that gesture actually happened. It is what turns the
+// step AcquireHold stashed into a recorded one - see recording.go: a gesture
+// that was attempted and failed must not be written down as if it had
+// happened.
+//
+// End is where the gesture finished, and is set only by a gesture whose end
+// was not knowable when the hold was taken - a drag that follows a human's
+// finger. Every other gesture is composed in full before it starts, so its end
+// travelled with the intent at AcquireHold and there is nothing to correct
+// here; those callers leave this nil and the stashed step keeps the end it was
+// resolved with. A drag's hold is taken on `drag-begin`, whose request body
+// has no end point at all, so without this the recorded step would carry
+// ToX/ToY of zero and the emitted flow would read `end: "0%,0%"` - a
+// coordinate nobody ever touched.
+type GestureOutcome struct {
+	Performed bool
+	End       *simbridge.Point
+}
+
 // ReleaseHold gives the finger back, keeping the lease. A token that no longer
 // owns the hold is ErrNotFound rather than a misleading success: the caller has
 // to know its gesture was already taken over, because that is the case where a
 // finger can have been left down.
-//
-// performed says whether the gesture this hold covered actually happened. It
-// is what turns the step AcquireHold stashed into a recorded one - see
-// recording.go: a gesture that was attempted and failed must not be written
-// down as if it had happened.
-func (s *Service) ReleaseHold(ctx context.Context, udid, token string, performed bool) error {
+func (s *Service) ReleaseHold(ctx context.Context, udid, token string, outcome GestureOutcome) error {
 	key, err := s.leaseKey(udid)
 	if err != nil {
 		return err
@@ -140,7 +157,7 @@ func (s *Service) ReleaseHold(ctx context.Context, udid, token string, performed
 		return err
 	}
 	if s.recorder != nil {
-		s.finishRecording(ctx, token, released && performed)
+		s.finishRecording(ctx, token, released && outcome.Performed, outcome.End)
 	}
 	if !released {
 		return fmt.Errorf("%w: no live hold with that token on simulator %s; it may have lapsed and been taken over", ErrNotFound, key)

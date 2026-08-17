@@ -6409,7 +6409,10 @@ export interface operations {
     };
     releaseSimHold: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whether the gesture this hold covered actually happened. Defaults to true when omitted. A session recording gestures on this device keeps the step only when it did: a gesture that was attempted and failed must not be written into the flow as if it had happened. */
+                performed?: null | boolean;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */

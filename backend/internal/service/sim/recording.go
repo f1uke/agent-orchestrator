@@ -302,13 +302,24 @@ func (s *Service) sweepExpiredPendingLocked(now time.Time) {
 // given back. It always drops the stash for token; it appends the step to the
 // recording only when earn is true (the hold both belonged to this caller and
 // the gesture it covered was actually performed).
-func (s *Service) finishRecording(ctx context.Context, token string, earn bool) {
+//
+// end is the release's own account of where the gesture finished, and is set
+// only by a gesture whose end could not be known when the hold was taken - a
+// drag. It is applied here rather than at record time because that is the
+// first moment it exists: `drag-begin` carries a start and nothing else, so a
+// step stashed from it has no end at all until the drag ends. A drag that is
+// abandoned rather than ended deliberately never reaches this line with earn
+// set, so there is no path on which a step is written without a real end.
+func (s *Service) finishRecording(ctx context.Context, token string, earn bool, end *simbridge.Point) {
 	s.recMu.Lock()
 	p, ok := s.pending[token]
 	delete(s.pending, token)
 	s.recMu.Unlock()
 	if !ok || !earn {
 		return
+	}
+	if end != nil {
+		p.step.ToX, p.step.ToY = end.X, end.Y
 	}
 	_, appended, err := s.store.AppendSimRecordingStep(ctx, p.udid, p.step)
 	if err != nil {
@@ -397,7 +408,15 @@ func selectorChoice(snap simbridge.Snapshot, selector simbridge.Selector) (simfl
 			return simflow.Choice{Rung: simflow.RungID, ID: text, Ambiguity: len(ambiguous.Matches)},
 				simbridge.Element{ID: text}, true
 		}
-		return simflow.Choice{Rung: simflow.RungText, Text: text, Ambiguity: len(ambiguous.Matches)},
+		// Through simflow, not built here, so the name gets the SAME escaping
+		// a unique match gets from For: Maestro matches text as a regex, and a
+		// label like "Continue." left raw would also match "Continue!" - the
+		// over-matching this escaping exists to prevent, arriving on the one
+		// path that already could not tell its candidates apart. The element
+		// returned alongside keeps the RAW label: that one is only ever
+		// compared against the labels in a screen fingerprint, which are raw
+		// too.
+		return simflow.ForAmbiguousText(text, len(ambiguous.Matches)),
 			simbridge.Element{Label: text}, true
 	}
 	return simflow.Choice{Rung: simflow.RungNone}, simbridge.Element{}, false

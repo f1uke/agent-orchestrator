@@ -51,7 +51,7 @@ func TestAcquireHold_TokensAreNotGuessable(t *testing.T) {
 			t.Fatalf("hold token %q is too short to be unguessable", hold.Token)
 		}
 		seen[hold.Token] = true
-		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, true); err != nil {
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 			t.Fatalf("release %d: %v", i, err)
 		}
 	}
@@ -155,7 +155,7 @@ func TestReleaseHold_UnknownTokenIsNotFound(t *testing.T) {
 		t.Fatalf("hold: %v", err)
 	}
 
-	if err := svc.ReleaseHold(context.Background(), udidProMax, "not-the-live-token", true); !errors.Is(err, sim.ErrNotFound) {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, "not-the-live-token", sim.GestureOutcome{Performed: true}); !errors.Is(err, sim.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
@@ -171,7 +171,7 @@ func TestReleaseHold_FreesTheDeviceForTheNextGesture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, first.Token, true); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, first.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 

@@ -115,6 +115,26 @@ func (q *Queries) AppendSimRecordingStep(ctx context.Context, arg AppendSimRecor
 	return i, err
 }
 
+const deleteSimRecordingSteps = `-- name: DeleteSimRecordingSteps :exec
+DELETE FROM sim_recording_step WHERE udid = ?
+`
+
+// Clears a device's captured steps. StartSimRecording runs this in the SAME
+// transaction as the upsert above, and only when the upsert granted, because a
+// restart REUSES the device's one sim_recording row: without this, the second
+// recording inherits the first one's steps (AppendSimRecordingStep continues
+// from MAX(seq) and ListSimRecordingSteps is keyed by udid alone), and the flow
+// emitted from it silently contains gestures from a recording that ended
+// before it began. Re-recording is the sanctioned repair path for a flow that
+// came out wrong (spec 13.4), so that is the common case, not an edge one.
+//
+// In the transaction rather than as a second round trip: a crash between the
+// two would leave a recording that reads as fresh over steps that are not.
+func (q *Queries) DeleteSimRecordingSteps(ctx context.Context, udid string) error {
+	_, err := q.db.ExecContext(ctx, deleteSimRecordingSteps, udid)
+	return err
+}
+
 const getSimRecording = `-- name: GetSimRecording :one
 SELECT udid, session_id, name, started_at, stopped_at, updated_at
 FROM sim_recording WHERE udid = ?
