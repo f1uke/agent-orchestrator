@@ -28,6 +28,7 @@ ao sim swipe  <x1> <y1> <x2> <y2> [flags]
 ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
 ao sim type   <text>           [flags]
 ao sim button <name>           [flags]
+ao sim flow check <file>       [flags]
 ```
 
 ## The loop that works
@@ -404,3 +405,13 @@ ao sim ax                              # confirm what actually happened
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
 - **If a tap seems to do nothing AND `ao sim ax` comes back empty, the app itself may be stuck.** `ao sim ax` samples the foreground app's main thread before it reports an empty tree, and says so when that thread is blocked - with the frames that name what it is stuck in. A blocked main thread answers no accessibility query and processes no touch, so both symptoms have one cause and it is not accessibility. The usual cause is a pipe on the app's stdout that nobody is draining.
+
+---
+
+### ao sim flow
+
+Work with Maestro flow files. `ao sim flow check <file>` parses a flow and needs no device at all - it reports the first syntax error and cannot tell you whether a selector matches anything on screen. `ao sim flow` shells out to the external `maestro` binary on `PATH`; AO never installs, downloads or vendors it. If `maestro` is missing, the command fails and says so - everything else in `ao sim`, including `ao sim ax --format maestro`, is unaffected.
+
+```bash
+ao sim flow check flow.yaml
+```
