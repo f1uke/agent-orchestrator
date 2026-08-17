@@ -33,6 +33,8 @@
 		"vite.renderer.config.ts",
 		"playwright.config.ts",
 		"playwright.device.config.ts",
+		"e2e/**/*.ts",
+		"e2e/**/*.tsx",
 		"e2e-device/**/*.ts"
 	],
 	"exclude": ["node_modules", "dist", "dist-electron", ".vite", "release", "out", "src/landing"]

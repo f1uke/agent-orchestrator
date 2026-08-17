@@ -11,8 +11,8 @@ import {
 	GitPullRequestDraft,
 	MessageSquare,
 	OctagonX,
-	SignalZero,
 	TriangleAlert,
+	WifiOff,
 	type LucideIcon,
 } from "lucide-react";
 import { attentionZone, primaryPR, type SessionStatus, type WorkspaceSession } from "../types/workspace";
@@ -57,9 +57,18 @@ const ICONS: Record<SessionStatus, { Icon: LucideIcon; filled?: boolean }> = {
 	working: { Icon: Circle, filled: true },
 	idle: { Icon: Circle, filled: true },
 	// ── The four NEEDS YOU statuses. Deliberately four unlike silhouettes:
-	// bubble / bars / octagon / triangle stay apart at 13px and in greyscale.
+	// bubble / struck-through fan / octagon / triangle stay apart at 13px and in
+	// greyscale.
+	//
+	// `no_signal` is WifiOff, NOT lucide's `SignalZero`. SignalZero looks like the
+	// right answer from its name and is not: its entire geometry is `M2 20h.01`, a
+	// zero-length path parked in the bottom-left corner of the 24-unit viewBox. At
+	// 15px that is a ~1px stroke cap sitting 83% of the way down the box — on
+	// screen, a stray full stop near the text baseline rather than a status mark.
+	// Choose an icon by the shape it DRAWS (e2e/status-glyph.spec.ts measures it),
+	// never by the shape its name suggests.
 	needs_input: { Icon: MessageSquare },
-	no_signal: { Icon: SignalZero },
+	no_signal: { Icon: WifiOff },
 	ci_failed: { Icon: OctagonX },
 	changes_requested: { Icon: TriangleAlert },
 	// ── Waiting on someone else.
