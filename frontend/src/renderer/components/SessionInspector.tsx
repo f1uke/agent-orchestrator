@@ -17,7 +17,7 @@ import {
 	providerFromPRURL,
 	sessionPRDisplaySummaries,
 } from "../lib/pr-display";
-import type { SessionActivityState, WorkspaceSession } from "../types/workspace";
+import type { SessionActivityState, SessionTermination, WorkspaceSession } from "../types/workspace";
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
@@ -343,6 +343,8 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 		<div role="tabpanel">
 			{showReadiness ? <ReadinessStrip readiness={readiness} /> : null}
 
+			<EndingSection termination={session.termination} />
+
 			<JiraIssueSection sessionId={session.id} linked={jiraLinked} />
 
 			<Section title={prSectionTitle}>
@@ -384,6 +386,43 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 				</dl>
 			</Section>
 		</div>
+	);
+}
+
+// A stopped session looks identical to one still thinking, so when it HAS
+// stopped the inspector leads with who ended it. The three sources are genuinely
+// different situations for the reader: the agent chose to stop, AO took the
+// session down, or nobody said and AO inferred it from a runtime that was gone.
+const ENDED_BY: Record<SessionTermination["source"], string> = {
+	agent: "The agent ended it",
+	ao: "AO tore it down",
+	runtime_gone: "Its terminal was gone (inferred)",
+};
+
+// The state the session was in when it stopped, in the board's own words. An
+// unfamiliar state from a newer daemon falls through to the raw token rather
+// than being hidden.
+const ENDED_WHILE: Record<string, string> = {
+	active: "Working",
+	idle: "Idle",
+	waiting_input: "Waiting on you",
+	blocked: "Blocked",
+	exited: "Exited",
+};
+
+function EndingSection({ termination }: { termination?: SessionTermination }) {
+	if (!termination) return null;
+	const wasDoing = termination.lastState ? (ENDED_WHILE[termination.lastState] ?? termination.lastState) : "";
+	return (
+		<Section className="inspector-section--separated" title="Ended">
+			<dl className="inspector-kv">
+				<Row k="By" v={ENDED_BY[termination.source] ?? termination.source} />
+				<Row k="Reason" v={termination.reason} mono />
+				{wasDoing ? <Row k="Was" v={wasDoing} /> : null}
+				<Row k="At" v={formatTimeCompact(termination.at)} mono />
+				{termination.transcriptPath ? <Row k="Transcript" v={termination.transcriptPath} mono /> : null}
+			</dl>
+		</Section>
 	);
 }
 

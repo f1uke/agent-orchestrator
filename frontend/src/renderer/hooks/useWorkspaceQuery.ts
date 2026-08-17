@@ -88,6 +88,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				createdBy: session.createdBy,
 				prompt: session.prompt,
 				tokenUsage: session.tokenUsage,
+				termination: session.termination,
 			})),
 	}));
 }

@@ -144,10 +144,16 @@ type SessionRecord struct {
 	TokenUsage TokenUsage `json:"-"`
 	// TokensUpdatedAt is when TokenUsage was last (re)parsed from the transcript.
 	// Zero = never parsed (no telemetry available → no chip). Internal durable fact.
-	TokensUpdatedAt time.Time       `json:"-"`
-	Metadata        SessionMetadata `json:"-"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	UpdatedAt       time.Time       `json:"updatedAt"`
+	TokensUpdatedAt time.Time `json:"-"`
+	// Termination is the account of HOW this session reached its terminal state:
+	// who ended it, why, what it was doing, and where its transcript is. Written
+	// by the lifecycle reducer on every terminal transition and cleared on
+	// respawn. Zero for a live session and for sessions terminated before AO kept
+	// this account. json:"-" — exposed via the curated termination wire object.
+	Termination Termination     `json:"-"`
+	Metadata    SessionMetadata `json:"-"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord

@@ -85,6 +85,64 @@ func DeriveDetail(agent, event string, payload []byte) (domain.ActivityDetail, b
 	return derive(event, payload)
 }
 
+// EndReasonFunc maps a native agent hook event and its raw stdin payload onto
+// the harness's own reason for ENDING the session. ok=false means the event is
+// not an ending.
+type EndReasonFunc func(event string, payload []byte) (string, bool)
+
+// EndReasonDerivers maps the agent token in `ao hooks <agent> <event>` to its
+// end-reason deriver. Sparser than Derivers by design: only harnesses that
+// report a reason with their end-of-session callback appear. A harness missing
+// here still terminates its AO session — the record simply names the agent as
+// the source with an unknown cause, which is the honest answer for a harness
+// that never said why.
+var EndReasonDerivers = map[string]EndReasonFunc{
+	"claude-code": claudecode.SessionEndReason,
+}
+
+// maxEndReasonLen bounds a reason token. Every reason a harness actually reports
+// is a short snake_case word or two; anything longer is not a reason token and
+// has no business crossing into the daemon.
+const maxEndReasonLen = 40
+
+// DeriveEndReason looks up the end-reason deriver for an agent token, applies
+// it, and passes the result through a shape guard. ok=false when the token has
+// no deriver, the event is not an ending, or the reported reason is not a short
+// token.
+//
+// The guard is the curation boundary for this field, mirroring what
+// adapters/agent/toolcurate does for activity detail: the reason is the ONE
+// thing lifted out of a raw hook payload and posted to the daemon, so it is
+// bounded to `[A-Za-z0-9_-]{1,40}` rather than trusted. That shape cannot carry
+// a path, a command, a prompt or a token, and — unlike a closed list of known
+// reasons — it still lets a reason AO has never seen through, because recording
+// what the harness really said beats recording "unknown".
+func DeriveEndReason(agent, event string, payload []byte) (string, bool) {
+	derive, found := EndReasonDerivers[agent]
+	if !found {
+		return "", false
+	}
+	reason, ok := derive(event, payload)
+	if !ok || reason == "" || !isEndReasonToken(reason) {
+		return "", false
+	}
+	return reason, true
+}
+
+func isEndReasonToken(s string) bool {
+	if len(s) > maxEndReasonLen {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // DenyFunc reports whether a native agent hook callback must be REFUSED, and
 // the reason handed back to the agent. Unlike the derivers above it can change
 // what the agent does, so it is only ever consulted for callbacks that run

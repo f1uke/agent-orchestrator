@@ -18,7 +18,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
-    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
 FROM sessions WHERE id = ?
 `
 
@@ -64,6 +65,11 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.TokensUpdatedAt,
 		&i.TaskSize,
 		&i.AutoResolveOnReply,
+		&i.TerminationSource,
+		&i.TerminationReason,
+		&i.TerminationLastState,
+		&i.TerminationTranscriptPath,
+		&i.TerminatedAt,
 	)
 	return i, err
 }
@@ -74,43 +80,50 @@ INSERT INTO sessions (
     activity_state, activity_last_at, first_signal_at, is_terminated, reactivated,
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
-    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
-	ID                 domain.SessionID
-	ProjectID          domain.ProjectID
-	Num                int64
-	IssueID            domain.IssueID
-	Kind               domain.SessionKind
-	Harness            domain.AgentHarness
-	DisplayName        string
-	ActivityState      domain.ActivityState
-	ActivityLastAt     time.Time
-	FirstSignalAt      sql.NullTime
-	IsTerminated       bool
-	Reactivated        bool
-	Branch             string
-	WorkspacePath      string
-	RuntimeHandleID    string
-	AgentSessionID     string
-	Prompt             string
-	PreviewURL         string
-	PreviewRevision    int64
-	AutoNudgeComments  sql.NullInt64
-	AutoResolveOnReply sql.NullInt64
-	IsTodo             bool
-	BaseBranch         string
-	AutoNameBranch     bool
-	PRTarget           string
-	CreatedBy          string
-	IsSuspended        bool
-	LastOpenedAt       sql.NullTime
-	KeepWarmOnMerge    bool
-	TaskSize           string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                        domain.SessionID
+	ProjectID                 domain.ProjectID
+	Num                       int64
+	IssueID                   domain.IssueID
+	Kind                      domain.SessionKind
+	Harness                   domain.AgentHarness
+	DisplayName               string
+	ActivityState             domain.ActivityState
+	ActivityLastAt            time.Time
+	FirstSignalAt             sql.NullTime
+	IsTerminated              bool
+	Reactivated               bool
+	Branch                    string
+	WorkspacePath             string
+	RuntimeHandleID           string
+	AgentSessionID            string
+	Prompt                    string
+	PreviewURL                string
+	PreviewRevision           int64
+	AutoNudgeComments         sql.NullInt64
+	AutoResolveOnReply        sql.NullInt64
+	IsTodo                    bool
+	BaseBranch                string
+	AutoNameBranch            bool
+	PRTarget                  string
+	CreatedBy                 string
+	IsSuspended               bool
+	LastOpenedAt              sql.NullTime
+	KeepWarmOnMerge           bool
+	TaskSize                  string
+	TerminationSource         domain.TerminationSource
+	TerminationReason         string
+	TerminationLastState      domain.ActivityState
+	TerminationTranscriptPath string
+	TerminatedAt              sql.NullTime
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -145,6 +158,11 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.LastOpenedAt,
 		arg.KeepWarmOnMerge,
 		arg.TaskSize,
+		arg.TerminationSource,
+		arg.TerminationReason,
+		arg.TerminationLastState,
+		arg.TerminationTranscriptPath,
+		arg.TerminatedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -156,7 +174,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
-    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
 FROM sessions ORDER BY project_id, num
 `
 
@@ -208,6 +227,11 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.TokensUpdatedAt,
 			&i.TaskSize,
 			&i.AutoResolveOnReply,
+			&i.TerminationSource,
+			&i.TerminationReason,
+			&i.TerminationLastState,
+			&i.TerminationTranscriptPath,
+			&i.TerminatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -227,7 +251,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
-    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply
+    token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -279,6 +304,11 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.TokensUpdatedAt,
 			&i.TaskSize,
 			&i.AutoResolveOnReply,
+			&i.TerminationSource,
+			&i.TerminationReason,
+			&i.TerminationLastState,
+			&i.TerminationTranscriptPath,
+			&i.TerminatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -518,40 +548,47 @@ UPDATE sessions SET
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
     preview_url = ?, preview_revision = ?, auto_nudge_comments = ?, auto_resolve_on_reply = ?,
-    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, keep_warm_on_merge = ?, task_size = ?, updated_at = ?
+    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, keep_warm_on_merge = ?, task_size = ?,
+    termination_source = ?, termination_reason = ?, termination_last_state = ?, termination_transcript_path = ?, terminated_at = ?,
+    updated_at = ?
 WHERE id = ?
 `
 
 type UpdateSessionParams struct {
-	IssueID            domain.IssueID
-	Kind               domain.SessionKind
-	Harness            domain.AgentHarness
-	DisplayName        string
-	ActivityState      domain.ActivityState
-	ActivityLastAt     time.Time
-	FirstSignalAt      sql.NullTime
-	IsTerminated       bool
-	Reactivated        bool
-	Branch             string
-	WorkspacePath      string
-	RuntimeHandleID    string
-	AgentSessionID     string
-	Prompt             string
-	PreviewURL         string
-	PreviewRevision    int64
-	AutoNudgeComments  sql.NullInt64
-	AutoResolveOnReply sql.NullInt64
-	IsTodo             bool
-	BaseBranch         string
-	AutoNameBranch     bool
-	PRTarget           string
-	CreatedBy          string
-	IsSuspended        bool
-	LastOpenedAt       sql.NullTime
-	KeepWarmOnMerge    bool
-	TaskSize           string
-	UpdatedAt          time.Time
-	ID                 domain.SessionID
+	IssueID                   domain.IssueID
+	Kind                      domain.SessionKind
+	Harness                   domain.AgentHarness
+	DisplayName               string
+	ActivityState             domain.ActivityState
+	ActivityLastAt            time.Time
+	FirstSignalAt             sql.NullTime
+	IsTerminated              bool
+	Reactivated               bool
+	Branch                    string
+	WorkspacePath             string
+	RuntimeHandleID           string
+	AgentSessionID            string
+	Prompt                    string
+	PreviewURL                string
+	PreviewRevision           int64
+	AutoNudgeComments         sql.NullInt64
+	AutoResolveOnReply        sql.NullInt64
+	IsTodo                    bool
+	BaseBranch                string
+	AutoNameBranch            bool
+	PRTarget                  string
+	CreatedBy                 string
+	IsSuspended               bool
+	LastOpenedAt              sql.NullTime
+	KeepWarmOnMerge           bool
+	TaskSize                  string
+	TerminationSource         domain.TerminationSource
+	TerminationReason         string
+	TerminationLastState      domain.ActivityState
+	TerminationTranscriptPath string
+	TerminatedAt              sql.NullTime
+	UpdatedAt                 time.Time
+	ID                        domain.SessionID
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) error {
@@ -583,6 +620,11 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.LastOpenedAt,
 		arg.KeepWarmOnMerge,
 		arg.TaskSize,
+		arg.TerminationSource,
+		arg.TerminationReason,
+		arg.TerminationLastState,
+		arg.TerminationTranscriptPath,
+		arg.TerminatedAt,
 		arg.UpdatedAt,
 		arg.ID,
 	)

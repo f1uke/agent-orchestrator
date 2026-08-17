@@ -104,3 +104,35 @@ func TestSessionsAPI_ActivityWithoutRecorderIs501(t *testing.T) {
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/activity", `{"state":"idle"}`)
 	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
 }
+
+// An ending signal carries the harness's own reason through to the reducer, so
+// the terminated row can say why it stopped instead of only that it did.
+func TestSessionsAPI_ActivityCarriesTheEndReasonToTheReducer(t *testing.T) {
+	rec := &fakeActivityRecorder{}
+	srv := newActivityTestServer(t, rec)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/activity", `{"state":"exited","end":{"reason":"prompt_input_exit"}}`)
+	if status != http.StatusOK {
+		t.Fatalf("activity = %d, want 200; body=%s", status, body)
+	}
+	if rec.gotSignal.End == nil {
+		t.Fatal("signal carried no end block")
+	}
+	if rec.gotSignal.End.Reason != "prompt_input_exit" {
+		t.Errorf("end reason = %q, want the reported reason", rec.gotSignal.End.Reason)
+	}
+}
+
+// An ending with no reason still tells the reducer that the AGENT reported the
+// exit — the presence of the block is itself the attribution.
+func TestSessionsAPI_ActivityEndBlockSurvivesAnEmptyReason(t *testing.T) {
+	rec := &fakeActivityRecorder{}
+	srv := newActivityTestServer(t, rec)
+
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/activity", `{"state":"exited","end":{}}`); status != http.StatusOK {
+		t.Fatalf("activity = %d, want 200", status)
+	}
+	if rec.gotSignal.End == nil {
+		t.Fatal("an end block with no reason must still reach the reducer")
+	}
+}

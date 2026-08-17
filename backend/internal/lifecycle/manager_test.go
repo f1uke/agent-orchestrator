@@ -444,7 +444,7 @@ func TestActivity_MissingSessionReturnsNotFound(t *testing.T) {
 func TestMarkTerminated(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = working("mer-1")
-	if err := m.MarkTerminated(ctx, "mer-1"); err != nil {
+	if err := m.MarkTerminated(ctx, "mer-1", domain.TerminationCauseKill); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]

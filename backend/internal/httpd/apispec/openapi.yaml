@@ -4859,6 +4859,8 @@ components:
           type: string
         terminalHandleId:
           type: string
+        termination:
+          $ref: '#/components/schemas/SessionTermination'
         tokenUsage:
           $ref: '#/components/schemas/SessionTokenUsage'
         updatedAt:
@@ -6141,6 +6143,13 @@ components:
       - sessionId
       - message
       type: object
+    SessionEndPayload:
+      properties:
+        reason:
+          description: The harness's own end reason, e.g. prompt_input_exit. Empty
+            when the harness reports none.
+          type: string
+      type: object
     SessionPRCISummary:
       properties:
         failingChecks:
@@ -6489,6 +6498,38 @@ components:
       required:
       - session
       type: object
+    SessionTermination:
+      properties:
+        at:
+          format: date-time
+          type: string
+        lastState:
+          enum:
+          - active
+          - idle
+          - waiting_input
+          - blocked
+          - exited
+          type: string
+        reason:
+          description: The harness's own end reason when source is agent, or the named
+            AO cause otherwise. 'unknown' when the ending is real but unexplained.
+          type: string
+        source:
+          description: 'Who ended the session: the agent reported it, AO tore it down,
+            or AO inferred it from a missing runtime.'
+          enum:
+          - agent
+          - ao
+          - runtime_gone
+          type: string
+        transcriptPath:
+          type: string
+      required:
+      - source
+      - reason
+      - at
+      type: object
     SessionTokenUsage:
       properties:
         cacheCreation:
@@ -6533,6 +6574,10 @@ components:
         detail:
           $ref: '#/components/schemas/ActivityDetail'
           description: Optional curated detail of the action behind this signal.
+        end:
+          $ref: '#/components/schemas/SessionEndPayload'
+          description: 'Present on a terminal signal: the agent reported the ending,
+            with the harness''s own reason.'
         state:
           description: Agent activity state reported by an agent hook.
           enum:

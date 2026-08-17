@@ -22,14 +22,15 @@ func (f *fakeTelemetrySink) Emit(_ context.Context, ev ports.TelemetryEvent) {
 func (f *fakeTelemetrySink) Close(context.Context) error { return nil }
 
 type fakeStore struct {
-	sessions map[domain.SessionID]domain.SessionRecord
-	pr       map[domain.SessionID]domain.PRFacts
-	projects map[string]domain.ProjectRecord
-	checks   map[string][]domain.PullRequestCheck
-	reviews  map[string][]domain.PullRequestReview
-	threads  map[string][]domain.PullRequestReviewThread
-	comments map[string][]domain.PullRequestComment
-	num      int
+	getSessionErr error
+	sessions      map[domain.SessionID]domain.SessionRecord
+	pr            map[domain.SessionID]domain.PRFacts
+	projects      map[string]domain.ProjectRecord
+	checks        map[string][]domain.PullRequestCheck
+	reviews       map[string][]domain.PullRequestReview
+	threads       map[string][]domain.PullRequestReviewThread
+	comments      map[string][]domain.PullRequestComment
+	num           int
 }
 
 func newFakeStore() *fakeStore {
@@ -52,6 +53,9 @@ func (f *fakeStore) CreateSession(_ context.Context, rec domain.SessionRecord) (
 }
 
 func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	if f.getSessionErr != nil {
+		return domain.SessionRecord{}, false, f.getSessionErr
+	}
 	r, ok := f.sessions[id]
 	return r, ok, nil
 }
@@ -342,6 +346,7 @@ func TestSessionRenameMissingSessionReturnsNotFound(t *testing.T) {
 // fakeCommander records Kill/Spawn calls so a test can assert the
 // clean-orchestrator ordering without wiring a real session engine.
 type fakeCommander struct {
+	teardownCauses  []string
 	killed          []domain.SessionID
 	restarted       []domain.SessionID
 	retired         []domain.SessionID
@@ -410,17 +415,18 @@ func (f *fakeCommander) Wake(_ context.Context, id domain.SessionID) (domain.Ses
 	return f.wakeRecord, nil
 }
 func (f *fakeCommander) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
-	res, err := f.Teardown(ctx, id)
+	res, err := f.Teardown(ctx, id, domain.TerminationCauseKill)
 	return res.Freed, err
 }
 
 // teardownResult, when set, is what Teardown reports instead of a clean free.
 // It is how a test stands in a dirty worktree that refuses removal.
-func (f *fakeCommander) Teardown(_ context.Context, id domain.SessionID) (sessionmanager.TeardownResult, error) {
+func (f *fakeCommander) Teardown(_ context.Context, id domain.SessionID, cause string) (sessionmanager.TeardownResult, error) {
 	if f.killErr != nil {
 		return sessionmanager.TeardownResult{}, f.killErr
 	}
 	f.killed = append(f.killed, id)
+	f.teardownCauses = append(f.teardownCauses, cause)
 	if f.teardownResult != nil {
 		return *f.teardownResult, nil
 	}
@@ -1332,8 +1338,13 @@ func TestListReclaimable_TakesASuspendedSessionOnceTerminated(t *testing.T) {
 // branch kept) so the auto-reclaim loop shares the exact same teardown path a
 // user-initiated kill uses.
 func TestReclaim_DelegatesToKill(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-1"] = domain.SessionRecord{
+		ID: "sess-1", ProjectID: "demo", Kind: domain.KindWorker, IsTerminated: true,
+		Activity: domain.Activity{State: domain.ActivityExited, LastActivityAt: time.Now()},
+	}
 	fc := &fakeCommander{}
-	svc := &Service{manager: fc}
+	svc := &Service{manager: fc, store: st}
 	out, err := svc.Reclaim(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatalf("Reclaim: %v", err)
@@ -1351,12 +1362,17 @@ func TestReclaim_DelegatesToKill(t *testing.T) {
 // back from Reclaim indistinguishable from one that was deleted, so the reclaim
 // loop recorded a success that never happened and never retried.
 func TestReclaim_ReportsAPreservedWorkspaceAsNotFreed(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-1"] = domain.SessionRecord{
+		ID: "sess-1", ProjectID: "demo", Kind: domain.KindWorker, IsTerminated: true,
+		Activity: domain.Activity{State: domain.ActivityExited, LastActivityAt: time.Now()},
+	}
 	fc := &fakeCommander{teardownResult: &sessionmanager.TeardownResult{
 		Freed:         false,
 		Reason:        sessionmanager.ReasonWorkspaceDirty,
 		WorkspacePath: "/tmp/dirty",
 	}}
-	svc := &Service{manager: fc}
+	svc := &Service{manager: fc, store: st}
 
 	out, err := svc.Reclaim(context.Background(), "sess-1")
 	if err != nil {
@@ -1498,5 +1514,81 @@ func TestToAPIErrorMapsNotTerminalAndWorkspaceDirty(t *testing.T) {
 				t.Fatalf("mapped = %v, want %s %s", mapped, tc.wantCode, e)
 			}
 		})
+	}
+}
+
+// The guard this incident asked for. A live worker's eligibility is decided by
+// ListReclaimable, but between that listing and this teardown the session can
+// come back — a restore, a resume, a TODO started — and the reclaim loop would
+// then tear down a session with an agent working in it. Reclaim re-reads the
+// record it is about to destroy and refuses anything not terminated, so the
+// filter is not the only thing standing between a live agent and its worktree.
+func TestReclaim_RefusesALiveSession(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-1"] = domain.SessionRecord{
+		ID: "sess-1", ProjectID: "demo", Kind: domain.KindWorker,
+		Activity:     domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()},
+		IsTerminated: false,
+		Metadata:     domain.SessionMetadata{WorkspacePath: "/tmp/live-worktree"},
+	}
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc, store: st}
+
+	out, err := svc.Reclaim(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("a refusal is not an error: %v", err)
+	}
+	if len(fc.killed) != 0 {
+		t.Fatalf("teardown ran against a live session: %v", fc.killed)
+	}
+	if out.Freed {
+		t.Fatal("nothing may be freed from a live session")
+	}
+	if out.Reason != ReasonNotTerminated {
+		t.Fatalf("reason = %q, want %q", out.Reason, ReasonNotTerminated)
+	}
+}
+
+// A session that IS terminated still reclaims: the guard must refuse live
+// sessions, not stop the feature working.
+func TestReclaim_StillTearsDownATerminatedSession(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["sess-1"] = domain.SessionRecord{
+		ID: "sess-1", ProjectID: "demo", Kind: domain.KindWorker,
+		Activity:     domain.Activity{State: domain.ActivityExited, LastActivityAt: time.Now()},
+		IsTerminated: true,
+	}
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc, store: st}
+
+	out, err := svc.Reclaim(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+	if len(fc.killed) != 1 || fc.killed[0] != "sess-1" {
+		t.Fatalf("killed = %v, want [sess-1]", fc.killed)
+	}
+	if !out.Freed {
+		t.Fatal("a terminated session's teardown must still report Freed")
+	}
+}
+
+// An unreadable record is not permission to proceed. If the store cannot say
+// whether the session is finished, tearing its worktree down anyway is exactly
+// the gamble the repo forbids elsewhere ("do not treat a failed probe as proof a
+// session is dead"). It surfaces as an error so the loop logs it loudly and
+// retries, rather than being filed alongside the routine "still running" skip.
+func TestReclaim_RefusesWhenTheRecordCannotBeRead(t *testing.T) {
+	st := newFakeStore()
+	st.getSessionErr = errors.New("db unavailable")
+	fc := &fakeCommander{}
+	svc := &Service{manager: fc, store: st}
+
+	_, err := svc.Reclaim(context.Background(), "sess-1")
+	if err == nil {
+		t.Fatal("an unreadable record must surface as an error, not a silent skip")
+	}
+	if len(fc.killed) != 0 {
+		t.Fatalf("teardown ran without knowing the session was finished: %v", fc.killed)
 	}
 }

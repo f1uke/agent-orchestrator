@@ -78,7 +78,7 @@ const hookBinaryName = "ao"
 
 type lifecycleRecorder interface {
 	MarkSpawned(ctx context.Context, id domain.SessionID, metadata domain.SessionMetadata) error
-	MarkTerminated(ctx context.Context, id domain.SessionID) error
+	MarkTerminated(ctx context.Context, id domain.SessionID, cause string) error
 	// MarkSuspended records that the idle sweep tore a session's runtime down
 	// while keeping it on the board (not terminated). See CloseIdleSessions.
 	MarkSuspended(ctx context.Context, id domain.SessionID) error
@@ -889,7 +889,7 @@ func sessionPrefix(project domain.ProjectRecord) string {
 // row when nothing observable has landed yet (seed state) via rollbackSpawn or
 // rollbackSpawnSeedRow.
 func (m *Manager) markSpawnFailedTerminated(ctx context.Context, id domain.SessionID) {
-	_ = m.lcm.MarkTerminated(ctx, id)
+	_ = m.lcm.MarkTerminated(ctx, id, domain.TerminationCauseSpawnRollback)
 }
 
 // rollbackSpawnSeedRow best-effort removes the row of a spawn that failed
@@ -945,7 +945,7 @@ func (m *Manager) RollbackSpawn(ctx context.Context, id domain.SessionID) (delet
 // available destroy steps are skipped so it can be cleaned up from the
 // dashboard.
 func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
-	res, err := m.Teardown(ctx, id)
+	res, err := m.Teardown(ctx, id, domain.TerminationCauseKill)
 	return res.Freed, err
 }
 
@@ -980,7 +980,12 @@ const (
 // Teardown is Kill's implementation, reporting the full outcome. Kill and the
 // auto-reclaim loop share it so there is exactly one teardown code path and no
 // second, divergent reclaimer to keep in step.
-func (m *Manager) Teardown(ctx context.Context, id domain.SessionID) (TeardownResult, error) {
+//
+// Because they share it, cause is how the two stay distinguishable ON THE
+// RECORD: the terminated session names the operation that ordered its teardown,
+// so "did the reclaimer take my live worker?" is answered by the row rather than
+// by correlating logs after the fact.
+func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause string) (TeardownResult, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
 		return TeardownResult{}, fmt.Errorf("kill %s: %w", id, err)
@@ -1047,7 +1052,7 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID) (TeardownRe
 	if err := m.store.DeleteSessionWorktrees(ctx, id); err != nil {
 		m.logger.Warn("kill: delete restore marker failed", "sessionID", id, "error", err)
 	}
-	if err := m.lcm.MarkTerminated(ctx, id); err != nil {
+	if err := m.lcm.MarkTerminated(ctx, id, cause); err != nil {
 		return TeardownResult{}, fmt.Errorf("kill %s: %w", id, err)
 	}
 	return res, nil
@@ -1070,7 +1075,7 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	ws := workspaceInfo(rec)
 
 	if !rec.IsTerminated {
-		if err := m.lcm.MarkTerminated(ctx, id); err != nil {
+		if err := m.lcm.MarkTerminated(ctx, id, domain.TerminationCausePurge); err != nil {
 			return fmt.Errorf("purge %s: %w", id, err)
 		}
 	}
@@ -1127,7 +1132,7 @@ func (m *Manager) RetireForReplacement(ctx context.Context, id domain.SessionID)
 				return fmt.Errorf("retire replacement %s: runtime: %w", id, err)
 			}
 		}
-		if err := m.lcm.MarkTerminated(ctx, id); err != nil {
+		if err := m.lcm.MarkTerminated(ctx, id, domain.TerminationCauseReplaced); err != nil {
 			return fmt.Errorf("retire replacement %s: mark terminated: %w", id, err)
 		}
 		return nil
@@ -1154,7 +1159,7 @@ func (m *Manager) RetireForReplacement(ctx context.Context, id domain.SessionID)
 	if err := m.workspace.ForceDestroy(ctx, ws); err != nil {
 		return fmt.Errorf("retire replacement %s: force destroy: %w", id, err)
 	}
-	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+	if err := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseReplaced); err != nil {
 		return fmt.Errorf("retire replacement %s: mark terminated: %w", id, err)
 	}
 	return nil
@@ -1180,7 +1185,7 @@ func (m *Manager) retireWorkspaceProjectForReplacement(ctx context.Context, rec 
 	if err := m.store.DeleteSessionWorktrees(ctx, rec.ID); err != nil {
 		return fmt.Errorf("retire replacement %s: clear restore markers: %w", rec.ID, err)
 	}
-	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+	if err := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseReplaced); err != nil {
 		return fmt.Errorf("retire replacement %s: mark terminated: %w", rec.ID, err)
 	}
 	return nil
@@ -1354,7 +1359,7 @@ func (m *Manager) restartInPlace(ctx context.Context, rec domain.SessionRecord) 
 	// The agent is gone the moment Destroy returns, so record that before the
 	// relaunch: if anything below fails, the session is honestly terminated and
 	// stays restorable, rather than a live-looking row with a dead terminal.
-	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+	if err := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseRestart); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
 	}
 	ws, err := m.restoreSessionWorkspace(ctx, project, rec)
@@ -1449,7 +1454,7 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 	}
 
 	// 3. Mark terminal via the LCM (same path Kill uses).
-	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+	if err := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseDaemonShutdown); err != nil {
 		return fmt.Errorf("save %s: mark terminated: %w", rec.ID, err)
 	}
 
@@ -1528,7 +1533,7 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 	// stash+marker+destroy for regular projects, and multi-repo for workspaces).
 	if err := m.saveAndTeardownOne(ctx, rec, false); err != nil {
 		m.logger.Warn("reconcile: save-and-teardown failed; terminating without restore marker", "sessionID", rec.ID, "error", err)
-		if mErr := m.lcm.MarkTerminated(ctx, rec.ID); mErr != nil {
+		if mErr := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseRuntimeMissing); mErr != nil {
 			return fmt.Errorf("reconcile %s: mark terminated: %w", rec.ID, mErr)
 		}
 	}
@@ -2118,7 +2123,7 @@ func (m *Manager) saveAndTeardownWorkspaceProject(ctx context.Context, rec domai
 			return fmt.Errorf("save %s repo %s: upsert worktree row: %w", rec.ID, row.RepoName, err)
 		}
 	}
-	if err := m.lcm.MarkTerminated(ctx, rec.ID); err != nil {
+	if err := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseDaemonShutdown); err != nil {
 		return fmt.Errorf("save %s: mark terminated: %w", rec.ID, err)
 	}
 	handle := runtimeHandle(rec.Metadata)

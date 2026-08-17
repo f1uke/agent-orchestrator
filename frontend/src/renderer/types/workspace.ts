@@ -347,6 +347,29 @@ export type WorkspaceSession = {
 	 * session not yet parsed — the card then shows no token chip.
 	 */
 	tokenUsage?: TokenUsage;
+	/**
+	 * How this session reached its terminal state. Absent for a live session, and
+	 * for one that ended before the daemon recorded an account — the UI then says
+	 * nothing rather than inventing an ending.
+	 */
+	termination?: SessionTermination;
+};
+
+/**
+ * The account of how a session ended. `source` is who ended it — the agent
+ * reported its own exit, AO tore it down, or AO inferred it from a runtime that
+ * was gone — and `reason` is the harness's own end reason or the named AO cause.
+ * Without this a worker that stopped mid-task is indistinguishable from one AO
+ * reclaimed, which is exactly the question asked when work disappears.
+ */
+export type SessionTermination = {
+	source: "agent" | "ao" | "runtime_gone";
+	reason: string;
+	/** What the session was doing immediately before it stopped. */
+	lastState?: string;
+	at: string;
+	/** The agent transcript as it was at termination; absent when AO cannot locate one. */
+	transcriptPath?: string;
 };
 
 /**

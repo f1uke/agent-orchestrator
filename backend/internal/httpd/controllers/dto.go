@@ -196,6 +196,32 @@ type SessionView struct {
 	// once; omitted entirely for agents without a readable transcript or a session
 	// not yet parsed, which the UI renders as "no chip / n/a".
 	TokenUsage *SessionTokenUsage `json:"tokenUsage,omitempty"`
+	// Termination is the account of how this session ended: who ended it, why,
+	// what it was doing, and where its transcript is. Present only on a session
+	// that has actually ended and for which AO kept an account — omitted for a
+	// live session and for one terminated before AO recorded this, which the UI
+	// renders as "no ending recorded" rather than inventing one. Shadows the
+	// json:"-" domain field with the curated wire shape.
+	Termination *SessionTermination `json:"termination,omitempty"`
+}
+
+// SessionTermination is the wire shape of a session's ending.
+//
+// It exists because "activity: exited" is not an answer to "why did my worker
+// disappear?". source says WHO ended it — the agent's own end-of-session report,
+// an AO teardown, or the reaper inferring it from a runtime that was gone —
+// and reason names the harness's reason or the AO operation behind it.
+type SessionTermination struct {
+	Source string `json:"source" enum:"agent,ao,runtime_gone" description:"Who ended the session: the agent reported it, AO tore it down, or AO inferred it from a missing runtime."`
+	Reason string `json:"reason" description:"The harness's own end reason when source is agent, or the named AO cause otherwise. 'unknown' when the ending is real but unexplained."`
+	// LastState is what the session was doing immediately before it ended — the
+	// difference between "it was still working" and "it had been waiting on me".
+	LastState string    `json:"lastState,omitempty" enum:"active,idle,waiting_input,blocked,exited"`
+	At        time.Time `json:"at"`
+	// TranscriptPath points at the agent transcript as it was at termination, so
+	// the last thing the agent did is readable even after the worktree is gone.
+	// Empty for a harness whose transcript AO cannot locate.
+	TranscriptPath string `json:"transcriptPath,omitempty"`
 }
 
 // SessionTokenUsage is the per-session token telemetry surfaced on the board. The
@@ -1137,9 +1163,22 @@ type ClaimPRResponse struct {
 // `ao hooks` before this request is sent, so a raw agent payload — a file body,
 // a command with an inline token, a tool response — never reaches the daemon.
 // Harnesses with no per-tool hook simply omit it.
+//
+// End is present only on a terminal signal. It says the AGENT reported the
+// ending — as opposed to AO tearing the session down — and carries the harness's
+// own reason token for it. Like Detail it is curated inside `ao hooks`: the
+// reason is bounded to a short token, and nothing else from the ending payload
+// (transcript path, native ids, cwd) is forwarded.
 type SetActivityRequest struct {
 	State  string                 `json:"state" enum:"active,idle,waiting_input,exited" description:"Agent activity state reported by an agent hook."`
 	Detail *domain.ActivityDetail `json:"detail,omitempty" description:"Optional curated detail of the action behind this signal."`
+	End    *SessionEndPayload     `json:"end,omitempty" description:"Present on a terminal signal: the agent reported the ending, with the harness's own reason."`
+}
+
+// SessionEndPayload is what an agent's end-of-session hook reports about the
+// ending itself.
+type SessionEndPayload struct {
+	Reason string `json:"reason,omitempty" description:"The harness's own end reason, e.g. prompt_input_exit. Empty when the harness reports none."`
 }
 
 // SetActivityResponse is the body of POST /api/v1/sessions/{sessionId}/activity.

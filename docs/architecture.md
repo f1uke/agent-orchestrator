@@ -37,6 +37,14 @@ The only persistent session state is:
 
 - `activity_state` — What the agent last reported (`active`, `idle`, `waiting_input`, `exited`)
 - `is_terminated` — Whether the session should be treated as over
+- `termination_*` — How the session ended: `source` (`agent` — the harness reported its
+  own exit; `ao` — a teardown AO initiated; `runtime_gone` — the reaper inferred it from a
+  missing runtime), `reason` (the harness's own end reason, or the named AO cause such as
+  `kill` / `auto_reclaim` / `daemon_shutdown`), `last_state`, `transcript_path`, and
+  `terminated_at`. Written by the lifecycle reducer on every terminal transition and
+  cleared on respawn. `activity_state = 'exited'` alone cannot tell a worker that stopped
+  by itself mid-task from one AO reclaimed, and that difference is what someone asking
+  "why did it disappear?" needs.
 - PR facts — `pr`, `pr_checks`, `pr_comment` tables
 
 ### What is NOT Durable
