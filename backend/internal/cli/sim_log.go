@@ -246,9 +246,11 @@ func (c *commandContext) streamSimLog(
 		return err
 	})
 	// Being stopped is how a follow ends: by a signal, by a parent that went
-	// away, or by a harness that timed it out. None of those is a failure.
+	// away, or by a harness that timed it out. None of those is a failure, and
+	// the read error they produce ("file already closed") is this command
+	// closing its own pipe on the way out.
 	if ctx.Err() != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: an interrupted follow did its job until it was stopped
 	}
 	if readErr != nil {
 		return readErr

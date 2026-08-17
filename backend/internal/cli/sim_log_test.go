@@ -209,7 +209,7 @@ func TestSimLog_FollowStopsCleanlyOnSignalAndLeavesNoChild(t *testing.T) {
 	// it started. Past `ao sim` slices leaked exactly this.
 	deps, stream, _, _ := logDeps(t, "")
 	ctx, cancel := context.WithCancel(context.Background())
-	out, done := executeCLIStreamingContext(t, ctx, deps, "sim", "log", "--follow")
+	out, done := executeCLIStreamingContext(ctx, t, deps, "sim", "log", "--follow")
 
 	_, _ = io.WriteString(stream.writer, "2026-08-17 16:31:59.078 Df Nimbus[4242:714e3fa] [] live\n")
 	waitFor(t, func() bool { return strings.Contains(out.String(), "live") }, "nothing was streamed")
@@ -459,11 +459,11 @@ func (s *syncBuffer) String() string {
 
 func executeCLIStreaming(t *testing.T, deps Deps, args ...string) (*syncBuffer, <-chan error) {
 	t.Helper()
-	return executeCLIStreamingContext(t, context.Background(), deps, args...)
+	return executeCLIStreamingContext(context.Background(), t, deps, args...)
 }
 
 func executeCLIStreamingContext(
-	t *testing.T, ctx context.Context, deps Deps, args ...string,
+	ctx context.Context, t *testing.T, deps Deps, args ...string,
 ) (*syncBuffer, <-chan error) {
 	t.Helper()
 	out := &syncBuffer{}
