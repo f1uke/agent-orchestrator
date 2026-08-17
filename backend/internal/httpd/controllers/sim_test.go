@@ -32,6 +32,9 @@ type fakeSimService struct {
 	gotUDID    string
 	gotTTL     time.Duration
 	gotToken   string
+	// gotPerformed is what the last ReleaseHold call actually received - see
+	// TestReleaseSimHold_PerformedDefaultsTrueWhenQueryParamIsAbsent.
+	gotPerformed bool
 	// holds counts grants. A drag that took one per move would still look right
 	// on the device and be wrong about arbitration, so it is counted.
 	holds int
@@ -47,8 +50,8 @@ func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.Session
 	return domain.SimHold{UDID: udid, SessionID: sessionID, Token: "tok-fake", ExpiresAt: now.Add(ttl)}, nil
 }
 
-func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string, _ bool) error {
-	f.gotUDID, f.gotToken = udid, token
+func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string, performed bool) error {
+	f.gotUDID, f.gotToken, f.gotPerformed = udid, token, performed
 	return f.releaseHoldErr
 }
 
