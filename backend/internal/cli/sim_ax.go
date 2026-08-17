@@ -74,6 +74,7 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 			"but it always reports who holds it. " + simNeverBootsNote,
 		Example: `  ao sim ax
   ao sim ax --json
+  ao sim ax --format maestro
   ao sim ax --max-nodes 2000 --udid 00000000-0000-0000-0000-000000000000`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -138,7 +139,13 @@ func writeSimAXMaestro(out io.Writer, result simAXResult) error {
 		return err
 	}
 	if result.Frontmost.BundleID != "" {
-		if _, err := fmt.Fprintf(out, "# foreground app: %s\n", result.Frontmost.BundleID); err != nil {
+		if _, err := fmt.Fprintf(out, "# Foreground app: %s\n", result.Frontmost.BundleID); err != nil {
+			return err
+		}
+	}
+	if result.Truncated {
+		if _, err := fmt.Fprintf(out, "# %d of %d elements shown, so the ambiguity counts below are a lower bound. Re-run with --max-nodes %d to see the rest.\n",
+			result.NodeCount, result.TotalNodeCount, result.TotalNodeCount); err != nil {
 			return err
 		}
 	}
@@ -146,12 +153,23 @@ func writeSimAXMaestro(out io.Writer, result simAXResult) error {
 		return err
 	}
 
+	// A container - the root, a row, a wrapper - has no label and no id but
+	// still has a tap point, so it falls to the point rung the same as a real
+	// leaf control would. On a real screen that drowns the useful selectors in
+	// brittle coordinates nobody would ever tap by name. A leaf with no label
+	// or id, on the other hand, IS a real control, and keeps its point
+	// fallback - it is skipped only when it has children to recurse into
+	// instead.
 	var walk func(els []simbridge.Element) error
 	walk = func(els []simbridge.Element) error {
 		for _, el := range els {
-			block := simflow.Render(simflow.For(result.Snapshot, el), el.Label)
-			if _, err := io.WriteString(out, block); err != nil {
-				return err
+			choice := simflow.For(result.Snapshot, el)
+			skip := (choice.Rung == simflow.RungPoint || choice.Rung == simflow.RungNone) && len(el.Children) > 0
+			if !skip {
+				block := simflow.Render(choice, el.Label)
+				if _, err := io.WriteString(out, block); err != nil {
+					return err
+				}
 			}
 			if err := walk(el.Children); err != nil {
 				return err

@@ -124,10 +124,12 @@ func TestSimFlowCheck_SyntaxErrorIsReportedWithMaestrosOwnWords(t *testing.T) {
 	}
 }
 
-// Deps.withDefaults must fill in every function member: a partial Deps is the
+// Deps.withDefaults must fill in CommandOutputWithEnv: a partial Deps is the
 // normal way callers and tests construct one, and a nil member is a panic at
 // the moment the command runs rather than an error anyone can read.
-// CommandOutputWithEnv was missed once already.
+// CommandOutputWithEnv was missed once already. (Not every function member
+// gets an entry here: SimDriver deliberately does not, because its
+// constructor needs a data dir withDefaults has no access to.)
 func TestDepsWithDefaults_FillsCommandOutputWithEnv(t *testing.T) {
 	got := Deps{}.withDefaults()
 	if got.CommandOutputWithEnv == nil {

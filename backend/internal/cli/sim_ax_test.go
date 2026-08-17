@@ -345,6 +345,71 @@ func TestSimAX_FormatMaestroEmitsSelectorsPerElement(t *testing.T) {
 	}
 }
 
+// On a real screen a container - the Application root, a row, a wrapper - has
+// no label and no id but does have a tap point, so it would otherwise fall to
+// the same brittle `point:` rung as a real leaf control, and on a screen with
+// hundreds of nodes those drown out the selectors anyone can actually use.
+func TestSimAX_FormatMaestroSkipsContainerPointBlocks(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if strings.Contains(out, "point:") {
+		t.Errorf("the Application root has no label or id but does have children, so it must not emit a point fallback:\n%s", out)
+	}
+	// Recursing into a skipped element's children is the whole point: the
+	// leaves underneath must still show up.
+	if !strings.Contains(out, `- tapOn: "Search"`) {
+		t.Errorf("missing the leaf selector for a real control:\n%s", out)
+	}
+}
+
+// A leaf with no label and no id is a real control, not a container, and must
+// keep its point fallback even though the rung is the same as a container's.
+func TestSimAX_FormatMaestroKeepsPointForALabellessLeaf(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Elements[0].Children = append(snap.Elements[0].Children, simbridge.Element{
+		Path: "0.2", Type: "Button", Enabled: true,
+		Tap: &simbridge.Point{X: 0.5, Y: 0.9},
+	})
+	driver := &fakeSimDriver{snapshot: snap}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, "point:") {
+		t.Errorf("a leaf with no label or id and no children must keep its point fallback:\n%s", out)
+	}
+}
+
+// writeSimAX prints a notice when --max-nodes capped the tree; the maestro
+// format must say the same thing, because a capped read also under-counts
+// ambiguity - the one number this whole design leans on - with nothing else
+// on the page saying so.
+func TestSimAX_FormatMaestroNotesTruncation(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro", "--max-nodes", "2")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, "2 of 3 elements shown") {
+		t.Errorf("missing the truncation notice:\n%s", out)
+	}
+	if !strings.Contains(out, "ambiguity") {
+		t.Errorf("must warn that the ambiguity counts below are now a lower bound:\n%s", out)
+	}
+	if !strings.Contains(out, "--max-nodes 3") {
+		t.Errorf("must say how to see the rest:\n%s", out)
+	}
+}
+
 func TestSimAX_FormatMaestroAndJSONTogetherIsRefused(t *testing.T) {
 	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
 	deps, _ := touchDeps(t, driver)

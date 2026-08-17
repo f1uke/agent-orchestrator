@@ -109,9 +109,9 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 // permissions, and taking a device in order to do that to it is precisely the
 // "succeed quietly and carry on" behaviour the lease exists to prevent.
 func (c *commandContext) requireSimLeaseForFlow(ctx context.Context, device simDevice) error {
-	sessionID := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
-	if sessionID == "" {
-		return errors.New("`ao sim flow run` runs as an AO session so the device can be arbitrated, but AO_SESSION_ID is not set")
+	sessionID, err := simSessionID("`ao sim flow run`")
+	if err != nil {
+		return err
 	}
 	views, reachable := c.simLeaseViews(ctx)
 	if !reachable {
@@ -129,11 +129,7 @@ func (c *commandContext) requireSimLeaseForFlow(ctx context.Context, device simD
 
 // maestroBinary resolves the tool, or explains that AO will not fetch it.
 func (c *commandContext) maestroBinary() (string, error) {
-	lookPath := c.deps.LookPath
-	if lookPath == nil {
-		return "", errors.New(maestroMissing)
-	}
-	bin, err := lookPath("maestro")
+	bin, err := c.deps.LookPath("maestro")
 	if err != nil || strings.TrimSpace(bin) == "" {
 		return "", errors.New(maestroMissing)
 	}

@@ -23,12 +23,18 @@ func Render(c Choice, plain string) string {
 			b.WriteString("# no label, no id and no reachable point - this element cannot be addressed\n")
 			return b.String()
 		}
+		// Off screen is exactly the case where the caller cannot look at the
+		// screen to sanity-check a match, so the ambiguity warning matters more
+		// here than anywhere else, not less.
+		if c.Ambiguity > 1 {
+			fmt.Fprintf(&b, "# %d elements share this text - index picks one, verify it is the one you mean\n", c.Ambiguity)
+		}
 		// An off-screen element has no point to touch, so the only honest
 		// command is the one that brings it on screen first.
 		b.WriteString("# off screen - scroll to it first\n")
 		b.WriteString("- scrollUntilVisible:\n")
 		fmt.Fprintf(&b, "    element: %q\n", scrollTarget(c, plain))
-		b.WriteString("    direction: DOWN\n")
+		fmt.Fprintf(&b, "    direction: %s\n", c.ScrollDirection)
 		return b.String()
 	}
 
@@ -64,8 +70,8 @@ func Render(c Choice, plain string) string {
 // label: scrolling to an element is a search, and an escaped pattern reads as
 // noise in a flow a human will edit.
 func scrollTarget(c Choice, plain string) string {
-	if strings.TrimSpace(plain) != "" {
-		return plain
+	if trimmed := strings.TrimSpace(plain); trimmed != "" {
+		return trimmed
 	}
 	return c.ID
 }

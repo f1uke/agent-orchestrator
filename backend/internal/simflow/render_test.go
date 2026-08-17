@@ -63,7 +63,7 @@ func TestRender_PointRungIsMarkedBrittle(t *testing.T) {
 
 func TestRender_OffScreenEmitsScrollNotTap(t *testing.T) {
 	got := simflow.Render(simflow.Choice{
-		Rung: simflow.RungText, Text: "See all", Ambiguity: 1, OffScreen: true,
+		Rung: simflow.RungText, Text: "See all", Ambiguity: 1, OffScreen: true, ScrollDirection: simflow.ScrollDown,
 	}, "See all")
 	if strings.Contains(got, "tapOn") {
 		t.Errorf("off-screen element must not be tapped directly: %q", got)
@@ -72,6 +72,47 @@ func TestRender_OffScreenEmitsScrollNotTap(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+// Render emits whatever ScrollDirection holds - the decision of which way to
+// scroll belongs to For, not to Render.
+func TestRender_OffScreenEmitsWhicheverDirectionTheChoiceHolds(t *testing.T) {
+	got := simflow.Render(simflow.Choice{
+		Rung: simflow.RungText, Text: "Header", Ambiguity: 1, OffScreen: true, ScrollDirection: simflow.ScrollUp,
+	}, "Header")
+	if !strings.Contains(got, "    direction: UP\n") {
+		t.Errorf("want direction: UP for an element above the fold, got:\n%s", got)
+	}
+	if strings.Contains(got, "direction: DOWN") {
+		t.Errorf("must not also say DOWN: %q", got)
+	}
+}
+
+// Off screen is exactly the case where the caller cannot look at the screen to
+// check a match, so the ambiguity warning matters more here, not less - it
+// must not be dropped the way it used to be.
+func TestRender_OffScreenWithAmbiguityStillWarns(t *testing.T) {
+	got := simflow.Render(simflow.Choice{
+		Rung: simflow.RungTextIndex, Text: "Continue", Index: 1, Ambiguity: 3, OffScreen: true, ScrollDirection: simflow.ScrollDown,
+	}, "Continue")
+	if !strings.Contains(got, "# 3 elements share this text") {
+		t.Errorf("missing the ambiguity comment on the off-screen path: %q", got)
+	}
+	if !strings.Contains(got, "- scrollUntilVisible:") {
+		t.Errorf("missing the scroll stanza: %q", got)
+	}
+}
+
+// scrollTarget must trim the label the same way For does when matching, or a
+// label like "  Save  " ends up tapped as "Save" but scrolled to as
+// "  Save  ".
+func TestRender_ScrollTargetIsTrimmed(t *testing.T) {
+	got := simflow.Render(simflow.Choice{
+		Rung: simflow.RungText, Text: "Save", Ambiguity: 1, OffScreen: true, ScrollDirection: simflow.ScrollDown,
+	}, "  Save  ")
+	if !strings.Contains(got, `    element: "Save"`) {
+		t.Errorf("want the trimmed label as the scroll target, got: %q", got)
 	}
 }
 

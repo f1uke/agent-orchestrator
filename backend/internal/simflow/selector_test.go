@@ -125,3 +125,27 @@ func TestFor_OffScreenWithLabelStillReportsTheLabel(t *testing.T) {
 		t.Fatalf("got %+v, want RungText with OffScreen", got)
 	}
 }
+
+// simbridge sets OffScreen whenever an element's centre is off the viewport in
+// any direction, not only below it. Scrolling DOWN for something entirely
+// above the top edge moves away from the element, not toward it.
+func TestFor_ScrollDirectionFollowsTheBox(t *testing.T) {
+	cases := []struct {
+		name string
+		box  *simbridge.Box
+		want simflow.ScrollDirection
+	}{
+		{"entirely above the viewport", &simbridge.Box{Y1: -0.6, Y2: -0.1}, simflow.ScrollUp},
+		{"entirely below the viewport", &simbridge.Box{Y1: 1.1, Y2: 1.5}, simflow.ScrollDown},
+		{"no box at all", nil, simflow.ScrollDown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			el := simbridge.Element{Path: "0.0", Label: "See all", OffScreen: true, Box: tc.box}
+			got := simflow.For(tree(el), el)
+			if got.ScrollDirection != tc.want {
+				t.Errorf("ScrollDirection = %v, want %v", got.ScrollDirection, tc.want)
+			}
+		})
+	}
+}

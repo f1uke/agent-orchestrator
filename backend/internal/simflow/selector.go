@@ -35,6 +35,20 @@ const (
 	RungPoint
 )
 
+// ScrollDirection is which way scrollUntilVisible should search for an
+// off-screen element.
+type ScrollDirection string
+
+const (
+	// ScrollDown is the common case - most of a scrolling screen sits below the
+	// fold - and the safe default when an element's edges are not known.
+	ScrollDown ScrollDirection = "DOWN"
+	// ScrollUp is for an element entirely above the top of the viewport, which
+	// simbridge also reports as OffScreen: scrolling down would move away from
+	// it, not toward it.
+	ScrollUp ScrollDirection = "UP"
+)
+
 // Choice is the selector for one element plus everything a reader needs in
 // order to decide how much to trust it.
 type Choice struct {
@@ -56,6 +70,12 @@ type Choice struct {
 	PercentX  int
 	PercentY  int
 	OffScreen bool
+	// ScrollDirection is which way scrollUntilVisible should search when
+	// OffScreen is set. It is decided from the element's own edges, not just
+	// whether it is off screen, because simbridge sets OffScreen for an element
+	// above the top of the viewport too - and scrolling down moves away from
+	// that one, not toward it.
+	ScrollDirection ScrollDirection
 }
 
 // metacharacter is the set that makes a label behave as a pattern rather than a
@@ -67,7 +87,7 @@ var metacharacter = regexp.MustCompile(`[(){}\[\].+*?^$|\\]`)
 
 // For picks the best selector for el, using snap only to count collisions.
 func For(snap simbridge.Snapshot, el simbridge.Element) Choice {
-	c := Choice{Rung: RungNone, OffScreen: el.OffScreen}
+	c := Choice{Rung: RungNone, OffScreen: el.OffScreen, ScrollDirection: scrollDirectionFor(el.Box)}
 
 	if label := strings.TrimSpace(el.Label); label != "" {
 		matches := matchingPaths(snap, label)
@@ -134,6 +154,24 @@ func escape(label string) (string, bool) {
 		return label, false
 	}
 	return regexp.QuoteMeta(label), true
+}
+
+// scrollDirectionFor decides which way scrollUntilVisible should search, from
+// an element's normalized box.
+//
+// simbridge sets OffScreen whenever an element's centre falls outside the
+// viewport in any direction, not just below it - a header pinned above the
+// current scroll position is off screen the same way a row further down is.
+// Scrolling DOWN for the first case moves away from the element, not toward
+// it.
+func scrollDirectionFor(box *simbridge.Box) ScrollDirection {
+	if box == nil {
+		return ScrollDown
+	}
+	if box.Y2 <= 0 {
+		return ScrollUp
+	}
+	return ScrollDown
 }
 
 // percent converts a normalized coordinate to the whole percent Maestro takes.
