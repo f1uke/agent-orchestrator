@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -91,12 +92,7 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 			if err := ctx.requireSimLeaseForFlow(cmd.Context(), device); err != nil {
 				return err
 			}
-			out, err := ctx.runMaestro(cmd.Context(), "test", "--device", device.UDID, args[0])
-			if err != nil {
-				return err
-			}
-			_, err = fmt.Fprint(cmd.OutOrStdout(), out)
-			return err
+			return ctx.runMaestroStream(cmd.Context(), cmd.OutOrStdout(), "test", "--device", device.UDID, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&udid, "udid", "", "Run against this simulator instead of the booted one")
@@ -136,20 +132,28 @@ func (c *commandContext) maestroBinary() (string, error) {
 	return bin, nil
 }
 
-// runMaestro checks the flow file exists, then runs maestro on it. The file is
-// checked here rather than left to maestro because a missing path should not
-// cost a JVM start, and because maestro's own message for it is worse.
+// maestroPreflight checks the flow file exists, then resolves the binary. The
+// file is checked here rather than left to maestro because a missing path
+// should not cost a JVM start, and because maestro's own message for it is
+// worse.
 //
 // The flow file must be the last argument: that is what gets stat-ed before a
 // JVM is started. Every caller in this package satisfies that by construction
 // (`check-syntax <file>`, `test --device <udid> <file>`); a caller that puts
 // something else last will have the wrong path checked.
-func (c *commandContext) runMaestro(ctx context.Context, args ...string) (string, error) {
+func (c *commandContext) maestroPreflight(args []string) (string, error) {
 	file := args[len(args)-1]
 	if _, err := os.Stat(file); err != nil {
 		return "", fmt.Errorf("no flow file at %s", file)
 	}
-	bin, err := c.maestroBinary()
+	return c.maestroBinary()
+}
+
+// runMaestro runs maestro and collects all of its output before returning.
+// This is `check`'s command: a syntax check with no device is a fast parse,
+// over almost as soon as it starts, so there is nothing worth watching arrive.
+func (c *commandContext) runMaestro(ctx context.Context, args ...string) (string, error) {
+	bin, err := c.maestroPreflight(args)
 	if err != nil {
 		return "", err
 	}
@@ -160,4 +164,47 @@ func (c *commandContext) runMaestro(ctx context.Context, args ...string) (string
 		return "", fmt.Errorf("maestro %s failed:\n%s", args[0], strings.TrimSpace(text))
 	}
 	return text, nil
+}
+
+// runMaestroStream runs maestro and prints its output as it arrives. This is
+// `run`'s command: a flow takes tens of seconds to minutes, and a worker
+// watching it needs to see progress rather than silence until it ends.
+func (c *commandContext) runMaestroStream(ctx context.Context, out io.Writer, args ...string) error {
+	bin, err := c.maestroPreflight(args)
+	if err != nil {
+		return err
+	}
+	stream, err := c.deps.StartStreamWithEnv(ctx, []string{maestroEnvNoAnalytics}, bin, args...)
+	if err != nil {
+		return fmt.Errorf("could not start maestro %s: %w", args[0], err)
+	}
+	defer func() { _ = stream.Close() }()
+	// A read parked on a pipe cannot be interrupted by a context; stopping the
+	// child is what ends it. Same treatment as `ao sim log --follow` (stream.go),
+	// for the same reason.
+	reading := make(chan struct{})
+	defer close(reading)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = stream.Close()
+		case <-reading:
+		}
+	}()
+
+	_, copyErr := io.Copy(out, stream)
+	// Being stopped is how an interrupted run ends: by a signal, by a parent
+	// that went away, or by a harness that timed it out. None of those is a
+	// failure, and the read error it produces ("file already closed") is this
+	// command closing its own pipe on the way out.
+	if ctx.Err() != nil {
+		return nil //nolint:nilerr // intentional: an interrupted flow run was stopped on purpose
+	}
+	if copyErr != nil {
+		return fmt.Errorf("maestro %s failed: %w", args[0], copyErr)
+	}
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("maestro %s failed:\n%s", args[0], strings.TrimSpace(err.Error()))
+	}
+	return nil
 }

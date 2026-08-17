@@ -80,6 +80,14 @@ type Deps struct {
 	// which may have to be stopped rather than waited for. `ao sim log --follow`
 	// is the only caller: a `log stream` never ends on its own.
 	StartStream func(ctx context.Context, name string, args ...string) (ProcessStream, error)
+	// StartStreamWithEnv is StartStream plus extra environment on top of the
+	// process's own, the streaming counterpart to CommandOutputWithEnv. It
+	// exists because `ao sim flow run` must disable Maestro's analytics on
+	// every invocation while still streaming output as it arrives, and
+	// StartStream itself carries no environment parameter - mutating this
+	// process's own environment to smuggle a variable through it would leak
+	// into every other command the CLI runs.
+	StartStreamWithEnv func(ctx context.Context, env []string, name string, args ...string) (ProcessStream, error)
 	// DoctorGitHubRESTBase lets tests point the doctor GitHub token probe at
 	// httptest without mutating package-global state.
 	DoctorGitHubRESTBase string
@@ -110,6 +118,7 @@ func DefaultDeps() Deps {
 		CommandOutputInDir:   commandOutputInDir,
 		CommandOutputWithEnv: commandOutputWithEnv,
 		StartStream:          startProcessStream,
+		StartStreamWithEnv:   startProcessStreamWithEnv,
 		DoctorGitHubRESTBase: defaultDoctorGitHubRESTBase,
 		Now:                  time.Now,
 		Sleep:                time.Sleep,
@@ -169,6 +178,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.StartStream == nil {
 		d.StartStream = def.StartStream
+	}
+	if d.StartStreamWithEnv == nil {
+		d.StartStreamWithEnv = def.StartStreamWithEnv
 	}
 	if d.DoctorGitHubRESTBase == "" {
 		d.DoctorGitHubRESTBase = def.DoctorGitHubRESTBase

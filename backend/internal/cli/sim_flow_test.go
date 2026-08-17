@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,7 +157,11 @@ func TestSimFlowCheck_MissingFileIsRefusedBeforeRunningAnything(t *testing.T) {
 // flowRunDeps is touchDeps (a booted-only device listing, a fake driver and a
 // live fake daemon) plus maestro faked the same way flowTestDeps fakes it for
 // `check`: LookPath composes onto touchDeps' own (xcrun must still resolve),
-// and CommandOutputWithEnv records every invocation.
+// and StartStreamWithEnv records every invocation and hands back a stream
+// that immediately has `out` available to read, and - if runErr is set -
+// fails the way a real ProcessStream does: Err() names what the exit status
+// was and what the child said, not a returned error from the call that
+// started it.
 func flowRunDeps(t *testing.T, found bool, out []byte, runErr error, rec *[]recordedCommand) (Deps, *simDaemon) {
 	t.Helper()
 	deps, daemon := touchDeps(t, &fakeSimDriver{})
@@ -169,9 +175,14 @@ func flowRunDeps(t *testing.T, found bool, out []byte, runErr error, rec *[]reco
 		}
 		return "/usr/local/bin/maestro", nil
 	}
-	deps.CommandOutputWithEnv = func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
+	deps.StartStreamWithEnv = func(_ context.Context, env []string, name string, args ...string) (ProcessStream, error) {
 		*rec = append(*rec, recordedCommand{env: env, name: name, args: args})
-		return out, runErr
+		stream := newFakeStream()
+		if runErr != nil {
+			stream.err = fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(out)))
+		}
+		stream.feed(string(out))
+		return stream, nil
 	}
 	return deps, daemon
 }
@@ -322,5 +333,54 @@ func TestSimFlowRun_DisablesMaestroAnalytics(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("MAESTRO_CLI_NO_ANALYTICS=1 not in env %v", rec[0].env)
+	}
+}
+
+// A Maestro flow takes tens of seconds to minutes. Collecting all of its
+// output before printing any of it - what CommandOutputWithEnv would do -
+// leaves a worker watching a hung flow with no sign of life. This asserts
+// genuine streaming: the first line must reach stdout while the fake child is
+// still running, well before it ends - an assertion that only passes if the
+// output is read as it arrives, not buffered and flushed at the end.
+func TestSimFlowRun_StreamsOutputAsItArrives(t *testing.T) {
+	deps, daemon := touchDeps(t, &fakeSimDriver{})
+	lookXcrun := deps.LookPath
+	deps.LookPath = func(file string) (string, error) {
+		if file != "maestro" {
+			return lookXcrun(file)
+		}
+		return "/usr/local/bin/maestro", nil
+	}
+	grantSimLease(daemon, simUDIDProMax, "mer-9")
+	stream := newFakeStream()
+	var rec []recordedCommand
+	deps.StartStreamWithEnv = func(_ context.Context, env []string, name string, args ...string) (ProcessStream, error) {
+		rec = append(rec, recordedCommand{env: env, name: name, args: args})
+		return stream, nil
+	}
+	path := writeFlowFile(t)
+
+	out, done := executeCLIStreaming(t, deps, "sim", "flow", "run", path, "--udid", simUDIDProMax)
+
+	_, _ = io.WriteString(stream.writer, "Running flow\n")
+	waitFor(t, func() bool { return strings.Contains(out.String(), "Running flow") },
+		"maestro's progress line never reached stdout before the flow finished")
+
+	// Only now does the fake child end. The wait above already proved the
+	// first line arrived before this point.
+	_, _ = io.WriteString(stream.writer, "Flow passed\n")
+	_ = stream.writer.CloseWithError(io.EOF)
+
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out.String(), "Flow passed") {
+		t.Fatalf("the final line must also reach stdout:\n%s", out.String())
+	}
+	if len(rec) != 1 {
+		t.Fatalf("started %d maestro invocations, want 1", len(rec))
+	}
+	if !strings.Contains(strings.Join(rec[0].args, " "), "--device "+simUDIDProMax) {
+		t.Fatalf("args = %v, must still pin --device", rec[0].args)
 	}
 }
