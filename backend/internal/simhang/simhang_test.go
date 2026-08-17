@@ -221,6 +221,11 @@ func TestDiagnose_DegradesWhenItCannotTell(t *testing.T) {
 		{name: "no main thread in the graph", pid: 4242, look: lookFound, runs: []answer{{out: "Call graph:\n    3 Thread_1: com.apple.other\n"}}},
 		{name: "confirming run failed", pid: 4242, look: lookFound,
 			runs: []answer{{out: blockedOnStdout}, {err: errors.New("exit status 1")}}},
+		// The order matters as much as the outcome: a probe whose FIRST sample
+		// was unreadable never ruled the run loop out, so a clear second one is
+		// not enough to claim a hang on.
+		{name: "the cheap sample was unreadable", pid: 4242, look: lookFound,
+			runs: []answer{{out: "sample cannot examine process 4242"}, {out: blockedOnStdout}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -275,5 +280,51 @@ func TestDiagnose_TruncatedGraphIsNoVerdict(t *testing.T) {
 
 	if got, ok := Diagnose(context.Background(), lookFound, r.run, 4242); ok {
 		t.Fatalf("want no verdict, got %+v", got)
+	}
+}
+
+// A main thread parked in mach_msg for a synchronous XPC call that will never
+// be answered: the same leaf a healthy app waits in, without the run loop above
+// it. It is blocked, and the leaf alone cannot tell the two apart.
+const blockedOnSyncXPC = `Call graph:
+    10 Thread_9000001   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 10 main  (in Nimbus) + 120  [0x105024dc4]
+    +   10 Nimbus.Session.refresh  (in Nimbus) + 44  [0x105030000]
+    +     10 xpc_connection_send_message_with_reply_sync  (in libxpc.dylib) + 216  [0x18a4c0000]
+    +       10 mach_msg2_internal  (in libsystem_kernel.dylib) + 72  [0x105605e5c]
+    +         10 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x1055f4b70]
+`
+
+// Two samples of one stack, which is not evidence that a thread never moves.
+const thinReport = `Call graph:
+    2 Thread_9000001   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 2 main  (in Nimbus) + 120  [0x105024dc4]
+    +   2 write  (in libsystem_kernel.dylib) + 8  [0x1055f5000]
+`
+
+func TestDiagnose_AWaitThatIsNotTheRunLoopsIsStillBlocked(t *testing.T) {
+	// The run loop is what makes mach_msg innocent, not mach_msg itself.
+	r := &runner{answers: []answer{{out: blockedOnSyncXPC}, {out: blockedOnSyncXPC}}}
+
+	got, ok := Diagnose(context.Background(), lookFound, r.run, 4242)
+	if !ok || !got.Blocked {
+		t.Fatalf("a synchronous XPC wait with no run loop above it is blocked: %+v ok=%v", got, ok)
+	}
+	if !strings.Contains(strings.Join(got.Frames, " "), "xpc_connection_send_message_with_reply_sync") {
+		t.Fatalf("frames = %v, want the call it is waiting on", got.Frames)
+	}
+}
+
+func TestDiagnose_TooFewSamplesIsNotEnoughToCallItBlocked(t *testing.T) {
+	// "It was in the same place twice" is a coincidence, not a hung app, and a
+	// wrong hang claim sends an agent down its own wrong path.
+	r := &runner{answers: []answer{{out: thinReport}, {out: thinReport}}}
+
+	got, ok := Diagnose(context.Background(), lookFound, r.run, 4242)
+	if !ok {
+		t.Fatal("want a verdict")
+	}
+	if got.Blocked {
+		t.Fatalf("two samples are not evidence of a blocked thread: %+v", got)
 	}
 }
