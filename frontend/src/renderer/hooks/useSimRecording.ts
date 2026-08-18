@@ -106,7 +106,11 @@ export function useSimFlows(sessionId: string, enabled: boolean) {
 				if (response?.status === 501) return [];
 				throw error ?? new Error("Could not list recordings");
 			}
-			return data.flows;
+			// Never undefined. React Query treats an undefined result as a
+			// programming error and throws, which takes the whole panel down -
+			// so a response without the field reads as "nothing recorded",
+			// which is also what it means.
+			return data.flows ?? [];
 		},
 	});
 }

@@ -259,8 +259,12 @@ func TestSimRecordStop_JSONCarriesThePathAndBothCounts(t *testing.T) {
 	if res.StepCount != 7 || res.ReviewCount != 2 {
 		t.Fatalf("counts = %d steps / %d review, want 7 / 2", res.StepCount, res.ReviewCount)
 	}
-	if !filepath.IsAbs(res.Path) {
-		t.Fatalf("path = %q, want an absolute path", res.Path)
+	// The exact path the daemon reported, not one this side reconstructed.
+	// (Asserting filepath.IsAbs here instead was wrong on Windows, where a
+	// POSIX fixture path is not absolute - and it tested less: what matters is
+	// that the CLI passes the daemon's answer through untouched.)
+	if want := "/data/sim/mer-9/flows/login-to-portfolio-20260813-074502.000Z.yaml"; res.Path != want {
+		t.Fatalf("path = %q, want the daemon's own answer %q", res.Path, want)
 	}
 }
 
