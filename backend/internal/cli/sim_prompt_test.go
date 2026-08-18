@@ -83,10 +83,12 @@ var simPromptDecisions = map[string]bool{
 	"log --since":     false,
 }
 
-// ambientSimFlags are on nearly every `ao sim` command and are about how the
-// caller talks to the CLI, not about the device. Excluding them is itself a
-// reviewed decision - they are named here rather than filtered by a pattern so
-// the exclusion cannot quietly widen.
+// ambientSimFlags are the two flags nearly every `ao sim` command carries, so
+// deciding them per command would be twenty entries saying the same thing:
+// `--json` is output shape, and `--udid` is device selection, which the prompt
+// settles once in prose (which device you may drive at all) rather than command
+// by command. Excluding them is itself a reviewed decision - they are named
+// here rather than filtered by a pattern so the exclusion cannot quietly widen.
 var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 
 // simGuidanceBudget caps the always-seen block. Brevity is the whole reason the
