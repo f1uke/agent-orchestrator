@@ -54,6 +54,17 @@ type simAXResult struct {
 	Runtime           string       `json:"runtime"`
 	RuntimeIdentifier string       `json:"runtimeIdentifier"`
 	Lease             simLeaseView `json:"lease"`
+	// Settle reports what --settle did, and is absent when it was not asked
+	// for. A caller that asked for a settled read has to be able to tell
+	// "settled after two reads" from "gave up while it was still moving",
+	// because only one of those is a screen worth acting on.
+	Settle *simSettleView `json:"settle,omitempty"`
+}
+
+// simSettleView is the settling outcome as the CLI reports it.
+type simSettleView struct {
+	Reads   int  `json:"reads"`
+	Settled bool `json:"settled"`
 }
 
 func newSimAXCommand(ctx *commandContext) *cobra.Command {
@@ -62,6 +73,7 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 		maxNodes int
 		json     bool
 		format   string
+		settle   bool
 	}
 	cmd := &cobra.Command{
 		Use:   "ax",
@@ -70,11 +82,17 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 			"Every element carries the point to tap it - normalized 0..1, exactly what " +
 			"`ao sim tap` takes - so acting on what you read never involves coordinate " +
 			"maths or guessing a position from a screenshot.\n\n" +
+			"A plain read returns whatever is on screen at that instant, which on a screen " +
+			"still loading is a half-drawn one. `--settle` reads again until two reads agree, " +
+			"and says so if the screen never stops moving. It is off by default because most " +
+			"reads are of a screen that is already still, and every agent interaction would " +
+			"otherwise pay for the extra read.\n\n" +
 			"This is a read: it needs no claim on the device and is never blocked by one, " +
 			"but it always reports who holds it. " + simNeverBootsNote,
 		Example: `  ao sim ax
   ao sim ax --json
   ao sim ax --format maestro
+  ao sim ax --settle
   ao sim ax --max-nodes 2000 --udid 00000000-0000-0000-0000-000000000000`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -85,7 +103,7 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 			if opts.maxNodes <= 0 {
 				return usageError{fmt.Errorf("--max-nodes must be positive, got %d", opts.maxNodes)}
 			}
-			result, err := ctx.readSimAX(cmd.Context(), opts.udid, opts.maxNodes)
+			result, err := ctx.readSimAX(cmd.Context(), opts.udid, opts.maxNodes, opts.settle)
 			if err != nil {
 				return err
 			}
@@ -104,6 +122,8 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 	f.IntVar(&opts.maxNodes, "max-nodes", defaultSimAXMaxNodes, "Stop after this many elements")
 	f.BoolVar(&opts.json, "json", false, "Output the tree as JSON")
 	f.StringVar(&opts.format, "format", "text", "Output format: text, json, or maestro (Maestro selectors, one block per element)")
+	f.BoolVar(&opts.settle, "settle", false,
+		"Read again until the screen stops changing, so content that arrives late is not missed (costs one or two extra reads)")
 	return cmd
 }
 
@@ -180,7 +200,7 @@ func writeSimAXMaestro(out io.Writer, result simAXResult) error {
 	return walk(result.Elements)
 }
 
-func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes int) (simAXResult, error) {
+func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes int, settle bool) (simAXResult, error) {
 	device, err := c.resolveBootedSimDevice(ctx, udid)
 	if err != nil {
 		return simAXResult{}, err
@@ -189,20 +209,35 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 	if err != nil {
 		return simAXResult{}, err
 	}
-	snapshot, err := driver.AX(ctx, device.UDID)
+	read := func(ctx context.Context) (simbridge.Snapshot, error) { return driver.AX(ctx, device.UDID) }
+
+	var settleView *simSettleView
+	var snapshot simbridge.Snapshot
+	if settle {
+		var res simbridge.SettleResult
+		snapshot, res, err = simbridge.ReadSettled(ctx, read, simbridge.SettleOptions{})
+		settleView = &simSettleView{Reads: res.Reads, Settled: res.Settled}
+	} else {
+		snapshot, err = read(ctx)
+	}
 	if err != nil {
 		return simAXResult{}, err
 	}
 	// For a second after an app comes to the front, the tree is the clock and
 	// the battery and nothing else. One more read is cheaper than an agent
 	// concluding the app is blank and acting on it.
+	//
+	// This stays even under --settle: a status-bar-only screen is perfectly
+	// stable, so settling agrees with itself and returns it. The two checks
+	// answer different questions - "has it stopped moving" and "has it started
+	// at all".
 	if snapshot.OnlyStatusBar {
 		select {
 		case <-ctx.Done():
 			return simAXResult{}, ctx.Err()
 		case <-time.After(simAXSettleDelay):
 		}
-		if second, retryErr := driver.AX(ctx, device.UDID); retryErr == nil {
+		if second, retryErr := read(ctx); retryErr == nil {
 			snapshot = second
 		}
 	}
@@ -218,6 +253,7 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 		Runtime:           device.Runtime,
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		Lease:             simLeaseFor(views, device.UDID, reachable),
+		Settle:            settleView,
 	}, nil
 }
 
@@ -352,6 +388,15 @@ func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
 	}
 	if _, err := fmt.Fprintf(out, "Device: %s\nLease: %s\n", result.UDID, result.Lease.captureLine(sessionID)); err != nil {
 		return err
+	}
+	if result.Settle != nil && !result.Settle.Settled {
+		// The bound exists so an animation cannot hang the command; saying so
+		// is what stops the caller from acting on a half-drawn screen as
+		// though it were a settled one.
+		if _, err := fmt.Fprintf(out, "Note: the screen was still changing after %d reads, so this is the last one, not a settled one. "+
+			"Something on it is animating or still loading - read again, or look with `ao sim shot`.\n", result.Settle.Reads); err != nil {
+			return err
+		}
 	}
 	if result.OnlyStatusBar {
 		// Said as a possibility, because a genuinely blank screen looks the same

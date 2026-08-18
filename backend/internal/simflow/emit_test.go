@@ -445,3 +445,59 @@ func TestEmit_EntryPathIsQuoted(t *testing.T) {
 		t.Fatalf("the entry path must be quoted, got:\n%s", got)
 	}
 }
+
+// A reader decides whether to trust a generated flow in the first seconds.
+// When some steps were guessed the header has to say so, with a count, or the
+// per-step markers go unread.
+func TestEmit_HeaderCountsTheStepsThatWereGuessed(t *testing.T) {
+	steps := []simflow.Step{
+		{Seq: 1, Kind: simflow.StepTap, Choice: simflow.Choice{Rung: simflow.RungText, Text: "Home", Ambiguity: 1}, Plain: "Home"},
+		{Seq: 2, Kind: simflow.StepTap, Choice: simflow.Choice{Rung: simflow.RungTextIndex, Text: "Buy", Index: 1, Ambiguity: 3}, Plain: "Buy"},
+		{Seq: 3, Kind: simflow.StepTap, Choice: simflow.Choice{
+			Rung: simflow.RungTextAnchor, Text: "Buy", Ambiguity: 3, Anchor: "Section", Relation: simflow.RelBelow,
+		}, Plain: "Buy"},
+	}
+
+	got, err := simflow.Emit(steps, simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, "REVIEW REQUIRED: 1 of 3 steps") {
+		t.Errorf("header must count exactly the guessed steps:\n%s", got)
+	}
+}
+
+// The banner must not appear when nothing was guessed: a warning that is
+// always there is one nobody reads.
+func TestEmit_NoReviewHeaderWhenEveryStepResolved(t *testing.T) {
+	steps := []simflow.Step{
+		{Seq: 1, Kind: simflow.StepTap, Choice: simflow.Choice{Rung: simflow.RungText, Text: "Home", Ambiguity: 1}, Plain: "Home"},
+		{Seq: 2, Kind: simflow.StepType, Text: "hello"},
+	}
+
+	got, err := simflow.Emit(steps, simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if strings.Contains(got, "REVIEW") {
+		t.Errorf("a clean flow must carry no review banner:\n%s", got)
+	}
+}
+
+// An anchored step still gets its "the new screen arrived" wait, and that wait
+// is on the target's own text - not on the anchor, which would fail for a
+// reason unrelated to the screen having loaded.
+func TestEmit_AnchoredStepWaitsOnItsOwnTextNotTheAnchor(t *testing.T) {
+	steps := []simflow.Step{{
+		Seq: 1, Kind: simflow.StepTap, ScreenChange: true, Plain: "Buy",
+		Choice: simflow.Choice{Rung: simflow.RungTextAnchor, Text: "Buy", Ambiguity: 2, Anchor: "Section", Relation: simflow.RelBelow},
+	}}
+
+	got, err := simflow.Emit(steps, simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, "- extendedWaitUntil:\n    visible: \"Buy\"") {
+		t.Errorf("missing the wait on the target's own text:\n%s", got)
+	}
+}

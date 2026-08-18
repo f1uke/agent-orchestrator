@@ -2607,6 +2607,8 @@ export interface components {
             offScreen?: boolean;
             screenChange?: boolean;
             selector?: string;
+            selectorAnchor?: string;
+            selectorAnchorRel?: string;
             /** Format: int64 */
             selectorIndex?: number;
             /** Format: int64 */

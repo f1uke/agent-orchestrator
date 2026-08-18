@@ -42,22 +42,24 @@ type simRecordingClient struct {
 
 // simRecordingStepClient mirrors domain.SimRecordingStep on the wire.
 type simRecordingStepClient struct {
-	Seq           int64     `json:"seq"`
-	At            time.Time `json:"at"`
-	Kind          string    `json:"kind"`
-	Selector      string    `json:"selector,omitempty"`
-	SelectorRung  int64     `json:"selectorRung,omitempty"`
-	SelectorIndex int64     `json:"selectorIndex,omitempty"`
-	Ambiguity     int64     `json:"ambiguity,omitempty"`
-	OffScreen     bool      `json:"offScreen,omitempty"`
-	ScreenChange  bool      `json:"screenChange,omitempty"`
-	X             float64   `json:"x"`
-	Y             float64   `json:"y"`
-	ToX           float64   `json:"toX"`
-	ToY           float64   `json:"toY"`
-	DurationMS    int64     `json:"durationMs,omitempty"`
-	Text          string    `json:"text,omitempty"`
-	Detail        string    `json:"detail,omitempty"`
+	Seq               int64     `json:"seq"`
+	At                time.Time `json:"at"`
+	Kind              string    `json:"kind"`
+	Selector          string    `json:"selector,omitempty"`
+	SelectorRung      int64     `json:"selectorRung,omitempty"`
+	SelectorIndex     int64     `json:"selectorIndex,omitempty"`
+	SelectorAnchor    string    `json:"selectorAnchor,omitempty"`
+	SelectorAnchorRel string    `json:"selectorAnchorRel,omitempty"`
+	Ambiguity         int64     `json:"ambiguity,omitempty"`
+	OffScreen         bool      `json:"offScreen,omitempty"`
+	ScreenChange      bool      `json:"screenChange,omitempty"`
+	X                 float64   `json:"x"`
+	Y                 float64   `json:"y"`
+	ToX               float64   `json:"toX"`
+	ToY               float64   `json:"toY"`
+	DurationMS        int64     `json:"durationMs,omitempty"`
+	Text              string    `json:"text,omitempty"`
+	Detail            string    `json:"detail,omitempty"`
 }
 
 // startSimRecordingRequest mirrors controllers.StartSimRecordingInput.
@@ -435,6 +437,11 @@ func simSessionRecordingPath(recordedAt time.Time, udid string) (string, error) 
 // a cosmetic one, which is why it has its own column rather than a
 // documented gap.
 //
+// Choice.Anchor/Relation round-trip through their own columns
+// (0041_sim_recording_step_anchor.sql) for the same reason: an anchor resolved
+// at record time and then lost would fall back to the index it exists to
+// replace, quietly reintroducing the failure it was added to remove.
+//
 // Choice.Escaped - whether the stored selector text needed regex escaping -
 // has no column of its own and needs none: it is RECOVERED here rather than
 // remembered, because a stored text selector is always the escaped form, so
@@ -462,6 +469,12 @@ func simRecordingStepToFlow(step simRecordingStepClient) simflow.Step {
 	case simflow.RungText, simflow.RungTextIndex:
 		choice.Text = step.Selector
 		plain, choice.Escaped = simflow.Unescape(step.Selector)
+	case simflow.RungTextAnchor:
+		choice.Text = step.Selector
+		plain, choice.Escaped = simflow.Unescape(step.Selector)
+		choice.Anchor = step.SelectorAnchor
+		_, choice.AnchorEscaped = simflow.Unescape(step.SelectorAnchor)
+		choice.Relation = simflow.Relation(step.SelectorAnchorRel)
 	case simflow.RungID:
 		choice.ID = step.Selector
 	case simflow.RungPoint:
