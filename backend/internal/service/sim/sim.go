@@ -164,10 +164,27 @@ func WithTokenSource(tokens func() string) Option {
 // DefaultScreenRefreshDelay is how long the recorder waits after a gesture
 // before reading the screen.
 //
-// Long enough that a flurry of drags produces no reads at all - the bridge
-// stays free for the human's next touch - and short enough that an ordinary
-// pause leaves a screen ready before they act again.
-const DefaultScreenRefreshDelay = 500 * time.Millisecond
+// ⚠ Measured, and the number matters. The bridge is exclusive, so a read that
+// is in flight when the human acts again is time their touch waits behind -
+// and on a real app one read is well over a second. With a 500 ms wait, a
+// person flicking through a screen pauses for about as long as a read takes,
+// so the read reliably started during the pause and was still going when they
+// moved: measured on their own app, EVERY drag-begin then cost 360-867 ms
+// while the moves behind it stayed at 1-2 ms.
+//
+// Two seconds is longer than the pauses inside ordinary use, so flicking and
+// tapping through a screen triggers no reads at all, and the read happens when
+// somebody actually stops to look at what they did.
+//
+// ⚠ It cannot be eliminated, only made rare, and saying so is the honest part:
+// a read cannot be cancelled once the bridge has it, so a human who pauses
+// exactly long enough to start one and then acts will still wait for it. What
+// changed is that this is now the exception rather than every gesture.
+//
+// The cost of the longer wait is description, not correctness: a step taken
+// while the maintained screen is stale is recorded as a coordinate and marked
+// for review, which is exactly what a drag records anyway.
+const DefaultScreenRefreshDelay = 2 * time.Second
 
 // WithScreenRefreshDelay overrides that wait, so a test does not have to.
 func WithScreenRefreshDelay(d time.Duration) Option {
