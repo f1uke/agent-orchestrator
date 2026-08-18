@@ -4671,6 +4671,33 @@ paths:
       summary: List this machine's iOS Simulators with their lease state
       tags:
       - sim
+  /api/v1/sim/devices/{udid}/keyboard:
+    get:
+      operationId: getSimKeyboard
+      parameters:
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimKeyboardView'
+          description: OK
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Which keyboard input mode a simulator will read key presses through
+      tags:
+      - sim
   /api/v1/sim/leases:
     get:
       operationId: listSimLeases
@@ -7290,6 +7317,21 @@ components:
           $ref: '#/components/schemas/SimHold'
       required:
       - hold
+      type: object
+    SimKeyboardView:
+      properties:
+        mode:
+          type: string
+        reason:
+          type: string
+        sendsUSASCII:
+          type: boolean
+        udid:
+          type: string
+      required:
+      - udid
+      - mode
+      - sendsUSASCII
       type: object
     SimLease:
       properties:

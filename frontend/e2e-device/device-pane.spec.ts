@@ -12,7 +12,7 @@
  * `npm run package` for the renderer build). Everything missing is a skip.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -311,6 +311,163 @@ test("recording captures a hand drag, and stop writes the flow it reports", asyn
 	expect(reported).toContain(`${counts![1]} step`);
 
 	await expect(button).toHaveAttribute("aria-pressed", "false");
+});
+
+/**
+ * 🗝 A character has to appear about as fast as it does when typing into
+ * Simulator.app, because a person types by watching characters land.
+ *
+ * Measured before this guard existed: one character took 1164-1181 ms to reach
+ * the device - a 250 ms wait for the human to pause, then ~935 ms for the
+ * daemon to ask the guest which keyboard input mode it was in, in front of
+ * every keystroke - and a burst arrived all at once when they stopped typing.
+ * After: 8-14 ms, of which the device itself is 3-6 ms.
+ *
+ * ⚠ jsdom can measure none of this: it has no daemon, no guest and no clock
+ * that means anything. The bound here is deliberately far above what was
+ * measured and far below what the bug cost, so it catches the probe coming back
+ * onto the keystroke path without failing on an unlucky second.
+ */
+test("a character reaches the device without waiting for a pause", async () => {
+	await readyToDrive(sandbox);
+	await openSpotlightField(sandbox);
+	const canvas = sandbox.page.getByTestId("sim-canvas");
+	await canvas.focus();
+	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
+	await sandbox.page.waitForTimeout(1500);
+
+	const seen: { at: number; kind: string }[] = [];
+	const onFinished = (request: import("@playwright/test").Request) => {
+		if (!request.url().includes("/gesture")) return;
+		let kind = "";
+		try {
+			kind = (JSON.parse(request.postData() ?? "{}") as { kind?: string }).kind ?? "";
+		} catch {
+			kind = "";
+		}
+		const timing = request.timing();
+		seen.push({ at: timing.startTime + Math.max(0, timing.responseEnd), kind });
+	};
+	sandbox.page.on("requestfinished", onFinished);
+
+	const pressed = Date.now();
+	await sandbox.page.keyboard.press("a");
+	await expect.poll(() => seen.filter((s) => s.kind === "type").length, { timeout: 10_000 }).toBe(1);
+	sandbox.page.off("requestfinished", onFinished);
+
+	const echo = seen.filter((s) => s.kind === "type")[0].at - pressed;
+	expect(echo, `a character took ${Math.round(echo)} ms to reach the device`).toBeLessThan(400);
+});
+
+/**
+ * The pane says when something typed has not arrived yet - and saying it must
+ * not move the screen.
+ *
+ * ⚠ Only measurable here. jsdom has no layout, so it cannot see a row growing
+ * by an icon and pushing the device screen down; and the state itself is only
+ * reachable through a send that genuinely takes time. Thai is that send: no US
+ * keyboard key can produce those runes, so they go through the guest pasteboard
+ * whatever the input mode is, measured at ~2.9 s.
+ */
+test("saying that typing is on its way does not move the screen", async () => {
+	await readyToDrive(sandbox);
+	await openSpotlightField(sandbox);
+	const canvas = sandbox.page.getByTestId("sim-canvas");
+	await canvas.focus();
+	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
+	await sandbox.page.waitForTimeout(1500);
+
+	const slot = sandbox.page.getByTestId("sim-typing-waiting");
+	await expect(slot, "the slot must always be in the row, so nothing moves when it fills").toBeAttached();
+	const before = await canvas.boundingBox();
+
+	// ⚠ Neither `press` nor `type` delivers a Thai rune: one wants a named key,
+	// the other falls back to insertText, which fires no keydown at all. A Thai
+	// Mac sends a real keydown carrying the rune.
+	const cdp = await sandbox.app.context().newCDPSession(sandbox.page);
+	for (const ch of "สวัสดี") {
+		await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch });
+		await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
+		await sandbox.page.waitForTimeout(60);
+	}
+
+	await expect(slot, "the human was left watching nothing happen").not.toBeEmpty({ timeout: 10_000 });
+	// Actually visible, and actually where it says it is - not clipped to
+	// nothing or painted under something else.
+	const box = await slot.boundingBox();
+	expect(box, "the indicator has no box at all").not.toBeNull();
+	expect(box!.width, "the indicator is clipped to nothing").toBeGreaterThan(4);
+	expect(box!.height).toBeGreaterThan(4);
+	const onTop = await sandbox.page.evaluate(() => {
+		const el = document.querySelector('[data-testid="sim-typing-waiting"]');
+		if (!el) return false;
+		const r = el.getBoundingClientRect();
+		const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+		return el.contains(hit) || hit === el;
+	});
+	expect(onTop, "something is painted over the indicator").toBe(true);
+
+	// The screen has not moved by a pixel while it is showing.
+	const during = await canvas.boundingBox();
+	expect(during).toEqual(before);
+
+	// And it stops saying so once the text has landed.
+	await expect(slot).toBeEmpty({ timeout: 20_000 });
+	expect(await canvas.boundingBox()).toEqual(before);
+});
+
+/**
+ * A recorded step is what the human did, not how the pane chunked it.
+ *
+ * Typing is sent a character at a time on a guest that reads US ASCII
+ * faithfully - that is what makes it immediate - so without coalescing, one
+ * word would record five steps and emit five `inputText` lines.
+ */
+test("a word typed while recording is one step and one inputText", async () => {
+	clearRecordings(sandbox);
+	await readyToDrive(sandbox);
+	await openSpotlightField(sandbox);
+
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	await expect(button).toBeEnabled();
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "true");
+
+	const canvas = sandbox.page.getByTestId("sim-canvas");
+	await canvas.focus();
+	await sandbox.page.keyboard.type("hello");
+	await expect
+		.poll(() => sandbox.page.getByTestId("sim-record-count").textContent(), { timeout: 15_000 })
+		.not.toBe("0");
+	// The whole word is one step, however many requests carried it.
+	await expect(sandbox.page.getByTestId("sim-record-count")).toHaveText("1");
+
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "false");
+
+	const dir = path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows");
+	// ⚠ Polled, and deliberately NOT gated on the stop summary being visible:
+	// an earlier case in this file leaves its own summary on screen, so waiting
+	// for one proves nothing about THIS stop and would pass before the flow was
+	// written. The file is the evidence - the directory was cleared at the top
+	// of this case, so exactly one flow in it can only be this recording's. On
+	// a failure it prints what is actually there, so "no flow" and "a flow
+	// somewhere else" are distinguishable without a second run.
+	await expect
+		.poll(() => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".yaml")).length : -1), {
+			timeout: 10_000,
+			message: `no flow appeared in ${dir} (session dir holds: ${
+				existsSync(path.dirname(dir)) ? readdirSync(path.dirname(dir)).join(", ") : "nothing"
+			})`,
+		})
+		.toBe(1);
+	const written = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
+	const body = readFileSync(path.join(dir, written[0]), "utf8");
+	expect(body).toContain('- inputText: "hello"');
+	expect(
+		(body.match(/- inputText:/g) ?? []).length,
+		`one word must not become one inputText per character:\n${body}`,
+	).toBe(1);
 });
 
 // One recording per session, not one per surface: what a terminal starts is

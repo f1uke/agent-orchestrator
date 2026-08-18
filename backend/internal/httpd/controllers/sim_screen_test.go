@@ -800,3 +800,78 @@ func TestSimGesture_UnknownKeyIsRefusedBeforeTheDevice(t *testing.T) {
 		t.Fatal("an unknown key must not reach the device")
 	}
 }
+
+// --- the keyboard the pane asks about before typing --------------------------
+//
+// The pane asks this when the human focuses the device surface, which is the
+// moment BEFORE they type - so the ~935 ms the guest takes to answer is spent
+// while their hands are still moving, instead of in front of the first
+// character. What it gets back is a pacing decision, never a routing one: the
+// daemon still plans every `type` request itself.
+
+func TestSimKeyboard_WithoutAScreenIs501(t *testing.T) {
+	srv := newScreenTestServer(t, &fakeSimService{}, nil)
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices/"+testSimUDID+"/keyboard", nil); code != http.StatusNotImplemented {
+		t.Fatalf("status %d, want 501", code)
+	}
+}
+
+func TestSimKeyboard_AUSGuestTakesKeyPressesOneAtATime(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted(), keyboard: "en_US@sw=QWERTY;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	var out struct {
+		UDID         string `json:"udid"`
+		Mode         string `json:"mode"`
+		SendsUSASCII bool   `json:"sendsUSASCII"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices/"+testSimUDID+"/keyboard", &out); code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	if !out.SendsUSASCII {
+		t.Fatal("a US guest takes key presses faithfully, so characters may go one at a time")
+	}
+	if udid, calls := screen.keyboardAsked(); udid != testSimUDID || calls != 1 {
+		t.Fatalf("asked %q %d times, want the named device asked once", udid, calls)
+	}
+}
+
+// A guest that would remap the keys must never be paced one character at a
+// time: every one of those is a pasteboard round trip measured at 3.1-3.4 s.
+func TestSimKeyboard_ARemappingGuestIsPacedInBursts(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted(), keyboard: "th_TH@sw=Thai;hw=Automatic"}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	var out struct {
+		SendsUSASCII bool `json:"sendsUSASCII"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices/"+testSimUDID+"/keyboard", &out); code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	if out.SendsUSASCII {
+		t.Fatal("a Thai guest remaps key presses; pacing it per character would paste per character")
+	}
+}
+
+// ⚠ A device that will not say is an ANSWER here, not a failure: the pane's
+// question is "may I send these one at a time", and "I could not find out" is
+// safely no. Returning an error instead would leave the pane with nothing to
+// pace by at exactly the moment it is about to be typed into.
+func TestSimKeyboard_AGuestThatWillNotSayIsAnAnswerNotAnError(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted(), keyboardErr: errors.New("device not booted")}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	var out struct {
+		SendsUSASCII bool   `json:"sendsUSASCII"`
+		Reason       string `json:"reason"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices/"+testSimUDID+"/keyboard", &out); code != http.StatusOK {
+		t.Fatalf("status %d, want 200 - not knowing is an answer", code)
+	}
+	if out.SendsUSASCII {
+		t.Fatal("an unknown keyboard must never be paced as a faithful one")
+	}
+	if out.Reason == "" {
+		t.Fatal("a no needs its reason, or nobody can tell a Thai guest from an unreadable one")
+	}
+}

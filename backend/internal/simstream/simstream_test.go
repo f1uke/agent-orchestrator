@@ -637,3 +637,206 @@ func countingLister(runs *atomic.Int64, block func(int64)) simctl.Runner {
 			`{"udid":"UDID-A","name":"iPhone","state":"Booted","isAvailable":true}]}}`), nil
 	}
 }
+
+// --- the keyboard input mode ------------------------------------------------
+//
+// 🗝 Why this is cached at all, when the probe itself says it must not be.
+//
+// Asking a guest which input mode it is in costs a process spawned INSIDE the
+// simulator, measured at 909-960 ms on the machine this was built for, and it
+// used to run synchronously in front of every keystroke: a character typed in
+// the Device tab took 1164-1181 ms to reach the device, of which ~935 ms was
+// this one question and 6 ms was the device. Typing that arrives in a lump
+// after a pause reads as broken even when every character is right.
+//
+// What makes reuse safe is not the clock, it is what the browser already did.
+// The pane sends the CHARACTER the human meant (`event.key`), so a human who
+// switches their Mac to Thai starts sending Thai runes - and PlanText routes
+// those to the pasteboard from the TEXT alone, before the input mode is
+// consulted at all. So a stale "US" cannot corrupt Thai. What it could still
+// get wrong is a switch to another LATIN layout (AZERTY, QWERTZ, UK) while
+// typing ASCII, which is what the freshness window below is sized for.
+
+// countingKeyboard stands in for `simctl spawn <udid> defaults read`, counting
+// only the keyboard probes so a test can tell them from device listings.
+func countingKeyboard(probes *atomic.Int64, block func(int64), identifier string) simctl.Runner {
+	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		isProbe := false
+		for _, a := range args {
+			if a == "defaults" {
+				isProbe = true
+			}
+		}
+		if !isProbe {
+			return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+				`{"udid":"UDID-A","name":"iPhone","state":"Booted","isAvailable":true}]}}`), nil
+		}
+		n := probes.Add(1)
+		if block != nil {
+			block(n)
+		}
+		return []byte("(\n    \"" + identifier + "\"\n)\n"), nil
+	}
+}
+
+// The whole point: a burst of typing asks the guest once, not once per key.
+//
+// ⚠ It asserts that no further probe is even STARTED, not merely that the count
+// has not moved yet. Counting alone passed with the fresh window disabled
+// entirely - the stale branch answers from the same remembered value and kicks
+// a refresh behind the caller, and the count is read before that goroutine
+// gets there. The distinction is the point: inside the window nothing is asked
+// at all, so a burst of typing costs the guest nothing.
+func TestScreen_KeyboardModeIsReusedForABurstOfKeystrokes(t *testing.T) {
+	var probes atomic.Int64
+	started := make(chan int64, 8)
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	screen := simstream.NewScreenForTest(nil, countingKeyboard(&probes, func(n int64) {
+		if n > 1 {
+			started <- n
+		}
+	}, "en_US@sw=QWERTY;hw=Automatic"), now)
+
+	for range 6 {
+		mode, err := screen.Keyboard(context.Background(), "UDID-A")
+		if err != nil {
+			t.Fatalf("keyboard: %v", err)
+		}
+		if !mode.SendsUSASCII() {
+			t.Fatal("a US guest must still be reported as one; the cache may not change the answer")
+		}
+	}
+	select {
+	case n := <-started:
+		t.Fatalf("the guest was asked again (probe %d) inside the window, where nothing should be asked", n)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if probes.Load() != 1 {
+		t.Fatalf("the guest was asked %d times for six keystrokes inside the window, want 1", probes.Load())
+	}
+}
+
+// Serving a mode that is merely getting old, and refreshing behind the caller,
+// is what keeps a keystroke mid-session from being the unlucky one that pays
+// the second. Same shape as the device listing, for the same reason.
+func TestScreen_AStaleKeyboardModeIsServedAtOnceAndRefreshedBehind(t *testing.T) {
+	var probes atomic.Int64
+	release := make(chan struct{})
+	started := make(chan int64, 16)
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	screen := simstream.NewScreenForTest(nil, countingKeyboard(&probes, func(n int64) {
+		if n > 1 {
+			started <- n
+			<-release
+		}
+	}, "en_US@sw=QWERTY;hw=Automatic"), now)
+
+	if _, err := screen.Keyboard(context.Background(), "UDID-A"); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	clock = clock.Add(simstream.KeyboardTTL + time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := screen.Keyboard(context.Background(), "UDID-A"); err != nil {
+			t.Errorf("stale read: %v", err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a mode that is only getting old must be served at once, not waited for")
+	}
+	<-started
+	close(release)
+}
+
+// Past a minute the speed is not worth it. A recording left open while somebody
+// did something else comes back to a machine that may have changed language.
+func TestScreen_AKeyboardModePastItsMaxAgeIsProbedBeforeAnswering(t *testing.T) {
+	var probes atomic.Int64
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	screen := simstream.NewScreenForTest(nil, countingKeyboard(&probes, nil, "en_US@sw=QWERTY;hw=Automatic"), now)
+
+	if _, err := screen.Keyboard(context.Background(), "UDID-A"); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	clock = clock.Add(simstream.KeyboardMaxAge + time.Second)
+	if _, err := screen.Keyboard(context.Background(), "UDID-A"); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if probes.Load() != 2 {
+		t.Fatalf("the guest was asked %d times, want a mode this old established before answering", probes.Load())
+	}
+}
+
+// Two devices are two guests with two input modes. Sharing one answer between
+// them would be the layout bug wearing a cache.
+func TestScreen_EachDeviceKeepsItsOwnKeyboardMode(t *testing.T) {
+	var probes atomic.Int64
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	screen := simstream.NewScreenForTest(nil, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		udid := ""
+		for i, a := range args {
+			if a == "spawn" && i+1 < len(args) {
+				udid = args[i+1]
+			}
+		}
+		if udid == "" {
+			return []byte(`{"devices":{}}`), nil
+		}
+		probes.Add(1)
+		if udid == "UDID-THAI" {
+			return []byte("(\n    \"th_TH@sw=Thai;hw=Automatic\"\n)\n"), nil
+		}
+		return []byte("(\n    \"en_US@sw=QWERTY;hw=Automatic\"\n)\n"), nil
+	}, now)
+
+	us, err := screen.Keyboard(context.Background(), "UDID-US")
+	if err != nil {
+		t.Fatalf("us: %v", err)
+	}
+	thai, err := screen.Keyboard(context.Background(), "UDID-THAI")
+	if err != nil {
+		t.Fatalf("thai: %v", err)
+	}
+	if !us.SendsUSASCII() {
+		t.Fatal("the US device must send US ASCII")
+	}
+	if thai.SendsUSASCII() {
+		t.Fatal("a Thai guest must never be reported as sending US ASCII - that is the corruption bug")
+	}
+	if probes.Load() != 2 {
+		t.Fatalf("the guest was asked %d times for two devices, want one each", probes.Load())
+	}
+}
+
+// A guest that would not answer is asked again. Remembering "unknown" would
+// route every later keystroke through the pasteboard for as long as the daemon
+// lived, which is slow rather than wrong - but it is also never revisited.
+func TestScreen_AFailedKeyboardProbeIsNotCached(t *testing.T) {
+	var probes atomic.Int64
+	screen := simstream.NewScreenForTest(nil, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "defaults" {
+				probes.Add(1)
+				return nil, errors.New("device not booted")
+			}
+		}
+		return []byte(`{"devices":{}}`), nil
+	}, time.Now)
+
+	for range 3 {
+		if _, err := screen.Keyboard(context.Background(), "UDID-A"); err == nil {
+			t.Fatal("a guest that would not say must be reported, not cached as an answer")
+		}
+	}
+	if probes.Load() != 3 {
+		t.Fatalf("the guest was asked %d times, want every failed probe retried", probes.Load())
+	}
+}

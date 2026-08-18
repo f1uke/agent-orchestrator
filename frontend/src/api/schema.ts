@@ -1540,6 +1540,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sim/devices/{udid}/keyboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which keyboard input mode a simulator will read key presses through */
+        get: operations["getSimKeyboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sim/leases": {
         parameters: {
             query?: never;
@@ -2633,6 +2650,12 @@ export interface components {
         };
         SimHoldResponse: {
             hold: components["schemas"]["SimHold"];
+        };
+        SimKeyboardView: {
+            mode: string;
+            reason?: string;
+            sendsUSASCII: boolean;
+            udid: string;
         };
         SimLease: {
             /** Format: date-time */
@@ -8551,6 +8574,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSimKeyboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimKeyboardView"];
                 };
             };
             /** @description Not Implemented */

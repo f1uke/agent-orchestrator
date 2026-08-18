@@ -42,6 +42,12 @@ type Screen struct {
 	listedAt   time.Time
 	refreshing bool
 
+	// The guest's keyboard input mode, per device. Kept beside the listing
+	// cache because it is the same problem in the same place: a subprocess that
+	// costs about a second, on a path a human is waiting on.
+	kbMu sync.Mutex
+	kb   map[string]keyboardEntry
+
 	mu       sync.Mutex
 	hub      *Hub
 	hubErr   error
@@ -66,7 +72,29 @@ const (
 	// Serving the recent answer and refreshing behind it means nobody waits
 	// except the first caller of all.
 	DevicesMaxAge = 30 * time.Second
+
+	// KeyboardTTL is how long a guest's input mode is reused without asking
+	// again. It is sized by what it protects: long enough that a burst of
+	// typing costs one probe rather than one per keystroke, and short enough
+	// that somebody who switches their Mac's input source is followed within a
+	// few characters rather than a sentence.
+	KeyboardTTL = 5 * time.Second
+	// KeyboardMaxAge is how old a mode may be and still be served while a fresh
+	// one is fetched behind the caller. Past this it is established before
+	// anything is typed: a minute of not typing is long enough that the machine
+	// may have become a different machine to type on, and correctness is worth
+	// the second there in a way it is not worth mid-sentence. The same bound,
+	// for the same reason, as the screen a recording remembers.
+	KeyboardMaxAge = time.Minute
 )
+
+// keyboardEntry is one device's last known input mode, and whether a refresh
+// for it is already on its way.
+type keyboardEntry struct {
+	mode       simkeyboard.Mode
+	at         time.Time
+	refreshing bool
+}
 
 // NewScreen builds the surface. Nothing is started here.
 func NewScreen(dataDir string) *Screen {
@@ -234,13 +262,80 @@ func (s *Screen) AX(ctx context.Context, udid string) (simbridge.Snapshot, error
 
 // Keyboard asks a device which input mode it will read key presses through.
 //
-// Unlike the device listing, this is NOT cached. The mode follows the Mac's own
-// input source while Simulator.app's "Use the Same Keyboard Language as macOS"
-// is ticked, so it can change between one gesture and the next - and a cached
-// "US" that outlived the change is precisely the silent corruption that made
-// this worth asking about at all.
+// 🗝 This used to be fetched fresh for every keystroke, and that is what made
+// typing in the Device tab feel broken: the probe spawns a process INSIDE the
+// guest, measured at 909-960 ms, and it sat in front of the character. A
+// character took 1164-1181 ms to reach the device, of which ~935 ms was this
+// question and 6 ms was the device itself. So it is now maintained rather than
+// fetched - the same move that took the recorder's screen read off the gesture
+// path, for the same reason: the cost is real and nobody has to be waiting on it.
+//
+// ⚠ The old comment here said caching this was "precisely the silent
+// corruption" the probe exists to prevent, so why it is safe now has to be
+// stated rather than assumed. What changed is the caller. The pane sends the
+// CHARACTER the human meant, taken from `event.key`, which the browser has
+// already resolved through the Mac's input source. So a human who switches
+// their Mac to Thai immediately starts sending Thai runes, and PlanText routes
+// those to the pasteboard from the TEXT alone - before the input mode is
+// consulted at all. A stale "US" therefore cannot corrupt Thai, which is the
+// case that made this worth asking about.
+//
+// What a stale mode could still get wrong is narrow and real: a switch to
+// another LATIN layout (AZERTY, QWERTZ, UK) while typing ASCII, where the
+// characters stay sendable but the guest maps the usages differently. That is
+// what the windows below are sized for, and it is why the mode is still
+// established from scratch rather than assumed when it has gone properly cold.
 func (s *Screen) Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error) {
-	return simkeyboard.Probe(ctx, s.run, udid)
+	s.kbMu.Lock()
+	entry, have := s.kb[udid]
+	age := s.now().Sub(entry.at)
+	switch {
+	case have && age < KeyboardTTL:
+		s.kbMu.Unlock()
+		return entry.mode, nil
+	case have && age < KeyboardMaxAge:
+		start := !entry.refreshing
+		entry.refreshing = true
+		s.kb[udid] = entry
+		s.kbMu.Unlock()
+		if start {
+			// Detached from this request for the same reason the listing's
+			// refresh is: the caller is being answered now, and a refresh that
+			// died with them would never land. At most one runs per device -
+			// two queued probes are two guest spawns nobody is reading.
+			go func() { _, _ = s.probeKeyboard(context.WithoutCancel(ctx), udid) }()
+		}
+		return entry.mode, nil
+	}
+	s.kbMu.Unlock()
+
+	return s.probeKeyboard(ctx, udid)
+}
+
+// probeKeyboard asks the guest and stores what it said. The subprocess is
+// deliberately not run under the lock: it takes about a second, and holding it
+// would put every other device's keystrokes behind this one.
+func (s *Screen) probeKeyboard(ctx context.Context, udid string) (simkeyboard.Mode, error) {
+	mode, err := simkeyboard.Probe(ctx, s.run, udid)
+
+	s.kbMu.Lock()
+	defer s.kbMu.Unlock()
+	if s.kb == nil {
+		s.kb = map[string]keyboardEntry{}
+	}
+	entry := s.kb[udid]
+	entry.refreshing = false
+	if err != nil {
+		// Never cached, the same rule the listing keeps: a guest that would not
+		// answer must be asked again rather than remembered as unreadable. A
+		// failed refresh leaves whatever was already known in place, because a
+		// device that answered a moment ago has not become a different device.
+		s.kb[udid] = entry
+		return simkeyboard.Mode{}, err
+	}
+	entry.mode, entry.at = mode, s.now()
+	s.kb[udid] = entry
+	return mode, nil
 }
 
 // Pasteboard is the guest clipboard, which is how `type` reaches a field whose
