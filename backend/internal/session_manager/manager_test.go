@@ -4643,6 +4643,17 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		// The defect an agent would otherwise walk into: an element the tree
 		// lists but cannot be touched from here.
 		"off screen",
+		// The shortest correct way to tap something: name it, rather than
+		// copy a coordinate out of the tree.
+		`ao sim tap --label`,
+		// An empty tree is a finding about the app, not about accessibility -
+		// without this an agent re-reads perfectly good view code.
+		"main thread is blocked",
+		// The app's own account of what a gesture did.
+		"ao sim log",
+		// Which device: one booted simulator is selected without asking, and
+		// it may be the human's working device rather than a scratch one.
+		"scratch device",
 	} {
 		if !strings.Contains(sp, want) {
 			t.Fatalf("worker prompt for an iOS project is missing %q:\n%s", want, sp)
