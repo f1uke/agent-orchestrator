@@ -870,7 +870,7 @@ func simOperations() []operation {
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/sim-recordings/{udid}", id: "getSimRecording", tag: "sim",
 			summary:    "Read a simulator's recording, open or stopped, and the steps captured so far",
-			pathParams: []any{controllers.SimLeaseParam{}},
+			pathParams: []any{controllers.SimLeaseParam{}, controllers.ReadSimRecordingQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SimRecordingWithStepsResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
@@ -879,11 +879,48 @@ func simOperations() []operation {
 		},
 		{
 			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-recordings/{udid}", id: "stopSimRecording", tag: "sim",
-			summary:    "Stop this session's open recording on a simulator and return everything it captured",
-			pathParams: []any{controllers.SimLeaseParam{}},
+			summary:    "Stop this session's open recording on a simulator, write the Maestro flow it captured, and return both",
+			pathParams: []any{controllers.SimLeaseParam{}, controllers.StopSimRecordingQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SimRecordingWithStepsResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/sim-flows", id: "listSimFlows", tag: "sim",
+			summary:    "List the Maestro flows this session has recorded",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSimFlowsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPatch, path: "/api/v1/sessions/{sessionId}/sim-flows/{fileName}", id: "renameSimFlow", tag: "sim",
+			summary:    "Name a recorded flow, keeping the timestamp it was recorded at",
+			pathParams: []any{controllers.SimFlowParam{}},
+			reqBody:    controllers.RenameSimFlowInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimFlowResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-flows/{fileName}", id: "deleteSimFlow", tag: "sim",
+			summary:    "Delete one recorded flow",
+			pathParams: []any{controllers.SimFlowParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},

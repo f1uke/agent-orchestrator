@@ -112,6 +112,30 @@ function devicesPayload(devices: unknown[], defaultUdid: string | null, defaultR
 	return { data: { devices, defaultUdid, defaultReason }, error: undefined, response: { status: 200 } };
 }
 
+/**
+ * The device list is not the only thing this panel asks for - it also reads
+ * the device's recording and this session's recorded flows - so the client has
+ * to answer by ROUTE.
+ *
+ * It used to answer every GET with the device list, which meant the recording
+ * query got a body with no recording in it and the flows query got one with no
+ * flows. Both are the panel's own queries failing, and one of them managed to
+ * make an unrelated case in this file flake on CI while passing locally. Those
+ * two surfaces have their own tests in SimRecordControls.test.tsx; here they
+ * only have to answer plausibly and stay out of the way.
+ */
+function serveDevices(payload: ReturnType<typeof devicesPayload>) {
+	getMock.mockImplementation(async (path: string) => {
+		if (path.includes("sim-recordings")) {
+			return { data: undefined, error: { message: "not found" }, response: { status: 404 } };
+		}
+		if (path.includes("sim-flows")) {
+			return { data: { flows: [] }, error: undefined, response: { status: 200 } };
+		}
+		return payload;
+	});
+}
+
 function wrapper({ children }: { children: ReactNode }) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
@@ -156,7 +180,7 @@ afterEach(() => {
 
 describe("SimulatorPanel device selection", () => {
 	it("says nothing is booted, and never offers to boot one", async () => {
-		getMock.mockResolvedValue(devicesPayload([], null, "no simulator is booted"));
+		serveDevices(devicesPayload([], null, "no simulator is booted"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
 		expect(await screen.findByText(/no simulator is booted/i)).toBeInTheDocument();
@@ -168,7 +192,7 @@ describe("SimulatorPanel device selection", () => {
 	// looking nothing has been asked, so making that claim would state something
 	// AO never checked.
 	it("does not claim there is no simulator when it has not looked", async () => {
-		getMock.mockResolvedValue(devicesPayload([], null, "no simulator is booted"));
+		serveDevices(devicesPayload([], null, "no simulator is booted"));
 		render(<SimulatorPanel isActive={false} sessionId="p-1" />, { wrapper });
 
 		expect(await screen.findByText(/Nothing is being captured while this window is not focused/i)).toBeInTheDocument();
@@ -176,7 +200,7 @@ describe("SimulatorPanel device selection", () => {
 	});
 
 	it("watches the one booted simulator without being asked", async () => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
@@ -187,7 +211,7 @@ describe("SimulatorPanel device selection", () => {
 	// simulators, and a picker that quietly picked one would be less honest than
 	// the terminal.
 	it("refuses to choose between two booted simulators and says why", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload(
 				[device(), device({ udid: "UDID-B", name: "iPhone 17 Pro" })],
 				null,
@@ -209,7 +233,7 @@ describe("SimulatorPanel remembering a worker", () => {
 	// Switching to another worker and back remounts this panel. Picking the
 	// device again and opting in to driving again every time was the complaint.
 	it("comes back to the device and the driving it was left with", async () => {
-		getMock.mockResolvedValue(leased());
+		serveDevices(leased());
 		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
@@ -226,14 +250,14 @@ describe("SimulatorPanel remembering a worker", () => {
 	// What comes back is a device this session still owns. Remembering that
 	// driving was on is not the same as still being allowed to drive.
 	it("does not hand driving back when the lease has moved on", async () => {
-		getMock.mockResolvedValue(leased());
+		serveDevices(leased());
 		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await userEvent.click(await screen.findByRole("button", { name: /drive this device/i }));
 		first.unmount();
 
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -244,7 +268,7 @@ describe("SimulatorPanel remembering a worker", () => {
 
 	// One worker's choice is not another's.
 	it("keeps each worker's device separate", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload(
 				[device(), device({ udid: "UDID-B", name: "iPhone 17 Pro" })],
 				null,
@@ -267,7 +291,7 @@ describe("SimulatorPanel remembering a worker", () => {
 
 describe("SimulatorPanel layout", () => {
 	beforeEach(() => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 	});
 
 	// The complaint this rework answers: a picker, a freshness line, a lease row,
@@ -298,7 +322,7 @@ describe("SimulatorPanel layout", () => {
 	// paragraph of keyboard caveat spent inside a pane whose whole point is the
 	// screen. Driving a simulator by hand is tapping and swiping.
 	it("offers no text field, and no paragraph explaining one", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -317,7 +341,7 @@ describe("SimulatorPanel layout", () => {
 
 describe("SimulatorPanel capture lifetime", () => {
 	beforeEach(() => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 	});
 
 	it("captures nothing while the tab is not the one on screen", async () => {
@@ -378,7 +402,7 @@ describe("SimulatorPanel capture lifetime", () => {
 
 describe("SimulatorPanel decoding", () => {
 	beforeEach(() => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 	});
 
 	// The codec string is not a constant: it is the profile and level the device
@@ -455,7 +479,7 @@ function makeLive() {
 
 describe("SimulatorPanel lease truth", () => {
 	it("says unknown with the reason, never free", async () => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
 		const menu = await openMenu();
@@ -468,7 +492,7 @@ describe("SimulatorPanel lease truth", () => {
 	// session that does not hold the device is never given the control that
 	// turns driving on, and the effect below switches it off if the lease moves.
 	it("names the other holder and offers no way to drive until it is taken over", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -482,7 +506,7 @@ describe("SimulatorPanel lease truth", () => {
 	// which is one too many for the thing a person does before they can touch the
 	// screen at all. It is a button in the toolbar, so no menu is involved.
 	it("claims in a single press, with no menu to open first", async () => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
 		await userEvent.click(await screen.findByRole("button", { name: /claim to drive/i }));
@@ -500,7 +524,7 @@ describe("SimulatorPanel lease truth", () => {
 	// lock a person out of their own machine. One press here too - and still
 	// named after the holder, so it reads as a decision rather than a slip.
 	it("takes the device over in a single press, naming who has it", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -519,7 +543,7 @@ describe("SimulatorPanel lease truth", () => {
 	// An ordinary claim on a device nobody holds must not ask to take anything
 	// over: the two refuse for different reasons and mean different things.
 	it("never offers to take over a device nobody holds", async () => {
-		getMock.mockResolvedValue(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
 		await screen.findByRole("button", { name: /claim to drive/i });
@@ -536,9 +560,7 @@ describe("SimulatorPanel lease truth", () => {
 			[{ state: "held", holder: "other-7" }, /take over from @other-7/i],
 			[{ state: "held", holder: "p-1" }, /drive this device/i],
 		] as const) {
-			getMock.mockResolvedValue(
-				devicesPayload([device(lease ? { lease } : {})], "UDID-A", "the only booted simulator"),
-			);
+			serveDevices(devicesPayload([device(lease ? { lease } : {})], "UDID-A", "the only booted simulator"));
 			const view = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 			expect(await screen.findByRole("button", { name: expected })).toBeInTheDocument();
 			// Exactly one: two of these at once would be both a wider row and an
@@ -554,7 +576,7 @@ describe("SimulatorPanel lease truth", () => {
 	// The daemon refuses a takeover while a touch is actually happening, and the
 	// human has to be told why rather than left with a button that did nothing.
 	it("says why a takeover was refused mid-gesture", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		postMock.mockImplementation(async (path: string) => {
@@ -571,7 +593,7 @@ describe("SimulatorPanel lease truth", () => {
 	});
 
 	it("offers driving only once this session holds the lease, and never pre-enabled", async () => {
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator"),
 		);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -613,7 +635,7 @@ describe("SimulatorPanel driving", () => {
 	}
 
 	beforeEach(() => {
-		getMock.mockResolvedValue(leased());
+		serveDevices(leased());
 	});
 
 	it("sends nothing to the device while driving is off", async () => {
@@ -659,7 +681,7 @@ describe("SimulatorPanel driving", () => {
 		await turnDrivingOn();
 		expect(screen.getByRole("button", { name: /^home$/i })).toBeEnabled();
 
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		await refresh();
@@ -680,13 +702,13 @@ describe("SimulatorPanel driving", () => {
 		await turnDrivingOn();
 		expect(screen.getByRole("button", { name: /^home$/i })).toBeEnabled();
 
-		getMock.mockResolvedValue(
+		serveDevices(
 			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
 		);
 		await refresh();
 		await waitFor(() => expect(screen.getByRole("button", { name: /^home$/i })).toBeDisabled());
 
-		getMock.mockResolvedValue(leased());
+		serveDevices(leased());
 		await refresh();
 
 		const toggle = await screen.findByRole("button", { name: /drive this device/i });

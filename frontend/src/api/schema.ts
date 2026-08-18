@@ -933,6 +933,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the Maestro flows this session has recorded */
+        get: operations["listSimFlows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/sim-flows/{fileName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one recorded flow */
+        delete: operations["deleteSimFlow"];
+        options?: never;
+        head?: never;
+        /** Name a recorded flow, keeping the timestamp it was recorded at */
+        patch: operations["renameSimFlow"];
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/sim-leases": {
         parameters: {
             query?: never;
@@ -1013,7 +1048,7 @@ export interface paths {
         put?: never;
         /** Start capturing this session's gestures on a simulator it already leases */
         post: operations["startSimRecording"];
-        /** Stop this session's open recording on a simulator and return everything it captured */
+        /** Stop this session's open recording on a simulator, write the Maestro flow it captured, and return both */
         delete: operations["stopSimRecording"];
         options?: never;
         head?: never;
@@ -1712,6 +1747,13 @@ export interface components {
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
         };
+        ControllersListSimFlowsResponse: {
+            flows: components["schemas"]["ControllersSimFlowView"][];
+        };
+        ControllersRenameSimFlowInput: {
+            /** @description What to call it. Slugified; an empty name puts it back to its timestamp alone. */
+            name: string;
+        };
         ControllersResetReviewResponse: {
             /**
              * Format: int64
@@ -1776,6 +1818,28 @@ export interface components {
              * @description Body around the screen, as a fraction of screen width.
              */
             thickness: number;
+        };
+        ControllersSimFlowResponse: {
+            flow: components["schemas"]["ControllersSimFlowView"];
+        };
+        ControllersSimFlowView: {
+            /** Format: int64 */
+            bytes: number;
+            /** @description False for a flow recorded before flows stated their own counts; steps and review are then unmeasured rather than zero. */
+            countsKnown: boolean;
+            /** @description The base name, which is what a human writes in prose. */
+            fileName: string;
+            /** @description What a human called it, empty when it has not been named. Read back out of the file name, which is the only place it is stored. */
+            name: string;
+            /** @description Absolute path, which is what a worker can act on. */
+            path: string;
+            /** Format: date-time */
+            recordedAt: string;
+            /** @description How many steps are marked "# REVIEW:" - the number a human must check before trusting the flow. */
+            review: number;
+            steps: number;
+            /** @description False when recordedAt fell back to the file's modification time because its name carries no timestamp. */
+            timeFromFileName: boolean;
         };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
@@ -2626,7 +2690,9 @@ export interface components {
             y: number;
         };
         SimRecordingWithStepsResponse: {
+            flow?: components["schemas"]["ControllersSimFlowView"];
             recording: components["schemas"]["SimRecording"];
+            stepCount: number;
             steps: components["schemas"]["SimRecordingStep"][];
         };
         SmokeAuthoredCaseInput: {
@@ -6211,6 +6277,180 @@ export interface operations {
             };
         };
     };
+    listSimFlows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListSimFlowsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    deleteSimFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description The flow's base file name. Anything that is not a bare .yaml file name is refused. */
+                fileName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    renameSimFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description The flow's base file name. Anything that is not a bare .yaml file name is refused. */
+                fileName: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersRenameSimFlowInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersSimFlowResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     acquireSimLease: {
         parameters: {
             query?: never;
@@ -6468,7 +6708,10 @@ export interface operations {
     };
     getSimRecording: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description all (default) returns every captured step; none returns stepCount alone, for a caller that only needs to know how many there are. */
+                steps?: string;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */
@@ -6585,7 +6828,12 @@ export interface operations {
     };
     stopSimRecording: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Absolute path to write the flow to, instead of this session's own flows directory. */
+                out?: string;
+                /** @description Path to a shared entry-point flow, emitted as a runFlow step before the recorded steps. */
+                entry?: string;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */
@@ -6608,6 +6856,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

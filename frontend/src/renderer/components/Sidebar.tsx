@@ -2,10 +2,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import {
-	Check,
 	ChevronRight,
 	CheckCircle2,
-	Copy,
 	Folder,
 	FolderPlus,
 	GitPullRequest,
@@ -23,7 +21,7 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
@@ -38,6 +36,7 @@ import {
 	workerSessions,
 } from "../types/workspace";
 import { aoBridge } from "../lib/bridge";
+import { CopyButton } from "./CopyButton";
 import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
 import { moveProject } from "../lib/project-order";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
@@ -1084,9 +1083,6 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 	);
 }
 
-// How long the icon stays a check after a successful copy.
-const COPIED_FEEDBACK_MS = 1200;
-
 /**
  * Click-to-copy for a session's canonical id, sitting beside the `@id` line.
  *
@@ -1099,57 +1095,19 @@ const COPIED_FEEDBACK_MS = 1200;
  *
  * Revealed on row hover, and on keyboard focus anywhere in the row (it stays in
  * the tab order at all times, so Tab reaches it and Enter/Space fires it). Sized
- * to the id line's own line box so revealing it cannot resize the row, and the
- * check swap reuses the same box for the same reason.
+ * to the id line's own line box so revealing it cannot resize the row — which is
+ * why the reveal rules live here and the control itself is the shared CopyButton.
  */
 function CopySessionIdButton({ sessionId }: { sessionId: string }) {
-	const [copied, setCopied] = useState(false);
-	const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-	useEffect(() => () => clearTimeout(resetTimer.current), []);
-
-	const copy = (event: React.MouseEvent) => {
-		// The row's content div carries the open-the-session click, so this click
-		// MUST NOT bubble — copying an id that also navigated away would be a worse
-		// papercut than the retyping it saves. (The matching pointerdown stop below
-		// keeps the click from being read as the start of a split-drag.)
-		event.stopPropagation();
-		void aoBridge.clipboard
-			.writeText(sessionId)
-			.then(() => {
-				setCopied(true);
-				clearTimeout(resetTimer.current);
-				resetTimer.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-			})
-			.catch((error) => {
-				console.warn("Unable to copy session id", error);
-			});
-	};
-
 	return (
-		<button
-			aria-label={copied ? `Copied session id ${sessionId}` : `Copy session id ${sessionId}`}
+		<CopyButton
 			className={cn(
-				// `before:` widens the hit area to ~21px without adding layout width,
-				// so the 13px glyph stays proportionate to 10.5px mono text.
-				"relative grid size-[13px] shrink-0 place-items-center rounded-[3px]",
-				"before:absolute before:-inset-1 before:content-['']",
-				"text-muted-foreground transition-[opacity,color]",
 				"opacity-0 group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100",
-				"focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sidebar-ring focus-visible:outline-none",
-				// The hover tint is dropped while confirming: a `hover:` variant always
-				// outranks a base utility in Tailwind, and the pointer is by definition
-				// still on the button right after a click — so keeping it would repaint
-				// the green check plain foreground exactly when it is meant to be read.
-				copied ? "text-success opacity-100" : "hover:text-foreground",
+				"focus-visible:opacity-100 focus-visible:ring-sidebar-ring",
 			)}
-			onClick={copy}
-			onPointerDown={(event) => event.stopPropagation()}
-			title={`Copy session id ${sessionId}`}
-			type="button"
-		>
-			{copied ? <Check className="size-3" aria-hidden="true" /> : <Copy className="size-3" aria-hidden="true" />}
-		</button>
+			value={sessionId}
+			what="session id"
+		/>
 	);
 }
 

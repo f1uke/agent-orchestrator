@@ -2742,6 +2742,154 @@ paths:
         gesture hold `ao sim tap` uses
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-flows:
+    get:
+      operationId: listSimFlows
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListSimFlowsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the Maestro flows this session has recorded
+      tags:
+      - sim
+  /api/v1/sessions/{sessionId}/sim-flows/{fileName}:
+    delete:
+      operationId: deleteSimFlow
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: The flow's base file name. Anything that is not a bare .yaml
+          file name is refused.
+        in: path
+        name: fileName
+        required: true
+        schema:
+          description: The flow's base file name. Anything that is not a bare .yaml
+            file name is refused.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Delete one recorded flow
+      tags:
+      - sim
+    patch:
+      operationId: renameSimFlow
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: The flow's base file name. Anything that is not a bare .yaml
+          file name is refused.
+        in: path
+        name: fileName
+        required: true
+        schema:
+          description: The flow's base file name. Anything that is not a bare .yaml
+            file name is refused.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersRenameSimFlowInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersSimFlowResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Name a recorded flow, keeping the timestamp it was recorded at
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-leases:
     post:
       operationId: acquireSimLease
@@ -2995,6 +3143,22 @@ paths:
         schema:
           description: Simulator udid (matched case-insensitively).
           type: string
+      - description: Absolute path to write the flow to, instead of this session's
+          own flows directory.
+        in: query
+        name: out
+        schema:
+          description: Absolute path to write the flow to, instead of this session's
+            own flows directory.
+          type: string
+      - description: Path to a shared entry-point flow, emitted as a runFlow step
+          before the recorded steps.
+        in: query
+        name: entry
+        schema:
+          description: Path to a shared entry-point flow, emitted as a runFlow step
+            before the recorded steps.
+          type: string
       responses:
         "200":
           content:
@@ -3008,14 +3172,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
         "501":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Stop this session's open recording on a simulator and return everything
-        it captured
+      summary: Stop this session's open recording on a simulator, write the Maestro
+        flow it captured, and return both
       tags:
       - sim
     get:
@@ -3034,6 +3204,14 @@ paths:
         required: true
         schema:
           description: Simulator udid (matched case-insensitively).
+          type: string
+      - description: all (default) returns every captured step; none returns stepCount
+          alone, for a caller that only needs to know how many there are.
+        in: query
+        name: steps
+        schema:
+          description: all (default) returns every captured step; none returns stepCount
+            alone, for a caller that only needs to know how many there are.
           type: string
       responses:
         "200":
@@ -4920,6 +5098,24 @@ components:
       required:
       - loops
       type: object
+    ControllersListSimFlowsResponse:
+      properties:
+        flows:
+          items:
+            $ref: '#/components/schemas/ControllersSimFlowView'
+          type: array
+      required:
+      - flows
+      type: object
+    ControllersRenameSimFlowInput:
+      properties:
+        name:
+          description: What to call it. Slugified; an empty name puts it back to its
+            timestamp alone.
+          type: string
+      required:
+      - name
+      type: object
     ControllersResetReviewResponse:
       properties:
         failed:
@@ -5087,6 +5283,56 @@ components:
       required:
       - thickness
       - radius
+      type: object
+    ControllersSimFlowResponse:
+      properties:
+        flow:
+          $ref: '#/components/schemas/ControllersSimFlowView'
+      required:
+      - flow
+      type: object
+    ControllersSimFlowView:
+      properties:
+        bytes:
+          format: int64
+          type: integer
+        countsKnown:
+          description: False for a flow recorded before flows stated their own counts;
+            steps and review are then unmeasured rather than zero.
+          type: boolean
+        fileName:
+          description: The base name, which is what a human writes in prose.
+          type: string
+        name:
+          description: What a human called it, empty when it has not been named. Read
+            back out of the file name, which is the only place it is stored.
+          type: string
+        path:
+          description: Absolute path, which is what a worker can act on.
+          type: string
+        recordedAt:
+          format: date-time
+          type: string
+        review:
+          description: How many steps are marked "# REVIEW:" - the number a human
+            must check before trusting the flow.
+          type: integer
+        steps:
+          type: integer
+        timeFromFileName:
+          description: False when recordedAt fell back to the file's modification
+            time because its name carries no timestamp.
+          type: boolean
+      required:
+      - name
+      - fileName
+      - path
+      - recordedAt
+      - timeFromFileName
+      - steps
+      - review
+      - countsKnown
+      - bytes
       type: object
     ControllersWorkspaceResolveCandidateDTO:
       properties:
@@ -7162,14 +7408,19 @@ components:
       type: object
     SimRecordingWithStepsResponse:
       properties:
+        flow:
+          $ref: '#/components/schemas/ControllersSimFlowView'
         recording:
           $ref: '#/components/schemas/SimRecording'
+        stepCount:
+          type: integer
         steps:
           items:
             $ref: '#/components/schemas/SimRecordingStep'
           type: array
       required:
       - recording
+      - stepCount
       - steps
       type: object
     SmokeAuthoredCaseInput:

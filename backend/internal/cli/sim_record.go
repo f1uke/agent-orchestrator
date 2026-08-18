@@ -5,17 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-
-	"github.com/aoagents/agent-orchestrator/backend/internal/config"
-	"github.com/aoagents/agent-orchestrator/backend/internal/simflow"
 )
 
 // `ao sim record` turns what a session drives on a device - through
@@ -75,7 +70,20 @@ type simRecordingResponse struct {
 // simRecordingWithStepsResponse mirrors controllers.SimRecordingWithStepsResponse.
 type simRecordingWithStepsResponse struct {
 	Recording simRecordingClient       `json:"recording"`
+	StepCount int                      `json:"stepCount"`
 	Steps     []simRecordingStepClient `json:"steps"`
+	Flow      *simFlowClient           `json:"flow,omitempty"`
+}
+
+// simFlowClient mirrors controllers.SimFlowView - the file a stopped
+// recording became.
+type simFlowClient struct {
+	Name     string `json:"name"`
+	FileName string `json:"fileName"`
+	Path     string `json:"path"`
+	Steps    int    `json:"steps"`
+	Review   int    `json:"review"`
+	Bytes    int64  `json:"bytes"`
 }
 
 func newSimRecordCommand(ctx *commandContext) *cobra.Command {
@@ -236,7 +244,10 @@ func (c *commandContext) simRecordingStatus(ctx context.Context, udid string) (s
 	}
 
 	var res simRecordingWithStepsResponse
-	path := "sessions/" + url.PathEscape(sessionID) + "/sim-recordings/" + url.PathEscape(device.UDID)
+	// `steps=none`: this command reports how many steps there are, never what
+	// they were, so asking for them would be pulling every captured selector
+	// back over the wire to call len() on it.
+	path := "sessions/" + url.PathEscape(sessionID) + "/sim-recordings/" + url.PathEscape(device.UDID) + "?steps=none"
 	if err := c.getJSON(ctx, path, &res); err != nil {
 		var apiErr apiResponseError
 		if errors.As(err, &apiErr) && apiErr.ErrorBody.Code == "SIM_NOT_FOUND" {
@@ -248,7 +259,7 @@ func (c *commandContext) simRecordingStatus(ctx context.Context, udid string) (s
 	result := simRecordStatusResult{
 		UDID: device.UDID, DeviceName: device.Name, Runtime: device.Runtime,
 		Found: true, SessionID: res.Recording.SessionID, RecordingName: res.Recording.Name,
-		StepCount: len(res.Steps),
+		StepCount: res.StepCount,
 	}
 	startedAt := res.Recording.StartedAt.UTC()
 	result.StartedAt = &startedAt
@@ -285,7 +296,12 @@ type simRecordStopResult struct {
 	Runtime    string `json:"runtime"`
 	Path       string `json:"path"`
 	StepCount  int    `json:"stepCount"`
-	Bytes      int    `json:"bytes"`
+	// ReviewCount is how many of those steps the generator could not resolve
+	// to one element with confidence. It is the number a reader has to act on,
+	// and it comes from the flow the daemon wrote rather than being counted a
+	// second time here.
+	ReviewCount int `json:"reviewCount"`
+	Bytes       int `json:"bytes"`
 }
 
 func newSimRecordStopCommand(ctx *commandContext) *cobra.Command {
@@ -340,202 +356,61 @@ func (c *commandContext) stopSimRecording(ctx context.Context, udid, out, entry 
 		return simRecordStopResult{}, err
 	}
 
+	// The flow is built and written by the daemon, not here. It used to be
+	// built here, and moving it was not tidying: the Device tab stops
+	// recordings too, has no Go in it, and a second emitter on that side would
+	// be a second answer to "how many of these steps need review" - the one
+	// number a human is asked to act on. This command reports what the daemon
+	// wrote.
+	query := url.Values{}
+	if trimmed := strings.TrimSpace(out); trimmed != "" {
+		// Resolved here, because this is the side that knows which working
+		// directory a relative path meant.
+		abs, err := filepath.Abs(trimmed)
+		if err != nil {
+			return simRecordStopResult{}, fmt.Errorf("resolve --out path: %w", err)
+		}
+		query.Set("out", abs)
+	}
+	if trimmed := strings.TrimSpace(entry); trimmed != "" {
+		query.Set("entry", trimmed)
+	}
+
 	var res simRecordingWithStepsResponse
 	path := "sessions/" + url.PathEscape(sessionID) + "/sim-recordings/" + url.PathEscape(device.UDID)
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
 	if err := c.deleteJSON(ctx, path, &res); err != nil {
 		return simRecordStopResult{}, c.explainSimRecordingStopFailure(device, err)
 	}
-
-	steps := make([]simflow.Step, 0, len(res.Steps))
-	for _, s := range res.Steps {
-		steps = append(steps, simRecordingStepToFlow(s))
+	if res.Flow == nil {
+		return simRecordStopResult{}, fmt.Errorf(
+			"recording stopped on %s with %d step(s) captured, but the daemon wrote no flow file",
+			device.Label(), res.StepCount)
 	}
-
-	recordedAt := c.deps.Now().UTC()
-	if res.Recording.StoppedAt != nil {
-		recordedAt = res.Recording.StoppedAt.UTC()
-	}
-	// EmitOptions carries no Frontmost field - see its own doc comment in
-	// internal/simflow/emit.go for why: nothing upstream of this call
-	// persists which app was frontmost when the recording started, and a
-	// header line that would always read "unknown" is worse than no line.
-	flow, err := simflow.Emit(steps, simflow.EmitOptions{
-		Device:     device.Name,
-		Runtime:    device.Runtime,
-		RecordedAt: recordedAt.Format(time.RFC3339),
-		Entry:      strings.TrimSpace(entry),
-	})
-	if err != nil {
-		// The recording already stopped on the daemon side - that side effect
-		// happened and cannot be undone here - so the failure has to say so
-		// rather than read as "nothing happened".
-		return simRecordStopResult{}, fmt.Errorf("recording stopped on %s, but the flow could not be built: %w",
-			device.Label(), err)
-	}
-
-	writePath := strings.TrimSpace(out)
-	if writePath == "" {
-		writePath, err = simSessionRecordingPath(recordedAt, device.UDID)
-		if err != nil {
-			return simRecordStopResult{}, err
-		}
-	} else if writePath, err = filepath.Abs(writePath); err != nil {
-		return simRecordStopResult{}, fmt.Errorf("resolve --out path: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(writePath), 0o750); err != nil {
-		return simRecordStopResult{}, fmt.Errorf("create recording directory: %w", err)
-	}
-	if err := os.WriteFile(writePath, []byte(flow), 0o600); err != nil {
-		return simRecordStopResult{}, fmt.Errorf("write flow to %s: %w", writePath, err)
-	}
-
 	return simRecordStopResult{
 		UDID: device.UDID, DeviceName: device.Name, Runtime: device.Runtime,
-		Path: writePath, StepCount: len(steps), Bytes: len(flow),
+		Path: res.Flow.Path, StepCount: res.Flow.Steps, ReviewCount: res.Flow.Review, Bytes: int(res.Flow.Bytes),
 	}, nil
 }
 
 func writeSimRecordStop(out io.Writer, r simRecordStopResult) error {
-	if _, err := fmt.Fprintf(out, "Stopped recording on %s (%s, %s): %d step(s) captured.\n",
-		r.DeviceName, r.Runtime, r.UDID, r.StepCount); err != nil {
+	summary := fmt.Sprintf("Stopped recording on %s (%s, %s): %d step(s) captured",
+		r.DeviceName, r.Runtime, r.UDID, r.StepCount)
+	// The review count is stated only when there is one, for the same reason
+	// the flow's own banner is: a line that always reads "0 need review" is a
+	// line nobody reads on the day it says 3.
+	if r.ReviewCount > 0 {
+		summary += fmt.Sprintf(", %d needing review - see the \"# REVIEW:\" markers", r.ReviewCount)
+	}
+	if _, err := fmt.Fprintln(out, summary+"."); err != nil {
 		return err
 	}
 	// The path gets a line of its own, the same way `ao sim shot` prints it, so
 	// it can be read straight off the terminal and handed to a file read.
 	_, err := fmt.Fprintln(out, r.Path)
 	return err
-}
-
-// simSessionRecordingPath puts the emitted flow in this session's own artifact
-// directory under the AO data dir, by the same rule `ao sim shot` uses for its
-// screenshots (simSessionShotPath in sim.go): per-session so concurrent
-// workers cannot clobber each other, and outside every repository so a
-// generated flow can never be committed by accident.
-func simSessionRecordingPath(recordedAt time.Time, udid string) (string, error) {
-	sessionID := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
-	if sessionID == "" {
-		return "", errors.New("ao sim record stop writes into the current session's artifact directory, but " +
-			"AO_SESSION_ID is not set; pass --out <path> to write outside an AO session")
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return "", err
-	}
-	name := recordedAt.Format(simShotStampLayout) + "Z-" + udid + ".yaml"
-	return filepath.Join(cfg.DataDir, "sim", sessionID, name), nil
-}
-
-// simRecordingStepToFlow turns one recorded step, as the daemon returns it,
-// into simflow.Step - Emit's own mechanism-neutral shape (Task 4).
-//
-// Choice.Index (which of several same-label matches this step resolved to)
-// round-trips through SelectorIndex (0039_sim_recording_step_index.sql):
-// without it, re-emitting a flow from a stored recording would always
-// address the FIRST element sharing a label, silently substituting it for
-// whichever one was actually tapped - a flow whose selector text reads
-// correctly while touching the wrong element. That is a correctness bug, not
-// a cosmetic one, which is why it has its own column rather than a
-// documented gap.
-//
-// Choice.Anchor/Relation round-trip through their own columns
-// (0041_sim_recording_step_anchor.sql) for the same reason: an anchor resolved
-// at record time and then lost would fall back to the index it exists to
-// replace, quietly reintroducing the failure it was added to remove.
-//
-// Choice.Escaped - whether the stored selector text needed regex escaping -
-// has no column of its own and needs none: it is RECOVERED here rather than
-// remembered, because a stored text selector is always the escaped form, so
-// unescaping it recovers both the plain label and the fact that it was
-// escaped in the first place. Both are used, and neither is cosmetic:
-//
-//   - Plain is what scrollUntilVisible matches on for an off-screen element,
-//     and render.go's rule is that it is the label a human reads. Handing it
-//     the stored (escaped) text emitted `element: "See all \\(12\\)"` for a
-//     label that reads "See all (12)".
-//   - Escaped drives the "# escaped: ..." comment that tells a reader why the
-//     selector above it is full of backslashes.
-func simRecordingStepToFlow(step simRecordingStepClient) simflow.Step {
-	choice := simflow.Choice{
-		Rung:      simflow.Rung(step.SelectorRung),
-		Index:     int(step.SelectorIndex),
-		Ambiguity: int(step.Ambiguity),
-		OffScreen: step.OffScreen,
-	}
-	// plain is the label as a human reads it; it stays empty for a rung whose
-	// selector is not text, so Render falls back to the id the way it does for
-	// a Choice that never had a label.
-	var plain string
-	switch choice.Rung {
-	case simflow.RungText, simflow.RungTextIndex:
-		choice.Text = step.Selector
-		plain, choice.Escaped = simflow.Unescape(step.Selector)
-	case simflow.RungTextAnchor:
-		choice.Text = step.Selector
-		plain, choice.Escaped = simflow.Unescape(step.Selector)
-		choice.Anchor = step.SelectorAnchor
-		_, choice.AnchorEscaped = simflow.Unescape(step.SelectorAnchor)
-		choice.Relation = simflow.Relation(step.SelectorAnchorRel)
-	case simflow.RungID:
-		choice.ID = step.Selector
-	case simflow.RungPoint:
-		choice.PercentX = simRecordPercent(step.X)
-		choice.PercentY = simRecordPercent(step.Y)
-	}
-	if choice.OffScreen {
-		// The element's own box - what scrollDirectionFor (internal/simflow)
-		// would otherwise decide this from - is never persisted either. DOWN
-		// is that same function's fallback "when an element's edges are not
-		// known", which is exactly this case.
-		choice.ScrollDirection = simflow.ScrollDown
-	}
-	return simflow.Step{
-		Seq:          step.Seq,
-		Kind:         simRecordingStepKind(step.Kind),
-		Choice:       choice,
-		Plain:        plain,
-		ScreenChange: step.ScreenChange,
-		X:            step.X, Y: step.Y, ToX: step.ToX, ToY: step.ToY,
-		Text:   step.Text,
-		Detail: step.Detail,
-	}
-}
-
-// simRecordingStepKind maps a recorded step's Kind onto simflow's coarser
-// vocabulary (Task 4). A drag is emitted exactly like a swipe (spec §8), so
-// both "swipe" and "drag" - along with the daemon's own "drag-begin"/
-// "drag-move"/"drag-end" intent kinds, which the Device tab may still send
-// under a single hold - map onto StepSwipe. Anything this switch does not
-// recognize passes straight through: Emit refuses an untranslatable step by
-// name rather than dropping it silently, and inventing a second "unknown
-// kind" error here would just repeat that refusal worse.
-func simRecordingStepKind(kind string) simflow.StepKind {
-	switch kind {
-	case "tap":
-		return simflow.StepTap
-	case "type":
-		return simflow.StepType
-	case "swipe", "drag", "drag-begin", "drag-move", "drag-end":
-		return simflow.StepSwipe
-	case "button":
-		return simflow.StepButton
-	default:
-		return simflow.StepKind(kind)
-	}
-}
-
-// simRecordPercent mirrors internal/simflow's own unexported percent(): a
-// normalized 0..1 coordinate rounded to the whole percent Maestro takes,
-// clamped to 0..100. Duplicated rather than exported because it is three
-// lines and the alternative is widening simflow's API for a single caller.
-func simRecordPercent(v float64) int {
-	p := int(math.Round(v * 100))
-	if p < 0 {
-		return 0
-	}
-	if p > 100 {
-		return 100
-	}
-	return p
 }
 
 // explainSimRecordingRefusal turns the daemon's SIM_RECORDING_REFUSED 409

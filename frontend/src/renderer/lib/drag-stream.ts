@@ -71,6 +71,22 @@ export class DragStream {
 
 	end(point: DragPoint): void {
 		if (!this.active) return;
+		// ⚠ The FIRST end wins, and the guard is load-bearing rather than
+		// defensive. A drag is ended twice on every ordinary release: the pane's
+		// pointerup ends it where the finger actually left, and the browser then
+		// fires `lostpointercapture` - which the pane also has to treat as an
+		// end, because a capture the OS takes back mid-drag would otherwise
+		// leave a finger down forever. That second end carries no real position,
+		// only a fallback.
+		//
+		// Until this guard existed, `active` stayed true until the queued end
+		// was actually SENT, so the fallback arrived first and overwrote the
+		// real one: every drag in the Device tab lifted at the middle of the
+		// screen, and every drag a recording captured was written into the flow
+		// as a swipe from wherever it started to 50%,50%. It was invisible
+		// because the touch did end and the drag did work - only its last
+		// position was wrong.
+		if (this.closing) return;
 		this.last = point;
 		this.closing = point;
 		// A drag that ends before its last move went out ends where the finger

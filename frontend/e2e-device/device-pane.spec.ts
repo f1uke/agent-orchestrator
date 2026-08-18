@@ -12,6 +12,8 @@
  * `npm run package` for the renderer build). Everything missing is a skip.
  */
 import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { type Sandbox, deviceState, dragThrough, openDevicePane, skipReason, startSandbox } from "./sandbox";
 
@@ -149,4 +151,224 @@ test("the body around the screen is the device's own proportions", async () => {
 	expect(drawn).not.toBeNull();
 	// Within a pixel: the drawn body is rounded to whole pixels.
 	expect(Math.abs(drawn!.bezel - drawn!.screenWidth * frame!.thickness)).toBeLessThanOrEqual(1.5);
+});
+
+// --- recording ---------------------------------------------------------------
+
+/**
+ * ⚠ The requirement, and it is a hard one: the device screen's dimensions must
+ * be IDENTICAL with zero recordings, with one, and with fifty. A screen that
+ * resizes as a side effect of unrelated activity is what made this pane feel
+ * bad before, and "the screen is too small" is the complaint that produced the
+ * 84.6% measurement it now has to hold.
+ *
+ * jsdom cannot see this at all - it has no layout - so it has to be measured
+ * here, and it is measured rather than eyeballed so this goes red if somebody
+ * later makes the list push the screen.
+ */
+async function deviceBox(sandbox: Sandbox) {
+	return sandbox.page.evaluate(() => {
+		const canvas = document.querySelector("[data-testid=sim-canvas]");
+		if (!canvas) return null;
+		const box = canvas.getBoundingClientRect();
+		return { width: Math.round(box.width), height: Math.round(box.height), top: Math.round(box.top) };
+	});
+}
+
+/** Writes flows straight into the session's own directory, as a recording would. */
+function seedRecordings(sandbox: Sandbox, count: number): void {
+	const dir = path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows");
+	mkdirSync(dir, { recursive: true });
+	for (let i = 0; i < count; i += 1) {
+		const stamp = `20260818-0400${String(i).padStart(2, "0")}.000Z`;
+		const body = [
+			"appId: ${APP_ID}",
+			"---",
+			"# recorded by ao sim at t, device d (r)",
+			"# 3 step(s), 1 needing review",
+			'- tapOn: "Home"',
+			"",
+		].join("\n");
+		writeFileSync(path.join(dir, `seeded-flow-${i}-${stamp}.yaml`), body);
+	}
+}
+
+function clearRecordings(sandbox: Sandbox): void {
+	rmSync(path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows"), { recursive: true, force: true });
+}
+
+test("the device screen is exactly the same size with no recordings, one, and fifty", async () => {
+	clearRecordings(sandbox);
+	await sandbox.page.getByTestId("sim-recordings-trigger").click();
+	await sandbox.page.keyboard.press("Escape");
+	await expect.poll(() => sandbox.page.getByTestId("sim-recordings-count").textContent()).toBe("0");
+	const empty = await deviceBox(sandbox);
+	expect(empty, "no device screen to measure").not.toBeNull();
+
+	seedRecordings(sandbox, 1);
+	await expect
+		.poll(() => sandbox.page.getByTestId("sim-recordings-count").textContent(), { timeout: 15_000 })
+		.toBe("1");
+	expect(await deviceBox(sandbox), "one recording moved the screen").toEqual(empty);
+
+	seedRecordings(sandbox, 50);
+	await expect
+		.poll(() => sandbox.page.getByTestId("sim-recordings-count").textContent(), { timeout: 15_000 })
+		.toBe("50");
+	expect(await deviceBox(sandbox), "fifty recordings moved the screen").toEqual(empty);
+
+	// And with the list actually open and scrolling, which is the case a
+	// disclosure would have failed.
+	await sandbox.page.getByTestId("sim-recordings-trigger").click();
+	const list = sandbox.page.getByTestId("sim-recordings-list");
+	await expect(list).toBeVisible();
+	expect(
+		await list.evaluate((el) => el.scrollHeight > el.clientHeight),
+		"fifty rows should overflow the list's own bounded height",
+	).toBe(true);
+	expect(await deviceBox(sandbox), "opening the list moved the screen").toEqual(empty);
+
+	await sandbox.page.keyboard.press("Escape");
+	clearRecordings(sandbox);
+});
+
+// A control can render, pass every unit test and still be invisible or
+// unhittable - this repo has shipped exactly that. So: is the thing at the
+// button's own centre point the button?
+test("the record button is actually visible and actually hittable", async () => {
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	await expect(button).toBeVisible();
+
+	const hit = await button.evaluate((el) => {
+		const box = el.getBoundingClientRect();
+		const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+		const style = getComputedStyle(el);
+		return {
+			ownsItsCentre: el === at || el.contains(at),
+			width: box.width,
+			height: box.height,
+			visibility: style.visibility,
+			opacity: style.opacity,
+		};
+	});
+	expect(hit.ownsItsCentre, "something else is on top of the record button").toBe(true);
+	expect(hit.width).toBeGreaterThan(24);
+	expect(hit.height).toBeGreaterThan(20);
+	expect(hit.visibility).toBe("visible");
+	expect(Number(hit.opacity)).toBeGreaterThan(0.5);
+});
+
+// The whole loop, through the real routes: record, drag by hand, watch the
+// count move, stop, and find the flow on disk with the counts it claimed.
+test("recording captures a hand drag, and stop writes the flow it reports", async () => {
+	clearRecordings(sandbox);
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	if ((await drive.getAttribute("aria-pressed")) !== "true") await drive.click();
+	await expect(drive).toHaveAttribute("aria-pressed", "true");
+
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	await expect(button).toBeEnabled();
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "true");
+	await expect(sandbox.page.getByTestId("sim-record-count")).toHaveText("0");
+
+	await dragThrough(
+		sandbox,
+		[0.5, 0.45, 0.4, 0.35].map((y) => ({ x: 0.5, y })),
+	);
+
+	// 🗝 The count has to MOVE. A recorder that is not wired to the daemon
+	// leaves it at zero while start and stop both succeed, and this is the
+	// assertion that catches that.
+	await expect
+		.poll(() => sandbox.page.getByTestId("sim-record-count").textContent(), {
+			timeout: 15_000,
+			message: "the step count never moved - the recorder captured nothing",
+		})
+		.not.toBe("0");
+
+	await button.click();
+	const summary = sandbox.page.getByTestId("sim-stop-summary");
+	await expect(summary).toBeVisible();
+	const reported = await summary.textContent();
+
+	const dir = path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows");
+	const written = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
+	expect(written, "stop reported a flow that is not on disk").toHaveLength(1);
+	const body = readFileSync(path.join(dir, written[0]), "utf8");
+	expect(body).toContain("appId: ${APP_ID}");
+	// What the summary claims and what the file says are the same numbers.
+	const counts = body.match(/# (\d+) step\(s\), (\d+) needing review/);
+	expect(counts, `the flow states no counts:\n${body}`).not.toBeNull();
+	expect(reported).toContain(`${counts![1]} step`);
+
+	await expect(button).toHaveAttribute("aria-pressed", "false");
+});
+
+// One recording per session, not one per surface: what a terminal starts is
+// what the tab shows.
+test("a recording started outside the tab shows up in it", async () => {
+	const started = post(sandbox, `/api/v1/sessions/${sandbox.sessionId}/sim-recordings/${sandbox.udid}`, {});
+	expect(started.status, "could not start a recording the way the CLI does").toBe(200);
+
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	await expect(button).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 });
+
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "false");
+});
+
+/**
+ * The narrow cases, where a control that grows by one character costs the
+ * device a whole line of height: the toolbar row wraps, and the row is above
+ * the screen's own flex space.
+ *
+ * 960px is the app's minimum window width. Both the recording state changing
+ * and the count climbing are checked, because those are the two things that
+ * change while somebody is looking at the screen rather than at the toolbar.
+ */
+test("nothing about recording resizes the screen at the minimum window width", async () => {
+	clearRecordings(sandbox);
+	await sandbox.app.evaluate(({ BrowserWindow }) => {
+		BrowserWindow.getAllWindows()[0]?.setSize(960, 800);
+	});
+	await sandbox.page.waitForTimeout(500);
+
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	if ((await drive.getAttribute("aria-pressed")) !== "true") await drive.click();
+
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	const idle = await deviceBox(sandbox);
+	expect(idle).not.toBeNull();
+
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "true");
+	expect(await deviceBox(sandbox), "turning recording on resized the screen").toEqual(idle);
+
+	// And with a count wide enough to have widened an unconstrained slot.
+	await dragThrough(
+		sandbox,
+		[0.5, 0.45, 0.4].map((y) => ({ x: 0.5, y })),
+	);
+	await expect
+		.poll(() => sandbox.page.getByTestId("sim-record-count").textContent(), { timeout: 15_000 })
+		.not.toBe("0");
+	expect(await deviceBox(sandbox), "a climbing step count resized the screen").toEqual(idle);
+
+	await button.click();
+	await sandbox.page.getByTestId("sim-stop-summary").waitFor();
+
+	// The list has to fit inside the window at this width, not spill out of it.
+	await sandbox.page.getByTestId("sim-recordings-trigger").click();
+	const popover = sandbox.page.getByTestId("sim-recordings-popover");
+	await expect(popover).toBeVisible();
+	const fits = await popover.evaluate((el) => {
+		const box = el.getBoundingClientRect();
+		return { left: box.left, right: box.right, width: window.innerWidth };
+	});
+	expect(fits.left).toBeGreaterThanOrEqual(0);
+	expect(fits.right).toBeLessThanOrEqual(fits.width);
+	await sandbox.page.keyboard.press("Escape");
+
+	clearRecordings(sandbox);
 });

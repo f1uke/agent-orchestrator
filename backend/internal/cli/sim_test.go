@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
 
 // simctl fixtures. The shape mirrors `xcrun simctl list devices --json`: a
@@ -330,9 +332,15 @@ func TestSimShot_ExactlyOneBootedWritesSessionArtifact(t *testing.T) {
 	if got.UDID != simUDIDProMax {
 		t.Errorf("udid = %q, want the only booted device %q", got.UDID, simUDIDProMax)
 	}
-	wantDir := filepath.Join(cfg.dataDir, "sim", "agent-orchestrator-123")
+	// Screenshots have their own subdirectory, apart from recorded flows: a
+	// session with a morning of captures in it used to bury every flow it had
+	// recorded in the same flat listing.
+	wantDir := simrecord.ShotsDir(cfg.dataDir, "agent-orchestrator-123")
 	if filepath.Dir(got.Path) != wantDir {
-		t.Errorf("artifact dir = %q, want session dir %q", filepath.Dir(got.Path), wantDir)
+		t.Errorf("artifact dir = %q, want the session's shots dir %q", filepath.Dir(got.Path), wantDir)
+	}
+	if flows := simrecord.FlowsDir(cfg.dataDir, "agent-orchestrator-123"); filepath.Dir(got.Path) == flows {
+		t.Errorf("a screenshot must not land in the flows directory %q", flows)
 	}
 	// Millisecond-precision UTC stamp plus udid keeps concurrent captures from
 	// colliding inside one session.
@@ -631,7 +639,7 @@ func TestSimShot_ConcurrentSessionsDoNotCollide(t *testing.T) {
 			t.Fatalf("decode: %v\n%s", err, out)
 		}
 		paths[session] = got.Path
-		if want := filepath.Join(cfg.dataDir, "sim", session); filepath.Dir(got.Path) != want {
+		if want := simrecord.ShotsDir(cfg.dataDir, session); filepath.Dir(got.Path) != want {
 			t.Errorf("%s wrote to %q, want %q", session, filepath.Dir(got.Path), want)
 		}
 	}
