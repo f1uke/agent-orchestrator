@@ -1296,6 +1296,74 @@ func TestAcquireHold_RecordsTypedTextAndKeys(t *testing.T) {
 	}
 }
 
+// 🗝 A recorded step is what the HUMAN did, not how the pane chose to chunk it.
+//
+// On a guest that reads US ASCII key presses faithfully the Device tab sends
+// each character on its own - that is what makes a character appear in 3-6 ms
+// instead of waiting 250 ms for a pause and then ~935 ms for the daemon to ask
+// the guest which keyboard it had. That pacing decision must not reach the
+// flow: without this, typing one word would record one step per letter, emit
+// one `inputText` line per letter, and climb the tab's live step count by five
+// for a single word.
+func TestAcquireHold_ARunOfTypingIsOneStepHoweverItWasChunked(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	// Exactly what the pane sends while somebody types "hi", taps, then types
+	// "yo" - one request per character.
+	for _, intent := range []sim.GestureIntent{
+		{Kind: "type", Text: "h"},
+		{Kind: "type", Text: "i"},
+		{Kind: "tap", X: 0.5, Y: 0.5},
+		{Kind: "type", Text: "y"},
+		{Kind: "type", Text: "o"},
+	} {
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, intent)
+		if err != nil {
+			t.Fatalf("hold %+v: %v", intent, err)
+		}
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+	}
+
+	// While it is still open, so the live count a human is watching agrees with
+	// the flow they will get.
+	_, live, ok, err := svc.GetRecording(context.Background(), udidProMax)
+	if err != nil || !ok {
+		t.Fatalf("get recording: %v ok=%v", err, ok)
+	}
+	if len(live) != 3 {
+		t.Fatalf("live steps = %d, want 3 - typing, the tap, typing", len(live))
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(steps))
+	}
+	if steps[0].Kind != "type" || steps[0].Text != "hi" {
+		t.Errorf("step 1 = %q %q, want the whole run typed before the tap", steps[0].Kind, steps[0].Text)
+	}
+	if steps[1].Kind != "tap" {
+		t.Errorf("step 2 = %q, want the tap that ended the run", steps[1].Kind)
+	}
+	if steps[2].Kind != "type" || steps[2].Text != "yo" {
+		t.Errorf("step 3 = %q %q, want the run typed after the tap", steps[2].Kind, steps[2].Text)
+	}
+	// The run keeps the moment it BEGAN: that is when the human started typing
+	// it, and it stays true as the run grows.
+	if !steps[0].At.Equal(now) {
+		t.Errorf("run started at %s, want the first keystroke's own time %s", steps[0].At, now)
+	}
+}
+
 // ⚠ #209 removed the accessibility read from between the finger going down and
 // the touch reaching the device. Typing must not put work back on that path:
 // a key press is not a screen read, and neither is starting one.

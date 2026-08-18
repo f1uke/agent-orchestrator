@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * The human's own keyboard, into the device.
@@ -32,14 +32,33 @@ import { useCallback, useEffect, useRef } from "react";
  * remap them into and text is the wrong shape for them anyway: a flow that
  * turned Enter into a newline would submit nothing.
  *
- * ## Why typing is batched
+ * ## Why typing is paced by the route it will take
  *
- * Characters accumulate and go out as one `type` per burst. On a guest that
- * remaps, each `type` is a pasteboard round trip that reads the screen to
- * prove it landed; one of those per keystroke would be unusable, and would put
- * the guest's pasteboard through a cycle per character. A burst ends when the
- * human pauses, presses a key that is not a character, leaves the surface, or
- * stops driving.
+ * 🗝 A person types by watching characters land, so text that arrives correctly
+ * after a pause still reads as broken - they retype, or tap around thinking the
+ * field lost focus, and a correct system produces a wrong result. So a
+ * character goes out AT ONCE wherever that is cheap, and is batched only where
+ * batching is what makes it correct.
+ *
+ * Which one applies is the device's answer, not this hook's opinion:
+ *
+ *   - the guest reads US ASCII key presses faithfully (`immediate`), and the
+ *     character is ASCII: sent on its own, measured at 3-6 ms on the device.
+ *   - anything else - a guest that would remap the keys, one that would not say
+ *     what it is, or a character no US key can send (Thai, an emoji): the
+ *     characters accumulate and go out as one `type` per burst. Each of those
+ *     is a pasteboard round trip that reads the screen twice to prove it
+ *     landed, measured at 3.1-3.4 s: one per keystroke would be far worse than
+ *     the pause it was meant to remove, and would cycle the guest's pasteboard
+ *     on every character.
+ *
+ * ⚠ `immediate` is a PACING hint and never a routing decision. The daemon plans
+ * every request itself, from the mode as it is at that moment, so a hint that
+ * has gone stale costs speed and never correctness - which is what keeps
+ * "is this keyboard safe" implemented in exactly one place, and not here.
+ *
+ * A burst ends when the human pauses, presses a key that is not a character,
+ * leaves the surface, or stops driving.
  *
  * ⚠ Ordering is the thing that must not break. A named key FLUSHES the pending
  * text first and is queued behind it, so `ab<Backspace>c` cannot arrive as
@@ -111,21 +130,63 @@ export function classifyKey(event: {
 	return null;
 }
 
+/**
+ * How long text may be on its way before the pane admits it is waiting.
+ *
+ * ⚠ Not a delay on anything - it only decides when the human is TOLD. Below
+ * this, saying so would be a flicker on every keystroke of ordinary fast
+ * typing, which is noise rather than information; above it, the human is in the
+ * gap where they would otherwise start retyping into a field that is about to
+ * receive what they already typed.
+ */
+export const TYPING_WAIT_VISIBLE_MS = 200;
+
+/**
+ * Whether a character can be sent on its own cheaply, given a guest that reads
+ * US ASCII key presses faithfully.
+ *
+ * ⚠ This is not "can the device type this" - that question belongs to the
+ * daemon and is answered there. It is only "would sending this alone be cheap",
+ * and it is deliberately conservative: anything outside printable ASCII takes
+ * the pasteboard route, so it is batched instead.
+ */
+function sendsAlone(text: string): boolean {
+	for (const rune of text) {
+		const code = rune.codePointAt(0) ?? 0;
+		if (code < 0x20 || code > 0x7e) return false;
+	}
+	return true;
+}
+
 export type DeviceKeyboard = {
 	/** Wire to onKeyDown of the surface that has focus. */
 	onKeyDown: (event: React.KeyboardEvent) => void;
 	/** Wire to onBlur: leaving the surface must not strand pending text. */
 	flush: () => void;
+	/**
+	 * Something typed has not reached the device yet, and has been on its way
+	 * long enough to be worth saying so. Never what was typed - only that.
+	 */
+	waiting: boolean;
 };
 
 export function useDeviceKeyboard({
 	enabled,
+	immediate = false,
 	sendText,
 	sendKey,
 	onEscape,
 }: {
 	/** Typing reaches the device only while this is true. */
 	enabled: boolean;
+	/**
+	 * The device reads US ASCII key presses as the characters they were sent
+	 * as, so an ASCII character can go out on its own. A pacing hint from the
+	 * daemon; see the note above about why it is never a routing decision.
+	 * Defaults to false, so a pane that has not been told yet batches - the
+	 * slower answer is always the safe one to guess.
+	 */
+	immediate?: boolean;
 	sendText: (text: string) => Promise<void>;
 	sendKey: (name: string) => Promise<void>;
 	/** Escape is the way out of the surface, and is never sent to the device. */
@@ -141,6 +202,28 @@ export function useDeviceKeyboard({
 	sendTextRef.current = sendText;
 	sendKeyRef.current = sendKey;
 
+	// How many typed characters have been accepted and not yet reached the
+	// device - buffered here, queued, or in flight. Counted rather than a flag,
+	// because several sends can be outstanding at once when typing is immediate.
+	const unconfirmed = useRef(0);
+	const waitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const [waiting, setWaiting] = useState(false);
+
+	const accepted = useCallback((count: number) => {
+		unconfirmed.current += count;
+		if (waitTimer.current === undefined) {
+			waitTimer.current = setTimeout(() => setWaiting(true), TYPING_WAIT_VISIBLE_MS);
+		}
+	}, []);
+
+	const confirmed = useCallback((count: number) => {
+		unconfirmed.current = Math.max(0, unconfirmed.current - count);
+		if (unconfirmed.current > 0) return;
+		clearTimeout(waitTimer.current);
+		waitTimer.current = undefined;
+		setWaiting(false);
+	}, []);
+
 	const enqueue = useCallback((run: () => Promise<void>) => {
 		queue.current = queue.current.then(run, run);
 	}, []);
@@ -151,15 +234,26 @@ export function useDeviceKeyboard({
 		const text = pending.current;
 		pending.current = "";
 		if (text === "") return;
-		enqueue(() => sendTextRef.current(text));
-	}, [enqueue]);
+		const runes = [...text].length;
+		// settled, not resolved: text that failed to reach the device is no
+		// longer on its way either, and leaving the pane claiming it was would
+		// be a spinner that never stops. The failure itself is reported by the
+		// caller's own error handling.
+		enqueue(() => sendTextRef.current(text).finally(() => confirmed(runes)));
+	}, [confirmed, enqueue]);
 
 	// Nothing typed may be left behind when typing stops being allowed - the
 	// lease going away, driving switched off, the tab closing.
 	useEffect(() => {
 		if (!enabled) flush();
 	}, [enabled, flush]);
-	useEffect(() => () => clearTimeout(timer.current), []);
+	useEffect(
+		() => () => {
+			clearTimeout(timer.current);
+			clearTimeout(waitTimer.current);
+		},
+		[],
+	);
 
 	const onKeyDown = useCallback(
 		(event: React.KeyboardEvent) => {
@@ -186,6 +280,15 @@ export function useDeviceKeyboard({
 			}
 
 			pending.current += what.text;
+			accepted(1);
+			// The character can stand on its own, and the device will read it as
+			// itself: send it now rather than making the human wait for a pause
+			// they have no reason to take. Anything already pending goes with it,
+			// so nothing can overtake what was typed before it.
+			if (immediate && sendsAlone(pending.current)) {
+				flush();
+				return;
+			}
 			if ([...pending.current].length >= MAX_PENDING_RUNES) {
 				flush();
 				return;
@@ -193,8 +296,8 @@ export function useDeviceKeyboard({
 			clearTimeout(timer.current);
 			timer.current = setTimeout(flush, TYPING_FLUSH_MS);
 		},
-		[enabled, enqueue, flush, onEscape],
+		[accepted, enabled, enqueue, flush, immediate, onEscape],
 	);
 
-	return { onKeyDown, flush };
+	return { onKeyDown, flush, waiting };
 }

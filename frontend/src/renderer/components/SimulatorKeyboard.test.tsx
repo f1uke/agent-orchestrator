@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TYPING_FLUSH_MS, TYPING_WAIT_VISIBLE_MS } from "../hooks/useDeviceKeyboard";
 import { SimulatorPanel } from "./SimulatorPanel";
 
 const { getMock, postMock, deleteMock, patchMock } = vi.hoisted(() => ({
@@ -50,8 +51,25 @@ const UDID = "UDID-A";
 const heldByUs = { state: "held", holder: "p-1" };
 const heldByNobody = { state: "unknown", reason: "no AO session holds this device" };
 
-function serve(lease: Record<string, unknown>) {
+/**
+ * A guest that reads US ASCII key presses as the characters they were sent as.
+ * That is what lets the pane send a character on its own; see `usGuest` vs
+ * `remappingGuest` below.
+ */
+const usGuest = { udid: UDID, mode: "US", sendsUSASCII: true };
+/** A guest that would turn those key presses into other characters. */
+const remappingGuest = {
+	udid: UDID,
+	mode: "Thai",
+	sendsUSASCII: false,
+	reason: "the simulator's keyboard input mode is Thai, which would remap the key presses",
+};
+
+function serve(lease: Record<string, unknown>, keyboard: Record<string, unknown> = usGuest) {
 	getMock.mockImplementation(async (path: string) => {
+		if (path.includes("/keyboard")) {
+			return { data: keyboard, error: undefined, response: { status: 200 } };
+		}
 		if (path === "/api/v1/sim/devices") {
 			return {
 				data: {
@@ -134,16 +152,30 @@ async function settle() {
 }
 
 describe("typing into the device", () => {
-	it("sends what was typed as text, through the same gesture route as a tap", async () => {
+	// 🗝 The reason this slice exists. A character used to wait for the human to
+	// pause typing (250 ms) and then for the daemon to ask the guest which
+	// keyboard it had (~935 ms), so the first character of "hello" reached the
+	// device 1738 ms after it was pressed and all five arrived at once. On a
+	// guest that reads US ASCII faithfully each one now goes out on its own,
+	// which is a 3-6 ms round trip.
+	it("sends each character on its own, without waiting for a pause", async () => {
 		serve(heldByUs);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
+		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
 
 		canvas().focus();
 		await userEvent.keyboard("hello");
-		await settle();
+		// Deliberately NOT settled first: nothing here may be waiting on a timer.
+		await waitFor(() => expect(sent()).toHaveLength(5));
 
-		expect(sent()).toEqual([{ kind: "type", text: "hello" }]);
+		expect(sent()).toEqual([
+			{ kind: "type", text: "h" },
+			{ kind: "type", text: "e" },
+			{ kind: "type", text: "l" },
+			{ kind: "type", text: "l" },
+			{ kind: "type", text: "o" },
+		]);
 		expect(postMock).toHaveBeenCalledWith(
 			"/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture",
 			expect.objectContaining({ params: { path: { sessionId: "p-1", udid: UDID } } }),
@@ -165,8 +197,13 @@ describe("typing into the device", () => {
 		expect(sent()).toEqual([{ kind: "type", text: "สวัสดี" }]);
 	});
 
-	it("batches a burst into one request and starts a new one after a pause", async () => {
-		serve(heldByUs);
+	// ⚠ Still batched where batching is what makes it correct. Each `type` on a
+	// remapping guest is a pasteboard round trip that reads the screen twice to
+	// prove it landed, measured at 3.1-3.4 s - one per character would be far
+	// worse than the pause this slice removed, and would cycle the guest's
+	// pasteboard on every keystroke.
+	it("batches a burst on a guest that would remap the keys", async () => {
+		serve(heldByUs, remappingGuest);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
@@ -186,7 +223,7 @@ describe("typing into the device", () => {
 	// after the text it was meant to delete would silently corrupt what was
 	// typed - into a password field, invisibly.
 	it("flushes pending text before a key, so editing arrives in order", async () => {
-		serve(heldByUs);
+		serve(heldByUs, remappingGuest);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
@@ -199,6 +236,24 @@ describe("typing into the device", () => {
 			{ kind: "key", name: "backspace" },
 			{ kind: "type", text: "c" },
 		]);
+	});
+
+	// ⚠ Even on a US guest, a character no US key can send has to go through the
+	// pasteboard - so Thai is batched by the TEXT, whatever the input mode says.
+	// This is the property that makes a remembered input mode safe to reuse at
+	// all: a human who switches their Mac to Thai starts producing Thai runes,
+	// and those are routed by what they are rather than by what was remembered.
+	it("batches characters no US key can send, even on a US guest", async () => {
+		serve(heldByUs);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
+
+		canvas().focus();
+		await userEvent.keyboard("สวัสดี");
+		await settle();
+
+		expect(sent()).toEqual([{ kind: "type", text: "สวัสดี" }]);
 	});
 
 	it("sends Enter, Tab and the arrows as keys rather than as text", async () => {
@@ -221,7 +276,7 @@ describe("typing into the device", () => {
 	});
 
 	it("does not strand what was typed when focus leaves", async () => {
-		serve(heldByUs);
+		serve(heldByUs, remappingGuest);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
@@ -231,6 +286,75 @@ describe("typing into the device", () => {
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(sent()).toEqual([{ kind: "type", text: "half" }]);
+	});
+});
+
+/**
+ * The pane admits when something typed has not arrived yet.
+ *
+ * 🗝 Why this is not decoration. Where the text has to go through the guest's
+ * pasteboard it is still batched, and in that gap the human sees nothing
+ * happen - so they retype, or tap around thinking the field lost focus, and a
+ * correct system still ends up with the wrong thing in the field. What it must
+ * never do is show what was typed.
+ */
+describe("saying that typing is still on its way", () => {
+	const waitingSlot = () => screen.getByTestId("sim-typing-waiting");
+
+	it("says nothing while typing is landing promptly", async () => {
+		serve(heldByUs);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
+
+		canvas().focus();
+		await userEvent.keyboard("ab");
+		await waitFor(() => expect(sent()).toHaveLength(2));
+		await vi.advanceTimersByTimeAsync(400);
+
+		expect(waitingSlot()).toBeEmptyDOMElement();
+	});
+
+	it("says so once text has been on its way long enough to doubt it", async () => {
+		serve(heldByUs, remappingGuest);
+		let land: () => void = () => {};
+		postMock.mockImplementation(
+			async () =>
+				await new Promise((resolve) => {
+					land = () => resolve({ error: undefined });
+				}),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+
+		canvas().focus();
+		await userEvent.keyboard("สวัสดี");
+		await vi.advanceTimersByTimeAsync(TYPING_FLUSH_MS + TYPING_WAIT_VISIBLE_MS + 50);
+
+		expect(waitingSlot()).not.toBeEmptyDOMElement();
+		// ⚠ Never the text itself: it is written verbatim into a recorded flow
+		// and is a password often enough that it must not reach the DOM.
+		expect(waitingSlot().textContent ?? "").not.toContain("สวัสดี");
+		expect(document.body.textContent ?? "").not.toContain("สวัสดี");
+
+		land();
+		await waitFor(() => expect(waitingSlot()).toBeEmptyDOMElement());
+	});
+
+	// A send that failed is not still on its way. Leaving it saying so would be
+	// a spinner that never stops, on the one surface where a human is deciding
+	// whether to type the whole thing again.
+	it("stops saying so when the text could not be delivered", async () => {
+		serve(heldByUs, remappingGuest);
+		postMock.mockResolvedValue({ error: { message: "nope" } });
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+
+		canvas().focus();
+		await userEvent.keyboard("สวัสดี");
+		await vi.advanceTimersByTimeAsync(TYPING_FLUSH_MS + TYPING_WAIT_VISIBLE_MS + 50);
+
+		await waitFor(() => expect(waitingSlot()).toBeEmptyDOMElement());
 	});
 });
 

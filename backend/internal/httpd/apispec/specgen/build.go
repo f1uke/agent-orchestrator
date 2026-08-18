@@ -285,6 +285,7 @@ var schemaNames = map[string]string{
 	"ControllersListSimDevicesResponse":        "ListSimDevicesResponse",
 	"ControllersSimGestureInput":               "SimGestureInput",
 	"ControllersSimGestureResponse":            "SimGestureResponse",
+	"ControllersSimKeyboardView":               "SimKeyboardView",
 	"ControllersStartSimRecordingInput":        "StartSimRecordingInput",
 	"ControllersSimRecordingResponse":          "SimRecordingResponse",
 	"ControllersSimRecordingWithStepsResponse": "SimRecordingWithStepsResponse",
@@ -835,6 +836,15 @@ func simOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.ListSimDevicesResponse{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sim/devices/{udid}/keyboard", id: "getSimKeyboard", tag: "sim",
+			summary:    "Which keyboard input mode a simulator will read key presses through",
+			pathParams: []any{controllers.SimDeviceParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimKeyboardView{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},

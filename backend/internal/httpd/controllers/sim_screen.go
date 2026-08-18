@@ -40,9 +40,11 @@ type SimScreenProvider interface {
 	Subscribe(ctx context.Context, udid string) (<-chan simstream.Event, error)
 	Driver(ctx context.Context) (simbridge.Driver, error)
 	// Keyboard is what the device will turn key presses into. Only `type` needs
-	// it, and it is asked per gesture rather than cached: the mode changes
-	// whenever the Mac's input source does, and a cached "US" outliving that
-	// change is the silent corruption this exists to prevent.
+	// it, and asking the guest costs about a second - so the implementation
+	// maintains it per device rather than asking in front of every keystroke.
+	// What makes that safe (the pane sends the character the human meant, so a
+	// switch to Thai is routed by the text before the mode is consulted) is
+	// argued where the caching lives, in internal/simstream.
 	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
 	// Pasteboard is the guest clipboard, which is how text reaches a field the
 	// keyboard cannot be trusted to fill.
@@ -164,10 +166,64 @@ type SimScreenController struct {
 // alongside the terminal mux.
 func (c *SimScreenController) Register(r chi.Router) {
 	r.Get("/sim/devices", c.devices)
+	// Asked before typing rather than during it. It takes no lease because it
+	// touches nothing: it reads which input mode the guest will interpret key
+	// presses through, which is the one thing a keystroke cannot be planned
+	// without and the one thing that costs about a second to find out.
+	r.Get("/sim/devices/{udid}/keyboard", c.keyboard)
 	// The gesture hangs off the session it is arbitrated as. A click in the
 	// desktop app is that session's click, which is what makes it arbitrable at
 	// all - a human's click with no session behind it could not be.
 	r.Post("/sessions/{sessionId}/sim-devices/{udid}/gesture", c.gesture)
+}
+
+// SimKeyboardView is what the pane needs in order to PACE typing: whether this
+// guest will read US ASCII key presses as the characters they were sent as.
+//
+// ⚠ It is deliberately not a routing decision, and the pane is not allowed to
+// treat it as one. The daemon plans every `type` request from scratch, with the
+// mode as it is at that moment; this only tells the pane whether sending
+// characters one at a time is cheap here. Being wrong costs speed, never
+// correctness - which is why there is still exactly one implementation of "is
+// this keyboard safe", and it is not in the renderer.
+type SimKeyboardView struct {
+	UDID string `json:"udid"`
+	// Mode is the guest's input mode in words, for a human reading a pane that
+	// is behaving unexpectedly. Never the text being typed.
+	Mode string `json:"mode"`
+	// SendsUSASCII is the pacing answer: may characters go one at a time.
+	SendsUSASCII bool `json:"sendsUSASCII"`
+	// Reason says why not, so an unreadable guest can be told from a remapping
+	// one without reading the daemon's logs.
+	Reason string `json:"reason,omitempty"`
+}
+
+// keyboard answers which input mode a guest reads key presses through, and
+// warms the daemon's own copy of that answer as a side effect.
+//
+// A guest that will not say is answered with a no rather than an error: the
+// question is "may I send these one at a time", and "I could not find out" is
+// safely no. An error would leave the pane with nothing to pace by at exactly
+// the moment somebody is about to type into it.
+func (c *SimScreenController) keyboard(w http.ResponseWriter, r *http.Request) {
+	if c.Screen == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sim/devices/{udid}/keyboard")
+		return
+	}
+	udid := chi.URLParam(r, "udid")
+	mode, err := c.Screen.Keyboard(r.Context(), udid)
+	view := SimKeyboardView{UDID: udid, Mode: mode.Describe()}
+	switch {
+	case err != nil:
+		view.Mode = "unknown"
+		view.Reason = "the simulator would not say which keyboard input mode it is using"
+	case !mode.SendsUSASCII():
+		view.Reason = "the simulator's keyboard input mode is " + mode.Describe() +
+			", which would remap the key presses"
+	default:
+		view.SendsUSASCII = true
+	}
+	envelope.WriteJSON(w, http.StatusOK, view)
 }
 
 func (c *SimScreenController) devices(w http.ResponseWriter, r *http.Request) {

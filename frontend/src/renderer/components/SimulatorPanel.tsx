@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { House, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
+import { House, Keyboard, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
+import { useSimKeyboard } from "../hooks/useSimKeyboard";
 import { usePageActive, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
 import { useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
 import { DragStream } from "../lib/drag-stream";
@@ -275,8 +276,16 @@ export function SimulatorPanel({
 		[sessionId],
 	);
 
+	// Asked as soon as a touch could reach the device, which is well before the
+	// human has focused the surface and started typing - so the second it takes
+	// the guest to answer is spent while nobody is waiting. See useSimKeyboard.
+	const guestKeyboard = useSimKeyboard(chosen, canDrive);
+
 	const keyboard = useDeviceKeyboard({
 		enabled: canDrive && typingFocused,
+		// Pacing only. Until the device has answered this is false, so the pane
+		// batches - guessing the slower route is always the safe way to be wrong.
+		immediate: guestKeyboard.data?.sendsUSASCII ?? false,
 		onEscape: () => canvasRef.current?.blur(),
 		sendText: useCallback(
 			async (text: string) => {
@@ -541,6 +550,7 @@ export function SimulatorPanel({
 							label="App switcher"
 							onClick={() => gesture.mutate({ kind: "button", name: "app-switcher" })}
 						/>
+						<TypingIndicator waiting={keyboard.waiting} />
 						<DeviceMenu
 							busy={claim.isPending || release.isPending}
 							device={device}
@@ -662,6 +672,50 @@ function useStageSize(stageRef: React.RefObject<HTMLDivElement | null>): { width
 		return () => observer.disconnect();
 	}, [stageRef]);
 	return stage;
+}
+
+/**
+ * Says that something typed has not reached the device yet.
+ *
+ * 🗝 Why this exists at all. Typing is immediate wherever the guest reads US
+ * ASCII key presses faithfully, but where it would remap them - or where the
+ * characters are Thai, or an emoji - the text has to go through the guest's
+ * pasteboard, which is measured at 3.1-3.4 s per send and so is still batched.
+ * In that gap a human sees nothing happen, and their instinct is to retype or
+ * tap around thinking the field lost focus - which is how a correct system
+ * still ends up with the wrong thing in the field. Saying "it is on its way" is
+ * what stops that.
+ *
+ * ⚠ It never shows WHAT was typed. Recorded text is written verbatim into a
+ * flow file and is a password often enough that it must not reach the DOM, a
+ * message or a log - the same rule the error paths here keep.
+ *
+ * Three things it deliberately does not do:
+ *   - it does not animate, so there is nothing for prefers-reduced-motion to
+ *     suppress, and nothing blinking in a panel somebody is working in. The
+ *     app's own `status-pulse` dips to 2.07:1 dark / 1.65:1 light at its
+ *     faintest, which is unreadable at the dim end of every cycle.
+ *   - it does not move anything: the slot is always in the row at the same
+ *     width, so text arriving or leaving cannot shift the screen by a pixel.
+ *   - it does not rely on colour: the glyph is either there or it is not, which
+ *     is a channel a colour-blind reader and a screen reader both have.
+ */
+function TypingIndicator({ waiting }: { waiting: boolean }) {
+	return (
+		<span
+			aria-live="polite"
+			className="flex w-6 shrink-0 items-center justify-center"
+			data-testid="sim-typing-waiting"
+			role="status"
+		>
+			{waiting ? (
+				<>
+					<Keyboard aria-hidden className="size-3.5 text-muted-foreground" />
+					<span className="sr-only">Sending what you typed to the device</span>
+				</>
+			) : null}
+		</span>
+	);
 }
 
 function PillButton({

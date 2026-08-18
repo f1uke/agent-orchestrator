@@ -214,7 +214,7 @@ func (s *Service) StopRecording(ctx context.Context, sessionID domain.SessionID,
 	if err != nil {
 		return domain.SimRecording{}, nil, err
 	}
-	return rec, steps, nil
+	return rec, coalesceTypeRuns(steps), nil
 }
 
 // GetRecording returns a device's recording, open or stopped, and the steps it
@@ -236,7 +236,44 @@ func (s *Service) GetRecording(ctx context.Context, udid string) (domain.SimReco
 	if err != nil {
 		return domain.SimRecording{}, nil, false, err
 	}
-	return rec, steps, true, nil
+	return rec, coalesceTypeRuns(steps), true, nil
+}
+
+// coalesceTypeRuns joins consecutive typed steps into the one thing the human
+// actually did.
+//
+// 🗝 A step is meant to be a gesture, and typing a word is one gesture. How
+// many requests it arrived as is a PACING decision made in the Device tab: on a
+// guest that reads US ASCII key presses faithfully the pane sends each
+// character on its own, because batching is what made a character take
+// 1164-1181 ms to appear when the device itself answers in 6 ms. That decision
+// must not be visible in the flow, so it is undone here - once, on the way out
+// - rather than in the emitter, the CLI and the counter separately.
+//
+// Done on READ rather than on write on purpose: the stored log stays a faithful
+// record of what was requested, and every reader (the live step count in the
+// tab, `ao sim record status`, and the flow a stop emits) sees the same
+// coalesced view, so they cannot disagree about how many steps there are.
+//
+// Only ADJACENT typing merges. Anything else between two runs - a tap, a key, a
+// swipe - ends the run, which is what keeps `ab<Backspace>c` three steps and
+// stops a flow claiming text was typed in one go when something happened in the
+// middle of it. The run keeps the seq and the timestamp of its first keystroke:
+// that is when the human started typing it.
+func coalesceTypeRuns(steps []domain.SimRecordingStep) []domain.SimRecordingStep {
+	if len(steps) == 0 {
+		return steps
+	}
+	out := make([]domain.SimRecordingStep, 0, len(steps))
+	for _, step := range steps {
+		last := len(out) - 1
+		if step.Kind == "type" && last >= 0 && out[last].Kind == "type" {
+			out[last].Text += step.Text
+			continue
+		}
+		out = append(out, step)
+	}
+	return out
 }
 
 // recorderSettleReads bounds the recorder's settle.
