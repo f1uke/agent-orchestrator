@@ -458,6 +458,7 @@ func (s *Service) refreshScreen(udid string) {
 		return
 	}
 	s.refreshing[udid] = true
+	scheduledAfter := s.gestures[udid]
 	s.recMu.Unlock()
 
 	s.runRefresh(func() {
@@ -466,6 +467,44 @@ func (s *Service) refreshScreen(udid string) {
 			delete(s.refreshing, udid)
 			s.recMu.Unlock()
 		}()
+		// ⚠ Wait for the human to stop, and give up if they have not.
+		//
+		// The bridge serializes, so this read is time the NEXT touch waits
+		// behind it - and on a real app the tree is big enough that one read is
+		// well over a second. Measured with a human driving their own app: the
+		// motion all arrived, but individual requests took up to 1105 ms,
+		// because each gesture was queueing behind the refresh the previous one
+		// started.
+		//
+		// So the refresh is not for the middle of a flurry. It exists to have a
+		// screen ready for the NEXT thing the human does, and while they are
+		// still moving there is no next thing yet - the screen is changing under
+		// them anyway. If another gesture has been taken since this was
+		// scheduled, this one steps aside and that gesture's own release
+		// schedules the next.
+		//
+		// It WAITS rather than giving up, because only one of these is ever in
+		// flight per device: a refresh that returned here while the human was
+		// still going would leave nobody to read the screen once they stopped.
+		waited := 0
+		for {
+			s.sleep(s.refreshDelay)
+			s.recMu.Lock()
+			seen := s.gestures[udid]
+			s.recMu.Unlock()
+			if seen == scheduledAfter {
+				break
+			}
+			scheduledAfter = seen
+			waited++
+			if waited >= maxRefreshWaits {
+				// Somebody has been driving without a pause for a long time.
+				// Step aside for good; the next gesture's release schedules a
+				// fresh one, and until then a step simply goes undescribed.
+				return
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), screenRefreshTimeout)
 		defer cancel()
 		// This is where "read again until the screen stops changing" moved to.
@@ -502,6 +541,12 @@ func (s *Service) refreshScreen(udid string) {
 		s.rememberScreen(udid, snap)
 	})
 }
+
+// maxRefreshWaits bounds how long a refresh will keep standing aside for a
+// human who has not stopped. At the default delay that is about ten seconds of
+// unbroken gesturing, after which it gives up and the next release schedules
+// another.
+const maxRefreshWaits = 20
 
 // screenRefreshTimeout bounds a background read. It is generous because the
 // read it covers is slow by nature and nobody is waiting for it; it exists so
@@ -581,6 +626,7 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	}
 
 	s.recMu.Lock()
+	s.gestures[udid]++
 	s.sweepExpiredPendingLocked(s.now())
 	s.pending[token] = pending{
 		udid:        udid,

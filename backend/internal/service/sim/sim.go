@@ -139,6 +139,13 @@ type Service struct {
 	// runRefresh starts the background screen read. Production runs it in a
 	// goroutine; see WithScreenRefreshRunner.
 	runRefresh func(func())
+	// sleep and refreshDelay are how long a background read waits for the
+	// human to stop before taking the bridge from them.
+	sleep        func(time.Duration)
+	refreshDelay time.Duration
+	// gestures counts holds taken per device, so a scheduled refresh can tell
+	// that the human has moved on and step aside.
+	gestures map[string]uint64
 }
 
 // Option customizes a Service.
@@ -152,6 +159,30 @@ func WithClock(clock func() time.Time) Option {
 // WithTokenSource overrides hold-token generation for tests.
 func WithTokenSource(tokens func() string) Option {
 	return func(s *Service) { s.tokens = tokens }
+}
+
+// DefaultScreenRefreshDelay is how long the recorder waits after a gesture
+// before reading the screen.
+//
+// Long enough that a flurry of drags produces no reads at all - the bridge
+// stays free for the human's next touch - and short enough that an ordinary
+// pause leaves a screen ready before they act again.
+const DefaultScreenRefreshDelay = 500 * time.Millisecond
+
+// WithScreenRefreshDelay overrides that wait, so a test does not have to.
+func WithScreenRefreshDelay(d time.Duration) Option {
+	return func(s *Service) {
+		s.refreshDelay = d
+		if d == 0 {
+			s.sleep = func(time.Duration) {}
+		}
+	}
+}
+
+// WithSleep overrides how the recorder waits, so a test can decide what
+// happens during that wait rather than actually waiting.
+func WithSleep(sleep func(time.Duration)) Option {
+	return func(s *Service) { s.sleep = sleep }
 }
 
 // WithScreenRefreshRunner controls how the recorder's background screen read
@@ -178,13 +209,16 @@ func WithRecorder(screen ScreenReader) Option {
 // New builds the lease service over a store.
 func New(store Store, opts ...Option) *Service {
 	s := &Service{
-		store:      store,
-		clock:      func() time.Time { return time.Now().UTC() },
-		pending:    make(map[string]pending),
-		screens:    make(map[string]screenState),
-		seen:       make(map[string]seenScreen),
-		refreshing: make(map[string]bool),
-		runRefresh: func(f func()) { go f() },
+		store:        store,
+		clock:        func() time.Time { return time.Now().UTC() },
+		pending:      make(map[string]pending),
+		screens:      make(map[string]screenState),
+		seen:         make(map[string]seenScreen),
+		refreshing:   make(map[string]bool),
+		runRefresh:   func(f func()) { go f() },
+		sleep:        time.Sleep,
+		refreshDelay: DefaultScreenRefreshDelay,
+		gestures:     make(map[string]uint64),
 	}
 	for _, opt := range opts {
 		opt(s)

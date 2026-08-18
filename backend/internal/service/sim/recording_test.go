@@ -95,7 +95,7 @@ func newRecordingService(t *testing.T, now time.Time, reader *fakeScreenReader) 
 	// goroutine - and so mutating the fake screen between gestures is a
 	// sequence rather than a data race.
 	svc, store := newServiceWithOpts(t, fixedClock(now), sim.WithRecorder(reader),
-		sim.WithScreenRefreshRunner(func(f func()) { f() }))
+		sim.WithScreenRefreshRunner(func(f func()) { f() }), sim.WithScreenRefreshDelay(0))
 	owner := newSession(t, store, now)
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -1016,7 +1016,7 @@ func TestAcquireHold_DoesNotDescribeFromAnOldScreen(t *testing.T) {
 	clock := now
 	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
 	svc, store := newServiceWithOpts(t, func() time.Time { return clock }, sim.WithRecorder(reader),
-		sim.WithScreenRefreshRunner(func(f func()) { f() }))
+		sim.WithScreenRefreshRunner(func(f func()) { f() }), sim.WithScreenRefreshDelay(0))
 	owner := newSession(t, store, now)
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -1079,7 +1079,7 @@ func TestRefreshScreen_OnlyOneReadIsOutstandingPerDevice(t *testing.T) {
 	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
 	var queued []func()
 	svc, store := newServiceWithOpts(t, fixedClock(now), sim.WithRecorder(reader),
-		sim.WithScreenRefreshRunner(func(f func()) { queued = append(queued, f) }))
+		sim.WithScreenRefreshRunner(func(f func()) { queued = append(queued, f) }), sim.WithScreenRefreshDelay(0))
 	owner := newSession(t, store, now)
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -1409,5 +1409,67 @@ func TestAcquireHold_TypingCarriesNoSelector(t *testing.T) {
 	}
 	if steps[0].Text != "hello" {
 		t.Errorf("text = %q, want it recorded", steps[0].Text)
+	}
+}
+
+// ⚠ The refresh must step aside while the human is still moving.
+//
+// The bridge serializes, so a background read is time the next touch waits
+// behind it - and on a real app the tree is big enough that one read is well
+// over a second. Measured with a human driving their own app after the drag
+// stream was fixed: all the motion arrived, but single requests took up to
+// 1105 ms, each gesture queueing behind the refresh the previous one started.
+//
+// A refresh exists to have a screen ready for the NEXT thing they do. While
+// they are still going there is no next thing yet, and the screen is changing
+// under them anyway - so it waits, and reads once they stop.
+func TestRefreshScreen_WaitsForTheHumanToStopBeforeTakingTheBridge(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	var svc *sim.Service
+	var owner domain.SessionID
+	gestures := 0
+
+	gesture := func() {
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+		if err != nil {
+			t.Fatalf("hold: %v", err)
+		}
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+		gestures++
+	}
+
+	// The human carries straight on the first time the refresh waits: exactly
+	// the flurry that used to make every gesture queue behind a read.
+	stillGoing := 0
+	var store *sqlite.Store
+	svc, store = newServiceWithOpts(t, fixedClock(now), sim.WithRecorder(reader),
+		sim.WithScreenRefreshRunner(func(f func()) { f() }),
+		sim.WithScreenRefreshDelay(0),
+		sim.WithSleep(func(time.Duration) {
+			if stillGoing++; stillGoing == 1 {
+				gesture()
+			}
+		}))
+	owner = newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	primed := reader.calls
+
+	gesture()
+
+	// One read, not one per gesture: the refresh waited out the gesture that
+	// arrived while it was waiting, and then read once.
+	if got := reader.calls - primed; got != 1 {
+		t.Errorf("the screen was read %d time(s) across a flurry, want exactly one - after it ended", got)
+	}
+	if stillGoing < 2 {
+		t.Errorf("the refresh gave up instead of waiting: it slept %d time(s)", stillGoing)
 	}
 }
