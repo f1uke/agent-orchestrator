@@ -264,27 +264,38 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // It is short on purpose - the full catalog is in the ao skill the prompt
 // already points at. What is here is the part an agent gets wrong without
 // being told: that reading the screen is free but touching it needs a claim,
-// that half of a scrolling screen's elements cannot be tapped from where they
-// are, and that the device is shared and never to be booted or erased.
+// that an element can be named rather than measured, that half of a scrolling
+// screen's elements cannot be tapped from where they are, that one booted
+// device is picked without asking and may be the human's working device rather
+// than a scratch one, that an empty accessibility tree is a diagnosis about the
+// app rather than a fact about accessibility, and that the device is shared and
+// never to be booted or erased.
+//
+// Which `ao sim` commands belong here is a reviewed decision, not an accident:
+// cli.TestSimGuidance_DecidesEverySubcommand holds that list against the real
+// command tree, so a command added later cannot silently default to "omitted".
 func SimulatorGuidance() string { return simulatorGuidance }
 
 const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 
 This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
 
-` + "```bash\n" + `ao sim list                    # what is booted
-ao sim claim                   # required before ANY touch; reading never needs it
-ao sim ax                      # the screen as elements: label, state, box, tap point
-ao sim tap 0.5 0.93            # the point ` + "`ao sim ax`" + ` printed - never one estimated from a screenshot
-ao sim drag 0.5 0.8 0.5 0.4    # hold one finger through a route (scrolling); ` + "`swipe`" + ` is the two-point case
-ao sim shot                    # a PNG to actually look at, for what the tree cannot say
+` + "```bash\n" + `ao sim list                     # what is booted
+ao sim claim                    # required before ANY touch; reading never needs it
+ao sim ax                       # the screen as elements: name, state, box, tap point
+ao sim tap --label "Continue"   # tap what ` + "`ao sim ax`" + ` NAMED; it reads the screen itself, so this replaces a read you would have run
+ao sim tap 0.5 0.93             # by point when nothing names it: the one ` + "`ao sim ax`" + ` printed, never one estimated from a screenshot
+ao sim drag 0.5 0.8 0.5 0.4     # hold one finger through a route (scrolling); ` + "`swipe`" + ` is the two-point case
+ao sim shot                     # a PNG to actually look at, for what the tree cannot say
+ao sim log                      # what the app itself printed, when the screen does not explain it
 ao sim release` + "\n```" + `
 
 - **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and AO **never boots, shuts down, reboots or erases** a simulator - if none is booted, say so and ask.
+- **Not every booted device is yours to drive.** A working device holds the human's real app and state; a scratch device exists to be thrown away. ` + "`ao sim`" + ` - and Maestro without ` + "`--device`" + ` - takes the only booted device without asking, so anything that installs, launches or mutates belongs on a scratch device, named with ` + "`--udid`" + ` rather than left to that default pick; reading is safe anywhere. When ` + "`ao sim list`" + ` does not make clear which is which, ask rather than guess.
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
-- **Read the tree, not the picture.** ` + "`ao sim ax`" + ` says what is there, whether it is enabled, and exactly where to touch it; the screenshot is for what the tree cannot express.
+- **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 
-Everything else - the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
+Everything else - naming an element by its identifier, typing, buttons, recording what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
 
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of
