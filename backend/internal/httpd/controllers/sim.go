@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +15,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simflow"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
 
 // AcquireSimLeaseInput is the body of POST .../sim-leases.
@@ -111,8 +114,30 @@ type SimRecordingResponse struct {
 // SimRecordingWithStepsResponse is the { recording, steps } body returned by
 // reading or stopping a recording.
 type SimRecordingWithStepsResponse struct {
-	Recording domain.SimRecording       `json:"recording"`
+	Recording domain.SimRecording `json:"recording"`
+	// StepCount is how many steps the recording has captured. It is stated
+	// separately from Steps because the surface that watches a recording most
+	// closely - the Device tab's live counter - needs only this, and asking
+	// for the whole step array once a second to count it would drag every
+	// gesture's selector back over the wire to be thrown away. It always
+	// equals len(Steps) when the steps are included.
+	StepCount int                       `json:"stepCount"`
 	Steps     []domain.SimRecordingStep `json:"steps"`
+	// Flow is the file this recording became, present only on the response
+	// that stopped it.
+	Flow *SimFlowView `json:"flow,omitempty"`
+}
+
+// ReadSimRecordingQuery is the query string of GET .../sim-recordings/{udid}.
+type ReadSimRecordingQuery struct {
+	Steps string `query:"steps,omitempty" description:"all (default) returns every captured step; none returns stepCount alone, for a caller that only needs to know how many there are."`
+}
+
+// StopSimRecordingQuery is the query string of DELETE .../sim-recordings/{udid}:
+// what to do with the flow the daemon writes as the recording closes.
+type StopSimRecordingQuery struct {
+	Out   string `query:"out,omitempty" description:"Absolute path to write the flow to, instead of this session's own flows directory."`
+	Entry string `query:"entry,omitempty" description:"Path to a shared entry-point flow, emitted as a runFlow step before the recorded steps."`
 }
 
 // simRecordingService is the recording surface the recording routes depend
@@ -133,8 +158,25 @@ type simRecordingService interface {
 // A nil Svc returns 501, mirroring the other optional-service controllers; so
 // does a Svc that does not implement simRecordingService (only ever true in a
 // test double, since the concrete service implements both).
+//
+// DataDir and Screen are what stopping a recording needs in order to hand back
+// a file rather than an array of steps. Building the flow moved here from the
+// CLI deliberately: the Device tab has no Go in it and could not run the
+// emitter, and a second emitter in the renderer would be a second answer to
+// "how many of these steps need review" - the one number this whole surface
+// exists to report. One emitter, one writer, every caller reading the same
+// result.
 type SimController struct {
 	Svc simsvc.Manager
+	// DataDir is where a session's own flows directory lives. Empty means
+	// stopping still stops - the steps are still returned - but no file is
+	// written, because inventing a location for somebody's recording is worse
+	// than handing back what was captured and saying nothing about a path.
+	DataDir string
+	// Screen names the device for the flow's provenance header. Nil, or a
+	// machine that cannot list simulators, leaves the udid in its place rather
+	// than failing a stop over a comment.
+	Screen SimScreenProvider
 }
 
 // Register mounts the sim-lease routes on the supplied router. Listing is
@@ -314,7 +356,15 @@ func (c *SimController) getRecording(w http.ResponseWriter, r *http.Request) {
 	if steps == nil {
 		steps = []domain.SimRecordingStep{}
 	}
-	envelope.WriteJSON(w, http.StatusOK, SimRecordingWithStepsResponse{Recording: recording, Steps: steps})
+	body := SimRecordingWithStepsResponse{Recording: recording, StepCount: len(steps), Steps: steps}
+	// `steps=none` is for the caller watching a recording rather than reading
+	// it: the Device tab's counter asks once a second while a human drags, and
+	// every one of those answers would otherwise carry every selector captured
+	// so far only to be counted and dropped.
+	if r.URL.Query().Get("steps") == "none" {
+		body.Steps = []domain.SimRecordingStep{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, body)
 }
 
 func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +372,8 @@ func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	recording, steps, err := rec.StopRecording(r.Context(), sessionID(r), chi.URLParam(r, "udid"))
+	udid := chi.URLParam(r, "udid")
+	recording, steps, err := rec.StopRecording(r.Context(), sessionID(r), udid)
 	if err != nil {
 		writeSimRecordingError(w, r, err)
 		return
@@ -330,7 +381,85 @@ func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
 	if steps == nil {
 		steps = []domain.SimRecordingStep{}
 	}
-	envelope.WriteJSON(w, http.StatusOK, SimRecordingWithStepsResponse{Recording: recording, Steps: steps})
+
+	body := SimRecordingWithStepsResponse{Recording: recording, StepCount: len(steps), Steps: steps}
+	flow, err := c.writeFlow(r, recording, steps)
+	if err != nil {
+		// The recording has already stopped on the daemon side. That side
+		// effect happened and cannot be undone here, so the failure has to say
+		// so rather than read as "nothing happened" and invite a retry that
+		// would find no open recording.
+		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SIM_FLOW_WRITE_FAILED",
+			"the recording stopped, but its flow could not be written: "+err.Error(),
+			map[string]any{"udid": recording.UDID, "stepCount": len(steps)})
+		return
+	}
+	body.Flow = flow
+	envelope.WriteJSON(w, http.StatusOK, body)
+}
+
+// writeFlow turns the recording that just stopped into a file, and reports
+// where it landed.
+//
+// A nil flow with a nil error is the honest answer for a daemon with no data
+// directory: the steps are in the response, and nothing pretends a file was
+// written.
+func (c *SimController) writeFlow(r *http.Request, recording domain.SimRecording, steps []domain.SimRecordingStep) (*SimFlowView, error) {
+	if c.DataDir == "" {
+		return nil, nil
+	}
+	recordedAt := recording.UpdatedAt
+	if recording.StoppedAt != nil {
+		recordedAt = *recording.StoppedAt
+	}
+	device, runtime := c.describeDevice(r, recording.UDID)
+	body, err := simflow.Emit(simrecord.Steps(steps), simflow.EmitOptions{
+		Device:     device,
+		Runtime:    runtime,
+		RecordedAt: recordedAt.UTC().Format(time.RFC3339),
+		Entry:      strings.TrimSpace(r.URL.Query().Get("entry")),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// `out` is how `ao sim record stop --out` still writes wherever it was
+	// told to. It is resolved by the CLI before it gets here, so this side
+	// never has to guess which working directory a relative path meant.
+	if out := strings.TrimSpace(r.URL.Query().Get("out")); out != "" {
+		written, err := simrecord.WriteTo(out, body)
+		if err != nil {
+			return nil, err
+		}
+		view := simFlowView(written)
+		return &view, nil
+	}
+
+	written, err := simrecord.Write(c.DataDir, string(sessionID(r)), recording.Name, recordedAt, body)
+	if err != nil {
+		return nil, err
+	}
+	view := simFlowView(written)
+	return &view, nil
+}
+
+// describeDevice names the simulator for the flow's provenance comment. A
+// machine that cannot answer leaves the udid in place: a header comment is
+// never worth failing a stop over, and the udid still identifies the device.
+func (c *SimController) describeDevice(r *http.Request, udid string) (name, runtime string) {
+	if c.Screen == nil {
+		return udid, ""
+	}
+	listing, err := c.Screen.Devices(r.Context())
+	if err != nil {
+		return udid, ""
+	}
+	for _, d := range listing.Devices {
+		if strings.EqualFold(d.UDID, udid) {
+			return d.Name, d.Runtime
+		}
+	}
+	return udid, ""
 }
 
 // writeSimRecordingError maps recording refusals the same way writeSimError

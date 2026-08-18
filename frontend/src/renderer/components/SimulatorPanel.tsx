@@ -16,6 +16,7 @@ import {
 } from "./ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
+import { SimRecordControls, StopSummaryNote, type StopSummary } from "./SimRecordControls";
 
 /**
  * The Device tab: a booted iOS Simulator's screen, live, beside the session
@@ -140,6 +141,10 @@ export function SimulatorPanel({
 	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
 	const [driving, setDriving] = useState(() => recall(sessionId)?.driving ?? false);
 	const [problem, setProblem] = useState("");
+	// What the last stop produced. It hangs over the screen rather than in the
+	// toolbar because it is a sentence with a path in it, and it is dismissed
+	// by hand rather than on a timer: the path is the thing somebody came for.
+	const [stopped, setStopped] = useState<StopSummary | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const queryClient = useQueryClient();
 
@@ -437,6 +442,8 @@ export function SimulatorPanel({
 							{problem}
 						</p>
 					) : null}
+
+					{stopped ? <StopSummaryNote onDismiss={() => setStopped(null)} summary={stopped} /> : null}
 				</div>
 
 				<div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
@@ -468,6 +475,23 @@ export function SimulatorPanel({
 							sessionId={sessionId}
 						/>
 					</div>
+
+					{/* Recording sits WITH the device controls, in the row that is
+					    already here and already a fixed height, so it costs the
+					    screen nothing. Every number in it has a fixed-width slot -
+					    see SimRecordControls for why that is load-bearing rather
+					    than fussy - so the row cannot change shape as a count
+					    climbs, and the list it opens is a portal that cannot touch
+					    the screen at all. */}
+					<SimRecordControls
+						deviceChosen={Boolean(device)}
+						heldByThisSession={heldByThisSession}
+						onProblem={setProblem}
+						onStopped={setStopped}
+						sessionId={sessionId}
+						udid={chosen}
+						watching={watching}
+					/>
 
 					{/* Taking the device is what a person does before they can touch the
 					    screen at all, so it is a button and not an item inside a menu -

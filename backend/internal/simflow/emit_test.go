@@ -70,9 +70,16 @@ func TestEmit_EntryOptionEmitsRunFlowAsTheFirstStep(t *testing.T) {
 	if headerEnd < 0 {
 		t.Fatalf("missing the provenance comment, got:\n%s", got)
 	}
-	afterHeader := got[headerEnd:]
-	nl := strings.Index(afterHeader, "\n")
-	firstStepLine := strings.TrimSpace(afterHeader[nl+1:])
+	// The first line that is not a comment: the header carries the flow's own
+	// provenance and counts above this, and what is being pinned is that no
+	// STEP precedes runFlow.
+	firstStepLine := ""
+	for _, line := range strings.Split(got[headerEnd:], "\n")[1:] {
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			firstStepLine = trimmed
+			break
+		}
+	}
 	if firstStepLine != `- runFlow: "../flows/login.yaml"` {
 		t.Fatalf("first step after the header must be runFlow, got %q from:\n%s", firstStepLine, got)
 	}

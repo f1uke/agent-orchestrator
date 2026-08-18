@@ -119,6 +119,9 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 
 	b.WriteString("appId: ${APP_ID}\n---\n")
 	fmt.Fprintf(&b, "# recorded by ao sim at %s, device %s (%s)\n", opts.RecordedAt, opts.Device, opts.Runtime)
+	// Beside the provenance, not below the entry point: both lines say what
+	// this file IS, and a reader listing flows reads this one back.
+	writeCounts(&b, steps)
 	if opts.Entry != "" {
 		// Quoted like every other scalar this package writes: a path holding a
 		// colon or a '#' is ordinary on disk and unparseable as bare YAML.
@@ -155,12 +158,7 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 // from, so the header can never claim a flow is clean while a step below it
 // carries a marker.
 func writeReviewHeader(b *strings.Builder, steps []Step) {
-	guessed := 0
-	for _, step := range steps {
-		if actsOnAnElement(step.Kind) && step.Choice.NeedsReview() {
-			guessed++
-		}
-	}
+	guessed := ReviewCount(steps)
 	if guessed == 0 {
 		return
 	}

@@ -79,6 +79,7 @@ type API struct {
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
 	sim           *controllers.SimController
+	simFlows      *controllers.SimFlowsController
 	simScreen     *controllers.SimScreenController
 	notifications *controllers.NotificationsController
 	activity      *controllers.ActivityController
@@ -109,7 +110,8 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
-		sim:           &controllers.SimController{Svc: deps.Sim},
+		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen)},
+		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
@@ -142,6 +144,7 @@ func (a *API) Register(root chi.Router) {
 			a.reviews.Register(r)
 			a.smoke.Register(r)
 			a.sim.Register(r)
+			a.simFlows.Register(r)
 			a.simScreen.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)

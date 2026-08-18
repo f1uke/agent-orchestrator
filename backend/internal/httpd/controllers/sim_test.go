@@ -90,8 +90,17 @@ func (f *fakeSimService) List(context.Context) ([]domain.SimLease, error) { retu
 
 func newSimTestServer(t *testing.T, svc simsvc.Manager) *httptest.Server {
 	t.Helper()
+	return newSimTestServerIn(t, svc, "")
+}
+
+// newSimTestServerIn is the same server with a data directory, which is what
+// turns stopping a recording into a written flow and gives the sim-flows
+// routes somewhere to read.
+func newSimTestServerIn(t *testing.T, svc simsvc.Manager, dataDir string) *httptest.Server {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{Sim: svc}, httpd.ControlDeps{}))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(
+		config.Config{DataDir: dataDir}, log, nil, httpd.APIDeps{Sim: svc}, httpd.ControlDeps{}))
 	t.Cleanup(srv.Close)
 	return srv
 }

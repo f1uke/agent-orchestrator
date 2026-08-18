@@ -3,10 +3,13 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
-	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
 
 // --- ao sim record start ----------------------------------------------------
@@ -138,7 +141,7 @@ func TestSimRecordStatus_OpenRecordingShowsStepCount(t *testing.T) {
 	cfg := setConfigEnv(t)
 	daemon := newSimDaemon(t, cfg)
 	daemon.recordGetBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
-		`"startedAt":"2026-08-13T07:41:02Z","updatedAt":"2026-08-13T07:41:10Z"},` +
+		`"startedAt":"2026-08-13T07:41:02Z","updatedAt":"2026-08-13T07:41:10Z"},"stepCount":2,` +
 		`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"Continue","selectorRung":1,` +
 		`"ambiguity":1,"x":0.5,"y":0.9,"toX":0.5,"toY":0.9},` +
 		`{"seq":2,"at":"2026-08-13T07:41:06Z","kind":"tap","selector":"Next","selectorRung":1,"ambiguity":1,` +
@@ -161,7 +164,7 @@ func TestSimRecordStatus_JSONCarriesStepCount(t *testing.T) {
 	daemon := newSimDaemon(t, cfg)
 	daemon.recordGetBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"",` +
 		`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
-		`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap"}]}`
+		`"stepCount":1,"steps":[]}`
 
 	out, _, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "status", "--json")
 	if err != nil {
@@ -181,18 +184,22 @@ func TestSimRecordStatus_JSONCarriesStepCount(t *testing.T) {
 
 // --- ao sim record stop ------------------------------------------------------
 
-// stopBodyWithOneTap is a stopped recording with a single resolved tap step,
-// enough to exercise the domain-step -> simflow.Step -> Emit path end to end.
-const stopBodyWithOneTap = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
+// stopBody is what the daemon answers a stop with now that IT builds the
+// flow: the recording, the step count, and the file that was written. The CLI
+// does not emit anything - see stopSimRecording for why that moved - so what
+// these tests pin is that it asks correctly and reports faithfully.
+const stopBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
 	`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
-	`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"Continue","selectorRung":1,` +
-	`"ambiguity":1,"x":0.5,"y":0.934,"toX":0.5,"toY":0.934}]}`
+	`"stepCount":7,"steps":[],` +
+	`"flow":{"name":"login-to-portfolio","fileName":"login-to-portfolio-20260813-074502.000Z.yaml",` +
+	`"path":"/data/sim/mer-9/flows/login-to-portfolio-20260813-074502.000Z.yaml",` +
+	`"steps":7,"review":2,"countsKnown":true,"bytes":812}}`
 
-func TestSimRecordStop_WritesTheFlowAndPrintsItsPath(t *testing.T) {
+func TestSimRecordStop_PrintsThePathTheDaemonWrote(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
 	daemon := newSimDaemon(t, cfg)
-	daemon.recordStopBody = stopBodyWithOneTap
+	daemon.recordStopBody = stopBody
 
 	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
 	if err != nil {
@@ -201,183 +208,115 @@ func TestSimRecordStop_WritesTheFlowAndPrintsItsPath(t *testing.T) {
 	if want := "DELETE /api/v1/sessions/mer-9/sim-recordings/" + simUDIDProMax; !simCalled(daemon, want) {
 		t.Fatalf("calls = %v, want %s", daemon.calls, want)
 	}
+	// The path gets a line of its own, the way `ao sim shot` prints one, so it
+	// can be read straight off the terminal and handed to a file read.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	path := lines[len(lines)-1]
-	if !strings.HasPrefix(path, filepath.Join(cfg.dataDir, "sim", "mer-9")) {
-		t.Fatalf("path %q not under the session artifact directory %q", path, filepath.Join(cfg.dataDir, "sim", "mer-9"))
+	if got := lines[len(lines)-1]; got != "/data/sim/mer-9/flows/login-to-portfolio-20260813-074502.000Z.yaml" {
+		t.Fatalf("last line = %q, want the path the daemon reported", got)
 	}
-	if !strings.HasSuffix(path, ".yaml") {
-		t.Fatalf("path %q should end in .yaml", path)
+	if !strings.Contains(out, "7 step(s) captured") {
+		t.Fatalf("output must state the step count:\n%s", out)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("the printed path must exist: %v", err)
-	}
-	content := string(data)
-	if !strings.Contains(content, "appId: ${APP_ID}") {
-		t.Fatalf("flow missing the literal appId placeholder:\n%s", content)
-	}
-	if !strings.Contains(content, `tapOn: "Continue"`) {
-		t.Fatalf("flow missing the recorded tap:\n%s", content)
-	}
-	if strings.Contains(content, "launchApp") {
-		t.Fatalf("flow must never fabricate launchApp:\n%s", content)
+	// The review count is the number a human has to act on, and it comes from
+	// the flow the daemon wrote - never counted a second time here.
+	if !strings.Contains(out, "2 needing review") {
+		t.Fatalf("output must state how many steps need review:\n%s", out)
 	}
 }
 
-func TestSimRecordStop_WithEntryPutsRunFlowFirst(t *testing.T) {
+// A clean flow says nothing about review, for the same reason its own banner
+// does not: a line that always reads "0 needing review" is one nobody reads on
+// the day it says 3.
+func TestSimRecordStop_SaysNothingAboutReviewWhenThereIsNone(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
 	daemon := newSimDaemon(t, cfg)
-	daemon.recordStopBody = stopBodyWithOneTap
+	daemon.recordStopBody = strings.Replace(stopBody, `"review":2`, `"review":0`, 1)
 
-	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG),
-		"sim", "record", "stop", "--entry", "../flows/sign-in.yaml")
+	out, _, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
 	if err != nil {
-		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	path := lines[len(lines)-1]
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read flow: %v", err)
-	}
-	content := string(data)
-	runFlowIdx := strings.Index(content, `- runFlow: "../flows/sign-in.yaml"`)
-	tapIdx := strings.Index(content, "tapOn:")
-	if runFlowIdx < 0 {
-		t.Fatalf("flow missing the entry point:\n%s", content)
-	}
-	if tapIdx < 0 || runFlowIdx > tapIdx {
-		t.Fatalf("runFlow must come before the recorded steps:\n%s", content)
+	if strings.Contains(out, "review") {
+		t.Fatalf("a clean flow must not mention review:\n%s", out)
 	}
 }
 
-func TestSimRecordStop_OutOverridesTheDefaultPath(t *testing.T) {
+func TestSimRecordStop_JSONCarriesThePathAndBothCounts(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
 	daemon := newSimDaemon(t, cfg)
-	daemon.recordStopBody = stopBodyWithOneTap
-	dest := filepath.Join(t.TempDir(), "custom.yaml")
+	daemon.recordStopBody = stopBody
 
-	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG),
-		"sim", "record", "stop", "--out", dest)
+	out, _, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop", "--json")
 	if err != nil {
-		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, dest) {
-		t.Fatalf("output must print the overridden path:\n%s", out)
+	var res simRecordStopResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(dest); err != nil {
-		t.Fatalf("--out path must exist: %v", err)
+	if res.StepCount != 7 || res.ReviewCount != 2 {
+		t.Fatalf("counts = %d steps / %d review, want 7 / 2", res.StepCount, res.ReviewCount)
+	}
+	if !filepath.IsAbs(res.Path) {
+		t.Fatalf("path = %q, want an absolute path", res.Path)
 	}
 }
 
-// A step whose selector matched more than one element on screen
-// (selectorRung: RungTextIndex) must re-emit at the SAME index the human
-// actually tapped - here, the second of three "Continue" buttons - not index
-// 0 (the first). Before 0039_sim_recording_step_index.sql, SelectorIndex did
-// not exist anywhere in the wire shape and this always came back as 0: a flow
-// whose selector text read correctly while silently taking the FIRST matching
-// element rather than the one that was recorded, which is precisely the
-// failure this whole selector-ladder design exists to prevent.
-const stopBodyWithDuplicateLabelTap = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
-	`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
-	`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"Continue","selectorRung":2,` +
-	`"selectorIndex":2,"ambiguity":3,"x":0.5,"y":0.7,"toX":0.5,"toY":0.7}]}`
-
-func TestSimRecordStop_DuplicateLabelTapKeepsTheRecordedIndex(t *testing.T) {
+// --entry is passed through for the daemon to emit; --out is resolved HERE,
+// because this is the side that knows which working directory a relative path
+// meant. Sending it unresolved would land the file wherever the daemon happens
+// to be running.
+func TestSimRecordStop_ForwardsEntryAndAnAbsoluteOut(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
 	daemon := newSimDaemon(t, cfg)
-	daemon.recordStopBody = stopBodyWithDuplicateLabelTap
+	daemon.recordStopBody = stopBody
 
-	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if _, _, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG),
+		"sim", "record", "stop", "--entry", "../flows/sign-in.yaml", "--out", "custom.yaml"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if want := "DELETE /api/v1/sessions/mer-9/sim-recordings/" + simUDIDProMax; !simCalled(daemon, want) {
+		t.Fatalf("calls = %v, want %s", daemon.calls, want)
+	}
+	query, err := url.ParseQuery(daemon.query)
 	if err != nil {
-		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+		t.Fatalf("parse query %q: %v", daemon.query, err)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	path := lines[len(lines)-1]
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read flow: %v", err)
+	if got := query.Get("entry"); got != "../flows/sign-in.yaml" {
+		t.Errorf("entry = %q, want it passed through untouched", got)
 	}
-	content := string(data)
-	if !strings.Contains(content, "index: 2") {
-		t.Fatalf("flow must tap the SECOND %q (the one actually recorded), not silently default to index 0:\n%s",
-			"Continue", content)
+	out := query.Get("out")
+	if !filepath.IsAbs(out) {
+		t.Errorf("out = %q, want an absolute path resolved on this side", out)
 	}
-	if strings.Contains(content, "index: 0") {
-		t.Fatalf("flow fell back to index 0 - the wrong element - instead of the recorded index:\n%s", content)
+	if filepath.Base(out) != "custom.yaml" {
+		t.Errorf("out = %q, want it to still name custom.yaml", out)
 	}
 }
 
-// A recorded selector is STORED escaped (Maestro matches text as a regex), so
-// re-emitting one has to keep it escaped where it is matched on and unescape
-// it where a human reads it. scrollUntilVisible is the second kind: render.go
-// says the scroll target is the plain label, and feeding it the stored text
-// emitted `element: "See all \\(12\\)"` - a search for backslashes that are
-// not in the label. The tapOn-shaped assertions elsewhere never saw this
-// because no test used a label with metacharacters in it.
-const stopBodyWithOffScreenEscapedTap = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
-	`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
-	`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"See all \\(12\\)","selectorRung":1,` +
-	`"ambiguity":1,"offScreen":true,"x":0.5,"y":0.7}]}`
-
-func TestSimRecordStop_OffScreenEscapedSelectorScrollsToThePlainLabel(t *testing.T) {
+// A daemon that stopped the recording but wrote no file must not be reported
+// as a success with an empty path. The gestures ARE gone from the daemon's
+// side at that point, and the message has to say so rather than read as
+// "nothing happened".
+func TestSimRecordStop_NoFlowInTheResponseIsAnError(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
 	daemon := newSimDaemon(t, cfg)
-	daemon.recordStopBody = stopBodyWithOffScreenEscapedTap
+	daemon.recordStopBody = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9",` +
+		`"startedAt":"2026-08-13T07:41:02Z","updatedAt":"2026-08-13T07:45:02Z"},"stepCount":3,"steps":[]}`
 
-	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
-	if err != nil {
-		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	_, _, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
+	if err == nil {
+		t.Fatal("a stop that wrote no flow must not report success")
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	data, err := os.ReadFile(lines[len(lines)-1])
-	if err != nil {
-		t.Fatalf("read flow: %v", err)
-	}
-	content := string(data)
-	if !strings.Contains(content, `    element: "See all (12)"`) {
-		t.Fatalf("scrollUntilVisible must search for the label a human reads:\n%s", content)
-	}
-	if strings.Contains(content, `element: "See all \\(12\\)"`) {
-		t.Fatalf("the escaped pattern reached the scroll target:\n%s", content)
-	}
-}
-
-// The on-screen half: the selector itself stays escaped, because that is what
-// Maestro matches on - and the "# escaped" comment comes back too. Escaped has
-// no column of its own; it is recovered by unescaping the stored text, which
-// is what makes it safe not to persist.
-const stopBodyWithEscapedTap = `{"recording":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9","name":"flow",` +
-	`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},` +
-	`"steps":[{"seq":1,"at":"2026-08-13T07:41:05Z","kind":"tap","selector":"See all \\(12\\)","selectorRung":1,` +
-	`"ambiguity":1,"x":0.5,"y":0.7}]}`
-
-func TestSimRecordStop_EscapedSelectorKeepsItsEscapingAndExplainsIt(t *testing.T) {
-	t.Setenv("AO_SESSION_ID", "mer-9")
-	cfg := setConfigEnv(t)
-	daemon := newSimDaemon(t, cfg)
-	daemon.recordStopBody = stopBodyWithEscapedTap
-
-	out, errOut, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "record", "stop")
-	if err != nil {
-		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
-	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	data, err := os.ReadFile(lines[len(lines)-1])
-	if err != nil {
-		t.Fatalf("read flow: %v", err)
-	}
-	content := string(data)
-	if !strings.Contains(content, `- tapOn: "See all \\(12\\)"`) {
-		t.Fatalf("the matcher must keep the escaping it was recorded with:\n%s", content)
-	}
-	if !strings.Contains(content, "# escaped: the label contains regex characters") {
-		t.Fatalf("an escaped selector must carry its explanation:\n%s", content)
+	if !strings.Contains(err.Error(), "3 step(s) captured") {
+		t.Fatalf("the error must say the recording stopped and how much it held: %v", err)
 	}
 }
 
@@ -495,7 +434,7 @@ func TestSimType_SendsTheTypedTextInTheHoldIntent(t *testing.T) {
 }
 
 // A by-name tap used to send an empty intent (Kind ""), which poisoned an
-// entire recording: `simRecordingStepToFlow` -> `simflow.Emit` refuses any
+// entire recording: the step mapping -> `simflow.Emit` refuses any
 // step whose Kind it does not recognize, so `record stop` failed outright the
 // first time a session tapped by --label/--id while recording - tapping by
 // name being the idiomatic way to drive, not an edge case. This pins that the
@@ -528,11 +467,12 @@ func TestSimTapByName_SendsAGestureIntentOnAcquire(t *testing.T) {
 		t.Fatalf("hold intent = %+v, want no coordinates - the label is what was sent", hold)
 	}
 
-	// And the step that shape produces is one `simRecordingStepToFlow` and
+	// And the step that shape produces is one the daemon's own mapping and
 	// `Emit` can actually translate - the whole point of sending a real intent.
-	step := simRecordingStepClient{Kind: hold.Kind, Selector: "Continue", SelectorRung: 1}
-	flowStep := simRecordingStepToFlow(step)
-	if flowStep.Kind == "" {
+	// The mapping lives in internal/simrecord now that the daemon builds the
+	// flow; the assertion follows it rather than being dropped.
+	flowSteps := simrecord.Steps([]domain.SimRecordingStep{{Kind: hold.Kind, Selector: "Continue", SelectorRung: 1}})
+	if len(flowSteps) != 1 || flowSteps[0].Kind == "" {
 		t.Fatal("a by-name tap must not produce a step Emit refuses to translate")
 	}
 }

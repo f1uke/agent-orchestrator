@@ -15,6 +15,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
 
 // `ao sim` gives a session a cheap, strictly read-only way to see an iOS
@@ -324,6 +325,13 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output string
 // under the AO data dir. Per-session keeps concurrent workers from clobbering
 // each other, and living outside every repository means a stray screenshot can
 // never be committed by accident.
+//
+// Screenshots go in their own subdirectory, apart from recorded flows. They
+// used to share one, and a session with a morning of screenshots in it buried
+// every flow it had recorded - which matters because the two are used
+// differently: a screenshot is looked at once, a flow is found again later and
+// handed to somebody. Screenshots already on disk stay exactly where they are;
+// nothing reads them back by path.
 func simSessionShotPath(capturedAt time.Time, udid string) (string, error) {
 	sessionID := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
 	if sessionID == "" {
@@ -334,7 +342,7 @@ func simSessionShotPath(capturedAt time.Time, udid string) (string, error) {
 		return "", err
 	}
 	name := capturedAt.Format(simShotStampLayout) + "Z-" + udid + ".png"
-	return filepath.Join(cfg.DataDir, "sim", sessionID, name), nil
+	return filepath.Join(simrecord.ShotsDir(cfg.DataDir, sessionID), name), nil
 }
 
 func writeSimList(out io.Writer, result simListResult, now time.Time) error {

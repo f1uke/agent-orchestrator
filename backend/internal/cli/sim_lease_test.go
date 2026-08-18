@@ -34,6 +34,7 @@ type simDaemon struct {
 	// with no status falls back to a minimal canned success response.
 	recordStartStatus int
 	recordStartBody   string
+	query             string
 	recordGetStatus   int
 	recordGetBody     string
 	recordStopStatus  int
@@ -72,6 +73,10 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 		body, _ := io.ReadAll(r.Body)
 		d.mu.Lock()
 		d.calls = append(d.calls, r.Method+" "+r.URL.Path)
+		// The query separately from the path, because simCalled matches on the
+		// path and every caller of it would have to learn about query strings
+		// otherwise.
+		d.query = r.URL.RawQuery
 		d.body = string(body)
 		d.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")

@@ -141,3 +141,54 @@ describe("DragStream", () => {
 		expect(drag.isDragging).toBe(true);
 	});
 });
+
+// ⚠ Found by recording a real drag in the Device tab and reading the flow it
+// produced: every swipe came out ending at 50%,50% whatever the human did.
+//
+// A release ends a drag TWICE - `pointerup` with the real position, then
+// `lostpointercapture`, which the pane must also treat as an end because a
+// capture the OS takes back mid-drag would leave a finger down forever. The
+// second one carries only a fallback position, and it used to win, because
+// `active` stayed true until the queued end had actually been sent.
+describe("a drag ended twice keeps the position it really ended at", () => {
+	it("ignores a second end, whatever it claims", async () => {
+		const t = controllable();
+		const drag = new DragStream(t.send);
+
+		drag.begin({ x: 0.5, y: 0.8 });
+		await t.settle();
+		// ⚠ The move is left IN FLIGHT on purpose. That is the real shape of a
+		// release: a request is always outstanding when the finger comes up, so
+		// the end sits queued instead of being dispatched at once - which is the
+		// only window in which a second end can overwrite the first. Settling
+		// here made this test pass against the bug it exists to catch.
+		drag.move({ x: 0.5, y: 0.5 });
+		// The real release, then the fallback the browser's own event triggers.
+		drag.end({ x: 0.5, y: 0.35 });
+		drag.end({ x: 0.5, y: 0.5 });
+		await t.settle(3);
+
+		const ended = t.sent.filter((s) => s.step === "drag-end");
+		expect(ended).toHaveLength(1);
+		expect(ended[0].point).toEqual({ x: 0.5, y: 0.35 });
+	});
+
+	it("still lets a fresh drag start afterwards", async () => {
+		const t = controllable();
+		const drag = new DragStream(t.send);
+
+		drag.begin({ x: 0.5, y: 0.8 });
+		drag.end({ x: 0.5, y: 0.4 });
+		drag.end({ x: 0.5, y: 0.5 });
+		await t.settle(3);
+
+		drag.begin({ x: 0.2, y: 0.2 });
+		drag.end({ x: 0.2, y: 0.6 });
+		await t.settle(3);
+
+		expect(t.sent.filter((s) => s.step === "drag-end").map((s) => s.point)).toEqual([
+			{ x: 0.5, y: 0.4 },
+			{ x: 0.2, y: 0.6 },
+		]);
+	});
+});

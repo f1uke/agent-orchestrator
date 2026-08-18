@@ -45,6 +45,8 @@ export type Sandbox = {
 	/** The sandbox daemon, for asserting what actually reached the device. */
 	api: string;
 	udid: string;
+	/** The sandbox daemon's data directory, which is where recorded flows land. */
+	dataDir: string;
 	dispose: () => Promise<void>;
 };
 
@@ -55,24 +57,60 @@ export type Sandbox = {
 export function skipReason(): string | null {
 	if (process.platform !== "darwin") return "an iOS Simulator needs a mac";
 	if (!existsSync(RENDERER_BUILD)) return `no renderer build at ${RENDERER_BUILD} - run \`npm run package\` first`;
-	if (bootedUDID() === null) return "no simulator is booted (AO never boots one)";
+	const target = targetUDID();
+	if (target.udid === null) return target.reason;
 	const busy = liveLeaseHolder();
 	if (busy) return `the live AO holds this simulator (@${busy}) - two daemons cannot arbitrate one device`;
 	return null;
 }
 
-/** bootedUDID asks simctl directly: the same read-only listing `ao sim list` does. */
-function bootedUDID(): string | null {
+/** bootedUDIDs asks simctl directly: the same read-only listing `ao sim list` does. */
+function bootedUDIDs(): string[] {
 	try {
 		const raw = execFileSync("xcrun", ["simctl", "list", "devices", "--json"], { encoding: "utf8" });
 		const parsed = JSON.parse(raw) as { devices: Record<string, { udid: string; state: string }[]> };
+		const booted: string[] = [];
 		for (const devices of Object.values(parsed.devices)) {
-			for (const device of devices) if (device.state === "Booted") return device.udid;
+			for (const device of devices) if (device.state === "Booted") booted.push(device.udid);
 		}
+		return booted;
 	} catch {
-		return null;
+		return [];
 	}
-	return null;
+}
+
+/**
+ * Which simulator this harness may drive.
+ *
+ * ⚠ It never picks one when several are booted. This harness performs real
+ * drags on a real device, and on a machine where a person also has their own
+ * work running in a second simulator, "whichever simctl listed first" is a
+ * coin flip between a scratch device and somebody's actual app. That is the
+ * same refusal `ao sim shot` and the daemon already make when several are
+ * booted, for the same reason - the device is never guessed - and it is a
+ * stronger reason here, because this one touches it.
+ *
+ * Pin the device with AO_DEVICE_TEST_UDID to run against a chosen one.
+ */
+function targetUDID(): { udid: string | null; reason: string | null } {
+	const pinned = (process.env.AO_DEVICE_TEST_UDID ?? "").trim();
+	const booted = bootedUDIDs();
+	if (pinned) {
+		if (!booted.some((udid) => udid.toLowerCase() === pinned.toLowerCase())) {
+			return { udid: null, reason: `AO_DEVICE_TEST_UDID names ${pinned}, which is not booted` };
+		}
+		return { udid: booted.find((udid) => udid.toLowerCase() === pinned.toLowerCase()) ?? null, reason: null };
+	}
+	if (booted.length === 0) return { udid: null, reason: "no simulator is booted (AO never boots one)" };
+	if (booted.length > 1) {
+		return {
+			udid: null,
+			reason:
+				`${booted.length} simulators are booted and this harness drives the device it is given - ` +
+				"set AO_DEVICE_TEST_UDID to the one it may touch",
+		};
+	}
+	return { udid: booted[0], reason: null };
 }
 
 /**
@@ -183,7 +221,7 @@ export async function startSandbox(): Promise<Sandbox> {
 	await page.reload();
 	await page.waitForLoadState("domcontentloaded");
 
-	const udid = bootedUDID();
+	const udid = targetUDID().udid;
 	if (!udid) throw new Error("the simulator stopped being booted mid-setup");
 
 	return {
@@ -193,6 +231,7 @@ export async function startSandbox(): Promise<Sandbox> {
 		sessionId,
 		api,
 		udid,
+		dataDir: env.AO_DATA_DIR,
 		dispose: async () => {
 			await app.close().catch(() => {});
 			rmSync(root, { recursive: true, force: true });
@@ -228,6 +267,16 @@ export async function openDevicePane(sandbox: Sandbox): Promise<void> {
 		return device.isVisible();
 	}, "the session never opened with a Device tab - is the project's iOS config set?");
 	await device.click();
+
+	// With more than one simulator booted the pane refuses to choose - the same
+	// refusal `ao sim shot` makes - so the harness makes the choice it was given
+	// explicitly, rather than the pane guessing on its behalf.
+	if (!(await page.getByTestId("sim-canvas").isVisible())) {
+		const name = deviceName(sandbox);
+		await page.getByRole("combobox", { name: "Simulator to watch" }).click();
+		await page.getByRole("option", { name: new RegExp(escapeRegExp(name)) }).click();
+	}
+
 	await page.getByTestId("sim-canvas").waitFor({ state: "visible", timeout: 60_000 });
 
 	// Capture stops when the window loses focus - the rule that keeps this pane
@@ -239,6 +288,19 @@ export async function openDevicePane(sandbox: Sandbox): Promise<void> {
 		async () => ((await page.getByTestId("sim-freshness").textContent()) ?? "").includes("live"),
 		"no frames arrived - is the window in the background, or the simulator busy?",
 	);
+}
+
+/** deviceName is what the picker calls the device this harness may drive. */
+function deviceName(sandbox: Sandbox): string {
+	const raw = execFileSync("curl", ["-fsS", `${sandbox.api}/api/v1/sim/devices`], { encoding: "utf8" });
+	const parsed = JSON.parse(raw) as { devices: { udid: string; name: string }[] };
+	const found = parsed.devices.find((device) => device.udid.toUpperCase() === sandbox.udid.toUpperCase());
+	if (!found) throw new Error(`the daemon does not list ${sandbox.udid}`);
+	return found.name;
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** focusWindow puts the app in front, which is what makes it capture at all. */
