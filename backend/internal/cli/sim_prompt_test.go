@@ -70,9 +70,20 @@ var simPromptDecisions = map[string]bool{
 	"tap --label": true,
 	// --id is the same mechanism with a stabler key; one example teaches the
 	// form, and the closing pointer names the other.
-	"tap --id":        false,
-	"ax --format":     false,
-	"ax --max-nodes":  false,
+	"tap --id":       false,
+	"ax --format":    false,
+	"ax --max-nodes": false,
+	// `--settle` re-reads until the screen stops changing, for a screen whose
+	// content arrives late. Omitted because the loop the prompt already
+	// teaches - read, act, re-read - is self-correcting for ACTING: an agent
+	// that acts on a half-drawn screen sees the result on its next read. The
+	// path that is NOT self-correcting is recording, where a selector is
+	// written down once from whatever was on screen, and that one settles by
+	// itself without the agent asking. What is left is the deliberate case
+	// (asserting a screen is final), which is a task instruction rather than a
+	// standing hazard - and it costs about a second, which is the wrong thing
+	// to teach as a default.
+	"ax --settle":     false,
 	"claim --ttl":     false,
 	"drag --duration": false,
 	"shot --output":   false,
