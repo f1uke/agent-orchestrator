@@ -823,7 +823,14 @@ describe("SimulatorPanel driving", () => {
 		window.dispatchEvent(new Event("focus"));
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		// Deliberately no frame yet: this is the reconnecting window.
-		expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/connecting/i);
+		//
+		// ⚠ Waited for, not asserted outright. The socket is created
+		// synchronously by the mock, so `openSockets()` flips one render before
+		// the pill does - and on a slow machine the assertion ran while the pill
+		// still showed the state from before the blur. It failed on CI twice
+		// while passing every local run, which is the shape of a race rather
+		// than a fault.
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/connecting/i));
 
 		const canvas = await screen.findByTestId("sim-canvas");
 		canvas.setPointerCapture = () => {};

@@ -247,6 +247,18 @@ func writeStep(b *strings.Builder, step Step) error {
 	case StepType:
 		fmt.Fprintf(b, "- inputText: %q\n", step.Text)
 	case StepSwipe:
+		// A swipe's coordinates are exact, so it always replays - but if the
+		// recorder could not say WHAT it was made on, the flow has to say that
+		// rather than look complete. The condition is Choice.NeedsReview, the
+		// same one the banner counts, so the two cannot disagree.
+		//
+		// ⚠ Before this, a swipe the recorder could not describe came out as a
+		// bare `- swipe:` line with nothing to find, while the banner above it
+		// counted it as needing review.
+		if step.Choice.NeedsReview() {
+			fmt.Fprintf(b, "%s the screen this swipe was made on could not be described, so it replays as\n", reviewMarker)
+			b.WriteString("#   coordinates alone and will not notice if the screen underneath has changed.\n")
+		}
 		fmt.Fprintf(b, "- swipe: {start: \"%d%%,%d%%\", end: \"%d%%,%d%%\"}\n",
 			percent(step.X), percent(step.Y), percent(step.ToX), percent(step.ToY))
 	case StepButton:

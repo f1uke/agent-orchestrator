@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -252,6 +253,16 @@ const recorderSettleReads = 3
 // and the constant it is derived from cannot drift apart.
 const RecorderSettleMaxReads = recorderSettleReads + 1
 
+// worthDescribingFrom says whether a screen looks like it has arrived at all.
+//
+// It is the screen-only half of stableEnough: no elements, or the status bar
+// and nothing else, means the app has not published its screen yet. Unlike
+// stableEnough it asks nothing about a particular gesture, because the refresh
+// that uses it happens between gestures and has none in hand.
+func worthDescribingFrom(snap simbridge.Snapshot) bool {
+	return len(snap.Elements) > 0 && !snap.OnlyStatusBar
+}
+
 // stableEnough decides whether the screen a step is about to be described from
 // is worth describing from.
 //
@@ -290,81 +301,92 @@ func stableEnough(snap simbridge.Snapshot, resolved bool) bool {
 //     lands where the remembered tree has nothing is the strongest cheap
 //     signal that the remembered tree is not this screen.
 //
-// ok is false only when there is no screen to describe from at all. A read
-// that fails must never fail the hold: the gesture already got its finger, and
-// refusing it because the recorder could not read the screen would be damage,
-// done exactly when a device is misbehaving and the human most needs to drive
-// it. Losing one recorded step is a nuisance, not that.
-func (s *Service) resolveScreen(ctx context.Context, udid string, intent GestureIntent) (
-	snap simbridge.Snapshot, choice simflow.Choice, el simbridge.Element, found, ok bool,
+// It cannot fail, because it does no I/O. A gesture already got its finger by
+// the time this runs, and nothing the recorder wants to know is worth making
+// that finger wait - which is the whole of this fix.
+func (s *Service) resolveScreen(udid string, intent GestureIntent) (
+	snap simbridge.Snapshot, choice simflow.Choice, el simbridge.Element, found bool,
 ) {
-	// 🗝 A gesture that targets no element never reads, and never settles.
+	// 🗝 A gesture that targets no element never reads.
 	//
 	// Typing, a key press and a hardware button carry no coordinates, so
 	// resolving "what is under the finger" for them means hit-testing (0,0) -
 	// whatever happens to sit in the top-left corner, usually a status bar
 	// clock. That answer is not merely useless, it is actively wrong: it is
 	// why simflow refuses to write a wait on it (see actsOnAnElement there),
-	// and the recorder now applies the same rule at the point the question is
+	// and the recorder applies the same rule at the point the question is
 	// asked rather than the point the answer is written.
-	//
-	// ⚠ The cost of not doing this was measured by a test: a `type` intent
-	// resolved nothing at (0,0), which read as "the screen has not arrived",
-	// which took the fallback read AND a settle - three accessibility reads in
-	// front of a human's keystroke. #209 took that work off the gesture path
-	// for pointer gestures; this is the same defect on the path typing uses.
 	if !targetsAnElement(intent.Kind) {
 		remembered, _ := s.rememberedScreen(udid)
-		return remembered, simflow.Choice{}, simbridge.Element{}, false, true
+		return remembered, simflow.Choice{}, simbridge.Element{}, false
 	}
 
-	if remembered, fresh := s.rememberedScreen(udid); fresh {
+	remembered, fresh := s.rememberedScreen(udid)
+	if fresh {
 		choice, el, found = elementFor(remembered, intent)
 		if stableEnough(remembered, found) {
-			return remembered, choice, el, found, true
+			return remembered, choice, el, found
 		}
 	}
 
-	// Nothing read here is written back into the maintained screen. There is
-	// exactly one place that maintains it - the refresh after a gesture - and
-	// that refresh runs moments after this, on this very gesture's release,
-	// with a newer view of the screen than this one. A mutation check found the
-	// write that used to be here: removing it changed nothing any test could
-	// see, because it was overwritten before anything could read it.
-	read := func(ctx context.Context) (simbridge.Snapshot, error) { return s.recorder.AX(ctx, udid) }
-	snap, err := read(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "sim recorder: could not read the screen; skipping this step",
-			"udid", udid, "error", err)
-		return simbridge.Snapshot{}, simflow.Choice{}, simbridge.Element{}, false, false
-	}
-	choice, el, found = elementFor(snap, intent)
-	if stableEnough(snap, found) {
-		return snap, choice, el, found, true
-	}
+	// 🗝 And here is the whole of the rest of it: when the maintained screen
+	// cannot describe this gesture, the recorder DESCRIBES NOTHING. It does not
+	// read, and it does not settle.
+	//
+	// ⚠ It used to do both, and that was the bug the human kept hitting. An
+	// accessibility read costs ~0.5 s and the bridge serializes, so a read on
+	// this path is time the finger spends in the air - and because the drag
+	// stream sends one request at a time, a `drag-begin` stalled that long used
+	// to take the entire scroll down with it. Measured with a human driving:
+	// 11 of 26 drags arrived at the device as two requests and no motion at
+	// all, every one of them with a begin of 181-526 ms.
+	//
+	// The condition that triggered it is not rare and not about empty space: it
+	// is any frontmost app whose accessibility tree cannot be read. On this
+	// scratch device Safari and Settings both publish NOTHING, so every gesture
+	// took this path for as long as one of them was in front.
+	//
+	// ⚠ The safety this replaces is not deleted, it is MOVED. "The screen has
+	// not arrived, so read it again" was there to stop a step being described
+	// from a half-loaded screen, and that is still true - it just belongs after
+	// the gesture, where refreshScreen now settles instead of taking one read.
+	// An unresolvable screen is a fact about the recording, not a reason to
+	// stall a finger.
+	//
+	// The step is still recorded, and says it could not be described: see
+	// undescribed, and simflow.Render, which turns that into a "# REVIEW:" the
+	// flow's own banner counts.
+	return remembered, undescribed(intent), simbridge.Element{}, false
+}
 
-	// The screen this step will be described from has not arrived. Read again
-	// until it stops changing, then resolve against THAT.
-	//
-	// ⚠ Conditional, not unconditional, and the condition is the whole design.
-	// This is the one path still on the gesture's critical path, so settling
-	// every gesture would put a full AX read back in front of every tap a
-	// human makes while recording - which is the bug this file was rewritten
-	// to remove. The budget is only spent on the case that actually corrupts a
-	// selector: nothing resolvable under the finger, or a tree that is still
-	// just the status bar. `ao sim ax --settle` is the unconditional one, for
-	// callers reading a screen rather than acting on it.
-	//
-	// A settle that fails is not an error here: the step is still worth
-	// recording from the last read, exactly as it would have been without this
-	// at all.
-	if settled, res, settleErr := simbridge.ReadSettled(ctx, read, simbridge.SettleOptions{MaxReads: recorderSettleReads}); settleErr == nil {
-		snap = settled
-		choice, el, found = elementFor(snap, intent)
-		slog.DebugContext(ctx, "sim recorder: settled the screen before resolving a step",
-			"udid", udid, "reads", res.Reads, "settled", res.Settled, "resolved", found)
+// undescribed is the Choice for a step the recorder could not describe.
+//
+// It is a COORDINATE, not an absence. The coordinates are exact - they are
+// what the human's finger did - so a step resolved this way still replays,
+// which is the difference between a flow that is honest about a weak step and
+// a flow that silently drops one. RungPoint is the ladder's own rung 4 and
+// already carries "# REVIEW:", so a reader is told, the banner counts it, and
+// nothing has to invent a new vocabulary for "we could not look".
+func undescribed(intent GestureIntent) simflow.Choice {
+	return simflow.Choice{
+		Rung:     simflow.RungPoint,
+		PercentX: percentOf(intent.X),
+		PercentY: percentOf(intent.Y),
 	}
-	return snap, choice, el, found, true
+}
+
+// percentOf mirrors simflow's own percent(): a normalized 0..1 coordinate as
+// the whole percent Maestro takes, clamped.
+func percentOf(v float64) int {
+	p := int(math.Round(v * 100))
+	if p < 0 {
+		return 0
+	}
+	if p > 100 {
+		return 100
+	}
+	return p
+
 }
 
 // targetsAnElement says whether a gesture is aimed at something on screen.
@@ -436,6 +458,7 @@ func (s *Service) refreshScreen(udid string) {
 		return
 	}
 	s.refreshing[udid] = true
+	scheduledAfter := s.gestures[udid]
 	s.recMu.Unlock()
 
 	s.runRefresh(func() {
@@ -444,9 +467,71 @@ func (s *Service) refreshScreen(udid string) {
 			delete(s.refreshing, udid)
 			s.recMu.Unlock()
 		}()
+		// ⚠ Wait for the human to stop, and give up if they have not.
+		//
+		// The bridge serializes, so this read is time the NEXT touch waits
+		// behind it - and on a real app the tree is big enough that one read is
+		// well over a second. Measured with a human driving their own app: the
+		// motion all arrived, but individual requests took up to 1105 ms,
+		// because each gesture was queueing behind the refresh the previous one
+		// started.
+		//
+		// So the refresh is not for the middle of a flurry. It exists to have a
+		// screen ready for the NEXT thing the human does, and while they are
+		// still moving there is no next thing yet - the screen is changing under
+		// them anyway. If another gesture has been taken since this was
+		// scheduled, this one steps aside and that gesture's own release
+		// schedules the next.
+		//
+		// It WAITS rather than giving up, because only one of these is ever in
+		// flight per device: a refresh that returned here while the human was
+		// still going would leave nobody to read the screen once they stopped.
+		waited := 0
+		for {
+			s.sleep(s.refreshDelay)
+			s.recMu.Lock()
+			seen := s.gestures[udid]
+			s.recMu.Unlock()
+			if seen == scheduledAfter {
+				break
+			}
+			scheduledAfter = seen
+			waited++
+			if waited >= maxRefreshWaits {
+				// Somebody has been driving without a pause for a long time.
+				// Step aside for good; the next gesture's release schedules a
+				// fresh one, and until then a step simply goes undescribed.
+				return
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), screenRefreshTimeout)
 		defer cancel()
-		snap, err := s.recorder.AX(ctx, udid)
+		// This is where "read again until the screen stops changing" moved to.
+		//
+		// It used to sit on the gesture path, between the finger going down and
+		// the touch reaching the device, and that is what this whole fix takes
+		// off. Here nobody is waiting: the gesture is over and the human is
+		// looking at what they just did.
+		//
+		// ⚠ Still CONDITIONAL, and for a sharper reason than before. The bridge
+		// serializes, so a refresh in flight is time the NEXT touch waits behind
+		// - settling unconditionally here made a following drag block long
+		// enough to fail this file's own "the gesture path blocked" assertion.
+		// So the ordinary case is one read, and the budget is spent only when
+		// the screen plainly has not arrived: nothing in it at all, or the
+		// status bar and nothing else. A screen that is up and full costs
+		// exactly what it did before.
+		read := func(ctx context.Context) (simbridge.Snapshot, error) { return s.recorder.AX(ctx, udid) }
+		snap, err := read(ctx)
+		if err == nil && !worthDescribingFrom(snap) {
+			if settled, res, settleErr := simbridge.ReadSettled(ctx, read,
+				simbridge.SettleOptions{MaxReads: recorderSettleReads}); settleErr == nil {
+				snap = settled
+				slog.DebugContext(ctx, "sim recorder: settled the refreshed screen",
+					"udid", udid, "reads", res.Reads, "settled", res.Settled)
+			}
+		}
 		if err != nil {
 			// Nothing to do about it and nobody to tell: the next gesture that
 			// needs a screen and has none will read one itself.
@@ -456,6 +541,12 @@ func (s *Service) refreshScreen(udid string) {
 		s.rememberScreen(udid, snap)
 	})
 }
+
+// maxRefreshWaits bounds how long a refresh will keep standing aside for a
+// human who has not stopped. At the default delay that is about ten seconds of
+// unbroken gesturing, after which it gives up and the next release schedules
+// another.
+const maxRefreshWaits = 20
 
 // screenRefreshTimeout bounds a background read. It is generous because the
 // read it covers is slow by nature and nobody is waiting for it; it exists so
@@ -481,10 +572,11 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		return
 	}
 
-	snap, choice, el, found, ok := s.resolveScreen(ctx, udid, intent)
-	if !ok {
-		return
-	}
+	// ⚠ There is no failure path here any more, and that is the point: the
+	// recorder no longer performs I/O to describe a gesture, so there is
+	// nothing left that can fail. It describes the step from the screen it
+	// already had, or says it could not.
+	snap, choice, el, found := s.resolveScreen(udid, intent)
 	s.recMu.Lock()
 	prev, hasPrev := s.screens[udid]
 	s.recMu.Unlock()
@@ -534,6 +626,7 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	}
 
 	s.recMu.Lock()
+	s.gestures[udid]++
 	s.sweepExpiredPendingLocked(s.now())
 	s.pending[token] = pending{
 		udid:        udid,

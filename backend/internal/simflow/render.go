@@ -124,7 +124,13 @@ func Render(c Choice, plain string) string {
 		b.WriteString("- tapOn:\n")
 		fmt.Fprintf(&b, "    id: %q\n", c.ID)
 	case RungPoint:
-		b.WriteString("# no label and no id: only a point works here, and a point breaks on any layout change\n")
+		// ⚠ The marker, not a bare comment. NeedsReview counts this rung, so the
+		// banner at the top of the flow already tells a reader that a step below
+		// is marked - and until this line carried the marker, there was nothing
+		// there to find. A header that promises markers it did not write is the
+		// same untruth as a header that claims a flow is clean.
+		fmt.Fprintf(&b, "%s no label and no id, so this replays as a coordinate: it is where the finger went,\n", reviewMarker)
+		b.WriteString("#   not what was touched, and it breaks on any layout change. Check it.\n")
 		b.WriteString("- tapOn:\n")
 		fmt.Fprintf(&b, "    point: \"%d%%,%d%%\"\n", c.PercentX, c.PercentY)
 	default:

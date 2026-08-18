@@ -4,9 +4,30 @@
  * A pointer produces moves as fast as the display refreshes and the daemon
  * answers each one over loopback, so the two are not the same speed. The rule
  * here is the one the frame stream already uses in the other direction: send
- * one at a time, and while one is in flight keep only the newest position. A
- * queue would make the screen lag further behind the finger the longer you
- * drag, which is the exact complaint this replaces.
+ * one at a time.
+ *
+ * 🗝 What is NOT dropped while one is in flight is the motion itself. Keeping
+ * only the newest position looked right - the screen tracks the finger instead
+ * of replaying where it has been - and it is right whenever the daemon answers
+ * in a millisecond or two, which is the ordinary case. It is catastrophic when
+ * it does not: a `drag-begin` that takes a few hundred milliseconds outlives
+ * the whole drag, every move in between collapses into one slot, `end` then
+ * takes that slot, and the device receives a touch-down and a touch-up with
+ * NOTHING between them. iOS cannot read a scroll out of two points, so the
+ * scroll does not happen at all - not slowly, not partially.
+ *
+ * ⚠ Measured on a real device while a human drove the pane by hand: of 26
+ * drags, 11 collapsed to two requests and zero moves, and the correlation was
+ * exact - every collapse had a begin of 181-526 ms, every working drag had one
+ * of 1-9 ms. It happens with a recording open (the recorder makes a slow begin
+ * common) and it happens without one (measured at 151 ms on an app the
+ * accessibility service cannot read).
+ *
+ * So the moves are QUEUED, and the queue is what keeps the drag a drag. When
+ * the path is fast the queue never holds more than one point and the behaviour
+ * is exactly what it was; when the path is slow the motion arrives a moment
+ * late instead of not at all. Late is worse than immediate. Nothing is far
+ * worse than late.
  *
  * Sending one at a time is also what makes the order safe. Requests that
  * overlap can complete out of order, and a drag whose moves arrive shuffled
@@ -21,6 +42,13 @@ export type DragStep = "drag-begin" | "drag-move" | "drag-end";
 
 export type DragSender = (step: DragStep, point: DragPoint) => Promise<void>;
 
+/**
+ * How much unsent motion may wait. At a pointer's ~16 ms sampling this is
+ * about a second of drag, far more than any stall seen on this path, and it
+ * bounds how far behind the finger the touch can ever get.
+ */
+export const MAX_PENDING_MOVES = 64;
+
 export class DragStream {
 	private readonly send: DragSender;
 	private readonly onError: (error: unknown) => void;
@@ -30,8 +58,17 @@ export class DragStream {
 	private inFlight = false;
 	/** The begin that has not been sent yet. */
 	private opening: DragPoint | null = null;
-	/** The newest position not yet sent. Overwritten, never queued. */
-	private pending: DragPoint | null = null;
+	/**
+	 * Positions not yet sent, oldest first.
+	 *
+	 * Bounded, because a backlog that grows without limit would put the touch
+	 * further behind the finger the longer the drag went on - the failure the
+	 * single slot was there to prevent. At the cap the newest position replaces
+	 * the newest queued one, which degrades exactly to the old behaviour after
+	 * a second of unsent motion rather than throwing the drag away in the first
+	 * hundred milliseconds.
+	 */
+	private pending: DragPoint[] = [];
 	/** Where the finger came up, once it has. */
 	private closing: DragPoint | null = null;
 	/** The last position this side sent or was asked to send. */
@@ -58,14 +95,18 @@ export class DragStream {
 		this.last = point;
 		this.opening = point;
 		this.closing = null;
-		this.pending = null;
+		this.pending = [];
 		void this.pump();
 	}
 
 	move(point: DragPoint): void {
 		if (!this.active) return;
 		this.last = point;
-		this.pending = point;
+		if (this.pending.length >= MAX_PENDING_MOVES) {
+			this.pending[this.pending.length - 1] = point;
+		} else {
+			this.pending.push(point);
+		}
 		void this.pump();
 	}
 
@@ -89,9 +130,13 @@ export class DragStream {
 		if (this.closing) return;
 		this.last = point;
 		this.closing = point;
-		// A drag that ends before its last move went out ends where the finger
-		// actually left, so a move still pending is not worth sending.
-		this.pending = null;
+		// ⚠ The queued moves are NOT dropped here, and that reversal is the
+		// fix. Discarding them looked harmless - the end carries where the
+		// finger really left, so the last unsent move is redundant - but on a
+		// slow begin the queue holds the entire drag, and dropping it is what
+		// turned a scroll into a touch-down and a touch-up. The end is
+		// appended after them instead, so the device sees the motion and then
+		// the release, in the order the human made it.
 		void this.pump();
 	}
 
@@ -103,7 +148,7 @@ export class DragStream {
 	cancel(): void {
 		this.active = false;
 		this.opening = null;
-		this.pending = null;
+		this.pending = [];
 		this.closing = null;
 		this.last = null;
 	}
@@ -135,10 +180,8 @@ export class DragStream {
 			this.opening = null;
 			return { step: "drag-begin", point };
 		}
-		if (this.pending) {
-			const point = this.pending;
-			this.pending = null;
-			return { step: "drag-move", point };
+		if (this.pending.length > 0) {
+			return { step: "drag-move", point: this.pending.shift()! };
 		}
 		if (this.closing) {
 			const point = this.closing;

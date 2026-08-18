@@ -139,6 +139,13 @@ type Service struct {
 	// runRefresh starts the background screen read. Production runs it in a
 	// goroutine; see WithScreenRefreshRunner.
 	runRefresh func(func())
+	// sleep and refreshDelay are how long a background read waits for the
+	// human to stop before taking the bridge from them.
+	sleep        func(time.Duration)
+	refreshDelay time.Duration
+	// gestures counts holds taken per device, so a scheduled refresh can tell
+	// that the human has moved on and step aside.
+	gestures map[string]uint64
 }
 
 // Option customizes a Service.
@@ -152,6 +159,47 @@ func WithClock(clock func() time.Time) Option {
 // WithTokenSource overrides hold-token generation for tests.
 func WithTokenSource(tokens func() string) Option {
 	return func(s *Service) { s.tokens = tokens }
+}
+
+// DefaultScreenRefreshDelay is how long the recorder waits after a gesture
+// before reading the screen.
+//
+// ⚠ Measured, and the number matters. The bridge is exclusive, so a read that
+// is in flight when the human acts again is time their touch waits behind -
+// and on a real app one read is well over a second. With a 500 ms wait, a
+// person flicking through a screen pauses for about as long as a read takes,
+// so the read reliably started during the pause and was still going when they
+// moved: measured on their own app, EVERY drag-begin then cost 360-867 ms
+// while the moves behind it stayed at 1-2 ms.
+//
+// Two seconds is longer than the pauses inside ordinary use, so flicking and
+// tapping through a screen triggers no reads at all, and the read happens when
+// somebody actually stops to look at what they did.
+//
+// ⚠ It cannot be eliminated, only made rare, and saying so is the honest part:
+// a read cannot be cancelled once the bridge has it, so a human who pauses
+// exactly long enough to start one and then acts will still wait for it. What
+// changed is that this is now the exception rather than every gesture.
+//
+// The cost of the longer wait is description, not correctness: a step taken
+// while the maintained screen is stale is recorded as a coordinate and marked
+// for review, which is exactly what a drag records anyway.
+const DefaultScreenRefreshDelay = 2 * time.Second
+
+// WithScreenRefreshDelay overrides that wait, so a test does not have to.
+func WithScreenRefreshDelay(d time.Duration) Option {
+	return func(s *Service) {
+		s.refreshDelay = d
+		if d == 0 {
+			s.sleep = func(time.Duration) {}
+		}
+	}
+}
+
+// WithSleep overrides how the recorder waits, so a test can decide what
+// happens during that wait rather than actually waiting.
+func WithSleep(sleep func(time.Duration)) Option {
+	return func(s *Service) { s.sleep = sleep }
 }
 
 // WithScreenRefreshRunner controls how the recorder's background screen read
@@ -178,13 +226,16 @@ func WithRecorder(screen ScreenReader) Option {
 // New builds the lease service over a store.
 func New(store Store, opts ...Option) *Service {
 	s := &Service{
-		store:      store,
-		clock:      func() time.Time { return time.Now().UTC() },
-		pending:    make(map[string]pending),
-		screens:    make(map[string]screenState),
-		seen:       make(map[string]seenScreen),
-		refreshing: make(map[string]bool),
-		runRefresh: func(f func()) { go f() },
+		store:        store,
+		clock:        func() time.Time { return time.Now().UTC() },
+		pending:      make(map[string]pending),
+		screens:      make(map[string]screenState),
+		seen:         make(map[string]seenScreen),
+		refreshing:   make(map[string]bool),
+		runRefresh:   func(f func()) { go f() },
+		sleep:        time.Sleep,
+		refreshDelay: DefaultScreenRefreshDelay,
+		gestures:     make(map[string]uint64),
 	}
 	for _, opt := range opts {
 		opt(s)
