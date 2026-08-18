@@ -4651,6 +4651,9 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		"main thread is blocked",
 		// The app's own account of what a gesture did.
 		"ao sim log",
+		// Which device: one booted simulator is selected without asking, and
+		// it may be the human's working device rather than a scratch one.
+		"scratch device",
 	} {
 		if !strings.Contains(sp, want) {
 			t.Fatalf("worker prompt for an iOS project is missing %q:\n%s", want, sp)

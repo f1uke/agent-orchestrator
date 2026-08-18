@@ -265,9 +265,11 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // already points at. What is here is the part an agent gets wrong without
 // being told: that reading the screen is free but touching it needs a claim,
 // that an element can be named rather than measured, that half of a scrolling
-// screen's elements cannot be tapped from where they are, that an empty
-// accessibility tree is a diagnosis about the app rather than a fact about
-// accessibility, and that the device is shared and never to be booted or erased.
+// screen's elements cannot be tapped from where they are, that one booted
+// device is picked without asking and may be the human's working device rather
+// than a scratch one, that an empty accessibility tree is a diagnosis about the
+// app rather than a fact about accessibility, and that the device is shared and
+// never to be booted or erased.
 //
 // Which `ao sim` commands belong here is a reviewed decision, not an accident:
 // cli.TestSimGuidance_DecidesEverySubcommand holds that list against the real
@@ -289,6 +291,7 @@ ao sim log                      # what the app itself printed, when the screen d
 ao sim release` + "\n```" + `
 
 - **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and AO **never boots, shuts down, reboots or erases** a simulator - if none is booted, say so and ask.
+- **Not every booted device is yours to drive.** A working device holds the human's real app and state; a scratch device exists to be thrown away. ` + "`ao sim`" + ` - and Maestro without ` + "`--device`" + ` - takes the only booted device without asking, so anything that installs, launches or mutates belongs on a scratch device, while reading is safe anywhere. When ` + "`ao sim list`" + ` does not make clear which is which, ask rather than guess.
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
 - **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 
