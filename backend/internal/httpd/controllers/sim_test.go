@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 const testSimUDID = "087DF306-1FC9-4E5A-B9ED-AD36D6A1A0F1"
@@ -32,12 +33,18 @@ type fakeSimService struct {
 	gotUDID    string
 	gotTTL     time.Duration
 	gotToken   string
+	// gotPerformed is what the last ReleaseHold call actually received - see
+	// TestReleaseSimHold_PerformedDefaultsTrueWhenQueryParamIsAbsent.
+	gotPerformed bool
+	// gotEnd is where the last ReleaseHold call said the gesture ended, which
+	// only a drag reports - see TestSimGesture_DragReleasesWithItsRealEndPoint.
+	gotEnd *simbridge.Point
 	// holds counts grants. A drag that took one per move would still look right
 	// on the device and be wrong about arbitration, so it is counted.
 	holds int
 }
 
-func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error) {
+func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, _ simsvc.GestureIntent) (domain.SimHold, error) {
 	f.gotSession, f.gotUDID, f.gotTTL = sessionID, udid, ttl
 	if f.holdErr != nil {
 		return domain.SimHold{}, f.holdErr
@@ -47,8 +54,9 @@ func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.Session
 	return domain.SimHold{UDID: udid, SessionID: sessionID, Token: "tok-fake", ExpiresAt: now.Add(ttl)}, nil
 }
 
-func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string) error {
-	f.gotUDID, f.gotToken = udid, token
+func (f *fakeSimService) ReleaseHold(_ context.Context, udid, token string, outcome simsvc.GestureOutcome) error {
+	f.gotUDID, f.gotToken, f.gotPerformed = udid, token, outcome.Performed
+	f.gotEnd = outcome.End
 	return f.releaseHoldErr
 }
 

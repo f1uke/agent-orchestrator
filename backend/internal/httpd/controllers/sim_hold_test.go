@@ -123,6 +123,35 @@ func TestReleaseSimHold_HappyPathAndUnknownToken(t *testing.T) {
 	}
 }
 
+// performed is a query parameter on the release route, not a body (see
+// releaseHold in sim.go). A caller that has not been updated to send it must
+// keep recording the gestures it actually performs, so the default with the
+// parameter altogether absent has to be true - and an explicit "false" must
+// still override it.
+func TestReleaseSimHold_PerformedDefaultsTrueWhenQueryParamIsAbsent(t *testing.T) {
+	svc := &fakeSimService{}
+	srv := newSimTestServer(t, svc)
+
+	if _, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/mer-1/sim-leases/"+testSimUDID+"/hold/tok-1", ""); status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if !svc.gotPerformed {
+		t.Fatal("performed must default to true when the query parameter is absent, so an unmigrated caller keeps recording what it actually did")
+	}
+}
+
+func TestReleaseSimHold_PerformedQueryParamOverridesTheDefault(t *testing.T) {
+	svc := &fakeSimService{}
+	srv := newSimTestServer(t, svc)
+
+	if _, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/mer-1/sim-leases/"+testSimUDID+"/hold/tok-1?performed=false", ""); status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if svc.gotPerformed {
+		t.Fatal("performed=false in the query must be honored, not overridden by the default")
+	}
+}
+
 func TestSimHoldNilServiceReturns501(t *testing.T) {
 	srv := newSimTestServer(t, nil)
 	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/sim-leases/"+testSimUDID+"/hold", `{}`); status != http.StatusNotImplemented {

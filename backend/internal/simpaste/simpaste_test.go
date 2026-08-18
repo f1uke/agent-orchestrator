@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 )
 
@@ -168,6 +169,9 @@ type fakeHolder struct {
 	acquired int
 	released int
 	err      error
+	// lastPerformed is what the most recent Release call was told about
+	// whether the paste actually landed.
+	lastPerformed bool
 }
 
 func (h *fakeHolder) Acquire(context.Context, string, time.Duration) (string, error) {
@@ -178,7 +182,10 @@ func (h *fakeHolder) Acquire(context.Context, string, time.Duration) (string, er
 	return "tok", nil
 }
 
-func (h *fakeHolder) Release(context.Context, string, string) { h.released++ }
+func (h *fakeHolder) Release(_ context.Context, _, _ string, outcome simgesture.Outcome) {
+	h.released++
+	h.lastPerformed = outcome.Performed
+}
 
 func pasted(from, to string) *fakeDriver {
 	return &fakeDriver{snapshots: []simbridge.Snapshot{

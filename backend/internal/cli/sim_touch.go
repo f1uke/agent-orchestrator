@@ -69,8 +69,28 @@ type simGestureResult struct {
 }
 
 // acquireSimHoldRequest mirrors controllers.AcquireSimHoldInput.
+//
+// The fields beyond HoldSeconds are the intent this hold is about to bracket
+// - what a session recording gestures on this device needs in order to
+// capture the step. They mirror the daemon's own field names one-for-one on
+// purpose: two vocabularies for the same thing is how they drift apart.
 type acquireSimHoldRequest struct {
 	HoldSeconds int `json:"holdSeconds,omitempty"`
+
+	Kind       string  `json:"kind,omitempty"`
+	X          float64 `json:"x,omitempty"`
+	Y          float64 `json:"y,omitempty"`
+	ToX        float64 `json:"toX,omitempty"`
+	ToY        float64 `json:"toY,omitempty"`
+	DurationMS int     `json:"durationMs,omitempty"`
+	Text       string  `json:"text,omitempty"`
+	Name       string  `json:"name,omitempty"`
+	// Label and ID are set only for a by-name tap (`ao sim tap --label`/`--id`)
+	// - the name the caller gave, sent instead of a point so a recording open
+	// on the device resolves the step from the same name rather than
+	// hit-testing a coordinate to rediscover it. See runSimTapByName.
+	Label string `json:"label,omitempty"`
+	ID    string `json:"id,omitempty"`
 }
 
 // simHoldResponse mirrors controllers.SimHoldResponse.
@@ -122,6 +142,7 @@ func newSimTapCommand(ctx *commandContext) *cobra.Command {
 				action: "tap",
 				detail: fmt.Sprintf("(%.3f, %.3f)", at.X, at.Y),
 				events: events,
+				first:  at,
 				last:   at,
 			})
 		},
@@ -195,10 +216,12 @@ func newSimSwipeCommand(ctx *commandContext) *cobra.Command {
 				return usageError{err}
 			}
 			return ctx.runSimGesture(cmd, opts, simGesture{
-				action: "swipe",
-				detail: fmt.Sprintf("(%.3f, %.3f) to (%.3f, %.3f) over %s", from.X, from.Y, to.X, to.Y, duration),
-				events: events,
-				last:   to,
+				action:     "swipe",
+				detail:     fmt.Sprintf("(%.3f, %.3f) to (%.3f, %.3f) over %s", from.X, from.Y, to.X, to.Y, duration),
+				events:     events,
+				first:      from,
+				last:       to,
+				durationMS: int(duration.Milliseconds()),
 			})
 		},
 	}
@@ -249,10 +272,12 @@ func newSimDragCommand(ctx *commandContext) *cobra.Command {
 			}
 			last := points[len(points)-1]
 			return ctx.runSimGesture(cmd, opts, simGesture{
-				action: "drag",
-				detail: fmt.Sprintf("%d points ending at (%.3f, %.3f) over %s", len(points), last.X, last.Y, duration),
-				events: events,
-				last:   last,
+				action:     "drag",
+				detail:     fmt.Sprintf("%d points ending at (%.3f, %.3f) over %s", len(points), last.X, last.Y, duration),
+				events:     events,
+				first:      points[0],
+				last:       last,
+				durationMS: int(duration.Milliseconds()),
 			})
 		},
 	}
@@ -322,6 +347,7 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 				detail:   detail,
 				events:   route.Events,
 				keyboard: route.Keyboard.Identifier,
+				text:     text,
 			})
 		},
 	}
@@ -371,7 +397,12 @@ func (c *commandContext) runSimPaste(
 		return err
 	}
 
-	result, err := simpaste.Run(ctx, &cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver,
+	// Recorded as a "type" step regardless of route: a recording captures what
+	// the app saw (text arriving in a field), not the mechanism that delivered
+	// it, and Emit has one translation for both - inputText.
+	holder := &cliSimHolder{ctx: c, sessionID: sessionID, device: device,
+		intent: acquireSimHoldRequest{Kind: "type", Text: text}}
+	result, err := simpaste.Run(ctx, holder, driver,
 		simpaste.Simctl{Run: c.deps.CommandOutput}, device.UDID, text)
 	if err != nil {
 		return c.explainSimPasteFailure(ctx, device, route, err)
@@ -440,7 +471,7 @@ func newSimButtonCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return usageError{err}
 			}
-			return ctx.runSimGesture(cmd, opts, simGesture{action: "button", detail: args[0], events: events})
+			return ctx.runSimGesture(cmd, opts, simGesture{action: "button", detail: args[0], events: events, name: args[0]})
 		},
 	}
 	opts.bind(cmd)
@@ -466,9 +497,29 @@ type simGesture struct {
 	// keyboard is the simulator input mode `type` established before composing
 	// these events. Empty for every other gesture, none of which depends on one.
 	keyboard string
-	// last is where the finger would be if the gesture died in flight, and so
-	// where a recovery lift has to land.
-	last simbridge.Point
+	// first and last are the gesture's start and end point, in normalized 0..1
+	// screen coordinates - the same point for a tap. last is also where the
+	// finger would be if the gesture died in flight, and so where a recovery
+	// lift has to land.
+	first, last simbridge.Point
+	// durationMS, text and name feed the gesture hold's intent (see
+	// acquireSimHoldRequest): how long a swipe/drag takes, what a type sends,
+	// and which button a button press names. Each is set only by the gesture
+	// it applies to.
+	durationMS int
+	text       string
+	name       string
+}
+
+// intent is what this gesture asks the daemon's recorder to capture, in the
+// exact shape the gesture hold's Acquire call sends. Every touch command
+// builds one - see runSimGesture, and runSimPaste's own inline intent - so a
+// recording open on the device is never blind to what actually happened.
+func (g simGesture) intent() acquireSimHoldRequest {
+	return acquireSimHoldRequest{
+		Kind: g.action, X: g.first.X, Y: g.first.Y, ToX: g.last.X, ToY: g.last.Y,
+		DurationMS: g.durationMS, Text: g.text, Name: g.name,
+	}
 }
 
 // runSimGesture is the one path every touch takes: resolve the device, then
@@ -508,7 +559,8 @@ func (c *commandContext) runSimGestureOn(
 		return err
 	}
 
-	result, err := simgesture.Run(ctx, &cliSimHolder{ctx: c, sessionID: sessionID, device: device}, driver, device.UDID,
+	holder := &cliSimHolder{ctx: c, sessionID: sessionID, device: device, intent: gesture.intent()}
+	result, err := simgesture.Run(ctx, holder, driver, device.UDID,
 		simgesture.Gesture{Action: gesture.action, Detail: gesture.detail, Events: gesture.events, Last: gesture.last})
 	if err != nil {
 		return c.explainSimGestureFailure(device, err)
@@ -563,11 +615,17 @@ type cliSimHolder struct {
 	ctx       *commandContext
 	sessionID string
 	device    simDevice
+	// intent describes the gesture this hold is about to bracket - see
+	// acquireSimHoldRequest and simGesture.intent(). Its HoldSeconds is
+	// overwritten by Acquire from ttl; every other field is set once by
+	// whichever command built this holder.
+	intent acquireSimHoldRequest
 }
 
 func (h *cliSimHolder) Acquire(ctx context.Context, udid string, ttl time.Duration) (string, error) {
 	path := "sessions/" + url.PathEscape(h.sessionID) + "/sim-leases/" + url.PathEscape(udid) + "/hold"
-	body := acquireSimHoldRequest{HoldSeconds: int(ttl.Seconds())}
+	body := h.intent
+	body.HoldSeconds = int(ttl.Seconds())
 	var res simHoldResponse
 	if err := h.ctx.postJSON(ctx, path, body, &res); err != nil {
 		return "", h.ctx.explainSimHoldRefusal(h.device, err)
@@ -578,12 +636,23 @@ func (h *cliSimHolder) Acquire(ctx context.Context, udid string, ttl time.Durati
 // Release gives the finger back. A failure here is worth saying out loud but
 // must not fail a gesture that already happened: the hold lapses on its own
 // within a minute either way.
-func (h *cliSimHolder) Release(ctx context.Context, udid, token string) {
+//
+// outcome.Performed is passed on as the `performed` query parameter, which the
+// daemon defaults to true when it is absent - so it is only sent when false,
+// keeping the common case's request unchanged. outcome.End is not sent and has
+// nothing to send: the CLI composes every gesture it runs in full before
+// asking for the hold, so the end already travelled with the intent. Only a
+// drag has an end this side could not know up front, and the CLI drives no
+// drags - the desktop pane's drag never leaves the daemon.
+func (h *cliSimHolder) Release(ctx context.Context, udid, token string, outcome simgesture.Outcome) {
 	if token == "" {
 		return
 	}
 	path := "sessions/" + url.PathEscape(h.sessionID) + "/sim-leases/" + url.PathEscape(udid) +
 		"/hold/" + url.PathEscape(token)
+	if !outcome.Performed {
+		path += "?performed=false"
+	}
 	if err := h.ctx.deleteJSON(ctx, path, nil); err != nil {
 		_, _ = fmt.Fprintf(h.ctx.deps.Err, "warning: could not hand the device's gesture hold back (%v); it lapses on its own shortly.\n", err)
 	}

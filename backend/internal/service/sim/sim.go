@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -92,8 +93,8 @@ type Manager interface {
 	// AcquireHold/ReleaseHold bracket one gesture. See hold.go: the lease says
 	// which session may drive the device, the hold says whether a gesture is in
 	// flight, and both are needed because one session can run two commands.
-	AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration) (domain.SimHold, error)
-	ReleaseHold(ctx context.Context, udid, token string) error
+	AcquireHold(ctx context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, intent GestureIntent) (domain.SimHold, error)
+	ReleaseHold(ctx context.Context, udid, token string, outcome GestureOutcome) error
 }
 
 // Store is the persistence surface the service owns; *sqlite.Store satisfies it.
@@ -106,13 +107,30 @@ type Store interface {
 	AcquireSimHold(ctx context.Context, hold domain.SimHold, now time.Time) (domain.SimHoldOutcome, error)
 	ReleaseSimHold(ctx context.Context, udid, token string, now time.Time) (bool, error)
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
+
+	// The recording surface: Task 1's tables, extended here (see recording.go)
+	// onto the gesture-hold lifecycle.
+	StartSimRecording(ctx context.Context, rec domain.SimRecording, now time.Time) (domain.SimRecordingOutcome, error)
+	StopSimRecording(ctx context.Context, udid string, sessionID domain.SessionID, now time.Time) (bool, error)
+	GetSimRecording(ctx context.Context, udid string) (domain.SimRecording, bool, error)
+	AppendSimRecordingStep(ctx context.Context, udid string, step domain.SimRecordingStep) (int64, bool, error)
+	ListSimRecordingSteps(ctx context.Context, udid string) ([]domain.SimRecordingStep, error)
 }
 
 // Service is the concrete Manager.
 type Service struct {
-	store  Store
-	clock  func() time.Time
-	tokens func() string
+	store    Store
+	clock    func() time.Time
+	tokens   func() string
+	recorder ScreenReader
+
+	// recMu guards pending and screens: the recorder's in-memory bookkeeping.
+	// See recording.go - both are keyed by hold token or udid, never touched
+	// outside a gesture hold, and small enough that one mutex for both is not
+	// a contention point.
+	recMu   sync.Mutex
+	pending map[string]pending
+	screens map[string]screenState
 }
 
 // Option customizes a Service.
@@ -128,9 +146,22 @@ func WithTokenSource(tokens func() string) Option {
 	return func(s *Service) { s.tokens = tokens }
 }
 
+// WithRecorder turns on gesture recording. Without it, AcquireHold and
+// ReleaseHold never look at a recording row or a screen: the lease service has
+// no reason to depend on a screen in order to exist, and every daemon that
+// never wires a ScreenReader in pays nothing for this package existing.
+func WithRecorder(screen ScreenReader) Option {
+	return func(s *Service) { s.recorder = screen }
+}
+
 // New builds the lease service over a store.
 func New(store Store, opts ...Option) *Service {
-	s := &Service{store: store, clock: func() time.Time { return time.Now().UTC() }}
+	s := &Service{
+		store:   store,
+		clock:   func() time.Time { return time.Now().UTC() },
+		pending: make(map[string]pending),
+		screens: make(map[string]screenState),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}

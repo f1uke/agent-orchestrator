@@ -18,7 +18,7 @@ func TestAcquireHold_GrantsToTheLeaseHolderWithADefaultTTL(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0)
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{})
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestAcquireHold_TokensAreNotGuessable(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i := 0; i < 5; i++ {
-		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0)
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{})
 		if err != nil {
 			t.Fatalf("hold %d: %v", i, err)
 		}
@@ -51,7 +51,7 @@ func TestAcquireHold_TokensAreNotGuessable(t *testing.T) {
 			t.Fatalf("hold token %q is too short to be unguessable", hold.Token)
 		}
 		seen[hold.Token] = true
-		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token); err != nil {
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 			t.Fatalf("release %d: %v", i, err)
 		}
 	}
@@ -66,7 +66,7 @@ func TestAcquireHold_RefusedWhenAnotherSessionHoldsTheLease(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	_, err := svc.AcquireHold(context.Background(), other, udidProMax, 0)
+	_, err := svc.AcquireHold(context.Background(), other, udidProMax, 0, sim.GestureIntent{})
 	var refused *sim.HoldRefusedError
 	if !errors.As(err, &refused) {
 		t.Fatalf("err = %v, want a *HoldRefusedError", err)
@@ -91,7 +91,7 @@ func TestAcquireHold_RefusedWhenNobodyHoldsTheDevice(t *testing.T) {
 	svc, store := newService(t, fixedClock(now))
 	owner := newSession(t, store, now)
 
-	_, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0)
+	_, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{})
 	var refused *sim.HoldRefusedError
 	if !errors.As(err, &refused) {
 		t.Fatalf("err = %v, want a *HoldRefusedError", err)
@@ -108,11 +108,11 @@ func TestAcquireHold_RefusedWhileTheSameSessionIsMidGesture(t *testing.T) {
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0); err != nil {
+	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{}); err != nil {
 		t.Fatalf("first hold: %v", err)
 	}
 
-	_, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0)
+	_, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{})
 	var refused *sim.HoldRefusedError
 	if !errors.As(err, &refused) {
 		t.Fatalf("err = %v, want a *HoldRefusedError", err)
@@ -131,11 +131,11 @@ func TestAcquireHold_TTLBounds(t *testing.T) {
 	}
 
 	for _, ttl := range []time.Duration{sim.MaxHoldTTL + time.Second, -time.Second} {
-		if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, ttl); !errors.Is(err, sim.ErrInvalid) {
+		if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, ttl, sim.GestureIntent{}); !errors.Is(err, sim.ErrInvalid) {
 			t.Fatalf("ttl %s: err = %v, want ErrInvalid", ttl, err)
 		}
 	}
-	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, sim.MaxHoldTTL)
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, sim.MaxHoldTTL, sim.GestureIntent{})
 	if err != nil {
 		t.Fatalf("max ttl: %v", err)
 	}
@@ -151,11 +151,11 @@ func TestReleaseHold_UnknownTokenIsNotFound(t *testing.T) {
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0); err != nil {
+	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{}); err != nil {
 		t.Fatalf("hold: %v", err)
 	}
 
-	if err := svc.ReleaseHold(context.Background(), udidProMax, "not-the-live-token"); !errors.Is(err, sim.ErrNotFound) {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, "not-the-live-token", sim.GestureOutcome{Performed: true}); !errors.Is(err, sim.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
@@ -167,15 +167,15 @@ func TestReleaseHold_FreesTheDeviceForTheNextGesture(t *testing.T) {
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	first, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0)
+	first, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{})
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := svc.ReleaseHold(context.Background(), udidProMax, first.Token); err != nil {
+	if err := svc.ReleaseHold(context.Background(), udidProMax, first.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
-	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0); err != nil {
+	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{}); err != nil {
 		t.Fatalf("the next gesture must be able to take the finger: %v", err)
 	}
 }
@@ -189,11 +189,11 @@ func TestAcquireHold_UDIDCaseCannotSlipPastTheLease(t *testing.T) {
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0); err != nil {
+	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, sim.GestureIntent{}); err != nil {
 		t.Fatalf("hold: %v", err)
 	}
 
-	_, err := svc.AcquireHold(context.Background(), owner, strings.ToLower(udidProMax), 0)
+	_, err := svc.AcquireHold(context.Background(), owner, strings.ToLower(udidProMax), 0, sim.GestureIntent{})
 	var refused *sim.HoldRefusedError
 	if !errors.As(err, &refused) || refused.Reason != sim.HoldRefusedBusy {
 		t.Fatalf("err = %v, want a busy refusal for the same device spelled differently", err)

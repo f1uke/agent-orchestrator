@@ -47,6 +47,19 @@ func TestDrags_FollowTheFingerUnderOneHold(t *testing.T) {
 	if got := rec.order(); got != "acquire,hold,hold,hold,hold,lift,release" {
 		t.Fatalf("order = %q; want one hold taken up front, the touch followed, then one lift and one release", got)
 	}
+	if performed, ok := rec.lastReleasePerformed(); !ok || !performed {
+		t.Fatalf("a drag the caller ended must be released as performed: performed=%v ok=%v", performed, ok)
+	}
+	// The hold was taken when the finger went down, so nothing upstream knows
+	// where the drag ended until it does. The release is what carries that
+	// back; without it a recording keeps the begin's own point as the end.
+	outcome, ok := rec.lastRelease()
+	if !ok || outcome.End == nil {
+		t.Fatalf("a drag must report where it ended when its hold is released: %+v", outcome)
+	}
+	if *outcome.End != at(0.5, 0.5) {
+		t.Fatalf("released end = %+v, want the point the drag ended at (0.5,0.5)", *outcome.End)
+	}
 }
 
 // A move is the only thing in this package that reaches a device without taking
@@ -105,6 +118,50 @@ func TestDrags_AQuietDragIsLiftedAndTheHoldGivenBack(t *testing.T) {
 	// And the device is free again: a new drag may start.
 	if err := drags.Begin(context.Background(), rec, rec, "UDID-A", "p-2", at(0.2, 0.2)); err != nil {
 		t.Fatalf("a device whose drag was lifted must be usable again: %v", err)
+	}
+}
+
+// A drag the watchdog lifted was abandoned, not completed - the client that
+// started it never said it was done. A session recording gestures must not
+// write down a drag nobody actually finished.
+func TestDrags_AnAbandonedDragIsReleasedAsNotPerformed(t *testing.T) {
+	rec := &recorder{}
+	drags := simgesture.NewDragsForTest(20*time.Millisecond, time.Minute)
+
+	if err := drags.Begin(context.Background(), rec, rec, "UDID-A", "p-1", at(0.5, 0.8)); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	eventually(t, "the watchdog to lift the finger", func() bool {
+		return rec.order() == "acquire,hold,lift,release"
+	})
+	if performed, ok := rec.lastReleasePerformed(); !ok || performed {
+		t.Fatalf("a drag abandoned to the watchdog must be released as not performed: performed=%v ok=%v", performed, ok)
+	}
+}
+
+// A completed drag reached the device: the app saw it and moved. Whether the
+// finger came back up is a separate fact with its own warning, and folding the
+// two together would silently drop a step the human actually performed.
+func TestDrag_CompletedDragIsPerformedEvenWhenTheFinalLiftFails(t *testing.T) {
+	rec := &recorder{liftErr: errors.New("still gone")}
+	drags := simgesture.NewDragsForTest(time.Second, time.Minute)
+	ctx := context.Background()
+
+	if err := drags.Begin(ctx, rec, rec, "UDID-A", "p-1", at(0.5, 0.8)); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	err := drags.End(ctx, "UDID-A", "p-1", at(0.5, 0.5))
+	var failed *simgesture.FailedError
+	if !errors.As(err, &failed) || failed.LiftErr == nil {
+		t.Fatalf("a lift that failed must still be reported loudly: %v", err)
+	}
+	performed, ok := rec.lastReleasePerformed()
+	if !ok {
+		t.Fatal("the hold must still be released even though the lift failed")
+	}
+	if !performed {
+		t.Fatal("a drag the caller deliberately ended reached the device and must be released as performed, " +
+			"even though its final lift failed - that failure is reported separately and must not erase the step")
 	}
 }
 

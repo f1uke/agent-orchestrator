@@ -94,6 +94,84 @@ type SimHoldOutcome struct {
 	Busy bool
 }
 
+// SimRecording is one open-or-closed capture of the gestures an AO session
+// performs on one device, kept so a later task can emit them as a Maestro UI
+// test flow. Like a lease, it is scoped by udid - one device carries at most
+// one recording - and starting one requires the caller to already hold a live
+// lease on that device: a recording without a lease behind it could not have
+// produced any gestures to capture.
+//
+// StoppedAt is nil while the recording is open. Stopping never deletes the
+// row or its steps: a flow is emitted from them after the fact, so both must
+// outlive the recording being stopped.
+type SimRecording struct {
+	UDID      string     `json:"udid"`
+	SessionID SessionID  `json:"sessionId"`
+	Name      string     `json:"name"`
+	StartedAt time.Time  `json:"startedAt"`
+	StoppedAt *time.Time `json:"stoppedAt,omitempty"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// SimRecordingStep is one captured gesture or observation within a
+// SimRecording, numbered from 1 in the order it was appended. The fields
+// carry everything a later emitter needs to translate the step into a
+// Maestro command: what kind of action it was, how it targeted the screen (a
+// selector, which "rung" of the selector strategy matched, and whether that
+// match was ambiguous), where on screen it happened, and free-form detail for
+// steps a selector cannot describe.
+type SimRecordingStep struct {
+	Seq int64     `json:"seq"`
+	At  time.Time `json:"at"`
+	// Kind names the action: e.g. "tap", "swipe", "type", "wait".
+	Kind string `json:"kind"`
+	// Selector identifies the element the step targeted, when one could be
+	// resolved. SelectorRung records which selector strategy produced it (a
+	// coarser rung means a weaker match), and Ambiguity>0 means more than one
+	// element on screen matched it. SelectorIndex is which of those Ambiguity
+	// matches this step resolved to, in tree order (0 when there is no
+	// ambiguity) - without it, re-emitting a flow from this step would always
+	// address the FIRST element sharing the selector, even when a later one is
+	// the one that was actually tapped.
+	Selector      string `json:"selector,omitempty"`
+	SelectorRung  int64  `json:"selectorRung,omitempty"`
+	SelectorIndex int64  `json:"selectorIndex,omitempty"`
+	Ambiguity     int64  `json:"ambiguity,omitempty"`
+	// OffScreen: the step's target was outside the visible viewport.
+	OffScreen bool `json:"offScreen,omitempty"`
+	// ScreenChange: this step caused a screen transition, so an emitted flow
+	// may need to wait for the new screen before continuing.
+	ScreenChange bool `json:"screenChange,omitempty"`
+	// X/Y is where the step began; ToX/ToY is where it ended (equal to X/Y for
+	// a tap, the far end of the gesture for a swipe).
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	ToX        float64 `json:"toX"`
+	ToY        float64 `json:"toY"`
+	DurationMS int64   `json:"durationMs,omitempty"`
+	// Text is what was typed, for kind "type".
+	Text string `json:"text,omitempty"`
+	// Detail is free-form context for steps a selector cannot describe.
+	Detail string `json:"detail,omitempty"`
+}
+
+// SimRecordingOutcome is what the database decided about a StartSimRecording
+// request, and enough context to explain a refusal without a second, racy
+// read - the same shape as SimHoldOutcome and for the same reason.
+type SimRecordingOutcome struct {
+	// Granted: the caller now owns the open recording on this device.
+	Granted   bool
+	Recording SimRecording
+	// Lease/Leased describe the live lease on the device at the time of the
+	// decision, so a refusal can name the holder.
+	Lease  SimLease
+	Leased bool
+	// Busy: a recording is already open on this device, so this is "already
+	// recording", not "not yours" or "no lease". The three need different
+	// advice, so they are reported apart.
+	Busy bool
+}
+
 // NormalizeSimUDID canonicalizes a simulator udid for storage and comparison.
 // simctl reports udids upper-cased but accepts either case, and the udid is the
 // primary key that enforces the lease's exclusion - an un-normalized "abc"

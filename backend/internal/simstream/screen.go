@@ -214,6 +214,24 @@ func (s *Screen) Driver(context.Context) (simbridge.Driver, error) {
 	return s.driver, s.drvErr
 }
 
+// AX reads a device's accessibility tree through the same resident driver a
+// gesture goes through.
+//
+// It exists so the gesture recorder (internal/service/sim) can see the screen
+// without owning a bridge of its own: the recorder reads the tree at the
+// moment a gesture takes its hold, which is the moment this driver is already
+// being used to touch the same device. A second NodeDriver would be a second
+// Node process, a second addon load and a second 370 ms attach on a device
+// that has one finger anyway - and the daemon would then have two bridges to
+// shut down instead of one.
+func (s *Screen) AX(ctx context.Context, udid string) (simbridge.Snapshot, error) {
+	driver, err := s.Driver(ctx)
+	if err != nil {
+		return simbridge.Snapshot{}, err
+	}
+	return driver.AX(ctx, udid)
+}
+
 // Keyboard asks a device which input mode it will read key presses through.
 //
 // Unlike the device listing, this is NOT cached. The mode follows the Mac's own

@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -45,6 +47,28 @@ type ReleaseSimLeaseResponse struct {
 // AcquireSimHoldInput is the body of POST .../sim-leases/{udid}/hold.
 type AcquireSimHoldInput struct {
 	HoldSeconds int `json:"holdSeconds,omitempty" description:"How long the gesture may hold the device, in seconds (1-60). Omit for the 30 second default. This is not a working window: it only bounds how long a command killed mid-gesture keeps the device."`
+	// Intent describes the gesture this hold is about to bracket, mirroring
+	// SimGestureInput's own coordinate/text/name fields one-for-one: it is what
+	// a session recording gestures on this device needs in order to capture
+	// the step, and is optional so a caller with nothing to record (or one
+	// that predates this field) still gets the hold.
+	Kind       string  `json:"kind,omitempty" description:"tap, swipe, type, button, drag-begin, drag-move or drag-end - the gesture this hold covers."`
+	X          float64 `json:"x,omitempty" description:"Normalized 0..1 screen coordinates, for tap/swipe/drag."`
+	Y          float64 `json:"y,omitempty"`
+	ToX        float64 `json:"toX,omitempty" description:"Where a swipe or drag ends."`
+	ToY        float64 `json:"toY,omitempty"`
+	DurationMS int     `json:"durationMs,omitempty" description:"Swipe duration in milliseconds."`
+	Text       string  `json:"text,omitempty" description:"The text a type gesture sends."`
+	Name       string  `json:"name,omitempty" description:"button: home or app-switcher."`
+	// Label and ID are the one pair with no SimGestureInput counterpart: a tap
+	// that named its target (`ao sim tap --label`/`--id`) rather than pointing
+	// at one. When either is set, a recording open on this device resolves the
+	// step by that name against the screen it already reads, instead of
+	// hit-testing X/Y - the name is what the caller actually asked for, and
+	// hit-testing a coordinate to rediscover it would recover a worse answer
+	// to a question already answered.
+	Label string `json:"label,omitempty" description:"tap: the element label this hold's gesture is about to tap, when acquired for a by-name tap."`
+	ID    string `json:"id,omitempty" description:"tap: the element's accessibility identifier, the other way a by-name tap may target it."`
 }
 
 // SimHoldResponse is the { hold } body returned by acquiring a gesture hold.
@@ -65,8 +89,50 @@ type SimHoldParam struct {
 	Token     string `path:"token" description:"The token returned when the hold was taken."`
 }
 
-// SimController owns the simulator device-lease routes. A nil Svc returns 501,
-// mirroring the other optional-service controllers.
+// ReleaseSimHoldQuery is the query string of DELETE .../hold/{token}. It is a
+// query parameter rather than a body because every DELETE route in this
+// package takes its arguments that way; see releaseHold for why an absent or
+// unparseable value falls back to true.
+type ReleaseSimHoldQuery struct {
+	Performed *bool `query:"performed,omitempty" description:"Whether the gesture this hold covered actually happened. Defaults to true when omitted. A session recording gestures on this device keeps the step only when it did: a gesture that was attempted and failed must not be written into the flow as if it had happened."`
+}
+
+// StartSimRecordingInput is the body of POST .../sim-recordings/{udid}.
+type StartSimRecordingInput struct {
+	Name string `json:"name,omitempty" description:"Optional label for the recording, e.g. the flow it will become."`
+}
+
+// SimRecordingResponse is the { recording } body returned by starting a
+// recording.
+type SimRecordingResponse struct {
+	Recording domain.SimRecording `json:"recording"`
+}
+
+// SimRecordingWithStepsResponse is the { recording, steps } body returned by
+// reading or stopping a recording.
+type SimRecordingWithStepsResponse struct {
+	Recording domain.SimRecording       `json:"recording"`
+	Steps     []domain.SimRecordingStep `json:"steps"`
+}
+
+// simRecordingService is the recording surface the recording routes depend
+// on. It is a separate interface from Manager - rather than three more
+// methods added there - because starting, reading and stopping a recording is
+// not bracketing one gesture the way AcquireHold/ReleaseHold is, and every
+// other Manager fake in this package would otherwise have to grow methods it
+// never exercises. *simsvc.Service already satisfies it (see
+// internal/service/sim/recording.go); c.Svc is asserted against it per
+// request, the same way a nil Svc is checked per request.
+type simRecordingService interface {
+	StartRecording(ctx context.Context, sessionID domain.SessionID, udid, name string) (domain.SimRecording, error)
+	StopRecording(ctx context.Context, sessionID domain.SessionID, udid string) (domain.SimRecording, []domain.SimRecordingStep, error)
+	GetRecording(ctx context.Context, udid string) (domain.SimRecording, []domain.SimRecordingStep, bool, error)
+}
+
+// SimController owns the simulator device-lease and gesture-recording routes.
+// A nil Svc returns 501, mirroring the other optional-service controllers; so
+// does a Svc that does not implement simRecordingService (only ever true in a
+// test double, since the concrete service implements both).
 type SimController struct {
 	Svc simsvc.Manager
 }
@@ -82,6 +148,12 @@ func (c *SimController) Register(r chi.Router) {
 	// shorter claim on the same device, and it cannot exist without the lease.
 	r.Post("/sessions/{sessionId}/sim-leases/{udid}/hold", c.acquireHold)
 	r.Delete("/sessions/{sessionId}/sim-leases/{udid}/hold/{token}", c.releaseHold)
+	// A recording hangs off the session the same way: it captures that
+	// session's gestures on the device, and (per the service) requires a live
+	// lease to start.
+	r.Post("/sessions/{sessionId}/sim-recordings/{udid}", c.startRecording)
+	r.Get("/sessions/{sessionId}/sim-recordings/{udid}", c.getRecording)
+	r.Delete("/sessions/{sessionId}/sim-recordings/{udid}", c.stopRecording)
 }
 
 func (c *SimController) list(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +222,12 @@ func (c *SimController) acquireHold(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
 		return
 	}
-	hold, err := c.Svc.AcquireHold(r.Context(), sessionID(r), chi.URLParam(r, "udid"), time.Duration(in.HoldSeconds)*time.Second)
+	intent := simsvc.GestureIntent{
+		Kind: in.Kind, X: in.X, Y: in.Y, ToX: in.ToX, ToY: in.ToY,
+		DurationMS: in.DurationMS, Text: in.Text, Name: in.Name,
+		Label: in.Label, ID: in.ID,
+	}
+	hold, err := c.Svc.AcquireHold(r.Context(), sessionID(r), chi.URLParam(r, "udid"), time.Duration(in.HoldSeconds)*time.Second, intent)
 	if err != nil {
 		writeSimError(w, r, err)
 		return
@@ -163,11 +240,119 @@ func (c *SimController) releaseHold(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/sim-leases/{udid}/hold/{token}")
 		return
 	}
-	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token")); err != nil {
+	// performed is a query parameter, not a body: every DELETE route in this
+	// package takes its arguments from the path or query, and a body here would
+	// be the first exception. It defaults to true when absent, so a client that
+	// has not been updated to send it keeps recording the gestures it actually
+	// performs. An unparseable value also falls back to that same default,
+	// deliberately: a gesture that already happened must not be refused over a
+	// malformed query string.
+	performed := true
+	if v := r.URL.Query().Get("performed"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			performed = parsed
+		}
+	}
+	// No End: this route releases a hold taken for a gesture that was composed
+	// in full before it started, so its end already travelled with the intent.
+	// A drag - the one gesture whose end is not knowable up front - never
+	// reaches here: it is opened, followed and closed inside the daemon by
+	// internal/simgesture.Drags, which carries the real end point back with its
+	// own release.
+	outcome := simsvc.GestureOutcome{Performed: performed}
+	if err := c.Svc.ReleaseHold(r.Context(), chi.URLParam(r, "udid"), chi.URLParam(r, "token"), outcome); err != nil {
 		writeSimError(w, r, err)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ReleaseSimHoldResponse{Released: true})
+}
+
+// simRecorder asserts c.Svc against the recording surface, answering 501 the
+// same way a nil Svc does when it is absent or does not implement it.
+func (c *SimController) simRecorder(w http.ResponseWriter, r *http.Request, method, path string) (simRecordingService, bool) {
+	rec, ok := c.Svc.(simRecordingService)
+	if c.Svc == nil || !ok {
+		apispec.NotImplemented(w, r, method, path)
+		return nil, false
+	}
+	return rec, true
+}
+
+func (c *SimController) startRecording(w http.ResponseWriter, r *http.Request) {
+	rec, ok := c.simRecorder(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-recordings/{udid}")
+	if !ok {
+		return
+	}
+	var in StartSimRecordingInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	recording, err := rec.StartRecording(r.Context(), sessionID(r), chi.URLParam(r, "udid"), in.Name)
+	if err != nil {
+		writeSimRecordingError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SimRecordingResponse{Recording: recording})
+}
+
+func (c *SimController) getRecording(w http.ResponseWriter, r *http.Request) {
+	rec, ok := c.simRecorder(w, r, "GET", "/api/v1/sessions/{sessionId}/sim-recordings/{udid}")
+	if !ok {
+		return
+	}
+	recording, steps, found, err := rec.GetRecording(r.Context(), chi.URLParam(r, "udid"))
+	if err != nil {
+		writeSimRecordingError(w, r, err)
+		return
+	}
+	if !found {
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND",
+			"no recording has ever been started on this simulator", nil)
+		return
+	}
+	if steps == nil {
+		steps = []domain.SimRecordingStep{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, SimRecordingWithStepsResponse{Recording: recording, Steps: steps})
+}
+
+func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
+	rec, ok := c.simRecorder(w, r, "DELETE", "/api/v1/sessions/{sessionId}/sim-recordings/{udid}")
+	if !ok {
+		return
+	}
+	recording, steps, err := rec.StopRecording(r.Context(), sessionID(r), chi.URLParam(r, "udid"))
+	if err != nil {
+		writeSimRecordingError(w, r, err)
+		return
+	}
+	if steps == nil {
+		steps = []domain.SimRecordingStep{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, SimRecordingWithStepsResponse{Recording: recording, Steps: steps})
+}
+
+// writeSimRecordingError maps recording refusals the same way writeSimError
+// maps hold/lease refusals: one code with a reason a caller can act on in
+// details, rather than a bare message it would have to pattern-match.
+func writeSimRecordingError(w http.ResponseWriter, r *http.Request, err error) {
+	var refused *simsvc.RecordingRefusedError
+	switch {
+	case errors.As(err, &refused):
+		details := map[string]any{"udid": refused.UDID, "reason": string(refused.Reason)}
+		if refused.Lease.SessionID != "" {
+			details["holder"] = string(refused.Lease.SessionID)
+			details["expiresAt"] = refused.Lease.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_RECORDING_REFUSED", err.Error(), details)
+	case errors.Is(err, simsvc.ErrNotFound):
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND", err.Error(), nil)
+	case errors.Is(err, simsvc.ErrInvalid):
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
+	default:
+		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SIM_OPERATION_FAILED", "Simulator recording operation failed", nil)
+	}
 }
 
 // writeSimError maps the service sentinels. Contention gets its own 409 with

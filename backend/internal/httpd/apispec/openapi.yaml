@@ -2935,6 +2935,20 @@ paths:
         schema:
           description: The token returned when the hold was taken.
           type: string
+      - description: 'Whether the gesture this hold covered actually happened. Defaults
+          to true when omitted. A session recording gestures on this device keeps
+          the step only when it did: a gesture that was attempted and failed must
+          not be written into the flow as if it had happened.'
+        in: query
+        name: performed
+        schema:
+          description: 'Whether the gesture this hold covered actually happened. Defaults
+            to true when omitted. A session recording gestures on this device keeps
+            the step only when it did: a gesture that was attempted and failed must
+            not be written into the flow as if it had happened.'
+          type:
+          - "null"
+          - boolean
       responses:
         "200":
           content:
@@ -2961,6 +2975,150 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Release the gesture hold, keeping the lease
+      tags:
+      - sim
+  /api/v1/sessions/{sessionId}/sim-recordings/{udid}:
+    delete:
+      operationId: stopSimRecording
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimRecordingWithStepsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop this session's open recording on a simulator and return everything
+        it captured
+      tags:
+      - sim
+    get:
+      operationId: getSimRecording
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimRecordingWithStepsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read a simulator's recording, open or stopped, and the steps captured
+        so far
+      tags:
+      - sim
+    post:
+      operationId: startSimRecording
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSimRecordingInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimRecordingResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start capturing this session's gestures on a simulator it already leases
       tags:
       - sim
   /api/v1/sessions/{sessionId}/smoke-checks:
@@ -4382,11 +4540,46 @@ components:
       type: object
     AcquireSimHoldInput:
       properties:
+        durationMs:
+          description: Swipe duration in milliseconds.
+          type: integer
         holdSeconds:
           description: 'How long the gesture may hold the device, in seconds (1-60).
             Omit for the 30 second default. This is not a working window: it only
             bounds how long a command killed mid-gesture keeps the device.'
           type: integer
+        id:
+          description: 'tap: the element''s accessibility identifier, the other way
+            a by-name tap may target it.'
+          type: string
+        kind:
+          description: tap, swipe, type, button, drag-begin, drag-move or drag-end
+            - the gesture this hold covers.
+          type: string
+        label:
+          description: 'tap: the element label this hold''s gesture is about to tap,
+            when acquired for a by-name tap.'
+          type: string
+        name:
+          description: 'button: home or app-switcher.'
+          type: string
+        text:
+          description: The text a type gesture sends.
+          type: string
+        toX:
+          description: Where a swipe or drag ends.
+          format: double
+          type: number
+        toY:
+          format: double
+          type: number
+        x:
+          description: Normalized 0..1 screen coordinates, for tap/swipe/drag.
+          format: double
+          type: number
+        "y":
+          format: double
+          type: number
       type: object
     AcquireSimLeaseInput:
       properties:
@@ -6877,6 +7070,104 @@ components:
       required:
       - lease
       type: object
+    SimRecording:
+      properties:
+        name:
+          type: string
+        sessionId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        stoppedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        udid:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - udid
+      - sessionId
+      - name
+      - startedAt
+      - updatedAt
+      type: object
+    SimRecordingResponse:
+      properties:
+        recording:
+          $ref: '#/components/schemas/SimRecording'
+      required:
+      - recording
+      type: object
+    SimRecordingStep:
+      properties:
+        ambiguity:
+          format: int64
+          type: integer
+        at:
+          format: date-time
+          type: string
+        detail:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        kind:
+          type: string
+        offScreen:
+          type: boolean
+        screenChange:
+          type: boolean
+        selector:
+          type: string
+        selectorIndex:
+          format: int64
+          type: integer
+        selectorRung:
+          format: int64
+          type: integer
+        seq:
+          format: int64
+          type: integer
+        text:
+          type: string
+        toX:
+          format: double
+          type: number
+        toY:
+          format: double
+          type: number
+        x:
+          format: double
+          type: number
+        "y":
+          format: double
+          type: number
+      required:
+      - seq
+      - at
+      - kind
+      - x
+      - "y"
+      - toX
+      - toY
+      type: object
+    SimRecordingWithStepsResponse:
+      properties:
+        recording:
+          $ref: '#/components/schemas/SimRecording'
+        steps:
+          items:
+            $ref: '#/components/schemas/SimRecordingStep'
+          type: array
+      required:
+      - recording
+      - steps
+      type: object
     SmokeAuthoredCaseInput:
       properties:
         expected:
@@ -7109,6 +7400,12 @@ components:
           type: string
       required:
       - projectId
+      type: object
+    StartSimRecordingInput:
+      properties:
+        name:
+          description: Optional label for the recording, e.g. the flow it will become.
+          type: string
       type: object
     SubmitReviewInput:
       properties:

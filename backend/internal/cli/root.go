@@ -71,10 +71,23 @@ type Deps struct {
 	LookPath           func(file string) (string, error)
 	CommandOutput      func(ctx context.Context, name string, args ...string) ([]byte, error)
 	CommandOutputInDir func(ctx context.Context, dir, name string, args ...string) ([]byte, error)
+	// CommandOutputWithEnv runs a command with extra environment on top of the
+	// process's own. It exists because `ao sim flow` must disable Maestro's
+	// analytics on every invocation, and mutating this process's environment to
+	// do that would leak into everything else the CLI runs.
+	CommandOutputWithEnv func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 	// StartStream runs a child process whose output is read as it arrives and
 	// which may have to be stopped rather than waited for. `ao sim log --follow`
 	// is the only caller: a `log stream` never ends on its own.
 	StartStream func(ctx context.Context, name string, args ...string) (ProcessStream, error)
+	// StartStreamWithEnv is StartStream plus extra environment on top of the
+	// process's own, the streaming counterpart to CommandOutputWithEnv. It
+	// exists because `ao sim flow run` must disable Maestro's analytics on
+	// every invocation while still streaming output as it arrives, and
+	// StartStream itself carries no environment parameter - mutating this
+	// process's own environment to smuggle a variable through it would leak
+	// into every other command the CLI runs.
+	StartStreamWithEnv func(ctx context.Context, env []string, name string, args ...string) (ProcessStream, error)
 	// DoctorGitHubRESTBase lets tests point the doctor GitHub token probe at
 	// httptest without mutating package-global state.
 	DoctorGitHubRESTBase string
@@ -103,7 +116,9 @@ func DefaultDeps() Deps {
 		LookPath:             exec.LookPath,
 		CommandOutput:        commandOutput,
 		CommandOutputInDir:   commandOutputInDir,
+		CommandOutputWithEnv: commandOutputWithEnv,
 		StartStream:          startProcessStream,
+		StartStreamWithEnv:   startProcessStreamWithEnv,
 		DoctorGitHubRESTBase: defaultDoctorGitHubRESTBase,
 		Now:                  time.Now,
 		Sleep:                time.Sleep,
@@ -117,6 +132,12 @@ func commandOutput(ctx context.Context, name string, args ...string) ([]byte, er
 func commandOutputInDir(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
 	cmd := aoprocess.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
+func commandOutputWithEnv(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
+	cmd := aoprocess.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
 	return cmd.CombinedOutput()
 }
 
@@ -152,8 +173,14 @@ func (d Deps) withDefaults() Deps {
 	if d.CommandOutputInDir == nil {
 		d.CommandOutputInDir = def.CommandOutputInDir
 	}
+	if d.CommandOutputWithEnv == nil {
+		d.CommandOutputWithEnv = def.CommandOutputWithEnv
+	}
 	if d.StartStream == nil {
 		d.StartStream = def.StartStream
+	}
+	if d.StartStreamWithEnv == nil {
+		d.StartStreamWithEnv = def.StartStreamWithEnv
 	}
 	if d.DoctorGitHubRESTBase == "" {
 		d.DoctorGitHubRESTBase = def.DoctorGitHubRESTBase

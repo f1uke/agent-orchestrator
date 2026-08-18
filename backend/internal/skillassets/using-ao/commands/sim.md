@@ -28,6 +28,11 @@ ao sim swipe  <x1> <y1> <x2> <y2> [flags]
 ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
 ao sim type   <text>           [flags]
 ao sim button <name>           [flags]
+ao sim flow check <file>       [flags]
+ao sim flow run   <file>       [flags]
+ao sim record start            [flags]
+ao sim record status           [flags]
+ao sim record stop             [flags]
 ```
 
 ## The loop that works
@@ -150,11 +155,12 @@ Read what is on a booted simulator's screen as a structured accessibility tree. 
 
 **Flags:**
 
-| Flag              | Description                                   |
-| ----------------- | --------------------------------------------- |
-| `--udid <udid>`   | Read this simulator instead of the booted one |
-| `--max-nodes <n>` | Stop after this many elements (default 500)   |
-| `--json`          | Output the tree as JSON                       |
+| Flag                             | Description                                                                                                                                                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--udid <udid>`                  | Read this simulator instead of the booted one                                                                                                                                                                                      |
+| `--max-nodes <n>`                | Stop after this many elements (default 500)                                                                                                                                                                                        |
+| `--json`                         | Output the tree as JSON                                                                                                                                                                                                            |
+| `--format <text\|json\|maestro>` | Output format. `text` (default) and `json` are the tree above; `maestro` prints a Maestro selector per element instead - see below. Passing both `--json` and a disagreeing `--format` is refused rather than silently picking one. |
 
 The device is resolved exactly like `ao sim shot`. Reading takes no lease and is never blocked by one, but the output always reports who holds the device.
 
@@ -404,3 +410,121 @@ ao sim ax                              # confirm what actually happened
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
 - **If a tap seems to do nothing AND `ao sim ax` comes back empty, the app itself may be stuck.** `ao sim ax` samples the foreground app's main thread before it reports an empty tree, and says so when that thread is blocked - with the frames that name what it is stuck in. A blocked main thread answers no accessibility query and processes no touch, so both symptoms have one cause and it is not accessibility. The usual cause is a pipe on the app's stdout that nobody is draining.
+
+---
+
+### ao sim record
+
+Capture the gestures this session drives on a claimed simulator and turn them into a Maestro flow: `ao sim record start` opens the capture, `ao sim record status` reports what it has captured so far without stopping it, and `ao sim record stop` closes it and writes the flow. It requires a live claim on the device (`ao sim claim`) and never claims one itself - `start` is refused, naming why, on a device this session has not claimed, one someone else holds, or one that already has a recording open.
+
+**Flags:**
+
+| Command  | Flag              | Description                                                              |
+| -------- | ----------------- | ------------------------------------------------------------------------- |
+| `start`  | `--udid <udid>`   | Record this simulator instead of the booted one                          |
+| `start`  | `--name <name>`   | Optional label for the recording, e.g. the flow it will become           |
+| `status` | `--udid <udid>`   | Report this simulator instead of the booted one                         |
+| `stop`   | `--udid <udid>`   | Stop recording this simulator instead of the booted one                 |
+| `stop`   | `--out <path>`    | Write the flow here instead of the session artifact directory           |
+| `stop`   | `--entry <path>`  | Path to a shared entry-point flow, prepended as `runFlow` (see below)    |
+| all three | `--json`         | Output the result as JSON                                                |
+
+**The loop:**
+
+```bash
+ao sim claim
+ao sim record start --name "sign up flow"
+ao sim tap --label "Continue"          # every ao sim tap/swipe/drag/type/button, and
+ao sim swipe 0.5 0.8 0.5 0.2           # every hand-driven gesture in the Device tab,
+                                        # becomes a step while a recording is open
+ao sim record status                   # how many steps so far, without stopping it
+ao sim record stop                     # closes it, writes the flow, prints its path
+```
+
+**What gets captured, and by what.** `ao sim tap`/`swipe`/`drag`/`type`/`button` all
+become steps - and so does a human driving the same session's **Device tab** in
+the desktop app by hand, with no separate switch to turn that on. Both paths
+acquire the same underlying gesture hold before touching the device, and the
+recorder hooks *that hold's* lifecycle rather than the CLI layer: it cannot tell
+a typed command from a click, and does not need to. A gesture that was
+attempted and failed - the hold released as not performed - is never recorded;
+only what actually reached the device becomes a step.
+
+**Where the flow lands.** `ao sim record stop` writes everything captured into
+this session's own artifact directory (`<AO data dir>/sim/<session id>/`),
+outside any repository, by the same rule `ao sim shot` uses for screenshots -
+so a generated flow can never be committed by accident. `--out` writes it
+somewhere else instead.
+
+**No `launchApp` is ever invented.** A recording begins wherever the app
+already was when `ao sim record start` ran - mid-session, on whatever screen
+happened to be open - and the emitted flow's header says so in a comment
+rather than fabricating the step that got there. Nothing here can know, or
+guess, how the app was launched.
+
+**`--entry` supplies the missing beginning.** Maestro cannot "resume from
+here" on its own, so a flow recorded mid-session is not runnable standalone
+until something launches the app first. Pass `--entry <path>` to a shared
+entry-point flow (e.g. a `login.yaml` the team already keeps around) and `ao
+sim record stop` prepends it as `- runFlow: <path>`, in place of the comment
+that otherwise tells a human to add their own. It changes nothing about the
+recorded steps - only what runs before them.
+
+```bash
+ao sim record stop --entry ../flows/sign-in.yaml
+```
+
+Run what comes out the same way as any other flow - see `ao sim flow` below.
+
+---
+
+## Turning what you explored into a Maestro flow
+
+`ao sim ax --format maestro` prints a Maestro selector for every element on the
+screen, with the caveat attached to each one:
+
+    ao sim ax --format maestro
+
+- A bare `- tapOn: "Some label"` means the label is unique in the tree.
+- `text:` plus `index:` means several elements share that text. The comment says
+  how many. Check you indexed the one you meant.
+- `id:` means the element has no label and was matched on its accessibility id.
+- `point:` means neither existed. A coordinate breaks on any layout change -
+  treat it as a last resort, not a selector.
+- `scrollUntilVisible` appears instead of a tap when the element is off screen.
+  An off-screen element has no point that reaches it.
+
+These are selectors, not a flow. You decide which steps belong in the test, in
+what order, and behind which waits.
+
+⚠ The ambiguity count is a lower bound. It is counted against the tree `ao sim
+ax` reads; Maestro walks the XCUITest hierarchy, which reports far more nodes for
+the same screen because one label commonly sits on both a container and its
+child. A selector reported as unique can still match several nodes for Maestro.
+The only way to know is to run it.
+
+### ao sim flow
+
+Work with Maestro flow files.
+
+```bash
+ao sim flow check flow.yaml            # parses it - no device involved
+ao sim claim --udid <test-device>
+ao sim flow run flow.yaml --udid <test-device>
+ao sim release --udid <test-device>
+```
+
+`ao sim flow check` is a pure parse. It catches unknown commands and malformed
+structure. It does NOT check that a selector matches anything, and it does not
+check values - an out-of-range `point:` passes the parse and fails at run time.
+
+`ao sim flow run` requires a claim on the target device and always pins
+`--device` for you. Both refuse loudly if `maestro` is not installed; AO never
+installs it - everything else in `ao sim`, including `ao sim ax --format
+maestro`, is unaffected.
+
+⚠ Run flows on a simulator set aside for testing, never on the one a human is
+working on. A Maestro flow's `launchApp` terminates the app under test and
+resets its privacy permissions to allow-everything. That is what a regression
+test wants, and it is destructive anywhere else. AO cannot tell the two devices
+apart - the lease is what you have, so claim deliberately.

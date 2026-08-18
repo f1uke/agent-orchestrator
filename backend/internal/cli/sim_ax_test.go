@@ -322,3 +322,132 @@ func TestSimAX_SaysSoWhenTheScreenNeverSettles(t *testing.T) {
 		t.Fatalf("a tree of nothing but furniture must say so, and what to do:\n%s", out)
 	}
 }
+
+func TestSimAX_FormatMaestroEmitsSelectorsPerElement(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: scrolledSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// The header still says what screen this is, because a selector list with
+	// no idea which app it came from is not actionable.
+	if !strings.Contains(out, "com.example.app") {
+		t.Errorf("missing the foreground app header:\n%s", out)
+	}
+	if !strings.Contains(out, `- tapOn: "Search"`) {
+		t.Errorf("missing the unique-label selector:\n%s", out)
+	}
+	// "See all" is below the fold in scrolledSnapshot.
+	if !strings.Contains(out, "- scrollUntilVisible:") {
+		t.Errorf("missing the off-screen scroll stanza:\n%s", out)
+	}
+}
+
+// On a real screen a container - the Application root, a row, a wrapper - has
+// no label and no id but does have a tap point, so it would otherwise fall to
+// the same brittle `point:` rung as a real leaf control, and on a screen with
+// hundreds of nodes those drown out the selectors anyone can actually use.
+func TestSimAX_FormatMaestroSkipsContainerPointBlocks(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if strings.Contains(out, "point:") {
+		t.Errorf("the Application root has no label or id but does have children, so it must not emit a point fallback:\n%s", out)
+	}
+	// Recursing into a skipped element's children is the whole point: the
+	// leaves underneath must still show up.
+	if !strings.Contains(out, `- tapOn: "Search"`) {
+		t.Errorf("missing the leaf selector for a real control:\n%s", out)
+	}
+}
+
+// A leaf with no label and no id is a real control, not a container, and must
+// keep its point fallback even though the rung is the same as a container's.
+func TestSimAX_FormatMaestroKeepsPointForALabellessLeaf(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Elements[0].Children = append(snap.Elements[0].Children, simbridge.Element{
+		Path: "0.2", Type: "Button", Enabled: true,
+		Tap: &simbridge.Point{X: 0.5, Y: 0.9},
+	})
+	driver := &fakeSimDriver{snapshot: snap}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, "point:") {
+		t.Errorf("a leaf with no label or id and no children must keep its point fallback:\n%s", out)
+	}
+}
+
+// writeSimAX prints a notice when --max-nodes capped the tree; the maestro
+// format must say the same thing, because a capped read also under-counts
+// ambiguity - the one number this whole design leans on - with nothing else
+// on the page saying so.
+func TestSimAX_FormatMaestroNotesTruncation(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--format", "maestro", "--max-nodes", "2")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, "2 of 3 elements shown") {
+		t.Errorf("missing the truncation notice:\n%s", out)
+	}
+	if !strings.Contains(out, "ambiguity") {
+		t.Errorf("must warn that the ambiguity counts below are now a lower bound:\n%s", out)
+	}
+	if !strings.Contains(out, "--max-nodes 3") {
+		t.Errorf("must say how to see the rest:\n%s", out)
+	}
+}
+
+func TestSimAX_FormatMaestroAndJSONTogetherIsRefused(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	_, _, err := executeCLI(t, deps, "sim", "ax", "--json", "--format", "maestro")
+	if err == nil {
+		t.Fatal("want an error when --json and --format disagree")
+	}
+	if !strings.Contains(err.Error(), "--json") || !strings.Contains(err.Error(), "--format") {
+		t.Errorf("error must name both flags, got %q", err)
+	}
+}
+
+func TestSimAX_UnknownFormatIsRefusedAndListsTheValid(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	_, _, err := executeCLI(t, deps, "sim", "ax", "--format", "yaml")
+	if err == nil {
+		t.Fatal("want an error for an unknown --format")
+	}
+	for _, want := range []string{"text", "json", "maestro"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must list %q, got %q", want, err)
+		}
+	}
+}
+
+func TestSimAX_JSONFlagStillWorksUnchanged(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--json")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var got simAXResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output is not the JSON payload it was before: %v", err)
+	}
+}

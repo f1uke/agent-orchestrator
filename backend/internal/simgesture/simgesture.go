@@ -31,6 +31,23 @@ import (
 // a caller killed mid-gesture keeps the device.
 const HoldSlack = 15 * time.Second
 
+// Outcome is what a release says about the gesture its hold covered.
+type Outcome struct {
+	// Performed says whether the gesture actually reached the device - not
+	// merely whether it was attempted. It is what a session recording gestures
+	// on this device uses to decide whether to keep the step it stashed when
+	// the hold was taken: a gesture that failed, or a drag abandoned rather
+	// than completed, must not leave a step behind that never really happened.
+	Performed bool
+	// End is where the gesture finished, for a gesture whose end was not known
+	// when the hold was taken. Only a drag sets it: every other gesture in this
+	// package is composed in full before the hold is asked for, so its end
+	// already travelled with the intent and repeating it here would be a second
+	// copy of the same fact. A drag's hold, by contrast, is taken on the finger
+	// going DOWN, and where it comes back up is only knowable when it does.
+	End *simbridge.Point
+}
+
 // Holder takes and gives back the device's gesture hold. The CLI implements it
 // over daemon HTTP; the daemon implements it over the lease service. Release
 // returns nothing on purpose: a hold that could not be handed back has already
@@ -38,7 +55,7 @@ const HoldSlack = 15 * time.Second
 // that happened into a reported failure.
 type Holder interface {
 	Acquire(ctx context.Context, udid string, ttl time.Duration) (token string, err error)
-	Release(ctx context.Context, udid, token string)
+	Release(ctx context.Context, udid, token string, outcome Outcome)
 }
 
 // Gesture is one composed gesture, ready to run.
@@ -114,7 +131,15 @@ func run(
 	if err != nil {
 		return Gesture{}, simbridge.PerformResult{}, err
 	}
-	defer holder.Release(ctx, udid, token)
+	// performed starts false and is only ever raised on the one path where the
+	// gesture actually reached the device: driver.Perform returning cleanly. A
+	// gesture that failed - even one that touched the screen and had to be
+	// recovered - never earns a recorded step, because it is not the gesture a
+	// caller asked for.
+	performed := false
+	// No End: a composed gesture's end travelled with the intent that took the
+	// hold, so there is nothing here the recorder does not already have.
+	defer func() { holder.Release(ctx, udid, token, Outcome{Performed: performed}) }()
 
 	gesture, err := compose(ctx)
 	if err != nil {
@@ -125,6 +150,7 @@ func run(
 
 	result, performErr := driver.Perform(ctx, udid, gesture.Events)
 	if performErr == nil {
+		performed = true
 		return gesture, result, nil
 	}
 

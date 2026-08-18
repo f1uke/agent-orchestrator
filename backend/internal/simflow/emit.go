@@ -1,0 +1,235 @@
+package simflow
+
+import (
+	"fmt"
+	"strings"
+)
+
+// StepKind is which action a Step performed, at the granularity Emit needs in
+// order to choose a YAML shape.
+//
+// It is deliberately coarser than the intent kinds a recording captures at
+// the HTTP boundary ("drag-begin", "drag-move", "drag-end" already resolve
+// to one recorded step by the time Emit sees it - see the recorder's own
+// "one hold, one step" rule). A caller building a Step from a stored step
+// maps whatever it drove onto one of these.
+type StepKind string
+
+// Step kinds Emit knows how to translate. A drag is emitted exactly like a
+// swipe (§8, "swipe / drag" is one row), so it maps onto StepSwipe too -
+// there is no separate StepDrag.
+const (
+	StepTap    StepKind = "tap"
+	StepType   StepKind = "type"
+	StepSwipe  StepKind = "swipe"
+	StepButton StepKind = "button"
+)
+
+// Step is one recorded gesture or observation, shaped for Emit.
+//
+// It is deliberately not domain.SimRecordingStep: this package stays free of
+// storage types, so a caller that has a SimRecordingStep in hand builds one
+// of these. Choice and Plain mirror Render's own parameters exactly, because
+// Emit hands a tap step straight to Render - there is no second
+// reconstruction of what a selector means, and the two can never disagree
+// about how one gets written.
+type Step struct {
+	// Seq identifies this step for a human, in an error naming the step Emit
+	// could not translate. It is the recording's own step number, carried
+	// through rather than recomputed here.
+	Seq int64
+
+	Kind StepKind
+
+	// Choice and Plain are the selector this step resolved to when it was
+	// recorded, in exactly the shape For/Render already use. They are handed
+	// straight to Render for a StepTap, and also (only to decide whether a
+	// stable target exists, never to re-render one) for the extendedWaitUntil
+	// stanza below.
+	Choice Choice
+	Plain  string
+
+	// ScreenChange says this step caused a screen transition. It was computed
+	// at record time against an accessibility tree Emit never sees, and must
+	// be read here rather than re-derived: Emit has no tree to compare
+	// against.
+	ScreenChange bool
+
+	// X, Y is where a swipe began, ToX, ToY where it ended - normalized 0..1
+	// exactly as simbridge reports them. Unused for every other Kind.
+	X, Y, ToX, ToY float64
+
+	// Text is what was typed, for StepType.
+	Text string
+
+	// Detail names the button pressed, for StepButton ("home",
+	// "app-switcher", ...).
+	Detail string
+}
+
+// EmitOptions is the provenance a flow's header records, plus what to do
+// about the entry point a recording never captures.
+//
+// There is deliberately no AppID field here. House style keeps
+// `appId: ${APP_ID}` an environment variable (spec §5), and Emit always
+// writes that literal placeholder regardless of what device the recording
+// ran on - so a field a caller could set and watch silently do nothing would
+// be worse than no field at all. If a bundle id ever needs to be explained to
+// a reader, it belongs in the header's own comment where a reader of the flow
+// sees it, not in a struct field nobody reads.
+//
+// There is also deliberately no Frontmost field. A "frontmost at start" line
+// sounds useful, but nothing upstream of this package persists which app was
+// in the foreground when a recording began (that would need a column on
+// sim_recording, which no caller has today), so the only honest value any
+// caller could pass is a permanent "unknown" - and a header line that always
+// reads "unknown" is noise a reader learns to skip past, which is exactly
+// where the entry-point instruction lives. If provenance turns out to matter,
+// it is a migration and a real value, not a placeholder shipped ahead of one.
+type EmitOptions struct {
+	// Device and Runtime describe the simulator the recording ran on, e.g.
+	// "iPhone 17 Pro Max" and "iOS 18.4".
+	Device  string
+	Runtime string
+	// RecordedAt is an already-formatted RFC3339 timestamp - Emit does not
+	// format one itself, so it stays a pure function of what it is given.
+	RecordedAt string
+	// Entry, when set, is a path to a shared entry-point flow. It becomes
+	// `- runFlow: <Entry>` as the very first step, in place of the comment
+	// that otherwise tells a human to add their own.
+	Entry string
+}
+
+// Emit turns a recording's steps into a house-style Maestro flow.
+//
+// Two things it will never do, both load-bearing (spec §8.2):
+//   - fabricate a launchApp. A recording starts wherever the app already
+//     was; the header states that fact, it does not invent the step that got
+//     there.
+//   - write a literal bundle id into the appId line. That line is always the
+//     `${APP_ID}` environment-variable placeholder.
+//
+// And one thing it refuses to do silently: a step this package has no
+// Maestro translation for - today, only the app-switcher button - fails Emit
+// outright, naming the step, rather than being dropped from the output. A
+// flow that quietly skips a step the recording says happened is worse than
+// one that refuses to be written.
+func Emit(steps []Step, opts EmitOptions) (string, error) {
+	var b strings.Builder
+
+	b.WriteString("appId: ${APP_ID}\n---\n")
+	fmt.Fprintf(&b, "# recorded by ao sim at %s, device %s (%s)\n", opts.RecordedAt, opts.Device, opts.Runtime)
+	if opts.Entry != "" {
+		// Quoted like every other scalar this package writes: a path holding a
+		// colon or a '#' is ordinary on disk and unparseable as bare YAML.
+		fmt.Fprintf(&b, "- runFlow: %q\n", opts.Entry)
+	} else {
+		b.WriteString("# add your own entry point above if this flow must start from a cold app,\n")
+		b.WriteString("#   e.g. `- runFlow: ../flows/<entry>.yaml`\n")
+	}
+
+	for _, step := range steps {
+		if step.ScreenChange && actsOnAnElement(step.Kind) {
+			writeExtendedWait(&b, step.Choice)
+		}
+		if err := writeStep(&b, step); err != nil {
+			return "", err
+		}
+	}
+	return b.String(), nil
+}
+
+// actsOnAnElement says whether a step's Choice describes something the step
+// actually targeted - which is what makes a wait on it honest.
+//
+// A tap and a swipe both go to a place on screen, so the selector recorded for
+// them was resolved from that place. A type and a button press do not: their
+// intent carries no coordinates at all, so the recorder hit-tests (0,0) and
+// resolves whatever happens to sit in the top-left corner - a status bar
+// clock, usually. Waiting for THAT element to appear before typing is a wait
+// on something the step has nothing to do with, which is the same untruth as
+// an invented coordinate: it either passes for the wrong reason or fails for
+// one. The step itself is still emitted; only the wait in front of it is
+// dropped.
+func actsOnAnElement(kind StepKind) bool {
+	return kind == StepTap || kind == StepSwipe
+}
+
+// writeExtendedWait emits the "wait for the new screen" stanza (spec §8.1)
+// before a step that changed screens - and only when there is something
+// stable to name. Each rung was considered on its own:
+//   - RungText / RungTextIndex: waited on, as a bare string. That is a text
+//     matcher in Maestro.
+//   - RungID: waited on too - an accessibility id is MORE stable than a text
+//     label, not less, so skipping it would leave exactly the screens whose
+//     only landmark is an id with no wait at all. It cannot use the bare
+//     string form, though: under `visible:` a bare string is always a text
+//     matcher, so an id has to be nested (`visible: { id: "..." }`) or
+//     Maestro would search for an element whose *text* equals the id.
+//   - RungPoint: skipped. A point already breaks on any layout change;
+//     waiting for a point to become "visible" is not a thing Maestro does.
+//   - RungNone, or OffScreen regardless of rung: skipped. There is either
+//     nothing to name, or the thing named was not on screen at record time -
+//     neither is an honest target to wait on.
+//
+// In every skipped case the step itself is still emitted; only the wait in
+// front of it is omitted.
+func writeExtendedWait(b *strings.Builder, c Choice) {
+	if c.OffScreen {
+		return
+	}
+	switch c.Rung {
+	case RungText, RungTextIndex:
+		b.WriteString("- extendedWaitUntil:\n")
+		fmt.Fprintf(b, "    visible: %q\n", c.Text)
+		b.WriteString("    timeout: 10000\n")
+	case RungID:
+		b.WriteString("- extendedWaitUntil:\n")
+		b.WriteString("    visible:\n")
+		fmt.Fprintf(b, "      id: %q\n", c.ID)
+		b.WriteString("    timeout: 10000\n")
+	default:
+		return
+	}
+}
+
+// writeStep emits the one command a recorded step becomes, per the mapping
+// in spec §8.
+func writeStep(b *strings.Builder, step Step) error {
+	switch step.Kind {
+	case StepTap:
+		// Render owns every rule about how a selector becomes YAML - escaping,
+		// quoting, the off-screen scroll, the ambiguity comment. Re-deriving
+		// any of that here would let this path and Render's disagree about how
+		// a selector is written, which is exactly the trap this package has
+		// already been caught by once (see the escaping test at the bottom of
+		// this file).
+		b.WriteString(Render(step.Choice, step.Plain))
+	case StepType:
+		fmt.Fprintf(b, "- inputText: %q\n", step.Text)
+	case StepSwipe:
+		fmt.Fprintf(b, "- swipe: {start: \"%d%%,%d%%\", end: \"%d%%,%d%%\"}\n",
+			percent(step.X), percent(step.Y), percent(step.ToX), percent(step.ToY))
+	case StepButton:
+		key, ok := maestroKeyCode(step.Detail)
+		if !ok {
+			return fmt.Errorf("step %d: button %q has no Maestro key code and cannot be translated to a flow step", step.Seq, step.Detail)
+		}
+		fmt.Fprintf(b, "- pressKey: %s\n", key)
+	default:
+		return fmt.Errorf("step %d: kind %q has no Maestro translation", step.Seq, step.Kind)
+	}
+	return nil
+}
+
+// maestroKeyCode maps a recorded button name onto Maestro's KeyCode. Only
+// Home has one - Maestro's KeyCode enum has no app-switcher entry at all
+// (spec §8's Step → YAML mapping table), so "app-switcher", and any other
+// button name this package does not recognize, falls through to the
+// "no translation" branch in writeStep rather than being silently skipped.
+func maestroKeyCode(name string) (string, bool) {
+	if name == "home" {
+		return "Home", true
+	}
+	return "", false
+}

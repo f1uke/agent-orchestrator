@@ -31,17 +31,29 @@ type ProcessStream interface {
 }
 
 // startProcessStream is the production ProcessStream.
+func startProcessStream(ctx context.Context, name string, args ...string) (ProcessStream, error) {
+	return startProcessStreamWithEnv(ctx, nil, name, args...)
+}
+
+// startProcessStreamWithEnv is startProcessStream plus extra environment on
+// top of the process's own. It is a second entry point rather than a
+// parameter on StartStream because that field's only other caller, `ao sim
+// log --follow`, has no environment to add and every existing call site would
+// otherwise need to pass nil; a nil env here is exactly that case; append(os.
+// Environ(), nil...) is just os.Environ(), so startProcessStream delegating
+// to this with a nil env is unchanged behaviour, not an approximation of it.
 //
 // The child's stdout is an os.Pipe we own rather than cmd.StdoutPipe, because
 // exec closes a StdoutPipe from Wait - which would race the read this is built
 // to allow. Owning the pipe means stopping the child and reading its output are
 // independent.
-func startProcessStream(ctx context.Context, name string, args ...string) (ProcessStream, error) {
+func startProcessStreamWithEnv(ctx context.Context, env []string, name string, args ...string) (ProcessStream, error) {
 	readFrom, writeTo, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
 	cmd := aoprocess.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = writeTo
 	stderr := &bytes.Buffer{}
 	cmd.Stderr = stderr
