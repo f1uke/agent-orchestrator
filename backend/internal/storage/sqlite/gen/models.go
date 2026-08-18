@@ -240,23 +240,25 @@ type SimRecording struct {
 }
 
 type SimRecordingStep struct {
-	Udid          string
-	Seq           int64
-	At            time.Time
-	Kind          string
-	Selector      string
-	SelectorRung  int64
-	Ambiguity     int64
-	OffScreen     int64
-	ScreenChange  int64
-	X             float64
-	Y             float64
-	ToX           float64
-	ToY           float64
-	DurationMs    int64
-	Text          string
-	Detail        string
-	SelectorIndex int64
+	Udid              string
+	Seq               int64
+	At                time.Time
+	Kind              string
+	Selector          string
+	SelectorRung      int64
+	Ambiguity         int64
+	OffScreen         int64
+	ScreenChange      int64
+	X                 float64
+	Y                 float64
+	ToX               float64
+	ToY               float64
+	DurationMs        int64
+	Text              string
+	Detail            string
+	SelectorIndex     int64
+	SelectorAnchor    string
+	SelectorAnchorRel string
 }
 
 type SmokeCheck struct {

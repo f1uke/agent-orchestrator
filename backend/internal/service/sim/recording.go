@@ -195,6 +195,43 @@ func (s *Service) GetRecording(ctx context.Context, udid string) (domain.SimReco
 	return rec, steps, true, nil
 }
 
+// recorderSettleReads bounds the recorder's settle.
+//
+// It counts the settle's OWN reads, which start fresh - the first read has
+// already happened by the time settling is decided on, so the worst case for
+// one gesture is four reads, not three. Three allows one retry, which is what
+// a screen one frame from being drawn needs, and four reads is far inside the
+// hold's own 30 s TTL, so a screen that never settles still cannot hold a
+// gesture open long enough to matter.
+const recorderSettleReads = 3
+
+// RecorderSettleMaxReads is that worst case, exported so the test that pins it
+// and the constant it is derived from cannot drift apart.
+const RecorderSettleMaxReads = recorderSettleReads + 1
+
+// stableEnough decides whether the screen a step is about to be described from
+// is worth describing from.
+//
+// The two signals are the ones that mean "this tree is not the screen yet",
+// and both are things that silently produce a WRONG selector rather than an
+// obviously missing one:
+//
+//   - nothing resolved under the gesture. Something was touched - the actor
+//     saw it - so a tree with nothing there is a tree that has not caught up.
+//     This is the case that produced the measurement's own false reading: a
+//     web-hosted screen mid-load reported six elements where the settled
+//     screen had twenty-one.
+//   - the tree is the status bar and nothing else, which the read path
+//     already treats as "the app has not published its screen yet".
+//
+// It deliberately does NOT try to detect a screen that resolved to something
+// plausible but incomplete. That cannot be told apart from a finished screen
+// without another read, and paying for one on every gesture is the cost this
+// function exists to avoid.
+func stableEnough(snap simbridge.Snapshot, resolved bool) bool {
+	return resolved && !snap.OnlyStatusBar
+}
+
 // recordIntent is what AcquireHold calls, once the hold itself is granted, to
 // resolve intent into a step and stash it under token. expiresAt is the
 // hold's own expiry, carried through so the stash entry cannot outlive it.
@@ -219,7 +256,8 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	// screen would be damage, done exactly when a device is misbehaving and
 	// the human most needs to drive it. Losing one recorded step is a
 	// nuisance, not that.
-	snap, err := s.recorder.AX(ctx, udid)
+	read := func(ctx context.Context) (simbridge.Snapshot, error) { return s.recorder.AX(ctx, udid) }
+	snap, err := read(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "sim recorder: could not read the screen; skipping this step",
 			"udid", udid, "error", err)
@@ -227,6 +265,31 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	}
 
 	choice, el, found := elementFor(snap, intent)
+	if !stableEnough(snap, found) {
+		// The screen this step will be described from has not arrived. Read
+		// again until it stops changing, then resolve against THAT.
+		//
+		// ⚠ Conditional, not unconditional, and the condition is the whole
+		// design. This read sits synchronously in AcquireHold, between the
+		// hold being granted and the gesture being performed, so settling
+		// every gesture would add a full AX read (~1.5 s) to every tap a human
+		// makes while recording. The common case - the screen is up and the
+		// finger landed on something - therefore costs nothing extra, and the
+		// budget is only spent on the case that actually corrupts a selector:
+		// nothing resolvable under the finger, or a tree that is still just
+		// the status bar. `ao sim ax --settle` is the unconditional one, for
+		// callers reading a screen rather than acting on it.
+		//
+		// A settle that fails is not an error here: the step is still worth
+		// recording from the last read, exactly as it would have been without
+		// this at all.
+		if settled, res, settleErr := simbridge.ReadSettled(ctx, read, simbridge.SettleOptions{MaxReads: recorderSettleReads}); settleErr == nil {
+			snap = settled
+			choice, el, found = elementFor(snap, intent)
+			slog.DebugContext(ctx, "sim recorder: settled the screen before resolving a step",
+				"udid", udid, "reads", res.Reads, "settled", res.Settled, "resolved", found)
+		}
+	}
 
 	s.recMu.Lock()
 	prev, hasPrev := s.screens[udid]
@@ -265,6 +328,10 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	switch choice.Rung {
 	case simflow.RungText, simflow.RungTextIndex:
 		step.Selector = choice.Text
+	case simflow.RungTextAnchor:
+		step.Selector = choice.Text
+		step.SelectorAnchor = choice.Anchor
+		step.SelectorAnchorRel = string(choice.Relation)
 	case simflow.RungID:
 		step.Selector = choice.ID
 	}

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -449,5 +450,74 @@ func TestSimAX_JSONFlagStillWorksUnchanged(t *testing.T) {
 	var got simAXResult
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("output is not the JSON payload it was before: %v", err)
+	}
+}
+
+// The hot path must stay one read. `ao sim ax` backs every agent's picture of
+// the screen and `tap --label` reads on every tap, so settling being off by
+// default is a property worth pinning rather than an implementation detail.
+func TestSimAX_DoesNotSettleUnlessAsked(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, _ := touchDeps(t, driver)
+
+	if _, _, err := executeCLI(t, deps, "sim", "ax"); err != nil {
+		t.Fatalf("sim ax failed: %v", err)
+	}
+	if driver.reads() != 1 {
+		t.Fatalf("reads = %d, want 1 - a plain read must not pay for settling", driver.reads())
+	}
+}
+
+// The case this flag exists for: content that arrives after the first read.
+// The measurement that motivated it read a loading screen as six elements and
+// concluded, wrongly, that the tree could not see web content.
+func TestSimAX_SettleReturnsTheScreenThatArrivedLate(t *testing.T) {
+	loading := fixtureSnapshot()
+	loading.Elements = nil
+	loading.NodeCount = 0
+	arrived := fixtureSnapshot()
+	driver := &fakeSimDriver{snapshotQueue: []simbridge.Snapshot{loading}, snapshot: arrived}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--settle")
+	if err != nil {
+		t.Fatalf("sim ax --settle failed: %v", err)
+	}
+	if driver.reads() < 2 {
+		t.Fatalf("reads = %d, want at least 2 with --settle", driver.reads())
+	}
+	if strings.Contains(out, "still changing") {
+		t.Fatalf("the reads agreed, so nothing needs saying:\n%s", out)
+	}
+	if !strings.Contains(out, "Search") {
+		t.Fatalf("returned the loading screen instead of the settled one:\n%s", out)
+	}
+}
+
+// A screen that never stops moving has to bound out and say so, or a caller
+// acts on a half-drawn screen believing it settled.
+func TestSimAX_SettleSaysSoWhenTheScreenNeverStops(t *testing.T) {
+	// Every read shows a different label, which is what a spinner or a
+	// counting timer looks like from here: the tree never repeats.
+	frame := func(n int) simbridge.Snapshot {
+		snap := fixtureSnapshot()
+		snap.Elements[0].Children[0].Label = fmt.Sprintf("Loading %d", n)
+		return snap
+	}
+	driver := &fakeSimDriver{
+		snapshotQueue: []simbridge.Snapshot{frame(1), frame(2), frame(3)},
+		snapshot:      frame(4),
+	}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax", "--settle")
+	if err != nil {
+		t.Fatalf("a moving screen is not an error: %v", err)
+	}
+	if !strings.Contains(out, "still changing") {
+		t.Fatalf("an unsettled read must say it is one:\n%s", out)
+	}
+	if driver.reads() > simbridge.DefaultSettleReads {
+		t.Fatalf("reads = %d, want no more than the budget of %d", driver.reads(), simbridge.DefaultSettleReads)
 	}
 }

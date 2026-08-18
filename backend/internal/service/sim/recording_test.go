@@ -37,15 +37,26 @@ func newServiceWithOpts(t *testing.T, now func() time.Time, opts ...sim.Option) 
 // property TestAcquireHold_DoesNotReadTheScreenWhenNoRecordingIsOpen exists to
 // pin.
 type fakeScreenReader struct {
-	snap  simbridge.Snapshot
-	err   error
-	calls int
+	snap simbridge.Snapshot
+	// script, when set, is returned one entry per call, with the last entry
+	// repeating - which is how a screen that arrives late is expressed. It
+	// lives here rather than in a second reader type so that "how many times
+	// was AX called" stays one counter with one meaning.
+	script []simbridge.Snapshot
+	err    error
+	calls  int
 }
 
 func (f *fakeScreenReader) AX(_ context.Context, _ string) (simbridge.Snapshot, error) {
 	f.calls++
 	if f.err != nil {
 		return simbridge.Snapshot{}, f.err
+	}
+	if len(f.script) > 0 {
+		if f.calls <= len(f.script) {
+			return f.script[f.calls-1], nil
+		}
+		return f.script[len(f.script)-1], nil
 	}
 	return f.snap, nil
 }
@@ -620,5 +631,164 @@ func TestAcquireHold_MarksScreenChangeWhenTheForegroundAppChanged(t *testing.T) 
 	}
 	if !steps[1].ScreenChange {
 		t.Fatal("the second step's foreground app differs from the first's; it must be marked as a screen change")
+	}
+}
+
+// The case the real-app measurement was itself fooled by: a screen whose
+// content arrives late. The first read has nothing under the finger, so the
+// recorder must read again and describe the step from the screen that turned
+// up - not record a step it could not resolve.
+func TestRecordIntent_SettlesWhenNothingResolvedUnderTheGesture(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	arrived := snapshotWithButton("com.app.a", "Continue")
+	// An empty tree first: the app is up, the screen is not.
+	loading := simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "com.app.a"}}
+	reader := &fakeScreenReader{script: []simbridge.Snapshot{loading, arrived, arrived}}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != "Continue" {
+		t.Fatalf("selector = %q, want the element from the settled screen", steps[0].Selector)
+	}
+	if reader.calls < 2 {
+		t.Errorf("AX calls = %d; an unresolved gesture must trigger another read", reader.calls)
+	}
+}
+
+// The other half of the same decision, and the reason it is conditional: this
+// read sits between a hold being granted and the gesture being performed, so
+// a screen that is already up must cost exactly one read. If this ever fails,
+// every tap a human makes while recording just got a full AX read slower.
+func TestRecordIntent_SettledScreenCostsNoExtraRead(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent()); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+
+	if reader.calls != 1 {
+		t.Errorf("AX calls = %d, want 1 - settling must not run on a screen that resolved", reader.calls)
+	}
+}
+
+// A screen that never settles must not hold the gesture open indefinitely: the
+// step is recorded from the last read, exactly as it would have been if
+// settling did not exist.
+func TestRecordIntent_UnsettleableScreenStillRecordsAStep(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	// Every read differs and none has anything under the finger.
+	reader := &fakeScreenReader{script: []simbridge.Snapshot{
+		{Frontmost: simbridge.Frontmost{BundleID: "com.app.a"}},
+		snapshotWithButton("com.app.a", "One"),
+		snapshotWithButton("com.app.a", "Two"),
+	}}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("a screen that will not settle must not fail the hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want the step recorded anyway", len(steps))
+	}
+	// One first read plus the settle's own budget, and not one more: this
+	// number is what stops an animating screen from holding a gesture open.
+	if reader.calls > sim.RecorderSettleMaxReads {
+		t.Errorf("AX calls = %d; settling must be bounded at %d", reader.calls, sim.RecorderSettleMaxReads)
+	}
+}
+
+// An anchored selector is only worth resolving if it survives to the flow.
+// Rung, anchor and relation all have to come back out of the store, or
+// re-emitting silently falls back to the index the anchor exists to replace.
+func TestRecordIntent_AnchoredSelectorRoundTripsThroughTheStore(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	// Two identically labelled buttons with a unique heading between them.
+	snap := simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.app.a"},
+		Screen:    simbridge.Size{Width: 400, Height: 800},
+		Elements: []simbridge.Element{
+			recordedRow("0.0", "Buy", 0, 100),
+			recordedRow("0.1", "Second Section", 0, 300),
+			recordedRow("0.2", "Buy", 0, 500),
+		},
+	}
+	reader := &fakeScreenReader{snap: snap}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	// Tap the second "Buy": centre of the row at y=500 on an 800-point screen.
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "tap", X: 0.125, Y: (500 + 10) / 800.0})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].SelectorRung != int64(simflow.RungTextAnchor) {
+		t.Fatalf("rung = %d, want RungTextAnchor (%d)", steps[0].SelectorRung, simflow.RungTextAnchor)
+	}
+	if steps[0].SelectorAnchor != "Second Section" {
+		t.Errorf("anchor = %q, want the unique nearby label", steps[0].SelectorAnchor)
+	}
+	if steps[0].SelectorAnchorRel != string(simflow.RelBelow) {
+		t.Errorf("relation = %q, want below", steps[0].SelectorAnchorRel)
+	}
+}
+
+// recordedRow is an element with a real frame and a box, which is what
+// hitTest and the anchor rung both need.
+func recordedRow(path, label string, x, y float64) simbridge.Element {
+	const w, h, sw, sh = 100.0, 20.0, 400.0, 800.0
+	return simbridge.Element{
+		Path:  path,
+		Label: label,
+		Frame: simbridge.Rect{X: x, Y: y, Width: w, Height: h},
+		Tap:   &simbridge.Point{X: (x + w/2) / sw, Y: (y + h/2) / sh},
+		Box:   &simbridge.Box{X1: x / sw, Y1: y / sh, X2: (x + w) / sw, Y2: (y + h) / sh},
 	}
 }

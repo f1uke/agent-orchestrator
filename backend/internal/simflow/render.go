@@ -5,6 +5,34 @@ import (
 	"strings"
 )
 
+// reviewMarker prefixes the comment on any step the generator could not
+// resolve with confidence.
+//
+// It is one fixed string rather than prose per rung so that a human, a grep
+// and Emit's header all recognise the same thing. The point is the one the
+// real-app measurement made: a step that was guessed and a step that is
+// certain must not look alike in the emitted YAML, because a suite that
+// passes while tapping the wrong element teaches people to trust it.
+const reviewMarker = "# REVIEW:"
+
+// NeedsReview reports whether this Choice was a guess rather than a resolved
+// selector - the same condition that makes Render write a reviewMarker.
+//
+// It exists so Emit's header and Render's per-step comment cannot disagree
+// about which steps are guesses; there is one rule and both read it.
+func (c Choice) NeedsReview() bool {
+	switch c.Rung {
+	case RungTextIndex, RungPoint, RungNone:
+		return true
+	case RungText:
+		// A by-name tap that matched several candidates is stored as RungText
+		// with no Index - see ForAmbiguousText. It is a guess too.
+		return c.Ambiguity > 1
+	default:
+		return false
+	}
+}
+
 // Render writes the Maestro YAML for acting on one element, with the comment
 // that says how far to trust it.
 //
@@ -26,8 +54,8 @@ func Render(c Choice, plain string) string {
 		// Off screen is exactly the case where the caller cannot look at the
 		// screen to sanity-check a match, so the ambiguity warning matters more
 		// here than anywhere else, not less.
-		if c.Ambiguity > 1 {
-			fmt.Fprintf(&b, "# %d elements share this text - index picks one, verify it is the one you mean\n", c.Ambiguity)
+		if c.NeedsReview() && c.Ambiguity > 1 {
+			fmt.Fprintf(&b, "%s %d elements share this text - scrolling finds whichever comes first. Check it.\n", reviewMarker, c.Ambiguity)
 		}
 		// An off-screen element has no point to touch, so the only honest
 		// command is the one that brings it on screen first.
@@ -49,18 +77,42 @@ func Render(c Choice, plain string) string {
 		// unique label still gets none, so this stays a comment worth reading
 		// rather than one every step carries.
 		if c.Ambiguity > 1 {
-			fmt.Fprintf(&b, "# %d elements share this text - index picks one, verify it is the one you mean\n", c.Ambiguity)
-			b.WriteString("# which one was tapped could not be determined - verify this selector, or add your own index\n")
+			fmt.Fprintf(&b, "%s %d elements share this text, and which one was tapped could not be\n", reviewMarker, c.Ambiguity)
+			b.WriteString("#   determined - this selector takes whichever Maestro finds first. Check it.\n")
 		}
 		if c.Escaped {
 			b.WriteString("# escaped: the label contains regex characters, and Maestro matches text as a regex\n")
 		}
 		fmt.Fprintf(&b, "- tapOn: %q\n", c.Text)
+	case RungTextAnchor:
+		// Narrowed, not guessed. The anchor is resolved by Maestro inside its
+		// own hierarchy, so unlike an index it does not depend on our tree and
+		// Maestro's counting the same elements. Say which anchor and why, so a
+		// reader editing the flow knows what the step is leaning on.
+		fmt.Fprintf(&b, "# %d elements share this text - pinned by the unique label %q rather than an index\n", c.Ambiguity, c.Anchor)
+		if c.Escaped || c.AnchorEscaped {
+			b.WriteString("# escaped: a label contains regex characters, and Maestro matches text as a regex\n")
+		}
+		b.WriteString("- tapOn:\n")
+		fmt.Fprintf(&b, "    text: %q\n", c.Text)
+		fmt.Fprintf(&b, "    %s:\n", c.Relation)
+		fmt.Fprintf(&b, "      text: %q\n", c.Anchor)
 	case RungTextIndex:
 		// Unlike RungText above, an index WAS picked - at record time, from the
 		// same tree this Choice was resolved against - so the warning here is
 		// "verify the index is still the one you mean", not "no index exists".
-		fmt.Fprintf(&b, "# %d elements share this text - index picks one, verify it is the one you mean\n", c.Ambiguity)
+		//
+		// This is the rung the real-app measurement caught landing on a
+		// DIFFERENT element 14% of the time, silently, because the index is
+		// counted in our tree and replayed against Maestro's. Nothing here can
+		// fix that (anchorFor already tried and found nothing unique to lean
+		// on), so the only honest thing left is to refuse to look like the
+		// rungs that ARE trustworthy - hence the marker, which Emit also
+		// collects into the flow's header.
+		fmt.Fprintf(&b, "%s %d elements share this text and no unique nearby label pins this one down.\n", reviewMarker, c.Ambiguity)
+		b.WriteString("#   The index below is counted in the accessibility tree we recorded from, and\n")
+		b.WriteString("#   Maestro counts its own - measured on a real app, that lands on a different\n")
+		b.WriteString("#   element 14% of the time, WITHOUT failing. Check this step before trusting it.\n")
 		if c.Escaped {
 			b.WriteString("# escaped: the label contains regex characters, and Maestro matches text as a regex\n")
 		}

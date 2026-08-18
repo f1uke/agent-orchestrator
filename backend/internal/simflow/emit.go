@@ -128,6 +128,8 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 		b.WriteString("#   e.g. `- runFlow: ../flows/<entry>.yaml`\n")
 	}
 
+	writeReviewHeader(&b, steps)
+
 	for _, step := range steps {
 		if step.ScreenChange && actsOnAnElement(step.Kind) {
 			writeExtendedWait(&b, step.Choice)
@@ -137,6 +139,34 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// writeReviewHeader states, at the top of the flow, how many steps the
+// generator could not resolve with confidence.
+//
+// A reader opening a generated flow decides in the first two seconds whether
+// to trust it. Per-step "# REVIEW:" comments are the detail; this is the thing
+// that makes a human go looking for them at all, and it is why the count is
+// stated rather than a bare "some steps need review". Nothing is written when
+// every step resolved - a banner that is always there is a banner nobody
+// reads.
+//
+// The condition is Choice.NeedsReview, the same one Render writes its marker
+// from, so the header can never claim a flow is clean while a step below it
+// carries a marker.
+func writeReviewHeader(b *strings.Builder, steps []Step) {
+	guessed := 0
+	for _, step := range steps {
+		if actsOnAnElement(step.Kind) && step.Choice.NeedsReview() {
+			guessed++
+		}
+	}
+	if guessed == 0 {
+		return
+	}
+	fmt.Fprintf(b, "#\n# REVIEW REQUIRED: %d of %d steps could not be resolved to one element\n", guessed, len(steps))
+	b.WriteString("# with confidence, and are marked \"# REVIEW:\" below. They will RUN - and may\n")
+	b.WriteString("# pass while touching the wrong element. Check them before relying on this flow.\n#\n")
 }
 
 // actsOnAnElement says whether a step's Choice describes something the step
@@ -179,7 +209,13 @@ func writeExtendedWait(b *strings.Builder, c Choice) {
 		return
 	}
 	switch c.Rung {
-	case RungText, RungTextIndex:
+	case RungText, RungTextIndex, RungTextAnchor:
+		// The anchor rung waits on its text like the other two. The anchor
+		// itself is deliberately NOT part of the wait: the wait exists to say
+		// "the new screen has arrived", and the target's own text is what
+		// answers that. Nesting the relative selector here would make the wait
+		// fail for a reason that has nothing to do with the screen having
+		// loaded.
 		b.WriteString("- extendedWaitUntil:\n")
 		fmt.Fprintf(b, "    visible: %q\n", c.Text)
 		b.WriteString("    timeout: 10000\n")

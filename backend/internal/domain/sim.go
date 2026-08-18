@@ -136,7 +136,15 @@ type SimRecordingStep struct {
 	Selector      string `json:"selector,omitempty"`
 	SelectorRung  int64  `json:"selectorRung,omitempty"`
 	SelectorIndex int64  `json:"selectorIndex,omitempty"`
-	Ambiguity     int64  `json:"ambiguity,omitempty"`
+	// SelectorAnchor and SelectorAnchorRel pin an ambiguous selector without
+	// an index: "the one element matching Selector that lies <rel> the element
+	// labelled <anchor>". They are preferred over SelectorIndex when set,
+	// because an index is counted in the tree this step was recorded from
+	// while the runner counts its own - measured on a real app, that lands on
+	// a different element 14% of the time and the flow still passes.
+	SelectorAnchor    string `json:"selectorAnchor,omitempty"`
+	SelectorAnchorRel string `json:"selectorAnchorRel,omitempty"`
+	Ambiguity         int64  `json:"ambiguity,omitempty"`
 	// OffScreen: the step's target was outside the visible viewport.
 	OffScreen bool `json:"offScreen,omitempty"`
 	// ScreenChange: this step caused a screen transition, so an emitted flow

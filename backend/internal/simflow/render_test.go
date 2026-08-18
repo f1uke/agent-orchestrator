@@ -19,8 +19,13 @@ func TestRender_RepeatedTextEmitsIndexAndSaysWhy(t *testing.T) {
 	got := simflow.Render(simflow.Choice{
 		Rung: simflow.RungTextIndex, Text: "Continue", Index: 1, Ambiguity: 3,
 	}, "Continue")
-	if !strings.Contains(got, "# 3 elements share this text") {
+	if !strings.Contains(got, "3 elements share this text") {
 		t.Errorf("missing the ambiguity comment: %q", got)
+	}
+	// The index rung is the one measured landing on a different element 14% of
+	// the time without failing, so it must not read like a rung that resolved.
+	if !strings.Contains(got, "# REVIEW:") {
+		t.Errorf("an indexed step is a guess and must be marked for review: %q", got)
 	}
 	for _, want := range []string{"- tapOn:", "    text: \"Continue\"", "    index: 1"} {
 		if !strings.Contains(got, want) {
@@ -96,8 +101,11 @@ func TestRender_OffScreenWithAmbiguityStillWarns(t *testing.T) {
 	got := simflow.Render(simflow.Choice{
 		Rung: simflow.RungTextIndex, Text: "Continue", Index: 1, Ambiguity: 3, OffScreen: true, ScrollDirection: simflow.ScrollDown,
 	}, "Continue")
-	if !strings.Contains(got, "# 3 elements share this text") {
+	if !strings.Contains(got, "3 elements share this text") {
 		t.Errorf("missing the ambiguity comment on the off-screen path: %q", got)
+	}
+	if !strings.Contains(got, "# REVIEW:") {
+		t.Errorf("an ambiguous off-screen step is still a guess: %q", got)
 	}
 	if !strings.Contains(got, "- scrollUntilVisible:") {
 		t.Errorf("missing the scroll stanza: %q", got)
@@ -154,5 +162,62 @@ func TestRender_EscapedTextIsValidYAMLNotJustEscaped(t *testing.T) {
 	}
 	if !strings.Contains(got, `"a\\(b"`) {
 		t.Errorf("want the backslash doubled for YAML, got %q", got)
+	}
+}
+
+// The anchor rung must emit Maestro's nested relative selector, and must NOT
+// emit an index - carrying one would defeat the entire point of the rung.
+func TestRender_AnchorEmitsTheRelativeSelectorAndNoIndex(t *testing.T) {
+	got := simflow.Render(simflow.Choice{
+		Rung: simflow.RungTextAnchor, Text: "Buy", Ambiguity: 3,
+		Anchor: "Second Section", Relation: simflow.RelBelow,
+	}, "Buy")
+
+	for _, want := range []string{"- tapOn:", "    text: \"Buy\"", "    below:", "      text: \"Second Section\""} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "index:") {
+		t.Errorf("an anchored selector must carry no index:\n%s", got)
+	}
+	if strings.Contains(got, "# REVIEW:") {
+		t.Errorf("an anchored step was narrowed, not guessed:\n%s", got)
+	}
+	if !strings.Contains(got, "3 elements share this text") {
+		t.Errorf("the ambiguity count is still worth stating:\n%s", got)
+	}
+}
+
+// Whichever of the two matchers needed escaping, the reader has to be told:
+// both are compiled as regexes by Maestro.
+func TestRender_AnchorEscapingIsAnnouncedEvenWhenOnlyTheAnchorNeededIt(t *testing.T) {
+	got := simflow.Render(simflow.Choice{
+		Rung: simflow.RungTextAnchor, Text: "Buy", Ambiguity: 2,
+		Anchor: `Total \(THB\)`, AnchorEscaped: true, Relation: simflow.RelAbove,
+	}, "Buy")
+
+	if !strings.Contains(got, "# escaped:") {
+		t.Errorf("missing the escaping comment: %q", got)
+	}
+	if !strings.Contains(got, `      text: "Total \\(THB\\)"`) {
+		t.Errorf("missing the escaped anchor: %q", got)
+	}
+}
+
+// A point is brittle and an unaddressable element is worse; both are guesses
+// and must carry the same marker an index does, or a reader learns the marker
+// only means "index".
+func TestRender_PointAndUnaddressableAreGuessesToo(t *testing.T) {
+	for _, c := range []simflow.Choice{
+		{Rung: simflow.RungPoint, PercentX: 50, PercentY: 80},
+		{Rung: simflow.RungNone},
+	} {
+		if !c.NeedsReview() {
+			t.Errorf("%v should need review", c.Rung)
+		}
+	}
+	if (simflow.Choice{Rung: simflow.RungID, ID: "x"}).NeedsReview() {
+		t.Error("an accessibility id is the most stable thing on the screen and is not a guess")
 	}
 }

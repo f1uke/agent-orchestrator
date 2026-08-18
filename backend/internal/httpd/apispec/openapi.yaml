@@ -7124,6 +7124,10 @@ components:
           type: boolean
         selector:
           type: string
+        selectorAnchor:
+          type: string
+        selectorAnchorRel:
+          type: string
         selectorIndex:
           format: int64
           type: integer
