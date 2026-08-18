@@ -740,3 +740,63 @@ func TestSimGesture_ADragStepForAnUnknownDeviceIsStillRefused(t *testing.T) {
 		t.Fatalf("a move for an unknown device reached one: %v", got)
 	}
 }
+
+// --- keyboard keys ----------------------------------------------------------
+
+// 🗝 A named key is sent as a key press and is NOT planned like text.
+//
+// The distinction is the layout bug's own lesson turned around. A CHARACTER has
+// to be planned, because the guest remaps character keys according to its input
+// mode - which is how `ao sim type "fa12345"` once arrived as Thai gibberish.
+// A key that produces no character has nothing to remap, so it goes straight
+// through, and asking the device about its keyboard for one would be paying a
+// subprocess for an answer that cannot change the outcome.
+func TestSimGesture_NamedKeysAreSentDirectlyAndNeverAskAboutTheKeyboard(t *testing.T) {
+	for _, name := range []string{"enter", "backspace", "tab", "arrow-up", "arrow-down", "arrow-left", "arrow-right"} {
+		t.Run(name, func(t *testing.T) {
+			driver := &fakeDriver{}
+			screen := &fakeScreen{listing: oneBooted(), driver: driver}
+			srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+			code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+				map[string]any{"kind": "key", "name": name})
+			if code != http.StatusOK {
+				t.Fatalf("status %d: %v", code, out)
+			}
+			if _, calls := screen.keyboardAsked(); calls != 0 {
+				t.Errorf("a key that produces no character asked about the keyboard %d time(s)", calls)
+			}
+			if detail, _ := out["detail"].(string); detail != name {
+				t.Errorf("detail = %q, want %q", detail, name)
+			}
+			// Down then up: a key left held is the keyboard's stuck finger, and
+			// every later keystroke would arrive with it applied.
+			if len(driver.events) != 1 {
+				t.Fatalf("driver was called %d time(s), want once", len(driver.events))
+			}
+			events := driver.events[0]
+			if len(events) != 2 {
+				t.Fatalf("events = %d, want a down and an up: %+v", len(events), events)
+			}
+			if events[0].Kind != "key" || events[0].Type != "down" {
+				t.Errorf("first event = %+v, want a key down", events[0])
+			}
+			if events[1].Type != "up" || events[1].Usage != events[0].Usage {
+				t.Errorf("second event = %+v, want the same key released", events[1])
+			}
+		})
+	}
+}
+
+func TestSimGesture_UnknownKeyIsRefusedBeforeTheDevice(t *testing.T) {
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, &fakeSimService{}, &fakeScreen{listing: oneBooted(), driver: driver})
+	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "key", "name": "page-down"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422", code)
+	}
+	if len(driver.events) != 0 {
+		t.Fatal("an unknown key must not reach the device")
+	}
+}

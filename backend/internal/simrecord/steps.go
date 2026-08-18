@@ -115,6 +115,8 @@ func flowStepKind(kind string) simflow.StepKind {
 		return simflow.StepSwipe
 	case "button":
 		return simflow.StepButton
+	case "key":
+		return simflow.StepKey
 	default:
 		return simflow.StepKind(kind)
 	}

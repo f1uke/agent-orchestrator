@@ -298,6 +298,26 @@ func stableEnough(snap simbridge.Snapshot, resolved bool) bool {
 func (s *Service) resolveScreen(ctx context.Context, udid string, intent GestureIntent) (
 	snap simbridge.Snapshot, choice simflow.Choice, el simbridge.Element, found, ok bool,
 ) {
+	// 🗝 A gesture that targets no element never reads, and never settles.
+	//
+	// Typing, a key press and a hardware button carry no coordinates, so
+	// resolving "what is under the finger" for them means hit-testing (0,0) -
+	// whatever happens to sit in the top-left corner, usually a status bar
+	// clock. That answer is not merely useless, it is actively wrong: it is
+	// why simflow refuses to write a wait on it (see actsOnAnElement there),
+	// and the recorder now applies the same rule at the point the question is
+	// asked rather than the point the answer is written.
+	//
+	// ⚠ The cost of not doing this was measured by a test: a `type` intent
+	// resolved nothing at (0,0), which read as "the screen has not arrived",
+	// which took the fallback read AND a settle - three accessibility reads in
+	// front of a human's keystroke. #209 took that work off the gesture path
+	// for pointer gestures; this is the same defect on the path typing uses.
+	if !targetsAnElement(intent.Kind) {
+		remembered, _ := s.rememberedScreen(udid)
+		return remembered, simflow.Choice{}, simbridge.Element{}, false, true
+	}
+
 	if remembered, fresh := s.rememberedScreen(udid); fresh {
 		choice, el, found = elementFor(remembered, intent)
 		if stableEnough(remembered, found) {
@@ -345,6 +365,20 @@ func (s *Service) resolveScreen(ctx context.Context, udid string, intent Gesture
 			"udid", udid, "reads", res.Reads, "settled", res.Settled, "resolved", found)
 	}
 	return snap, choice, el, found, true
+}
+
+// targetsAnElement says whether a gesture is aimed at something on screen.
+//
+// It mirrors simflow.actsOnAnElement, deliberately and by the same reasoning: a
+// tap and a swipe go to a place, so the thing at that place describes them. A
+// type, a key and a button do not - their intent has no coordinates at all.
+func targetsAnElement(kind string) bool {
+	switch kind {
+	case "tap", "swipe", "drag", "drag-begin", "drag-move", "drag-end":
+		return true
+	default:
+		return false
+	}
 }
 
 // rememberedScreen returns the maintained screen, and whether it is young
@@ -456,7 +490,10 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 	s.recMu.Unlock()
 
 	screenChange := false
-	if hasPrev {
+	// A snapshot only counts as a comparison when there is one. A gesture that
+	// targets no element may have had no screen to look at, and an empty
+	// frontmost would otherwise read as "the app changed".
+	if hasPrev && snap.Frontmost.BundleID != "" {
 		switch {
 		case snap.Frontmost.BundleID != prev.frontmost:
 			screenChange = true

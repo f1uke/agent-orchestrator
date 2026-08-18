@@ -15,7 +15,15 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { type Sandbox, deviceState, dragThrough, openDevicePane, skipReason, startSandbox } from "./sandbox";
+import {
+	type Sandbox,
+	deviceState,
+	dragThrough,
+	focusWindow,
+	openDevicePane,
+	skipReason,
+	startSandbox,
+} from "./sandbox";
 
 let sandbox: Sandbox;
 const skip = skipReason();
@@ -494,4 +502,120 @@ test("a drag recorded at full speed still records where it really ended", async 
 	expect(Number(endY), "the drag was recorded as ending where it started").toBeLessThan(Number(startY));
 	expect(Number(endY)).toBeLessThan(50);
 	clearRecordings(sandbox);
+});
+
+// --- the human's own keyboard ------------------------------------------------
+
+/**
+ * Typing was the one thing this tab did not forward. You could tap a field,
+ * watch the caret appear, type - and nothing arrived, so the only way in was
+ * `ao sim type` from a terminal while looking at the tab.
+ *
+ * ⚠ jsdom can see none of this: not whether a key reached the device, and not
+ * focus as a browser resolves it. What is pinned here is delivery and scoping
+ * on a real device; the character-by-character rules are in
+ * src/renderer/hooks/useDeviceKeyboard.test.ts, where they cost nothing.
+ */
+async function deviceField(sandbox: Sandbox): Promise<string> {
+	const tree = execFileSync(sandbox.aoBin, ["sim", "ax", "--udid", sandbox.udid], { encoding: "utf8" });
+	const line = tree.split("\n").find((l) => l.includes('TextField "'));
+	const value = line?.match(/TextField "([^"]*)"/)?.[1] ?? "";
+	// Spotlight shows its placeholder when the field is empty.
+	return value === "Search" ? "" : value.trim();
+}
+
+/**
+ * Claims the device if it is not already this session's, and turns driving on.
+ *
+ * It also puts the window back to a comfortable size and in front, because an
+ * earlier case in this file deliberately shrinks it to the minimum width and
+ * nothing captures while the window is in the background - so a case that
+ * needs to drive has to set that up rather than inherit whatever the last one
+ * left.
+ */
+async function readyToDrive(sandbox: Sandbox) {
+	await sandbox.app.evaluate(({ BrowserWindow }) => {
+		BrowserWindow.getAllWindows()[0]?.setSize(1280, 900);
+	});
+	await focusWindow(sandbox);
+	await sandbox.page.waitForTimeout(500);
+	const claim = sandbox.page.getByRole("button", { name: /claim to drive|take over from/i });
+	if (await claim.isVisible().catch(() => false)) await claim.click();
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	await expect(drive).toBeVisible({ timeout: 20_000 });
+	if ((await drive.getAttribute("aria-pressed")) !== "true") await drive.click();
+	await expect(drive).toHaveAttribute("aria-pressed", "true");
+}
+
+/** Opens Spotlight and puts the caret in its search field. */
+async function openSpotlightField(sandbox: Sandbox) {
+	// exact, because a recorded flow's path contains "home" and the copy button
+	// carries that whole path in its accessible name - which is right for the
+	// copy button and ambiguous for this locator.
+	//
+	// Disabled while a gesture is still in flight, so wait for the pane to be
+	// idle rather than racing it.
+	const home = sandbox.page.getByRole("button", { name: "Home", exact: true });
+	await expect(home).toBeEnabled({ timeout: 20_000 });
+	await home.click();
+	await sandbox.page.waitForTimeout(1500);
+	const box = await sandbox.page.getByTestId("sim-canvas").boundingBox();
+	if (!box) throw new Error("no canvas");
+	await sandbox.page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.35);
+	await sandbox.page.mouse.down();
+	for (const y of [0.45, 0.55, 0.65, 0.75]) {
+		await sandbox.page.mouse.move(box.x + box.width * 0.5, box.y + box.height * y);
+		await sandbox.page.waitForTimeout(16);
+	}
+	await sandbox.page.mouse.up();
+	await sandbox.page.waitForTimeout(2000);
+	await sandbox.page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.936);
+	await sandbox.page.mouse.down();
+	await sandbox.page.mouse.up();
+	await sandbox.page.waitForTimeout(1500);
+}
+
+test("typing on the human's own keyboard reaches the device", async () => {
+	await readyToDrive(sandbox);
+	await openSpotlightField(sandbox);
+	const canvas = sandbox.page.getByTestId("sim-canvas");
+	await canvas.focus();
+	// Clear whatever a previous run left, using the key under test.
+	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
+	await sandbox.page.waitForTimeout(2500);
+
+	await sandbox.page.keyboard.type("abc");
+	await sandbox.page.waitForTimeout(2500);
+	expect(await deviceField(sandbox), "what was typed did not reach the field").toBe("abc");
+
+	// Backspace, then the arrows - a caret move is the only thing that can put
+	// a character in the MIDDLE of what was already there.
+	await sandbox.page.keyboard.press("Backspace");
+	await sandbox.page.waitForTimeout(2000);
+	expect(await deviceField(sandbox)).toBe("ab");
+	await sandbox.page.keyboard.press("ArrowLeft");
+	await sandbox.page.waitForTimeout(800);
+	await sandbox.page.keyboard.type("X");
+	await sandbox.page.waitForTimeout(2500);
+	expect(await deviceField(sandbox), "the arrow key did not move the caret").toBe("aXb");
+});
+
+// ⚠ The rule that keeps the rest of AO usable: keys reach the device only when
+// the device surface has focus. jsdom cannot judge focus the way a browser
+// does, so this is checked where focus is real.
+test("keys do not reach the device unless the device surface has focus", async () => {
+	await readyToDrive(sandbox);
+	await openSpotlightField(sandbox);
+	const canvas = sandbox.page.getByTestId("sim-canvas");
+	await canvas.focus();
+	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
+	await sandbox.page.waitForTimeout(2500);
+	const before = await deviceField(sandbox);
+
+	// Escape is the way out, and is never sent on.
+	await sandbox.page.keyboard.press("Escape");
+	await expect(canvas).not.toBeFocused();
+	await sandbox.page.keyboard.type("nope");
+	await sandbox.page.waitForTimeout(2500);
+	expect(await deviceField(sandbox), "keys reached the device with the surface unfocused").toBe(before);
 });

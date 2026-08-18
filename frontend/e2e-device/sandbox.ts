@@ -47,6 +47,8 @@ export type Sandbox = {
 	udid: string;
 	/** The sandbox daemon's data directory, which is where recorded flows land. */
 	dataDir: string;
+	/** The ao binary this harness built, for read-only checks against the device. */
+	aoBin: string;
 	dispose: () => Promise<void>;
 };
 
@@ -232,6 +234,7 @@ export async function startSandbox(): Promise<Sandbox> {
 		api,
 		udid,
 		dataDir: env.AO_DATA_DIR,
+		aoBin: ao,
 		dispose: async () => {
 			await app.close().catch(() => {});
 			rmSync(root, { recursive: true, force: true });
