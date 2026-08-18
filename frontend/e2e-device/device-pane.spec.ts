@@ -372,3 +372,126 @@ test("nothing about recording resizes the screen at the minimum window width", a
 
 	clearRecordings(sandbox);
 });
+
+// --- recording must not change how the tab behaves ---------------------------
+
+/**
+ * ⚠ The regression this pins, which shipped in #208 and the human hit at once:
+ * with a recording open, driving the tab got slow and drag-to-scroll stopped
+ * working ENTIRELY.
+ *
+ * One cause, two symptoms. The recorder read the accessibility tree between
+ * the finger going down and the touch reaching the device; the bridge
+ * serializes reads and touches, so that read (~0.5 s here, ~1.5 s on a real
+ * app) was time the finger spent in the air. And because the drag stream sends
+ * one request at a time and coalesces moves, a ~0.5 s stall on `drag-begin`
+ * meant every intermediate move was collapsed and then dropped by the end:
+ * the device received a touch-down and a touch-up with NO motion between them,
+ * which is not a scroll at any speed.
+ *
+ * Measured, before: tap 45 ms -> 616 ms, and a drag went from 9 gesture
+ * requests to 2. After: identical either way.
+ *
+ * jsdom can see none of this. The request COUNT is the structurally checkable
+ * half of it and is what makes the scroll failure visible here; the
+ * milliseconds are in the record.
+ */
+function countGestures(sandbox: Sandbox): { stop: () => { kinds: string[]; slowest: number } } {
+	const seen: { kind: string; ms: number }[] = [];
+	const onFinished = (request: import("@playwright/test").Request) => {
+		if (!request.url().includes("/gesture")) return;
+		const timing = request.timing();
+		let kind = "";
+		try {
+			kind = (JSON.parse(request.postData() ?? "{}") as { kind?: string }).kind ?? "";
+		} catch {
+			kind = "";
+		}
+		seen.push({ kind, ms: Math.max(0, timing.responseEnd - timing.requestStart) });
+	};
+	sandbox.page.on("requestfinished", onFinished);
+	return {
+		stop: () => {
+			sandbox.page.off("requestfinished", onFinished);
+			return { kinds: seen.map((s) => s.kind), slowest: Math.max(0, ...seen.map((s) => s.ms)) };
+		},
+	};
+}
+
+async function dragForScroll(sandbox: Sandbox) {
+	await dragThrough(
+		sandbox,
+		[0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45].map((y) => ({ x: 0.5, y })),
+	);
+	await sandbox.page.waitForTimeout(800);
+}
+
+test("a recording does not change how a drag reaches the device", async () => {
+	clearRecordings(sandbox);
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	if ((await drive.getAttribute("aria-pressed")) !== "true") await drive.click();
+	await expect(drive).toHaveAttribute("aria-pressed", "true");
+
+	const plain = countGestures(sandbox);
+	await dragForScroll(sandbox);
+	const withoutRecording = plain.stop();
+	const moves = withoutRecording.kinds.filter((k) => k === "drag-move").length;
+	expect(moves, "the baseline drag delivered no motion, so this test cannot mean anything").toBeGreaterThan(2);
+
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "true");
+
+	const recorded = countGestures(sandbox);
+	await dragForScroll(sandbox);
+	const withRecording = recorded.stop();
+
+	// The shape of the gesture must be identical. Before the fix this was
+	// ["drag-begin", "drag-end"] - every move swallowed.
+	expect(withRecording.kinds, "recording changed the drag the device received").toEqual(withoutRecording.kinds);
+	// And nothing on the path may block for anything like an accessibility
+	// read. The threshold is far above the ~2 ms these take and far below the
+	// ~500 ms a read costs, so it fails on the regression and not on a slow
+	// machine.
+	expect(withRecording.slowest, "a gesture blocked long enough to have taken a screen read").toBeLessThan(250);
+
+	await button.click();
+	await sandbox.page.getByTestId("sim-stop-summary").waitFor();
+});
+
+// Speed must not have been bought with the drag end coordinates #208 fixed.
+// Both properties, proved by the same drag.
+test("a drag recorded at full speed still records where it really ended", async () => {
+	clearRecordings(sandbox);
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	if ((await drive.getAttribute("aria-pressed")) !== "true") await drive.click();
+
+	const button = sandbox.page.getByTestId("sim-record-toggle");
+	await button.click();
+	await expect(button).toHaveAttribute("aria-pressed", "true");
+
+	const counted = countGestures(sandbox);
+	await dragThrough(
+		sandbox,
+		[0.8, 0.7, 0.6, 0.5, 0.4].map((y) => ({ x: 0.5, y })),
+	);
+	await sandbox.page.waitForTimeout(800);
+	const during = counted.stop();
+	expect(during.slowest, "the gesture path blocked").toBeLessThan(250);
+
+	await button.click();
+	await sandbox.page.getByTestId("sim-stop-summary").waitFor();
+
+	const dir = path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows");
+	const written = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
+	expect(written).toHaveLength(1);
+	const body = readFileSync(path.join(dir, written[0]), "utf8");
+	const swipe = body.match(/- swipe: \{start: "(\d+)%,(\d+)%", end: "(\d+)%,(\d+)%"\}/);
+	expect(swipe, `no swipe in the recorded flow:\n${body}`).not.toBeNull();
+	const [, , startY, , endY] = swipe!;
+	// It went up the screen, and the end is where the finger left - not the
+	// middle of the screen, which is what the fallback used to record.
+	expect(Number(endY), "the drag was recorded as ending where it started").toBeLessThan(Number(startY));
+	expect(Number(endY)).toBeLessThan(50);
+	clearRecordings(sandbox);
+});
