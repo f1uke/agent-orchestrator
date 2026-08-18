@@ -1111,3 +1111,170 @@ func TestReleaseHold_RefreshesEvenWhenTheGestureDidNotHappen(t *testing.T) {
 		t.Errorf("steps = %d, want 0 for a gesture that never happened", len(steps))
 	}
 }
+
+// --- typing and keys are recorded like anything else ------------------------
+
+// A recorded login that silently omitted the typing produces a flow that
+// cannot replay, so typed text and the keys around it are captured exactly the
+// way a tap is - through the same hold, off the same path.
+func TestAcquireHold_RecordsTypedTextAndKeys(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	for _, intent := range []sim.GestureIntent{
+		{Kind: "type", Text: "hello"},
+		{Kind: "key", Name: "backspace"},
+		// Non-ASCII is the human's real case, and it must survive being stored
+		// and read back exactly as typed.
+		{Kind: "type", Text: "สวัสดี"},
+		{Kind: "key", Name: "enter"},
+	} {
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, intent)
+		if err != nil {
+			t.Fatalf("hold %+v: %v", intent, err)
+		}
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 4 {
+		t.Fatalf("steps = %d, want 4", len(steps))
+	}
+	if steps[0].Kind != "type" || steps[0].Text != "hello" {
+		t.Errorf("step 1 = %q %q, want the typed text", steps[0].Kind, steps[0].Text)
+	}
+	if steps[1].Kind != "key" || steps[1].Detail != "backspace" {
+		t.Errorf("step 2 = %q %q, want the key", steps[1].Kind, steps[1].Detail)
+	}
+	if steps[2].Text != "สวัสดี" {
+		t.Errorf("step 3 text = %q, want it unchanged", steps[2].Text)
+	}
+	if steps[3].Detail != "enter" {
+		t.Errorf("step 4 = %q, want enter", steps[3].Detail)
+	}
+}
+
+// ⚠ #209 removed the accessibility read from between the finger going down and
+// the touch reaching the device. Typing must not put work back on that path:
+// a key press is not a screen read, and neither is starting one.
+func TestAcquireHold_TypingAndKeysAddNoReadToTheGesturePath(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	primed := reader.calls
+
+	for _, intent := range []sim.GestureIntent{
+		{Kind: "type", Text: "hello"},
+		{Kind: "key", Name: "enter"},
+		buttonIntent(),
+	} {
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, intent)
+		if err != nil {
+			t.Fatalf("hold %+v: %v", intent, err)
+		}
+		// Checked BEFORE the release, because the release is where the read is
+		// allowed to happen - after the gesture, with nobody waiting.
+		if reader.calls != primed {
+			t.Fatalf("%s performed %d read(s) while the gesture was in flight", intent.Kind, reader.calls-primed)
+		}
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+		primed = reader.calls
+	}
+}
+
+// A drag DOES target something: it starts on an element, and that element is
+// what its selector and its screen-change detection are built from. Typing and
+// key presses are the ones that target nothing.
+//
+// ⚠ Found by a mutation check: dropping the drag kinds from targetsAnElement
+// broke nothing, because every other test in this file drives taps. A drag
+// recorded with no selector loses both the wait stanza in the emitted flow and
+// the fingerprint that says whether the screen changed - silently.
+func TestAcquireHold_ADragStillResolvesWhatItStartedOn(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "drag-begin", X: 0.3, Y: 0.2})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{
+		Performed: true, End: &simbridge.Point{X: 0.3, Y: 0.9},
+	}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != "Continue" {
+		t.Errorf("selector = %q, want the element the drag started on", steps[0].Selector)
+	}
+}
+
+// The other half of the same rule, stated directly: typing targets nothing, so
+// it must not carry a selector describing whatever sits in the top-left corner.
+func TestAcquireHold_TypingCarriesNoSelector(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	// A tree whose only element IS in the corner, so a hit-test at (0,0) would
+	// find something to wrongly attach to the step.
+	corner := simbridge.Snapshot{
+		Frontmost: simbridge.Frontmost{BundleID: "com.app.a"},
+		Elements: []simbridge.Element{{
+			Path: "0", Label: "Clock",
+			Box: &simbridge.Box{X1: 0, Y1: 0, X2: 0.2, Y2: 0.1},
+			Tap: &simbridge.Point{X: 0.05, Y: 0.02},
+		}},
+	}
+	reader := &fakeScreenReader{snap: corner}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "type", Text: "hello"})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != "" {
+		t.Errorf("selector = %q; typing targets no element and must not borrow the corner's", steps[0].Selector)
+	}
+	if steps[0].Text != "hello" {
+		t.Errorf("text = %q, want it recorded", steps[0].Text)
+	}
+}

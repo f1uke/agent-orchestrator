@@ -4,6 +4,7 @@ import { House, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { usePageActive, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
+import { useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
 import { DragStream } from "../lib/drag-stream";
 import { devicePoint, fitDevice } from "../lib/screen-fit";
 import { cn } from "../lib/utils";
@@ -124,7 +125,11 @@ const STALE_AFTER_MS = 2_000;
 
 // What this panel sends one-shot. A drag is not here: it is several requests
 // under one hold, and lives in DragStream.
-type GestureBody = { kind: "tap"; x: number; y: number } | { kind: "button"; name: string };
+type GestureBody =
+	| { kind: "tap"; x: number; y: number }
+	| { kind: "button"; name: string }
+	| { kind: "type"; text: string }
+	| { kind: "key"; name: string };
 
 export function SimulatorPanel({
 	sessionId,
@@ -248,6 +253,54 @@ export function SimulatorPanel({
 	// has actually ended is a different thing: the picture will never update
 	// again, so driving on it would be driving blind.
 	const canDrive = driving && stream.state !== "ended" && stream.state !== "unsupported";
+
+	// Whether the device surface itself has keyboard focus. Typing reaches the
+	// device only while this is true, which is what keeps every AO shortcut and
+	// every ordinary AO text input working while this tab is open.
+	const [typingFocused, setTypingFocused] = useState(false);
+
+	// Typing goes through the same daemon route, the same lease and the same
+	// gesture hold as a tap - so it is arbitrated identically, and a recording
+	// captures it without anything here having to know that.
+	const sendGesture = useCallback(
+		async (body: GestureBody) => {
+			const udid = chosenRef.current;
+			if (!udid) throw new Error("No simulator is selected");
+			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture", {
+				params: { path: { sessionId, udid } },
+				body,
+			});
+			if (error) throw error;
+		},
+		[sessionId],
+	);
+
+	const keyboard = useDeviceKeyboard({
+		enabled: canDrive && typingFocused,
+		onEscape: () => canvasRef.current?.blur(),
+		sendText: useCallback(
+			async (text: string) => {
+				try {
+					await sendGesture({ kind: "type", text });
+				} catch (error) {
+					// ⚠ Never the text itself. What was typed is a password often
+					// enough that it must not reach a message, a log or the DOM.
+					setProblem(apiErrorMessage(error, "What you typed did not reach the device"));
+				}
+			},
+			[sendGesture],
+		),
+		sendKey: useCallback(
+			async (name: string) => {
+				try {
+					await sendGesture({ kind: "key", name });
+				} catch (error) {
+					setProblem(apiErrorMessage(error, `The ${name} key did not reach the device`));
+				}
+			},
+			[sendGesture],
+		),
+	});
 
 	const pressed = useRef<{ x: number; y: number; at: number } | null>(null);
 
@@ -408,13 +461,36 @@ export function SimulatorPanel({
 						>
 							<canvas
 								ref={canvasRef}
-								aria-label="Live simulator screen"
+								aria-label={
+									canDrive
+										? "Live simulator screen. Click to focus, then type to send keys to the device; Escape to stop."
+										: "Live simulator screen"
+								}
 								data-testid="sim-canvas"
+								// ⚠ Focusable only while a touch may reach the device. Off
+								// the tab order otherwise, so Tab never lands a keyboard
+								// user on a surface that would swallow their keys and give
+								// nothing back.
+								tabIndex={canDrive ? 0 : -1}
+								data-typing={canDrive && typingFocused ? "true" : "false"}
+								onBlur={() => {
+									setTypingFocused(false);
+									keyboard.flush();
+								}}
+								onFocus={() => setTypingFocused(true)}
+								onKeyDown={keyboard.onKeyDown}
 								// The box is sized to the picture, so `object-contain` has
 								// nothing to letterbox in the ordinary case - it is the safety
 								// net for the frame before the stage has been measured, and
 								// `pointFor` maps a press through the same fit either way.
-								className={cn("block h-full w-full object-contain", canDrive ? "cursor-crosshair" : "cursor-default")}
+								// The ring is inset and drawn on the canvas itself, so
+								// entering typing mode cannot move the screen by a pixel -
+								// the invariant #208 measured and pinned.
+								className={cn(
+									"block h-full w-full object-contain outline-none",
+									canDrive ? "cursor-crosshair" : "cursor-default",
+									canDrive && typingFocused ? "ring-2 ring-accent ring-inset" : "",
+								)}
 								style={{ borderRadius: drawn?.radius ?? 0 }}
 								onLostPointerCapture={onLostPointerCapture}
 								onPointerCancel={onPointerCancel}

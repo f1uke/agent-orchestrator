@@ -369,6 +369,56 @@ func Paste() []Event {
 	}
 }
 
+// keyUsages is the set of keyboard keys that are NOT characters.
+//
+// 🗝 This table is the reason live typing can send these as key presses at all,
+// while a character has to be planned by PlanText. The guest remaps
+// CHARACTER-producing keys according to its input mode - that is the whole
+// `ao sim type` layout bug - but these produce no character, so there is
+// nothing for a layout to remap them into. It is the same property that makes
+// Command-V work on a Thai guest (see Paste): the guest matches these against
+// the key, not against the letter a layout would print.
+//
+// ⚠ That is a claim about a real device, so it is verified on one rather than
+// reasoned about - see the record. A key whose effect could not be observed on
+// a device does not belong in this table.
+var keyUsages = map[string]int{
+	"enter":       40,
+	"backspace":   42,
+	"tab":         43,
+	"arrow-right": 79,
+	"arrow-left":  80,
+	"arrow-down":  81,
+	"arrow-up":    82,
+}
+
+// Key presses one named keyboard key.
+//
+// It is separate from Type because it promises something different. Type
+// promises CHARACTERS and has to choose a route to keep that promise; this
+// promises a key, and the keys it accepts are exactly the ones whose meaning
+// does not pass through the guest's input mode.
+func Key(name string) ([]Event, error) {
+	usage, ok := keyUsages[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown key %q: use one of %s", name, strings.Join(KeyNames(), ", "))
+	}
+	return []Event{
+		{Kind: "key", Type: "down", Usage: usage},
+		{Kind: "key", Type: "up", Usage: usage},
+	}, nil
+}
+
+// KeyNames lists what Key accepts, in a stable order.
+func KeyNames() []string {
+	names := make([]string, 0, len(keyUsages))
+	for name := range keyUsages {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // Button presses a hardware button.
 func Button(name string) ([]Event, error) {
 	native, ok := buttons[name]

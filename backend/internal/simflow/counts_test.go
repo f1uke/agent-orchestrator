@@ -151,3 +151,69 @@ func TestReviewCount_CountsOnlyGuessesOnStepsThatTargetAnElement(t *testing.T) {
 		t.Errorf("ReviewCount = %d, want 2 (the index guess and the coordinate)", got)
 	}
 }
+
+// A named keyboard key is not typing, and the difference is not cosmetic: a
+// flow that turned Enter into inputText "\n" would put a newline in the field
+// and submit nothing.
+func TestEmit_KeyStepsBecomePressKey(t *testing.T) {
+	steps := []simflow.Step{
+		{Seq: 1, Kind: simflow.StepType, Text: "hello"},
+		{Seq: 2, Kind: simflow.StepKey, Detail: "backspace"},
+		{Seq: 3, Kind: simflow.StepKey, Detail: "enter"},
+		{Seq: 4, Kind: simflow.StepKey, Detail: "tab"},
+		{Seq: 5, Kind: simflow.StepKey, Detail: "arrow-up"},
+		{Seq: 6, Kind: simflow.StepKey, Detail: "arrow-down"},
+		{Seq: 7, Kind: simflow.StepKey, Detail: "arrow-left"},
+		{Seq: 8, Kind: simflow.StepKey, Detail: "arrow-right"},
+	}
+	flow, err := simflow.Emit(steps, simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		`- inputText: "hello"`,
+		"- pressKey: Backspace",
+		"- pressKey: Enter",
+		"- pressKey: Tab",
+		"- pressKey: Arrow Up",
+		"- pressKey: Arrow Down",
+		"- pressKey: Arrow Left",
+		"- pressKey: Arrow Right",
+	} {
+		if !strings.Contains(flow, want) {
+			t.Errorf("flow missing %q:\n%s", want, flow)
+		}
+	}
+	// Order is what makes an edit mean anything: typing, then the backspace
+	// that removes part of it.
+	if strings.Index(flow, `- inputText: "hello"`) > strings.Index(flow, "- pressKey: Backspace") {
+		t.Errorf("steps came out in the wrong order:\n%s", flow)
+	}
+}
+
+// A key with no Maestro spelling must fail Emit by name rather than be dropped.
+// ⚠ `ao sim flow check` accepts ANY string after pressKey - it parses, it does
+// not validate - so a name that slipped through here would produce a flow that
+// runs and silently does nothing.
+func TestEmit_UnknownKeyIsRefusedRatherThanGuessed(t *testing.T) {
+	_, err := simflow.Emit([]simflow.Step{{Seq: 1, Kind: simflow.StepKey, Detail: "page-down"}},
+		simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err == nil {
+		t.Fatal("an unknown key must refuse the flow, not be written as a guess")
+	}
+	if !strings.Contains(err.Error(), "page-down") {
+		t.Errorf("the refusal must name the key: %v", err)
+	}
+}
+
+// A key press is not a step a human is asked to check: it targets no element,
+// so it can neither be a guess nor need review.
+func TestReviewCount_IgnoresKeyPresses(t *testing.T) {
+	steps := []simflow.Step{
+		{Seq: 1, Kind: simflow.StepKey, Detail: "enter", Choice: simflow.Choice{Rung: simflow.RungNone}},
+		{Seq: 2, Kind: simflow.StepKey, Detail: "backspace", Choice: simflow.Choice{Rung: simflow.RungPoint}},
+	}
+	if got := simflow.ReviewCount(steps); got != 0 {
+		t.Errorf("ReviewCount = %d, want 0", got)
+	}
+}

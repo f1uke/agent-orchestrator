@@ -23,6 +23,11 @@ const (
 	StepType   StepKind = "type"
 	StepSwipe  StepKind = "swipe"
 	StepButton StepKind = "button"
+	// StepKey is one named keyboard key - Enter, Backspace, Tab, an arrow.
+	// It is not StepType: typing promises characters and is written as
+	// inputText, while this promises a key and is written as pressKey. A flow
+	// that turned Enter into inputText "\n" would submit nothing.
+	StepKey StepKind = "key"
 )
 
 // Step is one recorded gesture or observation, shaped for Emit.
@@ -245,25 +250,55 @@ func writeStep(b *strings.Builder, step Step) error {
 		fmt.Fprintf(b, "- swipe: {start: \"%d%%,%d%%\", end: \"%d%%,%d%%\"}\n",
 			percent(step.X), percent(step.Y), percent(step.ToX), percent(step.ToY))
 	case StepButton:
-		key, ok := maestroKeyCode(step.Detail)
-		if !ok {
-			return fmt.Errorf("step %d: button %q has no Maestro key code and cannot be translated to a flow step", step.Seq, step.Detail)
-		}
-		fmt.Fprintf(b, "- pressKey: %s\n", key)
+		return writePressKey(b, step, maestroButtonKey)
+	case StepKey:
+		return writePressKey(b, step, maestroKeyName)
 	default:
 		return fmt.Errorf("step %d: kind %q has no Maestro translation", step.Seq, step.Kind)
 	}
 	return nil
 }
 
-// maestroKeyCode maps a recorded button name onto Maestro's KeyCode. Only
-// Home has one - Maestro's KeyCode enum has no app-switcher entry at all
+// writePressKey emits the one YAML shape a hardware button and a keyboard key
+// share, and refuses by name rather than skipping.
+//
+// ⚠ `ao sim flow check` accepts ANY string after `pressKey:` - it parses, it
+// does not validate the enum ("Nonsense Key" checks OK). So a name reaching
+// here has to have been observed pressing something on a real device; parsing
+// is not evidence. That is why these tables are short and why the record lists
+// what was watched happening.
+func writePressKey(b *strings.Builder, step Step, lookup func(string) (string, bool)) error {
+	key, ok := lookup(step.Detail)
+	if !ok {
+		return fmt.Errorf("step %d: %s %q has no Maestro key code and cannot be translated to a flow step",
+			step.Seq, step.Kind, step.Detail)
+	}
+	fmt.Fprintf(b, "- pressKey: %s\n", key)
+	return nil
+}
+
+// maestroButtonKey maps a recorded hardware button onto Maestro's KeyCode.
+// Only Home has one - Maestro's KeyCode enum has no app-switcher entry at all
 // (spec §8's Step → YAML mapping table), so "app-switcher", and any other
 // button name this package does not recognize, falls through to the
 // "no translation" branch in writeStep rather than being silently skipped.
-func maestroKeyCode(name string) (string, bool) {
+func maestroButtonKey(name string) (string, bool) {
 	if name == "home" {
 		return "Home", true
 	}
 	return "", false
+}
+
+// maestroKeyName maps a recorded keyboard key onto Maestro's own spelling.
+func maestroKeyName(name string) (string, bool) {
+	key, ok := map[string]string{
+		"enter":       "Enter",
+		"backspace":   "Backspace",
+		"tab":         "Tab",
+		"arrow-up":    "Arrow Up",
+		"arrow-down":  "Arrow Down",
+		"arrow-left":  "Arrow Left",
+		"arrow-right": "Arrow Right",
+	}[name]
+	return key, ok
 }

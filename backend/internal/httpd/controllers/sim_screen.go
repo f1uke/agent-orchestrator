@@ -97,7 +97,7 @@ type ListSimDevicesResponse struct {
 // carries every gesture on purpose: the arbitration around them is identical,
 // and five routes would be five places to forget the hold.
 type SimGestureInput struct {
-	Kind string `json:"kind" description:"tap, swipe, type, button, drag-begin, drag-move or drag-end."`
+	Kind string `json:"kind" description:"tap, swipe, type, key, button, drag-begin, drag-move or drag-end."`
 	// tap and swipe: normalized 0..1 screen coordinates, the same numbers
 	// `ao sim ax` reports per element.
 	X float64 `json:"x,omitempty"`
@@ -118,7 +118,9 @@ type SimGestureInput struct {
 	// key presses. Without it the route is chosen per request: key presses when
 	// the guest will deliver them faithfully, the pasteboard when it would not.
 	Paste bool `json:"paste,omitempty"`
-	// button: home or app-switcher.
+	// button: home or app-switcher. key: enter, backspace, tab or one of the
+	// arrow keys - the keys that produce no character, and so cannot be
+	// remapped by the guest's keyboard input mode the way a letter can.
 	Name string `json:"name,omitempty"`
 	// drag-begin, drag-move and drag-end are one touch spread over several
 	// requests, for a drag that follows a finger instead of being replayed once
@@ -525,8 +527,14 @@ func composeSimGesture(in SimGestureInput, keyboard simbridge.ProbedKeyboard) (s
 			return simgesture.Gesture{}, err
 		}
 		return simgesture.Gesture{Action: "button", Detail: in.Name, Events: events}, nil
+	case "key":
+		events, err := simbridge.Key(in.Name)
+		if err != nil {
+			return simgesture.Gesture{}, err
+		}
+		return simgesture.Gesture{Action: "key", Detail: in.Name, Events: events}, nil
 	default:
-		return simgesture.Gesture{}, fmt.Errorf("unknown gesture kind %q: use tap, swipe, type or button", in.Kind)
+		return simgesture.Gesture{}, fmt.Errorf("unknown gesture kind %q: use tap, swipe, type, key or button", in.Kind)
 	}
 }
 
