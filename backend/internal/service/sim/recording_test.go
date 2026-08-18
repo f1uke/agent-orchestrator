@@ -87,7 +87,13 @@ func buttonIntent() sim.GestureIntent {
 // owner on udidProMax, wired to reader, plus the store for further setup.
 func newRecordingService(t *testing.T, now time.Time, reader *fakeScreenReader) (*sim.Service, *sqlite.Store, domain.SessionID) {
 	t.Helper()
-	svc, store := newServiceWithOpts(t, fixedClock(now), sim.WithRecorder(reader))
+	// The recorder's screen read is asynchronous in production because being
+	// off the gesture's critical path is the whole point of it. Here it runs
+	// inline, so a test can say what the recorder has seen without racing a
+	// goroutine - and so mutating the fake screen between gestures is a
+	// sequence rather than a data race.
+	svc, store := newServiceWithOpts(t, fixedClock(now), sim.WithRecorder(reader),
+		sim.WithScreenRefreshRunner(func(f func()) { f() }))
 	owner := newSession(t, store, now)
 	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -605,12 +611,15 @@ func TestAcquireHold_MarksScreenChangeWhenTheForegroundAppChanged(t *testing.T) 
 	if err != nil {
 		t.Fatalf("hold 1: %v", err)
 	}
+	// The tap navigated to a new screen: a different app is now frontmost by
+	// the time the finger lifts. The ordering matters and is the production
+	// one - the touch is performed between acquiring the hold and releasing
+	// it, so the screen has already changed when the recorder looks again.
+	reader.snap = snapshotWithButton("com.app.b", "Done")
 	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release 1: %v", err)
 	}
 
-	// The tap navigated to a new screen: a different app is now frontmost.
-	reader.snap = snapshotWithButton("com.app.b", "Done")
 	hold, err = svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
 	if err != nil {
 		t.Fatalf("hold 2: %v", err)
@@ -643,7 +652,13 @@ func TestRecordIntent_SettlesWhenNothingResolvedUnderTheGesture(t *testing.T) {
 	arrived := snapshotWithButton("com.app.a", "Continue")
 	// An empty tree first: the app is up, the screen is not.
 	loading := simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "com.app.a"}}
-	reader := &fakeScreenReader{script: []simbridge.Snapshot{loading, arrived, arrived}}
+	// Twice loading, because there are now two reads BEFORE any settling: the
+	// one that primes the screen when the recording opens, and the one the
+	// gesture falls back to when the primed screen has nothing under the
+	// finger. If the screen arrived on either of those, this test would pass
+	// without the settle ever running - which is exactly what it did until a
+	// mutation check disabled the settle and nothing failed.
+	reader := &fakeScreenReader{script: []simbridge.Snapshot{loading, loading, arrived, arrived}}
 	svc, _, owner := newRecordingService(t, now, reader)
 	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
 		t.Fatalf("start recording: %v", err)
@@ -667,29 +682,43 @@ func TestRecordIntent_SettlesWhenNothingResolvedUnderTheGesture(t *testing.T) {
 	if steps[0].Selector != "Continue" {
 		t.Fatalf("selector = %q, want the element from the settled screen", steps[0].Selector)
 	}
-	if reader.calls < 2 {
-		t.Errorf("AX calls = %d; an unresolved gesture must trigger another read", reader.calls)
+	if reader.calls < 3 {
+		t.Errorf("AX calls = %d; an unresolved gesture must settle rather than describe a step from a screen that is not there", reader.calls)
 	}
 }
 
-// The other half of the same decision, and the reason it is conditional: this
-// read sits between a hold being granted and the gesture being performed, so
-// a screen that is already up must cost exactly one read. If this ever fails,
-// every tap a human makes while recording just got a full AX read slower.
-func TestRecordIntent_SettledScreenCostsNoExtraRead(t *testing.T) {
+// The other half of the same decision, and the reason settling is conditional.
+//
+// This is about the SLOW path - the one a gesture takes when there is no
+// usable maintained screen - because that path is still in front of the
+// human's finger. A read that resolved must cost exactly one read there; if it
+// ever settles anyway, every such gesture just got three more AX reads slower.
+// (That a gesture with a maintained screen costs NO read is a different
+// property, pinned by
+// TestAcquireHold_GestureDoesNotReadTheScreenWhenOneIsAlreadyKnown.)
+func TestRecordIntent_SettledScreenCostsNoExtraReadOnTheSlowPath(t *testing.T) {
 	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	clock := now
 	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
-	svc, _, owner := newRecordingService(t, now, reader)
+	svc, store := newServiceWithOpts(t, func() time.Time { return clock }, sim.WithRecorder(reader),
+		sim.WithScreenRefreshRunner(func(f func()) { f() }))
+	owner := newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
 	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
 		t.Fatalf("start recording: %v", err)
 	}
+	// Age the maintained screen out, so the gesture has to read for itself.
+	clock = now.Add(2 * time.Minute)
+	before := reader.calls
 
 	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent()); err != nil {
 		t.Fatalf("hold: %v", err)
 	}
 
-	if reader.calls != 1 {
-		t.Errorf("AX calls = %d, want 1 - settling must not run on a screen that resolved", reader.calls)
+	if got := reader.calls - before; got != 1 {
+		t.Errorf("AX calls during the gesture = %d, want 1 - settling must not run on a screen that resolved", got)
 	}
 }
 
@@ -790,5 +819,295 @@ func recordedRow(path, label string, x, y float64) simbridge.Element {
 		Frame: simbridge.Rect{X: x, Y: y, Width: w, Height: h},
 		Tap:   &simbridge.Point{X: (x + w/2) / sw, Y: (y + h/2) / sh},
 		Box:   &simbridge.Box{X1: x / sw, Y1: y / sh, X2: (x + w) / sw, Y2: (y + h) / sh},
+	}
+}
+
+// --- the screen read is off the gesture's critical path ----------------------
+//
+// The defect these pin: with a recording open, a tap went from 45 ms to 616 ms
+// and a drag lost every one of its intermediate moves, because the recorder
+// read the accessibility tree between the finger going down and the touch
+// reaching the device. The bridge serializes, so that read is time the finger
+// spends in the air - and the drag stream, which sends one request at a time,
+// collapsed a whole scroll into a touch-down and a touch-up with no motion
+// between them.
+//
+// ⚠ Timing itself cannot be asserted here. What IS structurally checkable is
+// the thing that causes it: how many reads a gesture performs. That is what
+// these pin; the milliseconds are in the record, measured on a device.
+
+// The property the fix rests on: once the recorder has seen the screen, a
+// gesture performs NO read at all.
+func TestAcquireHold_GestureDoesNotReadTheScreenWhenOneIsAlreadyKnown(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	// Starting a recording primes the screen, off any gesture's path.
+	primed := reader.calls
+	if primed == 0 {
+		t.Fatal("starting a recording must prime the screen, or the first gesture pays for it")
+	}
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if reader.calls != primed {
+		t.Errorf("acquiring the hold performed %d read(s); a gesture must perform none", reader.calls-primed)
+	}
+
+	// The read happens on release instead - after the touch, with nobody
+	// waiting for it - and it is what the NEXT gesture describes itself from.
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if reader.calls != primed+1 {
+		t.Errorf("reads after the gesture = %d, want exactly one refresh", reader.calls-primed)
+	}
+}
+
+// A whole drag takes ONE hold, so the count that matters is per drag, not per
+// request - and it must not read while the finger is moving. This is the
+// scroll failure stated as a count: a read during the drag is the stall that
+// swallowed every move.
+func TestAcquireHold_ADragPerformsNoReadWhileTheFingerIsDown(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	before := reader.calls
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "drag-begin", X: 0.3, Y: 0.2})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if reader.calls != before {
+		t.Fatalf("drag-begin performed %d read(s); every one of them is motion the device never sees",
+			reader.calls-before)
+	}
+
+	// And the end coordinates still arrive, which is the property #208 fixed
+	// and this must not trade back.
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{
+		Performed: true, End: &simbridge.Point{X: 0.3, Y: 0.9},
+	}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].X != 0.3 || steps[0].Y != 0.2 || steps[0].ToX != 0.3 || steps[0].ToY != 0.9 {
+		t.Errorf("drag recorded as %.2f,%.2f -> %.2f,%.2f, want 0.30,0.20 -> 0.30,0.90",
+			steps[0].X, steps[0].Y, steps[0].ToX, steps[0].ToY)
+	}
+}
+
+// The guard that keeps the maintained screen honest: a finger that lands where
+// the remembered tree has nothing means the remembered tree is not this
+// screen, so the recorder reads rather than describing the step from it.
+func TestAcquireHold_ReadsAgainWhenTheRememberedScreenCannotDescribeTheGesture(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	before := reader.calls
+
+	// The app moved on by itself, and the finger lands on something the
+	// remembered screen has nothing at.
+	reader.snap = snapshotWithButton("com.app.b", "Done")
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "tap", X: 0.9, Y: 0.9})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if reader.calls == before {
+		t.Fatal("nothing resolved under the finger and the recorder did not look again")
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+}
+
+// ⚠ The trade this design makes, pinned so it is a decision rather than a
+// surprise.
+//
+// A step is described from the screen as of the end of the PREVIOUS gesture.
+// Nothing the human does can change it in between - their only way to touch
+// the device is through this same path - but the app can, by finishing a load
+// or running an animation. When it does, AND the remembered screen still
+// resolves the gesture, the step is described from the older screen.
+//
+// This is the cost of the recorder not making the tab unusable. The record
+// says why no cheaper check is sound: proving the screen has not changed needs
+// a read, which is the thing being avoided.
+func TestAcquireHold_DescribesFromTheRememberedScreenWhenTheAppMovedOnUnderneath(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	// The app relabelled the control in place, after the recorder last looked.
+	// The finger still lands on it, so nothing tells the recorder to look
+	// again - and the step carries the label that was there before.
+	reader.snap = snapshotWithButton("com.app.a", "Done")
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if steps[0].Selector != "Continue" {
+		t.Errorf("selector = %q, want %q - if this changed, the trade-off described above changed with it",
+			steps[0].Selector, "Continue")
+	}
+}
+
+// A screen nobody has driven for a long time is not described from. The TTL
+// does not make a stale screen safe - only bounds how stale one may be when a
+// recording is left open and returned to.
+func TestAcquireHold_ReadsAgainWhenTheRememberedScreenIsOld(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	clock := now
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, store := newServiceWithOpts(t, func() time.Time { return clock }, sim.WithRecorder(reader),
+		sim.WithScreenRefreshRunner(func(f func()) { f() }))
+	owner := newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	before := reader.calls
+
+	clock = now.Add(2 * time.Minute)
+	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent()); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if reader.calls == before {
+		t.Error("a screen nobody has looked at for two minutes was described from without checking it")
+	}
+}
+
+// Nothing is read when no recording is open - the property that pays for the
+// whole design - and that has to stay true of the refresh too, or every
+// gesture on an unrecorded device would start one.
+func TestReleaseHold_DoesNotRefreshTheScreenWithoutARecording(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if reader.calls != 0 {
+		t.Errorf("a device with no recording open was read %d time(s)", reader.calls)
+	}
+}
+
+// ⚠ At most one background read may be outstanding per device, and the reason
+// is the same one the whole design rests on: the bridge SERIALIZES reads and
+// touches. Two refreshes queued on it are up to a second the human's next
+// touch waits behind - which is the bug this fix removes, reintroduced through
+// the back door.
+//
+// The runner is captured rather than run, so the guard is exercised without a
+// goroutine deciding the outcome.
+func TestRefreshScreen_OnlyOneReadIsOutstandingPerDevice(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	var queued []func()
+	svc, store := newServiceWithOpts(t, fixedClock(now), sim.WithRecorder(reader),
+		sim.WithScreenRefreshRunner(func(f func()) { queued = append(queued, f) }))
+	owner := newSession(t, store, now)
+	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	gesture := func() {
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+		if err != nil {
+			t.Fatalf("hold: %v", err)
+		}
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+	}
+
+	gesture()
+	gesture()
+	gesture()
+	if len(queued) != 1 {
+		t.Fatalf("%d reads queued behind one another; at most one may be outstanding", len(queued))
+	}
+
+	// Once the outstanding one finishes, the next gesture may start another.
+	queued[0]()
+	gesture()
+	if len(queued) != 2 {
+		t.Errorf("after the outstanding read finished, a later gesture queued %d; want a second", len(queued)-1)
+	}
+}
+
+// A gesture that was attempted and failed still leaves the screen wherever it
+// left it, so it must refresh too. Skipping it would let one refused touch
+// strand the maintained screen on a view of the device that has moved on.
+func TestReleaseHold_RefreshesEvenWhenTheGestureDidNotHappen(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	before := reader.calls
+
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: false}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if reader.calls == before {
+		t.Error("a gesture that failed left the maintained screen untouched; the next one describes itself from a stale view")
+	}
+
+	// And the step itself is still not recorded - a gesture that did not
+	// happen must never be written down as if it had.
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 0 {
+		t.Errorf("steps = %d, want 0 for a gesture that never happened", len(steps))
 	}
 }

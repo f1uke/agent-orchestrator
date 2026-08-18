@@ -131,6 +131,14 @@ type Service struct {
 	recMu   sync.Mutex
 	pending map[string]pending
 	screens map[string]screenState
+	// seen is the screen the recorder last read per device, and refreshing
+	// says one is being read right now. Together they are what keeps the
+	// accessibility read off the gesture's critical path - see seenScreen.
+	seen       map[string]seenScreen
+	refreshing map[string]bool
+	// runRefresh starts the background screen read. Production runs it in a
+	// goroutine; see WithScreenRefreshRunner.
+	runRefresh func(func())
 }
 
 // Option customizes a Service.
@@ -146,6 +154,19 @@ func WithTokenSource(tokens func() string) Option {
 	return func(s *Service) { s.tokens = tokens }
 }
 
+// WithScreenRefreshRunner controls how the recorder's background screen read
+// is started.
+//
+// It exists so a test can make that read happen inline. The read is
+// deliberately asynchronous in production - being off the gesture's critical
+// path is the entire point of it - but a test that has to reason about what
+// the recorder has seen cannot race a goroutine to find out, and one that
+// mutates its fake screen while a goroutine reads it is a data race rather
+// than a test.
+func WithScreenRefreshRunner(run func(func())) Option {
+	return func(s *Service) { s.runRefresh = run }
+}
+
 // WithRecorder turns on gesture recording. Without it, AcquireHold and
 // ReleaseHold never look at a recording row or a screen: the lease service has
 // no reason to depend on a screen in order to exist, and every daemon that
@@ -157,10 +178,13 @@ func WithRecorder(screen ScreenReader) Option {
 // New builds the lease service over a store.
 func New(store Store, opts ...Option) *Service {
 	s := &Service{
-		store:   store,
-		clock:   func() time.Time { return time.Now().UTC() },
-		pending: make(map[string]pending),
-		screens: make(map[string]screenState),
+		store:      store,
+		clock:      func() time.Time { return time.Now().UTC() },
+		pending:    make(map[string]pending),
+		screens:    make(map[string]screenState),
+		seen:       make(map[string]seenScreen),
+		refreshing: make(map[string]bool),
+		runRefresh: func(f func()) { go f() },
 	}
 	for _, opt := range opts {
 		opt(s)

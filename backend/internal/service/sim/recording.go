@@ -61,6 +61,47 @@ type pending struct {
 	expiresAt   time.Time
 }
 
+// seenScreen is the screen the recorder last read, kept so a gesture does not
+// have to wait for one.
+//
+// 🗝 This is the whole fix for the recorder making the tab slow. Reading the
+// accessibility tree costs ~0.5 s on an idle device and ~1.5 s on a real app,
+// and the bridge SERIALIZES: a read and a touch cannot overlap, so a read
+// taken on the gesture path is time the finger spends in the air. Measured, a
+// tap went from 45 ms to 616 ms with a recording open, and a drag lost every
+// one of its intermediate moves.
+//
+// So the recorder stops fetching the screen and starts maintaining it. The
+// read happens AFTER a gesture, when the human is looking at what they just
+// did and nobody is waiting; the screen it returns is the "before" screen of
+// whatever they do next.
+//
+// ⚠ What this trades, stated plainly rather than buried: the screen a step is
+// described from is the screen as of the END OF THE PREVIOUS GESTURE, not the
+// instant of this one. Nothing the HUMAN does can change it in between - their
+// only way to touch the device is through this very path - but the APP can, by
+// finishing a load or running an animation. resolveScreen falls back to a
+// synchronous read whenever the maintained screen cannot describe the gesture,
+// which catches the common shape of that (the finger lands somewhere the old
+// tree has nothing), and does NOT catch a screen that changed into something
+// else equally resolvable. See the record for why no cheaper check is sound.
+type seenScreen struct {
+	snap simbridge.Snapshot
+	at   time.Time
+}
+
+// screenCacheTTL bounds how old a maintained screen may be before a gesture
+// pays for a fresh read instead.
+//
+// It is not a correctness guarantee - an app can change its screen a second
+// after a refresh - and it is not pretending to be one. It bounds the blast
+// radius of the case a TTL genuinely covers: a recording left open while
+// somebody goes and does something else, coming back to a device that has
+// moved on entirely. A minute is long enough that ordinary deliberation
+// between two taps stays free, which is the whole point of maintaining the
+// screen at all.
+const screenCacheTTL = time.Minute
+
 // screenState is the cheap memory of what the last RECORDED step (the last one
 // actually appended, not merely attempted) saw on screen. It exists to answer
 // one question - did the screen change since then - without keeping a tree
@@ -137,7 +178,9 @@ func (s *Service) StartRecording(ctx context.Context, sessionID domain.SessionID
 	// capture that has nothing to do with it.
 	s.recMu.Lock()
 	delete(s.screens, key)
+	delete(s.seen, key)
 	s.recMu.Unlock()
+	s.primeScreen(ctx, key)
 	return outcome.Recording, nil
 }
 
@@ -232,6 +275,159 @@ func stableEnough(snap simbridge.Snapshot, resolved bool) bool {
 	return resolved && !snap.OnlyStatusBar
 }
 
+// resolveScreen produces the screen a step is described from, and whatever the
+// gesture resolved to on it.
+//
+// The fast path is the maintained screen, which costs nothing. The slow path
+// is the read this used to do on every gesture, and it is taken exactly when
+// the fast path cannot answer:
+//
+//   - nothing is maintained yet (the first gesture of a recording that was
+//     started before the priming read finished), or
+//   - what is maintained is older than screenCacheTTL, or
+//   - the gesture does not resolve against it - which is the same condition
+//     `stableEnough` has always used, now doing a second job: a finger that
+//     lands where the remembered tree has nothing is the strongest cheap
+//     signal that the remembered tree is not this screen.
+//
+// ok is false only when there is no screen to describe from at all. A read
+// that fails must never fail the hold: the gesture already got its finger, and
+// refusing it because the recorder could not read the screen would be damage,
+// done exactly when a device is misbehaving and the human most needs to drive
+// it. Losing one recorded step is a nuisance, not that.
+func (s *Service) resolveScreen(ctx context.Context, udid string, intent GestureIntent) (
+	snap simbridge.Snapshot, choice simflow.Choice, el simbridge.Element, found, ok bool,
+) {
+	if remembered, fresh := s.rememberedScreen(udid); fresh {
+		choice, el, found = elementFor(remembered, intent)
+		if stableEnough(remembered, found) {
+			return remembered, choice, el, found, true
+		}
+	}
+
+	// Nothing read here is written back into the maintained screen. There is
+	// exactly one place that maintains it - the refresh after a gesture - and
+	// that refresh runs moments after this, on this very gesture's release,
+	// with a newer view of the screen than this one. A mutation check found the
+	// write that used to be here: removing it changed nothing any test could
+	// see, because it was overwritten before anything could read it.
+	read := func(ctx context.Context) (simbridge.Snapshot, error) { return s.recorder.AX(ctx, udid) }
+	snap, err := read(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "sim recorder: could not read the screen; skipping this step",
+			"udid", udid, "error", err)
+		return simbridge.Snapshot{}, simflow.Choice{}, simbridge.Element{}, false, false
+	}
+	choice, el, found = elementFor(snap, intent)
+	if stableEnough(snap, found) {
+		return snap, choice, el, found, true
+	}
+
+	// The screen this step will be described from has not arrived. Read again
+	// until it stops changing, then resolve against THAT.
+	//
+	// ⚠ Conditional, not unconditional, and the condition is the whole design.
+	// This is the one path still on the gesture's critical path, so settling
+	// every gesture would put a full AX read back in front of every tap a
+	// human makes while recording - which is the bug this file was rewritten
+	// to remove. The budget is only spent on the case that actually corrupts a
+	// selector: nothing resolvable under the finger, or a tree that is still
+	// just the status bar. `ao sim ax --settle` is the unconditional one, for
+	// callers reading a screen rather than acting on it.
+	//
+	// A settle that fails is not an error here: the step is still worth
+	// recording from the last read, exactly as it would have been without this
+	// at all.
+	if settled, res, settleErr := simbridge.ReadSettled(ctx, read, simbridge.SettleOptions{MaxReads: recorderSettleReads}); settleErr == nil {
+		snap = settled
+		choice, el, found = elementFor(snap, intent)
+		slog.DebugContext(ctx, "sim recorder: settled the screen before resolving a step",
+			"udid", udid, "reads", res.Reads, "settled", res.Settled, "resolved", found)
+	}
+	return snap, choice, el, found, true
+}
+
+// rememberedScreen returns the maintained screen, and whether it is young
+// enough to describe a gesture from.
+func (s *Service) rememberedScreen(udid string) (simbridge.Snapshot, bool) {
+	s.recMu.Lock()
+	defer s.recMu.Unlock()
+	seen, ok := s.seen[udid]
+	if !ok {
+		return simbridge.Snapshot{}, false
+	}
+	return seen.snap, s.now().Sub(seen.at) <= screenCacheTTL
+}
+
+func (s *Service) rememberScreen(udid string, snap simbridge.Snapshot) {
+	s.recMu.Lock()
+	defer s.recMu.Unlock()
+	s.seen[udid] = seenScreen{snap: snap, at: s.now()}
+}
+
+// primeScreen reads the screen while the recording is being opened, so the
+// FIRST gesture is as cheap as every other one.
+//
+// 🗝 Synchronous, and that is the point rather than an oversight. Somebody
+// starting a recording and immediately dragging is not an edge case, it is the
+// sequence a human performs - and measured, that first gesture cost 784 ms
+// when the priming read was still in flight behind it, because the bridge
+// serializes. Doing it here moves that half-second onto the press of a button,
+// where nothing is mid-gesture and a mode taking a moment to arm is ordinary,
+// instead of onto the first thing the human does with their finger.
+//
+// Best effort: a screen that cannot be read must not stop a recording from
+// opening. The first gesture then pays for a read, exactly as it would have.
+func (s *Service) primeScreen(ctx context.Context, udid string) {
+	snap, err := s.recorder.AX(ctx, udid)
+	if err != nil {
+		slog.DebugContext(ctx, "sim recorder: could not prime the screen", "udid", udid, "error", err)
+		return
+	}
+	s.rememberScreen(udid, snap)
+}
+
+// refreshScreen reads the screen into the maintained one, off any caller's
+// critical path.
+//
+// ⚠ It is deliberately NOT waited on anywhere. The point is that the read
+// happens while the human is looking at what a gesture just did; a caller that
+// waited for it would have put the read straight back in front of them. At
+// most one is in flight per device, because the bridge serializes anyway and a
+// queue of reads behind a human's next touch is the exact cost being removed.
+func (s *Service) refreshScreen(udid string) {
+	s.recMu.Lock()
+	if s.refreshing[udid] {
+		s.recMu.Unlock()
+		return
+	}
+	s.refreshing[udid] = true
+	s.recMu.Unlock()
+
+	s.runRefresh(func() {
+		defer func() {
+			s.recMu.Lock()
+			delete(s.refreshing, udid)
+			s.recMu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), screenRefreshTimeout)
+		defer cancel()
+		snap, err := s.recorder.AX(ctx, udid)
+		if err != nil {
+			// Nothing to do about it and nobody to tell: the next gesture that
+			// needs a screen and has none will read one itself.
+			slog.DebugContext(ctx, "sim recorder: could not refresh the screen", "udid", udid, "error", err)
+			return
+		}
+		s.rememberScreen(udid, snap)
+	})
+}
+
+// screenRefreshTimeout bounds a background read. It is generous because the
+// read it covers is slow by nature and nobody is waiting for it; it exists so
+// a wedged bridge cannot leave a refresh marked in flight forever.
+const screenRefreshTimeout = 30 * time.Second
+
 // recordIntent is what AcquireHold calls, once the hold itself is granted, to
 // resolve intent into a step and stash it under token. expiresAt is the
 // hold's own expiry, carried through so the stash entry cannot outlive it.
@@ -251,46 +447,10 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		return
 	}
 
-	// A screen read that fails must never fail the hold: the gesture already
-	// got its finger, and refusing it because the recorder could not read the
-	// screen would be damage, done exactly when a device is misbehaving and
-	// the human most needs to drive it. Losing one recorded step is a
-	// nuisance, not that.
-	read := func(ctx context.Context) (simbridge.Snapshot, error) { return s.recorder.AX(ctx, udid) }
-	snap, err := read(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "sim recorder: could not read the screen; skipping this step",
-			"udid", udid, "error", err)
+	snap, choice, el, found, ok := s.resolveScreen(ctx, udid, intent)
+	if !ok {
 		return
 	}
-
-	choice, el, found := elementFor(snap, intent)
-	if !stableEnough(snap, found) {
-		// The screen this step will be described from has not arrived. Read
-		// again until it stops changing, then resolve against THAT.
-		//
-		// ⚠ Conditional, not unconditional, and the condition is the whole
-		// design. This read sits synchronously in AcquireHold, between the
-		// hold being granted and the gesture being performed, so settling
-		// every gesture would add a full AX read (~1.5 s) to every tap a human
-		// makes while recording. The common case - the screen is up and the
-		// finger landed on something - therefore costs nothing extra, and the
-		// budget is only spent on the case that actually corrupts a selector:
-		// nothing resolvable under the finger, or a tree that is still just
-		// the status bar. `ao sim ax --settle` is the unconditional one, for
-		// callers reading a screen rather than acting on it.
-		//
-		// A settle that fails is not an error here: the step is still worth
-		// recording from the last read, exactly as it would have been without
-		// this at all.
-		if settled, res, settleErr := simbridge.ReadSettled(ctx, read, simbridge.SettleOptions{MaxReads: recorderSettleReads}); settleErr == nil {
-			snap = settled
-			choice, el, found = elementFor(snap, intent)
-			slog.DebugContext(ctx, "sim recorder: settled the screen before resolving a step",
-				"udid", udid, "reads", res.Reads, "settled", res.Settled, "resolved", found)
-		}
-	}
-
 	s.recMu.Lock()
 	prev, hasPrev := s.screens[udid]
 	s.recMu.Unlock()
@@ -382,7 +542,16 @@ func (s *Service) finishRecording(ctx context.Context, token string, earn bool, 
 	p, ok := s.pending[token]
 	delete(s.pending, token)
 	s.recMu.Unlock()
-	if !ok || !earn {
+	if !ok {
+		return
+	}
+	// The gesture is over, so this is the moment to look: the human is reading
+	// what they just did, nothing is waiting on the bridge, and what this read
+	// returns is the "before" screen of whatever they do next. It runs whether
+	// or not the step was earned - a gesture that was attempted and failed
+	// still leaves the screen wherever it left it.
+	s.refreshScreen(p.udid)
+	if !earn {
 		return
 	}
 	if end != nil {
