@@ -61,7 +61,7 @@ export function skipReason(): string | null {
 	if (!existsSync(RENDERER_BUILD)) return `no renderer build at ${RENDERER_BUILD} - run \`npm run package\` first`;
 	const target = targetUDID();
 	if (target.udid === null) return target.reason;
-	const busy = liveLeaseHolder();
+	const busy = liveLeaseHolder(target.udid);
 	if (busy) return `the live AO holds this simulator (@${busy}) - two daemons cannot arbitrate one device`;
 	return null;
 }
@@ -120,13 +120,21 @@ function targetUDID(): { udid: string | null; reason: string | null } {
  * one is. The sandbox daemon cannot see that lease, so this is the only thing
  * standing between an agent's drag and a human's.
  */
-function liveLeaseHolder(): string | null {
+function liveLeaseHolder(udid: string): string | null {
 	try {
 		const runFile = process.env.AO_RUN_FILE ?? path.join(homedir(), ".ao", "running.json");
 		const { port } = JSON.parse(readFileSync(runFile, "utf8")) as { port: number };
 		const raw = execFileSync("curl", ["-fsS", `http://127.0.0.1:${port}/api/v1/sim/devices`], { encoding: "utf8" });
-		const parsed = JSON.parse(raw) as { devices: { lease?: { state: string; holder?: string } }[] };
+		const parsed = JSON.parse(raw) as { devices: { udid: string; lease?: { state: string; holder?: string } }[] };
 		for (const device of parsed.devices) {
+			// ⚠ Only the device this harness is about to DRIVE. It used to refuse
+			// whenever the live AO held any lease at all, which on a machine with
+			// two simulators booted means a human working on one of them blocks
+			// every test against the other - and the two do not collide: the
+			// lease is per device, and this harness only ever touches the one it
+			// was given. The guard is still the only thing standing between an
+			// agent's drag and a human's, so it stays exact rather than eager.
+			if (device.udid.toLowerCase() !== udid.toLowerCase()) continue;
 			if (device.lease?.state === "held") return device.lease.holder ?? "another session";
 		}
 	} catch {

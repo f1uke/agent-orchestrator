@@ -152,6 +152,76 @@ func TestReviewCount_CountsOnlyGuessesOnStepsThatTargetAnElement(t *testing.T) {
 	}
 }
 
+// ⚠ The banner says the steps it counts are "marked # REVIEW: below", so every
+// step it counts must actually carry that marker. It did not: a coordinate tap
+// carried a plain comment, and a swipe the recorder could not describe carried
+// nothing at all, while the banner counted both.
+//
+// This walks the flow and checks the promise directly, rather than checking one
+// shape at a time - a new step kind that forgets its marker fails here.
+func TestEmit_EveryStepTheBannerCountsCarriesTheMarker(t *testing.T) {
+	steps := []simflow.Step{
+		tapText(1, "Home"),
+		// A tap that could only be described as a coordinate.
+		{Seq: 2, Kind: simflow.StepTap, X: 0.4, Y: 0.6,
+			Choice: simflow.Choice{Rung: simflow.RungPoint, PercentX: 40, PercentY: 60}},
+		// A swipe made on a screen the recorder could not describe.
+		{Seq: 3, Kind: simflow.StepSwipe, X: 0.5, Y: 0.75, ToX: 0.5, ToY: 0.35,
+			Choice: simflow.Choice{Rung: simflow.RungPoint, PercentX: 50, PercentY: 75}},
+		// And one that resolved: it must NOT be marked.
+		{Seq: 4, Kind: simflow.StepSwipe, X: 0.5, Y: 0.5, ToX: 0.5, ToY: 0.2,
+			Choice: simflow.Choice{Rung: simflow.RungText, Text: "List", Ambiguity: 1}, Plain: "List"},
+	}
+
+	flow, err := simflow.Emit(steps, simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	counts, ok := simflow.ParseCounts(flow)
+	if !ok {
+		t.Fatalf("no counts line:\n%s", flow)
+	}
+	if counts.Review != 2 {
+		t.Fatalf("counts say %d need review, want 2:\n%s", counts.Review, flow)
+	}
+	markers := 0
+	for _, line := range strings.Split(flow, "\n") {
+		if strings.HasPrefix(line, "# REVIEW:") {
+			markers++
+		}
+	}
+	if markers != counts.Review {
+		t.Errorf("the banner counts %d steps needing review but the flow carries %d markers:\n%s",
+			counts.Review, markers, flow)
+	}
+	// The step that resolved is still written plainly.
+	if !strings.Contains(flow, `- swipe: {start: "50%,50%", end: "50%,20%"}`) {
+		t.Errorf("a swipe that resolved must still be emitted:\n%s", flow)
+	}
+}
+
+// A step the recorder could not describe still REPLAYS: the coordinates are
+// exact, because they are what the finger did. Refusing to describe is
+// acceptable; dropping the step is not.
+func TestEmit_AnUndescribedStepStillReplays(t *testing.T) {
+	steps := []simflow.Step{
+		{Seq: 1, Kind: simflow.StepTap, X: 0.4, Y: 0.6,
+			Choice: simflow.Choice{Rung: simflow.RungPoint, PercentX: 40, PercentY: 60}},
+		{Seq: 2, Kind: simflow.StepSwipe, X: 0.5, Y: 0.75, ToX: 0.5, ToY: 0.35,
+			Choice: simflow.Choice{Rung: simflow.RungPoint, PercentX: 50, PercentY: 75}},
+	}
+	flow, err := simflow.Emit(steps, simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(flow, `point: "40%,60%"`) {
+		t.Errorf("the tap must still act, as a coordinate:\n%s", flow)
+	}
+	if !strings.Contains(flow, `- swipe: {start: "50%,75%", end: "50%,35%"}`) {
+		t.Errorf("the swipe must still act:\n%s", flow)
+	}
+}
+
 // A named keyboard key is not typing, and the difference is not cosmetic: a
 // flow that turned Enter into inputText "\n" would put a newline in the field
 // and submit nothing.

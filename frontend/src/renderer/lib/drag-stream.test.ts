@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DragStream, type DragPoint, type DragStep } from "./drag-stream";
+import { DragStream, MAX_PENDING_MOVES, type DragPoint, type DragStep } from "./drag-stream";
 
 /** A sender whose requests finish only when the test says so. */
 function controllable() {
@@ -43,7 +43,17 @@ describe("DragStream", () => {
 
 	// The rule the frame stream already uses in the other direction: while one
 	// request is in flight the newest position is the only one worth having.
-	it("keeps only the newest position while a request is in flight", async () => {
+	// ⚠ This case USED to assert the opposite - that only the newest position
+	// survived while a request was in flight - and that assertion described the
+	// bug. Dropping the motion is fine at 1 ms and destroys the drag at 200 ms,
+	// because a slow `drag-begin` outlives the whole gesture: every move
+	// collapses into one slot, the end takes that slot, and the device gets a
+	// touch-down and a touch-up with nothing in between. Measured on a device
+	// with a human driving: 11 of 26 drags arrived as exactly two requests.
+	//
+	// The motion is queued now. Late motion is a worse drag; no motion is not a
+	// drag at all.
+	it("queues the positions it could not send yet, in order", async () => {
 		const t = controllable();
 		const drag = new DragStream(t.send);
 
@@ -52,27 +62,48 @@ describe("DragStream", () => {
 		drag.move({ x: 0.5, y: 0.8 });
 		drag.move({ x: 0.5, y: 0.7 });
 		drag.move({ x: 0.5, y: 0.6 });
-		await t.settle();
+		await t.settle(3);
 
-		expect(steps(t.sent)).toEqual(["drag-begin", "drag-move", "drag-move"]);
-		// The two intermediate positions were dropped, not queued.
-		expect(t.sent[1].point.y).toBeCloseTo(0.8, 5);
-		expect(t.sent[2].point.y).toBeCloseTo(0.6, 5);
+		expect(steps(t.sent)).toEqual(["drag-begin", "drag-move", "drag-move", "drag-move"]);
+		expect(t.sent.slice(1).map((s) => s.point.y)).toEqual([0.8, 0.7, 0.6]);
+	});
+
+	// The queue is bounded, so a path that stays slow cannot put the touch
+	// further and further behind the finger - the failure the single slot was
+	// there to prevent. Past the cap it degrades to exactly the old behaviour.
+	it("bounds how much unsent motion can pile up", async () => {
+		const t = controllable();
+		const drag = new DragStream(t.send);
+
+		drag.begin({ x: 0.5, y: 1 });
+		// Nothing is settled, so everything after the begin queues.
+		for (let i = 0; i < MAX_PENDING_MOVES + 20; i += 1) {
+			drag.move({ x: 0.5, y: 1 - i / 1000 });
+		}
+		await t.settle(MAX_PENDING_MOVES + 30);
+
+		const moves = t.sent.filter((s) => s.step === "drag-move");
+		expect(moves.length).toBeLessThanOrEqual(MAX_PENDING_MOVES);
+		// And the finger's final position is never the one dropped.
+		expect(moves[moves.length - 1].point.y).toBeCloseTo(1 - (MAX_PENDING_MOVES + 19) / 1000, 5);
 	});
 
 	// The touch going down and coming up are the span the daemon holds the
-	// device for, so neither may ever be dropped as stale.
-	it("never drops the begin or the end", async () => {
+	// device for, so neither may ever be dropped as stale - and the motion
+	// between them is delivered rather than discarded when the end catches up
+	// with it. (This case used to expect the move to vanish here.)
+	it("never drops the begin or the end, and keeps the motion between them", async () => {
 		const t = controllable();
 		const drag = new DragStream(t.send);
 
 		drag.begin({ x: 0.5, y: 0.9 });
 		drag.move({ x: 0.5, y: 0.5 });
 		drag.end({ x: 0.5, y: 0.4 });
-		await t.settle(3);
+		await t.settle(4);
 
-		expect(steps(t.sent)).toEqual(["drag-begin", "drag-end"]);
-		expect(t.sent[1].point.y).toBeCloseTo(0.4, 5);
+		expect(steps(t.sent)).toEqual(["drag-begin", "drag-move", "drag-end"]);
+		expect(t.sent[1].point.y).toBeCloseTo(0.5, 5);
+		expect(t.sent[2].point.y).toBeCloseTo(0.4, 5);
 		expect(drag.isDragging).toBe(false);
 	});
 

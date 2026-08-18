@@ -3,6 +3,7 @@ package sim_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simflow"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
@@ -545,8 +547,16 @@ func TestAcquireHold_ScreenReadFailureStillGrantsTheHold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stop recording: %v", err)
 	}
-	if len(steps) != 0 {
-		t.Fatalf("steps = %d, want 0: an unreadable screen must lose the step, not the hold", len(steps))
+	// ⚠ This used to assert the step was LOST. It is recorded now, and the
+	// change is deliberate: the gesture happened, and a recording that quietly
+	// omits a gesture the human performed produces a flow that cannot replay.
+	// What it cannot do is describe it, so it says so - a coordinate step the
+	// flow marks "# REVIEW:" rather than a step that never existed.
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want the gesture recorded even though the screen could not be read", len(steps))
+	}
+	if steps[0].Selector != "" {
+		t.Errorf("selector = %q, want none - nothing was readable to describe it with", steps[0].Selector)
 	}
 }
 
@@ -672,53 +682,35 @@ func TestRecordIntent_SettlesWhenNothingResolvedUnderTheGesture(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
-	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	_, steps, _, err := svc.GetRecording(context.Background(), udidProMax)
 	if err != nil {
-		t.Fatalf("stop recording: %v", err)
+		t.Fatalf("read recording: %v", err)
 	}
 	if len(steps) != 1 {
 		t.Fatalf("steps = %d, want 1", len(steps))
 	}
-	if steps[0].Selector != "Continue" {
-		t.Fatalf("selector = %q, want the element from the settled screen", steps[0].Selector)
-	}
-	if reader.calls < 3 {
-		t.Errorf("AX calls = %d; an unresolved gesture must settle rather than describe a step from a screen that is not there", reader.calls)
-	}
-}
-
-// The other half of the same decision, and the reason settling is conditional.
-//
-// This is about the SLOW path - the one a gesture takes when there is no
-// usable maintained screen - because that path is still in front of the
-// human's finger. A read that resolved must cost exactly one read there; if it
-// ever settles anyway, every such gesture just got three more AX reads slower.
-// (That a gesture with a maintained screen costs NO read is a different
-// property, pinned by
-// TestAcquireHold_GestureDoesNotReadTheScreenWhenOneIsAlreadyKnown.)
-func TestRecordIntent_SettledScreenCostsNoExtraReadOnTheSlowPath(t *testing.T) {
-	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
-	clock := now
-	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
-	svc, store := newServiceWithOpts(t, func() time.Time { return clock }, sim.WithRecorder(reader),
-		sim.WithScreenRefreshRunner(func(f func()) { f() }))
-	owner := newSession(t, store, now)
-	if _, err := svc.Acquire(context.Background(), owner, udidProMax, 0); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
-		t.Fatalf("start recording: %v", err)
-	}
-	// Age the maintained screen out, so the gesture has to read for itself.
-	clock = now.Add(2 * time.Minute)
-	before := reader.calls
-
-	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent()); err != nil {
-		t.Fatalf("hold: %v", err)
+	// ⚠ The FIRST gesture cannot be described: the screen it was performed on
+	// had not arrived, and the recorder no longer stalls the finger to wait for
+	// it. What settling now guarantees is the gesture AFTER it - the refresh
+	// that follows a gesture reads until the screen stops changing, so the next
+	// step is described from a screen that is really there.
+	if steps[0].Selector != "" {
+		t.Errorf("selector = %q; the screen was not there and nothing may be invented", steps[0].Selector)
 	}
 
-	if got := reader.calls - before; got != 1 {
-		t.Errorf("AX calls during the gesture = %d, want 1 - settling must not run on a screen that resolved", got)
+	second, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold 2: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, second.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release 2: %v", err)
+	}
+	_, steps, err = svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop recording: %v", err)
+	}
+	if len(steps) != 2 || steps[1].Selector != "Continue" {
+		t.Fatalf("second step = %+v, want it described from the screen the refresh settled on", steps)
 	}
 }
 
@@ -864,6 +856,10 @@ func TestAcquireHold_GestureDoesNotReadTheScreenWhenOneIsAlreadyKnown(t *testing
 	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
+	// One: the refresh takes a single read on a screen that has arrived, and
+	// only settles when the screen plainly has not (see worthDescribingFrom).
+	// The bridge serializes, so every extra read here is time the NEXT touch
+	// would wait behind.
 	if reader.calls != primed+1 {
 		t.Errorf("reads after the gesture = %d, want exactly one refresh", reader.calls-primed)
 	}
@@ -912,10 +908,20 @@ func TestAcquireHold_ADragPerformsNoReadWhileTheFingerIsDown(t *testing.T) {
 	}
 }
 
-// The guard that keeps the maintained screen honest: a finger that lands where
-// the remembered tree has nothing means the remembered tree is not this
-// screen, so the recorder reads rather than describing the step from it.
-func TestAcquireHold_ReadsAgainWhenTheRememberedScreenCannotDescribeTheGesture(t *testing.T) {
+// 🗝 The rule this whole fix turns around, and the reason it had to.
+//
+// ⚠ This case USED to assert that the recorder looked AGAIN when the
+// remembered screen could not describe the gesture. That read costs ~0.5 s on
+// a serialized bridge, sat between the finger going down and the touch
+// reaching the device, and took the whole scroll with it: measured with a
+// human driving, 11 of 26 drags reached the device as two requests and no
+// motion, every one with a begin of 181-526 ms. And the trigger is not rare -
+// any frontmost app whose accessibility tree cannot be read takes this path
+// for every gesture.
+//
+// So the recorder does not look. It records the step, and says it could not
+// describe it.
+func TestAcquireHold_DoesNotReadWhenTheRememberedScreenCannotDescribeTheGesture(t *testing.T) {
 	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
 	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
 	svc, _, owner := newRecordingService(t, now, reader)
@@ -924,19 +930,34 @@ func TestAcquireHold_ReadsAgainWhenTheRememberedScreenCannotDescribeTheGesture(t
 	}
 	before := reader.calls
 
-	// The app moved on by itself, and the finger lands on something the
-	// remembered screen has nothing at.
-	reader.snap = snapshotWithButton("com.app.b", "Done")
+	// The finger lands where the remembered screen has nothing.
 	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
 		sim.GestureIntent{Kind: "tap", X: 0.9, Y: 0.9})
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if reader.calls == before {
-		t.Fatal("nothing resolved under the finger and the recorder did not look again")
+	if reader.calls != before {
+		t.Fatalf("the gesture performed %d read(s); every one of them is time the finger spends in the air",
+			reader.calls-before)
 	}
 	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
 		t.Fatalf("release: %v", err)
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want the gesture recorded", len(steps))
+	}
+	// Recorded as a coordinate, which is exact, and with no selector - so the
+	// flow replays and says plainly that it could not name what was touched.
+	if steps[0].Selector != "" {
+		t.Errorf("selector = %q, want none", steps[0].Selector)
+	}
+	if steps[0].X != 0.9 || steps[0].Y != 0.9 {
+		t.Errorf("coordinates = %.2f,%.2f, want what the finger actually did", steps[0].X, steps[0].Y)
 	}
 }
 
@@ -984,10 +1005,13 @@ func TestAcquireHold_DescribesFromTheRememberedScreenWhenTheAppMovedOnUnderneath
 	}
 }
 
-// A screen nobody has driven for a long time is not described from. The TTL
-// does not make a stale screen safe - only bounds how stale one may be when a
-// recording is left open and returned to.
-func TestAcquireHold_ReadsAgainWhenTheRememberedScreenIsOld(t *testing.T) {
+// A screen nobody has driven for a long time is not described from.
+//
+// The TTL does not make a stale screen safe - only bounds how stale one may be
+// when a recording is left open and returned to. It no longer triggers a read
+// either: an old screen means the step goes undescribed, which is the same
+// answer as any other screen that cannot describe the gesture.
+func TestAcquireHold_DoesNotDescribeFromAnOldScreen(t *testing.T) {
 	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
 	clock := now
 	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
@@ -1003,11 +1027,22 @@ func TestAcquireHold_ReadsAgainWhenTheRememberedScreenIsOld(t *testing.T) {
 	before := reader.calls
 
 	clock = now.Add(2 * time.Minute)
-	if _, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent()); err != nil {
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if reader.calls == before {
-		t.Error("a screen nobody has looked at for two minutes was described from without checking it")
+	if reader.calls != before {
+		t.Errorf("an old screen made the gesture wait for %d read(s)", reader.calls-before)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 || steps[0].Selector != "" {
+		t.Errorf("steps = %+v, want one step described from nothing rather than from a two-minute-old screen", steps)
 	}
 }
 
@@ -1112,7 +1147,105 @@ func TestReleaseHold_RefreshesEvenWhenTheGestureDidNotHappen(t *testing.T) {
 	}
 }
 
-// --- typing and keys are recorded like anything else ------------------------
+// The refresh settles only when the screen has not arrived - and when it does,
+// the NEXT gesture is described from the screen that turned up rather than
+// from the empty one.
+func TestRefreshScreen_SettlesOnlyWhenTheScreenHasNotArrived(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	arrived := snapshotWithButton("com.app.a", "Continue")
+	loading := simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "com.app.a"}}
+	// Primed on an empty screen, then the screen turns up.
+	reader := &fakeScreenReader{script: []simbridge.Snapshot{loading, loading, arrived, arrived}}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	// First gesture: nothing to describe it with, and nothing is read for it.
+	primed := reader.calls
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if reader.calls != primed {
+		t.Fatalf("the gesture read %d time(s)", reader.calls-primed)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	// The refresh saw an empty screen, so it settled rather than keeping it.
+	if reader.calls-primed < 2 {
+		t.Errorf("the refresh read %d time(s); an empty screen must be settled, off the gesture path", reader.calls-primed)
+	}
+
+	second, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0, buttonIntent())
+	if err != nil {
+		t.Fatalf("hold 2: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, second.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release 2: %v", err)
+	}
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(steps))
+	}
+	if steps[0].Selector != "" {
+		t.Errorf("step 1 selector = %q; the screen was not there yet", steps[0].Selector)
+	}
+	if steps[1].Selector != "Continue" {
+		t.Errorf("step 2 selector = %q, want the screen the refresh settled on", steps[1].Selector)
+	}
+}
+
+// ⚠ Found by a mutation check: describing an undescribed step as "nothing"
+// rather than as a COORDINATE broke no test, and it silently drops the step
+// from the flow. Render writes a bare comment for a Choice with no rung and no
+// point - so a tap the human really made would appear in the recording, be
+// counted in the banner, and produce no action at all when the flow ran.
+//
+// This pins the whole chain, because the value of the rung is only visible at
+// the end of it: recorded step -> simrecord -> simflow -> YAML that acts.
+func TestAcquireHold_AnUndescribedTapStillActsInTheFlow(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	// A finger where the remembered screen has nothing.
+	hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+		sim.GestureIntent{Kind: "tap", X: 0.42, Y: 0.61})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+
+	flow, err := simflow.Emit(simrecord.Steps(steps), simflow.EmitOptions{Device: "d", Runtime: "r", RecordedAt: "t"})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(flow, `point: "42%,61%"`) {
+		t.Errorf("the tap must still act, as the coordinate the finger really went to:\n%s", flow)
+	}
+	// And it must say it is a guess, so the banner's count has something to
+	// point at.
+	if !strings.Contains(flow, "# REVIEW:") {
+		t.Errorf("an undescribed step must be marked:\n%s", flow)
+	}
+}
 
 // A recorded login that silently omitted the typing produces a flow that
 // cannot replay, so typed text and the keys around it are captured exactly the
