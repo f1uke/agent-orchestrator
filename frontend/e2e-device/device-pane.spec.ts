@@ -547,8 +547,31 @@ async function readyToDrive(sandbox: Sandbox) {
 	await expect(drive).toHaveAttribute("aria-pressed", "true");
 }
 
-/** Opens Spotlight and puts the caret in its search field. */
+/**
+ * Opens Spotlight and puts the caret in its search field.
+ *
+ * ⚠ It CHECKS that Spotlight actually opened rather than assuming it. These
+ * cases run in series against a device that other cases have been driving, so
+ * whatever app is in front when this starts is not fixed - and a pull-down that
+ * lands on the wrong screen leaves the following keystrokes going nowhere,
+ * which reads as "typing does not reach the device" when the truth is that no
+ * field was ever focused.
+ */
 async function openSpotlightField(sandbox: Sandbox) {
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await pullSpotlightDown(sandbox);
+		if (await hasTextField(sandbox)) return;
+	}
+	throw new Error("Spotlight never opened, so there was no field to type into");
+}
+
+/** Whether the device is showing a text field at all. */
+async function hasTextField(sandbox: Sandbox): Promise<boolean> {
+	const tree = execFileSync(sandbox.aoBin, ["sim", "ax", "--udid", sandbox.udid], { encoding: "utf8" });
+	return tree.includes('TextField "');
+}
+
+async function pullSpotlightDown(sandbox: Sandbox) {
 	// exact, because a recorded flow's path contains "home" and the copy button
 	// carries that whole path in its accessible name - which is right for the
 	// copy button and ambiguous for this locator.
