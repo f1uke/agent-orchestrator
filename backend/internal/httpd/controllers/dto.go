@@ -441,10 +441,22 @@ type SendSessionMessageRequest struct {
 }
 
 // SendSessionMessageResponse is the body of POST /api/v1/sessions/{sessionId}/send.
+//
+// Queued distinguishes "the agent has it" from "AO is holding it": a message
+// addressed to a SUSPENDED session is accepted (200) but not delivered until
+// that session's agent is listening again. Without this the caller could not
+// tell the two apart, which is the same blindness as the old silent failure.
 type SendSessionMessageResponse struct {
 	OK        bool             `json:"ok"`
 	SessionID domain.SessionID `json:"sessionId"`
 	Message   string           `json:"message"`
+	// Queued is true when the message was held for later delivery.
+	Queued bool `json:"queued,omitempty"`
+	// QueuedAt is when it was held; absent unless queued.
+	QueuedAt *time.Time `json:"queuedAt,omitempty"`
+	// PendingMessages is how many messages this session now has waiting,
+	// including this one; absent unless queued.
+	PendingMessages int `json:"pendingMessages,omitempty"`
 }
 
 // DispatchCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-dispatch.

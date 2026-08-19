@@ -48,11 +48,11 @@ type scmCapturedNudge struct {
 	body    string
 }
 
-func (s *scmMessengerSpy) Send(_ context.Context, id domain.SessionID, msg string) error {
+func (s *scmMessengerSpy) Send(_ context.Context, id domain.SessionID, msg string) (ports.SendOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sent = append(s.sent, scmCapturedNudge{session: id, body: msg})
-	return nil
+	return ports.SendOutcome{}, nil
 }
 
 func (s *scmMessengerSpy) count() int {

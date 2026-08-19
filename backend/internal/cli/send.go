@@ -25,6 +25,15 @@ type sendAPIRequest struct {
 	Message string `json:"message"`
 }
 
+// sendAPIResponse mirrors the daemon's SendSessionMessageResponse. Only the
+// queued half matters to the CLI: a message the daemon HELD is a success that
+// the agent has not seen yet, and saying nothing about that would leave the
+// sender believing it was delivered.
+type sendAPIResponse struct {
+	Queued          bool `json:"queued"`
+	PendingMessages int  `json:"pendingMessages"`
+}
+
 func newSendCommand(ctx *commandContext) *cobra.Command {
 	var opts sendOptions
 	cmd := &cobra.Command{
@@ -64,7 +73,17 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	// PathEscape: session ids are already "-"/digit safe, but may later come
 	// from sanitized issue refs; keep the URL well-formed regardless.
 	path := "sessions/" + url.PathEscape(session) + "/send"
-	return c.postJSON(ctx, path, sendAPIRequest{Message: message}, nil)
+	var res sendAPIResponse
+	if err := c.postJSON(ctx, path, sendAPIRequest{Message: message}, &res); err != nil {
+		return err
+	}
+	if res.Queued {
+		_, err := fmt.Fprintf(c.deps.Out,
+			"queued for %s: the session is asleep, so the message is held and will be delivered once its agent is listening again (%d waiting)\n",
+			session, res.PendingMessages)
+		return err
+	}
+	return nil
 }
 
 // resolveMessage returns the effective message body from --message /

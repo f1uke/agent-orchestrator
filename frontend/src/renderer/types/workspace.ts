@@ -322,6 +322,14 @@ export type WorkspaceSession = {
 	 * (terminated / todo / already suspended). Drives the board/sidebar countdown.
 	 */
 	idleCloseAt?: string;
+	/**
+	 * How many messages AO is HOLDING for this session because it could not
+	 * receive them (it was suspended when they were sent), and how many were
+	 * given up on and will never arrive. Both come straight from the daemon read
+	 * model; absent/0 for the overwhelming majority of sessions.
+	 */
+	queuedMessages?: number;
+	queuedMessagesFailed?: number;
 	/** The branch the worktree started from, and the branch this session's PR
 	 * merges into. Both are recorded on every session at spawn; `prTarget` is
 	 * additionally editable. `prTarget` is the STORED value — read

@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // Credential-shaped fixtures, assembled from fragments on purpose. They are
@@ -323,5 +324,22 @@ func TestActivityAPI_RejectedSendPublishesNothing(t *testing.T) {
 	}
 	if len(feed.events) != 0 {
 		t.Errorf("published %d events for a rejected send, want 0", len(feed.events))
+	}
+}
+
+// A QUEUED message has not reached the agent, so it must not appear in the
+// activity feed: the feed is what the human reads as "this happened", and a
+// held message has not happened yet.
+func TestActivityAPI_QueuedSendPublishesNothing(t *testing.T) {
+	feed := &fakeActivityFeed{}
+	svc := &fakeSessionService{sendOutcome: ports.SendOutcome{Queued: true, Pending: 2}}
+	srv := newActivityFeedServer(t, httpd.APIDeps{Sessions: svc, ActivityFeed: feed})
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-7/send", `{"message":"held for later"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if len(feed.events) != 0 {
+		t.Fatalf("published %d events for a queued send, want 0", len(feed.events))
 	}
 }

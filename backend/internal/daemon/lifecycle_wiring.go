@@ -230,36 +230,67 @@ type runtimeMessageSender interface {
 	SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error
 }
 
+// messageHolder holds a message for a session that cannot receive it now.
+// *msgqueue.Queue satisfies it; nil leaves the messenger with its old
+// deliver-or-fail behavior.
+type messageHolder interface {
+	Enqueue(ctx context.Context, id domain.SessionID, body string) (domain.QueuedMessage, int, error)
+}
+
 // runtimeMessenger sends the user's message directly to the session's live
-// runtime pane. The HTTP controller has already validated and sanitized the
-// message body; this adapter only resolves the stored runtime handle.
+// runtime pane, or hands it to the queue when the session is asleep. The HTTP
+// controller has already validated and sanitized the message body; this adapter
+// only resolves the stored runtime handle.
 type runtimeMessenger struct {
 	store   *sqlite.Store
 	runtime runtimeMessageSender
+	queue   messageHolder
 }
 
-func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message string) error {
+func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
-		return err
+		return ports.SendOutcome{}, err
 	}
 	if !ok {
-		return fmt.Errorf("session %s: %w", id, sessionmanager.ErrNotFound)
+		return ports.SendOutcome{}, fmt.Errorf("session %s: %w", id, sessionmanager.ErrNotFound)
 	}
 	if rec.IsTerminated {
-		return fmt.Errorf("session %s: %w", id, sessionmanager.ErrTerminated)
+		// Deliberately NOT queued. A terminated session is one the user finished;
+		// it comes back only if someone restores it, which may be never and is
+		// nobody's plan. Holding a message for it would turn a clear, immediate
+		// "this session is over" into a silent wait for a delivery that never
+		// happens - the exact confusion the queue exists to remove.
+		return ports.SendOutcome{}, fmt.Errorf("session %s: %w", id, sessionmanager.ErrTerminated)
+	}
+	if rec.IsSuspended && m.queue != nil {
+		// Suspended: the record and the worktree are intact but the tmux was reaped,
+		// so the stored handle points at a pane that no longer exists. Hold the
+		// message instead of typing it at nothing.
+		stored, pending, qErr := m.queue.Enqueue(ctx, id, message)
+		if qErr != nil {
+			return ports.SendOutcome{}, qErr
+		}
+		return ports.SendOutcome{Queued: true, QueuedAt: stored.QueuedAt, Pending: pending}, nil
 	}
 	handleID := rec.Metadata.RuntimeHandleID
 	if handleID == "" {
-		return fmt.Errorf("session %s: %w", id, sessionmanager.ErrIncompleteHandle)
+		return ports.SendOutcome{}, fmt.Errorf("session %s: %w", id, sessionmanager.ErrIncompleteHandle)
 	}
-	return m.runtime.SendMessage(ctx, ports.RuntimeHandle{ID: handleID}, message)
+	// A LIVE session whose send fails still fails loudly rather than queueing: the
+	// session is not asleep, so a failure here means something is genuinely wrong
+	// and the caller must hear about it now, not in an inbox.
+	if err := m.runtime.SendMessage(ctx, ports.RuntimeHandle{ID: handleID}, message); err != nil {
+		return ports.SendOutcome{}, err
+	}
+	return ports.SendOutcome{}, nil
 }
 
-// newSessionMessenger assembles the per-daemon agent messenger. For now, ao
-// send is intentionally minimal: submit the message to the live runtime pane.
-func newSessionMessenger(store *sqlite.Store, runtime runtimeMessageSender, _ *slog.Logger) ports.AgentMessenger {
-	return runtimeMessenger{store: store, runtime: runtime}
+// newSessionMessenger assembles the per-daemon agent messenger: submit the
+// message to the live runtime pane, or hand it to queue when the session is
+// suspended so it is delivered once the session's agent is listening again.
+func newSessionMessenger(store *sqlite.Store, runtime runtimeMessageSender, queue messageHolder, _ *slog.Logger) ports.AgentMessenger {
+	return runtimeMessenger{store: store, runtime: runtime, queue: queue}
 }
 
 // buildAgentRegistry returns a registry populated with the agent adapters the

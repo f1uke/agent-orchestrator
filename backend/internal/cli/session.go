@@ -763,6 +763,21 @@ func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 		{"workspace", sess.WorkspacePath},
 		{"terminated", fmt.Sprintf("%t", sess.IsTerminated)},
 	}
+	// A suspended session is paused, not finished, and until now nothing in this
+	// output said so - which made "why did my message not arrive?" unanswerable
+	// from the CLI. Only shown when true, so a live session's output is unchanged.
+	if sess.IsSuspended {
+		fields = append(fields, [2]string{"suspended", "true (paused; opening it resumes it in place)"})
+	}
+	// Messages AO is holding for this session. Shown only when there are any.
+	if sess.QueuedMessages > 0 {
+		fields = append(fields, [2]string{"queued messages",
+			fmt.Sprintf("%d waiting for this session's agent", sess.QueuedMessages)})
+	}
+	if sess.QueuedMessagesFailed > 0 {
+		fields = append(fields, [2]string{"undelivered messages",
+			fmt.Sprintf("%d given up on (never delivered)", sess.QueuedMessagesFailed)})
+	}
 	// A session that has ended accounts for itself here rather than leaving the
 	// reader to correlate the change log, the daemon log and the reclaim log.
 	// Absent for a live session, and for one that ended before AO kept an

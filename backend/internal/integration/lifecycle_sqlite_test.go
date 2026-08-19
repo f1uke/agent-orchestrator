@@ -106,9 +106,9 @@ func (s *stubWorkspace) SyncToBase(_ context.Context, _ ports.WorkspaceInfo, bas
 
 type captureMessenger struct{ msgs []string }
 
-func (c *captureMessenger) Send(_ context.Context, _ domain.SessionID, msg string) error {
+func (c *captureMessenger) Send(_ context.Context, _ domain.SessionID, msg string) (ports.SendOutcome, error) {
 	c.msgs = append(c.msgs, msg)
-	return nil
+	return ports.SendOutcome{}, nil
 }
 
 type stack struct {

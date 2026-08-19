@@ -210,6 +210,18 @@ type Session struct {
 	TerminatedAt              sql.NullTime
 }
 
+type SessionMessageQueue struct {
+	ID        int64
+	SessionID domain.SessionID
+	Body      string
+	State     string
+	Attempts  int64
+	LastError string
+	QueuedAt  time.Time
+	ExpiresAt time.Time
+	UpdatedAt time.Time
+}
+
 type SessionWorktree struct {
 	SessionID    domain.SessionID
 	RepoName     string

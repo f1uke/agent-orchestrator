@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
@@ -68,9 +69,26 @@ type ClaimOutcome struct {
 	OwnerTerminated bool
 }
 
-// AgentMessenger injects a message into a running agent.
+// SendOutcome reports how a message addressed to a session was disposed of.
+// It exists so a caller can never confuse "the agent has it" with "AO is
+// holding it": a queued message is a SUCCESS (no error) that has not been
+// delivered yet, and silence about that difference is exactly the failure this
+// type prevents.
+type SendOutcome struct {
+	// Queued is true when the message was held for later delivery instead of
+	// typed into a live pane.
+	Queued bool
+	// QueuedAt is when it was held; zero unless Queued.
+	QueuedAt time.Time
+	// Pending is how many messages the session now has waiting, including this
+	// one; zero unless Queued.
+	Pending int
+}
+
+// AgentMessenger injects a message into a running agent, or holds it for a
+// session that cannot receive it yet (see SendOutcome).
 type AgentMessenger interface {
-	Send(ctx context.Context, id domain.SessionID, message string) error
+	Send(ctx context.Context, id domain.SessionID, message string) (SendOutcome, error)
 }
 
 // ---- runtime / agent / workspace plugin ports ----

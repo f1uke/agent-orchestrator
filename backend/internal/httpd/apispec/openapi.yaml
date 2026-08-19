@@ -5235,6 +5235,10 @@ components:
           items:
             $ref: '#/components/schemas/SessionPRFacts'
           type: array
+        queuedMessages:
+          type: integer
+        queuedMessagesFailed:
+          type: integer
         status:
           enum:
           - todo
@@ -6613,6 +6617,15 @@ components:
           type: string
         ok:
           type: boolean
+        pendingMessages:
+          type: integer
+        queued:
+          type: boolean
+        queuedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
         sessionId:
           type: string
       required:

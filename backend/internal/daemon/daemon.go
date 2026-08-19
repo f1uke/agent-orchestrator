@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgqueue"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -136,12 +137,22 @@ func Run() error {
 	simDrags := simgesture.NewDrags()
 	defer simDrags.Shutdown()
 
+	// The durable inbox for sessions that cannot receive a message right now: a
+	// suspended session's tmux is gone, so typing at its stored handle fails and
+	// the message is lost. It delivers through the SAME gated runtime, so a held
+	// message lands on an empty input line like any other. Built before the
+	// messenger, which hands it anything addressed to a sleeping session.
+	// The readiness signal is the runtime's own agent-liveness probe, taken from
+	// the UNWRAPPED adapter: gatedRuntime's method set is the union interface it
+	// embeds, which does not carry AgentAlive (conpty cannot implement it), so
+	// asking the wrapper for the capability would silently find nothing.
+	messageQueue := msgqueue.New(store, gatedRuntime, agentLivenessProber(runtimeAdapter), log)
 	// The agent messenger sends validated user input to the session's live
-	// runtime pane. Keep this path small until durable inbox semantics are needed.
-	// Built before the Lifecycle Manager so the LCM can use it for SCM-driven
-	// agent nudges (CI failure, review feedback, merge conflict). It injects
-	// through the gated runtime so delivery waits for a typing gap.
-	messenger := newSessionMessenger(store, gatedRuntime, log)
+	// runtime pane, or queues it when the session is asleep. Built before the
+	// Lifecycle Manager so the LCM can use it for SCM-driven agent nudges (CI
+	// failure, review feedback, merge conflict). It injects through the gated
+	// runtime so delivery waits for a typing gap.
+	messenger := newSessionMessenger(store, gatedRuntime, messageQueue, log)
 	notificationHub := notify.NewHub()
 	// The activity feed is an in-memory, lossy push path for ephemeral per-tool
 	// agent activity. It sits OUTSIDE the CDC pipeline on purpose: CDC carries
@@ -351,6 +362,14 @@ func Run() error {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
 	}
 
+	// A queued message still marked "delivering" was in flight when the previous
+	// daemon died: the runtime may already have typed it into the pane, so it is
+	// failed (kept, visible) rather than re-sent. Losing one message loudly beats
+	// giving an agent the same instruction twice.
+	if _, recoverErr := messageQueue.RecoverInFlight(ctx); recoverErr != nil {
+		log.Error("queued message recovery on boot failed", "err", recoverErr)
+	}
+
 	if reviewSvc != nil {
 		// Close reviewer panes whose worker has ended or was killed while the daemon
 		// was down: reviewers have no session row, so no session-reconcile pass ever
@@ -407,6 +426,21 @@ func Run() error {
 		return sessMgr.CloseIdleSessions(ctx)
 	}, log)
 
+	// Deliver messages held for sessions that could not receive them. The sweep
+	// is the whole delivery path: it is what survives a restart, and re-checking
+	// on a tick is also what makes "the session is still coming up" a non-event
+	// rather than a race - the message simply lands on a later tick.
+	queueRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "message-queue",
+		Display:     "Deliver held messages",
+		Description: "Delivers messages queued for sessions that were asleep, once their agent is listening again.",
+		Interval:    msgQueueSweepInterval,
+	})
+	queueSweepDone := startTickerSweep(ctx, "queued message delivery", msgQueueSweepInterval, func(ctx context.Context) error {
+		queueRec.Tick()
+		return messageQueue.Drain(ctx)
+	}, log)
+
 	// Keep every live orchestrator's worktree on its project's default branch.
 	// Spawn and restore already sync at startup; this covers the drift in
 	// between, because an orchestrator session runs for days while the default
@@ -453,6 +487,7 @@ func Run() error {
 	stop()
 	<-previewDone
 	<-idleSweepDone
+	<-queueSweepDone
 	<-orchSyncDone
 	<-evidenceSweepDone
 	<-reclaimerDone

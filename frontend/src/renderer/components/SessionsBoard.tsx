@@ -40,6 +40,7 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { TodoDetailDialog } from "./TodoDetailDialog";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergeSuspendChip } from "./MergeSuspendChip";
 import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
@@ -896,6 +897,7 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 							</span>
 						)}
 						<div className="ml-auto flex shrink-0 items-center gap-1.5">
+							<QueuedMessagesChip session={session} />
 							{isMergeSuspended(session) ? (
 								<MergeSuspendChip session={session} />
 							) : (
