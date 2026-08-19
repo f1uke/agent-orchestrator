@@ -1613,7 +1613,7 @@ func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 		if rec.IsSuspended {
 			continue
 		}
-		if now.Sub(idleReference(rec)) <= m.idleCloseTTL {
+		if !m.idlePastTTL(rec, now) {
 			continue
 		}
 		if err := m.closeIdle(ctx, rec, liveHandles, reapable); err != nil {
@@ -1621,6 +1621,16 @@ func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// idlePastTTL reports whether a session has gone untouched for longer than the
+// idle window — by BOTH the agent and the human (idleReference is the later of
+// the last activity signal and the last user open). It is the sweep's single
+// definition of "idle": CloseIdleSessions decides what to suspend with it, and
+// reapableHandles decides which shared tmux may go with it, so the two can never
+// disagree about who is being suspended in a pass.
+func (m *Manager) idlePastTTL(rec domain.SessionRecord, now time.Time) bool {
+	return now.Sub(idleReference(rec)) > m.idleCloseTTL
 }
 
 // reapableHandles decides which runtime handles this sweep may destroy when it
@@ -1649,7 +1659,7 @@ func (m *Manager) reapableHandles(recs []domain.SessionRecord, now time.Time) ma
 		if h == "" {
 			continue
 		}
-		if now.Sub(idleReference(rec)) > m.idleCloseTTL {
+		if m.idlePastTTL(rec, now) {
 			reapable[h] = true
 			continue
 		}
