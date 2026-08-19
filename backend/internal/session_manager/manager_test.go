@@ -4835,3 +4835,30 @@ func TestCloseIdleSessions_OrchestratorOpenedRecently_NotSwept(t *testing.T) {
 		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
 	}
 }
+
+// TestCloseIdleSessions_ExactlyAtTTL_NotYetIdle pins the boundary of the sweep's
+// one "idle" predicate (idlePastTTL). It is shared by CloseIdleSessions, which
+// picks what to suspend, and reapableHandles, which picks which shared tmux may
+// go — so an off-by-one there would desync the guard from the suspend decision.
+// The window is exclusive: a session idle for EXACTLY the TTL has not yet passed
+// it and survives the pass untouched.
+func TestCloseIdleSessions_ExactlyAtTTL_NotYetIdle(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h1"] = true
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h1", WorkspacePath: "/ws/s1", Branch: "ao/proj-orchestrator"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-time.Hour)},
+		CreatedAt: now.Add(-2 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if st.sessions["s1"].IsSuspended {
+		t.Fatal("a session idle for exactly the TTL has not passed it; it must not be suspended")
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+	}
+}
