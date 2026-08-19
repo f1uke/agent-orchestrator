@@ -133,7 +133,6 @@ beforeEach(() => {
 	patchMock.mockReset().mockResolvedValue({ error: undefined });
 	vi.stubGlobal("WebSocket", MockWebSocket);
 	sessionStorage.clear();
-	vi.spyOn(document, "hasFocus").mockReturnValue(true);
 	HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage: vi.fn() });
 });
 
