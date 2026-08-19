@@ -487,6 +487,101 @@ func TestSimGesture_TypeWithRawKeysSendsWithoutAskingTheDevice(t *testing.T) {
 	}
 }
 
+func TestSimGesture_ForwardedKeysReachTheDeviceWithoutAskingAboutTheKeyboard(t *testing.T) {
+	// 🗝 The fix, at the route. "ด" has no US key, so planning from the TEXT
+	// would take the pasteboard - measured at 2.7-3.7 s, with two screen reads
+	// to prove it landed. The human pressed the position a US keyboard prints
+	// `f` on, and the guest's Thai mode turns that back into "ด" by itself.
+	driver := &fakeDriver{}
+	pb := &fakePasteboard{content: "what the human had copied"}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver,
+		keyboard: "th_TH@sw=Thai;hw=Automatic", pasteboard: pb}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "ด", "keys": []map[string]any{{"code": "KeyF"}}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if len(driver.events) != 1 {
+		t.Fatalf("want one gesture on the device, got %d", len(driver.events))
+	}
+	// The probe is a subprocess inside the guest and it is the only reason
+	// typing was ever slow. Forwarding must not pay for it.
+	if _, calls := screen.keyboardAsked(); calls != 0 {
+		t.Fatalf("forwarding a key asked the guest about its input mode %d time(s)", calls)
+	}
+	if writes := pb.written(); len(writes) != 0 {
+		t.Fatalf("forwarding a key cycled the guest pasteboard: %q", writes)
+	}
+	// It promises a key press. Saying "1 character" would be the claim the
+	// whole layout fix exists to stop anything making.
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "key presses forwarded") {
+		t.Fatalf("detail = %q, want it to say what was actually sent", detail)
+	}
+}
+
+func TestSimGesture_ForwardedKeysCarryShiftAsPartOfThePress(t *testing.T) {
+	// On a Thai keyboard shift produces a DIFFERENT Thai letter, so dropping it
+	// would type the wrong character rather than the same one in lower case.
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, &fakeSimService{},
+		&fakeScreen{listing: oneBooted(), driver: driver, keyboard: "th_TH@sw=Thai;hw=Automatic"})
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "ศ", "keys": []map[string]any{{"code": "KeyL", "shift": true}}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	events := driver.events[0]
+	if len(events) == 0 || events[0].Usage != 225 || events[0].Type != "down" {
+		t.Fatalf("first event = %+v, want left shift held first", events[0])
+	}
+	var released bool
+	for _, e := range events {
+		if e.Usage == 225 && e.Type == "up" {
+			released = true
+		}
+	}
+	if !released {
+		t.Fatal("shift left held is the keyboard's stuck finger: every later keystroke would arrive shifted")
+	}
+}
+
+func TestSimGesture_AKeyThatCannotBeForwardedStillDeliversTheCharacter(t *testing.T) {
+	// The position is unknown; the character is not. The guest is asked after
+	// all, and the ordinary planned route carries it.
+	driver := pasteLands("ด")
+	screen := &fakeScreen{listing: oneBooted(), driver: driver,
+		keyboard: "th_TH@sw=Thai;hw=Automatic", pasteboard: &fakePasteboard{}}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "ด", "keys": []map[string]any{{"code": "IntlRo"}}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if _, calls := screen.keyboardAsked(); calls != 1 {
+		t.Fatalf("the guest was asked %d time(s); a route that cannot be forwarded has to be planned", calls)
+	}
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "pasted") {
+		t.Fatalf("detail = %q, want the character delivered by a route that can carry it", detail)
+	}
+}
+
+func TestSimGesture_KeysThatDoNotAccountForTheTextAreRefusedBeforeTheDevice(t *testing.T) {
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, &fakeSimService{}, &fakeScreen{listing: oneBooted(), driver: driver})
+	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "ดฟ", "keys": []map[string]any{{"code": "KeyF"}}})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422", code)
+	}
+	if len(driver.events) != 0 {
+		t.Fatal("a request whose keys and text disagree must not reach the device")
+	}
+}
+
 func TestSimGesture_OnlyTypingAsksAboutTheKeyboard(t *testing.T) {
 	// The probe is a subprocess on a real machine. Paying it for every tap in a
 	// drag is what this route already learned not to do with `simctl list`.

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -150,30 +150,55 @@ async function settle() {
 	await vi.advanceTimersByTimeAsync(400);
 }
 
+/**
+ * A keystroke as a REAL keyboard delivers it: the character the layout produced
+ * AND the position of the key that produced it.
+ *
+ * ⚠ `userEvent.keyboard` cannot express this. Its map knows the US layout, so
+ * it can pair `a` with `KeyA` but has no position at all for `ส` - which is
+ * precisely the pairing that matters here, and the reason this dispatches the
+ * event itself. jsdom then tells us what the pane SENT; whether that reached a
+ * device is a question only a device can answer, and the record says which
+ * claims rest on that.
+ */
+function typeOn(key: string, code: string, init: KeyboardEventInit = {}) {
+	fireEvent.keyDown(canvas(), { key, code, ...init });
+}
+
+/**
+ * Focus the device surface and let React see it.
+ *
+ * ⚠ Typing reaches the device only while the surface HAS focus, and that is
+ * React state - so a keystroke dispatched in the same tick as the focus sees
+ * the pane still switched off. `userEvent` flushes on its own; a dispatched
+ * event does not.
+ */
+async function focusCanvas() {
+	canvas().focus();
+	await vi.advanceTimersByTimeAsync(0);
+}
+
 describe("typing into the device", () => {
 	// 🗝 The reason this slice exists. A character used to wait for the human to
 	// pause typing (250 ms) and then for the daemon to ask the guest which
 	// keyboard it had (~935 ms), so the first character of "hello" reached the
-	// device 1738 ms after it was pressed and all five arrived at once. On a
-	// guest that reads US ASCII faithfully each one now goes out on its own,
-	// which is a 3-6 ms round trip.
+	// device 1738 ms after it was pressed and all five arrived at once. Now each
+	// keystroke goes out on its own, carrying the position of the key that
+	// produced it - a 1-2 ms round trip on the device.
 	it("sends each character on its own, without waiting for a pause", async () => {
 		serve(heldByUs);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
 
-		canvas().focus();
-		await userEvent.keyboard("hello");
+		await focusCanvas();
+		await userEvent.keyboard("hi");
 		// Deliberately NOT settled first: nothing here may be waiting on a timer.
-		await waitFor(() => expect(sent()).toHaveLength(5));
+		await waitFor(() => expect(sent()).toHaveLength(2));
 
 		expect(sent()).toEqual([
-			{ kind: "type", text: "h" },
-			{ kind: "type", text: "e" },
-			{ kind: "type", text: "l" },
-			{ kind: "type", text: "l" },
-			{ kind: "type", text: "o" },
+			{ kind: "type", text: "h", keys: [{ code: "KeyH", shift: false }] },
+			{ kind: "type", text: "i", keys: [{ code: "KeyI", shift: false }] },
 		]);
 		expect(postMock).toHaveBeenCalledWith(
 			"/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture",
@@ -181,41 +206,104 @@ describe("typing into the device", () => {
 		);
 	});
 
-	// 🗝 The case the whole design is for. The browser resolved the input
-	// source, so the pane never has to guess a character from a key code -
-	// which is what made `ao sim type "fa12345"` arrive as Thai gibberish.
-	it("sends Thai exactly as typed", async () => {
-		serve(heldByUs);
-		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
-		await drive();
-
-		canvas().focus();
-		await userEvent.keyboard("สวัสดี");
-		await settle();
-
-		expect(sent()).toEqual([{ kind: "type", text: "สวัสดี" }]);
-	});
-
-	// ⚠ Still batched where batching is what makes it correct. Each `type` on a
-	// remapping guest is a pasteboard round trip that reads the screen twice to
-	// prove it landed, measured at 3.1-3.4 s - one per character would be far
-	// worse than the pause this slice removed, and would cycle the guest's
-	// pasteboard on every keystroke.
-	it("batches a burst on a guest that would remap the keys", async () => {
+	// 🗝 The fix, and the human's actual case. A Thai rune has no US key, so
+	// sending it as TEXT put every keystroke through the guest's pasteboard -
+	// 2.7-3.7 s each, batched into bursts to make that bearable. The key the
+	// human pressed goes straight through instead, exactly as it does in
+	// Simulator.app, and the guest's own Thai mode turns it back into the rune.
+	//
+	// The character travels too: it is what a recording keeps, and what the
+	// daemon falls back to delivering if it cannot forward the position.
+	it("forwards a Thai keystroke as the key that produced it, one per character", async () => {
 		serve(heldByUs, remappingGuest);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
-		await userEvent.keyboard("ab");
+		await focusCanvas();
+		// "สว" on a Thai Mac: the keys a US keyboard prints `l` and `;` on.
+		typeOn("ส", "KeyL");
+		typeOn("ว", "Semicolon");
+		await waitFor(() => expect(sent()).toHaveLength(2));
+
+		expect(sent()).toEqual([
+			{ kind: "type", text: "ส", keys: [{ code: "KeyL", shift: false }] },
+			{ kind: "type", text: "ว", keys: [{ code: "Semicolon", shift: false }] },
+		]);
+	});
+
+	// ⚠ Shift belongs to the KEY, not to the character. On a Thai keyboard it
+	// produces a different Thai letter, so dropping it would type the wrong
+	// character rather than the same one in lower case.
+	it("carries shift with the key it was held for", async () => {
+		serve(heldByUs, remappingGuest);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+
+		await focusCanvas();
+		typeOn("ศ", "KeyL", { shiftKey: true });
+		await waitFor(() => expect(sent()).toHaveLength(1));
+
+		expect(sent()).toEqual([{ kind: "type", text: "ศ", keys: [{ code: "KeyL", shift: true }] }]);
+	});
+
+	// ⚠ Caps Lock is the one case where the position and shift do NOT account
+	// for the character: the Mac made a capital from an unshifted press, and the
+	// device - never told about Caps Lock - would make the lower-case letter
+	// from the same key. So the character is sent instead, by the route that can
+	// promise it. Wrong-and-fast is the one outcome this surface may not have.
+	it("sends the character rather than the key when Caps Lock made it", async () => {
+		serve(heldByUs, remappingGuest);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+
+		await focusCanvas();
+		typeOn("A", "KeyA", { modifierCapsLock: true });
 		await settle();
-		await userEvent.keyboard("cd");
+
+		expect(sent()).toEqual([{ kind: "type", text: "A" }]);
+	});
+
+	// ⚠ Still batched where there is no position to forward, because there the
+	// daemon has to plan the route: on a guest that would remap the keys that is
+	// a pasteboard round trip which reads the screen twice to prove it landed,
+	// measured at 2.7-3.7 s. One per keystroke would be far worse than the pause
+	// it replaced, and would cycle the guest's pasteboard on every character.
+	it("batches a burst of keystrokes that carry no position", async () => {
+		serve(heldByUs, remappingGuest);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+
+		await focusCanvas();
+		// An on-screen keyboard, an accessibility tool, a synthetic event: the
+		// character is known and the key that made it is not.
+		typeOn("a", "");
+		typeOn("b", "");
+		await settle();
+		typeOn("c", "");
+		typeOn("d", "");
 		await settle();
 
 		expect(sent()).toEqual([
 			{ kind: "type", text: "ab" },
 			{ kind: "type", text: "cd" },
 		]);
+	});
+
+	// A burst that has already lost its positions cannot regain them: the keys
+	// have to account for every character or for none, so one forwardable key
+	// mixed into it goes by the slower route WITH the rest rather than jumping
+	// ahead of what was typed before it.
+	it("keeps a burst in order rather than letting one forwardable key overtake it", async () => {
+		serve(heldByUs, remappingGuest);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+
+		await focusCanvas();
+		typeOn("a", "");
+		typeOn("b", "KeyB");
+		await settle();
+
+		expect(sent()).toEqual([{ kind: "type", text: "ab" }]);
 	});
 
 	// ⚠ Ordering is the property that must not break: a backspace that arrived
@@ -226,8 +314,11 @@ describe("typing into the device", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
-		await userEvent.keyboard("ab{Backspace}c");
+		await focusCanvas();
+		typeOn("a", "");
+		typeOn("b", "");
+		await userEvent.keyboard("{Backspace}");
+		typeOn("c", "");
 		await settle();
 
 		expect(sent()).toEqual([
@@ -237,19 +328,19 @@ describe("typing into the device", () => {
 		]);
 	});
 
-	// ⚠ Even on a US guest, a character no US key can send has to go through the
-	// pasteboard - so Thai is batched by the TEXT, whatever the input mode says.
-	// This is the property that makes a remembered input mode safe to reuse at
-	// all: a human who switches their Mac to Thai starts producing Thai runes,
-	// and those are routed by what they are rather than by what was remembered.
+	// ⚠ Even on a US guest, a character no US key can send and no position to
+	// forward has to go through the pasteboard - so it is batched by the TEXT,
+	// whatever the input mode says. This is the property that makes a remembered
+	// input mode safe to reuse at all: what a keystroke IS decides its route,
+	// not what was remembered about the guest.
 	it("batches characters no US key can send, even on a US guest", async () => {
 		serve(heldByUs);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
 
-		canvas().focus();
-		await userEvent.keyboard("สวัสดี");
+		await focusCanvas();
+		for (const rune of "สวัสดี") typeOn(rune, "");
 		await settle();
 
 		expect(sent()).toEqual([{ kind: "type", text: "สวัสดี" }]);
@@ -260,7 +351,7 @@ describe("typing into the device", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
+		await focusCanvas();
 		await userEvent.keyboard("{Enter}{Tab}{ArrowUp}{ArrowDown}{ArrowLeft}{ArrowRight}");
 		await settle();
 
@@ -279,8 +370,8 @@ describe("typing into the device", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
-		await userEvent.keyboard("half");
+		await focusCanvas();
+		for (const rune of "half") typeOn(rune, "");
 		canvas().blur();
 		await vi.advanceTimersByTimeAsync(0);
 
@@ -306,7 +397,7 @@ describe("saying that typing is still on its way", () => {
 		await drive();
 		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
 
-		canvas().focus();
+		await focusCanvas();
 		await userEvent.keyboard("ab");
 		await waitFor(() => expect(sent()).toHaveLength(2));
 		await vi.advanceTimersByTimeAsync(400);
@@ -326,8 +417,8 @@ describe("saying that typing is still on its way", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
-		await userEvent.keyboard("สวัสดี");
+		await focusCanvas();
+		for (const rune of "สวัสดี") typeOn(rune, "");
 		await vi.advanceTimersByTimeAsync(TYPING_FLUSH_MS + TYPING_WAIT_VISIBLE_MS + 50);
 
 		expect(waitingSlot()).not.toBeEmptyDOMElement();
@@ -349,8 +440,8 @@ describe("saying that typing is still on its way", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
-		await userEvent.keyboard("สวัสดี");
+		await focusCanvas();
+		for (const rune of "สวัสดี") typeOn(rune, "");
 		await vi.advanceTimersByTimeAsync(TYPING_FLUSH_MS + TYPING_WAIT_VISIBLE_MS + 50);
 
 		await waitFor(() => expect(waitingSlot()).toBeEmptyDOMElement());
@@ -375,7 +466,7 @@ describe("the keyboard is not stolen from the rest of the app", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await screen.findByRole("button", { name: /drive this device/i });
 
-		canvas().focus();
+		await focusCanvas();
 		await userEvent.keyboard("hello");
 		await settle();
 
@@ -387,7 +478,7 @@ describe("the keyboard is not stolen from the rest of the app", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await screen.findByRole("button", { name: /claim to drive/i });
 
-		canvas().focus();
+		await focusCanvas();
 		await userEvent.keyboard("hello");
 		await settle();
 
@@ -405,7 +496,7 @@ describe("the keyboard is not stolen from the rest of the app", () => {
 			if (!event.defaultPrevented) seen.push(event.key);
 		};
 		document.addEventListener("keydown", listener);
-		canvas().focus();
+		await focusCanvas();
 		await userEvent.keyboard("{Meta>}w{/Meta}{Control>}k{/Control}{Alt>}f{/Alt}");
 		await settle();
 		document.removeEventListener("keydown", listener);
@@ -426,7 +517,7 @@ describe("the keyboard is not stolen from the rest of the app", () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
-		canvas().focus();
+		await focusCanvas();
 		expect(canvas()).toHaveFocus();
 		await userEvent.keyboard("{Escape}");
 		await settle();

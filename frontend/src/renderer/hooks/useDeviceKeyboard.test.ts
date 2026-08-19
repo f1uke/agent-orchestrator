@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { classifyKey } from "./useDeviceKeyboard";
 
-const press = (key: string, mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean }> = {}) => ({
+const press = (
+	key: string,
+	mods: Partial<{
+		metaKey: boolean;
+		ctrlKey: boolean;
+		altKey: boolean;
+		shiftKey: boolean;
+		code: string;
+		capsLock: boolean;
+	}> = {},
+) => ({
 	key,
 	metaKey: false,
 	ctrlKey: false,
 	altKey: false,
 	...mods,
+	getModifierState: (name: "CapsLock") => name === "CapsLock" && mods.capsLock === true,
 });
 
 describe("what a keypress means to the device", () => {
@@ -68,5 +79,90 @@ describe("what a keypress means to the device", () => {
 		expect(classifyKey(press("Dead"))).toBeNull();
 		expect(classifyKey(press("Process"))).toBeNull();
 		expect(classifyKey(press("Unidentified"))).toBeNull();
+	});
+});
+
+/**
+ * 🗝 The character says what the human meant; the KEY says what they did. Both
+ * travel, because they answer different questions: the key is how the keystroke
+ * reaches the device at the speed of Simulator.app, and the character is what a
+ * recording keeps and what the daemon delivers if the key cannot be forwarded.
+ */
+describe("the key a character came from", () => {
+	/** classifyKey, narrowed to the character case the tests below are about. */
+	const character = (event: Parameters<typeof classifyKey>[0]) => {
+		const what = classifyKey(event);
+		if (what?.kind !== "text") throw new Error(`expected a character, got ${JSON.stringify(what)}`);
+		return what;
+	};
+
+	it("travels with the character it produced, whatever the layout printed", () => {
+		// A Thai Mac: the key a US keyboard prints `f` on produced "ด".
+		expect(classifyKey(press("ด", { code: "KeyF" }))).toEqual({
+			kind: "text",
+			text: "ด",
+			key: { code: "KeyF", shift: false },
+		});
+		expect(classifyKey(press("a", { code: "KeyA" }))).toEqual({
+			kind: "text",
+			text: "a",
+			key: { code: "KeyA", shift: false },
+		});
+	});
+
+	// Shift belongs to the press, not to the character: on a Thai keyboard it
+	// produces a DIFFERENT Thai letter, so losing it types the wrong character
+	// rather than the same one in lower case.
+	it("keeps shift as part of the press", () => {
+		expect(character(press("ศ", { code: "KeyL", shiftKey: true })).key).toEqual({
+			code: "KeyL",
+			shift: true,
+		});
+		expect(character(press("A", { code: "KeyA", shiftKey: true })).key).toEqual({
+			code: "KeyA",
+			shift: true,
+		});
+	});
+
+	it("covers every position that carries a character", () => {
+		const positions = [
+			"KeyA",
+			"KeyZ",
+			"Digit0",
+			"Digit9",
+			"Minus",
+			"Equal",
+			"BracketLeft",
+			"BracketRight",
+			"Backslash",
+			"Semicolon",
+			"Quote",
+			"Backquote",
+			"Comma",
+			"Period",
+			"Slash",
+			"Space",
+		];
+		for (const code of positions) {
+			expect(character(press("x", { code })).key, code).toEqual({ code, shift: false });
+		}
+	});
+
+	// ⚠ No position means no key to forward - the character still goes, by the
+	// route the daemon plans for it. A synthetic event, an on-screen keyboard
+	// and an accessibility tool all land here.
+	it("is absent when the keystroke says nothing about which key it was", () => {
+		for (const code of [undefined, "", "Unidentified", "F5", "IntlRo"]) {
+			expect(character(press("a", code === undefined ? {} : { code })).key, String(code)).toBeUndefined();
+		}
+	});
+
+	// ⚠ Caps Lock is the one case where the position and shift do NOT account
+	// for the character: the Mac made a capital from an unshifted press, and the
+	// device was never told about Caps Lock, so the same key would make the
+	// lower-case letter there. Sending Shift instead would be a guess, and on a
+	// layout where Caps Lock is not simply Shift it would be the wrong one.
+	it("is absent while Caps Lock is what made the character", () => {
+		expect(classifyKey(press("A", { code: "KeyA", capsLock: true }))).toEqual({ kind: "text", text: "A" });
 	});
 });

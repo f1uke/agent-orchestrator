@@ -460,3 +460,193 @@ func TestPath_RefusesWhatWouldNotLand(t *testing.T) {
 		t.Fatal("a path with no duration must be refused")
 	}
 }
+
+func TestForwardKeys_SendsThePositionAndItsShift(t *testing.T) {
+	// The keys a Thai Mac uses for "ดฟ" are the positions US keyboards print
+	// `f` and `a` on, and shift is part of the press rather than of the letter.
+	events, err := ForwardKeys([]KeyPress{{Code: "KeyF"}, {Code: "KeyA", Shift: true}})
+	if err != nil {
+		t.Fatalf("ForwardKeys: %v", err)
+	}
+	var keys []Event
+	for _, e := range events {
+		if e.Kind == "key" {
+			keys = append(keys, e)
+		}
+	}
+	want := []struct {
+		usage int
+		typ   string
+	}{
+		{9, "down"}, {9, "up"},
+		{225, "down"}, {4, "down"}, {4, "up"}, {225, "up"},
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("got %d key events, want %d: %+v", len(keys), len(want), keys)
+	}
+	for i, w := range want {
+		if keys[i].Usage != w.usage || keys[i].Type != w.typ {
+			t.Fatalf("key %d = usage %d %s, want usage %d %s", i, keys[i].Usage, keys[i].Type, w.usage, w.typ)
+		}
+	}
+}
+
+func TestForwardKeys_IsTheSameUsagesTheUSTableWouldSend(t *testing.T) {
+	// 🗝 What `KeyboardEvent.code` MEANS, written out independently of how the
+	// table is built: each position is named for the character a US keyboard
+	// prints on it. So forwarding a position must compose exactly what typing
+	// that character composes - every position, not a sample. A single wrong
+	// entry here is a key that lands somewhere else on the device, which on a
+	// Thai guest is a different letter and in a secure field is invisible.
+	positions := map[string]string{
+		"Digit1": "1", "Digit2": "2", "Digit3": "3", "Digit4": "4", "Digit5": "5",
+		"Digit6": "6", "Digit7": "7", "Digit8": "8", "Digit9": "9", "Digit0": "0",
+		"Minus": "-", "Equal": "=", "BracketLeft": "[", "BracketRight": "]", "Backslash": `\`,
+		"Semicolon": ";", "Quote": "'", "Backquote": "`", "Comma": ",", "Period": ".",
+		"Slash": "/", "Space": " ",
+	}
+	for r := 'a'; r <= 'z'; r++ {
+		positions["Key"+string(r-32)] = string(r)
+	}
+	if len(positions) != len(keyPositions) {
+		t.Fatalf("the table has %d positions and this test knows %d", len(keyPositions), len(positions))
+	}
+	for code, char := range positions {
+		forwarded, err := ForwardKeys([]KeyPress{{Code: code}})
+		if err != nil {
+			t.Fatalf("ForwardKeys(%s): %v", code, err)
+		}
+		typed, err := TypeRaw(char)
+		if err != nil {
+			t.Fatalf("TypeRaw(%q): %v", char, err)
+		}
+		if !reflect.DeepEqual(forwarded, typed) {
+			t.Fatalf("%s does not send what typing %q sends: %+v vs %+v", code, char, forwarded, typed)
+		}
+	}
+	// And shifted: the position is the same key, held with shift, which is what
+	// the US table does for the shifted character.
+	forwarded, err := ForwardKeys([]KeyPress{{Code: "KeyA", Shift: true}, {Code: "Digit1", Shift: true}})
+	if err != nil {
+		t.Fatalf("ForwardKeys: %v", err)
+	}
+	typed, err := TypeRaw("A!")
+	if err != nil {
+		t.Fatalf("TypeRaw: %v", err)
+	}
+	if !reflect.DeepEqual(forwarded, typed) {
+		t.Fatalf("a shifted position must send the shifted key: %+v vs %+v", forwarded, typed)
+	}
+}
+
+func TestForwardKeys_RefusesAPositionItHasNoUsageFor(t *testing.T) {
+	// Refused rather than dropped: a keystroke that silently sends nothing is
+	// the failure this package exists to make impossible.
+	for _, code := range []string{"F5", "IntlRo", ""} {
+		_, err := ForwardKeys([]KeyPress{{Code: code}})
+		var unknown *UnknownKeyError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("ForwardKeys(%q) must report an unknown position, got %v", code, err)
+		}
+	}
+	if _, err := ForwardKeys(nil); err == nil {
+		t.Fatal("forwarding nothing is a mistake worth reporting, not a no-op")
+	}
+	long := make([]KeyPress, MaxTypeRunes+1)
+	for i := range long {
+		long[i] = KeyPress{Code: "KeyA"}
+	}
+	if _, err := ForwardKeys(long); err == nil {
+		t.Fatal("a run longer than a gesture hold can cover must be refused")
+	}
+}
+
+func TestForwardableKeys_AnswersWithoutTouchingTheDevice(t *testing.T) {
+	if !ForwardableKeys([]KeyPress{{Code: "KeyF"}, {Code: "Digit1"}}) {
+		t.Fatal("ordinary character positions are forwardable")
+	}
+	if ForwardableKeys([]KeyPress{{Code: "KeyF"}, {Code: "F5"}}) {
+		t.Fatal("one position with no usage makes the whole run unforwardable")
+	}
+	if ForwardableKeys(nil) {
+		t.Fatal("nothing to forward is not a forwardable run")
+	}
+}
+
+func TestPlanText_ForwardsTheKeysAPersonPressedWithoutAskingTheGuestAnything(t *testing.T) {
+	// 🗝 The fix. A Thai rune has no US key, so planning from the TEXT sends it
+	// to the pasteboard - three seconds and two screen reads. Planning from the
+	// KEY the human pressed sends the key, and the guest's Thai mode turns it
+	// back into the same rune, which is why typing into Simulator.app is fast.
+	//
+	// Note what the guest is NOT asked: the probe is not consulted at all here.
+	route, err := PlanText("ด", ProbedKeyboard{Err: errors.New("never asked")},
+		TextOptions{Keys: []KeyPress{{Code: "KeyF"}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Paste {
+		t.Fatal("a key a person pressed must be forwarded, not pasted")
+	}
+	if !route.Forwarded {
+		t.Fatal("the route must say it forwarded keys: it promises a key press, not a character")
+	}
+	keys, err := ForwardKeys([]KeyPress{{Code: "KeyF"}})
+	if err != nil {
+		t.Fatalf("ForwardKeys: %v", err)
+	}
+	if !reflect.DeepEqual(route.Events, keys) {
+		t.Fatal("forwarding must send exactly the keys that were pressed")
+	}
+}
+
+func TestPlanText_FallsBackToTheTextWhenAKeyCannotBeForwarded(t *testing.T) {
+	// The position is unknown, but the CHARACTER is still known - so the
+	// ordinary planner delivers it. Slower, never wrong.
+	route, err := PlanText("ด", ProbedKeyboard{Mode: thaiMode}, TextOptions{Keys: []KeyPress{{Code: "IntlRo"}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Forwarded {
+		t.Fatal("a position with no usage cannot have been forwarded")
+	}
+	if !route.Paste {
+		t.Fatal("the character must still reach the device, by the route that can carry it")
+	}
+}
+
+func TestPlanText_RefusesKeysThatDoNotMatchTheText(t *testing.T) {
+	// The text is what a recording keeps. If it disagrees with the keys, one of
+	// them is a lie and there is no way to tell which.
+	_, err := PlanText("ดฟ", ProbedKeyboard{Mode: usMode}, TextOptions{Keys: []KeyPress{{Code: "KeyF"}}})
+	if err == nil {
+		t.Fatal("one key press cannot account for two characters")
+	}
+	if !strings.Contains(err.Error(), "same keystrokes") {
+		t.Fatalf("error = %q, must say what has to line up", err)
+	}
+}
+
+func TestPlanText_RefusesForwardedKeysCombinedWithARouteFlag(t *testing.T) {
+	for _, opts := range []TextOptions{
+		{Keys: []KeyPress{{Code: "KeyF"}}, Paste: true},
+		{Keys: []KeyPress{{Code: "KeyF"}}, RawKeys: true},
+	} {
+		if _, err := PlanText("ด", ProbedKeyboard{Mode: usMode}, opts); err == nil {
+			t.Fatalf("%+v asks for two routes at once and has no answer", opts)
+		}
+	}
+}
+
+func TestPlanText_WithoutKeysIsUnchanged(t *testing.T) {
+	// The agent-facing promise: a caller that did not watch a person press
+	// anything still gets the planned, proven route. Locked here so a future
+	// change to forwarding cannot quietly become the default.
+	route, err := PlanText("fa12345", ProbedKeyboard{Mode: thaiMode}, TextOptions{})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Forwarded || !route.Paste {
+		t.Fatal("text with no keys behind it must still be planned from the guest's input mode")
+	}
+}

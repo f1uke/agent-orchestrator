@@ -214,6 +214,11 @@ type TextRoute struct {
 	Events []Event
 	// Keyboard is the input mode that was established, when one was.
 	Keyboard simkeyboard.Mode
+	// Forwarded: the keys a person pressed were sent as themselves, so what
+	// arrives is the guest's reading of those keys rather than a promise about
+	// characters. Reported rather than inferred from Events being non-empty:
+	// the two routes compose the same shape and mean different things.
+	Forwarded bool
 }
 
 // ProbedKeyboard is what a device answered when asked which input mode it uses,
@@ -239,6 +244,16 @@ type TextOptions struct {
 	RawKeys bool
 	// Paste: use the pasteboard regardless.
 	Paste bool
+	// Keys are the physical keys a person pressed to produce this text on THIS
+	// Mac, in the same order. When they are all forwardable they are sent as
+	// themselves and nothing about the guest's input mode has to be asked or
+	// planned around - see ForwardKeys for why that is correct for a human and
+	// wrong for an agent.
+	//
+	// ⚠ Only a caller that watched a person press these keys may set them. A
+	// string an agent chose has no keys behind it, and inventing some would be
+	// the layout bug of #198 with extra steps.
+	Keys []KeyPress
 }
 
 // PlanText decides how to deliver text so that the characters asked for are the
@@ -264,6 +279,33 @@ func PlanText(text string, keyboard ProbedKeyboard, opts TextOptions) (TextRoute
 	}
 	if text == "" {
 		return TextRoute{}, errors.New("nothing to type")
+	}
+	if len(opts.Keys) > 0 {
+		if opts.RawKeys || opts.Paste {
+			return TextRoute{}, errors.New(
+				"forwarded key presses already say how to reach the device, so they cannot be combined with " +
+					"raw keys or paste. Send the keys, or send the text and pick a route for it")
+		}
+		// The two must describe the same keystrokes. If they do not, one of them
+		// is wrong and there is no way to tell which - and the text is what a
+		// recording keeps, so a mismatch would write down something that was
+		// never typed.
+		if n := len([]rune(text)); n != len(opts.Keys) {
+			return TextRoute{}, fmt.Errorf(
+				"%d key press(es) were forwarded for %d character(s): the keys and the text must describe "+
+					"the same keystrokes, in the same order", len(opts.Keys), n)
+		}
+		events, err := ForwardKeys(opts.Keys)
+		if err == nil {
+			return TextRoute{Events: events, Forwarded: true}, nil
+		}
+		// A position with no usage is not a failure. The text still says which
+		// characters the human meant, and the ordinary planner can deliver
+		// those - slower, and never wrong.
+		var unknown *UnknownKeyError
+		if !errors.As(err, &unknown) {
+			return TextRoute{}, err
+		}
 	}
 	if opts.Paste {
 		return TextRoute{Paste: true, Why: "the pasteboard was asked for", Keyboard: keyboard.Mode}, nil
@@ -344,6 +386,141 @@ func TypeRaw(text string) ([]Event, error) {
 		events = append(events, Event{Kind: "sleep", MS: int(keyStep.Milliseconds())})
 	}
 	return events, nil
+}
+
+// KeyPress is one physical key a person pressed on their own keyboard, named
+// the way the browser names it.
+//
+// 🗝 `KeyboardEvent.code` is a POSITION on the keyboard, not a character: it is
+// defined as where that key sits on a US layout, whatever the layout in force
+// prints on it. That is the same thing a USB HID usage is, which is why a
+// keystroke a human actually performed can be forwarded to the device without
+// anything in between having to know what character it means.
+type KeyPress struct {
+	// Code is `KeyboardEvent.code`, e.g. "KeyF", "Digit1", "Semicolon".
+	Code string
+	// Shift was held. It is part of the key press rather than of the character:
+	// on a Thai keyboard shift produces a different Thai letter, and the guest
+	// applies its own layout to the pair exactly as the Mac did.
+	Shift bool
+}
+
+// ForwardKeys composes the key presses for keys a person actually pressed.
+//
+// 🗝 This is the interactive counterpart of PlanText, and it is a different
+// promise rather than a faster version of the same one. PlanText answers "make
+// these CHARACTERS arrive", which is an agent's question: the agent chose a
+// string, and the guest's input mode stands between that string and the field,
+// so the route has to be planned and proven. Forwarding answers "the human
+// pressed THIS KEY", where the guest's input mode is not an obstacle but the
+// point: it is the same layout the Mac just used to decide which character the
+// human saw themselves type, so whatever the guest makes of the key is what
+// they meant. It is also exactly what Simulator.app does, which is why typing
+// there has never felt slow.
+//
+// What it does not promise is characters. A guest whose input mode has drifted
+// away from the Mac's - Simulator's I/O > Keyboard > "Use the Same Keyboard
+// Language as macOS" unticked, or a field that forced the guest to an
+// ASCII-capable mode - will produce something else, exactly as Simulator.app
+// would. The human is watching the screen, and that is the check.
+func ForwardKeys(keys []KeyPress) ([]Event, error) {
+	if len(keys) == 0 {
+		return nil, errors.New("no keys to forward")
+	}
+	if len(keys) > MaxTypeRunes {
+		return nil, fmt.Errorf("cannot forward %d key presses at once: keep it to %d or fewer, "+
+			"so one gesture stays inside the hold that keeps other commands off the device", len(keys), MaxTypeRunes)
+	}
+	events := make([]Event, 0, len(keys)*5)
+	for _, k := range keys {
+		usage, ok := keyPositions[k.Code]
+		if !ok {
+			return nil, &UnknownKeyError{Code: k.Code}
+		}
+		if k.Shift {
+			events = append(events, Event{Kind: "key", Type: "down", Usage: usageLeftShift})
+		}
+		events = append(events,
+			Event{Kind: "key", Type: "down", Usage: usage},
+			Event{Kind: "key", Type: "up", Usage: usage},
+		)
+		if k.Shift {
+			events = append(events, Event{Kind: "key", Type: "up", Usage: usageLeftShift})
+		}
+		events = append(events, Event{Kind: "sleep", MS: int(keyStep.Milliseconds())})
+	}
+	return events, nil
+}
+
+// ForwardableKeys reports whether every one of these key positions has a usage
+// to send it with.
+//
+// It exists so a caller can tell, WITHOUT touching the device, that it is about
+// to take the forwarding route and therefore does not need to ask the guest
+// which input mode it is in - the read that costs about a second and is the
+// only reason typing was ever slow.
+func ForwardableKeys(keys []KeyPress) bool {
+	if len(keys) == 0 || len(keys) > MaxTypeRunes {
+		return false
+	}
+	for _, k := range keys {
+		if _, ok := keyPositions[k.Code]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// UnknownKeyError is a key position with no usage to send it with - an F-key, a
+// layout-specific extra key, or an event that carried no position at all. It is
+// a type rather than a message because it selects a route: the key cannot be
+// forwarded, but the caller still knows which CHARACTER the human meant, and
+// PlanText can deliver that instead.
+type UnknownKeyError struct{ Code string }
+
+func (e *UnknownKeyError) Error() string {
+	if e.Code == "" {
+		return "that keystroke carried no key position, so there is no key to forward"
+	}
+	return fmt.Sprintf("no simulator key matches the position %q", e.Code)
+}
+
+// keyPositions maps a `KeyboardEvent.code` to the HID usage for that position.
+//
+// It is built from usKeyboard rather than written out, because the two say the
+// same thing: `code` is defined by the character that position carries on a US
+// keyboard, and usKeyboard is what usage sends that character. One table means
+// one place for the usages to be right.
+//
+// Only positions that carry a character are here. The keys that do not - Enter,
+// Backspace, Tab, the arrows - are the `key` gesture's business (see keyUsages),
+// and modified keystrokes never reach here at all: a chord is a shortcut on the
+// Mac, not something a person is typing into a field.
+var keyPositions = buildKeyPositions()
+
+func buildKeyPositions() map[string]int {
+	m := make(map[string]int, 48)
+	add := func(code string, r rune) {
+		key, ok := usKeyboard[r]
+		if !ok {
+			panic("simbridge: no US keyboard usage for " + string(r))
+		}
+		m[code] = key.usage
+	}
+	for r := 'a'; r <= 'z'; r++ {
+		add("Key"+string(r-32), r)
+	}
+	for r := '0'; r <= '9'; r++ {
+		add("Digit"+string(r), r)
+	}
+	for code, r := range map[string]rune{
+		"Minus": '-', "Equal": '=', "BracketLeft": '[', "BracketRight": ']',
+		"Backslash": '\\', "Semicolon": ';', "Quote": '\'', "Backquote": '`',
+		"Comma": ',', "Period": '.', "Slash": '/', "Space": ' ',
+	} {
+		add(code, r)
+	}
+	return m
 }
 
 // Paste sends Command-V.

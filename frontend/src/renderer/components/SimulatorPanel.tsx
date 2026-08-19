@@ -5,7 +5,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { useSimKeyboard } from "../hooks/useSimKeyboard";
 import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
-import { useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
+import { type ForwardedKey, useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
 import { DragStream } from "../lib/drag-stream";
 import { devicePoint, fitDevice } from "../lib/screen-fit";
 import { cn } from "../lib/utils";
@@ -162,7 +162,7 @@ const STALE_AFTER_MS = 2_000;
 type GestureBody =
 	| { kind: "tap"; x: number; y: number }
 	| { kind: "button"; name: string }
-	| { kind: "type"; text: string }
+	| { kind: "type"; text: string; keys?: { code: string; shift: boolean }[] }
 	| { kind: "key"; name: string };
 
 export function SimulatorPanel({
@@ -365,9 +365,13 @@ export function SimulatorPanel({
 		immediate: guestKeyboard.data?.sendsUSASCII ?? false,
 		onEscape: () => canvasRef.current?.blur(),
 		sendText: useCallback(
-			async (text: string) => {
+			async (text: string, keys?: ForwardedKey[]) => {
 				try {
-					await sendGesture({ kind: "type", text });
+					// The positions travel with the text, not instead of it: the
+					// daemon forwards them when it can and delivers the text by
+					// its own planned route when it cannot, and a recording keeps
+					// the text either way.
+					await sendGesture({ kind: "type", text, keys });
 				} catch (error) {
 					// ⚠ Never the text itself. What was typed is a password often
 					// enough that it must not reach a message, a log or the DOM.

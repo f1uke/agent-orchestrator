@@ -1364,6 +1364,45 @@ func TestAcquireHold_ARunOfTypingIsOneStepHoweverItWasChunked(t *testing.T) {
 	}
 }
 
+// The same rule, on the human's actual case.
+//
+// Thai used to reach the device one BURST at a time, because every request was
+// a pasteboard round trip costing seconds. Forwarding the key the human pressed
+// makes it one request per character - so a Thai word now depends on this
+// coalescing exactly as an English one does, and a word that recorded six steps
+// and six `inputText` lines would be a regression nobody would see until they
+// read the flow.
+func TestAcquireHold_ARunOfThaiTypingIsAlsoOneStep(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	reader := &fakeScreenReader{snap: snapshotWithButton("com.app.a", "Continue")}
+	svc, _, owner := newRecordingService(t, now, reader)
+	if _, err := svc.StartRecording(context.Background(), owner, udidProMax, "flow"); err != nil {
+		t.Fatalf("start recording: %v", err)
+	}
+
+	for _, rune_ := range "สวัสดี" {
+		hold, err := svc.AcquireHold(context.Background(), owner, udidProMax, 0,
+			sim.GestureIntent{Kind: "type", Text: string(rune_)})
+		if err != nil {
+			t.Fatalf("hold %q: %v", string(rune_), err)
+		}
+		if err := svc.ReleaseHold(context.Background(), udidProMax, hold.Token, sim.GestureOutcome{Performed: true}); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+	}
+
+	_, steps, err := svc.StopRecording(context.Background(), owner, udidProMax)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want the word as one step: %+v", len(steps), steps)
+	}
+	if steps[0].Kind != "type" || steps[0].Text != "สวัสดี" {
+		t.Fatalf("step = %q %q, want the whole word", steps[0].Kind, steps[0].Text)
+	}
+}
+
 // ⚠ #209 removed the accessibility read from between the finger going down and
 // the touch reaching the device. Typing must not put work back on that path:
 // a key press is not a screen read, and neither is starting one.

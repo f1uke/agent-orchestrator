@@ -120,6 +120,17 @@ type SimGestureInput struct {
 	// key presses. Without it the route is chosen per request: key presses when
 	// the guest will deliver them faithfully, the pasteboard when it would not.
 	Paste bool `json:"paste,omitempty"`
+	// type: the physical keys a person actually pressed to produce Text on this
+	// Mac, in the same order, one per character.
+	//
+	// ⚠ Only a caller that WATCHED someone press them may send these - the
+	// Device tab, forwarding a real keyboard. They are sent to the device as
+	// themselves, so what arrives is whatever the simulator's input mode makes
+	// of them, exactly as it would in Simulator.app: correct for a person,
+	// because the same layout resolved the character they saw themselves type,
+	// and wrong for an agent, which is why a string an agent chose must be sent
+	// as Text alone and planned from the guest's input mode.
+	Keys []SimKeyPress `json:"keys,omitempty" description:"The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these: they are forwarded to the device as themselves, so the simulator's input mode decides what they produce, exactly as it would in Simulator.app. A string chosen by an agent has no keys behind it and must be sent as Text alone."`
 	// button: home or app-switcher. key: enter, backspace, tab or one of the
 	// arrow keys - the keys that produce no character, and so cannot be
 	// remapped by the guest's keyboard input mode the way a letter can.
@@ -128,6 +139,15 @@ type SimGestureInput struct {
 	// requests, for a drag that follows a finger instead of being replayed once
 	// it has been let go. They use X and Y, take one hold across the whole drag,
 	// and the touch is lifted by a watchdog if the moves stop arriving.
+}
+
+// SimKeyPress is one physical key press, named the way a browser names it.
+// `code` is a POSITION on the keyboard - where the key sits on a US layout,
+// whatever the layout in force prints on it - which is the same thing the
+// device's HID usages are.
+type SimKeyPress struct {
+	Code  string `json:"code" description:"KeyboardEvent.code, e.g. KeyF, Digit1, Semicolon."`
+	Shift bool   `json:"shift,omitempty" description:"Shift was held. Part of the key press, not of the character."`
 }
 
 // SimGestureResponse says what happened on the device.
@@ -336,8 +356,14 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 	// to Thai turns "fa12345" into "ดฟๅ/_ภถ". The mode is established before
 	// anything is composed, and a device that cannot say is refused rather than
 	// typed at hopefully.
+	//
+	// ⚠ Keys a person pressed are the exception, and it is the whole of this
+	// fix: forwarding a key does not need the mode, because the mode is what
+	// makes forwarding right rather than what stands in its way. Asking anyway
+	// would put a guest round trip in front of every keystroke for an answer
+	// nothing reads.
 	var keyboard simbridge.ProbedKeyboard
-	if in.Kind == "type" && !in.RawKeys && !in.Paste {
+	if in.Kind == "type" && !in.RawKeys && !in.Paste && !simbridge.ForwardableKeys(keyPresses(in.Keys)) {
 		keyboard.Mode, keyboard.Err = c.Screen.Keyboard(r.Context(), device.UDID)
 	}
 
@@ -393,6 +419,21 @@ func (c *SimScreenController) paste(
 		response.Detail += "; WARNING: the simulator pasteboard could not be put back"
 	}
 	envelope.WriteJSON(w, http.StatusOK, response)
+}
+
+// keyPresses carries the request's key presses across the package boundary.
+// The two types are deliberately separate: one is the wire shape, the other is
+// what the composer takes, and collapsing them would put JSON tags on the
+// composer.
+func keyPresses(in []SimKeyPress) []simbridge.KeyPress {
+	if len(in) == 0 {
+		return nil
+	}
+	keys := make([]simbridge.KeyPress, len(in))
+	for i, k := range in {
+		keys[i] = simbridge.KeyPress{Code: k.Code, Shift: k.Shift}
+	}
+	return keys
 }
 
 func isDragKind(kind string) bool {
@@ -561,7 +602,7 @@ func composeSimGesture(in SimGestureInput, keyboard simbridge.ProbedKeyboard) (s
 		}, nil
 	case "type":
 		route, err := simbridge.PlanText(in.Text, keyboard,
-			simbridge.TextOptions{RawKeys: in.RawKeys, Paste: in.Paste})
+			simbridge.TextOptions{RawKeys: in.RawKeys, Paste: in.Paste, Keys: keyPresses(in.Keys)})
 		if err != nil {
 			return simgesture.Gesture{}, err
 		}
@@ -575,6 +616,11 @@ func composeSimGesture(in SimGestureInput, keyboard simbridge.ProbedKeyboard) (s
 		detail := fmt.Sprintf("%d characters", len([]rune(in.Text)))
 		if in.RawKeys {
 			detail = fmt.Sprintf("%d key presses", len([]rune(in.Text)))
+		}
+		if route.Forwarded {
+			// Named for what was done rather than for what it produced: these
+			// keys were sent as pressed, and the simulator decided the rest.
+			detail = fmt.Sprintf("%d key presses forwarded", len(in.Keys))
 		}
 		return simgesture.Gesture{Action: "type", Detail: detail, Events: route.Events}, nil
 	case "button":
