@@ -4,7 +4,7 @@ import { House, Keyboard, Layers, MoreHorizontal, MousePointer2 } from "lucide-r
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { useSimKeyboard } from "../hooks/useSimKeyboard";
-import { usePageActive, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
+import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
 import { useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
 import { DragStream } from "../lib/drag-stream";
 import { devicePoint, fitDevice } from "../lib/screen-fit";
@@ -39,10 +39,12 @@ import { SimRecordControls, StopSummaryNote, type StopSummary } from "./SimRecor
  *
  * Three things here are deliberate and load-bearing.
  *
- * Nothing runs unless this tab is being looked at. `active` is the tab being
- * shown AND the page being visible AND the window having focus; it gates both
- * the frame socket and the device list. Closing the socket is what stops the
- * capture process on the daemon side, so a hidden tab costs exactly nothing.
+ * Nothing runs unless this tab can be seen. `watching` is the tab being the one
+ * on screen AND the page being visible; it gates both the frame socket and the
+ * device list. Closing the socket is what stops the capture process on the
+ * daemon side, so a hidden tab costs exactly nothing. Focus is not part of it -
+ * a window behind another window is still a window somebody is watching, and
+ * the whole point of a live view is to be watched while you do something else.
  *
  * The device is never guessed. With two simulators booted the daemon reports no
  * default and says why, and this panel asks rather than picking - the same
@@ -55,15 +57,46 @@ import { SimRecordControls, StopSummaryNote, type StopSummary } from "./SimRecor
  */
 
 /**
+ * Why nothing is being captured, when that is deliberate - a short word for the
+ * pill and a sentence for the human.
+ *
+ * There is one of these, derived once, and everything that has to say why reads
+ * it: the pill, the empty state, and the note over a stale frame. The last time
+ * this rule was spelled out in two places, a mutation could break one of them
+ * and every test still passed.
+ *
+ * A stopped stream has to say WHICH reason. "Stopped because you cannot see it"
+ * and "stopped because it broke" look identical as `paused`, and a human who
+ * cannot tell them apart reports the second as a bug.
+ */
+type PausedReason = { label: string; why: string };
+
+function pausedReason(isActive: boolean, pageVisible: boolean): PausedReason | null {
+	if (!isActive) {
+		return {
+			label: "off screen",
+			why: "The Device tab is not the one on screen, so nothing is being captured. Open it to start watching.",
+		};
+	}
+	if (!pageVisible) {
+		return {
+			label: "hidden",
+			why: "This window is hidden, so nothing is being captured. It resumes as soon as the window is back on screen.",
+		};
+	}
+	return null;
+}
+
+/**
  * emptyReason says what is actually true when there is no screen to show.
  *
  * The distinction matters: "no simulator is booted" is a claim about the
- * machine, and while the window is unfocused nothing has been asked, so making
- * that claim would state something AO never checked - the same mistake the
- * lease column made before it learned to say why a device reads as unknown.
+ * machine, and while nothing can be seen nothing has been asked, so making that
+ * claim would state something AO never checked - the same mistake the lease
+ * column made before it learned to say why a device reads as unknown.
  */
-function emptyReason(watching: boolean, looked: boolean, bootedCount: number, defaultReason: string): string {
-	if (!watching) return "Nothing is being captured while this window is not focused. Focus it to start watching.";
+function emptyReason(paused: PausedReason | null, looked: boolean, bootedCount: number, defaultReason: string): string {
+	if (paused) return paused.why;
 	if (!looked) return "Looking for booted simulators…";
 	if (bootedCount === 0) {
 		return "No simulator is booted. AO never boots, shuts down or erases one - start it from Xcode or Simulator.app.";
@@ -140,8 +173,11 @@ export function SimulatorPanel({
 	sessionId: string;
 	isActive: boolean;
 }) {
-	const pageActive = usePageActive();
-	const watching = isActive && pageActive;
+	// One rule, one variable: `watching` is "somebody can see this screen", and
+	// `paused` is the same fact with the words for why not.
+	const pageVisible = usePageVisible();
+	const paused = pausedReason(isActive, pageVisible);
+	const watching = paused === null;
 
 	const devices = useSimDevices(watching);
 	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
@@ -488,8 +524,8 @@ export function SimulatorPanel({
 					chosen={chosen}
 					loading={devices.isPending && watching}
 					onChoose={setChosen}
+					paused={paused}
 					status={stream}
-					watching={watching}
 				/>
 
 				<div
@@ -556,15 +592,17 @@ export function SimulatorPanel({
 						</div>
 					) : (
 						<p className="max-w-[36ch] px-4 text-center text-[12px] text-muted-foreground">
-							{emptyReason(watching, devices.isSuccess, booted.length, devices.data?.defaultReason ?? "")}
+							{emptyReason(paused, devices.isSuccess, booted.length, devices.data?.defaultReason ?? "")}
 						</p>
 					)}
 
 					{/* A stream that stopped has to say so over the last frame rather
-					    than leave it to be mistaken for a live one. */}
-					{chosen && (stream.state === "ended" || stream.state === "unsupported") ? (
+					    than leave it to be mistaken for a live one - and say which
+					    kind of stopped it is, because a picture paused on purpose and
+					    a picture that broke look the same. */}
+					{chosen && (paused || stream.state === "ended" || stream.state === "unsupported") ? (
 						<p className="absolute inset-x-2 bottom-2 rounded-md bg-black/80 px-3 py-2 text-center text-[11px] text-white/85">
-							{stream.message || "The stream ended."}
+							{paused ? paused.why : stream.message || "The stream ended."}
 						</p>
 					) : null}
 
@@ -801,15 +839,15 @@ function DevicePill({
 	chosen,
 	loading,
 	onChoose,
+	paused,
 	status,
-	watching,
 }: {
 	booted: SimDevice[];
 	chosen: string | null;
 	loading: boolean;
 	onChoose: (udid: string) => void;
+	paused: PausedReason | null;
 	status: SimStreamStatus;
-	watching: boolean;
 }) {
 	return (
 		<div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-raised py-0.5 pl-1 pr-2.5">
@@ -829,7 +867,7 @@ function DevicePill({
 					))}
 				</SelectContent>
 			</Select>
-			<Freshness chosen={Boolean(chosen)} status={status} watching={watching} />
+			<Freshness chosen={Boolean(chosen)} paused={paused} status={status} />
 		</div>
 	);
 }
@@ -839,7 +877,15 @@ function DevicePill({
 // body text. That is the right weight for the guidance inside a popover, and
 // the wrong weight for the one line that says whether what you are looking at
 // is live. `text-muted-foreground` measures 7.57:1 and 5.60:1.
-function Freshness({ status, watching, chosen }: { status: SimStreamStatus; watching: boolean; chosen: boolean }) {
+function Freshness({
+	status,
+	paused,
+	chosen,
+}: {
+	status: SimStreamStatus;
+	paused: PausedReason | null;
+	chosen: boolean;
+}) {
 	// The capture engine re-emits at five frames a second even on a still
 	// screen, so frames arriving is what "live" means and a gap in them is a
 	// real signal rather than a screen that happens not to be moving.
@@ -857,11 +903,11 @@ function Freshness({ status, watching, chosen }: { status: SimStreamStatus; watc
 	let tone: string;
 	let text: string;
 	let title: string;
-	if (!watching) {
-		label = "paused";
+	if (paused) {
+		label = paused.label;
 		tone = "bg-passive";
 		text = "text-muted-foreground";
-		title = "This window is not focused, so nothing is being captured.";
+		title = paused.why;
 	} else if (!chosen) {
 		label = "idle";
 		tone = "bg-passive";

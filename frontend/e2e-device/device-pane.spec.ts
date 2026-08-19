@@ -122,8 +122,22 @@ test("a drag is on the device while the finger is still down", async () => {
 	expect(afterRelease.code, "the touch outlived the pointer").toBe("SIM_DRAG_ENDED");
 });
 
-// The rule that keeps this pane cheap: a stream nobody is looking at is a
-// process nobody needed. Two CPU-burning pollers have shipped here before.
+/**
+ * The rule that keeps this pane cheap: a stream nobody is looking at is a
+ * process nobody needed. Two CPU-burning pollers have shipped here before.
+ *
+ * ⚠ The tab being off screen is app state, so it is checkable here. The other
+ * two halves of the same rule - the window being unfocused (which must NOT stop
+ * the stream) and the window being minimised, hidden or covered (which must) -
+ * are NOT, and a case written here would pass for the wrong reason: Playwright
+ * turns Chromium's focus emulation on for every page, so `document.hasFocus()`
+ * stays true and `document.visibilityState` stays "visible" no matter what the
+ * window does. Measured, not assumed: with a window minimised and hidden
+ * outright, a page under Playwright still reported itself focused and visible.
+ * Turning focus emulation off over a raw CDP session fixes `hasFocus` and not
+ * visibility. Those two live in SimulatorPanel.test.tsx as the rule, and are
+ * verified against the real app by hand - see the record for this branch.
+ */
 test("nothing is captured once the tab is not the one on screen", async () => {
 	const capturing = () => {
 		try {

@@ -44,6 +44,15 @@ class MockWebSocket {
 
 const openSockets = () => sockets.filter((s) => !s.closed);
 
+// jsdom has no window server, so visibility is a property to define rather than
+// a state to reach. ⚠ This is why every claim about what actually streams was
+// also checked in the real app: jsdom cannot tell a covered window from a
+// focused one.
+function setVisibility(state: "visible" | "hidden") {
+	Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+	document.dispatchEvent(new Event("visibilitychange"));
+}
+
 // The wire the daemon writes: a kind byte, the framebuffer size, then the
 // encoded bytes.
 const KIND_DESCRIPTION = 1;
@@ -168,7 +177,7 @@ beforeEach(() => {
 		},
 	);
 	sessionStorage.clear();
-	vi.spyOn(document, "hasFocus").mockReturnValue(true);
+	setVisibility("visible");
 	// jsdom has no 2d context; the panel only needs the call not to throw.
 	HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage: vi.fn() });
 });
@@ -195,7 +204,9 @@ describe("SimulatorPanel device selection", () => {
 		serveDevices(devicesPayload([], null, "no simulator is booted"));
 		render(<SimulatorPanel isActive={false} sessionId="p-1" />, { wrapper });
 
-		expect(await screen.findByText(/Nothing is being captured while this window is not focused/i)).toBeInTheDocument();
+		expect(
+			await screen.findByText(/The Device tab is not the one on screen, so nothing is being captured/i),
+		).toBeInTheDocument();
 		expect(screen.queryByText(/No simulator is booted/i)).not.toBeInTheDocument();
 	});
 
@@ -358,13 +369,99 @@ describe("SimulatorPanel capture lifetime", () => {
 		await waitFor(() => expect(openSockets()).toHaveLength(0));
 	});
 
-	it("stops capturing when the window loses focus", async () => {
+	// The whole point of the tab: a live view is watched while you do something
+	// else. Blur used to close the socket, which made it a screenshot that
+	// refreshed when observed.
+	it("keeps capturing while the window is not focused", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+
+		// What a blurred window really looks like: `hasFocus` goes false and the
+		// blur event fires. Stubbed even though the hook no longer reads it, so
+		// that putting focus back into the rule fails here rather than shipping.
+		vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		window.dispatchEvent(new Event("blur"));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(openSockets()).toHaveLength(1);
+		expect(sockets).toHaveLength(1);
+		expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/live/i);
+	});
+
+	// Regaining focus must not rebuild a healthy socket either: a rebuild is a
+	// new capture process, a fresh keyframe wait and a few hundred milliseconds
+	// of a picture that cannot be clicked.
+	it("does not rebuild a healthy stream when the window is clicked back into", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+
+		window.dispatchEvent(new Event("blur"));
+		window.dispatchEvent(new Event("focus"));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(sockets).toHaveLength(1);
+		expect(openSockets()).toHaveLength(1);
+	});
+
+	// Hidden is not the same as unfocused: minimised, hidden with Cmd+H, on
+	// another Space or covered outright means nobody can see the screen, and
+	// "no viewer, no polling" is the part of the old rule that is kept.
+	it("stops capturing while the window is hidden", async () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 
-		vi.spyOn(document, "hasFocus").mockReturnValue(false);
-		window.dispatchEvent(new Event("blur"));
+		setVisibility("hidden");
 		await waitFor(() => expect(openSockets()).toHaveLength(0));
+	});
+
+	// ⚠ H.264 has no independent frames, so a resumed stream must be fed a
+	// complete start - the avcC description, then a keyframe - before anything
+	// is decoded. A delta decoded against a decoder nobody configured is a
+	// corrupted picture, not a late one.
+	it("resumes with a complete start when the window comes back", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+
+		setVisibility("hidden");
+		await waitFor(() => expect(openSockets()).toHaveLength(0));
+		decoderCalls.length = 0;
+		decodedKinds.length = 0;
+
+		setVisibility("visible");
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+		const socket = openSockets()[0];
+		// A delta ahead of the description is dropped rather than decoded.
+		socket.onmessage?.({ data: message(KIND_DELTA, [0x99]) } as MessageEvent);
+		expect(decodedKinds).toHaveLength(0);
+
+		socket.onmessage?.({ data: message(KIND_DESCRIPTION, AVCC) } as MessageEvent);
+		expect(decoderCalls).toHaveLength(1);
+		socket.onmessage?.({ data: message(KIND_KEYFRAME, [0x00]) } as MessageEvent);
+		expect(decodedKinds).toEqual(["key"]);
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/live/i));
+	});
+
+	// A stream that died while the human was away has to come back on its own
+	// when they return. Blur no longer rebuilds the socket, so nothing else
+	// would - and the price of getting this wrong is a dead picture that looks
+	// exactly like a live one until you touch it.
+	it("retries a stream that ended once the human comes back to the window", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+
+		openSockets()[0].onmessage?.({
+			data: JSON.stringify({ type: "ended", message: "the capture process failed" }),
+		} as MessageEvent);
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/ended/i));
+
+		window.dispatchEvent(new Event("focus"));
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		expect(sockets).toHaveLength(2);
 	});
 
 	it("stops capturing when the panel goes away entirely", async () => {
@@ -397,6 +494,59 @@ describe("SimulatorPanel capture lifetime", () => {
 		socket.onmessage?.({ data: JSON.stringify({ type: "ended", message: "the device is gone" }) } as MessageEvent);
 
 		expect(await screen.findByText(/the device is gone/i)).toBeInTheDocument();
+	});
+});
+
+/**
+ * What the pill says has to match why the stream is stopped.
+ *
+ * "Stopped because you cannot see it" and "stopped because it broke" are the
+ * same word - `paused` - to anyone reading a status line, and a human who
+ * cannot tell them apart reports the second as a bug.
+ */
+describe("SimulatorPanel says which kind of stopped it is", () => {
+	beforeEach(() => {
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+	});
+
+	it("says the tab is off screen, not that the stream is paused", async () => {
+		render(<SimulatorPanel isActive={false} sessionId="p-1" />, { wrapper });
+
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/off screen/i));
+		expect(screen.getByTestId("sim-freshness")).not.toHaveTextContent(/paused/i);
+	});
+
+	it("says the window is hidden, and that it resumes on its own", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+
+		setVisibility("hidden");
+
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/hidden/i));
+		expect(screen.getByText(/resumes as soon as the window is back on screen/i)).toBeInTheDocument();
+	});
+
+	it("says ended with the reason when the stream breaks, and never blames visibility", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+
+		openSockets()[0].onmessage?.({
+			data: JSON.stringify({ type: "ended", message: "the device is gone" }),
+		} as MessageEvent);
+
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/ended/i));
+		expect(await screen.findByText(/the device is gone/i)).toBeInTheDocument();
+		expect(screen.queryByText(/nothing is being captured/i)).not.toBeInTheDocument();
+	});
+
+	it("says idle while no device has been chosen", async () => {
+		serveDevices(devicesPayload([device(), device({ udid: "UDID-B", name: "iPhone 17 Pro" })], null, "2 are booted"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/idle/i));
+		expect(openSockets()).toHaveLength(0);
 	});
 });
 
@@ -897,24 +1047,22 @@ describe("SimulatorPanel driving", () => {
 		pending.settleHome?.();
 	});
 
-	// The one that made it feel random: clicking into the app from another
-	// window loses and regains focus, which rebuilds the frame socket, and every
-	// press in the few hundred milliseconds before the first new frame decodes
-	// used to be dropped. That is exactly when a human clicks.
-	it("drives a press made while the stream is reconnecting after a refocus", async () => {
+	// The one that made it feel random: coming back to a window that was hidden
+	// rebuilds the frame socket, and every press in the few hundred milliseconds
+	// before the first new frame decodes used to be dropped. That is exactly
+	// when a human clicks.
+	it("drives a press made while the stream is reconnecting after the window comes back", async () => {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
 
-		// The window loses focus and gets it straight back, as it does when the
-		// human clicks into the app. The socket is torn down and rebuilt.
-		vi.spyOn(document, "hasFocus").mockReturnValue(false);
-		window.dispatchEvent(new Event("blur"));
+		// The window is hidden and shown again, as it is when the human comes back
+		// from another Space. The socket is torn down and rebuilt.
+		setVisibility("hidden");
 		await waitFor(() => expect(openSockets()).toHaveLength(0));
 		sessionStorage.clear();
-		vi.spyOn(document, "hasFocus").mockReturnValue(true);
-		window.dispatchEvent(new Event("focus"));
+		setVisibility("visible");
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		// Deliberately no frame yet: this is the reconnecting window.
 		//

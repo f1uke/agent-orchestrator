@@ -290,10 +290,11 @@ export async function openDevicePane(sandbox: Sandbox): Promise<void> {
 
 	await page.getByTestId("sim-canvas").waitFor({ state: "visible", timeout: 60_000 });
 
-	// Capture stops when the window loses focus - the rule that keeps this pane
-	// off the CPU - so a window left in the background has no stream, and a
-	// press into a dead stream is refused. The window is brought forward and
-	// the wait is on frames actually arriving, not on the canvas existing.
+	// Capture stops when nobody can SEE the pane - the rule that keeps it off
+	// the CPU - and a window this harness launched can start life behind
+	// whatever else is on the screen. The window is brought forward, and the
+	// wait is on frames actually arriving rather than on the canvas existing;
+	// input needs focus even where capture no longer does.
 	await focusWindow(sandbox);
 	await waitFor(
 		async () => ((await page.getByTestId("sim-freshness").textContent()) ?? "").includes("live"),
@@ -314,7 +315,13 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** focusWindow puts the app in front, which is what makes it capture at all. */
+/**
+ * focusWindow puts the app in front, which is what makes its input path work.
+ *
+ * Not what makes it capture: a blurred window keeps streaming on purpose. But a
+ * pointer or a key belongs to whichever window has focus, so anything that
+ * presses something asks for it first.
+ */
 export async function focusWindow(sandbox: Sandbox): Promise<void> {
 	await sandbox.page.bringToFront();
 	await sandbox.app.evaluate(({ BrowserWindow }) => {

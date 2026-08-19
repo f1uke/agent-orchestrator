@@ -6,11 +6,24 @@ import { getApiBaseUrl, subscribeApiBaseUrl } from "../lib/api-client";
  *
  * The socket IS the subscription. The daemon starts a capture process for a
  * device when its first viewer connects and kills it when the last one leaves,
- * so this hook's only real job is to be honest about when somebody is looking:
- * it connects when the Device tab is showing AND the page is visible AND the
- * window has focus, and closes the moment any of those stops being true. There
- * is no timer and no heartbeat to forget — closing the socket is what stops the
- * capture.
+ * so this hook's only real job is to be honest about when somebody CAN SEE the
+ * screen: it connects when the Device tab is the one on screen AND the page is
+ * visible, and closes the moment either stops being true. There is no timer and
+ * no heartbeat to forget — closing the socket is what stops the capture.
+ *
+ * Focus is deliberately NOT part of that. A live view exists to be watched
+ * while you are doing something else — reading the diff, typing in a terminal,
+ * driving the device from Xcode — and a view that only updates while you stare
+ * at it is a screenshot that refreshes when observed. The first version of this
+ * hook closed the socket on blur because watching an idle screen cost 14.1% of
+ * a core in the capture child; measured again on the H.264 pipeline that
+ * replaced it, the same watch costs 2.1% in the capture child, 0.6% in the
+ * daemon and about 4% in this app - so the cost that rule was written to prevent
+ * is gone. What is kept is the rule that mattered: nobody able to look means
+ * nothing running.
+ *
+ * Blur does still do one thing, in the other direction: coming back to the
+ * window retries a stream that died while nobody was there to see it fail.
  *
  * The screen arrives as H.264 and is decoded by WebCodecs. That is what the
  * reference implementation this addon comes from does, and measuring both on
@@ -33,7 +46,7 @@ import { getApiBaseUrl, subscribeApiBaseUrl } from "../lib/api-client";
  */
 
 export type SimStreamState =
-	/** Nobody is looking, so nothing is running. */
+	/** Nobody can see the screen, so nothing is running. */
 	| "paused"
 	| "connecting"
 	| "live"
@@ -67,26 +80,22 @@ const FRAME_INTERVAL_US = 16_666;
 const FRESHNESS_SAMPLE_MS = 1_000;
 
 /**
- * usePageActive reports whether this window is actually being looked at.
+ * usePageVisible reports whether this window's pixels can be seen at all.
  *
- * Losing focus counts as not looking. That is deliberate and it has a cost — a
- * human who alt-tabs to Simulator.app sees the view freeze — so the panel says
- * so in words rather than leaving a stale frame to be mistaken for a live one.
+ * This is the browser's own answer rather than a guess about attention, and on
+ * macOS it is the window's occlusion state: measured against a real Electron
+ * window, minimised, hidden with Cmd+H and covered outright all report hidden,
+ * while a window that has merely lost focus reports visible. That is the line
+ * the capture is gated on, because it is the line between "nobody can see this"
+ * and "somebody is watching it while doing something else".
  */
-export function usePageActive(): boolean {
+export function usePageVisible(): boolean {
 	return useSyncExternalStore(
 		(onChange) => {
-			const events: [string, EventTarget][] = [
-				["visibilitychange", document],
-				["focus", window],
-				["blur", window],
-			];
-			for (const [event, target] of events) target.addEventListener(event, onChange);
-			return () => {
-				for (const [event, target] of events) target.removeEventListener(event, onChange);
-			};
+			document.addEventListener("visibilitychange", onChange);
+			return () => document.removeEventListener("visibilitychange", onChange);
 		},
-		() => document.visibilityState === "visible" && document.hasFocus(),
+		() => document.visibilityState === "visible",
 		() => false,
 	);
 }
@@ -108,17 +117,20 @@ export function useSimulatorStream({
 }: {
 	/** The device to watch. Null means none is chosen, so nothing connects. */
 	udid: string | null;
-	/** Whether somebody is looking. False closes the socket immediately. */
+	/** Whether the screen can be seen. False closes the socket immediately. */
 	active: boolean;
 	canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }): SimStreamStatus {
 	const [status, setStatus] = useState<SimStreamStatus>(PAUSED);
 	const baseUrl = useSyncExternalStore(subscribeApiBaseUrl, getApiBaseUrl, getApiBaseUrl);
+	// Bumped to ask for a fresh socket. Nothing else re-runs the effect when the
+	// device, the gate and the daemon address have all stayed the same.
+	const [attempt, setAttempt] = useState(0);
 	// A device's framebuffer size belongs to the device, not to the connection.
 	// Throwing it away every time the socket is rebuilt - which happens whenever
-	// the window loses and regains focus - made the pane unable to turn a click
+	// the window is hidden and shown again - made the pane unable to turn a click
 	// into a coordinate for the first few hundred milliseconds after a human
-	// clicked into the app, which is exactly when they click.
+	// came back to the app, which is exactly when they click.
 	const known = useRef<{ udid: string; size: { width: number; height: number } } | null>(null);
 
 	useEffect(() => {
@@ -263,7 +275,27 @@ export function useSimulatorStream({
 			if (decoder && decoder.state !== "closed") decoder.close();
 			decoder = null;
 		};
-	}, [udid, active, baseUrl, canvasRef]);
+	}, [udid, active, attempt, baseUrl, canvasRef]);
+
+	// Coming back to the window is what retries a stream that has ended.
+	//
+	// Blur no longer closes the socket, so it no longer rebuilds one either, and
+	// a stream that died while the human was away - the device rebooted, the
+	// daemon restarted, the capture process failed - would otherwise stay dead
+	// until they switched tabs and back. Retrying when they return is the whole
+	// recovery path: no timer, no button, and nothing at all while the stream is
+	// healthy, so an ordinary click into the window cannot interrupt the picture.
+	//
+	// Focus is the only trigger it needs. Becoming visible again already rebuilds
+	// the socket through the gate above, and a stream cannot end while the window
+	// is out of sight - there is nothing connected to end.
+	const ended = status.state === "ended";
+	useEffect(() => {
+		if (!ended) return;
+		const retry = () => setAttempt((n) => n + 1);
+		window.addEventListener("focus", retry);
+		return () => window.removeEventListener("focus", retry);
+	}, [ended]);
 
 	return status;
 }
