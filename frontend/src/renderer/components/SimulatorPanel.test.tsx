@@ -471,6 +471,44 @@ describe("SimulatorPanel decoding", () => {
 });
 
 /** Gives the stream a complete starting point, which is what "live" means. */
+/** Ask for the device list again, the way the menu item does. */
+async function refresh() {
+	const menu = await openMenu();
+	await userEvent.click(within(menu).getByRole("menuitem", { name: /refresh simulators/i }));
+}
+
+async function turnDrivingOn() {
+	const toggle = await screen.findByRole("button", { name: /drive this device/i });
+	await userEvent.click(toggle);
+	return toggle;
+}
+
+/** Every gesture kind that reached the daemon, in order. */
+function gestureKinds(): string[] {
+	return postMock.mock.calls
+		.filter(([path]) => String(path).endsWith("/gesture"))
+		.map(([, options]) => (options as { body?: { kind?: string } })?.body?.kind ?? "");
+}
+
+/**
+ * jsdom lays nothing out, so a canvas has no box and every pointer event would
+ * land outside the screen. This gives it one.
+ */
+function stubCanvasBox(canvas: HTMLElement) {
+	(canvas as HTMLElement & { setPointerCapture: () => void }).setPointerCapture = () => {};
+	canvas.getBoundingClientRect = () => ({
+		left: 0,
+		top: 0,
+		width: 200,
+		height: 400,
+		right: 200,
+		bottom: 400,
+		x: 0,
+		y: 0,
+		toJSON: () => ({}),
+	});
+}
+
 function makeLive() {
 	const socket = openSockets()[0];
 	socket.onmessage?.({ data: message(KIND_DESCRIPTION, AVCC) } as MessageEvent);
@@ -518,6 +556,80 @@ describe("SimulatorPanel lease truth", () => {
 				expect.objectContaining({ body: { udid: "UDID-A", takeOver: undefined } }),
 			),
 		);
+	});
+
+	/**
+	 * 🗝 THE BUG somebody lost real working time to. AO's leases last ten
+	 * minutes, so anybody working longer than that loses one and takes it back -
+	 * and driving never came back with it. The daemon said the lease was theirs,
+	 * the pill said live, and every press vanished in silence, so they had to
+	 * ask another person what was wrong.
+	 *
+	 * Reproduced in the real app before this was written: after a lease lapsed
+	 * and was re-acquired, the daemon confirmed the lease was ours again while
+	 * the Drive toggle read aria-pressed=false and a press sent 0 requests.
+	 */
+	it("drives again once a lease that lapsed comes back", async () => {
+		serveDevices(devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only one"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		await waitFor(() => expect(gestureKinds()).toEqual(["tap"]));
+
+		// The lease lapses. Driving must stop - this half already worked.
+		serveDevices(devicesPayload([device({ lease: { state: "unknown", reason: "lapsed" } })], "UDID-A", "the only one"));
+		await refresh();
+		await waitFor(() => expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument());
+
+		// And it comes back - re-claimed by this same session.
+		serveDevices(devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only one"));
+		await refresh();
+		const toggle = await screen.findByRole("button", { name: /drive this device/i });
+
+		// ⚠ The assertion the bug fails: the human turned driving on and never
+		// turned it off. The lease is what grants it, and the lease is back.
+		await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+		fireEvent.pointerDown(canvas, { pointerId: 2, clientX: 100, clientY: 300 });
+		fireEvent.pointerUp(canvas, { pointerId: 2, clientX: 100, clientY: 300 });
+		await waitFor(() => expect(gestureKinds()).toEqual(["tap", "tap"]));
+	});
+
+	// A press that cannot reach the device must say so. Dropping it in silence
+	// is what turned a ten-second fix into asking somebody else for help.
+	it("says why a press cannot reach the device instead of dropping it", async () => {
+		serveDevices(devicesPayload([device()], "UDID-A", "the only booted simulator"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+
+		expect(gestureKinds()).toEqual([]);
+		expect(await screen.findByText(/not holding this device/i)).toBeInTheDocument();
+	});
+
+	// Claimed, but driving switched off: the other silent case.
+	it("says driving is off when that is what is stopping the press", async () => {
+		serveDevices(devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only one"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+
+		expect(gestureKinds()).toEqual([]);
+		expect(await screen.findByText(/driving is off/i)).toBeInTheDocument();
 	});
 
 	// The lease stops two agents driving one device at once; it is not there to
@@ -607,19 +719,6 @@ describe("SimulatorPanel driving", () => {
 	const leased = () =>
 		devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator");
 
-	async function turnDrivingOn() {
-		const toggle = await screen.findByRole("button", { name: /drive this device/i });
-		await userEvent.click(toggle);
-		return toggle;
-	}
-
-	/** Every gesture kind that reached the daemon, in order. */
-	function gestureKinds(): string[] {
-		return postMock.mock.calls
-			.filter(([path]) => String(path).endsWith("/gesture"))
-			.map(([, options]) => (options as { body?: { kind?: string } })?.body?.kind ?? "");
-	}
-
 	/** The y of every gesture of one kind that reached the daemon, in order. */
 	function gesturePoints(kind: string): number[] {
 		return postMock.mock.calls
@@ -627,11 +726,6 @@ describe("SimulatorPanel driving", () => {
 			.map(([, options]) => (options as { body?: { kind?: string; y?: number } })?.body)
 			.filter((body): body is { kind: string; y: number } => body?.kind === kind)
 			.map((body) => body.y);
-	}
-
-	async function refresh() {
-		const menu = await openMenu();
-		await userEvent.click(within(menu).getByRole("menuitem", { name: /refresh simulators/i }));
 	}
 
 	beforeEach(() => {

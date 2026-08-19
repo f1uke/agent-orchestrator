@@ -145,7 +145,17 @@ export function SimulatorPanel({
 
 	const devices = useSimDevices(watching);
 	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
-	const [driving, setDriving] = useState(() => recall(sessionId)?.driving ?? false);
+	// 🗝 What the human ASKED for, which is not the same as what they may do.
+	// Driving itself is derived below, from this and the lease together.
+	//
+	// It used to be one stored flag that an effect switched off when the lease
+	// went away - and nothing ever switched it back on. AO's leases last ten
+	// minutes, so anybody working longer than that loses one and takes it back,
+	// and from that moment the tab was dead: the daemon said the lease was
+	// theirs, the pill said live, and every press vanished in silence. Storing
+	// the intent and deriving the permission means losing the lease stops
+	// driving and getting it back resumes it, with nothing to leave latched off.
+	const [wantsToDrive, setWantsToDrive] = useState(() => recall(sessionId)?.driving ?? false);
 	const [problem, setProblem] = useState("");
 	// What the last stop produced. It hangs over the screen rather than in the
 	// toolbar because it is a sentence with a path in it, and it is dismissed
@@ -172,22 +182,29 @@ export function SimulatorPanel({
 	const heldByThisSession = lease?.state === "held" && lease.holder === sessionId;
 	const heldByOther = lease?.state === "held" && lease.holder !== sessionId;
 
-	// Losing the lease switches driving back off. Deliberately conditional on
-	// the device being known: on a remount the lease state has not arrived yet,
-	// and clearing on "not held" before anyone has looked would wipe what this
-	// session was doing a moment ago rather than reflect anything true.
+	// ⚠ Losing the device TO SOMEBODY ELSE is different from merely losing it,
+	// and the difference is what may be resumed. Another session holding it may
+	// have driven it anywhere, so the screen underneath is no longer the one the
+	// human was looking at and the next click would land blind - they opt in
+	// again, deliberately. A lease that simply lapsed and came back to this same
+	// session had no other driver, so there is nothing to re-look at, and making
+	// them re-arm it is how a tab goes silently dead for ten minutes at a time.
 	useEffect(() => {
-		if (!chosen) {
-			setDriving(false);
-			return;
-		}
-		if (device && !heldByThisSession) setDriving(false);
-	}, [chosen, device, heldByThisSession]);
+		if (heldByOther) setWantsToDrive(false);
+	}, [heldByOther]);
 
-	// Remembered per session, not per mount.
+	// The lease is the permission, so driving is that permission and the
+	// human's intent together - derived, never stored. There is deliberately no
+	// effect switching anything off here any more: a value that is computed
+	// cannot be left behind by one, which is the whole bug this replaced.
+	const driving = wantsToDrive && heldByThisSession;
+
+	// Remembered per session, not per mount. The INTENT is what is remembered:
+	// remembering "was driving" would re-grant a permission the lease has to
+	// give, and the derivation above is what re-grants it.
 	useEffect(() => {
-		remember(sessionId, { udid: chosen, driving });
-	}, [sessionId, chosen, driving]);
+		remember(sessionId, { udid: chosen, driving: wantsToDrive });
+	}, [sessionId, chosen, wantsToDrive]);
 
 	// `active` is the only gate, and it is passed whole rather than also being
 	// folded into the udid: two guards for one rule means a mutation can break
@@ -254,6 +271,30 @@ export function SimulatorPanel({
 	// has actually ended is a different thing: the picture will never update
 	// again, so driving on it would be driving blind.
 	const canDrive = driving && stream.state !== "ended" && stream.state !== "unsupported";
+
+	/**
+	 * Why a press cannot reach the device, or "" when it can.
+	 *
+	 * ⚠ Every branch of `canDrive` has a sentence here, because the failure this
+	 * exists to prevent is silence: somebody held the lease, watched a live
+	 * screen, pressed, and nothing happened - so they asked another person what
+	 * was wrong rather than being told by the pane they were looking at.
+	 */
+	const driveBlockedReason = ((): string => {
+		if (canDrive) return "";
+		if (!chosen) return "No simulator is chosen yet, so there is nothing to touch. Pick one first.";
+		if (heldByOther) {
+			return `@${lease?.holder} is holding this device, so nothing here may touch it. Take it over to drive it.`;
+		}
+		if (!heldByThisSession) {
+			return "This session is not holding this device, so nothing here may touch it. Claim it to drive it.";
+		}
+		if (stream.state === "unsupported") return "This screen cannot be shown here, so it cannot be driven either.";
+		if (stream.state === "ended") {
+			return "The screen has stopped updating, so driving it would be driving blind. Reopen the tab to start watching again.";
+		}
+		return "Driving is off. Turn on \u201cDrive this device\u201d to touch the screen.";
+	})();
 
 	// Whether the device surface itself has keyboard focus. Typing reaches the
 	// device only while this is true, which is what keeps every AO shortcut and
@@ -363,7 +404,12 @@ export function SimulatorPanel({
 	// device's own arbitration is what may refuse this, and when it does it says
 	// so; silence here said nothing.
 	const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-		if (!canDrive) return;
+		if (!canDrive) {
+			// Said, not swallowed. A press is the moment somebody is asking the
+			// question, so it is the moment to answer it.
+			setProblem(driveBlockedReason);
+			return;
+		}
 		const point = pointFor(event);
 		if (!point) return;
 		event.currentTarget.setPointerCapture(event.pointerId);
@@ -633,7 +679,7 @@ export function SimulatorPanel({
 										? "border-accent bg-accent text-accent-foreground"
 										: "border-border bg-raised text-muted-foreground hover:text-foreground",
 								)}
-								onClick={() => setDriving((on) => !on)}
+								onClick={() => setWantsToDrive((on) => !on)}
 								type="button"
 							>
 								<MousePointer2 aria-hidden className="h-4 w-4" />

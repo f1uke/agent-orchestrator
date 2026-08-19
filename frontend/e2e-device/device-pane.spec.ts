@@ -314,6 +314,29 @@ test("recording captures a hand drag, and stop writes the flow it reports", asyn
 });
 
 /**
+ * Skips a case that can only mean anything on a guest which reads US ASCII key
+ * presses as the characters they were sent as.
+ *
+ * ⚠ The guest follows the MAC'S OWN input source, so these cases quietly depend
+ * on the language the developer happens to be typing in. On a Mac set to Thai
+ * the very same ASCII goes through the guest pasteboard instead - correctly,
+ * but batched, several seconds slower, and with iOS's smart-insert space
+ * turning "aXb" into "a X b". Without this they fail with a confusing number or
+ * a confusing string rather than saying which machine they are on.
+ */
+function skipUnlessGuestTakesUSKeys(sandbox: Sandbox) {
+	const keyboard = JSON.parse(
+		execFileSync("curl", ["-sS", `${sandbox.api}/api/v1/sim/devices/${sandbox.udid}/keyboard`], {
+			encoding: "utf8",
+		}),
+	) as { sendsUSASCII?: boolean; mode?: string };
+	test.skip(
+		keyboard.sendsUSASCII !== true,
+		`this Mac's input source makes the guest ${keyboard.mode ?? "unknown"}, which routes even ASCII through the pasteboard`,
+	);
+}
+
+/**
  * 🗝 A character has to appear about as fast as it does when typing into
  * Simulator.app, because a person types by watching characters land.
  *
@@ -329,12 +352,18 @@ test("recording captures a hand drag, and stop writes the flow it reports", asyn
  * onto the keystroke path without failing on an unlucky second.
  */
 test("a character reaches the device without waiting for a pause", async () => {
+	// First line on purpose: a skipped case must leave the device exactly as it
+	// found it. Claiming and driving before deciding to skip churns state that
+	// later timing cases in this serial file measure.
+	skipUnlessGuestTakesUSKeys(sandbox);
 	await readyToDrive(sandbox);
 	await openSpotlightField(sandbox);
 	const canvas = sandbox.page.getByTestId("sim-canvas");
 	await canvas.focus();
 	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
 	await sandbox.page.waitForTimeout(1500);
+
+	skipUnlessGuestTakesUSKeys(sandbox);
 
 	const seen: { at: number; kind: string }[] = [];
 	const onFinished = (request: import("@playwright/test").Request) => {
@@ -424,6 +453,7 @@ test("saying that typing is on its way does not move the screen", async () => {
  * word would record five steps and emit five `inputText` lines.
  */
 test("a word typed while recording is one step and one inputText", async () => {
+	skipUnlessGuestTakesUSKeys(sandbox);
 	clearRecordings(sandbox);
 	await readyToDrive(sandbox);
 	await openSpotlightField(sandbox);
@@ -756,6 +786,7 @@ async function pullSpotlightDown(sandbox: Sandbox) {
 }
 
 test("typing on the human's own keyboard reaches the device", async () => {
+	skipUnlessGuestTakesUSKeys(sandbox);
 	await readyToDrive(sandbox);
 	await openSpotlightField(sandbox);
 	const canvas = sandbox.page.getByTestId("sim-canvas");
@@ -861,4 +892,107 @@ test("a drag still carries its motion on a screen nothing can be read from", asy
 	await sandbox.page.getByRole("button", { name: "Home", exact: true }).click();
 	await sandbox.page.waitForTimeout(1000);
 	clearRecordings(sandbox);
+});
+
+// ⚠ These two go LAST on purpose. They take the lease away and give it back,
+// and #209's recorder keeps a per-device screen that a lease change discards -
+// so the first recorded gesture after them pays the fallback read, which is
+// exactly what the drag-timing case above measures. Ordering is load-bearing
+// in a serial file that drives one real device.
+/**
+ * 🗝 The bug somebody lost real working time to.
+ *
+ * AO's leases last ten minutes, so anybody working longer than that loses one
+ * and takes it back. Driving never came back with it: the daemon said the lease
+ * was theirs, the pill said live, and every press vanished in silence, so they
+ * had to ask another person what was wrong.
+ *
+ * ⚠ Only measurable here. jsdom has no daemon to hold a lease, no lease to
+ * lapse, and no device to refuse a gesture - the pane's own unit tests can pin
+ * the state machine, but "the press reached the device" is this.
+ */
+test("a lease that lapses and comes back can drive again", async () => {
+	await readyToDrive(sandbox);
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	await expect(drive).toHaveAttribute("aria-pressed", "true");
+
+	const lease = (method: "POST" | "DELETE") => {
+		const url =
+			method === "POST"
+				? `${sandbox.api}/api/v1/sessions/${sandbox.sessionId}/sim-leases`
+				: `${sandbox.api}/api/v1/sessions/${sandbox.sessionId}/sim-leases/${sandbox.udid}`;
+		const args = ["-sS", "-o", "/dev/null", "-w", "%{http_code}", "-X", method, url];
+		if (method === "POST") {
+			args.push("-H", "content-type: application/json", "-d", JSON.stringify({ udid: sandbox.udid }));
+		}
+		expect(Number(execFileSync("curl", args, { encoding: "utf8" }).trim())).toBe(200);
+	};
+
+	// The lease lapses and is taken again by this same session - nobody else
+	// ever held it, so nothing moved the screen underneath.
+	lease("DELETE");
+	await expect(sandbox.page.getByRole("button", { name: /claim to drive/i })).toBeVisible({ timeout: 20_000 });
+	lease("POST");
+	await expect(drive).toBeVisible({ timeout: 20_000 });
+
+	// Driving is back without being re-armed by hand...
+	await expect(drive, "the lease came back and driving did not").toHaveAttribute("aria-pressed", "true", {
+		timeout: 20_000,
+	});
+
+	// ...and a press actually reaches the device again, which is the thing the
+	// human could not do.
+	const seen: string[] = [];
+	const onRequest = (request: import("@playwright/test").Request) => {
+		if (request.url().includes("/gesture")) seen.push(request.url());
+	};
+	sandbox.page.on("request", onRequest);
+	const box = await sandbox.page.getByTestId("sim-canvas").boundingBox();
+	if (!box) throw new Error("no canvas");
+	await sandbox.page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+	await sandbox.page.mouse.down();
+	await sandbox.page.waitForTimeout(200);
+	await sandbox.page.mouse.up();
+	await expect.poll(() => seen.length, { timeout: 10_000 }).toBeGreaterThan(0);
+	sandbox.page.off("request", onRequest);
+});
+
+/**
+ * A press that cannot reach the device must say so where the human is pressing.
+ *
+ * ⚠ Checked in a browser because the failure was silence: `onPointerDown` used
+ * to open with `if (!canDrive) return`, which renders nothing, breaks nothing,
+ * and passes every test that only asserts what WAS sent.
+ */
+test("a press that cannot reach the device says why, on screen", async () => {
+	await readyToDrive(sandbox);
+	// Give the device back, so the pane is watching something it may not touch.
+	execFileSync("curl", [
+		"-sS",
+		"-o",
+		"/dev/null",
+		"-X",
+		"DELETE",
+		`${sandbox.api}/api/v1/sessions/${sandbox.sessionId}/sim-leases/${sandbox.udid}`,
+	]);
+	await expect(sandbox.page.getByRole("button", { name: /claim to drive/i })).toBeVisible({ timeout: 20_000 });
+
+	const box = await sandbox.page.getByTestId("sim-canvas").boundingBox();
+	if (!box) throw new Error("no canvas");
+	await sandbox.page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+	await sandbox.page.mouse.down();
+	await sandbox.page.waitForTimeout(150);
+	await sandbox.page.mouse.up();
+
+	// The words are in the page, and really painted rather than clipped away.
+	const said = sandbox.page.getByText(/not holding this device/i);
+	await expect(said, "a press was dropped without saying why").toBeVisible({ timeout: 10_000 });
+	const reason = await said.boundingBox();
+	expect(reason?.width ?? 0).toBeGreaterThan(20);
+
+	// ⚠ Put the lease back. These cases run in series against one device, and a
+	// later one starts a recording - which needs a live lease and is refused
+	// with a 409 without it. A case that takes something away owes it back.
+	expect(post(sandbox, `/api/v1/sessions/${sandbox.sessionId}/sim-leases`, { udid: sandbox.udid }).status).toBe(200);
+	await expect(sandbox.page.getByRole("button", { name: /drive this device/i })).toBeVisible({ timeout: 20_000 });
 });
