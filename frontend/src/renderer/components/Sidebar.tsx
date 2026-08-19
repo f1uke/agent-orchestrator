@@ -45,6 +45,7 @@ import { renameSession } from "../lib/rename-session";
 import { sessionRefLabel } from "../lib/session-ref";
 import { useEventsConnection } from "../hooks/useEventsConnection";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { useIdleCountdown } from "../hooks/useIdleCountdown";
 import { useResizable } from "../hooks/useResizable";
 import {
 	DropdownMenu,
@@ -610,6 +611,13 @@ function ProjectItem({
 	// (newestActiveOrchestrator drops them), and a project with no orchestrator has
 	// nothing to be busy about.
 	const orchestratorBusy = orchestrator?.status === "working";
+	// The same countdown the chip below renders, lifted so the idle-close state can
+	// also ride the button's accessible NAME. The chip's own labels are invisible to
+	// assistive tech here: an explicit aria-label on the button overrides its
+	// contents, so a screen-reader user would otherwise never learn the orchestrator
+	// is paused or about to pause. Hook order is unconditional — an absent
+	// orchestrator passes an empty session, which yields null.
+	const orchestratorCountdown = useIdleCountdown(orchestrator ?? {});
 	const prefersReducedMotion = usePrefersReducedMotion();
 
 	// Active-view glow: mark which of Dashboard / Orchestrator is the view
@@ -865,7 +873,15 @@ function ProjectItem({
 								// AT this widget's own content is mid-update and to hold
 								// announcements, which is neither true nor helpful. The name is
 								// read when the user asks for it, on focus.
-								(orchestratorBusy ? ", working" : "")
+								(orchestratorBusy ? ", working" : "") +
+								// Mutually exclusive by construction, not by branch order:
+								// useIdleCountdown nulls the deadline for a suspended session,
+								// so a paused orchestrator never carries a countdown too.
+								(orchestrator?.isSuspended
+									? ", paused"
+									: orchestratorCountdown
+										? `, auto-suspends in ${orchestratorCountdown.label}`
+										: "")
 							}
 							className={cn(SEG_CLASS, ORCHESTRATOR_SEG_CLASS, orchestratorActive && SEG_ACTIVE_CLASS)}
 							disabled={isSpawning || isProjectRestarting}
@@ -874,6 +890,16 @@ function ProjectItem({
 						>
 							<OrchestratorIcon aria-hidden="true" />
 							<span className="truncate">Orchestrator</span>
+							{/* Idle-close affordance. The orchestrator is the ONE session with no
+							card and no sidebar row of its own — workerSessions() filters it out
+							of both surfaces that render this chip — so without it here the
+							countdown the daemon already publishes for orchestrators
+							(idleCloseAt is derived for every non-terminated session, kind
+							included) would be invisible, and the human would meet the pause as
+							a surprise. `shrink-0` so the label truncates instead of the time,
+							and the chip renders nothing until ~1d out, which keeps the resting
+							look byte-identical to today's. */}
+							{orchestrator && <IdleStatusChip compact session={orchestrator} />}
 							{/* Busy dot: out of flow, so toggling it never resizes the button,
 							re-wraps the label or shifts the header. Decorative — the state is
 							already on the button's accessible name above. */}
