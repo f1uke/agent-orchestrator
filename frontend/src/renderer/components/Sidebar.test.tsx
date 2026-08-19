@@ -1028,4 +1028,59 @@ describe("Sidebar project reorder (drag and drop)", () => {
 		renderSidebar({ workspaces: [three[0]] });
 		expect(screen.getByText("Alpha").closest("[draggable='true']")).toBeNull();
 	});
+
+	// The orchestrator is the ONE session with no board card and no sidebar row of
+	// its own (workerSessions() filters it out of both surfaces that render
+	// IdleStatusChip), so without a chip on the project header's Orchestrator
+	// button the idle-suspend countdown the daemon already publishes for it would
+	// be invisible — and the human would meet the pause as a surprise rather than
+	// see it coming. The resting look must stay exactly as it is today.
+	describe("orchestrator idle-close countdown", () => {
+		function orchestratorBtn(name = "Project One") {
+			return screen.getByLabelText(new RegExp(`(Open|Spawn) ${name} orchestrator`));
+		}
+		const IN_WINDOW = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30m out
+		const FAR_OUT = new Date(Date.now() + 70 * 60 * 60 * 1000).toISOString(); // 70h out
+		const orch = (extra: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
+			...orchestratorSession,
+			status: "idle",
+			...extra,
+		});
+
+		it("counts down on the Orchestrator button as the deadline nears", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch({ idleCloseAt: IN_WINDOW })] }] });
+
+			// The remaining time is rendered inside the button the human can see
+			// without opening the session.
+			expect(orchestratorBtn()).toHaveTextContent(/\d+[hm]/);
+			// ...and rides the accessible name, because an explicit aria-label on the
+			// button hides the chip's own text from assistive tech.
+			expect(orchestratorBtn()).toHaveAccessibleName(/auto-suspends in/);
+		});
+
+		it("says paused once the orchestrator has been suspended", () => {
+			renderSidebar({
+				workspaces: [{ ...workspace, sessions: [orch({ isSuspended: true, idleCloseAt: IN_WINDOW })] }],
+			});
+
+			expect(screen.getByLabelText("Paused")).toBeInTheDocument();
+			// Paused wins over the countdown: there is no deadline left to count to.
+			expect(orchestratorBtn()).toHaveAccessibleName("Open Project One orchestrator, paused");
+		});
+
+		it("leaves the button untouched while the deadline is far out", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch({ idleCloseAt: FAR_OUT })] }] });
+
+			// Same bar the busy dot holds: a session nowhere near expiry looks
+			// exactly like today — icon and label only, nothing else rendered.
+			expect(orchestratorBtn().children).toHaveLength(2);
+			expect(orchestratorBtn()).toHaveAccessibleName("Open Project One orchestrator");
+		});
+
+		it("renders nothing when the project has no orchestrator", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [] }] });
+
+			expect(orchestratorBtn()).toHaveAccessibleName("Spawn Project One orchestrator");
+		});
+	});
 });

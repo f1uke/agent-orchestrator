@@ -1546,10 +1546,11 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 //
 //  1. Live pass: for each non-terminated session, adopt it if its runtime
 //     survived, else capture work and mark terminated (reconcileLive).
-//  2. Idle sweep: close sessions idle past the configured TTL — destroy their
-//     tmux and mark them terminated while KEEPING the worktree, so a normally
-//     terminated session's tmux survives app reopen and only ages out on
-//     inactivity (CloseIdleSessions). Replaces the old immediate reap.
+//  2. Idle sweep: suspend sessions idle past the configured TTL — destroy their
+//     tmux and mark them SUSPENDED (not terminated) while KEEPING the worktree,
+//     so they stay on the board and resume in place, and a normally terminated
+//     session's tmux survives app reopen and only ages out on inactivity
+//     (CloseIdleSessions). Replaces the old immediate reap.
 //  3. Restore pass: relaunch shutdown-saved sessions (existing RestoreAll).
 //
 // Best-effort throughout: a per-session failure is logged and never aborts the
@@ -1605,28 +1606,83 @@ func (m *Manager) CloseIdleSessions(ctx context.Context) error {
 		}
 	}
 	now := m.clock()
+	reapable := m.reapableHandles(recs, now)
 	for _, rec := range recs {
 		// Already suspended: its tmux is gone and it stays on the board until the
 		// user resumes it — re-processing would be a churny no-op. Leave it be.
 		if rec.IsSuspended {
 			continue
 		}
-		if now.Sub(idleReference(rec)) <= m.idleCloseTTL {
+		if !m.idlePastTTL(rec, now) {
 			continue
 		}
-		if err := m.closeIdle(ctx, rec, liveHandles); err != nil {
+		if err := m.closeIdle(ctx, rec, liveHandles, reapable); err != nil {
 			m.logger.Error("close idle: failed, skipping", "sessionID", rec.ID, "error", err)
 		}
 	}
 	return nil
 }
 
-// closeIdle destroys a session's runtime (if any survives) and marks it
-// terminated, deliberately keeping the worktree so the session stays restorable.
-// liveHandles is the set of runtime handles a live (non-terminated) session still
-// owns; because handles are shared across a project's orchestrators, a terminated
-// record must not reap a tmux that a live session is using.
-func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveHandles map[string]bool) error {
+// idlePastTTL reports whether a session has gone untouched for longer than the
+// idle window — by BOTH the agent and the human (idleReference is the later of
+// the last activity signal and the last user open). It is the sweep's single
+// definition of "idle": CloseIdleSessions decides what to suspend with it, and
+// reapableHandles decides which shared tmux may go with it, so the two can never
+// disagree about who is being suspended in a pass.
+func (m *Manager) idlePastTTL(rec domain.SessionRecord, now time.Time) bool {
+	return now.Sub(idleReference(rec)) > m.idleCloseTTL
+}
+
+// reapableHandles decides which runtime handles this sweep may destroy when it
+// suspends the live sessions sitting on them.
+//
+// Every orchestrator of a project gets the SAME branch (defaultSessionBranch
+// returns "ao/<prefix>-orchestrator", independent of the session id), so they all
+// map to one runtime handle — and SpawnOrchestrator's check-then-spawn is
+// explicitly not atomic, so a project can hold more than one non-terminated
+// orchestrator on that single handle. Suspending one of them must not destroy the
+// tmux another one is still working in.
+//
+// So a handle is reapable only when EVERY live session still holding it is being
+// suspended in this same pass. If any live holder is staying (not idle past the
+// TTL), the tmux belongs to it and is left alone — the idle record still
+// suspends, and Resume's adopt-if-alive guard reattaches it to that live runtime.
+// Already-suspended records hold no tmux, so they are not holders.
+func (m *Manager) reapableHandles(recs []domain.SessionRecord, now time.Time) map[string]bool {
+	reapable := make(map[string]bool)
+	staying := make(map[string]bool)
+	for _, rec := range recs {
+		if rec.IsTerminated || rec.IsSuspended {
+			continue
+		}
+		h := runtimeHandle(rec.Metadata).ID
+		if h == "" {
+			continue
+		}
+		if m.idlePastTTL(rec, now) {
+			reapable[h] = true
+			continue
+		}
+		staying[h] = true
+	}
+	for h := range staying {
+		delete(reapable, h)
+	}
+	return reapable
+}
+
+// closeIdle suspends a live session past the idle TTL (or reaps a terminated
+// record's leaked tmux), deliberately keeping the worktree so the session stays
+// restorable.
+//
+// Both handle maps exist because a project's orchestrators share ONE runtime
+// handle. liveHandles is the set of handles a non-terminated session still owns,
+// so a terminated record never reaps a tmux a live session is using. reapable is
+// the set of handles whose live holders are ALL being suspended in this pass (see
+// reapableHandles), so suspending one orchestrator never kills a sibling that is
+// still working in the same tmux. reapable is consumed on use, so a handle shared
+// by several suspending sessions is destroyed exactly once.
+func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveHandles, reapable map[string]bool) error {
 	handle := runtimeHandle(rec.Metadata)
 	if rec.IsTerminated {
 		// The record's runtime was torn down when it ended; a tmux still alive
@@ -1652,6 +1708,13 @@ func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveH
 	if err := m.lcm.MarkSuspended(ctx, rec.ID); err != nil {
 		return fmt.Errorf("close idle %s: mark suspended: %w", rec.ID, err)
 	}
+	// Only tear the tmux down when no live sibling is still using it. When one is,
+	// the record suspends without a reap: the memory belongs to that sibling's
+	// agent, and Resume adopts the still-alive runtime instead of colliding on it.
+	if !reapable[handle.ID] {
+		return nil
+	}
+	delete(reapable, handle.ID)
 	if err := m.reapRuntimeIfAlive(ctx, rec.ID, handle); err != nil {
 		return err
 	}

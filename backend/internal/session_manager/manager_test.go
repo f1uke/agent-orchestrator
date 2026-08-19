@@ -4671,3 +4671,194 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		t.Fatalf("the orchestrator does not drive simulators:\n%s", orch)
 	}
 }
+
+// TestCloseIdleSessions_IdleOrchestrator_KeepsLiveSiblingTmux is the shared-handle
+// guard that matters for orchestrators. Every orchestrator of a project gets the
+// SAME branch (defaultSessionBranch: "ao/<prefix>-orchestrator", independent of
+// session id), so its runtime handle is the same name for all of them — and
+// SpawnOrchestrator's check-then-spawn is explicitly not atomic, so a project can
+// briefly hold TWO non-terminated orchestrators on that one handle.
+//
+// When one of them is idle past the TTL and the OTHER is actively working, the
+// idle one must NOT destroy the shared tmux: doing so kills the live sibling's
+// agent out from under it. The idle record still suspends (it is genuinely idle,
+// and Resume adopts a still-alive runtime), but the tmux belongs to the live
+// owner and is left alone.
+func TestCloseIdleSessions_IdleOrchestrator_KeepsLiveSiblingTmux(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	const shared = "proj-ao-proj-orchestrator"
+	rt.aliveByHandle[shared] = true
+	// Idle orchestrator, quiet for 8h, shares the handle.
+	st.sessions["idle"] = domain.SessionRecord{
+		ID: "idle", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: shared, WorkspacePath: "/ws/idle", Branch: "ao/proj-orchestrator"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-8 * time.Hour)},
+		CreatedAt: now.Add(-9 * time.Hour),
+	}
+	// Live sibling orchestrator, working a minute ago, owns the same tmux.
+	st.sessions["busy"] = domain.SessionRecord{
+		ID: "busy", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: shared, WorkspacePath: "/ws/busy", Branch: "ao/proj-orchestrator"},
+		Activity:  domain.Activity{State: domain.ActivityActive, LastActivityAt: now.Add(-1 * time.Minute)},
+		CreatedAt: now.Add(-2 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("shared tmux must NOT be destroyed while a live sibling is using it; Destroy calls = %d ids=%v, want 0", rt.destroyed, rt.destroyedIDs)
+	}
+	if st.sessions["busy"].IsSuspended || st.sessions["busy"].IsTerminated {
+		t.Fatal("the actively-working sibling must be left running")
+	}
+	if !st.sessions["idle"].IsSuspended {
+		t.Fatal("the idle orchestrator must still be marked suspended (Resume adopts the live runtime)")
+	}
+}
+
+// TestCloseIdleSessions_AllHandleHoldersIdle_ReapsSharedTmuxOnce is the other
+// half of the shared-handle guard: when EVERY live session on a shared handle is
+// idle past the TTL, the tmux must still be freed (that is the whole point of the
+// sweep) — and destroyed exactly ONCE, not once per suspending record.
+func TestCloseIdleSessions_AllHandleHoldersIdle_ReapsSharedTmuxOnce(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	const shared = "proj-ao-proj-orchestrator"
+	rt.aliveByHandle[shared] = true
+	for _, id := range []string{"orch-a", "orch-b"} {
+		st.sessions[domain.SessionID(id)] = domain.SessionRecord{
+			ID: domain.SessionID(id), ProjectID: "mer", Kind: domain.KindOrchestrator,
+			Metadata:  domain.SessionMetadata{RuntimeHandleID: shared, WorkspacePath: "/ws/" + id, Branch: "ao/proj-orchestrator"},
+			Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-8 * time.Hour)},
+			CreatedAt: now.Add(-9 * time.Hour),
+		}
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if rt.destroyed != 1 || len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != shared {
+		t.Fatalf("shared tmux Destroy = %d ids=%v, want exactly one (memory freed, no double reap)", rt.destroyed, rt.destroyedIDs)
+	}
+	for _, id := range []domain.SessionID{"orch-a", "orch-b"} {
+		if !st.sessions[id].IsSuspended {
+			t.Fatalf("%s must be suspended", id)
+		}
+		if st.sessions[id].IsTerminated {
+			t.Fatalf("%s must not be terminated", id)
+		}
+	}
+}
+
+// TestCloseIdleSessions_OrchestratorIdleSemantics pins down what "idle" means for
+// an orchestrator, which is the state a human returns to after a break.
+//
+// The sweep keys on idleReference = max(last agent activity, last user open), so
+// "idle" means nobody — neither the agent nor the human — has touched the session
+// inside the window. That is deliberately blind to activity_state:
+//
+//   - working: an agent mid-turn stamps activity continuously, so its reference is
+//     fresh and it is never swept. This is the "never suspend one that is actually
+//     doing something" guarantee, and it comes from the timestamp, not the label.
+//   - waiting on a human: the reference freezes at the moment it asked, so the
+//     clock measures exactly how long the HUMAN has been away. Past the window it
+//     does suspend — the question is not lost, it is in the conversation, which
+//     Resume restores via --resume.
+func TestCloseIdleSessions_OrchestratorIdleSemantics(t *testing.T) {
+	cases := []struct {
+		name        string
+		state       domain.ActivityState
+		lastAt      time.Duration // how long ago, relative to now
+		wantSuspend bool
+	}{
+		{"working right now is never swept", domain.ActivityActive, -1 * time.Minute, false},
+		{"working, stamped inside the window", domain.ActivityActive, -30 * time.Minute, false},
+		{"asked the human a question moments ago", domain.ActivityWaitingInput, -5 * time.Minute, false},
+		{"asked the human, who never came back", domain.ActivityWaitingInput, -8 * time.Hour, true},
+		{"quiet past the window", domain.ActivityIdle, -8 * time.Hour, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+			m, st, rt, _, _ := newIdleManager(time.Hour, now)
+			rt.aliveByHandle["h1"] = true
+			st.sessions["orch"] = domain.SessionRecord{
+				ID: "orch", ProjectID: "mer", Kind: domain.KindOrchestrator,
+				Metadata:  domain.SessionMetadata{RuntimeHandleID: "h1", WorkspacePath: "/ws/orch", Branch: "ao/proj-orchestrator"},
+				Activity:  domain.Activity{State: tc.state, LastActivityAt: now.Add(tc.lastAt)},
+				CreatedAt: now.Add(-9 * time.Hour),
+			}
+			if err := m.CloseIdleSessions(ctx); err != nil {
+				t.Fatalf("CloseIdleSessions: %v", err)
+			}
+			got := st.sessions["orch"].IsSuspended
+			if got != tc.wantSuspend {
+				t.Fatalf("IsSuspended = %v, want %v", got, tc.wantSuspend)
+			}
+			if st.sessions["orch"].IsTerminated {
+				t.Fatal("the sweep must never terminate an orchestrator")
+			}
+			wantDestroy := 0
+			if tc.wantSuspend {
+				wantDestroy = 1
+			}
+			if rt.destroyed != wantDestroy {
+				t.Fatalf("Destroy calls = %d, want %d", rt.destroyed, wantDestroy)
+			}
+		})
+	}
+}
+
+// TestCloseIdleSessions_OrchestratorOpenedRecently_NotSwept covers the human half
+// of idleReference: an orchestrator whose AGENT has been quiet for days but that
+// the human opened an hour ago is not idle — opening it is what TouchIdleClose
+// stamps, and suspending a session the human just looked at would be the most
+// hostile version of this feature.
+func TestCloseIdleSessions_OrchestratorOpenedRecently_NotSwept(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h1"] = true
+	st.sessions["orch"] = domain.SessionRecord{
+		ID: "orch", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Metadata:     domain.SessionMetadata{RuntimeHandleID: "h1", WorkspacePath: "/ws/orch", Branch: "ao/proj-orchestrator"},
+		Activity:     domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-72 * time.Hour)},
+		LastOpenedAt: now.Add(-10 * time.Minute),
+		CreatedAt:    now.Add(-96 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if st.sessions["orch"].IsSuspended {
+		t.Fatal("an orchestrator the human opened 10 minutes ago must not be suspended")
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+	}
+}
+
+// TestCloseIdleSessions_ExactlyAtTTL_NotYetIdle pins the boundary of the sweep's
+// one "idle" predicate (idlePastTTL). It is shared by CloseIdleSessions, which
+// picks what to suspend, and reapableHandles, which picks which shared tmux may
+// go — so an off-by-one there would desync the guard from the suspend decision.
+// The window is exclusive: a session idle for EXACTLY the TTL has not yet passed
+// it and survives the pass untouched.
+func TestCloseIdleSessions_ExactlyAtTTL_NotYetIdle(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	rt.aliveByHandle["h1"] = true
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Metadata:  domain.SessionMetadata{RuntimeHandleID: "h1", WorkspacePath: "/ws/s1", Branch: "ao/proj-orchestrator"},
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-time.Hour)},
+		CreatedAt: now.Add(-2 * time.Hour),
+	}
+	if err := m.CloseIdleSessions(ctx); err != nil {
+		t.Fatalf("CloseIdleSessions: %v", err)
+	}
+	if st.sessions["s1"].IsSuspended {
+		t.Fatal("a session idle for exactly the TTL has not passed it; it must not be suspended")
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+	}
+}
