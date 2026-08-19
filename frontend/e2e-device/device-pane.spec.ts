@@ -371,7 +371,7 @@ test("a character reaches the device without waiting for a pause", async () => {
 	// later timing cases in this serial file measure.
 	skipUnlessGuestTakesUSKeys(sandbox);
 	await readyToDrive(sandbox);
-	await openSpotlightField(sandbox);
+	await openSearchField(sandbox);
 	const canvas = sandbox.page.getByTestId("sim-canvas");
 	await canvas.focus();
 	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
@@ -414,7 +414,7 @@ test("a character reaches the device without waiting for a pause", async () => {
  */
 test("saying that typing is on its way does not move the screen", async () => {
 	await readyToDrive(sandbox);
-	await openSpotlightField(sandbox);
+	await openSearchField(sandbox);
 	const canvas = sandbox.page.getByTestId("sim-canvas");
 	await canvas.focus();
 	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
@@ -470,7 +470,7 @@ test("a word typed while recording is one step and one inputText", async () => {
 	skipUnlessGuestTakesUSKeys(sandbox);
 	clearRecordings(sandbox);
 	await readyToDrive(sandbox);
-	await openSpotlightField(sandbox);
+	await openSearchField(sandbox);
 
 	const button = sandbox.page.getByTestId("sim-record-toggle");
 	await expect(button).toBeEnabled();
@@ -749,27 +749,67 @@ async function readyToDrive(sandbox: Sandbox) {
 }
 
 /**
- * Opens Spotlight and puts the caret in its search field.
+ * Puts the caret in a native search field on the device.
  *
- * ⚠ It CHECKS that Spotlight actually opened rather than assuming it. These
- * cases run in series against a device that other cases have been driving, so
- * whatever app is in front when this starts is not fixed - and a pull-down that
- * lands on the wrong screen leaves the following keystrokes going nowhere,
- * which reads as "typing does not reach the device" when the truth is that no
- * field was ever focused.
+ * ⚠ It CHECKS which app it landed in rather than assuming. These cases run in
+ * series against a device other cases have been driving, and a device that has
+ * ANY app in front already shows a text field - so "a field exists" is not
+ * evidence that the pull-down worked, and typing into whatever happened to be
+ * open reads as "typing does not reach the device" when the truth is that the
+ * keystrokes went somewhere nobody was looking.
+ *
+ * ⚠ And Spotlight is not always reachable. On a device with a HOME BUTTON the
+ * swipe-up-from-the-bottom that means "home" everywhere else opens Control
+ * Center instead, so the pane's Home button never reaches the home screen and
+ * Spotlight cannot be pulled down at all. Contacts is the way in there: a stock
+ * app with one native search field, and launching it also puts whatever was in
+ * front out of the way, which is the other half of what Home was for.
  */
-async function openSpotlightField(sandbox: Sandbox) {
-	for (let attempt = 0; attempt < 3; attempt += 1) {
+async function openSearchField(sandbox: Sandbox) {
+	for (let attempt = 0; attempt < 2; attempt += 1) {
 		await pullSpotlightDown(sandbox);
-		if (await hasTextField(sandbox)) return;
+		if (foregroundApp(sandbox) === "com.apple.springboard" && (await hasTextField(sandbox))) return;
 	}
-	throw new Error("Spotlight never opened, so there was no field to type into");
+	execFileSync("xcrun", ["simctl", "launch", sandbox.udid, CONTACTS], { encoding: "utf8" });
+	await sandbox.page.waitForTimeout(2500);
+	const field = searchFieldPoint(sandbox);
+	if (foregroundApp(sandbox) !== CONTACTS || !field) {
+		throw new Error("neither Spotlight nor Contacts offered a field to type into");
+	}
+	post(sandbox, `/api/v1/sessions/${sandbox.sessionId}/sim-devices/${sandbox.udid}/gesture`, {
+		kind: "tap",
+		x: field.x,
+		y: field.y,
+	});
+	await sandbox.page.waitForTimeout(1500);
+}
+
+/** A stock app with exactly one native search field, used when Spotlight cannot be reached. */
+const CONTACTS = "com.apple.MobileAddressBook";
+
+/** Which app is in front, read off the device rather than assumed. */
+function foregroundApp(sandbox: Sandbox): string {
+	const tree = execFileSync(sandbox.aoBin, ["sim", "ax", "--udid", sandbox.udid], { encoding: "utf8" });
+	return tree.match(/Foreground app: (\S+)/)?.[1] ?? "";
+}
+
+/** How many elements the describer can make out on the screen right now. */
+function describedElements(sandbox: Sandbox): number {
+	const tree = execFileSync(sandbox.aoBin, ["sim", "ax", "--udid", sandbox.udid], { encoding: "utf8" });
+	return Number(tree.match(/(\d+) elements/)?.[1] ?? 0);
 }
 
 /** Whether the device is showing a text field at all. */
 async function hasTextField(sandbox: Sandbox): Promise<boolean> {
+	return searchFieldPoint(sandbox) !== null;
+}
+
+/** Where to tap to put the caret in the field, in the device's own 0..1 units. */
+function searchFieldPoint(sandbox: Sandbox): { x: number; y: number } | null {
 	const tree = execFileSync(sandbox.aoBin, ["sim", "ax", "--udid", sandbox.udid], { encoding: "utf8" });
-	return tree.includes('TextField "');
+	const line = tree.split("\n").find((l) => l.includes('TextField "'));
+	const point = line?.match(/tap (\d+\.\d+) (\d+\.\d+)/);
+	return point ? { x: Number(point[1]), y: Number(point[2]) } : null;
 }
 
 async function pullSpotlightDown(sandbox: Sandbox) {
@@ -802,7 +842,7 @@ async function pullSpotlightDown(sandbox: Sandbox) {
 test("typing on the human's own keyboard reaches the device", async () => {
 	skipUnlessGuestTakesUSKeys(sandbox);
 	await readyToDrive(sandbox);
-	await openSpotlightField(sandbox);
+	await openSearchField(sandbox);
 	const canvas = sandbox.page.getByTestId("sim-canvas");
 	await canvas.focus();
 	// Clear whatever a previous run left, using the key under test.
@@ -825,12 +865,92 @@ test("typing on the human's own keyboard reaches the device", async () => {
 	expect(await deviceField(sandbox), "the arrow key did not move the caret").toBe("aXb");
 });
 
+/**
+ * 🗝 The human's own case, end to end: a Thai Mac, a Thai guest, and a person
+ * typing.
+ *
+ * Their Mac resolves the key they pressed into a Thai rune, and no US keyboard
+ * key can send a Thai rune - so the pane used to hand the RUNE to the daemon,
+ * which put every burst through the guest's pasteboard and read the screen
+ * twice to prove it landed: measured at 2.7-3.7 s per burst, for ASCII on this
+ * guest just as much as for Thai. Forwarding the KEY instead costs 1-2 ms, and
+ * the guest's own Thai mode turns it back into exactly the rune the Mac made,
+ * because it is the same layout.
+ *
+ * ⚠ Only measurable here, and only like this. `keyboard.type` cannot deliver a
+ * rune at all, and jsdom has no daemon, no guest and no clock - so what a key
+ * BECOMES on the device is a claim that can be checked nowhere else.
+ */
+test("a Thai keystroke reaches the device as the character the Mac made, without waiting", async () => {
+	const guest = JSON.parse(
+		execFileSync("curl", ["-sS", `${sandbox.api}/api/v1/sim/devices/${sandbox.udid}/keyboard`], {
+			encoding: "utf8",
+		}),
+	) as { sendsUSASCII?: boolean; mode?: string };
+	test.skip(
+		guest.sendsUSASCII !== false,
+		`this simulator's input mode is ${guest.mode ?? "unknown"}; a Thai guest is what turns these keys into Thai`,
+	);
+
+	await readyToDrive(sandbox);
+	await openSearchField(sandbox);
+	const canvas = sandbox.page.getByTestId("sim-canvas");
+	await canvas.focus();
+	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
+	await sandbox.page.waitForTimeout(1500);
+
+	// The keys a Thai Mac uses for "สวัสดี", with the rune each one produced -
+	// which is exactly what a real keydown carries.
+	const word: { rune: string; code: string }[] = [
+		{ rune: "ส", code: "KeyL" },
+		{ rune: "ว", code: "Semicolon" },
+		{ rune: "ั", code: "KeyY" },
+		{ rune: "ส", code: "KeyL" },
+		{ rune: "ด", code: "KeyF" },
+		{ rune: "ี", code: "KeyU" },
+	];
+
+	const sent: { at: number; body: { kind?: string; keys?: unknown[] } }[] = [];
+	const onFinished = (request: import("@playwright/test").Request) => {
+		if (!request.url().includes("/gesture")) return;
+		const timing = request.timing();
+		let body: { kind?: string; keys?: unknown[] } = {};
+		try {
+			body = JSON.parse(request.postData() ?? "{}") as { kind?: string; keys?: unknown[] };
+		} catch {
+			body = {};
+		}
+		sent.push({ at: timing.startTime + Math.max(0, timing.responseEnd), body });
+	};
+	sandbox.page.on("requestfinished", onFinished);
+
+	const cdp = await sandbox.app.context().newCDPSession(sandbox.page);
+	const pressed = Date.now();
+	for (const { rune, code } of word) {
+		await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: rune, code, text: rune });
+		await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: rune, code });
+		await sandbox.page.waitForTimeout(120);
+	}
+	await expect.poll(() => sent.filter((s) => s.body.kind === "type").length, { timeout: 15_000 }).toBe(word.length);
+	sandbox.page.off("requestfinished", onFinished);
+
+	// One request per keystroke, each carrying the key that produced it.
+	for (const one of sent.filter((s) => s.body.kind === "type")) {
+		expect(one.body.keys, "the keystroke was sent as text, so it took the pasteboard route").toHaveLength(1);
+	}
+	// The FIRST character is the one a person is watching for.
+	const echo = sent.filter((s) => s.body.kind === "type")[0].at - pressed;
+	expect(echo, `the first character took ${Math.round(echo)} ms to reach the device`).toBeLessThan(400);
+
+	expect(await deviceField(sandbox), "the guest did not make the character the Mac made").toBe("สวัสดี");
+});
+
 // ⚠ The rule that keeps the rest of AO usable: keys reach the device only when
 // the device surface has focus. jsdom cannot judge focus the way a browser
 // does, so this is checked where focus is real.
 test("keys do not reach the device unless the device surface has focus", async () => {
 	await readyToDrive(sandbox);
-	await openSpotlightField(sandbox);
+	await openSearchField(sandbox);
 	const canvas = sandbox.page.getByTestId("sim-canvas");
 	await canvas.focus();
 	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
@@ -871,6 +991,7 @@ test("a drag still carries its motion on a screen nothing can be read from", asy
 	// not booting a device - nothing here boots, shuts down or erases anything.
 	execFileSync("xcrun", ["simctl", "launch", sandbox.udid, "com.apple.mobilesafari"]);
 	await sandbox.page.waitForTimeout(5000);
+	const unreadable = !(await hasTextField(sandbox)) && describedElements(sandbox) === 0;
 
 	const record = sandbox.page.getByTestId("sim-record-toggle");
 	if ((await record.getAttribute("aria-pressed")) !== "true") await record.click();
@@ -896,12 +1017,20 @@ test("a drag still carries its motion on a screen nothing can be read from", asy
 	// looking complete.
 	const dir = path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows");
 	const body = readFileSync(path.join(dir, readdirSync(dir).filter((f) => f.endsWith(".yaml"))[0]), "utf8");
-	expect(body, `a swipe nothing could be described from must say so:\n${body}`).toContain("# REVIEW:");
 	expect(body).toMatch(/- swipe: \{start: "\d+%,\d+%", end: "\d+%,\d+%"\}/);
 	const counts = body.match(/# (\d+) step\(s\), (\d+) needing review/);
 	expect(counts).not.toBeNull();
 	const markers = body.split("\n").filter((l) => l.startsWith("# REVIEW:")).length;
 	expect(markers, "the banner counts steps it never marked").toBe(Number(counts![2]));
+	// ⚠ The premise, checked rather than assumed. Safari publishes NO
+	// accessibility elements on some device generations and a full tree on
+	// others, so "a screen nothing can be read from" is not something launching
+	// it guarantees. The motion above is the property under test either way;
+	// the review marker only means anything where the screen really was opaque,
+	// and asserting it elsewhere fails on the device rather than on the code.
+	if (unreadable) {
+		expect(body, `a swipe nothing could be described from must say so:\n${body}`).toContain("# REVIEW:");
+	}
 
 	await sandbox.page.getByRole("button", { name: "Home", exact: true }).click();
 	await sandbox.page.waitForTimeout(1000);

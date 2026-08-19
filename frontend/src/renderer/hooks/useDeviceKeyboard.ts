@@ -9,23 +9,33 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * same shape of gap as recording had, where the person driving by hand is
  * pushed out to the CLI for one step in the middle.
  *
- * ## How a keypress becomes a character on the device
+ * ## What a keystroke actually is here
  *
- * 🗝 **The character comes from `event.key`, never from a key code.** That is
- * the whole reason this surface can be correct where a synthesised keystroke
- * cannot. The browser has already resolved the human's input source for us: on
- * a Thai Mac, pressing the key labelled `f` gives `event.key === "ด"` - the
- * character they meant. Sending a US HID usage for `f` instead is exactly the
- * bug that made `ao sim type "fa12345"` arrive as `ดฟๅ/_ภถ` while reporting
- * success, because the GUEST remaps usages according to its own input mode.
+ * 🗝 **A person pressed a KEY. The character is what their layout made of it.**
+ * Both facts go to the device, and which one is load-bearing depends on who is
+ * asking.
  *
- * So characters are sent as TEXT to the daemon's `type` gesture, which already
- * knows how to deliver text truthfully - key presses when the guest will
- * deliver US ASCII faithfully, the guest pasteboard when it would remap or the
- * text is not ASCII, and it proves on screen that the text landed. There is no
- * second implementation of "is this keyboard safe" here, which is deliberate:
- * two of those would disagree one day and the layout bug would come back on
- * whichever surface had the stale copy.
+ * `event.key` is the character: the browser already resolved the human's input
+ * source, so on a Thai Mac the key labelled `f` gives `"ด"` - what they meant.
+ * `event.code` is the KEY: a position on the keyboard, defined by where it sits
+ * on a US layout, which is the same thing the device's HID usages are.
+ *
+ * This surface sends the POSITION, and the character with it. That is what
+ * Simulator.app does, and it is why typing there has never felt slow: the
+ * simulator's input mode follows the Mac's, so the guest resolves the position
+ * through the very layout that decided which character the human saw. Nothing
+ * has to be planned, nothing pasted, nothing read back off the screen to check.
+ *
+ * ⚠ **This is exactly the reasoning `ao sim type` may NOT use.** There, an
+ * agent chose the string `fa12345`; no person pressed anything, so a US usage
+ * for `f` is a guess about the guest's layout, and on a Thai guest it arrives
+ * as `ดฟๅ/_ภถ` while reporting success - the bug #198 exists for. The
+ * difference is not the mechanism, it is whether a human's own keyboard is at
+ * the other end of it. The daemon keeps both routes and picks by that.
+ *
+ * The character still travels, and still matters: it is what a recording keeps
+ * (`inputText`), and it is what the daemon delivers by the planned, proven
+ * route whenever the position cannot be forwarded.
  *
  * Keys that produce NO character - Enter, Backspace, Tab, the arrows - go the
  * other way, as named key presses, because there is nothing for a layout to
@@ -40,22 +50,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * character goes out AT ONCE wherever that is cheap, and is batched only where
  * batching is what makes it correct.
  *
- * Which one applies is the device's answer, not this hook's opinion:
+ *   - the keystroke carries a position the device can be given (`FORWARDABLE`):
+ *     sent on its own, measured at 1-2 ms on the device, whatever the layout.
+ *     This is the ordinary case and covers Thai as well as ASCII.
+ *   - no position, but the guest reads US ASCII key presses faithfully
+ *     (`immediate`) and the character is ASCII: also sent on its own.
+ *   - anything else: the characters accumulate and go out as one `type` per
+ *     burst, planned by the daemon. On a guest that would remap them that is a
+ *     pasteboard round trip which reads the screen twice to prove it landed,
+ *     measured at 2.7-3.7 s - one per keystroke would be far worse than the
+ *     pause it was meant to remove, and would cycle the guest's pasteboard on
+ *     every character.
  *
- *   - the guest reads US ASCII key presses faithfully (`immediate`), and the
- *     character is ASCII: sent on its own, measured at 3-6 ms on the device.
- *   - anything else - a guest that would remap the keys, one that would not say
- *     what it is, or a character no US key can send (Thai, an emoji): the
- *     characters accumulate and go out as one `type` per burst. Each of those
- *     is a pasteboard round trip that reads the screen twice to prove it
- *     landed, measured at 3.1-3.4 s: one per keystroke would be far worse than
- *     the pause it was meant to remove, and would cycle the guest's pasteboard
- *     on every character.
- *
- * ⚠ `immediate` is a PACING hint and never a routing decision. The daemon plans
- * every request itself, from the mode as it is at that moment, so a hint that
- * has gone stale costs speed and never correctness - which is what keeps
- * "is this keyboard safe" implemented in exactly one place, and not here.
+ * ⚠ Both `FORWARDABLE` and `immediate` are PACING hints and never routing
+ * decisions. The daemon plans every request itself, so a hint that is wrong or
+ * stale costs speed and never correctness - which is what keeps "how does this
+ * text reach the device" implemented in exactly one place, and not here.
  *
  * A burst ends when the human pauses, presses a key that is not a character,
  * leaves the surface, or stops driving.
@@ -87,7 +97,31 @@ const NAMED_KEYS: Record<string, string> = {
 	ArrowRight: "arrow-right",
 };
 
-export type DeviceKey = { kind: "text"; text: string } | { kind: "key"; name: string };
+/**
+ * One physical key press, in the browser's own vocabulary.
+ *
+ * `code` is a position, not a character - `"KeyF"` is where a US keyboard
+ * prints `f`, whatever the layout in force prints on it. Shift belongs to the
+ * press rather than to the character: on a Thai keyboard it produces a
+ * different Thai letter, and the guest applies its own layout to the pair
+ * exactly as the Mac just did.
+ */
+export type ForwardedKey = { code: string; shift: boolean };
+
+export type DeviceKey = { kind: "text"; text: string; key?: ForwardedKey } | { kind: "key"; name: string };
+
+/**
+ * The key positions worth forwarding: the ones that carry a character on every
+ * layout, spelled the way `KeyboardEvent.code` spells them.
+ *
+ * ⚠ Pacing only. The daemon has the authoritative table and decides the route;
+ * this decides whether to send the keystroke on its own or let it batch. Being
+ * narrower than the daemon's table costs a keystroke some speed. Being wider
+ * costs it some more, because the daemon falls back to the planned route - and
+ * neither can put the wrong character on the device.
+ */
+const FORWARDABLE =
+	/^(?:Key[A-Z]|Digit[0-9]|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Backquote|Comma|Period|Slash|Space)$/;
 
 /**
  * classifyKey decides what a keypress means to the device, or that it means
@@ -105,9 +139,12 @@ export type DeviceKey = { kind: "text"; text: string } | { kind: "key"; name: st
  */
 export function classifyKey(event: {
 	key: string;
+	code?: string;
+	shiftKey?: boolean;
 	metaKey: boolean;
 	ctrlKey: boolean;
 	altKey: boolean;
+	getModifierState?: (key: "CapsLock") => boolean;
 }): DeviceKey | null {
 	if (event.metaKey || event.ctrlKey || event.altKey) return null;
 
@@ -118,7 +155,9 @@ export function classifyKey(event: {
 	// `.length`, so a character outside the basic plane counts as one and an
 	// event like "ArrowUp" or "Dead" - which are names, not characters - does
 	// not look like a five-letter word.
-	if ([...event.key].length === 1) return { kind: "text", text: event.key };
+	if ([...event.key].length === 1) {
+		return { kind: "text", text: event.key, key: forwardableKey(event) };
+	}
 
 	// ⚠ Everything else is deliberately NOT forwarded and NOT prevented: F-keys,
 	// Home, Page Up, a bare Shift, and "Dead" - the first half of a composed
@@ -128,6 +167,27 @@ export function classifyKey(event: {
 	// keydown at all, so that input source is not supported here and is stated
 	// rather than half-handled.
 	return null;
+}
+
+/**
+ * The key press to forward, when the position and shift ACCOUNT FOR the
+ * character the Mac produced - and nothing when they do not.
+ *
+ * ⚠ Caps Lock is the case that makes this a function rather than a field. With
+ * it on, the Mac produces a capital from an unshifted press, and the device -
+ * which was never told about it - would produce the lower-case letter from the
+ * same position. So the position is dropped and the CHARACTER is sent instead,
+ * by the route that can promise it. Sending Shift instead would be a guess, and
+ * on a layout where Caps Lock is not simply Shift it would be the wrong one.
+ */
+function forwardableKey(event: {
+	code?: string;
+	shiftKey?: boolean;
+	getModifierState?: (key: "CapsLock") => boolean;
+}): ForwardedKey | undefined {
+	if (!event.code || !FORWARDABLE.test(event.code)) return undefined;
+	if (event.getModifierState?.("CapsLock")) return undefined;
+	return { code: event.code, shift: event.shiftKey === true };
 }
 
 /**
@@ -187,12 +247,21 @@ export function useDeviceKeyboard({
 	 * slower answer is always the safe one to guess.
 	 */
 	immediate?: boolean;
-	sendText: (text: string) => Promise<void>;
+	/**
+	 * keys are the positions that produced this text, one per character, and
+	 * are absent whenever any character in the burst had none. All or nothing:
+	 * a partial list could not say which character each key belongs to.
+	 */
+	sendText: (text: string, keys?: ForwardedKey[]) => Promise<void>;
 	sendKey: (name: string) => Promise<void>;
 	/** Escape is the way out of the surface, and is never sent to the device. */
 	onEscape: () => void;
 }): DeviceKeyboard {
 	const pending = useRef("");
+	// The positions behind `pending`, or null once a character has arrived that
+	// had none - because the daemon needs one key per character or nothing at
+	// all, and a half-filled list has no meaning.
+	const pendingKeys = useRef<ForwardedKey[] | null>([]);
 	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	// One queue, so text and keys reach the device in the order they were
 	// typed even though each send is a separate request.
@@ -232,14 +301,16 @@ export function useDeviceKeyboard({
 		clearTimeout(timer.current);
 		timer.current = undefined;
 		const text = pending.current;
+		const keys = pendingKeys.current;
 		pending.current = "";
+		pendingKeys.current = [];
 		if (text === "") return;
 		const runes = [...text].length;
 		// settled, not resolved: text that failed to reach the device is no
 		// longer on its way either, and leaving the pane claiming it was would
 		// be a spinner that never stops. The failure itself is reported by the
 		// caller's own error handling.
-		enqueue(() => sendTextRef.current(text).finally(() => confirmed(runes)));
+		enqueue(() => sendTextRef.current(text, keys ?? undefined).finally(() => confirmed(runes)));
 	}, [confirmed, enqueue]);
 
 	// Nothing typed may be left behind when typing stops being allowed - the
@@ -280,12 +351,16 @@ export function useDeviceKeyboard({
 			}
 
 			pending.current += what.text;
+			if (what.key && pendingKeys.current) pendingKeys.current.push(what.key);
+			else pendingKeys.current = null;
 			accepted(1);
-			// The character can stand on its own, and the device will read it as
-			// itself: send it now rather than making the human wait for a pause
-			// they have no reason to take. Anything already pending goes with it,
-			// so nothing can overtake what was typed before it.
-			if (immediate && sendsAlone(pending.current)) {
+			// The keystroke can stand on its own: send it now rather than making
+			// the human wait for a pause they have no reason to take. Anything
+			// already pending goes with it, so nothing can overtake what was
+			// typed before it - which is also why a forwardable key caught up in
+			// a burst that has already lost its positions simply goes by the
+			// slower route with the rest, rather than jumping the queue.
+			if (what.key || (immediate && sendsAlone(pending.current))) {
 				flush();
 				return;
 			}

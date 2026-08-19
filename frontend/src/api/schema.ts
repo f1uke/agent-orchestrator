@@ -1858,6 +1858,12 @@ export interface components {
             /** @description False when recordedAt fell back to the file's modification time because its name carries no timestamp. */
             timeFromFileName: boolean;
         };
+        ControllersSimKeyPress: {
+            /** @description KeyboardEvent.code, e.g. KeyF, Digit1, Semicolon. */
+            code: string;
+            /** @description Shift was held. Part of the key press, not of the character. */
+            shift?: boolean;
+        };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
             path: string;
@@ -2619,6 +2625,8 @@ export interface components {
         SimGestureInput: {
             /** @description Swipe duration in milliseconds. Omit for 300. */
             durationMs?: number;
+            /** @description The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these: they are forwarded to the device as themselves, so the simulator's input mode decides what they produce, exactly as it would in Simulator.app. A string chosen by an agent has no keys behind it and must be sent as Text alone. */
+            keys?: components["schemas"]["ControllersSimKeyPress"][];
             /** @description tap, swipe, type, key, button, drag-begin, drag-move or drag-end. */
             kind: string;
             name?: string;
