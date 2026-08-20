@@ -420,7 +420,7 @@ func TestSmokeChecklistProtocol_AuthorsBeforePR(t *testing.T) {
 		"UI flows, live SCM/CI polling, native-app behavior, timing/race", // conditional scope kept
 		"Skip this for pure-logic changes already covered by tests",       // skip clause kept
 		"leave `prNum` at 0",                                              // prNum note for pre-PR authoring
-		"cat <<'JSON' | ao smoke set \"$AO_SESSION_ID\" --from-file -",    // JSON-on-stdin mechanism
+		"cat <<'JSON' | ao smoke set \"$AO_CREW_ID\" --from-file -",       // JSON-on-stdin mechanism
 		"\"name\"", "\"why\"", "\"steps\"", "\"expected\"", "\"prNum\"", "\"fileRef\"", // case schema
 		"plays each case live in the Tests tab, attaches evidence, and reports results back to you", // contract
 	} {

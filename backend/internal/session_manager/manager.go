@@ -81,6 +81,14 @@ const (
 	// sessions' hook callbacks silently post to whatever daemon owns the
 	// default run file.
 	EnvRunFile = "AO_RUN_FILE"
+	// EnvCrewID names the TASK a crew member is working on, which is dev's session
+	// id. It exists because the artefacts of a task belong to the task, not to
+	// whichever agent happened to produce them: qa authors the smoke checklist the
+	// human plays and dev's card shows, so it must write it against this id and
+	// not against its own. A SOLO session sets it to its own id, so a command
+	// written with it is correct in both shapes and there is no branch for an
+	// agent to get wrong.
+	EnvCrewID = "AO_CREW_ID"
 )
 
 // hookBinaryName is the executable name the workspace hook commands invoke:
@@ -566,7 +574,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:        runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, cfg.Kind, project.Config.Env),
+		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, project.Config.Env),
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1427,7 +1435,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:        runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, project.Config.Env),
+		Env:           m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, project.Config.Env),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
@@ -3034,13 +3042,21 @@ This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create 
 // the AO-internal vars last so they always win (a project cannot override
 // AO_SESSION_ID and friends). An empty runFile is omitted so the hook CLI's own
 // default run-file resolution applies.
-func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, dataDir, runFile string, projectEnv map[string]string) map[string]string {
+func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, dataDir, runFile string, projectEnv map[string]string) map[string]string {
 	env := make(map[string]string, len(projectEnv)+6)
 	for k, v := range projectEnv {
 		env[k] = v
 	}
 	env[EnvSessionID] = string(id)
 	env[EnvSessionKind] = string(kind)
+	// A solo session is its own task, so this is its own id: every command an
+	// agent is taught works unchanged whether or not it turns out to have a
+	// crewmate.
+	if crew != "" {
+		env[EnvCrewID] = string(crew)
+	} else {
+		env[EnvCrewID] = string(id)
+	}
 	env[EnvProjectID] = string(project)
 	env[EnvIssueID] = string(issue)
 	env[EnvDataDir] = dataDir
@@ -3059,8 +3075,8 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, projectEnv map[string]string) map[string]string {
-	env := spawnEnv(id, project, issue, kind, m.dataDir, m.runFile, projectEnv)
+func (m *Manager) runtimeEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, projectEnv map[string]string) map[string]string {
+	env := spawnEnv(id, project, issue, kind, crew, m.dataDir, m.runFile, projectEnv)
 	path, err := HookPATH(m.executable, os.Getenv, projectEnv)
 	if err != nil {
 		m.logger.Warn("session PATH not pinned to the daemon binary; `ao hooks` callbacks may resolve to a different ao and activity tracking will stall",
