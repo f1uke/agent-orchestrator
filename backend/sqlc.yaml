@@ -160,10 +160,18 @@ sql:
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
               type: "SmokeVerdict"
+          - column: "smoke_check.agent_verdict"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "SmokeVerdict"
           - column: "smoke_evidence.session_id"
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
               type: "SessionID"
+          - column: "smoke_evidence.source"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "SmokeEvidenceSource"
           - column: "sim_lease.session_id"
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"

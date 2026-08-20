@@ -11,9 +11,20 @@ import (
 // worker (or orchestrator) reads to know what passed, failed, or was skipped.
 // Decided cases are listed in seq order with an icon, name, PR/file ref, and a
 // note/evidence line; a trailing line counts anything not yet checked.
+//
+// Retired cases are counted but not listed. They are no longer part of what the
+// user was asked to play, so folding an old verdict of theirs into "3 of 4
+// checked" would misreport the checklist - but dropping them silently would hide
+// the fact that it shrank, which is the one thing retiring is FOR.
 func composeSummary(sessionID domain.SessionID, checks []domain.SmokeCheck) string {
-	var pass, fail, skip, pending int
+	var pass, fail, skip, pending, retired int
+	active := make([]domain.SmokeCheck, 0, len(checks))
 	for _, c := range checks {
+		if c.Retired() {
+			retired++
+			continue
+		}
+		active = append(active, c)
 		switch c.Verdict {
 		case domain.SmokePass:
 			pass++
@@ -25,7 +36,7 @@ func composeSummary(sessionID domain.SessionID, checks []domain.SmokeCheck) stri
 			pending++
 		}
 	}
-	total := len(checks)
+	total := len(active)
 	checked := total - pending
 
 	var b strings.Builder
@@ -35,7 +46,7 @@ func composeSummary(sessionID domain.SessionID, checks []domain.SmokeCheck) stri
 	}
 	b.WriteString(".\n")
 
-	for _, c := range checks {
+	for _, c := range active {
 		if c.Verdict == domain.SmokePending {
 			continue
 		}
@@ -53,6 +64,9 @@ func composeSummary(sessionID domain.SessionID, checks []domain.SmokeCheck) stri
 
 	if pending > 0 {
 		fmt.Fprintf(&b, "\n… (%d pending, not yet checked)", pending)
+	}
+	if retired > 0 {
+		fmt.Fprintf(&b, "\n… (%d retired out of the checklist; their results are kept)", retired)
 	}
 
 	fmt.Fprintf(&b, "\n\nOpen the Tests tab or run `ao smoke list %s` for full notes + evidence.", sessionID)

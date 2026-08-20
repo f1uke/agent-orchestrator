@@ -99,21 +99,6 @@ func (c *commandContext) postLoopbackJSON(ctx context.Context, path string, body
 }
 
 func (c *commandContext) doJSONPath(ctx context.Context, method, path string, body, out any) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	info, err := runfile.Read(cfg.RunFilePath)
-	if err != nil {
-		return err
-	}
-	if info == nil {
-		return fmt.Errorf("AO daemon is not running — start it with `ao start`")
-	}
-	if !c.deps.ProcessAlive(info.PID) {
-		return fmt.Errorf("AO daemon is not running (stale run-file at %s) — start it with `ao start`", cfg.RunFilePath)
-	}
-
 	var reader io.Reader = http.NoBody
 	if body != nil {
 		payload, err := json.Marshal(body)
@@ -122,15 +107,53 @@ func (c *commandContext) doJSONPath(ctx context.Context, method, path string, bo
 		}
 		reader = bytes.NewReader(payload)
 	}
-	url := fmt.Sprintf("http://%s:%d%s", config.LoopbackHost, info.Port, path)
-	req, err := http.NewRequestWithContext(ctx, method, url, reader) // #nosec G704 -- daemon host is fixed loopback; path is an internal API route.
+	req, err := c.newDaemonRequest(ctx, method, path, reader)
 	if err != nil {
 		return err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return c.sendDaemonRequest(req, out)
+}
 
+// postBytes streams a raw body to POST /api/v1/<path> with an explicit content
+// type - the daemon's non-multipart upload path (see readEvidenceUpload). The
+// CLI uses it rather than multipart because it has one file and no form.
+func (c *commandContext) postBytes(ctx context.Context, path, contentType, filename string, body io.Reader, out any) error {
+	req, err := c.newDaemonRequest(ctx, http.MethodPost, "/api/v1/"+path, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if filename != "" {
+		req.Header.Set("X-Filename", filename)
+	}
+	return c.sendDaemonRequest(req, out)
+}
+
+// newDaemonRequest resolves the running daemon and builds a request against it,
+// failing with the "not running" guidance rather than a connection dump.
+func (c *commandContext) newDaemonRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	info, err := runfile.Read(cfg.RunFilePath)
+	if err != nil {
+		return nil, err
+	}
+	if info == nil {
+		return nil, fmt.Errorf("AO daemon is not running — start it with `ao start`")
+	}
+	if !c.deps.ProcessAlive(info.PID) {
+		return nil, fmt.Errorf("AO daemon is not running (stale run-file at %s) — start it with `ao start`", cfg.RunFilePath)
+	}
+	url := fmt.Sprintf("http://%s:%d%s", config.LoopbackHost, info.Port, path)
+	return http.NewRequestWithContext(ctx, method, url, body) // #nosec G704 -- daemon host is fixed loopback; path is an internal API route.
+}
+
+func (c *commandContext) sendDaemonRequest(req *http.Request, out any) error {
 	// Reuse the injected client's transport (keeps it stubbable in tests) but
 	// give daemon API calls far more headroom than the 2s status-probe timeout.
 	client := *c.deps.HTTPClient

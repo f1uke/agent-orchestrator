@@ -13,8 +13,10 @@ import (
 )
 
 // ListSmokeChecksBySession returns a session's checklist ordered by seq, each
-// case with its attached evidence loaded (checklists are small — 3–6 cases — so
-// evidence is fetched per case rather than with a join).
+// case with its attached evidence loaded (checklists are small - 3-6 cases - so
+// evidence is fetched per case rather than with a join). Retired cases sort
+// after the active ones: they are still part of the record, just not part of
+// what the user is asked to play.
 func (s *Store) ListSmokeChecksBySession(ctx context.Context, id domain.SessionID) ([]domain.SmokeCheck, error) {
 	rows, err := s.qr.ListSmokeChecksBySession(ctx, id)
 	if err != nil {
@@ -26,11 +28,9 @@ func (s *Store) ListSmokeChecksBySession(ctx context.Context, id domain.SessionI
 		if err != nil {
 			return nil, err
 		}
-		evidence, err := s.listSmokeEvidence(ctx, s.qr, check.ID)
-		if err != nil {
+		if err := s.loadSmokeEvidence(ctx, s.qr, &check); err != nil {
 			return nil, err
 		}
-		check.Evidence = evidence
 		checks = append(checks, check)
 	}
 	return checks, nil
@@ -49,11 +49,9 @@ func (s *Store) GetSmokeCheck(ctx context.Context, id string) (domain.SmokeCheck
 	if err != nil {
 		return domain.SmokeCheck{}, false, err
 	}
-	evidence, err := s.listSmokeEvidence(ctx, s.qr, id)
-	if err != nil {
+	if err := s.loadSmokeEvidence(ctx, s.qr, &check); err != nil {
 		return domain.SmokeCheck{}, false, err
 	}
-	check.Evidence = evidence
 	return check, true, nil
 }
 
@@ -63,6 +61,11 @@ func (s *Store) GetSmokeCheck(ctx context.Context, id string) (domain.SmokeCheck
 // is inserted fresh, and an existing id absent from cases is deleted (its
 // evidence rows cascade). Returns the removed check ids so the caller can delete
 // their on-disk evidence blobs (the store owns rows, not files).
+//
+// RETIRED cases are invisible to the replace: they are never deleted for being
+// absent from the payload (that absence is exactly what retiring one means) and
+// never rewritten. A retired case is frozen, so an agent that re-sends its whole
+// checklist every round can neither drop nor revive what it retired last round.
 func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -78,7 +81,12 @@ func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.Session
 		}
 		present := make(map[string]struct{}, len(existing))
 		for _, row := range existing {
+			// Still recorded as present so a same-id insert can never collide with
+			// the frozen row, but skipped by the delete sweep below.
 			present[row.ID] = struct{}{}
+			if row.RetiredAt.Valid {
+				continue
+			}
 			if _, ok := keep[row.ID]; !ok {
 				if err := q.DeleteSmokeCheck(ctx, row.ID); err != nil {
 					return err
@@ -154,8 +162,11 @@ func (s *Store) SetSmokeVerdict(ctx context.Context, id string, verdict domain.S
 	return n > 0, nil
 }
 
-// ResetSmokeCheck clears a case's verdict/note/decided_at and deletes its
-// evidence rows (one tx), ok=false if the case does not exist.
+// ResetSmokeCheck clears a case's verdict/note/decided_at and deletes the
+// evidence rows the USER attached (one tx), ok=false if the case does not exist.
+// Reset is the user re-playing a case, so it clears the user's result only: a
+// machine's recorded result and artifacts are not theirs to drop, and wiping
+// them here would make the two results one again by the back door.
 func (s *Store) ResetSmokeCheck(ctx context.Context, id string, now time.Time) (bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -169,12 +180,66 @@ func (s *Store) ResetSmokeCheck(ctx context.Context, id string, now time.Time) (
 		if !reset {
 			return nil
 		}
-		return q.DeleteSmokeEvidenceByCheck(ctx, id)
+		return q.DeleteUserSmokeEvidenceByCheck(ctx, id)
 	})
 	if err != nil {
 		return false, fmt.Errorf("reset smoke check %s: %w", id, err)
 	}
 	return reset, nil
+}
+
+// SetSmokeAgentResult writes the MACHINE's result for a case - verdict, note,
+// when it ran and the commit it ran against - leaving every user-runtime field
+// alone. ok=false when the case does not exist OR is retired: a frozen case is
+// not one anything is asked to run.
+func (s *Store) SetSmokeAgentResult(ctx context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.SetSmokeAgentResult(ctx, gen.SetSmokeAgentResultParams{
+		AgentVerdict: res.Verdict,
+		AgentNote:    res.Note,
+		AgentRanAt:   sql.NullTime{Time: ranAt, Valid: true},
+		AgentSha:     res.SHA,
+		UpdatedAt:    now,
+		ID:           id,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set smoke agent result %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// RetireSmokeCheck freezes a case with the reason it went, clearing nothing.
+// ok=false when the case does not exist or is already retired (the statement is
+// guarded on retired_at IS NULL, so the first reason and date always stand).
+func (s *Store) RetireSmokeCheck(ctx context.Context, id, reason string, retiredAt, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.RetireSmokeCheck(ctx, gen.RetireSmokeCheckParams{
+		RetiredAt:     sql.NullTime{Time: retiredAt, Valid: true},
+		RetiredReason: reason,
+		UpdatedAt:     now,
+		ID:            id,
+	})
+	if err != nil {
+		return false, fmt.Errorf("retire smoke check %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// ListUserSmokeEvidence returns the evidence rows the USER attached to a case -
+// exactly the rows ResetSmokeCheck deletes, so the caller can remove those blobs
+// and leave the machine's alone.
+func (s *Store) ListUserSmokeEvidence(ctx context.Context, checkID string) ([]domain.SmokeEvidence, error) {
+	rows, err := s.qr.ListUserSmokeEvidenceByCheck(ctx, checkID)
+	if err != nil {
+		return nil, fmt.Errorf("list user smoke evidence for check %s: %w", checkID, err)
+	}
+	out := make([]domain.SmokeEvidence, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, smokeEvidenceFromRow(row))
+	}
+	return out, nil
 }
 
 // MarkSmokeReported stamps reported_at across all of a session's checks and
@@ -206,6 +271,7 @@ func (s *Store) InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence
 		Mime:      ev.Mime,
 		SizeBytes: ev.SizeBytes,
 		CreatedAt: ev.CreatedAt,
+		Source:    evidenceSourceOrUser(ev.Source),
 	})
 }
 
@@ -233,16 +299,26 @@ func (s *Store) GetSmokeEvidence(ctx context.Context, id string) (domain.SmokeEv
 	return smokeEvidenceFromRow(row), true, nil
 }
 
-func (s *Store) listSmokeEvidence(ctx context.Context, q *gen.Queries, checkID string) ([]domain.SmokeEvidence, error) {
-	rows, err := q.ListSmokeEvidenceByCheck(ctx, checkID)
+// loadSmokeEvidence fills a case's TWO evidence lists, split by provenance: what
+// the user attached while playing it, and what a machine attached while running
+// it. The split happens here, at the only read path, so no consumer can mix them
+// up even by ignoring the source field on the row.
+func (s *Store) loadSmokeEvidence(ctx context.Context, q *gen.Queries, check *domain.SmokeCheck) error {
+	rows, err := q.ListSmokeEvidenceByCheck(ctx, check.ID)
 	if err != nil {
-		return nil, fmt.Errorf("list smoke evidence for check %s: %w", checkID, err)
+		return fmt.Errorf("list smoke evidence for check %s: %w", check.ID, err)
 	}
-	out := make([]domain.SmokeEvidence, 0, len(rows))
+	check.Evidence = []domain.SmokeEvidence{}
+	check.AgentEvidence = []domain.SmokeEvidence{}
 	for _, row := range rows {
-		out = append(out, smokeEvidenceFromRow(row))
+		ev := smokeEvidenceFromRow(row)
+		if ev.Source == domain.SmokeEvidenceAgent {
+			check.AgentEvidence = append(check.AgentEvidence, ev)
+			continue
+		}
+		check.Evidence = append(check.Evidence, ev)
 	}
-	return out, nil
+	return nil
 }
 
 // ListSmokeEvidenceCreatedBefore returns every evidence row whose created_at
@@ -268,23 +344,30 @@ func smokeCheckFromRow(r gen.SmokeCheck) (domain.SmokeCheck, error) {
 		}
 	}
 	return domain.SmokeCheck{
-		ID:         r.ID,
-		SessionID:  r.SessionID,
-		ProjectID:  r.ProjectID,
-		Seq:        int(r.Seq),
-		Name:       r.Name,
-		Why:        r.Why,
-		Steps:      steps,
-		Expected:   r.Expected,
-		PRNum:      int(r.PRNum),
-		FileRef:    r.FileRef,
-		Verdict:    r.Verdict,
-		Note:       r.Note,
-		Evidence:   []domain.SmokeEvidence{},
-		DecidedAt:  nullTimePtr(r.DecidedAt),
-		ReportedAt: nullTimePtr(r.ReportedAt),
-		CreatedAt:  r.CreatedAt,
-		UpdatedAt:  r.UpdatedAt,
+		ID:            r.ID,
+		SessionID:     r.SessionID,
+		ProjectID:     r.ProjectID,
+		Seq:           int(r.Seq),
+		Name:          r.Name,
+		Why:           r.Why,
+		Steps:         steps,
+		Expected:      r.Expected,
+		PRNum:         int(r.PRNum),
+		FileRef:       r.FileRef,
+		Verdict:       r.Verdict,
+		Note:          r.Note,
+		Evidence:      []domain.SmokeEvidence{},
+		DecidedAt:     nullTimePtr(r.DecidedAt),
+		AgentVerdict:  r.AgentVerdict,
+		AgentNote:     r.AgentNote,
+		AgentEvidence: []domain.SmokeEvidence{},
+		AgentRanAt:    nullTimePtr(r.AgentRanAt),
+		AgentSHA:      r.AgentSha,
+		RetiredAt:     nullTimePtr(r.RetiredAt),
+		RetiredReason: r.RetiredReason,
+		ReportedAt:    nullTimePtr(r.ReportedAt),
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
 	}, nil
 }
 
@@ -298,7 +381,19 @@ func smokeEvidenceFromRow(r gen.SmokeEvidence) domain.SmokeEvidence {
 		Mime:      r.Mime,
 		SizeBytes: r.SizeBytes,
 		CreatedAt: r.CreatedAt,
+		Source:    evidenceSourceOrUser(r.Source),
 	}
+}
+
+// evidenceSourceOrUser reads a stored provenance value, defaulting an empty one
+// to the user. Rows written before provenance existed carry ” only if the
+// column default was bypassed; either way "the user attached it" is the truth
+// for every row that predates `ao smoke record`.
+func evidenceSourceOrUser(src domain.SmokeEvidenceSource) domain.SmokeEvidenceSource {
+	if src == domain.SmokeEvidenceAgent {
+		return domain.SmokeEvidenceAgent
+	}
+	return domain.SmokeEvidenceUser
 }
 
 func nullTimePtr(t sql.NullTime) *time.Time {

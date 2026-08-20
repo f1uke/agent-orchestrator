@@ -176,10 +176,33 @@ function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	}
 }
 
+/**
+ * The smoke gate is `pass` only when a PERSON has judged every active case.
+ *
+ * A case can also carry a machine's result, and that result may move this
+ * label or make the tone STRICTER - it may never stand in for the human's
+ * verdict. The two answer different questions, and every regression a person has
+ * caught by hand (recording latency, dead drag-scroll, keystrokes never
+ * arriving, a tab pausing when unfocused, control lost after a lease lapse)
+ * lives in the gap between them; a machine pass opening the merge gate would let
+ * a card read green with nobody having touched the app. So this is AND-more,
+ * never OR-instead: the `pass` return below is reachable only from
+ * `pending === 0`, which counts human verdicts alone.
+ *
+ * Retired cases are excluded upstream (see progressFor) - a checklist that has
+ * legitimately shrunk must not hold the gate open forever.
+ */
 function smokeGate(smoke: SmokeProgress): ReadinessGate {
 	if (smoke.fail > 0) return gate("smoke", "Smoke", "block", "failed");
 	if (smoke.total === 0) return gate("smoke", "Smoke", "idle", "not run");
-	if (smoke.pending > 0) return gate("smoke", "Smoke", "wait", "running");
+	if (smoke.pending > 0) {
+		// A machine says the steps did not even run. That is real information and
+		// it is counted only over cases nobody has judged, so a person's verdict
+		// always overrules it rather than being shouted down by a stale run.
+		if (smoke.agentFail > 0) return gate("smoke", "Smoke", "block", "qa failed");
+		if (smoke.agentPass > 0) return gate("smoke", "Smoke", "wait", `qa ${smoke.agentPass}/${smoke.pending}`);
+		return gate("smoke", "Smoke", "wait", "running");
+	}
 	return gate("smoke", "Smoke", "pass", "passed");
 }
 

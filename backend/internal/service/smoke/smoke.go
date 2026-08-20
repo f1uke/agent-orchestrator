@@ -43,6 +43,18 @@ var (
 // instead, naming the cases and how to keep them. The controller maps it to 422.
 var ErrResultsAtRisk = errors.New("smoke: author would discard recorded results")
 
+// ErrCaseRetired refuses any write to a retired case. Retiring one is how a
+// checklist shrinks AUDITABLY: the case stops being something the user is asked
+// to play, and the row - its name, its steps, the user's verdict, note and
+// evidence, and the reason it went - stays. Frozen is what makes that trace
+// worth anything, so a retired case takes no verdict, no reset, no machine
+// result and no re-author. Nor can an `ao smoke set` payload revive one by
+// naming its id: an agent that re-sends its whole checklist every round must not
+// be able to resurrect what it retired last round. A case that genuinely comes
+// back comes back under a NEW id, unplayed - which is right, because the old
+// results were recorded against the old steps. The controller maps it to 422.
+var ErrCaseRetired = errors.New("smoke: case is retired")
+
 // Evidence size caps (user decision 2026-07-11): 25 MB image / 200 MB video.
 const (
 	maxImageBytes int64 = 25 << 20
@@ -66,6 +78,8 @@ type Manager interface {
 	List(ctx context.Context, sessionID domain.SessionID) (SessionSmoke, error)
 	Author(ctx context.Context, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error)
 	SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note string) (domain.SmokeCheck, error)
+	RecordAgentResult(ctx context.Context, sessionID domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error)
+	Retire(ctx context.Context, sessionID domain.SessionID, checkID, reason string) (domain.SmokeCheck, error)
 	Reset(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error)
 	AttachEvidence(ctx context.Context, sessionID domain.SessionID, checkID string, upload EvidenceUpload) (domain.SmokeEvidence, error)
 	OpenEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (EvidenceBlob, error)
@@ -85,6 +99,9 @@ type Store interface {
 	GetSmokeCheck(ctx context.Context, id string) (domain.SmokeCheck, bool, error)
 	ReplaceSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error)
 	SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error)
+	SetSmokeAgentResult(ctx context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error)
+	RetireSmokeCheck(ctx context.Context, id, reason string, retiredAt, now time.Time) (bool, error)
+	ListUserSmokeEvidence(ctx context.Context, checkID string) ([]domain.SmokeEvidence, error)
 	ResetSmokeCheck(ctx context.Context, id string, now time.Time) (bool, error)
 	MarkSmokeReported(ctx context.Context, id domain.SessionID, reportedAt, now time.Time) (int64, error)
 	InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence) error
@@ -116,6 +133,9 @@ type EvidenceUpload struct {
 	Filename string
 	Mime     string
 	Reader   io.Reader
+	// Source is who is attaching it. Empty means the user, which is what every
+	// caller before `ao smoke record` meant; only the record path sets "agent".
+	Source domain.SmokeEvidenceSource
 }
 
 // EvidenceBlob is what the controller needs to serve a stored blob.
@@ -208,6 +228,11 @@ func (s *Service) List(ctx context.Context, sessionID domain.SessionID) (Session
 // absent from the payload is removed and its evidence blobs deleted - but only
 // while nobody has played it. A missing case that carries a verdict, a note or
 // evidence fails the whole call with ErrResultsAtRisk rather than being deleted.
+//
+// Retired cases sit outside all of this. They are not "at risk" from an omission
+// (surviving one is what retiring a case means) and ReplaceSmokeChecks leaves
+// them alone, so a checklist that has shrunk stays shrunk. Naming a retired id
+// in the payload is refused with ErrCaseRetired rather than reviving it.
 func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error) {
 	if sessionID == "" {
 		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
@@ -244,6 +269,9 @@ func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases 
 	if err != nil {
 		return SessionSmoke{}, err
 	}
+	if err := checkRetiredInPayload(existing, resolved); err != nil {
+		return SessionSmoke{}, err
+	}
 	if err := checkResultsAtRisk(existing, resolved); err != nil {
 		return SessionSmoke{}, err
 	}
@@ -262,7 +290,7 @@ func (s *Service) SetVerdict(ctx context.Context, sessionID domain.SessionID, ch
 	if !verdict.Valid() {
 		return domain.SmokeCheck{}, fmt.Errorf("%w: verdict must be pass, fail, or skip", ErrInvalid)
 	}
-	if err := s.requireCheck(ctx, sessionID, checkID); err != nil {
+	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
 		return domain.SmokeCheck{}, err
 	}
 	now := s.now()
@@ -276,14 +304,94 @@ func (s *Service) SetVerdict(ctx context.Context, sessionID domain.SessionID, ch
 	return s.getCheck(ctx, checkID)
 }
 
-// Reset clears a case's verdict/note and deletes its evidence (rows + blobs).
-func (s *Service) Reset(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error) {
-	if err := s.requireCheck(ctx, sessionID, checkID); err != nil {
+// RecordAgentResult writes the MACHINE's result for a case: its verdict, what it
+// saw, when it ran and the commit it ran against. Strictly additive - it cannot
+// reach a single authored field (name/why/steps/expected/prNum/fileRef), cannot
+// reach a single user-runtime field (verdict/note/evidence/decidedAt), and
+// cannot remove a case. The worst a wrong call can do is overwrite the PREVIOUS
+// machine result, which is what re-running a case is supposed to do.
+//
+// An empty verdict is allowed and means "ran it, captured what I saw, did not
+// judge it" - the state a paint/focus/timing/feel case stays in forever, since
+// no machine can answer "does this work for a person". It is accepted only when
+// the case actually carries machine evidence, so an empty record still says
+// something. Refused on a retired case.
+func (s *Service) RecordAgentResult(ctx context.Context, sessionID domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error) {
+	check, err := s.requireActiveCheck(ctx, sessionID, checkID)
+	if err != nil {
 		return domain.SmokeCheck{}, err
 	}
-	// Remove blobs before clearing rows; either order is safe since the bytes
-	// are not in the DB.
-	_ = os.RemoveAll(s.checkDir(sessionID, checkID))
+	verdict := domain.SmokeVerdict(strings.TrimSpace(string(res.Verdict)))
+	if verdict != "" && !verdict.Valid() {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: agent verdict must be pass, fail, or skip (or omitted, for an evidence-only run)", ErrInvalid)
+	}
+	if verdict == "" && len(check.AgentEvidence) == 0 {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: a record with no verdict must carry evidence - attach a screenshot or clip, or say pass/fail/skip", ErrInvalid)
+	}
+	now := s.now()
+	updated, err := s.store.SetSmokeAgentResult(ctx, checkID, domain.SmokeAgentResult{
+		Verdict: verdict,
+		Note:    strings.TrimSpace(res.Note),
+		SHA:     strings.TrimSpace(res.SHA),
+	}, now, now)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	if !updated {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+	}
+	return s.getCheck(ctx, checkID)
+}
+
+// Retire freezes a case out of the active checklist, with the reason it went.
+// This is the legitimate way to remove a case the user has already played -
+// Author refuses to drop one (ErrResultsAtRisk) precisely because the verdict,
+// note and evidence bytes are the part of a checklist AO cannot regenerate, and
+// retiring destroys none of them. Nothing on the row is cleared: the case keeps
+// its name, its steps, the user's result and every evidence file, and gains a
+// reason and a date. "Retired 3, now covered by tests" is the artifact; three
+// cases quietly vanishing is not.
+//
+// The reason is required for that reason. A second retire is refused rather
+// than overwriting the first one's reason and date.
+func (s *Service) Retire(ctx context.Context, sessionID domain.SessionID, checkID, reason string) (domain.SmokeCheck, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: a reason is required - it is the whole point of retiring a case instead of deleting it (e.g. \"now covered by TestFoo\")", ErrInvalid)
+	}
+	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	now := s.now()
+	retired, err := s.store.RetireSmokeCheck(ctx, checkID, reason, now, now)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	if !retired {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+	}
+	return s.getCheck(ctx, checkID)
+}
+
+// Reset clears the USER's verdict/note and deletes the evidence they attached
+// (rows + blobs). It is the user re-playing a case, so it clears the user's
+// result only: a machine's recorded result and artifacts survive, because the
+// two results answer different questions and wiping one from the other's button
+// would merge them by the back door. Refused on a retired case.
+func (s *Service) Reset(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error) {
+	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	// Remove blobs before clearing rows; either order is safe since the bytes are
+	// not in the DB. Per-item rather than a directory sweep: the case dir also
+	// holds the machine's artifacts now, and RemoveAll would take those too.
+	userEvidence, err := s.store.ListUserSmokeEvidence(ctx, checkID)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	for _, ev := range userEvidence {
+		s.removeEvidenceFiles(ev)
+	}
 	reset, err := s.store.ResetSmokeCheck(ctx, checkID, s.now())
 	if err != nil {
 		return domain.SmokeCheck{}, err
@@ -299,7 +407,7 @@ func (s *Service) Reset(ctx context.Context, sessionID domain.SessionID, checkID
 // size cap, and a metadata row is recorded. The client filename is display-only
 // and never used for the on-disk path.
 func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID, checkID string, upload EvidenceUpload) (domain.SmokeEvidence, error) {
-	if err := s.requireCheck(ctx, sessionID, checkID); err != nil {
+	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
 		return domain.SmokeEvidence{}, err
 	}
 	normMime := normalizeMime(upload.Mime)
@@ -332,6 +440,7 @@ func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID
 		Mime:      normMime,
 		SizeBytes: size,
 		CreatedAt: now,
+		Source:    evidenceSource(upload.Source),
 	}
 	if err := s.store.InsertSmokeEvidence(ctx, ev); err != nil {
 		_ = os.Remove(path)
@@ -393,7 +502,7 @@ func (s *Service) ExportEvidence(ctx context.Context, sessionID domain.SessionID
 // mismatched or unknown id is ErrNotFound; the blob is removed best-effort after
 // the row so a stray file never blocks the delete.
 func (s *Service) RemoveEvidence(ctx context.Context, sessionID domain.SessionID, checkID, evidenceID string) (domain.SmokeCheck, error) {
-	if err := s.requireCheck(ctx, sessionID, checkID); err != nil {
+	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
 		return domain.SmokeCheck{}, err
 	}
 	ev, ok, err := s.store.GetSmokeEvidence(ctx, evidenceID)
@@ -406,13 +515,7 @@ func (s *Service) RemoveEvidence(ctx context.Context, sessionID domain.SessionID
 	if _, err := s.store.DeleteSmokeEvidence(ctx, evidenceID); err != nil {
 		return domain.SmokeCheck{}, err
 	}
-	rel := filepath.Join(string(sessionID), checkID, evidenceID)
-	if path, ok := preview.ConfinedPath(s.evidenceRoot, rel); ok {
-		_ = os.Remove(path)
-	}
-	if dst, ok := s.openExportPath(sessionID, checkID, evidenceID, ev.Filename, ev.Mime); ok {
-		_ = os.Remove(dst)
-	}
+	s.removeEvidenceFiles(ev)
 	return s.getCheck(ctx, checkID)
 }
 
@@ -651,19 +754,59 @@ func copyFileIfStale(src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-// requireCheck verifies a case exists and belongs to the session.
-func (s *Service) requireCheck(ctx context.Context, sessionID domain.SessionID, checkID string) error {
+// requireActiveCheck resolves a case that belongs to the session and is not
+// retired. Every write goes through it, so "a retired case is frozen" is one
+// rule in one place rather than a condition each verb has to remember.
+func (s *Service) requireActiveCheck(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error) {
 	if sessionID == "" || checkID == "" {
-		return fmt.Errorf("%w: session id and check id are required", ErrInvalid)
+		return domain.SmokeCheck{}, fmt.Errorf("%w: session id and check id are required", ErrInvalid)
 	}
 	check, ok, err := s.store.GetSmokeCheck(ctx, checkID)
 	if err != nil {
-		return err
+		return domain.SmokeCheck{}, err
 	}
 	if !ok || check.SessionID != sessionID {
-		return fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
 	}
-	return nil
+	if check.Retired() {
+		return domain.SmokeCheck{}, retiredError(check)
+	}
+	return check, nil
+}
+
+// retiredError names when a case was retired and why, so the caller reads the
+// decision rather than a bare refusal.
+func retiredError(check domain.SmokeCheck) error {
+	when := ""
+	if check.RetiredAt != nil {
+		when = " on " + check.RetiredAt.Format(time.RFC3339)
+	}
+	return fmt.Errorf("%w: %q (id %q) was retired%s: %s. A retired case is frozen - its name, steps and the results the user recorded are kept as the trace of why it went. If it needs to come back, add it under a NEW id",
+		ErrCaseRetired, check.Name, check.ID, when, check.RetiredReason)
+}
+
+// removeEvidenceFiles deletes one evidence item's stored blob and its exported
+// copy, best-effort. Both paths are derived from the item's OWN session/check,
+// so it can never reach another case's files.
+func (s *Service) removeEvidenceFiles(ev domain.SmokeEvidence) {
+	rel := filepath.Join(string(ev.SessionID), ev.CheckID, ev.ID)
+	if path, ok := preview.ConfinedPath(s.evidenceRoot, rel); ok {
+		_ = os.Remove(path)
+	}
+	if dst, ok := s.openExportPath(ev.SessionID, ev.CheckID, ev.ID, ev.Filename, ev.Mime); ok {
+		_ = os.Remove(dst)
+	}
+}
+
+// evidenceSource normalizes an upload's declared provenance. Anything that is
+// not explicitly the agent is the user: the user is the safe default because a
+// human artifact mislabelled as a machine's would quietly leave the human's
+// evidence list, while the reverse only adds a file to a list a person reads.
+func evidenceSource(src domain.SmokeEvidenceSource) domain.SmokeEvidenceSource {
+	if src == domain.SmokeEvidenceAgent {
+		return domain.SmokeEvidenceAgent
+	}
+	return domain.SmokeEvidenceUser
 }
 
 func (s *Service) getCheck(ctx context.Context, checkID string) (domain.SmokeCheck, error) {
@@ -723,8 +866,32 @@ func resolveCases(sessionID domain.SessionID, cases []domain.SmokeAuthoredCase, 
 	return out, nil
 }
 
+// checkRetiredInPayload refuses a payload that names a retired case's id. It
+// runs on the RESOLVED ids, so it also catches the common accident: a case whose
+// name still derives the id of one that was retired.
+func checkRetiredInPayload(existing []domain.SmokeCheck, resolved []domain.SmokeAuthoredCase) error {
+	retired := make(map[string]domain.SmokeCheck, len(existing))
+	for _, c := range existing {
+		if c.Retired() {
+			retired[c.ID] = c
+		}
+	}
+	if len(retired) == 0 {
+		return nil
+	}
+	for _, c := range resolved {
+		if was, ok := retired[c.ID]; ok {
+			return retiredError(was)
+		}
+	}
+	return nil
+}
+
 // checkResultsAtRisk refuses a re-author that would delete played cases. It runs
 // on the RESOLVED ids, so it sees exactly what ReplaceSmokeChecks would drop.
+// Retired cases are skipped: ReplaceSmokeChecks does not drop them, so their
+// absence from the payload destroys nothing - that is precisely what retiring
+// one buys, and it is the way OUT of this refusal for a case that must go.
 func checkResultsAtRisk(existing []domain.SmokeCheck, resolved []domain.SmokeAuthoredCase) error {
 	keep := make(map[string]struct{}, len(resolved))
 	for _, c := range resolved {
@@ -733,6 +900,9 @@ func checkResultsAtRisk(existing []domain.SmokeCheck, resolved []domain.SmokeAut
 	var atRisk []domain.SmokeCheck
 	for _, c := range existing {
 		if _, ok := keep[c.ID]; ok {
+			continue
+		}
+		if c.Retired() {
 			continue
 		}
 		if played(c) {
@@ -770,8 +940,8 @@ func resultsAtRiskError(atRisk []domain.SmokeCheck) error {
 	if len(atRisk) == 1 {
 		subject = "1 case the user already played is"
 	}
-	return fmt.Errorf("%w: %s missing from the payload: %s. A case id is derived from its name, so rewording a name drops the old case: re-send each one under the id it already has (e.g. add \"id\": \"%s\" to the case that replaces it), or ask the user to Reset the case in the Tests tab before dropping it",
-		ErrResultsAtRisk, subject, strings.Join(listed, "; "), atRisk[0].ID)
+	return fmt.Errorf("%w: %s missing from the payload: %s. A case id is derived from its name, so rewording a name drops the old case: re-send each one under the id it already has (e.g. add \"id\": \"%s\" to the case that replaces it); or retire it, which keeps the results and the reason it went (`ao smoke retire <session> --case %s --reason \"…\"`), and then it may be left out; or ask the user to Reset the case in the Tests tab before dropping it",
+		ErrResultsAtRisk, subject, strings.Join(listed, "; "), atRisk[0].ID, atRisk[0].ID)
 }
 
 // playedSummary describes what the user recorded on a case, for the refusal.

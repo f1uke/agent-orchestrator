@@ -121,6 +121,16 @@ type SmokeCheckParam struct {
 	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
 }
 
+// SmokeEvidenceUploadParam is SmokeCheckParam plus the provenance of the file
+// being attached. It rides on the query string because the upload has two body
+// shapes (multipart and raw bytes); a provenance carried in only one of them
+// would be a hole.
+type SmokeEvidenceUploadParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
+	Source    string `query:"source,omitempty" description:"Who attached it: user (default) or agent. Agent files land in the case's separate agentEvidence list so provenance is never ambiguous."`
+}
+
 // SimLeaseParam is the {sessionId}/{udid} path parameters for releasing a
 // simulator device lease.
 type SimLeaseParam struct {

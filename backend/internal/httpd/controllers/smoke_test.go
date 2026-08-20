@@ -34,6 +34,12 @@ type fakeSmokeService struct {
 	jiraOutcome smokesvc.JiraPostOutcome
 	jiraErr     error
 
+	agentResult   domain.SmokeAgentResult
+	agentErr      error
+	retiredCaseID string
+	retiredReason string
+	retireErr     error
+
 	removedEvidenceID string
 	removeErr         error
 
@@ -58,6 +64,23 @@ func (f *fakeSmokeService) SetVerdict(_ context.Context, _ domain.SessionID, che
 		return domain.SmokeCheck{}, f.verdictErr
 	}
 	return domain.SmokeCheck{ID: checkID, Verdict: verdict, Note: note}, nil
+}
+
+func (f *fakeSmokeService) RecordAgentResult(_ context.Context, _ domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error) {
+	if f.agentErr != nil {
+		return domain.SmokeCheck{}, f.agentErr
+	}
+	f.agentResult = res
+	return domain.SmokeCheck{ID: checkID, AgentVerdict: res.Verdict, AgentNote: res.Note, AgentSHA: res.SHA}, nil
+}
+
+func (f *fakeSmokeService) Retire(_ context.Context, _ domain.SessionID, checkID, reason string) (domain.SmokeCheck, error) {
+	if f.retireErr != nil {
+		return domain.SmokeCheck{}, f.retireErr
+	}
+	f.retiredCaseID, f.retiredReason = checkID, reason
+	retiredAt := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	return domain.SmokeCheck{ID: checkID, RetiredAt: &retiredAt, RetiredReason: reason}, nil
 }
 
 func (f *fakeSmokeService) Reset(_ context.Context, _ domain.SessionID, checkID string) (domain.SmokeCheck, error) {
@@ -560,4 +583,94 @@ func uploadSmokeEvidence(t *testing.T, srv *httptest.Server, session, checkID st
 		t.Fatalf("decode evidence: %v", err)
 	}
 	return out.Evidence.ID
+}
+
+// TestSmokeRecordAgentResultRoute: the machine's result travels its own endpoint
+// and its own body, so nothing on the user's verdict route can reach it or be
+// reached by it.
+func TestSmokeRecordAgentResultRoute(t *testing.T) {
+	svc := &fakeSmokeService{}
+	srv := newSmokeTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/agent-result",
+		`{"verdict":"pass","note":"ran clean","sha":"abc123"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	if svc.agentResult.Verdict != domain.SmokePass || svc.agentResult.Note != "ran clean" || svc.agentResult.SHA != "abc123" {
+		t.Fatalf("agent result not mapped: %+v", svc.agentResult)
+	}
+	for _, want := range []string{`"agentVerdict":"pass"`, `"agentSha":"abc123"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestSmokeRetireRoute(t *testing.T) {
+	svc := &fakeSmokeService{}
+	srv := newSmokeTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/retire",
+		`{"reason":"now covered by TestA"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	if svc.retiredCaseID != "a" || svc.retiredReason != "now covered by TestA" {
+		t.Fatalf("retire not mapped: %q/%q", svc.retiredCaseID, svc.retiredReason)
+	}
+	for _, want := range []string{`"retiredAt"`, `"retiredReason":"now covered by TestA"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+}
+
+// TestSmokeRetiredCaseMapsTo422: "this case is frozen, and here is why it went"
+// is a different answer from "no such case", and the caller has to be able to
+// tell them apart.
+func TestSmokeRetiredCaseMapsTo422(t *testing.T) {
+	svc := &fakeSmokeService{agentErr: fmt.Errorf("%w: %q was retired: now covered by TestA", smokesvc.ErrCaseRetired, "case a")}
+	srv := newSmokeTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/agent-result", `{"verdict":"pass"}`)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", status, body)
+	}
+	for _, want := range []string{`"SMOKE_CASE_RETIRED"`, "now covered by TestA"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+}
+
+// TestSmokeEvidenceSourceParam: provenance rides on the query string so it works
+// for both upload body shapes, and defaults to the user for every caller that
+// does not send it - which is every caller that exists today.
+func TestSmokeEvidenceSourceParam(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want domain.SmokeEvidenceSource
+	}{
+		{"/api/v1/sessions/w1/smoke-checks/a/evidence", domain.SmokeEvidenceUser},
+		{"/api/v1/sessions/w1/smoke-checks/a/evidence?source=agent", domain.SmokeEvidenceAgent},
+		{"/api/v1/sessions/w1/smoke-checks/a/evidence?source=nonsense", domain.SmokeEvidenceUser},
+	} {
+		svc := &fakeSmokeService{}
+		srv := newSmokeTestServer(t, svc)
+		req, err := http.NewRequest(http.MethodPost, srv.URL+tc.path, strings.NewReader("PNG"))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "image/png")
+		req.Header.Set("X-Filename", "shot.png")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("upload: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d for %s", resp.StatusCode, tc.path)
+		}
+		if svc.lastUpload.Source != tc.want {
+			t.Errorf("%s: source = %q, want %q", tc.path, svc.lastUpload.Source, tc.want)
+		}
+	}
 }

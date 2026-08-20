@@ -276,22 +276,28 @@ type SimRecordingStep struct {
 }
 
 type SmokeCheck struct {
-	ID         string
-	SessionID  domain.SessionID
-	ProjectID  domain.ProjectID
-	Seq        int64
-	Name       string
-	Why        string
-	Steps      string
-	Expected   string
-	PRNum      int64
-	FileRef    string
-	Verdict    domain.SmokeVerdict
-	Note       string
-	DecidedAt  sql.NullTime
-	ReportedAt sql.NullTime
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID            string
+	SessionID     domain.SessionID
+	ProjectID     domain.ProjectID
+	Seq           int64
+	Name          string
+	Why           string
+	Steps         string
+	Expected      string
+	PRNum         int64
+	FileRef       string
+	Verdict       domain.SmokeVerdict
+	Note          string
+	DecidedAt     sql.NullTime
+	ReportedAt    sql.NullTime
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	AgentVerdict  domain.SmokeVerdict
+	AgentNote     string
+	AgentRanAt    sql.NullTime
+	AgentSha      string
+	RetiredAt     sql.NullTime
+	RetiredReason string
 }
 
 type SmokeEvidence struct {
@@ -303,6 +309,7 @@ type SmokeEvidence struct {
 	Mime      string
 	SizeBytes int64
 	CreatedAt time.Time
+	Source    domain.SmokeEvidenceSource
 }
 
 type TelemetryEvent struct {

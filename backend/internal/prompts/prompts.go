@@ -244,7 +244,9 @@ When you finish a change whose runtime behavior unit tests can't fully cover —
 { "cases": [ { "name": "…", "why": "…", "steps": ["…","…"], "expected": "…", "prNum": 0, "fileRef": "file.go:1" } ] }
 JSON` + "\n```" + `
 
-The user plays each case live in the Tests tab, attaches evidence, and reports results back to you. Skip this for pure-logic changes already covered by tests. Run ` + "`ao smoke set --help`" + ` for the exact case schema.`
+The user plays each case live in the Tests tab, attaches evidence, and reports results back to you. Skip this for pure-logic changes already covered by tests.
+
+Re-running ` + "`ao smoke set`" + ` replaces the WHOLE checklist, and a case's id is derived from its name when you omit one - so rewording a name drops the old case. AO refuses that outright once the user has played it (their verdict, note and evidence are the one part of a checklist AO cannot regenerate): re-send the case under the id it already has, or, if it should really go, ` + "`ao smoke retire <session> --case <id> --reason \"...\"`" + ` - which keeps its results and records why it went. Run ` + "`ao smoke set --help`" + ` for the exact case schema, and read the ` + "`smoke`" + ` page of the using-ao skill for the rest of the surface (including ` + "`ao smoke record`" + `, which writes a MACHINE's result beside the user's and never in place of it).`
 
 const referenceConvention = "\n\n" + `## Referring to sessions, pull requests, and merge requests
 
