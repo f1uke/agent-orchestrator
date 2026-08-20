@@ -12,6 +12,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 )
 
 // Screen is the daemon's machine-local simulator surface: what simulators exist,
@@ -47,6 +48,12 @@ type Screen struct {
 	// costs about a second, on a path a human is waiting on.
 	kbMu sync.Mutex
 	kb   map[string]keyboardEntry
+
+	// power is the only thing in the daemon that can change a device's power
+	// state. It lives here because this is already the machine-local surface -
+	// the same object that lists devices and drives them - and because a boot
+	// has to invalidate the listing cache below the moment it lands.
+	power *simpower.Power
 
 	mu       sync.Mutex
 	hub      *Hub
@@ -98,7 +105,7 @@ type keyboardEntry struct {
 
 // NewScreen builds the surface. Nothing is started here.
 func NewScreen(dataDir string) *Screen {
-	return &Screen{
+	s := &Screen{
 		dataDir:  dataDir,
 		lookPath: exec.LookPath,
 		run:      commandOutput,
@@ -110,7 +117,45 @@ func NewScreen(dataDir string) *Screen {
 			return simbridge.NewNodeDriver(dir, lookPath, nil)
 		},
 	}
+	s.newPower()
+	return s
 }
+
+// newPower rebuilds the power surface over whatever runner the screen is
+// currently using, and wires its completion back into the listing cache.
+//
+// The wiring is the point. The listing is reused for a couple of seconds, so
+// without it a device that has just finished booting keeps reading as "still
+// booting" in the pane for a beat after it is up - which is exactly the moment
+// somebody is staring at the control waiting for it to change.
+func (s *Screen) newPower() {
+	s.power = simpower.New(s.lookPath, s.run)
+	s.power.OnSettled(s.forgetListing)
+}
+
+// forgetListing drops the cached device listing so the next caller reads the
+// machine rather than a memory of it.
+func (s *Screen) forgetListing() {
+	s.listMu.Lock()
+	s.listedAt = time.Time{}
+	s.listMu.Unlock()
+}
+
+// StartPower boots or shuts down a device, returning as soon as the work is
+// under way. See internal/simpower for why this exists in the daemon and
+// nowhere else - in particular, why there is no `ao sim boot`.
+func (s *Screen) StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error {
+	return s.power.Start(ctx, udid, op, done)
+}
+
+// PowerStatus is every device with a power operation in flight or a failure to
+// report, keyed by normalized udid.
+func (s *Screen) PowerStatus() map[string]simpower.Status { return s.power.All() }
+
+// ClearPower drops a device's remembered failure. Used when the machine has
+// since reached the state that failure was about, so a stale reason cannot
+// outlive the thing it described.
+func (s *Screen) ClearPower(udid string) { s.power.Clear(udid) }
 
 // NewScreenForTest builds a screen over a driver that is already made and a
 // clock the test owns, so the lifetime and caching rules can be checked without
@@ -127,6 +172,9 @@ func NewScreenForTest(driver simbridge.Driver, run simctl.Runner, now func() tim
 	if now != nil {
 		s.now = now
 	}
+	// After the runner and lookPath have been replaced, not before: power runs
+	// the test's commands, not the machine's.
+	s.newPower()
 	return s
 }
 

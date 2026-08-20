@@ -849,6 +849,20 @@ func simOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power", id: "setSimDevicePower", tag: "sim",
+			summary:    "Boot a simulator or shut one down from the desktop app's Device tab",
+			pathParams: []any{controllers.SimSessionDeviceParam{}},
+			reqBody:    controllers.SimPowerInput{},
+			resps: []respUnit{
+				{http.StatusAccepted, controllers.SimPowerResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture", id: "performSimGesture", tag: "sim",
 			summary:    "Touch a simulator screen as this session, under the same lease and gesture hold `ao sim tap` uses",
 			pathParams: []any{controllers.SimSessionDeviceParam{}},

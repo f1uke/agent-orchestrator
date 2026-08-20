@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -49,6 +51,16 @@ type SimScreenProvider interface {
 	// Pasteboard is the guest clipboard, which is how text reaches a field the
 	// keyboard cannot be trusted to fill.
 	Pasteboard() simpaste.Pasteboard
+	// StartPower boots or shuts a device down and returns at once, because a
+	// boot takes tens of seconds and the request cannot be held open for it.
+	// See internal/simpower for why this is reachable from the desktop app and
+	// from no `ao` subcommand.
+	StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error
+	// PowerStatus is what is in flight, keyed by normalized udid, so the
+	// listing the pane already polls carries the progress too.
+	PowerStatus() map[string]simpower.Status
+	// ClearPower drops a remembered failure the machine has since made moot.
+	ClearPower(udid string)
 }
 
 // SimDeviceLeaseView is what AO knows about who is driving one device. The
@@ -72,6 +84,17 @@ type SimDeviceFrameView struct {
 	Radius    float64 `json:"radius" description:"The display's own corner radius, as a fraction of screen width."`
 }
 
+// SimDevicePowerView is a power operation the desktop app started on this
+// device and that has not finished cleanly. There is no "booted successfully"
+// here on purpose: once a boot works, the device's own State says so, and a
+// second field repeating it is a second field to be wrong.
+type SimDevicePowerView struct {
+	Op        simpower.Op    `json:"op" description:"boot or shutdown."`
+	State     simpower.State `json:"state" description:"running while the operation is in flight; failed when it did not work."`
+	StartedAt time.Time      `json:"startedAt"`
+	Reason    string         `json:"reason,omitempty" description:"Why it failed, in the machine's own words where there are any."`
+}
+
 // SimDeviceView is one simulator plus its lease state.
 type SimDeviceView struct {
 	UDID              string              `json:"udid"`
@@ -83,6 +106,10 @@ type SimDeviceView struct {
 	Default           bool                `json:"default" description:"True for the one device an unqualified request resolves to. Never set when several are booted."`
 	Lease             SimDeviceLeaseView  `json:"lease"`
 	Frame             *SimDeviceFrameView `json:"frame,omitempty"`
+	// Power is set only while a boot or shutdown this daemon started is still
+	// running, or has failed and not yet been superseded. Absent is the normal
+	// case, and means the State field above is the whole story.
+	Power *SimDevicePowerView `json:"power,omitempty"`
 }
 
 // ListSimDevicesResponse is the body of GET /sim/devices.
@@ -195,6 +222,15 @@ func (c *SimScreenController) Register(r chi.Router) {
 	// desktop app is that session's click, which is what makes it arbitrable at
 	// all - a human's click with no session behind it could not be.
 	r.Post("/sessions/{sessionId}/sim-devices/{udid}/gesture", c.gesture)
+	// Powering a device on and off. Session-scoped for the same reason the
+	// gesture is: shutting a device down has to be arbitrated against whoever
+	// is driving it, and arbitration in AO is per session.
+	//
+	// ⚠ There is deliberately no `ao sim` command behind this. See
+	// internal/simpower: booting is a human capability exercised through the
+	// desktop app, because an agent that could boot devices would accumulate
+	// 4 GB virtual machines with nobody watching.
+	r.Post("/sessions/{sessionId}/sim-devices/{udid}/power", c.power)
 }
 
 // SimKeyboardView is what the pane needs in order to PACE typing: whether this
@@ -279,6 +315,8 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 		}
 	}
 
+	power := c.Screen.PowerStatus()
+
 	out := make([]SimDeviceView, 0, len(devices))
 	for _, d := range devices {
 		view := SimDeviceView{
@@ -298,9 +336,44 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 				ExpiresAt:  &expires,
 			}
 		}
+		view.Power = c.powerView(d, power[domain.NormalizeSimUDID(d.UDID)], len(power) > 0)
 		out = append(out, view)
 	}
 	return out
+}
+
+// powerView reports a device's in-flight or failed power operation, and drops
+// a failure the machine has since made moot.
+//
+// The dropping is what stops a stale sentence outliving what it described. A
+// boot that timed out on a device which is Booted now - because it finished
+// thirty seconds after we stopped waiting, or because somebody booted it from
+// Xcode - would otherwise keep saying it failed for as long as the daemon ran,
+// with the device visibly up beside it.
+func (c *SimScreenController) powerView(d simctl.Device, status simpower.Status, tracked bool) *SimDevicePowerView {
+	if !tracked || status.State == "" {
+		return nil
+	}
+	if status.State == simpower.Failed && reachedGoal(d, status.Op) {
+		c.Screen.ClearPower(d.UDID)
+		return nil
+	}
+	return &SimDevicePowerView{
+		Op: status.Op, State: status.State, StartedAt: status.StartedAt.UTC(), Reason: status.Reason,
+	}
+}
+
+// reachedGoal says whether the device is now in the state the operation was
+// trying to reach, whoever or whatever got it there.
+func reachedGoal(d simctl.Device, op simpower.Op) bool {
+	switch op {
+	case simpower.Boot:
+		return d.Booted()
+	case simpower.Shutdown:
+		return !d.Booted()
+	default:
+		return false
+	}
 }
 
 func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
@@ -650,7 +723,7 @@ func writeSimResolveError(w http.ResponseWriter, r *http.Request, err error) {
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND", err.Error(), nil)
 	case errors.As(err, &notBooted):
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_NOT_BOOTED",
-			notBooted.Error()+". AO never boots, shuts down or erases a simulator for you.", nil)
+			notBooted.Error()+". Boot it from the Device tab's simulator picker.", nil)
 	case errors.Is(err, simctl.ErrNoDevices), errors.Is(err, simctl.ErrNoBooted):
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND", err.Error(), nil)
 	default:
@@ -676,4 +749,236 @@ func writeSimGestureError(w http.ResponseWriter, r *http.Request, err error) {
 		message += " The touch was released afterwards, so the device is not left with a finger down."
 	}
 	envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SIM_GESTURE_FAILED", message, nil)
+}
+
+// SimPowerInput is the body of POST .../sim-devices/{udid}/power.
+type SimPowerInput struct {
+	// State is the power state to put the device in, named as a state rather
+	// than as a verb so the request is idempotent in intent: asking for
+	// "booted" twice is asking for the same world twice.
+	State string `json:"state" description:"booted or shutdown."`
+	// ConfirmHolder must name the session that currently leases the device
+	// when that session is somebody else. It exists so the confirmation is a
+	// property of the protocol rather than of the UI: a picker holding a list
+	// that went stale seconds ago cannot shut down a device on the strength of
+	// a lease it read before somebody else took it.
+	ConfirmHolder string `json:"confirmHolder,omitempty" description:"The session that currently leases the device. Required, and must match, when another session holds it."`
+}
+
+// SimPowerResponse acknowledges that the work has started. It is not a report
+// that the device reached the state: a boot takes tens of seconds, so progress
+// arrives on the device listing as SimDeviceView.power.
+type SimPowerResponse struct {
+	UDID  string `json:"udid"`
+	State string `json:"state" description:"The state the device is being taken to."`
+	// Detail says what was started, in words a person can be shown.
+	Detail string `json:"detail"`
+}
+
+// power boots a simulator or shuts one down.
+//
+// It answers 202 and does the work behind the request. A cold boot beats the
+// daemon's 60-second per-request ceiling (config.DefaultRequestTimeout), so a
+// synchronous route would time out on exactly the boots that most need
+// reporting - and progress that lived in the request would die with the
+// popover being closed or the renderer being reloaded, both of which somebody
+// does while waiting a minute for a device.
+func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
+	const route = "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power"
+	if c.Screen == nil || c.Leases == nil {
+		// No lease service is no arbitration, and cutting power to a device
+		// somebody may be mid-gesture on is not something to do unarbitrated.
+		apispec.NotImplemented(w, r, "POST", route)
+		return
+	}
+	var in SimPowerInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	op, err := powerOp(in.State)
+	if err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "SIM_INVALID_POWER_STATE", err.Error(), nil)
+		return
+	}
+
+	sessionID := domain.SessionID(chi.URLParam(r, "sessionId"))
+	device, err := c.findDevice(r.Context(), chi.URLParam(r, "udid"))
+	if err != nil {
+		writeSimResolveError(w, r, err)
+		return
+	}
+
+	// Already there is a conflict rather than a quiet success: a picker that
+	// asked has a list that disagrees with the machine, and saying so is how
+	// it finds out.
+	if reachedGoal(device, op) {
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_POWER_ALREADY", fmt.Sprintf(
+			"simulator %s is already %s", device.Label(), strings.ToLower(device.State)), nil)
+		return
+	}
+
+	done := func() {}
+	if op == simpower.Shutdown {
+		release, err := c.arbitrateShutdown(r.Context(), sessionID, device, in.ConfirmHolder)
+		if err != nil {
+			writeShutdownRefusal(w, r, err)
+			return
+		}
+		done = release
+	}
+
+	if err := c.Screen.StartPower(r.Context(), device.UDID, op, done); err != nil {
+		done()
+		writePowerStartError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, SimPowerResponse{
+		UDID: device.UDID, State: in.State,
+		Detail: fmt.Sprintf("%s %s", op, device.Label()),
+	})
+}
+
+// arbitrateShutdown decides whether this device may be powered off, and takes
+// the device while it is being powered off. It returns the function that gives
+// it back.
+//
+// 🗝 The rule, and why it is this rule. internal/service/sim.TakeOver already
+// answers the question "may a human take this device away from a session", and
+// its answer is: yes to a LEASE, never to a GESTURE THAT IS HAPPENING. Cutting
+// power is the same question with more at stake, so it gets the same answer by
+// running through the same primitive rather than by reimplementing the
+// judgement:
+//
+//   - a gesture in flight refuses the take-over, so it refuses the shutdown.
+//     That is not negotiable and no confirmation overrides it: the simulator's
+//     HID layer has no per-caller state, so a touch cut off mid-gesture leaves
+//     the driver believing a finger is still down, and a stuck touch wedges
+//     the device's input until somebody reboots it.
+//   - a lease held by another session yields, but only to a request that NAMES
+//     that session. AO already ships a "Take over from @X" button, so a human
+//     may already take a device away from a worker; refusing them the power
+//     switch would be stricter than that, and a wedged 4 GB device held by a
+//     session that is not coming back is precisely the memory problem this
+//     whole control exists for.
+//   - our own lease, or none at all, needs no naming - the confirmation for
+//     those lives in the UI, where the human is the only party being asked.
+//
+// The lease is held for the length of the shutdown and given back when it
+// settles, so the device is arbitrated for exactly as long as it is being
+// powered off.
+func (c *SimScreenController) arbitrateShutdown(
+	ctx context.Context, sessionID domain.SessionID, device simctl.Device, confirmHolder string,
+) (func(), error) {
+	if holder, ok := c.currentHolder(ctx, device.UDID); ok && holder != sessionID {
+		if !strings.EqualFold(strings.TrimSpace(confirmHolder), string(holder)) {
+			return nil, &shutdownUnconfirmedError{UDID: device.UDID, Holder: holder}
+		}
+	}
+	if _, err := c.Leases.TakeOver(ctx, sessionID, device.UDID, simpower.ShutdownTimeout); err != nil {
+		return nil, err
+	}
+	// Detached from the request, which is answered long before the shutdown
+	// finishes.
+	release := context.WithoutCancel(ctx)
+	return func() { _ = c.Leases.Release(release, sessionID, device.UDID) }, nil
+}
+
+// currentHolder is the session leasing a device right now, if AO knows of one.
+// A lease service that cannot be read is treated as holding nothing: the
+// take-over below is what actually arbitrates, and this only decides whether a
+// name has to be confirmed first.
+func (c *SimScreenController) currentHolder(ctx context.Context, udid string) (domain.SessionID, bool) {
+	leases, err := c.Leases.List(ctx)
+	if err != nil {
+		return "", false
+	}
+	key := domain.NormalizeSimUDID(udid)
+	for _, lease := range leases {
+		if domain.NormalizeSimUDID(lease.UDID) == key {
+			return lease.SessionID, true
+		}
+	}
+	return "", false
+}
+
+// shutdownUnconfirmedError is a shutdown aimed at a device somebody else holds
+// without saying whose it is.
+type shutdownUnconfirmedError struct {
+	UDID   string
+	Holder domain.SessionID
+}
+
+func (e *shutdownUnconfirmedError) Error() string {
+	return fmt.Sprintf("simulator %s is leased by @%s: shutting it down has to name them", e.UDID, e.Holder)
+}
+
+// findDevice locates a device whatever state it is in.
+//
+// Deliberately not simctl.Resolve, which refuses a device that is not booted -
+// the right answer for every route that wants to touch a screen, and the wrong
+// one for the single route whose whole job is to change that.
+func (c *SimScreenController) findDevice(ctx context.Context, udid string) (simctl.Device, error) {
+	listing, err := c.Screen.Devices(ctx)
+	if err != nil {
+		return simctl.Device{}, err
+	}
+	if strings.TrimSpace(udid) == "" {
+		return simctl.Device{}, fmt.Errorf("%w: no device named", simctl.ErrUnknownUDID)
+	}
+	key := domain.NormalizeSimUDID(udid)
+	for _, device := range listing.Devices {
+		if domain.NormalizeSimUDID(device.UDID) == key {
+			return device, nil
+		}
+	}
+	return simctl.Device{}, fmt.Errorf("%w: %s is not a simulator on this machine", simctl.ErrUnknownUDID, udid)
+}
+
+// powerOp maps the requested state onto the operation that reaches it.
+func powerOp(state string) (simpower.Op, error) {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "booted":
+		return simpower.Boot, nil
+	case "shutdown":
+		return simpower.Shutdown, nil
+	default:
+		return "", fmt.Errorf("unknown power state %q: use booted or shutdown", state)
+	}
+}
+
+// writeShutdownRefusal keeps the two refusals apart, because they need
+// different things from the person reading them: one is "wait a moment", the
+// other is "say whose device this is".
+func writeShutdownRefusal(w http.ResponseWriter, r *http.Request, err error) {
+	var (
+		unconfirmed *shutdownUnconfirmedError
+		held        *simsvc.HeldError
+	)
+	switch {
+	case errors.As(err, &unconfirmed):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_POWER_HOLDER_UNCONFIRMED",
+			unconfirmed.Error(), map[string]any{"udid": unconfirmed.UDID, "holder": string(unconfirmed.Holder)})
+	case errors.As(err, &held) && held.MidGesture:
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_POWER_GESTURE_IN_FLIGHT",
+			fmt.Sprintf("a gesture from @%s is in flight on simulator %s: shutting it down now would leave a "+
+				"touch held, which wedges the device's input until it is rebooted. Retry in a moment",
+				held.Lease.SessionID, held.Lease.UDID),
+			map[string]any{"udid": held.Lease.UDID, "holder": string(held.Lease.SessionID)})
+	default:
+		writeSimError(w, r, err)
+	}
+}
+
+// writePowerStartError maps the refusals that come from the power surface
+// itself rather than from the arbitration around it.
+func writePowerStartError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, simpower.ErrBusy):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_POWER_BUSY", err.Error(), nil)
+	case errors.Is(err, simpower.ErrUnavailable):
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "SIM_UNAVAILABLE", err.Error(), nil)
+	default:
+		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SIM_POWER_FAILED", err.Error(), nil)
+	}
 }

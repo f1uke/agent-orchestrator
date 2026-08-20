@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -184,6 +185,9 @@ type SimScreen interface {
 	Driver(ctx context.Context) (simbridge.Driver, error)
 	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
 	Pasteboard() simpaste.Pasteboard
+	StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error
+	PowerStatus() map[string]simpower.Status
+	ClearPower(udid string)
 }
 
 // screenProvider converts a nil interface value to a nil controller dependency.

@@ -21,7 +21,9 @@ import (
 // `ao sim` gives a session a cheap, strictly read-only way to see an iOS
 // Simulator screen. It shells out to `xcrun simctl` on demand and nothing else:
 // no helper process, no private frameworks, no HID synthesis, no polling, and
-// no command that could boot, shut down, reboot or erase a device. A human or
+// no command that could boot, shut down, reboot or erase a device - powering a
+// device on and off is a human capability, exercised through the desktop app's
+// Device tab and deliberately absent from this CLI. A human or
 // another AO session may be driving the same simulator, so every capture says
 // so rather than pretending the frame is ours alone.
 //
@@ -38,7 +40,7 @@ const (
 		"may have been mid-interaction when this frame was captured."
 	// simNeverBootsNote is repeated in every refusal so an agent does not go
 	// looking for a flag that boots a device. There is none, on purpose.
-	simNeverBootsNote = "AO never boots, shuts down or erases a simulator for you."
+	simNeverBootsNote = "No `ao sim` command boots, shuts down or erases a simulator; the desktop app's Device tab is where a human does that."
 	// simShotStampLayout keeps millisecond precision so two captures from one
 	// session cannot collide on a filename.
 	simShotStampLayout = "20060102-150405.000"
@@ -82,9 +84,11 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 		Short: "Read-only access to local iOS Simulators",
 		Long: "Inspect local iOS Simulators and capture their screen.\n\n" +
 			"Every subcommand is read-only against the device: it shells out to " +
-			"`xcrun simctl` on demand and never boots, shuts down, reboots or erases " +
-			"a simulator. Simulators are shared with other AO sessions and with any " +
-			"human using Xcode, so a captured frame may be mid-interaction.",
+			"`xcrun simctl` on demand and never powers a simulator on or off - there " +
+			"is no boot, shutdown, reboot or erase here. A human boots a device from " +
+			"the desktop app's Device tab. Simulators are shared with other AO " +
+			"sessions and with any human using Xcode, so a captured frame may be " +
+			"mid-interaction.",
 	}
 	cmd.AddCommand(
 		newSimListCommand(ctx), newSimShotCommand(ctx),

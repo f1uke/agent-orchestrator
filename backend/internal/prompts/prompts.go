@@ -269,7 +269,12 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // device is picked without asking and may be the human's working device rather
 // than a scratch one, that an empty accessibility tree is a diagnosis about the
 // app rather than a fact about accessibility, and that the device is shared and
-// never to be booted or erased.
+// that no `ao sim` command can power it on or off. That last part is phrased as
+// a fact about the CLI rather than about AO, because it stopped being true of
+// AO: the desktop app's Device tab boots and shuts down devices. What must not
+// leak into the guidance is an invitation to ask a human to boot things - an
+// agent that cannot boot a device should say so and stop, not open a
+// negotiation.
 //
 // Which `ao sim` commands belong here is a reviewed decision, not an accident:
 // cli.TestSimGuidance_DecidesEverySubcommand holds that list against the real
@@ -290,7 +295,7 @@ ao sim shot                     # a PNG to actually look at, for what the tree c
 ao sim log                      # what the app itself printed, when the screen does not explain it
 ao sim release` + "\n```" + `
 
-- **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and AO **never boots, shuts down, reboots or erases** a simulator - if none is booted, say so and ask.
+- **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and **no ` + "`ao sim`" + ` command powers a device on or off** - there is no boot, shutdown, reboot or erase. A human can boot one from the desktop app; you cannot, so if none is booted, say so and stop rather than working blind.
 - **Not every booted device is yours to drive.** A working device holds the human's real app and state; a scratch device exists to be thrown away. ` + "`ao sim`" + ` - and Maestro without ` + "`--device`" + ` - takes the only booted device without asking, so anything that installs, launches or mutates belongs on a scratch device, named with ` + "`--udid`" + ` rather than left to that default pick; reading is safe anywhere. When ` + "`ao sim list`" + ` does not make clear which is which, ask rather than guess.
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
 - **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.

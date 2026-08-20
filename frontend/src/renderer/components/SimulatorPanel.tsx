@@ -4,6 +4,7 @@ import { House, Keyboard, Layers, MoreHorizontal, MousePointer2 } from "lucide-r
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { useSimKeyboard } from "../hooks/useSimKeyboard";
+import { useSimPower, type SimPowerRequest } from "../hooks/useSimPower";
 import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
 import { type ForwardedKey, useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
 import { DragStream } from "../lib/drag-stream";
@@ -16,8 +17,8 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
+import { SimDevicePicker } from "./SimDevicePicker";
 import { SimRecordControls, StopSummaryNote, type StopSummary } from "./SimRecordControls";
 
 /**
@@ -95,11 +96,20 @@ function pausedReason(isActive: boolean, pageVisible: boolean): PausedReason | n
  * claim would state something AO never checked - the same mistake the lease
  * column made before it learned to say why a device reads as unknown.
  */
-function emptyReason(paused: PausedReason | null, looked: boolean, bootedCount: number, defaultReason: string): string {
+function emptyReason(
+	paused: PausedReason | null,
+	looked: boolean,
+	bootedCount: number,
+	defaultReason: string,
+	booting: boolean,
+): string {
 	if (paused) return paused.why;
 	if (!looked) return "Looking for booted simulators…";
 	if (bootedCount === 0) {
-		return "No simulator is booted. AO never boots, shuts down or erases one - start it from Xcode or Simulator.app.";
+		// Not a dead end any more: the picker above lists every simulator this
+		// machine has, booted or not, and booting one is a press.
+		if (booting) return "Booting a simulator. It takes tens of seconds; the picker above counts them.";
+		return "No simulator is booted. Pick one above to boot it.";
 	}
 	// With several booted there is no default, and the daemon's own words for
 	// why beat a picker that quietly chose one the human did not.
@@ -200,8 +210,38 @@ export function SimulatorPanel({
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const queryClient = useQueryClient();
 
-	const booted = useMemo(() => (devices.data?.devices ?? []).filter((d) => d.state === "Booted"), [devices.data]);
+	// Every simulator this machine has, not only the running ones. The picker
+	// needs the shut-down ones to offer them; everything else here still works
+	// off `booted`, because a device that is not up cannot be watched or driven.
+	const all = useMemo(() => devices.data?.devices ?? [], [devices.data]);
+	const booted = useMemo(() => all.filter((d) => d.state === "Booted"), [all]);
 	const defaultUdid = devices.data?.defaultUdid ?? null;
+
+	// A device this session asked to boot, so the tab can switch to it the
+	// moment it comes up. Choosing a shut-down device means "I want to look at
+	// this one", and asking the human to choose it a second time once it has
+	// booted would be making them answer a question they already answered.
+	const [booting, setBooting] = useState<string | null>(null);
+	useEffect(() => {
+		if (booting && booted.some((d) => d.udid === booting)) {
+			setChosen(booting);
+			setBooting(null);
+		}
+	}, [booting, booted]);
+
+	// Something is being powered on or off right now, anywhere on the machine.
+	// The empty state uses it so a blank pane says "booting" rather than
+	// "nothing is booted" while a boot this human started is under way.
+	const powering = useMemo(() => all.some((d) => d.power?.state === "running"), [all]);
+
+	const power = useSimPower(sessionId, setProblem);
+	const onPower = useCallback(
+		(request: SimPowerRequest) => {
+			if (request.state === "booted") setBooting(request.udid);
+			power.mutate(request);
+		},
+		[power],
+	);
 
 	// Preselect only what the daemon was willing to resolve, or what this session
 	// was last watching. With several booted the daemon hands back null, and null
@@ -524,11 +564,13 @@ export function SimulatorPanel({
 			    fixed colours that could not follow the theme. */}
 			<div className="relative flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden bg-background py-2">
 				<DevicePill
-					booted={booted}
 					chosen={chosen}
+					devices={all}
 					loading={devices.isPending && watching}
 					onChoose={setChosen}
+					onPower={onPower}
 					paused={paused}
+					sessionId={sessionId}
 					status={stream}
 				/>
 
@@ -596,7 +638,7 @@ export function SimulatorPanel({
 						</div>
 					) : (
 						<p className="max-w-[36ch] px-4 text-center text-[12px] text-muted-foreground">
-							{emptyReason(paused, devices.isSuccess, booted.length, devices.data?.defaultReason ?? "")}
+							{emptyReason(paused, devices.isSuccess, booted.length, devices.data?.defaultReason ?? "", powering)}
 						</p>
 					)}
 
@@ -834,43 +876,42 @@ function PillButton({
 
 /**
  * The pill above the screen: which device this is, and whether what you are
- * looking at is arriving. serve-sim's own header, with the one thing it does
- * not need - a choice of device, because AO refuses to guess when several are
- * booted.
+ * looking at is arriving. serve-sim's own header, plus the one thing serve-sim
+ * never needed - a picker, because AO refuses to guess when several are booted,
+ * and because booting a device is now something this tab can do.
+ *
+ * The pill's own width is not fixed, but the picker's trigger inside it is, so
+ * the row cannot change shape as devices come and go.
  */
 function DevicePill({
-	booted,
 	chosen,
+	devices,
 	loading,
 	onChoose,
+	onPower,
 	paused,
+	sessionId,
 	status,
 }: {
-	booted: SimDevice[];
 	chosen: string | null;
+	devices: SimDevice[];
 	loading: boolean;
 	onChoose: (udid: string) => void;
+	onPower: (request: SimPowerRequest) => void;
 	paused: PausedReason | null;
+	sessionId: string;
 	status: SimStreamStatus;
 }) {
 	return (
 		<div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-raised py-0.5 pl-1 pr-2.5">
-			<Select disabled={booted.length === 0} onValueChange={onChoose} value={chosen ?? ""}>
-				<SelectTrigger
-					aria-label="Simulator to watch"
-					className="h-7 max-w-[190px] border-0 bg-transparent px-2 text-[12px] font-medium text-foreground shadow-none focus:ring-0"
-					size="sm"
-				>
-					<SelectValue placeholder={loading ? "Looking for simulators…" : "Choose a simulator"} />
-				</SelectTrigger>
-				<SelectContent>
-					{booted.map((device) => (
-						<SelectItem key={device.udid} value={device.udid}>
-							{device.name} · {device.runtime}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
+			<SimDevicePicker
+				chosen={chosen}
+				devices={devices}
+				loading={loading}
+				onChoose={onChoose}
+				onPower={onPower}
+				sessionId={sessionId}
+			/>
 			<Freshness chosen={Boolean(chosen)} paused={paused} status={status} />
 		</div>
 	);

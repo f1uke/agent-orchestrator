@@ -36,7 +36,7 @@ const (
 
 // SimLease is one AO session's exclusive claim on one local iOS Simulator, held
 // for a bounded time. It is pure bookkeeping: taking a lease never touches the
-// device (AO never boots, shuts down, reboots or erases a simulator).
+// device, and no `ao sim` command powers one on or off.
 //
 // The claim is scoped to an AO session because that is the unit that both dies
 // (ending a session releases the device) and drives a device across many
