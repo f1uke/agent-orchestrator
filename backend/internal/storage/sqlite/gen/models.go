@@ -208,6 +208,8 @@ type Session struct {
 	TerminationLastState      domain.ActivityState
 	TerminationTranscriptPath string
 	TerminatedAt              sql.NullTime
+	CrewID                    string
+	CrewRole                  string
 }
 
 type SessionMessageQueue struct {

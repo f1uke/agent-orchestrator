@@ -8,9 +8,10 @@ INSERT INTO sessions (
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
+    crew_id, crew_role,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateSession :exec
 UPDATE sessions SET
@@ -29,7 +30,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
-    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    crew_id, crew_role
 FROM sessions WHERE id = ?;
 
 -- name: ListSessionsByProject :many
@@ -38,7 +40,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
-    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    crew_id, crew_role
 FROM sessions WHERE project_id = ? ORDER BY num;
 
 -- name: ListAllSessions :many
@@ -47,7 +50,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
-    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    crew_id, crew_role
 FROM sessions ORDER BY project_id, num;
 
 
@@ -113,8 +117,19 @@ SELECT EXISTS(
       AND prompt = ''
 ) AS is_seed;
 
+-- name: SetSessionCrew :execrows
+-- Sole writer of crew_id / crew_role: they are deliberately absent from the SET
+-- list of UpdateSession, so the full-row lifecycle write can never blank a crew.
+-- Crew membership is set once, when the crew is formed, and never toggled.
+-- Keep this ABOVE the trailing NOTE comment at the end of this file. sqlc 1.31
+-- attaches a dangling comment block to the NEXT query, and that block contains
+-- a backticked `= ?` fragment its SQLite parser reads as live SQL: a query
+-- placed after it loses its trailing placeholder and fails at runtime with
+-- "incomplete input". Same parser bug family as documented in changelog.sql.
+UPDATE sessions SET crew_id = ?, crew_role = ?, updated_at = ? WHERE id = ?;
+
 -- NOTE: the `DELETE FROM sessions WHERE id = ? AND <seed-state predicates>`
--- statement is intentionally NOT a sqlc query — same sqlc 1.31 SQLite-parser
+-- statement is intentionally NOT a sqlc query - same sqlc 1.31 SQLite-parser
 -- bug as documented in queries/changelog.sql: trailing string literals (and
 -- placeholders) on the RHS of `=` in a DELETE get silently stripped, so the
 -- generated SQL ends up mid-clause and the row count is meaningless. The
