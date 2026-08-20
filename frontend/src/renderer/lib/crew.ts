@@ -216,7 +216,7 @@ function roleNote(member: WorkspaceSession): string {
  *  2. dev's work can land AND qa has signed off AND review has not objected
  *     -> Ready to merge. THIS is the AND the feature exists for
  *  3. everything an agent can do is done and only the human's play remains
- *     -> Needs you (`qa · play the cases`), because nothing else can advance it
+ *     -> Needs you (`qa · Play the cases`), because nothing else can advance it
  *  4. an awake member is working -> its own lane
  *  5. nobody is awake -> In review, naming what the task is waiting for
  *
