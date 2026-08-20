@@ -821,8 +821,17 @@ func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key,
 	if maxAttempts > 0 && attempts >= maxAttempts {
 		return nil
 	}
-	if err := m.messenger.Send(ctx, id, msg); err != nil {
+	outcome, err := m.messenger.Send(ctx, id, msg)
+	if err != nil {
 		return err
+	}
+	if outcome.Queued {
+		// A nudge for a sleeping session is HELD, and the dedup below records it as
+		// sent. That is deliberate: re-firing on every observer poll would stack a
+		// dozen copies of the same nudge in the session's inbox for it to read on
+		// waking. One held copy, delivered once, is the whole point of the queue.
+		slog.Default().Info("lifecycle: nudge queued for a sleeping session",
+			"sessionID", id, "pending", outcome.Pending)
 	}
 	// Order: Send → in-memory mutation → durable persist. Sending first means a
 	// transient persist failure does NOT swallow a real send (the agent saw the

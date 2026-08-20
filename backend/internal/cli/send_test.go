@@ -409,3 +409,45 @@ func TestSend_NetworkErrorExits1(t *testing.T) {
 		t.Fatalf("exit code = %d, want 1", got)
 	}
 }
+
+// A queued send exits 0, so the ONLY thing separating it from a delivered one is
+// what the CLI prints. Silence here would tell an operator (or an agent reading
+// the output) that the message landed.
+func TestSend_SaysWhenTheMessageWasQueuedInsteadOfDelivered(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"hello","queued":true,"pendingMessages":2}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "queued for demo-1") {
+		t.Fatalf("output = %q, want it to say the message was queued", out)
+	}
+	if !strings.Contains(out, "asleep") || !strings.Contains(out, "2 waiting") {
+		t.Fatalf("output = %q, want the reason and how many are waiting", out)
+	}
+}
+
+// A delivered send stays silent, as it always has.
+func TestSend_SaysNothingWhenTheMessageWasDelivered(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-1","message":"hello"}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("output = %q, want nothing for a delivered message", out)
+	}
+}

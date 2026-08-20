@@ -32,3 +32,17 @@ func (g gatedRuntime) SendMessage(ctx context.Context, handle ports.RuntimeHandl
 	g.gate.WaitForQuiet(ctx, handle.ID)
 	return g.Runtime.SendMessage(ctx, handle, message)
 }
+
+// agentLivenessProber returns rt's agent-liveness capability, or nil when the
+// runtime cannot report it (conpty). It takes the UNWRAPPED adapter on purpose:
+// gatedRuntime embeds the runtimeselect union interface, so its method set is
+// that interface's, and AgentAlive is not part of it. Asking the wrapper would
+// therefore find nothing and silently downgrade queued-message delivery from
+// "wait for the agent" to "wait a while and hope".
+func agentLivenessProber(rt runtimeselect.Runtime) ports.AgentLivenessProber {
+	prober, ok := rt.(ports.AgentLivenessProber)
+	if !ok {
+		return nil
+	}
+	return prober
+}

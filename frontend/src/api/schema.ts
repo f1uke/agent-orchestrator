@@ -1810,6 +1810,8 @@ export interface components {
             projectId: string;
             prompt?: string;
             prs: components["schemas"]["SessionPRFacts"][];
+            queuedMessages?: number;
+            queuedMessagesFailed?: number;
             /** @enum {string} */
             status: "todo" | "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** @enum {string} */
@@ -2368,6 +2370,10 @@ export interface components {
         SendSessionMessageResponse: {
             message: string;
             ok: boolean;
+            pendingMessages?: number;
+            queued?: boolean;
+            /** Format: date-time */
+            queuedAt?: null | string;
             sessionId: string;
         };
         SessionEndPayload: {

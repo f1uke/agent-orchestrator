@@ -706,3 +706,45 @@ func TestWriteSessionDetailsShowsBranchAndWorkspace(t *testing.T) {
 		t.Fatalf("output missing workspace line:\n%s", out)
 	}
 }
+
+// `ao session get` is where an operator (or an agent) asks why a message has not
+// arrived. Both facts have to be there: the session is paused, and N messages
+// are waiting for it.
+func TestWriteSessionDetailsShowsSuspensionAndHeldMessages(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	sess := newSessionDTO("demo-1", "demo", "needs_input")
+	sess.IsSuspended = true
+	sess.QueuedMessages = 2
+	sess.QueuedMessagesFailed = 1
+	if err := writeSessionDetails(cmd, sess); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "suspended: true") {
+		t.Fatalf("output must say the session is paused:\n%s", out)
+	}
+	if !strings.Contains(out, "queued messages: 2") {
+		t.Fatalf("output must say how many messages are waiting:\n%s", out)
+	}
+	if !strings.Contains(out, "undelivered messages: 1") {
+		t.Fatalf("output must surface messages that were given up on:\n%s", out)
+	}
+}
+
+// A live session with an empty inbox prints exactly what it printed before.
+func TestWriteSessionDetailsOmitsQueueLinesWhenThereIsNothingToSay(t *testing.T) {
+	var buf strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	if err := writeSessionDetails(cmd, newSessionDTO("demo-1", "demo", "working")); err != nil {
+		t.Fatalf("writeSessionDetails: %v", err)
+	}
+	out := buf.String()
+	for _, unwanted := range []string{"suspended:", "queued messages:", "undelivered messages:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("output should not mention %q for a live session with no held messages:\n%s", unwanted, out)
+		}
+	}
+}

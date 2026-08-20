@@ -25,6 +25,7 @@ import (
 )
 
 type fakeSessionService struct {
+	sendOutcome           ports.SendOutcome
 	sessions              map[domain.SessionID]domain.Session
 	previewDisabled       bool
 	sent                  string
@@ -297,9 +298,9 @@ func (f *fakeSessionService) Rename(_ context.Context, id domain.SessionID, disp
 	return nil
 }
 
-func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message string) error {
+func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message string) (ports.SendOutcome, error) {
 	f.sent = message
-	return nil
+	return f.sendOutcome, nil
 }
 
 func (f *fakeSessionService) DispatchCommentToWorker(_ context.Context, _ domain.SessionID, prURL, threadID, extraPrompt string) error {
@@ -1965,5 +1966,48 @@ func TestSessionsAPI_SetPreviewRefusalBeatsEntryDetection(t *testing.T) {
 	}
 	if strings.Contains(string(body), "NO_PREVIEW_ENTRY") {
 		t.Fatalf("entry-point detection ran before the gate and masked the real reason: %s", body)
+	}
+}
+
+// The caller must be able to tell "the agent has it" from "AO is holding it".
+// Both are 200s, so the difference has to be in the body or it is invisible.
+func TestSessionsAPI_SendReportsAQueuedMessageAsQueued(t *testing.T) {
+	svc := newFakeSessionService()
+	queuedAt := time.Date(2031, 3, 4, 9, 0, 0, 0, time.UTC)
+	svc.sendOutcome = ports.SendOutcome{Queued: true, QueuedAt: queuedAt, Pending: 3}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, "held for later"))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	var got struct {
+		OK              bool   `json:"ok"`
+		Queued          bool   `json:"queued"`
+		QueuedAt        string `json:"queuedAt"`
+		PendingMessages int    `json:"pendingMessages"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, body)
+	}
+	if !got.OK || !got.Queued || got.PendingMessages != 3 {
+		t.Fatalf("response = %+v, want ok+queued with 3 pending", got)
+	}
+	if got.QueuedAt != queuedAt.Format(time.RFC3339) {
+		t.Fatalf("queuedAt = %q, want %q", got.QueuedAt, queuedAt.Format(time.RFC3339))
+	}
+}
+
+// A delivered message must NOT claim to be queued, or every send would read as
+// undelivered.
+func TestSessionsAPI_SendOmitsQueuedForADeliveredMessage(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, "straight through"))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if strings.Contains(string(body), "\"queued\"") || strings.Contains(string(body), "pendingMessages") {
+		t.Fatalf("delivered send reported queue fields: %s", body)
 	}
 }

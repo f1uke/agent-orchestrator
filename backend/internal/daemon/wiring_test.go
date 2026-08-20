@@ -155,7 +155,7 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
 	rt := runtimeselect.New(nil)
-	messenger := newSessionMessenger(store, rt, log)
+	messenger := newSessionMessenger(store, rt, nil, log)
 	spawnConfirm, err := spawnconfirm.NewStore(cfg.DataDir)
 	if err != nil {
 		t.Fatalf("spawnconfirm.NewStore: %v", err)
@@ -200,7 +200,7 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	lcm := lifecycle.New(store, nil)
 	cfg := config.Config{DataDir: t.TempDir()}
 	rt := runtimeselect.New(nil)
-	messenger := newSessionMessenger(store, rt, log)
+	messenger := newSessionMessenger(store, rt, nil, log)
 	spawnConfirm, err := spawnconfirm.NewStore(cfg.DataDir)
 	if err != nil {
 		t.Fatalf("spawnconfirm.NewStore: %v", err)
@@ -268,7 +268,7 @@ func TestWiring_SessionMessengerSendsToRuntimePane(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	runtime := &captureRuntimeSender{}
-	messenger := newSessionMessenger(store, runtime, nil)
+	messenger := newSessionMessenger(store, runtime, nil, nil)
 
 	ctx := context.Background()
 	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
@@ -282,7 +282,7 @@ func TestWiring_SessionMessengerSendsToRuntimePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := messenger.Send(ctx, rec.ID, "hello agent"); err != nil {
+	if _, err := messenger.Send(ctx, rec.ID, "hello agent"); err != nil {
 		t.Fatalf("messenger.Send: %v", err)
 	}
 	if runtime.handle.ID != "ao-1/terminal_0" {
@@ -300,8 +300,8 @@ func TestWiring_SessionMessengerWrapsLookupErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	messenger := newSessionMessenger(store, &captureRuntimeSender{}, nil)
-	err = messenger.Send(context.Background(), "missing", "hello")
+	messenger := newSessionMessenger(store, &captureRuntimeSender{}, nil, nil)
+	_, err = messenger.Send(context.Background(), "missing", "hello")
 	if !errors.Is(err, sessionmanager.ErrNotFound) {
 		t.Fatalf("missing session should wrap ErrNotFound, got %v", err)
 	}
@@ -325,8 +325,8 @@ func TestWiring_SessionMessengerRequiresRuntimeHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	messenger := newSessionMessenger(store, &captureRuntimeSender{}, nil)
-	err = messenger.Send(ctx, rec.ID, "hello")
+	messenger := newSessionMessenger(store, &captureRuntimeSender{}, nil, nil)
+	_, err = messenger.Send(ctx, rec.ID, "hello")
 	if !errors.Is(err, sessionmanager.ErrIncompleteHandle) {
 		t.Fatalf("missing runtime handle should wrap ErrIncompleteHandle, got %v", err)
 	}
@@ -353,8 +353,8 @@ func TestWiring_SessionMessengerRejectsTerminatedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := &captureRuntimeSender{}
-	messenger := newSessionMessenger(store, runtime, nil)
-	err = messenger.Send(ctx, rec.ID, "hello")
+	messenger := newSessionMessenger(store, runtime, nil, nil)
+	_, err = messenger.Send(ctx, rec.ID, "hello")
 	if !errors.Is(err, sessionmanager.ErrTerminated) {
 		t.Fatalf("terminated session should wrap ErrTerminated, got %v", err)
 	}
@@ -372,9 +372,9 @@ type capturedMessage struct {
 	msg string
 }
 
-func (c *captureMessenger) Send(_ context.Context, id domain.SessionID, msg string) error {
+func (c *captureMessenger) Send(_ context.Context, id domain.SessionID, msg string) (ports.SendOutcome, error) {
 	c.msgs = append(c.msgs, capturedMessage{id: id, msg: msg})
-	return nil
+	return ports.SendOutcome{}, nil
 }
 
 // TestWiring_StartLifecycleThreadsMessengerIntoLCM asserts startLifecycle
@@ -559,5 +559,138 @@ func TestStartTickerSweep_RunsSweepOnEveryTick(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("sweep goroutine did not exit on context cancel")
+	}
+}
+
+// recordingQueue stands in for the durable inbox so the messenger's routing
+// decision can be asserted without a real queue.
+type recordingQueue struct {
+	held    []string
+	pending int
+	err     error
+	at      time.Time
+}
+
+func (q *recordingQueue) Enqueue(_ context.Context, id domain.SessionID, body string) (domain.QueuedMessage, int, error) {
+	if q.err != nil {
+		return domain.QueuedMessage{}, 0, q.err
+	}
+	q.held = append(q.held, body)
+	q.pending++
+	return domain.QueuedMessage{SessionID: id, Body: body, QueuedAt: q.at}, q.pending, nil
+}
+
+// TestWiring_SessionMessengerQueuesForSuspendedSession is the whole feature at
+// the routing seam: a suspended session's tmux is gone, so the message must be
+// HELD rather than typed at a dead handle - and the caller must be told.
+func TestWiring_SessionMessengerQueuesForSuspendedSession(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	queuedAt := time.Now().UTC().Truncate(time.Second)
+	rec, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		IsSuspended: true,
+		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()},
+		// The handle is still stored on a suspended session - that stale handle is
+		// exactly what used to be handed to the runtime.
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &captureRuntimeSender{}
+	queue := &recordingQueue{at: queuedAt}
+	messenger := newSessionMessenger(store, runtime, queue, nil)
+
+	outcome, err := messenger.Send(ctx, rec.ID, "look at the failing check")
+	if err != nil {
+		t.Fatalf("send to a suspended session must succeed as a queue, got %v", err)
+	}
+	if !outcome.Queued || outcome.Pending != 1 || !outcome.QueuedAt.Equal(queuedAt) {
+		t.Fatalf("outcome = %+v, want queued at %s with 1 pending", outcome, queuedAt)
+	}
+	if len(queue.held) != 1 || queue.held[0] != "look at the failing check" {
+		t.Fatalf("held = %v, want the message", queue.held)
+	}
+	if runtime.message != "" {
+		t.Fatalf("runtime was called with %q for a suspended session; its pane is gone", runtime.message)
+	}
+}
+
+// A live session is not queued: a failure there is a real failure and must stay
+// loud rather than turning into a silent wait.
+func TestWiring_SessionMessengerDoesNotQueueForALiveSession(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()},
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &captureRuntimeSender{}
+	queue := &recordingQueue{}
+	outcome, err := newSessionMessenger(store, runtime, queue, nil).Send(ctx, rec.ID, "hello agent")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if outcome.Queued {
+		t.Fatal("a live session's message was queued instead of delivered")
+	}
+	if len(queue.held) != 0 {
+		t.Fatalf("queue held %v for a live session", queue.held)
+	}
+	if runtime.message != "hello agent" {
+		t.Fatalf("runtime message = %q, want it typed into the live pane", runtime.message)
+	}
+}
+
+// A terminated session is still refused outright: it comes back only if someone
+// restores it, so holding a message for it would be a promise AO cannot keep.
+func TestWiring_SessionMessengerDoesNotQueueForATerminatedSession(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		IsTerminated: true, IsSuspended: true,
+		Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()},
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue := &recordingQueue{}
+	_, err = newSessionMessenger(store, &captureRuntimeSender{}, queue, nil).Send(ctx, rec.ID, "hello")
+	if !errors.Is(err, sessionmanager.ErrTerminated) {
+		t.Fatalf("terminated session should wrap ErrTerminated, got %v", err)
+	}
+	if len(queue.held) != 0 {
+		t.Fatalf("queue held %v for a terminated session", queue.held)
 	}
 }

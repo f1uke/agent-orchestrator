@@ -67,5 +67,6 @@ func (s *Service) DispatchCommentToWorker(ctx context.Context, id domain.Session
 	if extra := strings.TrimSpace(extraPrompt); extra != "" {
 		msg += "\n\n" + domain.SanitizeControlChars(extra)
 	}
-	return s.Send(ctx, id, msg)
+	_, err = s.Send(ctx, id, msg)
+	return err
 }

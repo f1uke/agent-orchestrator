@@ -177,6 +177,14 @@ type Session struct {
 	// Derived on read from durable facts; drives the board/sidebar countdown.
 	IdleCloseAt      *time.Time `json:"idleCloseAt,omitempty"`
 	TerminalHandleID string     `json:"terminalHandleId,omitempty"`
+	// QueuedMessages is how many messages AO is HOLDING for this session because
+	// it could not receive them (it was suspended when they were sent); they are
+	// delivered once its agent is listening again. QueuedMessagesFailed is how
+	// many were given up on and will never arrive. Both are derived on read from
+	// the session_message_queue table, and both exist so "waiting" and "dropped"
+	// are visible to the human instead of only to the daemon log.
+	QueuedMessages       int `json:"queuedMessages,omitempty"`
+	QueuedMessagesFailed int `json:"queuedMessagesFailed,omitempty"`
 	// TargetBranch is the branch this session's work merges into, and
 	// TargetSource names WHERE that answer came from so the UI can distinguish a
 	// value the human set from one inherited off the project. Both are derived on

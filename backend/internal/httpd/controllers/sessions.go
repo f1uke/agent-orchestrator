@@ -80,7 +80,7 @@ type SessionService interface {
 	SetAutoResolve(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error)
 	SetTargetBranch(ctx context.Context, id domain.SessionID, target string) (domain.Session, error)
-	Send(ctx context.Context, id domain.SessionID, message string) error
+	Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error)
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
 	ResolveThread(ctx context.Context, id domain.SessionID, prURL, threadID string) error
@@ -820,12 +820,24 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := domain.SanitizeControlChars(in.Message)
-	if err := c.Svc.Send(r.Context(), sessionID(r), message); err != nil {
+	outcome, err := c.Svc.Send(r.Context(), sessionID(r), message)
+	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
+	resp := SendSessionMessageResponse{OK: true, SessionID: sessionID(r), Message: message}
+	if outcome.Queued {
+		// Held, not delivered: say so, and do NOT publish an activity event - the
+		// agent has not seen this message and the feed must not imply it has.
+		queuedAt := outcome.QueuedAt
+		resp.Queued = true
+		resp.QueuedAt = &queuedAt
+		resp.PendingMessages = outcome.Pending
+		envelope.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
 	c.publishActivity(r.Context(), activityEventFromMessage(sessionID(r), message))
-	envelope.WriteJSON(w, http.StatusOK, SendSessionMessageResponse{OK: true, SessionID: sessionID(r), Message: message})
+	envelope.WriteJSON(w, http.StatusOK, resp)
 }
 
 // commentDispatch forwards a review-thread comment (plus an optional extra

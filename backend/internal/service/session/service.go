@@ -46,6 +46,7 @@ type Store interface {
 	SetSessionIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
+	SessionQueuedMessageCounts(ctx context.Context, id domain.SessionID) (domain.QueuedMessageCounts, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
 	ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error)
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
@@ -82,7 +83,7 @@ type commander interface {
 	// preserved. The auto-reclaim loop needs that distinction; Kill's bool loses it.
 	Teardown(ctx context.Context, id domain.SessionID, cause string) (sessionmanager.TeardownResult, error)
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
-	Send(ctx context.Context, id domain.SessionID, message string) error
+	Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error)
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error)
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (deleted, killed bool, err error)
 	PurgeSession(ctx context.Context, id domain.SessionID, force bool) error
@@ -400,7 +401,7 @@ func (s *Service) SpawnOrchestrator(ctx context.Context, projectID domain.Projec
 const orchestratorRetireNotice = "AO is replacing this project orchestrator. Stop coordinating new work now; a fresh orchestrator will take over on the canonical branch."
 
 func (s *Service) sendRetireNotice(ctx context.Context, id domain.SessionID) error {
-	if err := s.manager.Send(ctx, id, orchestratorRetireNotice); err != nil {
+	if _, err := s.manager.Send(ctx, id, orchestratorRetireNotice); err != nil {
 		return fmt.Errorf("send retire notice to %s: %w", id, err)
 	}
 	return nil
@@ -768,9 +769,11 @@ func (s *Service) Delete(ctx context.Context, id domain.SessionID, force bool) e
 	return toAPIError(s.manager.PurgeSession(ctx, id, force))
 }
 
-// Send delegates agent messaging to the internal manager.
-func (s *Service) Send(ctx context.Context, id domain.SessionID, message string) error {
-	return toAPIError(s.manager.Send(ctx, id, message))
+// Send delegates agent messaging to the internal manager, passing back whether
+// the message reached the agent or was queued for a session that is asleep.
+func (s *Service) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
+	outcome, err := s.manager.Send(ctx, id, message)
+	return outcome, toAPIError(err)
 }
 
 // Rename updates the user-facing session display name.
@@ -1028,17 +1031,26 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		targetPRs = append(targetPRs, targetPR{Branch: p.TargetBranch, Open: !p.Merged && !p.Closed})
 	}
 	targetBranch, targetSource := resolveTargetChain(targetPRs, rec.PRTarget, rec.BaseBranch, projectDefaultBranch)
+	// One indexed lookup: the queue table is empty for almost every session, and
+	// the count has to be on the LIST read model or the board could not show that
+	// a sleeping session has mail waiting.
+	queued, err := s.store.SessionQueuedMessageCounts(ctx, rec.ID)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("queued messages %s: %w", rec.ID, err)
+	}
 	return domain.Session{
-		SessionRecord:    rec,
-		Status:           detail.Status,
-		StatusReason:     detail.Reason,
-		NextTransitionAt: detail.NextTransitionAt,
-		NextTransitionTo: detail.NextTransitionTo,
-		IdleCloseAt:      s.idleCloseAt(rec),
-		TerminalHandleID: rec.Metadata.RuntimeHandleID,
-		PRs:              prs,
-		TargetBranch:     targetBranch,
-		TargetSource:     targetSource,
+		SessionRecord:        rec,
+		Status:               detail.Status,
+		StatusReason:         detail.Reason,
+		NextTransitionAt:     detail.NextTransitionAt,
+		NextTransitionTo:     detail.NextTransitionTo,
+		IdleCloseAt:          s.idleCloseAt(rec),
+		TerminalHandleID:     rec.Metadata.RuntimeHandleID,
+		PRs:                  prs,
+		TargetBranch:         targetBranch,
+		TargetSource:         targetSource,
+		QueuedMessages:       queued.Pending,
+		QueuedMessagesFailed: queued.Failed,
 	}, nil
 }
 

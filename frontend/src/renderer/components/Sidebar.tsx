@@ -83,6 +83,7 @@ import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergeSuspendChip } from "./MergeSuspendChip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { Button } from "./ui/button";
@@ -1083,7 +1084,8 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 				(most rows show nothing). Sits left of the pr-7 rename zone so the
 				hover pencil never collides with it; hidden while collapsed to the icon
 				rail. */}
-				<span className="shrink-0 group-data-[collapsible=icon]:hidden">
+				<span className="flex shrink-0 items-center gap-1 group-data-[collapsible=icon]:hidden">
+					<QueuedMessagesChip session={session} compact />
 					{isMergeSuspended(session) ? (
 						<MergeSuspendChip session={session} compact />
 					) : (

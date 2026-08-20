@@ -63,8 +63,9 @@ func (f *fakeStore) UpdatePRLastNudgeSignature(_ context.Context, prURL, payload
 }
 
 type fakeMessenger struct {
-	msgs []string
-	err  error
+	outcome ports.SendOutcome
+	msgs    []string
+	err     error
 }
 
 type telemetrySink struct {
@@ -77,12 +78,12 @@ func (s *telemetrySink) Emit(_ context.Context, ev ports.TelemetryEvent) {
 
 func (*telemetrySink) Close(context.Context) error { return nil }
 
-func (f *fakeMessenger) Send(_ context.Context, _ domain.SessionID, msg string) error {
+func (f *fakeMessenger) Send(_ context.Context, _ domain.SessionID, msg string) (ports.SendOutcome, error) {
 	if f.err != nil {
-		return f.err
+		return ports.SendOutcome{}, f.err
 	}
 	f.msgs = append(f.msgs, msg)
-	return nil
+	return f.outcome, nil
 }
 
 func newManager() (*Manager, *fakeStore, *fakeMessenger) {

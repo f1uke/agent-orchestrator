@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 )
 
@@ -87,7 +88,7 @@ type Store interface {
 // Messenger delivers a report-back message over the same path `ao send` uses
 // (session manager Send). *sessionsvc.Service satisfies it.
 type Messenger interface {
-	Send(ctx context.Context, id domain.SessionID, message string) error
+	Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error)
 }
 
 // SessionSmoke is the list read model: the worker label (drives the tab
@@ -126,6 +127,11 @@ type ReportOutcome struct {
 	Delivered bool   `json:"delivered"`
 	Target    string `json:"target"` // "worker" | "orchestrator" | "persisted"
 	Summary   string `json:"summary"`
+	// Queued marks a report that AO is HOLDING because the target session is
+	// asleep: it will be delivered when that session's agent is listening again.
+	// Distinct from Delivered on purpose - the human must not read "sent" when
+	// the agent has not seen it yet.
+	Queued bool `json:"queued,omitempty"`
 }
 
 // Service is the API-facing smoke service.
@@ -457,15 +463,15 @@ func (s *Service) Report(ctx context.Context, sessionID domain.SessionID) (Repor
 // the results stay persisted (surfaced by `ao smoke list`).
 func (s *Service) deliver(ctx context.Context, worker domain.SessionRecord, summary string) ReportOutcome {
 	if s.messenger != nil && !worker.IsTerminated {
-		if err := s.messenger.Send(ctx, worker.ID, "[smoke results]\n\n"+summary); err == nil {
-			return ReportOutcome{Delivered: true, Target: "worker"}
+		if out, err := s.messenger.Send(ctx, worker.ID, "[smoke results]\n\n"+summary); err == nil {
+			return ReportOutcome{Delivered: !out.Queued, Queued: out.Queued, Target: "worker"}
 		}
 	}
 	if s.messenger != nil {
 		if orch, ok := s.activeOrchestrator(ctx, worker.ProjectID); ok {
 			wrapped := fmt.Sprintf("[smoke results for @%s]\n\n%s", worker.ID, summary)
-			if err := s.messenger.Send(ctx, orch, wrapped); err == nil {
-				return ReportOutcome{Delivered: true, Target: "orchestrator"}
+			if out, err := s.messenger.Send(ctx, orch, wrapped); err == nil {
+				return ReportOutcome{Delivered: !out.Queued, Queued: out.Queued, Target: "orchestrator"}
 			}
 		}
 	}

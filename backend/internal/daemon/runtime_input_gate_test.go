@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	goruntime "runtime"
 	"sync"
 	"testing"
 	"time"
@@ -76,5 +77,23 @@ func TestGatedRuntime_DefersWhileUserTyping(t *testing.T) {
 	}
 	if inner.sentCount() != 1 {
 		t.Fatalf("message not delivered after the quiet window")
+	}
+}
+
+// The queued-message readiness signal is the runtime's agent-liveness probe.
+// Losing it is INVISIBLE at runtime — messages still arrive, just later and on a
+// timer instead of on a signal — so pin both halves: the selected runtime does
+// carry the capability here, and the input-gated wrapper does NOT, which is why
+// the prober has to be taken from the adapter itself.
+func TestAgentLivenessProberComesFromTheUnwrappedRuntime(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("conpty cannot report agent liveness; the queue falls back to a bounded wait there")
+	}
+	adapter := runtimeselect.New(nil)
+	if agentLivenessProber(adapter) == nil {
+		t.Fatal("the selected runtime must expose AgentAlive, or queued messages lose their readiness signal")
+	}
+	if _, ok := any(newGatedRuntime(adapter, nil)).(ports.AgentLivenessProber); ok {
+		t.Fatal("gatedRuntime now satisfies AgentLivenessProber; the comment on agentLivenessProber is stale")
 	}
 }

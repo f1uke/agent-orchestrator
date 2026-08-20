@@ -11,6 +11,13 @@ import (
 // WHICH sessions close, this decides HOW PROMPTLY they are noticed.
 const idleSweepIntervalDefault = 5 * time.Minute
 
+// msgQueueSweepInterval is how often the daemon looks for held messages it can
+// now deliver. It is short because it is the ONLY delivery trigger: a session
+// the user just woke should not sit with an unread inbox for minutes. It is not
+// free-running work - the query returns nothing at all unless something is
+// actually waiting.
+const msgQueueSweepInterval = 5 * time.Second
+
 // startTickerSweep launches a background goroutine that calls sweep on every
 // tick until ctx is cancelled, returning a channel closed when the goroutine
 // exits so daemon shutdown can drain it (mirroring the preview poller's

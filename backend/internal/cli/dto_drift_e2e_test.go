@@ -151,8 +151,8 @@ func (f *fakeSessionService) SetTargetBranch(context.Context, domain.SessionID, 
 	return domain.Session{}, nil
 }
 
-func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) error {
-	return nil
+func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) (ports.SendOutcome, error) {
+	return ports.SendOutcome{}, nil
 }
 
 func (f *fakeSessionService) DispatchCommentToWorker(context.Context, domain.SessionID, string, string, string) error {

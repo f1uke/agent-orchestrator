@@ -22,6 +22,7 @@ func (f *fakeTelemetrySink) Emit(_ context.Context, ev ports.TelemetryEvent) {
 func (f *fakeTelemetrySink) Close(context.Context) error { return nil }
 
 type fakeStore struct {
+	queued        map[domain.SessionID]domain.QueuedMessageCounts
 	getSessionErr error
 	sessions      map[domain.SessionID]domain.SessionRecord
 	pr            map[domain.SessionID]domain.PRFacts
@@ -179,6 +180,10 @@ func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]
 		return nil, nil
 	}
 	return []domain.PullRequest{{URL: pr.URL, SessionID: id, Number: pr.Number, Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed, CI: pr.CI, Review: pr.Review, Mergeability: pr.Mergeability, SourceBranch: pr.SourceBranch, TargetBranch: pr.TargetBranch, UpdatedAt: pr.UpdatedAt}}, nil
+}
+
+func (f *fakeStore) SessionQueuedMessageCounts(_ context.Context, id domain.SessionID) (domain.QueuedMessageCounts, error) {
+	return f.queued[id], nil
 }
 
 func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {
@@ -346,6 +351,7 @@ func TestSessionRenameMissingSessionReturnsNotFound(t *testing.T) {
 // fakeCommander records Kill/Spawn calls so a test can assert the
 // clean-orchestrator ordering without wiring a real session engine.
 type fakeCommander struct {
+	sendOutcome     ports.SendOutcome
 	teardownCauses  []string
 	killed          []domain.SessionID
 	restarted       []domain.SessionID
@@ -446,13 +452,13 @@ func (f *fakeCommander) RetireForReplacement(_ context.Context, id domain.Sessio
 	f.retired = append(f.retired, id)
 	return nil
 }
-func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, message string) error {
+func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
 	if f.sendErr != nil {
-		return f.sendErr
+		return ports.SendOutcome{}, f.sendErr
 	}
 	f.sent = append(f.sent, id)
 	f.lastMessage = message
-	return nil
+	return f.sendOutcome, nil
 }
 func (f *fakeCommander) Cleanup(_ context.Context, project domain.ProjectID) (sessionmanager.CleanupResult, error) {
 	f.cleanupProjects = append(f.cleanupProjects, project)

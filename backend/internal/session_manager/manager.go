@@ -2295,12 +2295,16 @@ func (m *Manager) applyWorkspaceProjectPreserved(ctx context.Context, rows []por
 	}
 }
 
-// Send delivers a message to a running session's agent via the messenger.
-func (m *Manager) Send(ctx context.Context, id domain.SessionID, message string) error {
-	if err := m.messenger.Send(ctx, id, message); err != nil {
-		return fmt.Errorf("send %s: %w", id, err)
+// Send delivers a message to a running session's agent via the messenger, or -
+// when the session cannot receive it right now - reports that it was held for
+// later delivery. The outcome is passed through so no layer above can mistake a
+// queued message for a delivered one.
+func (m *Manager) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
+	outcome, err := m.messenger.Send(ctx, id, message)
+	if err != nil {
+		return ports.SendOutcome{}, fmt.Errorf("send %s: %w", id, err)
 	}
-	return nil
+	return outcome, nil
 }
 
 // CleanupSkip reports one terminal session whose workspace was preserved

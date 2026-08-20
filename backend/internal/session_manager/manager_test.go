@@ -512,9 +512,9 @@ func fakeWorkspaceRepoName(info ports.WorkspaceInfo) string {
 
 type fakeMessenger struct{ msgs []string }
 
-func (m *fakeMessenger) Send(_ context.Context, _ domain.SessionID, msg string) error {
+func (m *fakeMessenger) Send(_ context.Context, _ domain.SessionID, msg string) (ports.SendOutcome, error) {
 	m.msgs = append(m.msgs, msg)
-	return nil
+	return ports.SendOutcome{}, nil
 }
 
 func newManager() (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace) {

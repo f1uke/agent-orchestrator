@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // fakeStore is an in-memory Store for exercising service logic in isolation.
@@ -134,19 +135,20 @@ func (f *fakeStore) ListSessions(_ context.Context, projectID domain.ProjectID) 
 }
 
 type fakeMessenger struct {
-	sent map[domain.SessionID]string
-	err  error
+	outcome ports.SendOutcome
+	sent    map[domain.SessionID]string
+	err     error
 }
 
-func (m *fakeMessenger) Send(_ context.Context, id domain.SessionID, message string) error {
+func (m *fakeMessenger) Send(_ context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
 	if m.err != nil {
-		return m.err
+		return ports.SendOutcome{}, m.err
 	}
 	if m.sent == nil {
 		m.sent = map[domain.SessionID]string{}
 	}
 	m.sent[id] = message
-	return nil
+	return m.outcome, nil
 }
 
 func newTestService(t *testing.T, store Store, msg Messenger) *Service {
