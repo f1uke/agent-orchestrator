@@ -288,9 +288,11 @@ export function ReviewsView({
 	// runs — showing "Nothing to review yet" while it is in flight would flash a
 	// wrong answer at a session that does have a pre-MR review.
 	const loading = reviewsQuery.isLoading || (hasPr && commentsQuery.isLoading);
+	// A comments failure is only news when there are PRs to have comments on. With
+	// no PR it is noise that would hide the pre-merge review behind an error.
 	const err = reviewsQuery.error
 		? apiErrorMessage(reviewsQuery.error, "Unable to load reviews")
-		: commentsQuery.error
+		: hasPr && commentsQuery.error
 			? apiErrorMessage(commentsQuery.error, "Unable to load comments")
 			: null;
 
@@ -311,6 +313,7 @@ export function ReviewsView({
 				totalUnresolved={totalUnresolved}
 				commentPrCount={commentPrCount}
 				prCount={prs.length}
+				preMR={Boolean(preMRState)}
 				selectMode={selectMode}
 				canSelect={totalUnresolved > 0}
 				onToggleSelect={exitSelect}
@@ -458,6 +461,7 @@ function ReviewsHeader({
 	totalUnresolved,
 	commentPrCount,
 	prCount,
+	preMR,
 	selectMode,
 	canSelect,
 	onToggleSelect,
@@ -465,6 +469,8 @@ function ReviewsHeader({
 	totalUnresolved: number;
 	commentPrCount: number;
 	prCount: number;
+	/** A review ran on the branch before any PR existed, so "no PRs" is not "nothing here". */
+	preMR: boolean;
 	selectMode: boolean;
 	canSelect: boolean;
 	onToggleSelect: () => void;
@@ -474,7 +480,9 @@ function ReviewsHeader({
 			? `${totalUnresolved} unresolved across ${commentPrCount} PR${commentPrCount === 1 ? "" : "s"}`
 			: prCount > 0
 				? `${prCount} pull request${prCount === 1 ? "" : "s"} · no unresolved comments`
-				: "No pull requests yet";
+				: preMR
+					? "Reviewed before the PR · no PR yet"
+					: "No pull requests yet";
 	return (
 		<div style={{ flex: "none", padding: "16px 16px 12px", borderBottom: `1px solid ${P.divider}` }}>
 			<div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
@@ -1693,6 +1701,37 @@ function mockProjectConfig(): ProjectConfig {
 // not-run) so the demo shows the combined block's review pill in each state.
 function mockReviewsResponse(session: WorkspaceSession): ReviewsResponse {
 	const prs = sortedPRs(session);
+	// A session with no PR gets the pre-merge shape the backend's PlanBranch
+	// returns: one branch-keyed state, whose submitted body IS the whole review.
+	if (prs.length === 0) {
+		return {
+			reviewerHandleId: "",
+			reviews: [
+				{
+					branch: session.branch,
+					latestRun: {
+						batchId: `demo-batch-${session.id}`,
+						body: "No blocking findings.\n\ndocs/install.md:12 - the prerequisites list repeats step 2; fold it into the table above.\ndocs/install.md:47 - \"see below\" points at a section that moved.",
+						createdAt: new Date(Date.now() - 9 * 60 * 1000).toISOString(),
+						githubReviewId: "",
+						harness: "codex",
+						id: `demo-review-run-${session.id}`,
+						prUrl: "",
+						reviewId: `demo-review-${session.id}`,
+						sessionId: session.id,
+						status: "complete",
+						targetSha: "9f1c4ab27de3",
+						verdict: "approved",
+					},
+					prNumber: 0,
+					prUrl: "",
+					status: "up_to_date",
+					targetSha: "9f1c4ab27de3",
+					title: "",
+				},
+			],
+		} as ReviewsResponse;
+	}
 	return {
 		reviewerHandleId: `${session.id}-reviewer`,
 		reviews: prs.map((pr, index) => {

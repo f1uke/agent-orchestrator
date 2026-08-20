@@ -128,7 +128,8 @@ const REVIEW_AWAITING = "awaiting";
  * provider left quiet, and it can answer the "nobody has looked" case — but it
  * never satisfies a real approval rule (a numeric threshold or an explicit
  * `review_required` is about human approvers on the forge, and AO is not one of
- * them). An AO verdict is only ever reported at the PR's current head, so a green
+ * them, and those cases keep their own label — the state text truncates past
+ * ~12 characters, so there is no room to name both). An AO verdict is only ever reported at the PR's current head, so a green
  * "AO ✓" cannot be stale. */
 function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	if (!pr) return gate("review", "Review", "idle", "—");
@@ -154,9 +155,11 @@ function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 		case "approved":
 			return gate("review", "Review", "pass", count ?? "approved");
 		case "review_required":
-			// The forge is still waiting on a human. AO's approval is worth saying
-			// out loud, but it does not discharge the requirement.
-			if (aoApproved) return gate("review", "Review", "wait", count ?? "AO ✓, human required");
+			// The forge is still waiting on a human, and that is the whole state: an
+			// AO approval does not discharge the requirement, and the gate's state
+			// label truncates past ~12 characters, so naming both here would produce
+			// "AO ✓, huma…" — worse than saying the one thing that is blocking. AO's
+			// verdict stays visible on the Reviews tab and on the PR payload.
 			return gate("review", "Review", "wait", count ?? "required");
 		default:
 			if (count) return gate("review", "Review", "wait", count);

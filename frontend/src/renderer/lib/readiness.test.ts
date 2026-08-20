@@ -493,7 +493,7 @@ describe("deriveReadiness — AO's own review verdict", () => {
 	});
 
 	// The approval rule is about human approvers on the forge. AO is not one of
-	// them, so it may say so out loud without discharging the requirement.
+	// them, so an explicit review_required keeps its own label and its own tone.
 	it("an AO approval does not satisfy an explicit review_required", () => {
 		const r = deriveReadiness(
 			{},
@@ -501,6 +501,7 @@ describe("deriveReadiness — AO's own review verdict", () => {
 			smoke(),
 		);
 		expect(tones(r).review).toBe("wait");
+		expect(stateOf(r, "review")).toBe("required");
 		expect(r.verdict.word).toBe("In Review");
 	});
 
