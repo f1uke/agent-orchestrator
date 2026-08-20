@@ -369,6 +369,20 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				prs: [],
 			},
 			{
+				id: "docs-awaiting-review",
+				terminalHandleId: "docs-awaiting-review/terminal_0",
+				workspaceId: "docs-site",
+				workspaceName: "docs-site",
+				title: "Rewrite the upgrade notes",
+				provider: "claude-code",
+				branch: "demo/upgrade-notes",
+				status: "review_pending",
+				createdAt: hoursAgo(6),
+				updatedAt: minutesAgo(34),
+				activity: { state: "idle", lastActivityAt: minutesAgo(34) },
+				prs: [demoPr(412, "open", "passing", "none")],
+			},
+			{
 				id: "docs-ready",
 				terminalHandleId: "docs-ready/terminal_0",
 				workspaceId: "docs-site",
@@ -610,6 +624,12 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 			},
 		}),
 	],
+	// The two ends of a quiet review, side by side in one project: an open PR that
+	// nobody has looked at yet (no approval rule, no decision — the Review gate
+	// reads "awaiting"), and one that carries an approval. The first is the state
+	// the strip used to call Ready to Merge.
+	"docs-awaiting-review": [prSummary("docs-awaiting-review", 412, { changedFiles: 2, additions: 63, deletions: 11 })],
+	"docs-ready": [prSummary("docs-ready", 411, { changedFiles: 3, additions: 88, deletions: 24 })],
 	"demo-review-stack": [
 		prSummary("demo-review-stack", 319, {
 			provider: "gitlab",
