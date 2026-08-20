@@ -158,3 +158,23 @@ WHERE pr.url = ?;
 -- an open PR outranks the session's stored value -- so a successful retarget
 -- would look like it failed until the observer next polls.
 UPDATE pr SET target_branch = ?, updated_at = ? WHERE url = ?;
+
+-- name: ListOpenPRSourceBranchesInRepo :many
+-- Source branches of every still-open PR in one project's copy of one repo,
+-- across ALL of that project's sessions. lifecycle reads it to recognize a
+-- STACKED PR whose parent belongs to a DIFFERENT worker: a stack is routinely
+-- built by two sessions (worker A owns the parent branch and its PR, worker B is
+-- cut from A's branch and targets it), which a per-session lookup cannot see.
+-- Branch names are not unique on their own, so provider/host/repo pin the lookup
+-- to a single repository and the sessions join pins it to a single project.
+SELECT DISTINCT pr.source_branch
+FROM pr
+JOIN sessions ON sessions.id = pr.session_id
+WHERE sessions.project_id = ?
+  AND pr.provider = ?
+  AND pr.host = ?
+  AND pr.repo = ?
+  AND pr.is_merged = 0
+  AND pr.is_closed = 0
+  AND pr.source_branch <> ''
+ORDER BY pr.source_branch;

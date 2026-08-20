@@ -193,6 +193,62 @@ func (q *Queries) GetPRLastNudgeSignature(ctx context.Context, url string) (stri
 	return last_nudge_signature, err
 }
 
+const listOpenPRSourceBranchesInRepo = `-- name: ListOpenPRSourceBranchesInRepo :many
+SELECT DISTINCT pr.source_branch
+FROM pr
+JOIN sessions ON sessions.id = pr.session_id
+WHERE sessions.project_id = ?
+  AND pr.provider = ?
+  AND pr.host = ?
+  AND pr.repo = ?
+  AND pr.is_merged = 0
+  AND pr.is_closed = 0
+  AND pr.source_branch <> ''
+ORDER BY pr.source_branch
+`
+
+type ListOpenPRSourceBranchesInRepoParams struct {
+	ProjectID domain.ProjectID
+	Provider  string
+	Host      string
+	Repo      string
+}
+
+// Source branches of every still-open PR in one project's copy of one repo,
+// across ALL of that project's sessions. lifecycle reads it to recognize a
+// STACKED PR whose parent belongs to a DIFFERENT worker: a stack is routinely
+// built by two sessions (worker A owns the parent branch and its PR, worker B is
+// cut from A's branch and targets it), which a per-session lookup cannot see.
+// Branch names are not unique on their own, so provider/host/repo pin the lookup
+// to a single repository and the sessions join pins it to a single project.
+func (q *Queries) ListOpenPRSourceBranchesInRepo(ctx context.Context, arg ListOpenPRSourceBranchesInRepoParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenPRSourceBranchesInRepo,
+		arg.ProjectID,
+		arg.Provider,
+		arg.Host,
+		arg.Repo,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var source_branch string
+		if err := rows.Scan(&source_branch); err != nil {
+			return nil, err
+		}
+		items = append(items, source_branch)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPRFactsBySession = `-- name: ListPRFactsBySession :many
 SELECT
     pr.url,

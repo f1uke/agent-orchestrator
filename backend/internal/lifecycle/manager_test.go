@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,30 @@ func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.S
 
 func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]domain.PullRequest, error) {
 	return f.prs[id], nil
+}
+
+// Mirrors ListOpenPRSourceBranchesInRepo: every project session's open PRs in one
+// repository, not just the observed session's, and matched on the full
+// provider/host/repo coordinates so a same-named branch elsewhere cannot pose as
+// a parent.
+func (f *fakeStore) ListOpenPRSourceBranchesInRepo(_ context.Context, projectID domain.ProjectID, provider, host, repo string) ([]string, error) {
+	var out []string
+	for sid, prs := range f.prs {
+		if rec, ok := f.sessions[sid]; !ok || rec.ProjectID != projectID {
+			continue
+		}
+		for _, pr := range prs {
+			if pr.Merged || pr.Closed || pr.SourceBranch == "" {
+				continue
+			}
+			if pr.Provider != provider || pr.Host != host || pr.Repo != repo {
+				continue
+			}
+			out = append(out, pr.SourceBranch)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {
@@ -781,6 +806,146 @@ func TestSCMObservationUsesPRHeadWhenCIHeadMissing(t *testing.T) {
 	}
 }
 
+// The merge-conflict nudge used to sign itself with the constant string
+// "conflicting", so sendOnce suppressed every observation after the first one,
+// permanently, for the life of the PR row. These cases pin the two halves of the
+// contract the signature has to satisfy at once: a conflict episode is announced
+// exactly once, and a NEW episode is a new announcement.
+func TestPRObservation_MergeConflictNudgeEpisodes(t *testing.T) {
+	conflicting := func(head string) ports.PRObservation {
+		return ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeConflicting, HeadSHA: head}
+	}
+	mergeable := func(head string) ports.PRObservation {
+		return ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeMergeable, HeadSHA: head}
+	}
+	tests := []struct {
+		name string
+		obs  []ports.PRObservation
+		want int
+	}{
+		{
+			// The property the constant signature got right by accident and the fix
+			// must keep on purpose: the observer polls often, and a nudge per poll
+			// would be worse than the silence being fixed.
+			name: "unchanged conflict nudges once however many polls",
+			obs:  []ports.PRObservation{conflicting("sha-1"), conflicting("sha-1"), conflicting("sha-1")},
+			want: 1,
+		},
+		{
+			// The bug: the worker pushed a fix, the branch still conflicts, and it
+			// was never told a second time.
+			name: "conflict surviving a push nudges again",
+			obs:  []ports.PRObservation{conflicting("sha-1"), conflicting("sha-2")},
+			want: 2,
+		},
+		{
+			// A conflict the worker cleared and that later returns is a fresh
+			// episode even at an unchanged head (the base branch moved under it).
+			name: "conflict that resolves and returns nudges again",
+			obs:  []ports.PRObservation{conflicting("sha-1"), mergeable("sha-1"), conflicting("sha-1")},
+			want: 2,
+		},
+		{
+			// Mergeability UNKNOWN is the provider's recompute window, not evidence
+			// the conflict is gone; it must not re-arm the nudge.
+			name: "unknown mergeability does not re-arm the nudge",
+			obs: []ports.PRObservation{
+				conflicting("sha-1"),
+				{Fetched: true, URL: "pr1", Mergeability: domain.MergeUnknown, HeadSHA: "sha-1"},
+				conflicting("sha-1"),
+			},
+			want: 1,
+		},
+		{
+			// Same for a STALE mergeable reading: it is the local row echoed back,
+			// not a fresh provider fact.
+			name: "stale mergeable does not re-arm the nudge",
+			obs: []ports.PRObservation{
+				conflicting("sha-1"),
+				{Fetched: true, URL: "pr1", Mergeability: domain.MergeMergeable, MergeabilityStale: true, HeadSHA: "sha-1"},
+				conflicting("sha-1"),
+			},
+			want: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, st, msg := newManager()
+			st.sessions["mer-1"] = working("mer-1")
+			for i, o := range tc.obs {
+				if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+					t.Fatalf("observation %d: %v", i, err)
+				}
+			}
+			if len(msg.msgs) != tc.want {
+				t.Fatalf("want %d merge-conflict nudges, got %d: %v", tc.want, len(msg.msgs), msg.msgs)
+			}
+			for _, got := range msg.msgs {
+				if !strings.Contains(got, "merge conflicts") {
+					t.Fatalf("unexpected nudge text: %q", got)
+				}
+			}
+		})
+	}
+}
+
+// A daemon restart mid-episode must not re-announce the conflict the worker has
+// already been told about: the head-anchored signature is persisted in
+// pr.last_nudge_signature and reloaded lazily by loadPRSignaturesLocked. A push
+// after the restart still nudges.
+func TestPRObservation_MergeConflictDedupSurvivesRestart(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = working("mer-1")
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeConflicting, HeadSHA: "sha-1"}
+
+	first := &fakeMessenger{}
+	if err := New(st, first).ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.msgs) != 1 {
+		t.Fatalf("want the first conflict to nudge, got %v", first.msgs)
+	}
+
+	// Second Manager over the same store == the daemon coming back up.
+	restarted := &fakeMessenger{}
+	m := New(st, restarted)
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.msgs) != 0 {
+		t.Fatalf("restart must not re-announce the same conflict episode, got %v", restarted.msgs)
+	}
+	o.HeadSHA = "sha-2"
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.msgs) != 1 {
+		t.Fatalf("want a nudge once the head moves after restart, got %v", restarted.msgs)
+	}
+}
+
+// End-to-end through the provider-neutral entrypoint: the head SHA the signature
+// needs has to survive the SCMObservation → PRObservation projection.
+func TestSCMObservation_MergeConflictRenudgesAfterHeadMoves(t *testing.T) {
+	m, st, msg := newManager()
+	st.sessions["mer-1"] = working("mer-1")
+	o := ports.SCMObservation{
+		Fetched:      true,
+		PR:           ports.SCMPRObservation{URL: "pr1", Number: 1, HeadSHA: "sha-1"},
+		Mergeability: ports.SCMMergeabilityObservation{State: string(domain.MergeConflicting)},
+	}
+	if err := m.ApplySCMObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	o.PR.HeadSHA = "sha-2"
+	if err := m.ApplySCMObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 2 {
+		t.Fatalf("want a nudge per conflicting head, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+}
+
 func TestPRObservation_MergeConflictNudgesAgent(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
@@ -923,6 +1088,111 @@ func TestPRObservation_StackedChildConflictSuppressed(t *testing.T) {
 	}
 	if len(msg.msgs) != 0 {
 		t.Fatalf("stacked child conflict should be suppressed, got %v", msg.msgs)
+	}
+}
+
+// A stack is routinely split across two workers: worker A owns the parent branch
+// and its PR, worker B is cut from A's branch and targets it. The stacked-child
+// guard used to read only the OBSERVED session's PRs, so it never fired for that
+// shape and the child was nudged to rebase against a parent that is still moving.
+// Widening the lookup must not make it fire for a PR that merely shares a branch
+// NAME with something in another repo or another project.
+func TestPRObservation_StackedChildConflictAcrossSessions(t *testing.T) {
+	const (
+		provider = "github"
+		host     = "github.com"
+		repo     = "o/r"
+	)
+	child := domain.PullRequest{URL: "child", SourceBranch: "ao/x/auth", TargetBranch: "ao/x", Provider: provider, Host: host, Repo: repo}
+	parent := func(mutate func(*domain.PullRequest)) domain.PullRequest {
+		p := domain.PullRequest{URL: "parent", SourceBranch: "ao/x", TargetBranch: "main", Provider: provider, Host: host, Repo: repo}
+		if mutate != nil {
+			mutate(&p)
+		}
+		return p
+	}
+	tests := []struct {
+		name string
+		// prs is keyed by owning session; every session listed here belongs to
+		// project "mer" unless its id says otherwise (see projects).
+		prs      map[domain.SessionID][]domain.PullRequest
+		projects map[domain.SessionID]domain.ProjectID
+		wantNudg bool
+	}{
+		{
+			name: "parent PR owned by another worker in the same repo suppresses the nudge",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(nil)},
+			},
+		},
+		{
+			name: "parent PR in the same session still suppresses the nudge",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child, parent(nil)},
+			},
+		},
+		{
+			name: "no open PR owns the target branch, so an ordinary conflict still nudges",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {{URL: "unrelated", SourceBranch: "fix/other", TargetBranch: "main", Provider: provider, Host: host, Repo: repo}},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "a merged parent no longer shields the child",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(func(p *domain.PullRequest) { p.Merged = true })},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "same branch name in a different repo is not the parent",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(func(p *domain.PullRequest) { p.Repo = "o/other" })},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "same branch name on a different host is not the parent",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(func(p *domain.PullRequest) { p.Host = "gitlab.com"; p.Provider = "gitlab" })},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "same branch name in a different project is not the parent",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"oth-1": {parent(nil)},
+			},
+			projects: map[domain.SessionID]domain.ProjectID{"oth-1": "oth"},
+			wantNudg: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, st, msg := newManager()
+			for id, prs := range tc.prs {
+				rec := working(id)
+				if p, ok := tc.projects[id]; ok {
+					rec.ProjectID = p
+				}
+				st.sessions[id] = rec
+				st.prs[id] = prs
+			}
+			o := ports.PRObservation{Fetched: true, URL: "child", Mergeability: domain.MergeConflicting, HeadSHA: "sha-1"}
+			if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(msg.msgs) > 0; got != tc.wantNudg {
+				t.Fatalf("nudged=%v, want %v (msgs: %v)", got, tc.wantNudg, msg.msgs)
+			}
+		})
 	}
 }
 
