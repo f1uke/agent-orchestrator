@@ -256,6 +256,12 @@
 	   card and drop below 4.5:1 once the tint darkens the backdrop. */
 	--smoke-caption: #6c6c72;
 	--smoke-accent-text: var(--accent);
+	/* The machine's lane (what qa ran). Flat and neutral on purpose: the
+	   pass/fail hues on this tab belong to the human's verdict, so a machine
+	   result can never be mistaken for a played case. */
+	--smoke-qa-bg: #111116;
+	--smoke-qa-border: #23232a;
+	--smoke-qa-fg: #a3a3ad;
 }
 
 :root[data-theme="light"] {
@@ -413,6 +419,11 @@
 	   --inbox-muted gave 4.27:1 and --accent 4.14:1 there. */
 	--smoke-caption: #5a5a63;
 	--smoke-accent-text: #1d4ed8;
+	/* qa lane, light. 7.5:1 ink on its own fill; it carries the machine's own
+	   words, so it is body text, not a caption. */
+	--smoke-qa-bg: #f2f2f5;
+	--smoke-qa-border: #e2e2e6;
+	--smoke-qa-fg: #4f4f58;
 }
 
 * {

@@ -628,6 +628,9 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 	"demo-in-review": [
 		prSummary("demo-in-review", 322, {
 			provider: "gitlab",
+			// A real head commit, so the Tests tab can compare a machine result's
+			// `agentSha` against it and mark the older run stale.
+			headSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
 			review: {
 				decision: "none",
 				hasUnresolvedHumanComments: false,
@@ -1060,6 +1063,7 @@ export function mockJiraProjects(query: string): components["schemas"]["JiraProj
 // state (not every worker authors one). Shared by useSessionSmokeChecks so the
 // Tests tab and the Summary readiness strip read the same mock.
 export function mockSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
+	if (sessionId === "demo-in-review") return mockAgentSmokeChecks(sessionId, worker);
 	if (sessionId !== "demo-working") {
 		return { worker: worker || "worker", checks: [] };
 	}
@@ -1156,6 +1160,145 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				agentEvidence: [],
 				createdAt: now,
 				updatedAt: now,
+			},
+		],
+	};
+}
+
+/**
+ * The Tests tab with a MACHINE result beside the human's: one case in each
+ * state the tab has to keep apart, since jsdom cannot show whether the screen
+ * reads honestly and only looking at it can:
+ *
+ *  1. human-only, no machine run at all (renders exactly as it always has)
+ *  2. machine ran and judged pass, human hasn't played it
+ *  3. machine ran and judged fail
+ *  4. machine ran and DECLINED to judge (`agentRanAt` set, verdict empty):
+ *     evidence captured, judgement left to a person
+ *  5. stale, ran against a commit that is no longer head
+ *  6. retired, out of the checklist, kept with its reason
+ */
+function mockAgentSmokeChecks(
+	sessionId: string,
+	worker?: string,
+): components["schemas"]["ListSmokeChecksResponse"] {
+	const base = {
+		sessionId,
+		projectId: "agent-orchestrator",
+		note: "",
+		evidence: [],
+		agentEvidence: [],
+		createdAt: now,
+		updatedAt: now,
+	};
+	const shot = (checkId: string, id: string, filename: string) => ({
+		id,
+		checkId,
+		sessionId,
+		kind: "image",
+		filename,
+		mime: "image/png",
+		sizeBytes: 71204,
+		createdAt: now,
+		source: "agent",
+	});
+	return {
+		worker: worker || "settings copy",
+		checks: [
+			{
+				...base,
+				id: "settings-copy-paint",
+				seq: 1,
+				name: "The settings pane still paints in one frame on open",
+				why: "The copy change re-renders the whole pane; a person has to see whether it flashes.",
+				steps: ["Open Project settings.", "Close it and open it again, watching the first frame."],
+				expected: "No flash of unstyled or half-laid-out content.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:140",
+				verdict: "pending",
+			},
+			{
+				...base,
+				id: "settings-copy-saves",
+				seq: 2,
+				name: "Editing the project name saves and survives a reopen",
+				why: "The save path was touched by the copy refactor.",
+				steps: ["Open Project settings.", "Rename the project.", "Close and reopen the pane."],
+				expected: "The new name is there, and the daemon has it.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:212",
+				verdict: "pending",
+				agentVerdict: "pass",
+				agentNote: "Typed a new name, reopened the pane twice; the value came back both times.",
+				agentRanAt: minutesAgo(24),
+				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+			},
+			{
+				...base,
+				id: "settings-copy-validation",
+				seq: 3,
+				name: "An empty project name is refused with a message",
+				why: "The validation string moved; the refusal must still reach the user.",
+				steps: ["Clear the project name field.", "Press Save."],
+				expected: "Save is refused and the field explains why.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:233",
+				verdict: "pending",
+				agentVerdict: "fail",
+				agentNote: "Save went through with an empty name; no message appeared.",
+				agentRanAt: minutesAgo(24),
+				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+				agentEvidence: [shot("settings-copy-validation", "ev_agent_val", "empty-name-saved.png")],
+			},
+			{
+				...base,
+				id: "settings-copy-focus",
+				seq: 4,
+				name: "Focus lands in the name field, and the ring is visible",
+				why: "Keyboard users open this pane and type immediately; paint and focus are not machine-judgeable.",
+				steps: ["Open Project settings with ⌘,.", "Do not touch the mouse."],
+				expected: "The name field holds focus with a visible ring.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:118",
+				verdict: "pending",
+				agentRanAt: minutesAgo(23),
+				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+				agentEvidence: [
+					shot("settings-copy-focus", "ev_agent_focus", "settings-open-focus.png"),
+					shot("settings-copy-focus", "ev_agent_focus2", "settings-open-tabbed.png"),
+				],
+			},
+			{
+				...base,
+				id: "settings-copy-scroll",
+				seq: 5,
+				name: "The long settings list scrolls without stutter",
+				why: "The pane grew; drag-scroll feel is exactly what a machine cannot report.",
+				steps: ["Open Project settings.", "Drag the list quickly from top to bottom."],
+				expected: "Scrolling tracks the pointer with no jump or stall.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:301",
+				verdict: "pending",
+				agentVerdict: "pass",
+				agentNote: "Scrolled the container to the end programmatically; no error, all rows rendered.",
+				agentRanAt: hoursAgo(6),
+				agentSha: "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
+			},
+			{
+				...base,
+				id: "settings-copy-legacy-toggle",
+				seq: 6,
+				name: "The legacy settings toggle still writes the old key",
+				why: "Kept while the old key was read anywhere.",
+				steps: ["Flip the legacy toggle.", "Read the config file."],
+				expected: "The old key flips with it.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:410",
+				verdict: "pass",
+				note: "Old key flipped, checked the file by hand.",
+				decidedAt: hoursAgo(20),
+				retiredAt: hoursAgo(5),
+				retiredReason: "The legacy key was deleted in this PR, and a Go test now covers the migration.",
 			},
 		],
 	};

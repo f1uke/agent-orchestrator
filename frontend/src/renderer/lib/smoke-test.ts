@@ -59,6 +59,11 @@ export const PALETTE = {
 	expectedBorder: tint("var(--smoke-pass)", 28),
 	expectedBody: "var(--smoke-expected-body)",
 	evidenceOn: "var(--smoke-evidence-on)",
+	/** The machine's lane: a flat, neutral block. Deliberately not accent-tinted
+	 * (that is the app's own voice) and never a verdict hue. */
+	qaBg: "var(--smoke-qa-bg)",
+	qaBorder: "var(--smoke-qa-border)",
+	qaFg: "var(--smoke-qa-fg)",
 	// Pass/Fail decision buttons (softer than the verdict pills' fills).
 	passBtnBg: tint("var(--smoke-pass)", 12),
 	failBtnBg: tint("var(--smoke-fail)", 12),
@@ -128,6 +133,12 @@ export type SmokeProgress = {
 	 */
 	agentPass: number;
 	agentFail: number;
+	/**
+	 * Cases the machine RAN but deliberately did not judge (`agentRanAt` set,
+	 * `agentVerdict` empty). Counted separately from a verdict because it is not
+	 * a weaker verdict - it is captured evidence waiting for a person's eye.
+	 */
+	agentCaptured: number;
 };
 
 /** Counts for the progress bar + counts row. */
@@ -142,6 +153,7 @@ export function progressFor(checks: SmokeCheck[]): SmokeProgress {
 		retired: 0,
 		agentPass: 0,
 		agentFail: 0,
+		agentCaptured: 0,
 	};
 	for (const c of checks) {
 		if (c.retiredAt) {
@@ -161,8 +173,17 @@ export function progressFor(checks: SmokeCheck[]): SmokeProgress {
 				break;
 			default:
 				p.pending += 1;
-				if (c.agentVerdict === "pass") p.agentPass += 1;
-				if (c.agentVerdict === "fail") p.agentFail += 1;
+				switch (agentState(c)) {
+					case "pass":
+						p.agentPass += 1;
+						break;
+					case "fail":
+						p.agentFail += 1;
+						break;
+					case "captured":
+						p.agentCaptured += 1;
+						break;
+				}
 		}
 	}
 	p.checked = p.total - p.pending;
@@ -207,4 +228,140 @@ export function relativeTime(iso: string | null | undefined, now: number): strin
 /** Whether a MIME type is a video we accept as evidence. */
 export function isVideoMime(mime: string): boolean {
 	return mime.startsWith("video/");
+}
+
+// ---------------------------------------------------------------------------
+// The machine's lane.
+//
+// A case carries TWO results that are never merged: the human's
+// (verdict/note/evidence) and the machine's (agentVerdict/agentNote/
+// agentEvidence/agentRanAt/agentSha). They answer different questions - the
+// machine's is "did the steps execute", the human's is "does this work for a
+// person" - and every regression a person has caught by hand (recording
+// latency, dead drag-scroll, keystrokes never arriving, a tab pausing when
+// unfocused, control lost after a lease lapse) lives in the gap between them.
+//
+// So the screen keeps them in separate lanes, and the machine's lane is
+// deliberately MONOCHROME: the pass/fail hues on this tab belong to the human's
+// verdict alone, and a machine result must never render as a completed case.
+// The one hue the machine may borrow is the fail red, because an agent failure
+// only ever makes the picture stricter.
+
+/**
+ * What the machine did to a case.
+ *
+ * `captured` is the state this vocabulary exists for: `agentRanAt` set with an
+ * EMPTY `agentVerdict` is deliberate, not missing data. qa walked to the screen
+ * and photographed it but declined to judge, because paint / focus / timing /
+ * feel are not machine-judgeable. Rendering that as an empty circle would read
+ * "qa hasn't got to it yet" and send the person to fix the wrong thing.
+ */
+export type AgentState = "none" | "pass" | "fail" | "skip" | "captured";
+
+export function agentState(check: SmokeCheck): AgentState {
+	const v = check.agentVerdict ?? "";
+	if (v === "pass" || v === "fail" || v === "skip") return v;
+	return check.agentRanAt ? "captured" : "none";
+}
+
+export type AgentMeta = {
+	/** Chip text. Always prefixed `qa ·` so the actor is named, never inferred. */
+	label: string;
+	/** What the machine did, in its own row of the expanded case. */
+	headline: string;
+	/** What that result does and does NOT mean: the sentence that keeps a
+	 * machine pass from being read as a played case. */
+	caption: string;
+	color: string;
+};
+
+/** The machine's ink. Neutral by design; see the note above. */
+const QA_FG = "var(--smoke-qa-fg)";
+
+export const AGENT_META: Record<Exclude<AgentState, "none">, AgentMeta> = {
+	pass: {
+		label: "qa · ran",
+		headline: "qa ran the steps and they passed",
+		caption: "That is not a verdict on how it behaves. This case is still yours to play.",
+		color: QA_FG,
+	},
+	fail: {
+		label: "qa · failed",
+		headline: "qa ran the steps and hit a failure",
+		caption: "Worth reading before you play it, but the call is still yours.",
+		color: "var(--smoke-fail-fg)",
+	},
+	skip: {
+		label: "qa · skipped",
+		headline: "qa could not run this one",
+		caption: "Nothing was exercised, so there is nothing here to lean on.",
+		color: QA_FG,
+	},
+	captured: {
+		label: "qa · evidence only",
+		headline: "qa captured the screen and left the judgement to you",
+		caption:
+			"A machine cannot judge paint, focus, timing or feel, so there is no agent verdict coming for this one. Judge it from what qa captured instead of driving the app yourself.",
+		color: QA_FG,
+	},
+};
+
+export function agentMeta(state: AgentState): AgentMeta | null {
+	return state === "none" ? null : AGENT_META[state];
+}
+
+/** Head-of-branch facts the staleness rule needs, structurally typed so the
+ * Tests tab does not have to import the whole PR summary shape. */
+export type HeadRef = { number: number; headSha: string };
+
+/** First 7 of a sha, the length every git surface in the app already shows. */
+export function shortSha(sha: string | null | undefined): string {
+	return (sha ?? "").slice(0, 7);
+}
+
+/**
+ * Same commit? Prefix-tolerant in both directions: `ao smoke record --sha` may
+ * be handed an abbreviation, and calling an abbreviated match "stale" would cry
+ * wolf. Below 7 characters nothing is comparable, so nothing matches.
+ */
+export function shaMatches(a: string | null | undefined, b: string | null | undefined): boolean {
+	const x = (a ?? "").trim().toLowerCase();
+	const y = (b ?? "").trim().toLowerCase();
+	if (x.length < 7 || y.length < 7) return false;
+	return x.startsWith(y) || y.startsWith(x);
+}
+
+/** The head commit this case's machine result should be compared against: the
+ * PR the case names, else the most actionable one (the list arrives sorted). */
+export function headShaFor(check: SmokeCheck, heads: HeadRef[]): string {
+	const named = check.prNum > 0 ? heads.find((h) => h.number === check.prNum) : undefined;
+	return (named ?? heads[0])?.headSha ?? "";
+}
+
+/**
+ * Stale = the machine ran against a commit that is no longer head.
+ *
+ * Silence is not staleness: with no machine run, no recorded sha, or no head to
+ * compare to, the answer is "cannot tell" and the case renders normally. Only a
+ * head we know AND a recorded sha that differs earns the mark.
+ */
+export function isAgentStale(check: SmokeCheck, heads: HeadRef[]): boolean {
+	if (agentState(check) === "none") return false;
+	const ran = check.agentSha ?? "";
+	const head = headShaFor(check, heads);
+	if (!ran || !head) return false;
+	return !shaMatches(ran, head);
+}
+
+/** The cases the user is asked to play: retired ones are out of the checklist. */
+export function activeChecks(checks: SmokeCheck[]): SmokeCheck[] {
+	return checks.filter((c) => !c.retiredAt);
+}
+
+/** Retired cases, newest retirement first - the audit trail of a shrinking
+ * checklist ("3 retired, now covered by tests"), never a silent vanishing. */
+export function retiredChecks(checks: SmokeCheck[]): SmokeCheck[] {
+	return checks
+		.filter((c) => Boolean(c.retiredAt))
+		.sort((a, b) => Date.parse(b.retiredAt ?? "") - Date.parse(a.retiredAt ?? ""));
 }
