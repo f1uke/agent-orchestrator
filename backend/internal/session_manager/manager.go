@@ -1022,6 +1022,12 @@ const (
 	ReasonNoWorkspace = "no_workspace"
 	// ReasonSessionGone means the session row disappeared before teardown.
 	ReasonSessionGone = "session_gone"
+	// ReasonWorkspaceShared means the worktree is a CREW's and another member is
+	// still alive in it, so removing it would delete the ground a running agent
+	// is standing on. Like ReasonWorkspaceDirty this is a REFUSAL, not a success:
+	// the reclaim loop must retry rather than record a reclaim that never
+	// happened.
+	ReasonWorkspaceShared = "workspace_shared"
 )
 
 // Teardown is Kill's implementation, reporting the full outcome. Kill and the
@@ -1053,6 +1059,20 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 		workspaceProject = true
 	}
 
+	// A CREW is torn down as a TASK. Terminating dev is terminating the task: dev
+	// owns the branch, the worktree and the PR, so a subordinate left running
+	// after it would be an agent working on something nobody will land, in a tree
+	// about to be removed. Subordinates therefore go FIRST (design 1.10: qa, then
+	// dev, then reclaim), before this session's own runtime and worktree are
+	// touched. Terminating a SUBORDINATE fans out to nobody: that is the local
+	// case, and dev keeps working.
+	//
+	// The fan-out lives here rather than in Kill so that every route which ends a
+	// session - kill, purge, daemon shutdown, auto-reclaim - inherits it, and
+	// there is still exactly one teardown code path.
+	if rec.InCrew() && rec.CrewRole.IsDev() {
+		m.teardownCrewSubordinates(ctx, rec, cause)
+	}
 	if handle.ID != "" {
 		if err := m.runtime.Destroy(ctx, handle); err != nil {
 			return TeardownResult{}, fmt.Errorf("kill %s: runtime: %w", id, err)
@@ -1067,7 +1087,23 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	// reaps the reviewer.
 	m.reapReviewer(ctx, id)
 	res := TeardownResult{WorkspacePath: ws.Path}
-	if workspaceProject {
+	// The refcount: a crewmate that is still alive on this exact worktree keeps
+	// it. Checked AFTER the fan-out above, so tearing a whole task down still
+	// frees the disk in one pass, and BEFORE any destroy, so a live member never
+	// loses its tree. A solo session has no crewmates and takes neither branch.
+	held, err := m.workspaceHeldByLiveCrewMember(ctx, rec)
+	if err != nil {
+		return TeardownResult{}, fmt.Errorf("kill %s: crew: %w", id, err)
+	}
+	switch {
+	case held:
+		// Deliberately NOT an early return like the dirty case: this session IS
+		// finished (its runtime is gone and it is about to be marked terminated),
+		// so it must still drop its restore marker below or the next boot would
+		// resurrect it. Only the worktree survives, and it survives for its
+		// crewmate.
+		res.Reason = ReasonWorkspaceShared
+	case workspaceProject:
 		cleaned, err := m.destroyWorkspaceProjectRows(ctx, workspaceProjectRows)
 		if err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
@@ -1080,7 +1116,7 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 		if !cleaned {
 			res.Reason = ReasonWorkspaceDirty
 		}
-	} else if ws.Path != "" {
+	case ws.Path != "":
 		if err := m.workspace.Destroy(ctx, ws); err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
 				res.Reason = ReasonWorkspaceDirty
@@ -1089,7 +1125,7 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 			return TeardownResult{}, fmt.Errorf("kill %s: workspace: %w", id, err)
 		}
 		res.Freed = true
-	} else {
+	default:
 		res.Reason = ReasonNoWorkspace
 	}
 	// Clear the restore marker so the next boot's RestoreAll cannot resurrect a
@@ -1442,7 +1478,13 @@ func (m *Manager) SaveAndTeardownAll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("save-teardown-all: list sessions: %w", err)
 	}
-	for _, rec := range recs {
+	// Crew subordinates go before their dev. Both are being torn down either way,
+	// but dev is the member that captures the shared worktree's uncommitted work
+	// and removes it; if dev ran first it would find a live subordinate holding
+	// the tree, decline, and leave the capture to whichever member happened to run
+	// last. Still lossless, but the preserve ref would be filed under the wrong
+	// session. This is a no-op ordering for a list of solo sessions.
+	for _, rec := range crewSubordinatesFirst(recs) {
 		if rec.IsTerminated {
 			continue
 		}
@@ -1478,8 +1520,23 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 		return m.saveAndTeardownWorkspaceProject(ctx, rec, rows, destroyRuntime)
 	}
 
-	// 1. Capture uncommitted work (ref may be "" for clean worktrees).
+	// A CREW member whose crewmate is still alive in this worktree must not touch
+	// it. This path both STASHES and ForceDestroys, and it is reached at boot
+	// (reconcileLive, when a member's tmux died with the daemon) as well as at
+	// shutdown — so without this guard, restarting the daemon would delete a live
+	// dev's worktree out from under it and the task could not continue. The member
+	// still terminates and still records its restore marker, so RestoreAll
+	// relaunches it into the tree that is still there.
 	ws := workspaceInfo(rec)
+	held, err := m.workspaceHeldByLiveCrewMember(ctx, rec)
+	if err != nil {
+		return fmt.Errorf("save %s: crew: %w", rec.ID, err)
+	}
+	if held {
+		return m.saveCrewMemberSharingWorktree(ctx, rec, ws, destroyRuntime)
+	}
+
+	// 1. Capture uncommitted work (ref may be "" for clean worktrees).
 	ref, err := m.workspace.StashUncommitted(ctx, ws)
 	if err != nil {
 		return fmt.Errorf("save %s: stash: %w", rec.ID, err)

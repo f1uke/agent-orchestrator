@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // A CREW is the one or two long-lived sessions that belong to ONE task and share
@@ -180,4 +181,93 @@ func runtimeNameBranch(branch string, role domain.CrewRole) string {
 		return ""
 	}
 	return branch
+}
+
+// teardownCrewSubordinates tears down every non-dev member of rec's crew before
+// dev itself goes. It is a no-op for a solo session and for a subordinate.
+//
+// Best-effort by design: a member that will not die must not prevent dev from
+// terminating. The consequence of failing is visible and self-correcting — the
+// surviving member still holds the worktree, so the refcount refuses the destroy
+// and the reclaim log records a `workspace_shared` refusal naming the branch,
+// which is a complete recovery instruction. The consequence of ABORTING dev's
+// teardown would be a task nobody can finish.
+func (m *Manager) teardownCrewSubordinates(ctx context.Context, dev domain.SessionRecord, cause string) {
+	members, err := m.crewMembers(ctx, dev)
+	if err != nil {
+		m.logger.Warn("teardown: could not read crew; tearing dev down alone",
+			"sessionID", dev.ID, "crew", dev.CrewID, "error", err)
+		return
+	}
+	for _, member := range subordinatesFirst(members) {
+		if member.CrewRole.IsDev() || member.IsTerminated {
+			continue
+		}
+		if _, err := m.Teardown(ctx, member.ID, cause); err != nil {
+			m.logger.Error("teardown: crew member teardown failed; its worktree will be kept",
+				"sessionID", member.ID, "crew", dev.CrewID, "error", err)
+		}
+	}
+}
+
+// saveCrewMemberSharingWorktree is saveAndTeardownOne for a member whose crewmate
+// is still alive in the shared worktree: everything except touching the tree.
+//
+// It writes the same restore marker a solo save writes, with an EMPTY preserved
+// ref — there is nothing to preserve, because nothing was removed. RestoreAll
+// then relaunches the member into the worktree that is still on disk (Restore
+// returns an already-registered worktree rather than re-adding it), so the member
+// comes back exactly where it was.
+func (m *Manager) saveCrewMemberSharingWorktree(ctx context.Context, rec domain.SessionRecord, ws ports.WorkspaceInfo, destroyRuntime bool) error {
+	row := domain.SessionWorktreeRecord{
+		SessionID:    rec.ID,
+		RepoName:     domain.RootWorkspaceRepoName,
+		Branch:       rec.Metadata.Branch,
+		WorktreePath: ws.Path,
+		State:        "removed",
+	}
+	if err := m.store.UpsertSessionWorktree(ctx, row); err != nil {
+		return fmt.Errorf("save %s: upsert worktree row: %w", rec.ID, err)
+	}
+	if err := m.lcm.MarkTerminated(ctx, rec.ID, domain.TerminationCauseDaemonShutdown); err != nil {
+		return fmt.Errorf("save %s: mark terminated: %w", rec.ID, err)
+	}
+	handle := runtimeHandle(rec.Metadata)
+	if destroyRuntime && handle.ID != "" {
+		if err := m.runtime.Destroy(ctx, handle); err != nil {
+			m.logger.Warn("save-teardown: crew member runtime destroy failed", "sessionID", rec.ID, "error", err)
+		}
+	}
+	m.logger.Info("save-teardown: kept a crew worktree a live member is still in",
+		"sessionID", rec.ID, "crew", rec.CrewID, "path", ws.Path)
+	return nil
+}
+
+// crewSubordinatesFirst moves every crew DEV to the back of a session list,
+// which puts every subordinate ahead of every dev while leaving the relative
+// order of everything else alone. A list with no crew in it is returned
+// unchanged, by identity, so the shutdown sweep on an ordinary machine iterates
+// exactly the slice it always did.
+func crewSubordinatesFirst(recs []domain.SessionRecord) []domain.SessionRecord {
+	isCrewDev := func(rec domain.SessionRecord) bool { return rec.InCrew() && rec.CrewRole.IsDev() }
+	anyDev := false
+	for _, rec := range recs {
+		if isCrewDev(rec) {
+			anyDev = true
+			break
+		}
+	}
+	if !anyDev {
+		return recs
+	}
+	out := make([]domain.SessionRecord, 0, len(recs))
+	devs := make([]domain.SessionRecord, 0, 1)
+	for _, rec := range recs {
+		if isCrewDev(rec) {
+			devs = append(devs, rec)
+			continue
+		}
+		out = append(out, rec)
+	}
+	return append(out, devs...)
 }
