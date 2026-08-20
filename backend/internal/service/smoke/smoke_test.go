@@ -103,10 +103,11 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 	sort.Strings(removed)
 	for _, c := range cases {
 		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Seq: c.Seq, Name: c.Name, Steps: c.Steps, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
-		// An id already present keeps what the user recorded on it.
+		// An id already present keeps what the user recorded on it (its evidence
+		// rows are keyed to the id and joined on read, so they follow).
 		if prior, ok := f.checks[c.ID]; ok {
 			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
-			check.Evidence, check.CreatedAt = prior.Evidence, prior.CreatedAt
+			check.CreatedAt = prior.CreatedAt
 		}
 		f.checks[c.ID] = check
 		out = append(out, check)
