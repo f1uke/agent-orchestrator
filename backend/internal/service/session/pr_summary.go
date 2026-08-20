@@ -13,27 +13,50 @@ import (
 
 // PRSummary is the user-facing SCM read model for one PR owned by a session.
 type PRSummary struct {
-	URL              string
-	HTMLURL          string
-	Number           int
-	Title            string
-	State            domain.PRState
-	Provider         string
-	Repo             string
-	Author           string
-	SourceBranch     string
-	TargetBranch     string
-	HeadSHA          string
-	Additions        int
-	Deletions        int
-	ChangedFiles     int
-	CI               PRCISummary
-	Review           PRReviewSummary
-	Mergeability     PRMergeabilitySummary
+	URL          string
+	HTMLURL      string
+	Number       int
+	Title        string
+	State        domain.PRState
+	Provider     string
+	Repo         string
+	Author       string
+	SourceBranch string
+	TargetBranch string
+	HeadSHA      string
+	Additions    int
+	Deletions    int
+	ChangedFiles int
+	CI           PRCISummary
+	Review       PRReviewSummary
+	Mergeability PRMergeabilitySummary
+	// AOReview is the verdict AO's own reviewer recorded for THIS PR's current
+	// head, or nil when AO has not reviewed that commit. It is deliberately
+	// separate from Review, which is the provider's decision by human approvers:
+	// two different actors, and one never stands in for the other.
+	AOReview         *PRAOReviewSummary
 	UpdatedAt        time.Time
 	ObservedAt       time.Time
 	CIObservedAt     time.Time
 	ReviewObservedAt time.Time
+}
+
+// PRAOReviewSummary is the durable outcome of AO's own review pass at a PR's
+// current head. It is what makes an AO approval reach somebody: before this, an
+// approved run existed only as a review_run row nothing on the board ever read.
+type PRAOReviewSummary struct {
+	// Verdict is "approved" or "changes_requested".
+	Verdict domain.ReviewVerdict
+	// RunID identifies the pass, so a surface can link to it.
+	RunID string
+	// TargetSHA is the commit the pass reviewed - always the PR's current head,
+	// since a verdict on any other commit is not reported here at all.
+	TargetSHA string
+	// PreMR reports the verdict came from a pass that ran BEFORE this PR existed,
+	// keyed on the branch. The commit is the same; where it was posted is not
+	// (nowhere), so a surface that offers to open the review must not.
+	PreMR      bool
+	ReviewedAt time.Time
 }
 
 // PRCISummary describes the latest CI status and failing checks for a PR.
@@ -119,6 +142,13 @@ func (s *Service) ListPRSummaries(ctx context.Context, id domain.SessionID) ([]P
 	if err != nil {
 		return nil, err
 	}
+	// AO's own review runs for this session, read once. A failed read degrades to
+	// "AO has not reviewed" rather than failing the whole PR list: the provider
+	// facts are the load-bearing half of this payload.
+	runs, err := s.store.ListReviewRunsBySession(ctx, id)
+	if err != nil {
+		runs = nil
+	}
 	out := make([]PRSummary, 0, len(prs))
 	for _, pr := range prs {
 		checks, err := s.store.ListChecks(ctx, pr.URL)
@@ -137,10 +167,53 @@ func (s *Service) ListPRSummaries(ctx context.Context, id domain.SessionID) ([]P
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, summarizePR(pr, checks, reviews, threads, comments, approvalRule))
+		summary := summarizePR(pr, checks, reviews, threads, comments, approvalRule)
+		summary.AOReview = aoReviewAtHead(pr, runs)
+		out = append(out, summary)
 	}
 	sortPRSummaries(out)
 	return out, nil
+}
+
+// aoReviewAtHead picks the AO verdict that covers a PR's CURRENT head, or nil.
+// Only a terminal verdict counts (a running pass has none), and only at the head
+// - a verdict on a commit the PR has moved past says nothing about what is there
+// now, and reporting it would be the same mistake as calling an unreviewed PR
+// reviewed.
+//
+// A pre-MR run (empty PRURL) at the same commit counts: it reviewed this exact
+// tree, before the PR existed. That is the same adoption rule review.Plan uses to
+// keep the commit from being reviewed twice, so the board and the planner agree.
+func aoReviewAtHead(pr domain.PullRequest, runs []domain.ReviewRun) *PRAOReviewSummary {
+	if pr.URL == "" || pr.HeadSHA == "" {
+		return nil
+	}
+	var best *domain.ReviewRun
+	for i := range runs {
+		run := runs[i]
+		if run.TargetSHA != pr.HeadSHA || !run.Verdict.Valid() {
+			continue
+		}
+		if run.PRURL != "" && run.PRURL != pr.URL {
+			continue
+		}
+		// The PR's own run wins over an adopted pre-MR one; otherwise the newest.
+		if best == nil ||
+			(best.PRURL == "" && run.PRURL != "") ||
+			(best.PRURL == "" == (run.PRURL == "") && run.CreatedAt.After(best.CreatedAt)) {
+			best = &run
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	return &PRAOReviewSummary{
+		Verdict:    best.Verdict,
+		RunID:      best.ID,
+		TargetSHA:  best.TargetSHA,
+		PreMR:      best.PRURL == "",
+		ReviewedAt: best.CreatedAt,
+	}
 }
 
 // providerForPRSummary returns the stored provider, or derives it from the URL

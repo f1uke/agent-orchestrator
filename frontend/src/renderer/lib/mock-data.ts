@@ -383,6 +383,20 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				prs: [demoPr(412, "open", "passing", "none")],
 			},
 			{
+				id: "docs-ao-approved",
+				terminalHandleId: "docs-ao-approved/terminal_0",
+				workspaceId: "docs-site",
+				workspaceName: "docs-site",
+				title: "Split the install guide",
+				provider: "claude-code",
+				branch: "demo/install-guide",
+				status: "review_pending",
+				createdAt: hoursAgo(8),
+				updatedAt: minutesAgo(19),
+				activity: { state: "idle", lastActivityAt: minutesAgo(19) },
+				prs: [demoPr(413, "open", "passing", "none")],
+			},
+			{
 				id: "docs-ready",
 				terminalHandleId: "docs-ready/terminal_0",
 				workspaceId: "docs-site",
@@ -629,6 +643,23 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 	// reads "awaiting"), and one that carries an approval. The first is the state
 	// the strip used to call Ready to Merge.
 	"docs-awaiting-review": [prSummary("docs-awaiting-review", 412, { changedFiles: 2, additions: 63, deletions: 11 })],
+	// The third end of the same axis: no human has looked, but AO's own reviewer
+	// approved this exact head. That is not "nobody has looked", so the gate says
+	// who did.
+	"docs-ao-approved": [
+		prSummary("docs-ao-approved", 413, {
+			changedFiles: 4,
+			additions: 96,
+			deletions: 30,
+
+			aoReview: {
+				verdict: "approved",
+				runId: "preview-run-413",
+				targetSha: "preview-413",
+				reviewedAt: now,
+			},
+		}),
+	],
 	"docs-ready": [prSummary("docs-ready", 411, { changedFiles: 3, additions: 88, deletions: 24 })],
 	"demo-review-stack": [
 		prSummary("demo-review-stack", 319, {

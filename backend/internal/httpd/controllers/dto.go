@@ -514,27 +514,31 @@ type SessionPRFacts struct {
 // /sessions/{sessionId}/pr. It intentionally omits CI log tails and review
 // comment bodies.
 type SessionPRSummary struct {
-	URL              string                       `json:"url"`
-	HTMLURL          string                       `json:"htmlUrl,omitempty"`
-	Number           int                          `json:"number"`
-	Title            string                       `json:"title"`
-	State            domain.PRState               `json:"state" enum:"draft,open,merged,closed"`
-	Provider         string                       `json:"provider" enum:"github,gitlab"`
-	Repo             string                       `json:"repo"`
-	Author           string                       `json:"author"`
-	SourceBranch     string                       `json:"sourceBranch"`
-	TargetBranch     string                       `json:"targetBranch"`
-	HeadSHA          string                       `json:"headSha"`
-	Additions        int                          `json:"additions"`
-	Deletions        int                          `json:"deletions"`
-	ChangedFiles     int                          `json:"changedFiles"`
-	CI               SessionPRCISummary           `json:"ci"`
-	Review           SessionPRReviewSummary       `json:"review"`
-	Mergeability     SessionPRMergeabilitySummary `json:"mergeability"`
-	UpdatedAt        time.Time                    `json:"updatedAt"`
-	ObservedAt       time.Time                    `json:"observedAt,omitempty"`
-	CIObservedAt     time.Time                    `json:"ciObservedAt,omitempty"`
-	ReviewObservedAt time.Time                    `json:"reviewObservedAt,omitempty"`
+	URL          string                       `json:"url"`
+	HTMLURL      string                       `json:"htmlUrl,omitempty"`
+	Number       int                          `json:"number"`
+	Title        string                       `json:"title"`
+	State        domain.PRState               `json:"state" enum:"draft,open,merged,closed"`
+	Provider     string                       `json:"provider" enum:"github,gitlab"`
+	Repo         string                       `json:"repo"`
+	Author       string                       `json:"author"`
+	SourceBranch string                       `json:"sourceBranch"`
+	TargetBranch string                       `json:"targetBranch"`
+	HeadSHA      string                       `json:"headSha"`
+	Additions    int                          `json:"additions"`
+	Deletions    int                          `json:"deletions"`
+	ChangedFiles int                          `json:"changedFiles"`
+	CI           SessionPRCISummary           `json:"ci"`
+	Review       SessionPRReviewSummary       `json:"review"`
+	Mergeability SessionPRMergeabilitySummary `json:"mergeability"`
+	// AOReview is the verdict AO's OWN reviewer recorded at this PR's current
+	// head, absent when AO has not reviewed that commit. Distinct from Review,
+	// which is the provider's decision by human approvers.
+	AOReview         *SessionPRAOReviewSummary `json:"aoReview,omitempty"`
+	UpdatedAt        time.Time                 `json:"updatedAt"`
+	ObservedAt       time.Time                 `json:"observedAt,omitempty"`
+	CIObservedAt     time.Time                 `json:"ciObservedAt,omitempty"`
+	ReviewObservedAt time.Time                 `json:"reviewObservedAt,omitempty"`
 }
 
 // SessionPRCISummary is the CI status block for a session PR summary.
@@ -565,6 +569,17 @@ type SessionPRReviewSummary struct {
 	RequiredApprovals *int `json:"requiredApprovals,omitempty"`
 	// ApprovalRuleSource is which rule set the threshold: "scm", "ao", or "none".
 	ApprovalRuleSource string `json:"approvalRuleSource,omitempty" enum:"none,ao,scm"`
+}
+
+// SessionPRAOReviewSummary is AO's own review verdict at a PR's current head.
+type SessionPRAOReviewSummary struct {
+	Verdict   domain.ReviewVerdict `json:"verdict" enum:"approved,changes_requested"`
+	RunID     string               `json:"runId"`
+	TargetSHA string               `json:"targetSha"`
+	// PreMR marks a verdict from a pass that ran before this PR existed (keyed on
+	// the branch): the same commit, but posted nowhere.
+	PreMR      bool      `json:"preMr,omitempty"`
+	ReviewedAt time.Time `json:"reviewedAt"`
 }
 
 // SessionPRUnresolvedReviewer groups unresolved human comments by reviewer.
@@ -846,6 +861,7 @@ func NewSessionPRSummary(in sessionsvc.PRSummary) SessionPRSummary {
 		CI:               newSessionPRCISummary(in.CI),
 		Review:           newSessionPRReviewSummary(in.Review),
 		Mergeability:     newSessionPRMergeabilitySummary(in.Mergeability),
+		AOReview:         newSessionPRAOReviewSummary(in.AOReview),
 		UpdatedAt:        in.UpdatedAt,
 		ObservedAt:       in.ObservedAt,
 		CIObservedAt:     in.CIObservedAt,
@@ -877,6 +893,19 @@ func newSessionPRReviewSummary(in sessionsvc.PRReviewSummary) SessionPRReviewSum
 		ApprovalsCount:             in.ApprovalsCount,
 		RequiredApprovals:          in.RequiredApprovals,
 		ApprovalRuleSource:         in.ApprovalRuleSource,
+	}
+}
+
+func newSessionPRAOReviewSummary(in *sessionsvc.PRAOReviewSummary) *SessionPRAOReviewSummary {
+	if in == nil {
+		return nil
+	}
+	return &SessionPRAOReviewSummary{
+		Verdict:    in.Verdict,
+		RunID:      in.RunID,
+		TargetSHA:  in.TargetSHA,
+		PreMR:      in.PreMR,
+		ReviewedAt: in.ReviewedAt,
 	}
 }
 

@@ -851,3 +851,172 @@ func TestListReturnsHandleAndRuns(t *testing.T) {
 		t.Fatalf("list = %+v", got)
 	}
 }
+
+// --- pre-MR (PR-less) review ---
+
+// fakeHead is a canned checkout: what `git rev-parse` would have said.
+type fakeHead struct {
+	branch string
+	sha    string
+	err    error
+}
+
+func (f fakeHead) Head(context.Context, string) (string, string, error) {
+	return f.branch, f.sha, f.err
+}
+
+func newPreMREngine(store Store, prs PRs, launcher Launcher, head Head) *Engine {
+	ids := 0
+	return New(Deps{
+		Store: store, Sessions: fakeSessions{rec: liveWorker(), ok: true}, PRs: prs,
+		Projects: fakeProjects{}, Launcher: launcher, Head: head,
+		Clock: func() time.Time { return time.Unix(0, 0).UTC() },
+		NewID: func() string { ids++; return "id-" + string(rune('0'+ids)) },
+	})
+}
+
+// The whole point of §2.5: a worker with no PR can be reviewed. Before this,
+// Trigger refused with "has no PR to review" and there was no way to get a
+// review before the MR was opened.
+func TestTriggerReviewsAWorkerWithNoPR(t *testing.T) {
+	store := &fakeStore{}
+	launcher := &fakeLauncher{handle: "review-mer-1"}
+	eng := newPreMREngine(store, fakePRs{}, launcher, fakeHead{branch: "feature/x", sha: "sha1"})
+
+	res, err := eng.Trigger(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if !res.Created {
+		t.Fatalf("expected a review to be created for a PR-less worker: %+v", res)
+	}
+	if res.Run.PRURL != "" || res.Run.TargetSHA != "sha1" || res.Run.Status != domain.ReviewRunRunning {
+		t.Fatalf("run should be keyed on the commit with no PR: %+v", res.Run)
+	}
+	if !launcher.spawned {
+		t.Fatal("expected a reviewer to be spawned")
+	}
+	// The reviewer must be told WHAT it is reviewing, since there is no URL.
+	if launcher.gotSpec.Branch != "feature/x" || launcher.gotSpec.PRURL != "" {
+		t.Fatalf("launch spec = %+v", launcher.gotSpec)
+	}
+	if len(res.Reviews) != 1 || res.Reviews[0].Branch != "feature/x" || res.Reviews[0].Status != ReviewStateRunning {
+		t.Fatalf("reviews = %+v", res.Reviews)
+	}
+}
+
+// A checkout AO cannot name (detached HEAD, unborn branch, no worktree) is still
+// refused — but with an error that says what is actually missing.
+func TestTriggerRefusesWhenThereIsNoPRAndNoBranchCommit(t *testing.T) {
+	eng := newPreMREngine(&fakeStore{}, fakePRs{}, &fakeLauncher{}, fakeHead{})
+
+	_, err := eng.Trigger(context.Background(), "mer-1")
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v; want ErrInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "no branch commit") {
+		t.Fatalf("err = %v; should name the missing branch commit", err)
+	}
+}
+
+// Per-commit idempotency has to hold on the PR-less key too, or every poll would
+// start another pass over the same tree.
+func TestTriggerPreMRIsIdempotentForSameCommit(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs: []domain.ReviewRun{{
+			ID: "run-1", SessionID: "mer-1", PRURL: "", TargetSHA: "sha1",
+			Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved,
+		}},
+	}
+	launcher := &fakeLauncher{alive: true}
+	eng := newPreMREngine(store, fakePRs{}, launcher, fakeHead{branch: "feature/x", sha: "sha1"})
+
+	res, err := eng.Trigger(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if res.Created || res.Run.ID != "run-1" {
+		t.Fatalf("expected reuse of the pre-MR run for the same commit: %+v", res)
+	}
+	if launcher.spawned || launcher.notified {
+		t.Fatalf("should not launch for an already-reviewed commit: %+v", launcher)
+	}
+	if len(store.runs) != 1 {
+		t.Fatalf("should not insert another run: %+v", store.runs)
+	}
+}
+
+// The collision the two keying schemes could have caused: a commit reviewed
+// before the PR existed must not be reviewed a second time the moment the PR
+// opens on that same commit.
+func TestTriggerDoesNotReReviewAPreMRCommitOnceThePROpens(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs: []domain.ReviewRun{{
+			ID: "run-1", SessionID: "mer-1", PRURL: "", TargetSHA: "sha1",
+			Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved,
+		}},
+	}
+	launcher := &fakeLauncher{alive: true}
+	// The PR now exists, at the very commit the pre-MR pass approved.
+	eng := newPreMREngine(store, prAt("sha1"), launcher, fakeHead{branch: "feature/x", sha: "sha1"})
+
+	res, err := eng.Trigger(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if res.Created {
+		t.Fatalf("the PR's head was already reviewed pre-MR; expected no new pass: %+v", res)
+	}
+	if len(store.runs) != 1 {
+		t.Fatalf("should not insert another run: %+v", store.runs)
+	}
+	if len(res.Reviews) != 1 || res.Reviews[0].Status != ReviewStateUpToDate {
+		t.Fatalf("PR should read as up_to_date from the adopted pre-MR run: %+v", res.Reviews)
+	}
+}
+
+// The other half of "cannot collide": a PR at a DIFFERENT commit is unaffected
+// by a pre-MR run, and gets its own PR-scoped pass.
+func TestTriggerReviewsThePRWhenItsHeadMovedPastThePreMRCommit(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		runs: []domain.ReviewRun{{
+			ID: "run-1", SessionID: "mer-1", PRURL: "", TargetSHA: "sha1",
+			Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved,
+		}},
+	}
+	launcher := &fakeLauncher{handle: "review-mer-1"}
+	eng := newPreMREngine(store, prAt("sha2"), launcher, fakeHead{branch: "feature/x", sha: "sha2"})
+
+	res, err := eng.Trigger(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if !res.Created || res.Run.TargetSHA != "sha2" || res.Run.PRURL == "" {
+		t.Fatalf("expected a fresh PR-scoped pass for the new head: %+v", res.Run)
+	}
+}
+
+// CloseReviewer ends the pane AND forgets the handle. A stale handle left behind
+// is a dead terminal the UI offers and a probe the next trigger has to make.
+func TestCloseReviewerTearsDownAndClearsTheHandle(t *testing.T) {
+	store := &fakeStore{review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"}}
+	launcher := &fakeLauncher{}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	if err := eng.CloseReviewer(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("CloseReviewer: %v", err)
+	}
+	if len(launcher.teardowns) != 1 || launcher.teardowns[0] != "mer-1" {
+		t.Fatalf("teardowns = %+v", launcher.teardowns)
+	}
+	if store.review.ReviewerHandleID != "" {
+		t.Fatalf("handle should be cleared, got %q", store.review.ReviewerHandleID)
+	}
+	// Idempotent: a second close on a worker with no live pane is a no-op.
+	if err := eng.CloseReviewer(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("second CloseReviewer: %v", err)
+	}
+}

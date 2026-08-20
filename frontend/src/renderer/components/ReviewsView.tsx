@@ -103,9 +103,10 @@ export function ReviewsView({
 
 	// --- reviews (AO reviewer state per PR) ----------------------------------
 	const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+	// Not gated on hasPr: AO reviews a branch before any PR exists, and that pass's
+	// body lives nowhere else, so skipping the fetch would hide it entirely.
 	const reviewsQuery = useQuery({
 		queryKey: ["session-reviews", sessionId],
-		enabled: hasPr,
 		refetchInterval: (query) => {
 			const data = query.state.data as ReviewsResponse | undefined;
 			return (data?.reviews ?? []).some((review) => review.status === "running") ? 2500 : false;
@@ -121,7 +122,6 @@ export function ReviewsView({
 	});
 	const projectConfigQuery = useQuery({
 		queryKey: ["project-config", session.workspaceId],
-		enabled: hasPr,
 		queryFn: async () => {
 			if (usePreviewData) return mockProjectConfig();
 			const { data, error } = await apiClient.GET("/api/v1/projects/{id}", {
@@ -240,6 +240,10 @@ export function ReviewsView({
 
 	// --- merge PRs (facts) + reviews + comment groups into per-PR blocks ------
 	const blocks = useMemo(() => mergeBlocks(prs, reviewStates, groups), [prs, reviewStates, groups]);
+	// With no PR the planner returns a single branch-keyed state instead of one per
+	// PR. That is a real review with a real body, and mergeBlocks (which zips by PR
+	// number) has nothing to hang it on — so it gets its own card.
+	const preMRState = !hasPr ? reviewStates.find((r) => !r.prUrl) : undefined;
 	const totalUnresolved = blocks.reduce((n, b) => n + b.unresolved.length, 0);
 	const commentPrCount = blocks.filter((b) => b.unresolved.length > 0).length;
 	const resolvedItems = groups.flatMap((g) =>
@@ -280,10 +284,15 @@ export function ReviewsView({
 	};
 
 	// --- render --------------------------------------------------------------
-	const loading = hasPr && (reviewsQuery.isLoading || commentsQuery.isLoading);
+	// With no PR there are no comments to wait for, but the reviews fetch still
+	// runs — showing "Nothing to review yet" while it is in flight would flash a
+	// wrong answer at a session that does have a pre-MR review.
+	const loading = reviewsQuery.isLoading || (hasPr && commentsQuery.isLoading);
+	// A comments failure is only news when there are PRs to have comments on. With
+	// no PR it is noise that would hide the pre-merge review behind an error.
 	const err = reviewsQuery.error
 		? apiErrorMessage(reviewsQuery.error, "Unable to load reviews")
-		: commentsQuery.error
+		: hasPr && commentsQuery.error
 			? apiErrorMessage(commentsQuery.error, "Unable to load comments")
 			: null;
 
@@ -304,12 +313,13 @@ export function ReviewsView({
 				totalUnresolved={totalUnresolved}
 				commentPrCount={commentPrCount}
 				prCount={prs.length}
+				preMR={Boolean(preMRState)}
 				selectMode={selectMode}
 				canSelect={totalUnresolved > 0}
 				onToggleSelect={exitSelect}
 			/>
 
-			{hasPr && (
+			{(hasPr || preMRState) && (
 				<ReviewerStrip
 					harness={harness}
 					aggregate={sessionReviewVerdict(reviewStates)}
@@ -362,7 +372,7 @@ export function ReviewsView({
 				{loading && <p style={{ padding: 16, fontSize: 12.5, color: P.muted2 }}>Loading reviews…</p>}
 				{!loading && err && <p style={{ padding: 16, fontSize: 12.5, color: P.red }}>{err}</p>}
 
-				{!loading && !err && !hasPr && <NoPrEmptyState />}
+				{!loading && !err && !hasPr && (preMRState ? <PreMRReviewCard state={preMRState} /> : <NoPrEmptyState />)}
 
 				{!loading &&
 					!err &&
@@ -451,6 +461,7 @@ function ReviewsHeader({
 	totalUnresolved,
 	commentPrCount,
 	prCount,
+	preMR,
 	selectMode,
 	canSelect,
 	onToggleSelect,
@@ -458,6 +469,8 @@ function ReviewsHeader({
 	totalUnresolved: number;
 	commentPrCount: number;
 	prCount: number;
+	/** A review ran on the branch before any PR existed, so "no PRs" is not "nothing here". */
+	preMR: boolean;
 	selectMode: boolean;
 	canSelect: boolean;
 	onToggleSelect: () => void;
@@ -467,7 +480,9 @@ function ReviewsHeader({
 			? `${totalUnresolved} unresolved across ${commentPrCount} PR${commentPrCount === 1 ? "" : "s"}`
 			: prCount > 0
 				? `${prCount} pull request${prCount === 1 ? "" : "s"} · no unresolved comments`
-				: "No pull requests yet";
+				: preMR
+					? "Reviewed before the PR · no PR yet"
+					: "No pull requests yet";
 	return (
 		<div style={{ flex: "none", padding: "16px 16px 12px", borderBottom: `1px solid ${P.divider}` }}>
 			<div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
@@ -1510,6 +1525,55 @@ function ResolvedSection({ items }: { items: { group: Group; thread: Thread }[] 
 	);
 }
 
+/**
+ * A review that ran before any PR existed. There was nowhere to post it, so the
+ * submitted body is the entire review — which is why this renders the body in
+ * full rather than linking out to a provider thread that does not exist.
+ */
+function PreMRReviewCard({ state }: { state: PRReviewState }) {
+	const verdict = reviewVerdict(state);
+	const run = state.latestRun;
+	return (
+		<div
+			style={{
+				border: `1px solid ${P.borderCard}`,
+				borderRadius: 10,
+				background: P.cardBg,
+				padding: 14,
+				marginBottom: 12,
+			}}
+		>
+			<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+				<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>Pre-merge review</span>
+				<StatusPill color={TONE_COLOR[verdict.tone]} label={verdict.label} />
+			</div>
+			<div style={{ fontSize: 11.5, color: P.muted2, fontFamily: MONO, marginBottom: run?.body ? 10 : 0 }}>
+				{state.branch || "this branch"}
+				{state.targetSha ? ` · ${state.targetSha.slice(0, 12)}` : ""}
+			</div>
+			{run?.body ? (
+				<pre
+					style={{
+						margin: 0,
+						fontSize: 12,
+						lineHeight: 1.55,
+						color: P.secondary,
+						whiteSpace: "pre-wrap",
+						wordBreak: "break-word",
+						fontFamily: "inherit",
+					}}
+				>
+					{run.body}
+				</pre>
+			) : (
+				<div style={{ fontSize: 12.5, color: P.muted2, lineHeight: 1.5 }}>
+					No PR exists yet, so this review is not posted anywhere — its findings will appear here once the pass submits.
+				</div>
+			)}
+		</div>
+	);
+}
+
 function NoPrEmptyState() {
 	return (
 		<div
@@ -1524,11 +1588,10 @@ function NoPrEmptyState() {
 			}}
 		>
 			<div style={{ fontSize: 30, marginBottom: 14, opacity: 0.5 }}>◌</div>
-			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 4 }}>
-				No pull request opened yet.
-			</div>
-			<div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 240 }}>
-				Reviews and review comments appear here once this session opens a PR or MR.
+			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 4 }}>Nothing to review yet.</div>
+			<div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 260 }}>
+				AO can review this branch before a PR exists — it just needs a commit on it first. Review comments appear here
+				once a PR or MR is opened.
 			</div>
 		</div>
 	);
@@ -1635,6 +1698,37 @@ function mockProjectConfig(): ProjectConfig {
 // not-run) so the demo shows the combined block's review pill in each state.
 function mockReviewsResponse(session: WorkspaceSession): ReviewsResponse {
 	const prs = sortedPRs(session);
+	// A session with no PR gets the pre-merge shape the backend's PlanBranch
+	// returns: one branch-keyed state, whose submitted body IS the whole review.
+	if (prs.length === 0) {
+		return {
+			reviewerHandleId: "",
+			reviews: [
+				{
+					branch: session.branch,
+					latestRun: {
+						batchId: `demo-batch-${session.id}`,
+						body: 'No blocking findings.\n\ndocs/install.md:12 - the prerequisites list repeats step 2; fold it into the table above.\ndocs/install.md:47 - "see below" points at a section that moved.',
+						createdAt: new Date(Date.now() - 9 * 60 * 1000).toISOString(),
+						githubReviewId: "",
+						harness: "codex",
+						id: `demo-review-run-${session.id}`,
+						prUrl: "",
+						reviewId: `demo-review-${session.id}`,
+						sessionId: session.id,
+						status: "complete",
+						targetSha: "9f1c4ab27de3",
+						verdict: "approved",
+					},
+					prNumber: 0,
+					prUrl: "",
+					status: "up_to_date",
+					targetSha: "9f1c4ab27de3",
+					title: "",
+				},
+			],
+		} as ReviewsResponse;
+	}
 	return {
 		reviewerHandleId: `${session.id}-reviewer`,
 		reviews: prs.map((pr, index) => {

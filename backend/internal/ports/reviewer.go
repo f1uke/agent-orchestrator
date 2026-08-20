@@ -62,8 +62,12 @@ type ReviewInvocation struct {
 
 // ReviewTask is one PR/run in a multi-PR review trigger queue.
 type ReviewTask struct {
-	RunID     string
-	PRURL     string
+	RunID string
+	PRURL string
+	// Branch names the checkout branch a PR-less (pre-MR) task reviews against its
+	// base. It is set only when PRURL is empty; a PR task takes its identity from
+	// the URL.
+	Branch    string
 	TargetSHA string
 }
 

@@ -181,3 +181,54 @@ func TestReviewTextsIncludesMultiPRQueue(t *testing.T) {
 		}
 	}
 }
+
+// A pre-MR pass has nowhere to post, so the prompt must not hand the reviewer a
+// posting flow it cannot run — and must say plainly that the submitted body is
+// the only place the review lands.
+func TestReviewTextsPreMRTellsTheReviewerNotToPostAndThatTheBodyIsTheReview(t *testing.T) {
+	prompt, _ := reviewTexts(LaunchSpec{
+		RunID:     "run-1",
+		WorkerID:  "mer-1",
+		Branch:    "feature/x",
+		TargetSHA: "sha1",
+		ReviewQueue: []ports.ReviewTask{
+			{RunID: "run-1", Branch: "feature/x", TargetSHA: "sha1"},
+		},
+	})
+
+	for _, want := range []string{
+		"branch feature/x",
+		"no pull request or merge request",
+		"only place this review lands",
+		"ao review submit --session mer-1 --reviews -",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("pre-MR prompt is missing %q\n---\n%s", want, prompt)
+		}
+	}
+	for _, unwanted := range []string{"gh api", "glab mr note"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("pre-MR prompt must not tell the reviewer to post with %q\n---\n%s", unwanted, prompt)
+		}
+	}
+}
+
+// Preservation: a pass WITH a PR keeps the provider-posting flow exactly as it
+// was. Nothing about the pre-MR path may weaken the post-MR one.
+func TestReviewTextsWithAPRStillPostsToTheProvider(t *testing.T) {
+	prompt, _ := reviewTexts(LaunchSpec{
+		RunID:     "run-1",
+		WorkerID:  "mer-1",
+		PRURL:     "https://github.com/o/r/pull/7",
+		TargetSHA: "sha1",
+		ReviewQueue: []ports.ReviewTask{
+			{RunID: "run-1", PRURL: "https://github.com/o/r/pull/7", TargetSHA: "sha1"},
+		},
+	})
+	if !strings.Contains(prompt, "gh api") {
+		t.Errorf("post-MR prompt lost the gh api posting flow\n---\n%s", prompt)
+	}
+	if strings.Contains(prompt, "no pull request or merge request") {
+		t.Errorf("post-MR prompt must not use the pre-MR wording\n---\n%s", prompt)
+	}
+}

@@ -7,6 +7,7 @@ package review
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -51,6 +52,9 @@ type Store interface {
 	UpdateReviewRunResult(ctx context.Context, id string, status domain.ReviewRunStatus, verdict domain.ReviewVerdict, body, githubReviewID string) (bool, error)
 	MarkReviewRunDelivered(ctx context.Context, id string, deliveredAt time.Time) (bool, error)
 	ListPRsBySession(ctx context.Context, id domain.SessionID) ([]domain.PullRequest, error)
+	// ListReviewRunsBySession backs the close-on-submit check: the reviewer pane
+	// may only be closed once nothing is still running for this worker.
+	ListReviewRunsBySession(ctx context.Context, id domain.SessionID) ([]domain.ReviewRun, error)
 }
 
 // Reducer is the lifecycle reaction boundary used after a review result has
@@ -161,23 +165,58 @@ func (s *Service) SubmitMany(ctx context.Context, workerID domain.SessionID, rev
 		}
 		runs = append(runs, run)
 	}
-	if s.lifecycle == nil {
-		return runs, nil
-	}
-	delivered, err := s.deliverSubmitted(ctx, workerID, runs)
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[string]domain.ReviewRun, len(delivered))
-	for _, run := range delivered {
-		byID[run.ID] = run
-	}
-	for i, run := range runs {
-		if deliveredRun, ok := byID[run.ID]; ok {
-			runs[i] = deliveredRun
+	if s.lifecycle != nil {
+		delivered, err := s.deliverSubmitted(ctx, workerID, runs)
+		if err != nil {
+			return nil, err
+		}
+		byID := make(map[string]domain.ReviewRun, len(delivered))
+		for _, run := range delivered {
+			byID[run.ID] = run
+		}
+		for i, run := range runs {
+			if deliveredRun, ok := byID[run.ID]; ok {
+				runs[i] = deliveredRun
+			}
 		}
 	}
+	// The pane closes on submit, not at the next daemon boot. Runs last, so the
+	// reviewer's own `ao review submit` is only cut off after everything durable
+	// (the result rows and any worker nudge) has already been written.
+	s.closeReviewerIfIdle(ctx, workerID)
 	return runs, nil
+}
+
+// closeReviewerIfIdle ends the reviewer pane once this worker has no review run
+// still running. A pass that submits is finished, and the pane is not kept warm
+// for the next one: a surviving pane carries its whole transcript into every
+// later pass, and the findings it would "remember" are already on the review_run
+// row and (post-MR) on the PR itself.
+//
+// The guard is "nothing still running", not "this submission is done", because
+// one reviewer serves a whole multi-PR queue and is told to review every task
+// before submitting. Closing on the first submitted run would decapitate the rest
+// of the queue.
+//
+// Best-effort by design: the result is already persisted, and failing the submit
+// here would only make the reviewer retry a submission that already landed.
+func (s *Service) closeReviewerIfIdle(ctx context.Context, workerID domain.SessionID) {
+	if s.engine == nil {
+		return
+	}
+	runs, err := s.store.ListReviewRunsBySession(ctx, workerID)
+	if err != nil {
+		slog.Default().Warn("review: could not check for running passes before closing the reviewer", "sessionID", workerID, "err", err)
+		return
+	}
+	for _, run := range runs {
+		if run.Status == domain.ReviewRunRunning {
+			return
+		}
+	}
+	if err := s.engine.CloseReviewer(ctx, workerID); err != nil {
+		slog.Default().Warn("review: could not close the reviewer pane after submit", "sessionID", workerID, "err", err)
+	}
 }
 
 func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, review SubmittedReview) (domain.ReviewRun, error) {
@@ -283,7 +322,12 @@ func (s *Service) deliverableRuns(ctx context.Context, workerID domain.SessionID
 		if run.Status != domain.ReviewRunComplete || run.Verdict != domain.VerdictChangesRequested || run.DeliveredAt != nil {
 			continue
 		}
-		if run.BatchID != "" && currentHeads[run.PRURL] != run.TargetSHA {
+		// The head check only means anything for a run that has a PR: it exists to
+		// drop feedback for a commit the PR has already moved past. A pre-MR run has
+		// no PR row to compare against, so applying it would compare the branch head
+		// to currentHeads[""] — always "" — and silently drop every pre-MR
+		// changes_requested verdict instead of nudging the worker.
+		if run.PRURL != "" && run.BatchID != "" && currentHeads[run.PRURL] != run.TargetSHA {
 			continue
 		}
 		deliverable = append(deliverable, run)

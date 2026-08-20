@@ -45,25 +45,60 @@ func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 		prompts.ConfidentialityGuard
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Review the requested pull/merge request(s) for worker session %s.\n", spec.WorkerID)
+	if reviewIsPreMR(spec) {
+		fmt.Fprintf(&b, "Review the work on worker session %s's checkout. It has no pull/merge request yet — review the branch's diff against its base branch.\n", spec.WorkerID)
+	} else {
+		fmt.Fprintf(&b, "Review the requested pull/merge request(s) for worker session %s.\n", spec.WorkerID)
+	}
 	b.WriteString(reviewQueueText(spec))
 	b.WriteString("\n\nComplete every review task in the queue autonomously. Do not ask the user whether to continue to the next task, and do not stop after the first one unless the provider or checkout is genuinely unusable for every queued task.\n\n")
 	b.WriteString("Do these steps in order:\n")
 	b.WriteString(reviewStep1(spec))
-	b.WriteString(reviewStep2(string(spec.WorkerID)))
+	b.WriteString(reviewStep2(string(spec.WorkerID), reviewIsPreMR(spec)))
 	return b.String(), systemPrompt
 }
 
 func reviewQueueText(spec LaunchSpec) string {
 	if len(spec.ReviewQueue) <= 1 {
-		return fmt.Sprintf("\nReview task queue:\n* 1. %s (head commit %s, run %s)\n", spec.PRURL, spec.TargetSHA, spec.RunID)
+		target := reviewTargetName(spec.PRURL, spec.Branch)
+		return fmt.Sprintf("\nReview task queue:\n* 1. %s (head commit %s, run %s)\n", target, spec.TargetSHA, spec.RunID)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "\nAO created %d review tasks for this worker session. Review every queued PR/MR, then submit all results together.\n\nReview task queue:\n", len(spec.ReviewQueue))
 	for i, task := range spec.ReviewQueue {
-		fmt.Fprintf(&b, "* %d. %s (head commit %s, run %s)\n", i+1, task.PRURL, task.TargetSHA, task.RunID)
+		fmt.Fprintf(&b, "* %d. %s (head commit %s, run %s)\n", i+1, reviewTargetName(task.PRURL, task.Branch), task.TargetSHA, task.RunID)
 	}
 	return b.String()
+}
+
+// reviewTargetName names what a task reviews: its PR/MR URL, or — before any PR
+// exists — the branch. An unnamed branch degrades to "this branch" rather than
+// printing an empty target.
+func reviewTargetName(prURL, branch string) string {
+	if prURL != "" {
+		return prURL
+	}
+	if branch != "" {
+		return "branch " + branch
+	}
+	return "this branch"
+}
+
+// reviewIsPreMR reports that every task in this launch is PR-less. A pre-MR pass
+// has nowhere to post, so step 1 changes shape entirely. A mixed queue cannot
+// occur — Trigger keys a whole batch one way or the other — but the check is
+// written as "every task", not "the first one", so a future mixed batch keeps the
+// provider-posting instructions rather than silently losing them.
+func reviewIsPreMR(spec LaunchSpec) bool {
+	if len(spec.ReviewQueue) == 0 {
+		return spec.PRURL == ""
+	}
+	for _, task := range spec.ReviewQueue {
+		if task.PRURL != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // reviewURLIsGitLab reports whether a review target URL is a GitLab merge
@@ -104,6 +139,9 @@ func reviewQueueProviders(spec LaunchSpec) (github, gitlab bool) {
 // A queue is single-provider in practice (one worker session = one repo), but a
 // mixed queue is handled by emitting both blocks with a routing note.
 func reviewStep1(spec LaunchSpec) string {
+	if reviewIsPreMR(spec) {
+		return preMRReviewStep1
+	}
 	github, gitlab := reviewQueueProviders(spec)
 	switch {
 	case gitlab && !github:
@@ -114,6 +152,16 @@ func reviewStep1(spec LaunchSpec) string {
 		return githubReviewStep1
 	}
 }
+
+// preMRReviewStep1 replaces the posting step when there is no pull/merge request
+// yet. There is nothing to post to, so the review body submitted in step 2 is the
+// ONLY carrier for the findings: it is what AO persists on the review_run row and
+// what every AO surface reads back. Saying that plainly is what stops a reviewer
+// from writing a two-line "see the PR" summary that points at nothing.
+const preMRReviewStep1 = "1. There is no pull request or merge request for this work yet, so there is nowhere to post a review. Do NOT create one, and do not run `gh`, `glab`, `git push` or anything else that would publish this branch — reviewing is read-only.\n\n" +
+	"   - Read the diff yourself: find the branch's base (`git log --oneline` against the target branch, or `git merge-base`) and read `git diff <base>...HEAD`, including any uncommitted work in the checkout.\n" +
+	"   - Your review body in step 2 is the only place this review lands. Write the whole review there — the summary AND every finding, each as `<path>:<line> — <finding>` so it is actionable without an inline comment to anchor it.\n" +
+	"   - Use an empty githubReviewId in step 2; there is no provider review to reference.\n"
 
 // githubReviewStep1 is the original GitHub review-posting flow, preserved
 // verbatim so GitHub behavior is unchanged.
@@ -143,9 +191,17 @@ const gitlabReviewStep1 = "1. For each merge request below, post your review wit
 // reviewStep2 is the provider-neutral bookkeeping step. The githubReviewId field
 // name is an opaque id kept for wire/storage compatibility; it is empty for
 // GitLab merge requests.
-func reviewStep2(workerID string) string {
-	return fmt.Sprintf("2. After every task's review is posted in step 1, record AO's bookkeeping for those already-posted reviews using one command. Pass JSON on stdin so nothing is ever written into the worktree (a file there could be committed onto the worker's branch). Include one object per PR/MR run from the queue:\n\n"+
+func reviewStep2(workerID string, preMR bool) string {
+	lead := "After every task's review is posted in step 1, record AO's bookkeeping for those already-posted reviews using one command."
+	if preMR {
+		lead = "Record the review with one command. Nothing was posted anywhere in step 1, so this body IS the review."
+	}
+	tail := "Only if step 1 genuinely fails on the provider for a task, still include that run in step 2 with an empty githubReviewId so the result is recorded."
+	if preMR {
+		tail = "Submitting is not optional: a pre-MR review that is never submitted leaves no trace at all, because there is no PR carrying it."
+	}
+	return fmt.Sprintf("2. %s Pass JSON on stdin so nothing is ever written into the worktree (a file there could be committed onto the worker's branch). Include one object per PR/MR run from the queue:\n\n"+
 		"    printf '%%s' '{ \"reviews\": [ { \"runId\": \"<run-id>\", \"verdict\": \"<approved|changes_requested>\", \"githubReviewId\": \"<id-from-step-1-or-empty>\", \"body\": \"<your full review markdown>\" } ] }' | ao review submit --session %s --reviews -\n\n"+
-		"Only if step 1 genuinely fails on the provider for a task, still include that run in step 2 with an empty githubReviewId so the result is recorded.",
-		workerID)
+		"%s",
+		lead, workerID, tail)
 }

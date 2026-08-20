@@ -8,6 +8,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
+	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 )
 
 type fakeStore struct {
@@ -15,6 +16,7 @@ type fakeStore struct {
 	ok        bool
 	batchRuns []domain.ReviewRun
 	prs       []domain.PullRequest
+	review    *domain.Review
 
 	updateCalls int
 	markCalls   int
@@ -276,5 +278,184 @@ func TestSubmitCompletedRetryRejectsDifferentRecordedFields(t *testing.T) {
 				t.Fatalf("mismatched retry should not rewrite or deliver: update=%d mark=%d reducer=%d", st.updateCalls, st.markCalls, reducer.calls)
 			}
 		})
+	}
+}
+
+// --- close-on-submit ---
+//
+// The reviewer pane used to be kept warm between passes. It is not any more: a
+// pass that submits is over, and a surviving pane drags its whole transcript into
+// every later pass. These tests pin the new contract and its one guard rail — a
+// multi-PR queue that has only submitted half its runs keeps its reviewer.
+
+// The remaining reviewcore.Store surface, so one fake can back both the service
+// and a real engine. Only the review-row methods matter here; the run methods
+// above already do the work.
+func (f *fakeStore) UpsertReview(_ context.Context, r domain.Review) error {
+	cp := r
+	f.review = &cp
+	return nil
+}
+
+func (f *fakeStore) GetReviewBySession(context.Context, domain.SessionID) (domain.Review, bool, error) {
+	if f.review == nil {
+		return domain.Review{}, false, nil
+	}
+	return *f.review, true, nil
+}
+
+func (f *fakeStore) ListReviews(context.Context) ([]domain.Review, error) {
+	if f.review == nil {
+		return nil, nil
+	}
+	return []domain.Review{*f.review}, nil
+}
+
+func (f *fakeStore) InsertReviewRun(_ context.Context, r domain.ReviewRun) error {
+	f.batchRuns = append(f.batchRuns, r)
+	return nil
+}
+
+func (f *fakeStore) SupersedeReviewRun(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeStore) SupersedeStaleRunningReviewRuns(context.Context, domain.SessionID, string, string, string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeStore) FailRunningReviewRunsBySession(context.Context, domain.SessionID, string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeStore) GetReviewRunBySessionPRAndSHA(context.Context, domain.SessionID, string, string) (domain.ReviewRun, bool, error) {
+	return domain.ReviewRun{}, false, nil
+}
+
+func (f *fakeStore) ListSessionIDsWithRunningReviewRuns(context.Context) ([]domain.SessionID, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) ListReviewRunsBySession(context.Context, domain.SessionID) ([]domain.ReviewRun, error) {
+	if f.batchRuns != nil {
+		return append([]domain.ReviewRun(nil), f.batchRuns...), nil
+	}
+	if f.ok {
+		return []domain.ReviewRun{f.run}, nil
+	}
+	return nil, nil
+}
+
+type fakeSessions struct{}
+
+func (fakeSessions) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	return domain.SessionRecord{ID: id, ProjectID: "mer", Metadata: domain.SessionMetadata{WorkspacePath: "/ws/" + string(id)}}, true, nil
+}
+
+type fakeProjects struct{}
+
+func (fakeProjects) GetProject(_ context.Context, id string) (domain.ProjectRecord, bool, error) {
+	return domain.ProjectRecord{ID: id}, true, nil
+}
+
+type fakeLauncher struct{ teardowns []domain.SessionID }
+
+func (f *fakeLauncher) Spawn(context.Context, reviewcore.LaunchSpec) (string, error) {
+	return "review-mer-1", nil
+}
+func (f *fakeLauncher) Notify(context.Context, string, reviewcore.LaunchSpec) error { return nil }
+func (f *fakeLauncher) Alive(context.Context, string) (bool, error)                 { return true, nil }
+func (f *fakeLauncher) Teardown(_ context.Context, id domain.SessionID) error {
+	f.teardowns = append(f.teardowns, id)
+	return nil
+}
+
+func newEngineForService(st *fakeStore, launcher reviewcore.Launcher) *reviewcore.Engine {
+	return reviewcore.New(reviewcore.Deps{
+		Store: st, Sessions: fakeSessions{}, PRs: st, Projects: fakeProjects{}, Launcher: launcher,
+	})
+}
+
+func TestSubmitClosesTheReviewerPaneWhenNothingIsStillRunning(t *testing.T) {
+	st := &fakeStore{
+		ok:     true,
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		run:    domain.ReviewRun{ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+		batchRuns: []domain.ReviewRun{
+			{ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+		},
+		prs: []domain.PullRequest{{URL: "pr1", HeadSHA: "sha1"}},
+	}
+	launcher := &fakeLauncher{}
+	svc := New(newEngineForService(st, launcher), st, WithLifecycleReducer(&fakeReducer{outcome: lifecycle.ReviewDeliverySent}))
+
+	if _, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictApproved, "looks good", ""); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(launcher.teardowns) != 1 || launcher.teardowns[0] != "mer-1" {
+		t.Fatalf("expected the reviewer pane to be closed on submit, teardowns = %+v", launcher.teardowns)
+	}
+	if st.review.ReviewerHandleID != "" {
+		t.Fatalf("the closed pane's handle should be forgotten, got %q", st.review.ReviewerHandleID)
+	}
+}
+
+// One reviewer serves a whole multi-PR queue and is told to review every task
+// before submitting. Closing on the first submitted run would decapitate the rest.
+func TestSubmitKeepsTheReviewerPaneWhileAnotherRunIsStillRunning(t *testing.T) {
+	st := &fakeStore{
+		ok:     true,
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		batchRuns: []domain.ReviewRun{
+			{ID: "run-1", SessionID: "mer-1", BatchID: "batch-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+			{ID: "run-2", SessionID: "mer-1", BatchID: "batch-1", PRURL: "pr2", TargetSHA: "sha2", Status: domain.ReviewRunRunning},
+		},
+		prs: []domain.PullRequest{{URL: "pr1", HeadSHA: "sha1"}, {URL: "pr2", HeadSHA: "sha2"}},
+	}
+	launcher := &fakeLauncher{}
+	svc := New(newEngineForService(st, launcher), st, WithLifecycleReducer(&fakeReducer{outcome: lifecycle.ReviewDeliverySent}))
+
+	if _, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictApproved, "", ""); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(launcher.teardowns) != 0 {
+		t.Fatalf("run-2 is still running; the pane must survive: %+v", launcher.teardowns)
+	}
+
+	// Once the last run submits, the pane goes.
+	if _, err := svc.Submit(context.Background(), "mer-1", "run-2", domain.VerdictApproved, "", ""); err != nil {
+		t.Fatalf("second Submit: %v", err)
+	}
+	if len(launcher.teardowns) != 1 {
+		t.Fatalf("expected the pane to close once the queue is done: %+v", launcher.teardowns)
+	}
+}
+
+// Preservation: a pre-MR changes_requested verdict still reaches the worker. It
+// has no PR row to compare heads against, so the head guard that protects the
+// post-MR path must not be applied to it — otherwise every pre-MR verdict is
+// silently dropped.
+func TestSubmitDeliversAPreMRChangesRequestedVerdict(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	st := &fakeStore{
+		ok:     true,
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", ReviewerHandleID: "review-mer-1"},
+		batchRuns: []domain.ReviewRun{
+			{ID: "run-1", SessionID: "mer-1", BatchID: "batch-1", PRURL: "", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+		},
+	}
+	reducer := &fakeReducer{outcome: lifecycle.ReviewDeliverySent}
+	launcher := &fakeLauncher{}
+	svc := New(newEngineForService(st, launcher), st, WithLifecycleReducer(reducer), WithClock(func() time.Time { return now }))
+
+	run, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictChangesRequested, "fix the null check", "")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if reducer.batchCalls != 1 || len(reducer.gotBatch) != 1 || reducer.gotBatch[0].PRURL != "" {
+		t.Fatalf("pre-MR changes_requested should be delivered: batchCalls=%d got=%+v", reducer.batchCalls, reducer.gotBatch)
+	}
+	if run.Status != domain.ReviewRunDelivered {
+		t.Fatalf("run = %+v, want delivered", run)
 	}
 }

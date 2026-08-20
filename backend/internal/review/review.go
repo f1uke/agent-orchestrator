@@ -68,6 +68,10 @@ type Deps struct {
 	PRs      PRs
 	Projects Projects
 	Launcher Launcher
+	// Head resolves the worker checkout's branch and head commit for a pre-MR
+	// review (no PR to take them from). Nil defaults to the production git
+	// resolver, so a bare Engine still works.
+	Head Head
 
 	// PromptOverrides returns the current global per-kind base overrides, read at
 	// trigger time so an edit takes effect on the next reviewer (re)launch. Nil
@@ -91,6 +95,7 @@ type Engine struct {
 	prs              PRs
 	projects         Projects
 	launcher         Launcher
+	head             Head
 	promptOverrides  func() promptoverrides.Overrides
 	responseLanguage func() string
 	clock            func() time.Time
@@ -113,12 +118,17 @@ func New(d Deps) *Engine {
 	if newID == nil {
 		newID = uuid.NewString
 	}
+	head := d.Head
+	if head == nil {
+		head = NewGitHead()
+	}
 	return &Engine{
 		store:            d.Store,
 		sessions:         d.Sessions,
 		prs:              d.PRs,
 		projects:         d.Projects,
 		launcher:         d.Launcher,
+		head:             head,
 		promptOverrides:  d.PromptOverrides,
 		responseLanguage: d.ResponseLanguage,
 		clock:            clock,
@@ -199,14 +209,25 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 	if err != nil {
 		return TriggerResult{}, err
 	}
-	if len(prs) == 0 {
-		return TriggerResult{}, fmt.Errorf("%w: worker %q has no PR to review", ErrInvalid, workerID)
-	}
 	runs, err := e.store.ListReviewRunsBySession(ctx, workerID)
 	if err != nil {
 		return TriggerResult{}, err
 	}
-	reviews := Plan(prs, runs)
+	// A reviewer reads the checkout's diff against its base branch, so nothing
+	// about reviewing needs a PR. With no PR the pass keys on (branch, head sha)
+	// instead of (PR url, head sha); everything downstream — supersede, insert,
+	// launch, submit — is the same code.
+	branch, headSHA := "", ""
+	if len(prs) == 0 {
+		branch, headSHA, err = e.head.Head(ctx, worker.Metadata.WorkspacePath)
+		if err != nil {
+			return TriggerResult{}, err
+		}
+		if branch == "" || headSHA == "" {
+			return TriggerResult{}, fmt.Errorf("%w: worker %q has no PR and no branch commit to review", ErrInvalid, workerID)
+		}
+	}
+	reviews := e.plan(prs, branch, headSHA, runs)
 
 	reviewRow, hasReview, err := e.store.GetReviewBySession(ctx, workerID)
 	if err != nil {
@@ -233,7 +254,7 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 			if err != nil {
 				return TriggerResult{}, err
 			}
-			reviews = Plan(prs, runs)
+			reviews = e.plan(prs, branch, headSHA, runs)
 		}
 	}
 
@@ -315,11 +336,12 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 	}
 
 	handleID := ""
-	queue := reviewQueue(created)
+	queue := reviewQueue(created, branch)
 	// Resolve the reviewer's effective global base (override else default) and the
 	// project's per-project addition once; reviewTexts appends the review-only
 	// floor + confidentiality guard when it assembles the system prompt.
 	spec := reviewLaunchSpec(worker, harness, created[0], queue, 0)
+	spec.Branch = branch
 	spec.ReviewerBase = e.reviewerBase()
 	spec.ReviewerAddition = projCfg.SystemPromptAdditions.Reviewer
 	// The reviewer's human-facing output (its PR/MR review comments) follows the
@@ -372,16 +394,33 @@ func reviewLaunchSpec(worker domain.SessionRecord, harness domain.ReviewerHarnes
 	}
 }
 
-func reviewQueue(runs []domain.ReviewRun) []ports.ReviewTask {
+func reviewQueue(runs []domain.ReviewRun, branch string) []ports.ReviewTask {
 	queue := make([]ports.ReviewTask, 0, len(runs))
 	for _, run := range runs {
-		queue = append(queue, ports.ReviewTask{
+		task := ports.ReviewTask{
 			RunID:     run.ID,
 			PRURL:     run.PRURL,
 			TargetSHA: run.TargetSHA,
-		})
+		}
+		// A PR-less task names the branch instead, so the reviewer prompt can say
+		// what it is diffing rather than printing an empty URL.
+		if run.PRURL == "" {
+			task.Branch = branch
+		}
+		queue = append(queue, task)
 	}
 	return queue
+}
+
+// plan picks the keying scheme: (PR url, head sha) when the worker owns PRs,
+// (branch, head sha) when it does not. The two are disjoint by construction —
+// a branch run always carries an empty PRURL, a PR run never does — so they can
+// neither collide in the unique index nor be read for one another.
+func (e *Engine) plan(prs []domain.PullRequest, branch, headSHA string, runs []domain.ReviewRun) []PRReviewState {
+	if len(prs) == 0 {
+		return PlanBranch(branch, headSHA, runs)
+	}
+	return Plan(prs, runs)
 }
 
 func replaceReviewLatestRun(reviews []PRReviewState, prURL, targetSHA string, run domain.ReviewRun) []PRReviewState {
@@ -457,12 +496,47 @@ func (e *Engine) TeardownReviewer(ctx stdctx.Context, workerID domain.SessionID)
 	return e.launcher.Teardown(ctx, workerID)
 }
 
+// CloseReviewer closes a worker's reviewer pane and forgets its handle, after a
+// pass has submitted its result. The pane used to be kept warm between passes;
+// it no longer is. A reviewer is an ordinary interactive agent, so a pane that
+// survives a pass carries its whole previous transcript into the next one and
+// re-reads it on every turn — the same superlinear context growth a long-lived
+// worker pays. Independent short passes cost materially less than one
+// accumulating session, and the pass's findings are already durable on the
+// review_run row, so continuity buys nothing that is not already written down.
+//
+// Clearing ReviewerHandleID matters as much as the teardown: a stale handle left
+// on the row is a terminal the UI offers to attach to and a liveness probe the
+// next Trigger has to make before it can spawn.
+//
+// Best-effort and idempotent — a worker with no reviewer row, or whose pane is
+// already gone, is a no-op.
+func (e *Engine) CloseReviewer(ctx stdctx.Context, workerID domain.SessionID) error {
+	if workerID == "" {
+		return nil
+	}
+	if err := e.launcher.Teardown(ctx, workerID); err != nil {
+		return err
+	}
+	existing, ok, err := e.store.GetReviewBySession(ctx, workerID)
+	if err != nil || !ok || existing.ReviewerHandleID == "" {
+		return err
+	}
+	existing.ReviewerHandleID = ""
+	existing.UpdatedAt = e.clock()
+	return e.store.UpsertReview(ctx, existing)
+}
+
 // ReapOrphanedReviewers closes reviewer panes whose worker session is gone or
 // terminal, on daemon boot. Reviewers have no session row, so no boot pass
 // (Reconcile/CloseIdleSessions/Cleanup) ever touches them; a reviewer whose
 // worker ended out of band — or was killed while the daemon was down — otherwise
 // lingers forever (the review-<worker> keep-alive shell leak). A live worker's
-// reviewer is left alone: it may be mid-review or idle-waiting for the next pass.
+// reviewer is left alone: a pass that was still running when the daemon went down
+// may have a reviewer mid-review, and killing it would throw away work that is
+// about to submit. (It is no longer left alone because the pane is kept WARM
+// between passes — CloseReviewer ends the pane at submit now. This sweep is what
+// it always was underneath: recovery for a pane orphaned by a crash or a restart.)
 // Returns the number of panes reaped. Best-effort per the daemon's boot contract.
 func (e *Engine) ReapOrphanedReviewers(ctx stdctx.Context) (int, error) {
 	reviews, err := e.store.ListReviews(ctx)
@@ -519,7 +593,19 @@ func (e *Engine) List(ctx stdctx.Context, workerID domain.SessionID) (SessionRev
 	if err != nil {
 		return SessionReviews{}, err
 	}
-	return SessionReviews{ReviewerHandleID: handle, Runs: runs, Reviews: Plan(prs, runs)}, nil
+	// Same keying choice as Trigger, so the list surface and the trigger path
+	// never disagree about whether a commit still needs reviewing.
+	branch, headSHA := "", ""
+	if len(prs) == 0 {
+		if worker, ok, err := e.sessions.GetSession(ctx, workerID); err != nil {
+			return SessionReviews{}, err
+		} else if ok {
+			// Best-effort: a worker whose worktree is gone (merged and reclaimed)
+			// still lists its recorded runs; it just has no live pre-MR state.
+			branch, headSHA, _ = e.head.Head(ctx, worker.Metadata.WorkspacePath)
+		}
+	}
+	return SessionReviews{ReviewerHandleID: handle, Runs: runs, Reviews: e.plan(prs, branch, headSHA, runs)}, nil
 }
 
 // projectConfig loads the worker's project config once, nil-safe: no projects

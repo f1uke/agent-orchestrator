@@ -5218,6 +5218,28 @@ components:
       required:
       - failed
       type: object
+    ControllersSessionPRAOReviewSummary:
+      properties:
+        preMr:
+          type: boolean
+        reviewedAt:
+          format: date-time
+          type: string
+        runId:
+          type: string
+        targetSha:
+          type: string
+        verdict:
+          enum:
+          - approved
+          - changes_requested
+          type: string
+      required:
+      - verdict
+      - runId
+      - targetSha
+      - reviewedAt
+      type: object
     ControllersSessionView:
       properties:
         activity:
@@ -6258,6 +6280,8 @@ components:
       type: object
     PRReviewState:
       properties:
+        branch:
+          type: string
         latestRun:
           $ref: '#/components/schemas/ReviewRun'
         prNumber:
@@ -6964,6 +6988,8 @@ components:
       properties:
         additions:
           type: integer
+        aoReview:
+          $ref: '#/components/schemas/ControllersSessionPRAOReviewSummary'
         author:
           type: string
         changedFiles:

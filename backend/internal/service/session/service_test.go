@@ -31,18 +31,22 @@ type fakeStore struct {
 	reviews       map[string][]domain.PullRequestReview
 	threads       map[string][]domain.PullRequestReviewThread
 	comments      map[string][]domain.PullRequestComment
+	reviewRuns    map[domain.SessionID][]domain.ReviewRun
+	prList        map[domain.SessionID][]domain.PullRequest
 	num           int
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		sessions: map[domain.SessionID]domain.SessionRecord{},
-		pr:       map[domain.SessionID]domain.PRFacts{},
-		projects: map[string]domain.ProjectRecord{},
-		checks:   map[string][]domain.PullRequestCheck{},
-		reviews:  map[string][]domain.PullRequestReview{},
-		threads:  map[string][]domain.PullRequestReviewThread{},
-		comments: map[string][]domain.PullRequestComment{},
+		sessions:   map[domain.SessionID]domain.SessionRecord{},
+		pr:         map[domain.SessionID]domain.PRFacts{},
+		projects:   map[string]domain.ProjectRecord{},
+		checks:     map[string][]domain.PullRequestCheck{},
+		reviews:    map[string][]domain.PullRequestReview{},
+		threads:    map[string][]domain.PullRequestReviewThread{},
+		comments:   map[string][]domain.PullRequestComment{},
+		reviewRuns: map[domain.SessionID][]domain.ReviewRun{},
+		prList:     map[domain.SessionID][]domain.PullRequest{},
 	}
 }
 
@@ -175,6 +179,11 @@ func (f *fakeStore) GetDisplayPRFactsForSession(_ context.Context, id domain.Ses
 }
 
 func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]domain.PullRequest, error) {
+	// prList lets a test supply full PullRequest rows (head SHA and all); without
+	// it the list is projected from the PRFacts the other tests already seed.
+	if rows, ok := f.prList[id]; ok {
+		return append([]domain.PullRequest(nil), rows...), nil
+	}
 	pr, ok := f.pr[id]
 	if !ok {
 		return nil, nil
@@ -208,6 +217,10 @@ func (f *fakeStore) ListPRReviewThreads(_ context.Context, prURL string) ([]doma
 
 func (f *fakeStore) ListPRComments(_ context.Context, prURL string) ([]domain.PullRequestComment, error) {
 	return append([]domain.PullRequestComment(nil), f.comments[prURL]...), nil
+}
+
+func (f *fakeStore) ListReviewRunsBySession(_ context.Context, id domain.SessionID) ([]domain.ReviewRun, error) {
+	return append([]domain.ReviewRun(nil), f.reviewRuns[id]...), nil
 }
 
 func (f *fakeStore) GetProject(_ context.Context, id string) (domain.ProjectRecord, bool, error) {

@@ -122,30 +122,50 @@ const REVIEW_AWAITING = "awaiting";
  * threshold (amber while short — the live gate you're waiting on). Changes
  * requested always wins. Absent a rule, it falls back to the decision label;
  * unresolved human comment threads soften an otherwise-quiet review to
- * "comments". */
+ * "comments".
+ *
+ * AO's own reviewer is folded in STRICTLY ADDITIVELY. It can block a gate the
+ * provider left quiet, and it can answer the "nobody has looked" case — but it
+ * never satisfies a real approval rule (a numeric threshold or an explicit
+ * `review_required` is about human approvers on the forge, and AO is not one of
+ * them, and those cases keep their own label — the state text truncates past
+ * ~12 characters, so there is no room to name both). An AO verdict is only ever reported at the PR's current head, so a green
+ * "AO ✓" cannot be stale. */
 function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	if (!pr) return gate("review", "Review", "idle", "—");
 	if (pr.state === "merged" || pr.state === "closed") return gate("review", "Review", "pass", "done");
 	// Changes requested is the priority signal; approval progress rides underneath
 	// it and never turns a blocked review neutral.
 	if (pr.review.decision === "changes_requested") return gate("review", "Review", "block", "changes");
+	// AO requesting changes blocks for the same reason a human does: there is
+	// feedback at this exact head that nobody has addressed.
+	if (pr.aoReview?.verdict === "changes_requested") return gate("review", "Review", "block", "AO: changes");
 
 	const progress = approvalProgress(pr.review);
 	if (progress?.required != null) {
 		// A known threshold makes the meter authoritative: green when met, amber
-		// (the live gate) while short.
+		// (the live gate) while short. AO does not count toward it.
 		return gate("review", "Review", progress.met ? "pass" : "wait", approvalLabel(progress));
 	}
 	// Count-only (SCM rule, unknown threshold) or no rule: keep the decision label,
 	// but surface the observed count when we have one.
 	const count = progress ? approvalLabel(progress) : null;
+	const aoApproved = pr.aoReview?.verdict === "approved";
 	switch (pr.review.decision) {
 		case "approved":
 			return gate("review", "Review", "pass", count ?? "approved");
 		case "review_required":
+			// The forge is still waiting on a human, and that is the whole state: an
+			// AO approval does not discharge the requirement, and the gate's state
+			// label truncates past ~12 characters, so naming both here would produce
+			// "AO ✓, huma…" — worse than saying the one thing that is blocking. AO's
+			// verdict stays visible on the Reviews tab and on the PR payload.
 			return gate("review", "Review", "wait", count ?? "required");
 		default:
 			if (count) return gate("review", "Review", "wait", count);
+			// AO reviewed this head and approved it. That is not "nobody has looked" —
+			// which is the whole reason REVIEW_AWAITING exists — so say who looked.
+			if (aoApproved && !pr.review.hasUnresolvedHumanComments) return gate("review", "Review", "pass", "AO approved");
 			// Nobody has reviewed it yet. That is a review still owed, not an
 			// inapplicable gate: `idle` is the tone for "there was nothing to look
 			// at" (no PR, closed PR), and reading it here is what let an unreviewed

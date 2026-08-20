@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -98,5 +99,119 @@ func TestSummarizeReviewApprovalProgressMergedOmitted(t *testing.T) {
 	got := summarizeReview(pr, nil, nil, domain.ApprovalRule{Enabled: true})
 	if got.RequiredApprovals != nil || got.ApprovalRuleSource != "" || got.ApprovalsCount != 0 {
 		t.Fatalf("merged PR should carry no approval progress, got %+v", got)
+	}
+}
+
+// --- AO's own verdict on the PR read model ---
+//
+// Before this, an AO approval reached nobody: ApplyReviewResult treated it as a
+// no-op and the board read only the provider's decision, so the durable
+// review_run row was invisible everywhere a human looks. These pin the surface
+// that fixed it.
+
+func TestListPRSummariesCarriesAOApprovalAtHead(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	st.prList["mer-1"] = []domain.PullRequest{{URL: "pr1", Number: 1, HeadSHA: "sha1"}}
+	st.reviewRuns["mer-1"] = []domain.ReviewRun{{
+		ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1",
+		Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved, Body: "looks good",
+	}}
+
+	out, err := (&Service{store: st}).ListPRSummaries(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("ListPRSummaries: %v", err)
+	}
+	if len(out) != 1 || out[0].AOReview == nil {
+		t.Fatalf("AO's approval did not reach the PR read model: %+v", out)
+	}
+	got := out[0].AOReview
+	if got.Verdict != domain.VerdictApproved || got.RunID != "run-1" || got.TargetSHA != "sha1" || got.PreMR {
+		t.Fatalf("aoReview = %+v", got)
+	}
+	// AO is a separate actor: it must not be laundered into the provider's decision.
+	if out[0].Review.Decision == domain.ReviewApproved {
+		t.Fatalf("AO's verdict must not rewrite the provider decision: %+v", out[0].Review)
+	}
+}
+
+// A verdict on a commit the PR has moved past says nothing about what is on it
+// now. Reporting it would be the same mistake as calling an unreviewed PR
+// reviewed.
+func TestListPRSummariesIgnoresAnAOVerdictOnAnOlderCommit(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	st.prList["mer-1"] = []domain.PullRequest{{URL: "pr1", Number: 1, HeadSHA: "sha2"}}
+	st.reviewRuns["mer-1"] = []domain.ReviewRun{{
+		ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1",
+		Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved,
+	}}
+
+	out, err := (&Service{store: st}).ListPRSummaries(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("ListPRSummaries: %v", err)
+	}
+	if out[0].AOReview != nil {
+		t.Fatalf("a stale verdict must not be reported: %+v", out[0].AOReview)
+	}
+}
+
+// A pre-MR pass reviewed this exact tree before the PR existed, so it counts —
+// but it is marked, because there is no posted review behind it to open.
+func TestListPRSummariesAdoptsAPreMRVerdictAndMarksIt(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	st.prList["mer-1"] = []domain.PullRequest{{URL: "pr1", Number: 1, HeadSHA: "sha1"}}
+	st.reviewRuns["mer-1"] = []domain.ReviewRun{{
+		ID: "run-pre", SessionID: "mer-1", PRURL: "", TargetSHA: "sha1",
+		Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved,
+	}}
+
+	out, err := (&Service{store: st}).ListPRSummaries(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("ListPRSummaries: %v", err)
+	}
+	if out[0].AOReview == nil || !out[0].AOReview.PreMR || out[0].AOReview.RunID != "run-pre" {
+		t.Fatalf("aoReview = %+v; want the adopted pre-MR verdict, marked", out[0].AOReview)
+	}
+}
+
+// Another PR's verdict at a coincidentally equal head must not leak across.
+func TestListPRSummariesDoesNotBorrowAnotherPRsVerdict(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	st.prList["mer-1"] = []domain.PullRequest{{URL: "pr1", Number: 1, HeadSHA: "sha1"}}
+	st.reviewRuns["mer-1"] = []domain.ReviewRun{{
+		ID: "run-other", SessionID: "mer-1", PRURL: "pr2", TargetSHA: "sha1",
+		Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved,
+	}}
+
+	out, err := (&Service{store: st}).ListPRSummaries(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("ListPRSummaries: %v", err)
+	}
+	if out[0].AOReview != nil {
+		t.Fatalf("another PR's verdict leaked: %+v", out[0].AOReview)
+	}
+}
+
+// A pass still running has no verdict yet, and neither does a failed one.
+func TestListPRSummariesReportsNoVerdictForARunningOrFailedPass(t *testing.T) {
+	for _, run := range []domain.ReviewRun{
+		{ID: "r", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+		{ID: "r", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunFailed},
+	} {
+		st := newFakeStore()
+		st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+		st.prList["mer-1"] = []domain.PullRequest{{URL: "pr1", Number: 1, HeadSHA: "sha1"}}
+		st.reviewRuns["mer-1"] = []domain.ReviewRun{run}
+
+		out, err := (&Service{store: st}).ListPRSummaries(context.Background(), "mer-1")
+		if err != nil {
+			t.Fatalf("ListPRSummaries: %v", err)
+		}
+		if out[0].AOReview != nil {
+			t.Fatalf("%s run should carry no verdict: %+v", run.Status, out[0].AOReview)
+		}
 	}
 }

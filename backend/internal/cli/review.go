@@ -66,7 +66,7 @@ type reviewSubmitOptions struct {
 func newReviewCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",
-		Short: "Manage AO code reviews of a worker's PR",
+		Short: "Manage AO code reviews of a worker's branch or PR",
 	}
 	cmd.AddCommand(newReviewSubmitCommand(ctx))
 	cmd.AddCommand(newReviewResetCommand(ctx))
@@ -116,8 +116,13 @@ func newReviewSubmitCommand(ctx *commandContext) *cobra.Command {
 	var opts reviewSubmitOptions
 	cmd := &cobra.Command{
 		Use:   "submit [worker-session-id]",
-		Short: "Record a reviewer's result for a worker's PR",
-		Args:  atMostOneArg,
+		Short: "Record a reviewer's result for a worker's branch or PR",
+		Long: "Records the verdict and body for one review pass (or several at once via --reviews).\n\n" +
+			"A pass created BEFORE the worker opened a pull/merge request has nowhere to post to, " +
+			"so the body submitted here is the only place that review exists: write the whole review " +
+			"into it, findings included. A pass on an open PR/MR is bookkeeping for a review the " +
+			"reviewer already posted to the provider.",
+		Args: atMostOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ctx.submitReview(cmd, args, opts)
 		},
@@ -130,7 +135,7 @@ func newReviewSubmitCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVar(&opts.session, "session", "", "Worker session id (or pass it as the positional argument)")
 	cmd.Flags().StringVar(&opts.runID, "run", "", "Review run id (required)")
 	cmd.Flags().StringVar(&opts.verdict, "verdict", "", "Review verdict: approved or changes_requested (required)")
-	cmd.Flags().StringVar(&opts.body, "body", "", "Review body: a path to a Markdown file, or - to read from stdin (so nothing is written into the worktree)")
+	cmd.Flags().StringVar(&opts.body, "body", "", "Review body: a path to a Markdown file, or - to read from stdin (so nothing is written into the worktree). Required for changes_requested, and the only carrier of a review on a branch with no PR yet")
 	cmd.Flags().StringVar(&opts.reviewID, "review-id", "", "Id of the GitHub PR review just posted (the .id from the gh api POST that created the review)")
 	cmd.Flags().StringVar(&opts.reviews, "reviews", "", "JSON review results array or object: a path, or - to read from stdin")
 	return cmd
