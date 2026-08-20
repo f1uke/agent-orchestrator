@@ -112,6 +112,11 @@ function ciGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	}
 }
 
+/** The Review gate's state when nobody has looked at the pull request yet. Named
+ * because the verdict keys off it to say so out loud, rather than folding it in
+ * with a review that is genuinely under way. */
+const REVIEW_AWAITING = "awaiting";
+
 /** Review = approvals + changes-requested collapsed into one gate. When a project
  * or SCM approval rule applies, the node shows A/T progress and flips green at the
  * threshold (amber while short — the live gate you're waiting on). Changes
@@ -141,9 +146,13 @@ function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 			return gate("review", "Review", "wait", count ?? "required");
 		default:
 			if (count) return gate("review", "Review", "wait", count);
+			// Nobody has reviewed it yet. That is a review still owed, not an
+			// inapplicable gate: `idle` is the tone for "there was nothing to look
+			// at" (no PR, closed PR), and reading it here is what let an unreviewed
+			// PR headline as fully green.
 			return pr.review.hasUnresolvedHumanComments
 				? gate("review", "Review", "wait", "comments")
-				: gate("review", "Review", "idle", "awaiting");
+				: gate("review", "Review", "wait", REVIEW_AWAITING);
 	}
 }
 
@@ -239,10 +248,14 @@ function deriveVerdict(
 
 	// Ready — every applicable gate is green. A smoke checklist that was never
 	// authored ("not run", idle) does not block; an authored-but-pending one does.
+	// Review gets no such pass: a checklist nobody wrote means there was nothing to
+	// check, while a review nobody gave means nobody has looked. On an open PR the
+	// review gate is never idle anyway (idle survives only for "no PR" and
+	// "closed"), so requiring `pass` is the whole claim "all gates pass" makes.
 	const ready =
 		pr!.state === "open" &&
 		gates.ci.tone === "pass" &&
-		(gates.review.tone === "pass" || gates.review.tone === "idle") &&
+		gates.review.tone === "pass" &&
 		(gates.smoke.tone === "pass" || gates.smoke.tone === "idle") &&
 		gates.merge.tone === "pass";
 	if (ready) return { hue: "merge", word: "Ready to Merge", caption: "All gates pass — you can merge.", pulse: true };
@@ -250,8 +263,15 @@ function deriveVerdict(
 	// In-flight — surface the earliest gate still in motion.
 	if (pr!.state === "draft") return { hue: "todo", word: "Draft", caption: "Mark the draft ready for review." };
 	if (gates.ci.tone === "wait") return { hue: "review", word: "Waiting on CI", caption: "Checks are running." };
-	if (gates.review.tone === "wait" || gates.review.tone === "idle")
-		return { hue: "review", word: "In Review", caption: "Waiting on review approval." };
+	// "In Review" says someone is on the hook — an approval short of its threshold,
+	// a requested review, an open comment thread. When nobody has looked at all,
+	// say that instead: same blue lane, same non-blocking posture, but the human
+	// reads the difference between "a review is running" and "no one has started".
+	// It stays a verdict, not a veto — a solo author with no reviewer can still
+	// merge; the strip just stops claiming the review already happened.
+	if (gates.review.tone === "wait" && gates.review.state === REVIEW_AWAITING)
+		return { hue: "review", word: "Waiting on Review", caption: "No one has reviewed this yet. Merging is your call." };
+	if (gates.review.tone === "wait") return { hue: "review", word: "In Review", caption: "Waiting on review approval." };
 	if (gates.smoke.tone === "wait")
 		return { hue: "review", word: "Waiting on Smoke", caption: "Play the smoke checks to confirm." };
 	return { hue: "review", word: "In Review", caption: "Waiting on the merge pipeline." };

@@ -154,6 +154,9 @@ describe("deriveReadiness — verdict", () => {
 		expect(r.currentKey).toBeUndefined();
 	});
 
+	// Smoke's idle is deliberately non-blocking and must stay that way: a checklist
+	// nobody authored means there was nothing to check, unlike a review nobody gave.
+	// Tightening the Review gate is exactly the change that could take this with it.
 	it("smoke never authored does NOT block Ready to Merge", () => {
 		const r = deriveReadiness(
 			{},
@@ -161,14 +164,44 @@ describe("deriveReadiness — verdict", () => {
 			smoke({ total: 0 }),
 		);
 		expect(r.verdict.word).toBe("Ready to Merge");
+		expect(r.verdict.pulse).toBe(true);
 		expect(tones(r).smoke).toBe("idle");
 		expect(stateOf(r, "smoke")).toBe("not run");
+		expect(r.currentKey).toBeUndefined();
 	});
 
-	it("GitHub PR mergeable with no review → Ready to Merge (review idle doesn't block)", () => {
-		const r = deriveReadiness({}, [pr()], smoke());
-		expect(r.verdict.word).toBe("Ready to Merge");
+	// The headline must never contradict the gate row beneath it. An open PR that
+	// nobody has reviewed used to read "Ready to Merge — all gates pass" while its
+	// own Review gate said "awaiting".
+	it("open PR nobody has reviewed → Waiting on Review, not Ready to Merge", () => {
+		const r = deriveReadiness({ status: "review_pending", activity: { state: "idle" } }, [pr()], smoke());
+		expect(r.verdict.word).toBe("Waiting on Review");
+		expect(r.verdict.hue).toBe("review");
+		expect(r.verdict.pulse).toBeFalsy();
+		expect(tones(r).review).toBe("wait");
+		expect(stateOf(r, "review")).toBe("awaiting");
+		expect(r.currentKey).toBe("review");
+	});
+
+	it("says nobody has looked rather than implying a review is under way", () => {
+		const unreviewed = deriveReadiness({}, [pr()], smoke());
+		const underway = deriveReadiness(
+			{},
+			[pr({ review: { decision: "review_required", hasUnresolvedHumanComments: false, unresolvedBy: [] } })],
+			smoke(),
+		);
+		expect(unreviewed.verdict.caption).toBe("No one has reviewed this yet. Merging is your call.");
+		expect(underway.verdict.word).toBe("In Review");
+		// Same blue lane either way: neither posture blocks the human from merging.
+		expect(unreviewed.verdict.hue).toBe(underway.verdict.hue);
+	});
+
+	// A PR with no review can only be idle when there is no PR at all, and that
+	// route returns Working long before `ready` is evaluated.
+	it("leaves Review idle only when there is no pull request to review", () => {
+		const r = deriveReadiness({ status: "working", activity: { state: "active" } }, [], smoke());
 		expect(tones(r).review).toBe("idle");
+		expect(r.verdict.word).toBe("Working");
 	});
 
 	it("authored-but-pending smoke keeps it Waiting on Smoke, not Ready", () => {
