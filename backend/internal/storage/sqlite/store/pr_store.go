@@ -253,6 +253,24 @@ func (s *Store) ListPRsBySession(ctx context.Context, sessionID domain.SessionID
 	return out, nil
 }
 
+// ListOpenPRSourceBranchesInRepo returns the source branches of every still-open
+// PR that a project's sessions own in one repository. lifecycle uses it to see a
+// stacked PR whose parent PR belongs to a DIFFERENT session; the project and
+// repository coordinates keep a same-named branch in an unrelated repo from
+// masquerading as the parent.
+func (s *Store) ListOpenPRSourceBranchesInRepo(ctx context.Context, projectID domain.ProjectID, provider, host, repo string) ([]string, error) {
+	rows, err := s.qr.ListOpenPRSourceBranchesInRepo(ctx, gen.ListOpenPRSourceBranchesInRepoParams{
+		ProjectID: projectID,
+		Provider:  provider,
+		Host:      host,
+		Repo:      repo,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list open pr source branches for %s %s/%s: %w", projectID, host, repo, err)
+	}
+	return rows, nil
+}
+
 // ListChecks returns every recorded check run for a PR.
 func (s *Store) ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error) {
 	rows, err := s.qr.ListChecksByPR(ctx, prURL)

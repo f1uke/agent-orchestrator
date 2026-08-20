@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,30 @@ func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.S
 
 func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]domain.PullRequest, error) {
 	return f.prs[id], nil
+}
+
+// Mirrors ListOpenPRSourceBranchesInRepo: every project session's open PRs in one
+// repository, not just the observed session's, and matched on the full
+// provider/host/repo coordinates so a same-named branch elsewhere cannot pose as
+// a parent.
+func (f *fakeStore) ListOpenPRSourceBranchesInRepo(_ context.Context, projectID domain.ProjectID, provider, host, repo string) ([]string, error) {
+	var out []string
+	for sid, prs := range f.prs {
+		if rec, ok := f.sessions[sid]; !ok || rec.ProjectID != projectID {
+			continue
+		}
+		for _, pr := range prs {
+			if pr.Merged || pr.Closed || pr.SourceBranch == "" {
+				continue
+			}
+			if pr.Provider != provider || pr.Host != host || pr.Repo != repo {
+				continue
+			}
+			out = append(out, pr.SourceBranch)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {
@@ -1063,6 +1088,111 @@ func TestPRObservation_StackedChildConflictSuppressed(t *testing.T) {
 	}
 	if len(msg.msgs) != 0 {
 		t.Fatalf("stacked child conflict should be suppressed, got %v", msg.msgs)
+	}
+}
+
+// A stack is routinely split across two workers: worker A owns the parent branch
+// and its PR, worker B is cut from A's branch and targets it. The stacked-child
+// guard used to read only the OBSERVED session's PRs, so it never fired for that
+// shape and the child was nudged to rebase against a parent that is still moving.
+// Widening the lookup must not make it fire for a PR that merely shares a branch
+// NAME with something in another repo or another project.
+func TestPRObservation_StackedChildConflictAcrossSessions(t *testing.T) {
+	const (
+		provider = "github"
+		host     = "github.com"
+		repo     = "o/r"
+	)
+	child := domain.PullRequest{URL: "child", SourceBranch: "ao/x/auth", TargetBranch: "ao/x", Provider: provider, Host: host, Repo: repo}
+	parent := func(mutate func(*domain.PullRequest)) domain.PullRequest {
+		p := domain.PullRequest{URL: "parent", SourceBranch: "ao/x", TargetBranch: "main", Provider: provider, Host: host, Repo: repo}
+		if mutate != nil {
+			mutate(&p)
+		}
+		return p
+	}
+	tests := []struct {
+		name string
+		// prs is keyed by owning session; every session listed here belongs to
+		// project "mer" unless its id says otherwise (see projects).
+		prs      map[domain.SessionID][]domain.PullRequest
+		projects map[domain.SessionID]domain.ProjectID
+		wantNudg bool
+	}{
+		{
+			name: "parent PR owned by another worker in the same repo suppresses the nudge",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(nil)},
+			},
+		},
+		{
+			name: "parent PR in the same session still suppresses the nudge",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child, parent(nil)},
+			},
+		},
+		{
+			name: "no open PR owns the target branch, so an ordinary conflict still nudges",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {{URL: "unrelated", SourceBranch: "fix/other", TargetBranch: "main", Provider: provider, Host: host, Repo: repo}},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "a merged parent no longer shields the child",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(func(p *domain.PullRequest) { p.Merged = true })},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "same branch name in a different repo is not the parent",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(func(p *domain.PullRequest) { p.Repo = "o/other" })},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "same branch name on a different host is not the parent",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {parent(func(p *domain.PullRequest) { p.Host = "gitlab.com"; p.Provider = "gitlab" })},
+			},
+			wantNudg: true,
+		},
+		{
+			name: "same branch name in a different project is not the parent",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"oth-1": {parent(nil)},
+			},
+			projects: map[domain.SessionID]domain.ProjectID{"oth-1": "oth"},
+			wantNudg: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, st, msg := newManager()
+			for id, prs := range tc.prs {
+				rec := working(id)
+				if p, ok := tc.projects[id]; ok {
+					rec.ProjectID = p
+				}
+				st.sessions[id] = rec
+				st.prs[id] = prs
+			}
+			o := ports.PRObservation{Fetched: true, URL: "child", Mergeability: domain.MergeConflicting, HeadSHA: "sha-1"}
+			if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(msg.msgs) > 0; got != tc.wantNudg {
+				t.Fatalf("nudged=%v, want %v (msgs: %v)", got, tc.wantNudg, msg.msgs)
+			}
+		})
 	}
 }
 

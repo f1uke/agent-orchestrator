@@ -24,6 +24,12 @@ type sessionStore interface {
 	// when no open PR remains and at least one merged) and to suppress
 	// merge-conflict nudges on PRs stacked behind an open parent.
 	ListPRsBySession(ctx context.Context, id domain.SessionID) ([]domain.PullRequest, error)
+	// ListOpenPRSourceBranchesInRepo returns the source branches of every
+	// still-open PR the project's sessions own in one repository. A stack is
+	// routinely split across two workers - one owns the parent branch and its PR,
+	// the next is cut from that branch and targets it - so recognizing a stacked
+	// PR needs the project's whole open set, not just the observed session's.
+	ListOpenPRSourceBranchesInRepo(ctx context.Context, projectID domain.ProjectID, provider, host, repo string) ([]string, error)
 	// ListPRFactsForSession returns the same durable PR read model the derived
 	// display status is computed from — including the unresolved-comment flag.
 	// The ready-to-merge notification reads it so its "no blocking review

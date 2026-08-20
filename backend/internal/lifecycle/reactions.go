@@ -239,7 +239,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		// parent branch until the parent merges and it retargets, so nudging the
 		// agent to rebase it now would be noise. Mergeability UNKNOWN (the brief
 		// post-retarget recompute window) never reaches here.
-		blocked, err := m.prBlockedByOpenParent(ctx, id, o.URL)
+		blocked, err := m.prBlockedByOpenParent(ctx, id, rec.ProjectID, o.URL)
 		if err != nil {
 			return err
 		}
@@ -320,24 +320,57 @@ func (m *Manager) sessionComplete(ctx context.Context, id domain.SessionID) (boo
 }
 
 // prBlockedByOpenParent reports whether the PR at prURL is stacked on top of
-// another still-open PR in the same session — i.e. its target branch is the
-// source branch of a sibling open PR. Such a PR is not the bottom of its stack
-// and is exempt from merge-conflict nudges. Branch facts are read from the
-// store, which the observer has already updated for this observation.
-func (m *Manager) prBlockedByOpenParent(ctx context.Context, id domain.SessionID, prURL string) (bool, error) {
+// another still-open PR - i.e. its target branch is the source branch of an open
+// sibling. Such a PR is not the bottom of its stack and is exempt from
+// merge-conflict nudges: it is EXPECTED to report conflicts against a parent
+// branch that is still moving, and they disappear when the parent merges and the
+// child retargets. Branch facts are read from the store, which the observer has
+// already updated for this observation.
+//
+// The parent is looked for in TWO places, because a stack is routinely split
+// across workers: worker A owns the parent branch and its PR, and worker B is cut
+// from A's branch and targets it. A per-session lookup sees only the first shape,
+// so the guard used to miss the common one and nudged the child anyway.
+//
+//  1. This session's own PRs. Unchanged, and checked first so the widened lookup
+//     can only ever add parents, never take one away.
+//  2. Every other open PR the SAME PROJECT owns in the SAME REPOSITORY. Branch
+//     names are not unique on their own, so the lookup is pinned by
+//     provider/host/repo and by project; a PR whose repository coordinates are
+//     unknown (legacy rows) skips step 2 rather than matching every other blank
+//     row in the table.
+func (m *Manager) prBlockedByOpenParent(ctx context.Context, id domain.SessionID, projectID domain.ProjectID, prURL string) (bool, error) {
 	prs, err := m.store.ListPRsBySession(ctx, id)
 	if err != nil {
 		return false, err
 	}
+	var self domain.PullRequest
+	found := false
 	openSources := make(map[string]bool, len(prs))
 	for _, pr := range prs {
+		if pr.URL == prURL {
+			self, found = pr, true
+		}
 		if !pr.Merged && !pr.Closed && pr.SourceBranch != "" {
 			openSources[pr.SourceBranch] = true
 		}
 	}
-	for _, pr := range prs {
-		if pr.URL == prURL {
-			return pr.TargetBranch != "" && openSources[pr.TargetBranch], nil
+	if !found || self.TargetBranch == "" {
+		return false, nil
+	}
+	if openSources[self.TargetBranch] {
+		return true, nil
+	}
+	if strings.TrimSpace(self.Repo) == "" {
+		return false, nil
+	}
+	branches, err := m.store.ListOpenPRSourceBranchesInRepo(ctx, projectID, self.Provider, self.Host, self.Repo)
+	if err != nil {
+		return false, err
+	}
+	for _, b := range branches {
+		if b == self.TargetBranch {
+			return true, nil
 		}
 	}
 	return false, nil
