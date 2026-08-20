@@ -694,3 +694,87 @@ func TestWiring_SessionMessengerDoesNotQueueForATerminatedSession(t *testing.T) 
 		t.Fatalf("queue held %v for a terminated session", queue.held)
 	}
 }
+
+// TestWiring_SessionMessengerQueuesForASessionAtAPrompt is the safety half of the
+// dropped-nudge fix. The lifecycle reducers no longer refuse to nudge a session
+// in waiting_input; they hand the message here instead. The pane is LIVE, so the
+// old "queue only when suspended" rule would have typed it straight into the open
+// permission dialog, where the trailing Enter can answer it. It must be held.
+func TestWiring_SessionMessengerQueuesForASessionAtAPrompt(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	queuedAt := time.Now().UTC().Truncate(time.Second)
+	rec, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		Activity: domain.Activity{State: domain.ActivityWaitingInput, LastActivityAt: time.Now()},
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &captureRuntimeSender{}
+	queue := &recordingQueue{at: queuedAt}
+
+	outcome, err := newSessionMessenger(store, runtime, queue, nil).Send(ctx, rec.ID, "CI is failing")
+	if err != nil {
+		t.Fatalf("send to a session at a prompt must succeed as a queue, got %v", err)
+	}
+	if !outcome.Queued || outcome.Pending != 1 {
+		t.Fatalf("outcome = %+v, want queued with 1 pending", outcome)
+	}
+	if len(queue.held) != 1 || queue.held[0] != "CI is failing" {
+		t.Fatalf("held = %v, want the message", queue.held)
+	}
+	if runtime.message != "" {
+		t.Fatalf("runtime was typed at with %q while a permission prompt was open", runtime.message)
+	}
+}
+
+// A PARKED session is the opposite case and must not be confused with the one
+// above: its turn is simply over and it is sitting at an ordinary prompt, so the
+// message is delivered immediately rather than held. This is the whole point of
+// giving "parked" its own state instead of folding it into waiting_input.
+func TestWiring_SessionMessengerDeliversToAParkedSession(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		Activity: domain.Activity{State: domain.ActivityParked, LastActivityAt: time.Now()},
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &captureRuntimeSender{}
+	queue := &recordingQueue{}
+
+	outcome, err := newSessionMessenger(store, runtime, queue, nil).Send(ctx, rec.ID, "CI is failing")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if outcome.Queued {
+		t.Fatal("a parked session's message was held; a parked agent is listening")
+	}
+	if len(queue.held) != 0 {
+		t.Fatalf("queue held %v for a parked session", queue.held)
+	}
+	if runtime.message != "CI is failing" {
+		t.Fatalf("runtime message = %q, want it typed into the live pane", runtime.message)
+	}
+}

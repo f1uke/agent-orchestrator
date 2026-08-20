@@ -406,6 +406,7 @@ const ENDED_WHILE: Record<string, string> = {
 	active: "Working",
 	idle: "Idle",
 	waiting_input: "Waiting on you",
+	parked: "Parked at its prompt",
 	blocked: "Blocked",
 	exited: "Exited",
 };
@@ -577,6 +578,9 @@ const ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: string;
 	active: { label: "Working", tone: "var(--orange)", breathe: true },
 	idle: { label: "Idle", tone: "var(--fg-muted)", breathe: false },
 	waiting_input: { label: "Input Needed", tone: "var(--amber)", breathe: false },
+	// Parked is a finished turn, not a question: it reads like idle, not like the
+	// amber "the agent is asking you something".
+	parked: { label: "Your Turn", tone: "var(--fg-muted)", breathe: false },
 	exited: { label: "Exited", tone: "var(--fg-muted)", breathe: false },
 	unknown: { label: "Activity Unavailable", tone: "var(--fg-muted)", breathe: false },
 };

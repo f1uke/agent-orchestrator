@@ -429,7 +429,7 @@ func TestSend_SaysWhenTheMessageWasQueuedInsteadOfDelivered(t *testing.T) {
 	if !strings.Contains(out, "queued for demo-1") {
 		t.Fatalf("output = %q, want it to say the message was queued", out)
 	}
-	if !strings.Contains(out, "asleep") || !strings.Contains(out, "2 waiting") {
+	if !strings.Contains(out, "not listening") || !strings.Contains(out, "2 waiting") {
 		t.Fatalf("output = %q, want the reason and how many are waiting", out)
 	}
 }

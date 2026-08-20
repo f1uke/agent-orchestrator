@@ -156,6 +156,21 @@ type SessionRecord struct {
 	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
+// CanReceiveMessage reports whether a message may be typed at this session's
+// pane right now. It is false when the pane is gone (suspended: the tmux was
+// reaped, the stored handle points at nothing) and when the pane is there but
+// the agent is not listening (waiting_input: a permission dialog owns the
+// keyboard, so the text is eaten by the dialog and the trailing Enter can ANSWER
+// it). A caller that has something to say must HOLD it in those cases, never
+// drop it.
+//
+// Termination is deliberately not folded in: a terminated session is not
+// "temporarily unable to receive", it is over, and holding a message for it
+// would be a promise AO cannot keep. Callers refuse that case outright.
+func (r SessionRecord) CanReceiveMessage() bool {
+	return !r.IsSuspended && r.Activity.State.IsListening()
+}
+
 // Session is the read-model returned across the API boundary: a SessionRecord
 // plus the derived display Status.
 type Session struct {

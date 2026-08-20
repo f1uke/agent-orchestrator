@@ -19,7 +19,10 @@
 //     an agent's transcript is worse than a visible drop.
 //
 //  2. DELIVERED WHEN THE AGENT IS LISTENING, not when the session is technically
-//     back. Resuming a session recreates the pane as
+//     back. "Listening" has two failure modes and the queue waits out both: a
+//     permission prompt open in the pane (activity_state waiting_input) owns the
+//     keyboard, so anything typed is eaten by the dialog and the trailing Enter can
+//     answer it. And resuming a session recreates the pane as
 //     `<shell> -c '<exports>; <agent argv>; exec <shell> -i'`, so for a moment
 //     the foreground process is a SHELL. Text typed then is eaten by the shell
 //     as a command line and the human is told it was delivered. The gate is
@@ -274,6 +277,16 @@ func (q *Queue) drainSession(ctx context.Context, id domain.SessionID) error {
 	}
 	if rec.IsSuspended {
 		q.forget(id) // still asleep: readiness starts over when it wakes
+		return nil
+	}
+	if !rec.Activity.State.IsListening() {
+		// The pane is up but a permission prompt owns the keyboard, so the agent is
+		// not listening — the same fact this queue already waits for when a session
+		// is booting, arriving from the activity feed instead of the liveness probe.
+		// Typing now would feed the dialog and the trailing Enter could answer it.
+		// Readiness starts over when the prompt clears, exactly as it does after a
+		// wake, so nothing lands the instant the human hits "allow".
+		q.forget(id)
 		return nil
 	}
 	handle := ports.RuntimeHandle{ID: strings.TrimSpace(rec.Metadata.RuntimeHandleID)}

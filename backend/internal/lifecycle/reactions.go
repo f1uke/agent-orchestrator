@@ -56,7 +56,10 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 	if err != nil || !ok {
 		return ReviewDeliveryNoop, err
 	}
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput {
+	// Terminated is the only session state that cancels a nudge outright: the work
+	// is over, so there is nothing left to act on it. Whether the session can
+	// RECEIVE a message right now is deliberately not decided here — see sendOnce.
+	if rec.IsTerminated {
 		return ReviewDeliveryNoop, nil
 	}
 	if m.messenger == nil {
@@ -185,7 +188,10 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	if err != nil || !ok {
 		return err
 	}
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput {
+	// Terminated is the only session state that cancels a nudge outright: the work
+	// is over, so there is nothing left to act on it. Whether the session can
+	// RECEIVE a message right now is deliberately not decided here — see sendOnce.
+	if rec.IsTerminated {
 		return nil
 	}
 	// A single PR can trip several actionable conditions at once (failing CI,
@@ -278,7 +284,10 @@ func (m *Manager) ApplyReviewResult(ctx context.Context, workerID domain.Session
 	if err != nil || !ok {
 		return ReviewDeliveryNoop, err
 	}
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput {
+	// Terminated is the only session state that cancels a nudge outright: the work
+	// is over, so there is nothing left to act on it. Whether the session can
+	// RECEIVE a message right now is deliberately not decided here — see sendOnce.
+	if rec.IsTerminated {
 		return ReviewDeliveryNoop, nil
 	}
 	if m.messenger == nil {
@@ -744,7 +753,10 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 	if err != nil || !ok {
 		return err
 	}
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityWaitingInput {
+	// Terminated is the only session state that cancels a nudge outright: the work
+	// is over, so there is nothing left to act on it. Whether the session can
+	// RECEIVE a message right now is deliberately not decided here — see sendOnce.
+	if rec.IsTerminated {
 		return nil
 	}
 	if o.Changed.Assignee {
@@ -871,6 +883,19 @@ func (m *Manager) renderNudge(name messagetemplates.Name, data any) string {
 	return msg
 }
 
+// sendOnce delivers one nudge at most once per (key, signature), persisting the
+// dedup signature so a daemon restart does not re-fire it.
+//
+// It does NOT check whether the session can receive the message. That question
+// belongs to the messenger, which already owns the terminated and suspended
+// cases and can HOLD what it cannot deliver (ports.SendOutcome.Queued). These
+// reducers used to answer it themselves, dropping every nudge for a session in
+// waiting_input: the return came before the messenger, so the queue never saw
+// the message, nothing logged, nothing retried, and because the observer stamps
+// an observation acknowledged once lifecycle returns nil, the nudge was lost for
+// good rather than delayed. A CI failure, a review verdict, a review-comment
+// nudge and a merge-conflict nudge all vanished that way while an agent sat at a
+// permission prompt — the exact moment it most needed to be told.
 func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key, sig, msg string, maxAttempts int) error {
 	if m.messenger == nil {
 		return nil
@@ -897,11 +922,12 @@ func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key,
 		return err
 	}
 	if outcome.Queued {
-		// A nudge for a sleeping session is HELD, and the dedup below records it as
-		// sent. That is deliberate: re-firing on every observer poll would stack a
-		// dozen copies of the same nudge in the session's inbox for it to read on
-		// waking. One held copy, delivered once, is the whole point of the queue.
-		slog.Default().Info("lifecycle: nudge queued for a sleeping session",
+		// A nudge for a session that cannot receive it right now — asleep, or sitting
+		// at a permission prompt — is HELD, and the dedup below records it as sent.
+		// That is deliberate: re-firing on every observer poll would stack a dozen
+		// copies of the same nudge in the session's inbox. One held copy, delivered
+		// once, is the whole point of the queue.
+		slog.Default().Info("lifecycle: nudge held for a session that is not listening",
 			"sessionID", id, "pending", outcome.Pending)
 	}
 	// Order: Send → in-memory mutation → durable persist. Sending first means a

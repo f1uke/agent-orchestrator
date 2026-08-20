@@ -29,6 +29,15 @@ describe("isGenuinelyWaiting", () => {
 		expect(isGenuinelyWaiting(session({ status: "needs_input", statusReason: "active_stale" }))).toBe(false);
 	});
 
+	// A PARKED agent said outright that its turn is over, which is the same claim
+	// idle_aged makes from silence — not a question. The daemon derives it as
+	// idle_aged for exactly this reason, so the overlay must not summon for it. If
+	// parked ever started reporting waiting_input, every finished session would
+	// walk a Proc to the front and the overlay would become something you switch off.
+	it("is FALSE for a parked agent — a finished turn is not a question", () => {
+		expect(isGenuinelyWaiting(session({ status: "needs_input", statusReason: "idle_aged" }))).toBe(false);
+	});
+
 	it("is false when we have no reason at all — absence is not evidence", () => {
 		expect(isGenuinelyWaiting(session({ status: "needs_input" }))).toBe(false);
 	});

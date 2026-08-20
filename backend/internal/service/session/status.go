@@ -154,6 +154,17 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonActiveStale}
 	}
 
+	// parked is the harness saying outright what waitingInputGrace otherwise has to
+	// infer: the turn is over and the agent has settled at its prompt. It reads as
+	// an idle that has already aged, so it lands on the SAME status and reason a
+	// parked session shows today — needs_input / idle_aged — and, critically, it
+	// sits BELOW the open-PR and merged branches like idle rather than
+	// short-circuiting the way waiting_input does. ReasonWaitingInput stays
+	// exclusive to a real prompt, which is what the companion's live roster keys on.
+	if rec.Activity.State == domain.ActivityParked && !rec.FirstSignalAt.IsZero() {
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonIdleAged}
+	}
+
 	if rec.Activity.State == domain.ActivityIdle && !rec.FirstSignalAt.IsZero() &&
 		now.Sub(rec.Activity.LastActivityAt) > waitingInputGrace {
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonIdleAged}

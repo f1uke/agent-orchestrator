@@ -552,3 +552,72 @@ func TestCountsReportWhatIsWaiting(t *testing.T) {
 		t.Fatalf("counts = %+v, want 2 pending for %s", counts, h.session)
 	}
 }
+
+// atPrompt / leavePrompt move the session in and out of the state a permission
+// dialog puts it in: the pane is LIVE and the agent process is alive, but the
+// keyboard belongs to the dialog.
+func (h *harness) atPrompt(t *testing.T) {
+	h.setSession(t, func(rec *domain.SessionRecord) {
+		rec.Activity = domain.Activity{State: domain.ActivityWaitingInput, LastActivityAt: h.now}
+	})
+}
+
+func (h *harness) leavePrompt(t *testing.T, state domain.ActivityState) {
+	h.setSession(t, func(rec *domain.SessionRecord) {
+		rec.Activity = domain.Activity{State: state, LastActivityAt: h.now}
+	})
+}
+
+// A live, alive session whose agent is sitting at a permission prompt is NOT
+// listening: text typed now is consumed by the dialog and the trailing Enter can
+// answer it. The queue holds, which is the whole reason lifecycle is allowed to
+// hand it a nudge for such a session instead of dropping one.
+func TestAMessageIsHeldWhileTheAgentSitsAtAPrompt(t *testing.T) {
+	h := newHarness(t)
+	h.sender.setAlive(true)
+	h.atPrompt(t)
+	h.enqueue(t, "CI is failing")
+
+	h.drain(t)
+	h.advance(11 * time.Second)
+	h.drain(t)
+
+	if got := h.sender.delivered(); len(got) != 0 {
+		t.Fatalf("delivered %v into an open permission prompt", got)
+	}
+	pending, err := h.queue.List(context.Background(), h.session)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("held = %d messages, want the nudge still waiting", len(pending))
+	}
+}
+
+// Once the prompt is answered the agent is listening again and the held nudge
+// lands. Readiness restarts from scratch, exactly as it does after a wake, so
+// nothing is typed the instant the human hits "allow".
+func TestAHeldMessageLandsOnceThePromptIsAnswered(t *testing.T) {
+	for _, state := range []domain.ActivityState{domain.ActivityActive, domain.ActivityIdle, domain.ActivityParked} {
+		t.Run(string(state), func(t *testing.T) {
+			h := newHarness(t)
+			h.sender.setAlive(true)
+			h.atPrompt(t)
+			h.enqueue(t, "CI is failing")
+			h.drain(t)
+
+			h.leavePrompt(t, state)
+			h.drain(t)
+			if got := h.sender.delivered(); len(got) != 0 {
+				t.Fatalf("delivered %v before the settle elapsed", got)
+			}
+			h.advance(11 * time.Second)
+			h.drain(t)
+
+			got := bodiesOf(h.sender.delivered())
+			if len(got) != 1 || got[0] != "CI is failing" {
+				t.Fatalf("delivered = %v, want the held nudge once the agent was listening", got)
+			}
+		})
+	}
+}

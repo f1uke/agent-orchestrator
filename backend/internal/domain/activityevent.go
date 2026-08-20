@@ -159,14 +159,21 @@ func DetailTTL(kind ActivityEventKind) time.Duration {
 }
 
 // CoarseFromActivityState maps a reported activity state onto the coarse level
-// and its validity. The sticky states (waiting_input, exited) map to a zero TTL:
-// a pending prompt is pending until answered, and an exit is terminal.
+// and its validity. The states that hold until the next signal (waiting_input,
+// parked, exited) map to a zero TTL: a pending prompt is pending until answered,
+// a parked turn is over, and an exit is terminal.
 func CoarseFromActivityState(s ActivityState) (ActivityCoarse, time.Duration) {
 	switch s {
 	case ActivityActive:
 		return CoarseWorking, CoarseWorkingTTL
 	case ActivityIdle:
 		return CoarseIdle, CoarseIdleTTL
+	case ActivityParked:
+		// A parked agent is idle, not waiting on anything: it reads as idle in the
+		// feed. The TTL is zero because, unlike a plain idle that may be a lull
+		// between two bursts, the harness has stated the turn is over — the reading
+		// stays true until the next signal rather than expiring on its own.
+		return CoarseIdle, 0
 	case ActivityWaitingInput:
 		return CoarseWaiting, 0
 	case ActivityExited:

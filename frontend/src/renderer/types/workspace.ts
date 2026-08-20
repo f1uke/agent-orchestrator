@@ -37,9 +37,18 @@ export function toSessionStatus(status?: string, isTerminated = false): SessionS
 	return isTerminated ? "terminated" : "unknown";
 }
 
-export type SessionActivityState = "active" | "idle" | "waiting_input" | "exited" | "unknown";
+/**
+ * What the agent last reported through its hooks.
+ *
+ * `waiting_input` and `parked` are NOT the same thing and must not be collapsed:
+ * `waiting_input` means a permission prompt is open in the pane and the agent is
+ * blocked on the human, while `parked` means the turn simply ended and the agent
+ * is sitting at an ordinary prompt. Only the first is "the agent is asking you
+ * something".
+ */
+export type SessionActivityState = "active" | "idle" | "waiting_input" | "parked" | "exited" | "unknown";
 
-const sessionActivityStates = new Set<SessionActivityState>(["active", "idle", "waiting_input", "exited"]);
+const sessionActivityStates = new Set<SessionActivityState>(["active", "idle", "waiting_input", "parked", "exited"]);
 
 export type SessionActivity = {
 	state: SessionActivityState;
