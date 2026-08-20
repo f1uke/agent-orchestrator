@@ -169,6 +169,33 @@ func (s *Store) SetSessionTokenUsage(ctx context.Context, id domain.SessionID, u
 	return rows > 0, nil
 }
 
+// SetSessionCrew records which CREW a session belongs to and what it is FOR.
+// It is the sole writer of crew_id / crew_role: they are deliberately absent
+// from UpdateSession's SET list, so the full-row lifecycle write can never blank
+// a crew, the same discipline that protects the token columns.
+//
+// crewID is the DEV member's session id and is carried by every member, dev
+// included. Passing an empty id with an empty role dissolves the membership back
+// to SOLO, which is the state every ordinary session is in.
+//
+// Returns ok=false when the session id does not exist. It deliberately does NOT
+// trip a CDC event beyond the updated_at bump: crew membership is set once, when
+// the crew is formed, and nothing in the UI reads it.
+func (s *Store) SetSessionCrew(ctx context.Context, id, crewID domain.SessionID, role domain.CrewRole, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionCrew(ctx, gen.SetSessionCrewParams{
+		ID:        id,
+		CrewID:    string(crewID),
+		CrewRole:  string(role),
+		UpdatedAt: updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set crew for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionIssueBinding sets a session's issue_id and display_name together —
 // the after-the-fact Jira link/unlink path. issue_id becomes "jira:<KEY>" (with
 // display_name = the issue title) on link, or "" on unlink (display_name is kept
@@ -362,6 +389,8 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		PRTarget:           row.PRTarget,
 		CreatedBy:          domain.SessionID(row.CreatedBy),
 		TaskSize:           domain.TaskSize(row.TaskSize),
+		CrewID:             domain.SessionID(row.CrewID),
+		CrewRole:           domain.CrewRole(row.CrewRole),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -430,6 +459,8 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		LastOpenedAt:              timeToNullTime(rec.LastOpenedAt),
 		KeepWarmOnMerge:           rec.KeepWarmOnMerge,
 		TaskSize:                  string(rec.TaskSize.WithDefault()),
+		CrewID:                    string(rec.CrewID),
+		CrewRole:                  string(rec.CrewRole),
 		TerminationSource:         rec.Termination.Source,
 		TerminationReason:         rec.Termination.Reason,
 		TerminationLastState:      rec.Termination.LastState,

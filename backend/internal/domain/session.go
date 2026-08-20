@@ -134,6 +134,24 @@ type SessionRecord struct {
 	// Empty on old rows / normal spawns; WithDefault resolves that to standard (full
 	// ceremony). Internal durable fact, not part of the API read model.
 	TaskSize TaskSize `json:"-"`
+	// CrewID and CrewRole represent the CREW: the one or two long-lived sessions
+	// that belong to ONE task and share ONE worktree (dev + qa).
+	//
+	// CrewID is the DEV member's session id, carried by every member including dev
+	// itself, so the crew key and the id a human types into `ao send` are the same
+	// string. CrewRole names what this member is FOR: dev owns the PR and the
+	// branch and is where every PR-driven nudge already goes; a qa member is a
+	// subordinate that shares dev's worktree and never outlives it.
+	//
+	// BOTH EMPTY MEANS SOLO, which is every session a normal spawn creates. Solo is
+	// the zero value on purpose: the lifetime paths (teardown, reclaim, the idle
+	// sweep) read these fields, and a zero value makes them a no-op, so a solo
+	// task's behaviour is unchanged rather than merely intended to be.
+	//
+	// Durable facts, set once when the crew is formed and never toggled. Not part
+	// of the API read model — nothing in the UI reads them.
+	CrewID   SessionID `json:"-"`
+	CrewRole CrewRole  `json:"-"`
 	// TokenUsage holds the per-session token totals summed from the harness
 	// transcript (claude-code only; all-zero for agents without a parseable
 	// transcript). Durable measured facts; the raw + cost-weighted totals and the

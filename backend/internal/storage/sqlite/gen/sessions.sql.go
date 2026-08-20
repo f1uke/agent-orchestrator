@@ -19,7 +19,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
-    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    crew_id, crew_role
 FROM sessions WHERE id = ?
 `
 
@@ -70,6 +71,8 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.TerminationLastState,
 		&i.TerminationTranscriptPath,
 		&i.TerminatedAt,
+		&i.CrewID,
+		&i.CrewRole,
 	)
 	return i, err
 }
@@ -81,9 +84,10 @@ INSERT INTO sessions (
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
+    crew_id, crew_role,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -117,6 +121,8 @@ type InsertSessionParams struct {
 	LastOpenedAt              sql.NullTime
 	KeepWarmOnMerge           bool
 	TaskSize                  string
+	CrewID                    string
+	CrewRole                  string
 	TerminationSource         domain.TerminationSource
 	TerminationReason         string
 	TerminationLastState      domain.ActivityState
@@ -158,6 +164,8 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.LastOpenedAt,
 		arg.KeepWarmOnMerge,
 		arg.TaskSize,
+		arg.CrewID,
+		arg.CrewRole,
 		arg.TerminationSource,
 		arg.TerminationReason,
 		arg.TerminationLastState,
@@ -175,7 +183,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
-    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    crew_id, crew_role
 FROM sessions ORDER BY project_id, num
 `
 
@@ -232,6 +241,8 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.TerminationLastState,
 			&i.TerminationTranscriptPath,
 			&i.TerminatedAt,
+			&i.CrewID,
+			&i.CrewRole,
 		); err != nil {
 			return nil, err
 		}
@@ -252,7 +263,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     runtime_handle_id, agent_session_id, prompt, created_at, updated_at, display_name, first_signal_at, preview_url, preview_revision, reactivated, auto_nudge_comments,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
-    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at
+    termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
+    crew_id, crew_role
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -309,6 +321,8 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.TerminationLastState,
 			&i.TerminationTranscriptPath,
 			&i.TerminatedAt,
+			&i.CrewID,
+			&i.CrewRole,
 		); err != nil {
 			return nil, err
 		}
@@ -409,6 +423,38 @@ type SetSessionAutoResolveParams struct {
 // trigger refreshes the Reviews tab switch.
 func (q *Queries) SetSessionAutoResolve(ctx context.Context, arg SetSessionAutoResolveParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionAutoResolve, arg.AutoResolveOnReply, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setSessionCrew = `-- name: SetSessionCrew :execrows
+UPDATE sessions SET crew_id = ?, crew_role = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionCrewParams struct {
+	CrewID    string
+	CrewRole  string
+	UpdatedAt time.Time
+	ID        domain.SessionID
+}
+
+// Sole writer of crew_id / crew_role: they are deliberately absent from the SET
+// list of UpdateSession, so the full-row lifecycle write can never blank a crew.
+// Crew membership is set once, when the crew is formed, and never toggled.
+// Keep this ABOVE the trailing NOTE comment at the end of this file. sqlc 1.31
+// attaches a dangling comment block to the NEXT query, and that block contains
+// a backticked `= ?` fragment its SQLite parser reads as live SQL: a query
+// placed after it loses its trailing placeholder and fails at runtime with
+// "incomplete input". Same parser bug family as documented in changelog.sql.
+func (q *Queries) SetSessionCrew(ctx context.Context, arg SetSessionCrewParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionCrew,
+		arg.CrewID,
+		arg.CrewRole,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
