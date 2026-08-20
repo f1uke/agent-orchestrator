@@ -730,7 +730,11 @@ function QaChip({ state, stale }: { state: AgentState; stale: boolean }) {
 	const Icon = QA_ICON[state as Exclude<AgentState, "none">];
 	return (
 		<span
-			title={stale ? `${meta.headline}. ${meta.caption} It ran against an older commit.` : `${meta.headline}. ${meta.caption}`}
+			title={
+				stale
+					? `${meta.headline}. ${meta.caption} It ran against an older commit.`
+					: `${meta.headline}. ${meta.caption}`
+			}
 			style={{
 				display: "inline-flex",
 				alignItems: "center",
@@ -1585,9 +1589,7 @@ function RetiredSection({
 								    shown: it is history, and history is the point of not
 								    deleting. It counts towards nothing. */}
 								{check.verdict !== "pending" && (
-									<span style={{ fontSize: 10.5, color: P.muted }}>
-										your verdict: {meta.label.toLowerCase()}
-									</span>
+									<span style={{ fontSize: 10.5, color: P.muted }}>your verdict: {meta.label.toLowerCase()}</span>
 								)}
 							</div>
 							<div style={{ marginTop: 4, fontSize: 12.5, color: P.secondary2, lineHeight: 1.42 }}>{check.name}</div>

@@ -1178,10 +1178,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
  *  5. stale, ran against a commit that is no longer head
  *  6. retired, out of the checklist, kept with its reason
  */
-function mockAgentSmokeChecks(
-	sessionId: string,
-	worker?: string,
-): components["schemas"]["ListSmokeChecksResponse"] {
+function mockAgentSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
 	const base = {
 		sessionId,
 		projectId: "agent-orchestrator",
