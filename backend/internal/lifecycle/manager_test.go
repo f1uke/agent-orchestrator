@@ -781,6 +781,146 @@ func TestSCMObservationUsesPRHeadWhenCIHeadMissing(t *testing.T) {
 	}
 }
 
+// The merge-conflict nudge used to sign itself with the constant string
+// "conflicting", so sendOnce suppressed every observation after the first one,
+// permanently, for the life of the PR row. These cases pin the two halves of the
+// contract the signature has to satisfy at once: a conflict episode is announced
+// exactly once, and a NEW episode is a new announcement.
+func TestPRObservation_MergeConflictNudgeEpisodes(t *testing.T) {
+	conflicting := func(head string) ports.PRObservation {
+		return ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeConflicting, HeadSHA: head}
+	}
+	mergeable := func(head string) ports.PRObservation {
+		return ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeMergeable, HeadSHA: head}
+	}
+	tests := []struct {
+		name string
+		obs  []ports.PRObservation
+		want int
+	}{
+		{
+			// The property the constant signature got right by accident and the fix
+			// must keep on purpose: the observer polls often, and a nudge per poll
+			// would be worse than the silence being fixed.
+			name: "unchanged conflict nudges once however many polls",
+			obs:  []ports.PRObservation{conflicting("sha-1"), conflicting("sha-1"), conflicting("sha-1")},
+			want: 1,
+		},
+		{
+			// The bug: the worker pushed a fix, the branch still conflicts, and it
+			// was never told a second time.
+			name: "conflict surviving a push nudges again",
+			obs:  []ports.PRObservation{conflicting("sha-1"), conflicting("sha-2")},
+			want: 2,
+		},
+		{
+			// A conflict the worker cleared and that later returns is a fresh
+			// episode even at an unchanged head (the base branch moved under it).
+			name: "conflict that resolves and returns nudges again",
+			obs:  []ports.PRObservation{conflicting("sha-1"), mergeable("sha-1"), conflicting("sha-1")},
+			want: 2,
+		},
+		{
+			// Mergeability UNKNOWN is the provider's recompute window, not evidence
+			// the conflict is gone; it must not re-arm the nudge.
+			name: "unknown mergeability does not re-arm the nudge",
+			obs: []ports.PRObservation{
+				conflicting("sha-1"),
+				{Fetched: true, URL: "pr1", Mergeability: domain.MergeUnknown, HeadSHA: "sha-1"},
+				conflicting("sha-1"),
+			},
+			want: 1,
+		},
+		{
+			// Same for a STALE mergeable reading: it is the local row echoed back,
+			// not a fresh provider fact.
+			name: "stale mergeable does not re-arm the nudge",
+			obs: []ports.PRObservation{
+				conflicting("sha-1"),
+				{Fetched: true, URL: "pr1", Mergeability: domain.MergeMergeable, MergeabilityStale: true, HeadSHA: "sha-1"},
+				conflicting("sha-1"),
+			},
+			want: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, st, msg := newManager()
+			st.sessions["mer-1"] = working("mer-1")
+			for i, o := range tc.obs {
+				if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+					t.Fatalf("observation %d: %v", i, err)
+				}
+			}
+			if len(msg.msgs) != tc.want {
+				t.Fatalf("want %d merge-conflict nudges, got %d: %v", tc.want, len(msg.msgs), msg.msgs)
+			}
+			for _, got := range msg.msgs {
+				if !strings.Contains(got, "merge conflicts") {
+					t.Fatalf("unexpected nudge text: %q", got)
+				}
+			}
+		})
+	}
+}
+
+// A daemon restart mid-episode must not re-announce the conflict the worker has
+// already been told about: the head-anchored signature is persisted in
+// pr.last_nudge_signature and reloaded lazily by loadPRSignaturesLocked. A push
+// after the restart still nudges.
+func TestPRObservation_MergeConflictDedupSurvivesRestart(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = working("mer-1")
+	o := ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeConflicting, HeadSHA: "sha-1"}
+
+	first := &fakeMessenger{}
+	if err := New(st, first).ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.msgs) != 1 {
+		t.Fatalf("want the first conflict to nudge, got %v", first.msgs)
+	}
+
+	// Second Manager over the same store == the daemon coming back up.
+	restarted := &fakeMessenger{}
+	m := New(st, restarted)
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.msgs) != 0 {
+		t.Fatalf("restart must not re-announce the same conflict episode, got %v", restarted.msgs)
+	}
+	o.HeadSHA = "sha-2"
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.msgs) != 1 {
+		t.Fatalf("want a nudge once the head moves after restart, got %v", restarted.msgs)
+	}
+}
+
+// End-to-end through the provider-neutral entrypoint: the head SHA the signature
+// needs has to survive the SCMObservation → PRObservation projection.
+func TestSCMObservation_MergeConflictRenudgesAfterHeadMoves(t *testing.T) {
+	m, st, msg := newManager()
+	st.sessions["mer-1"] = working("mer-1")
+	o := ports.SCMObservation{
+		Fetched:      true,
+		PR:           ports.SCMPRObservation{URL: "pr1", Number: 1, HeadSHA: "sha-1"},
+		Mergeability: ports.SCMMergeabilityObservation{State: string(domain.MergeConflicting)},
+	}
+	if err := m.ApplySCMObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	o.PR.HeadSHA = "sha-2"
+	if err := m.ApplySCMObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 2 {
+		t.Fatalf("want a nudge per conflicting head, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+}
+
 func TestPRObservation_MergeConflictNudgesAgent(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")

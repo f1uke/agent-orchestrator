@@ -27,6 +27,11 @@ type PRObservation struct {
 	Title        string
 	SourceBranch string
 	TargetBranch string
+	// HeadSHA is the PR head commit SHA when the provider reports one. Lifecycle
+	// anchors the merge-conflict nudge signature on it so a conflict that SURVIVES
+	// the worker's push is announced again instead of being deduped away as the
+	// episode already reported.
+	HeadSHA      string
 	Draft        bool
 	Merged       bool
 	Closed       bool
