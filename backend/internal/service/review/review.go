@@ -21,6 +21,7 @@ import (
 var (
 	ErrInvalid             = reviewcore.ErrInvalid
 	ErrNotFound            = reviewcore.ErrNotFound
+	ErrTreeBusy            = reviewcore.ErrTreeBusy
 	ErrAgentBinaryNotFound = ports.ErrAgentBinaryNotFound
 )
 

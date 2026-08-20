@@ -56,3 +56,25 @@ func (r SessionRecord) InCrew() bool {
 func (r SessionRecord) OwnsCrewWorkspace() bool {
 	return !r.InCrew() || r.CrewRole.IsDev()
 }
+
+// Awake reports whether AO believes this session HAS A RUNNING AGENT right now.
+//
+// It is the definition ONE-AWAKE-AT-A-TIME is enforced on, so it is worth saying
+// exactly why it is these three fields and not the activity state:
+//
+//   - Terminated: the session is over and its runtime was destroyed.
+//   - Suspended: the tmux was reaped and the worktree kept. There is NO process.
+//     Only MarkSpawned (spawn, restore, resume, restart) clears the flag, so AO
+//     is the sole author of the transition in both directions.
+//   - Todo: prepared but never started - a row with no branch, no worktree and no
+//     runtime.
+//
+// Activity state (`active` / `parked`) is deliberately NOT part of this. It is a
+// READING reported by the agent's own CLI hook (see activity.go), not something
+// AO writes, and a parked agent still owns a live pane: a human, a nudge or a
+// queued message can put it back to work at any instant. An exclusion built on it
+// would be a convention the agents are asked to respect. Awake is a fact AO
+// controls, which is what makes refusing possible at all.
+func (r SessionRecord) Awake() bool {
+	return !r.IsTerminated && !r.IsSuspended && !r.IsTodo
+}

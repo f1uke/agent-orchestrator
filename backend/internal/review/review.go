@@ -27,6 +27,19 @@ import (
 var (
 	ErrInvalid  = errors.New("review: invalid input")
 	ErrNotFound = errors.New("review: not found")
+	// ErrTreeBusy means an agent is currently WRITING the checkout this review
+	// would read. The reviewer is a reader (reviewerFloor forbids it from pushing
+	// commits, editing files or touching the branch), so it never competes for a
+	// turn - but a reader can still see a half-written file, and a review of a torn
+	// tree is worse than no review. It therefore runs in the GAP: it starts only
+	// while nobody is writing.
+	//
+	// It can only fire for a session that shares its worktree with another
+	// long-lived session, which today means a CREW. A solo worker's tree has one
+	// writer, that writer is the session under review, and reviewing while it works
+	// is exactly what AO has always done - so this is never reached for a solo
+	// worker and nothing about solo review changes.
+	ErrTreeBusy = errors.New("review: the checkout is being written")
 )
 
 // Store is the persistence surface the engine needs. *sqlite.Store satisfies it
@@ -73,6 +86,16 @@ type Deps struct {
 	// resolver, so a bare Engine still works.
 	Head Head
 
+	// TreeWriter reports which session, if any, is currently AWAKE in the worker's
+	// checkout - the session that could be writing files while a reviewer reads
+	// them. The daemon wires it to the session manager's crew-slot derivation; it
+	// is a func rather than an interface so review keeps no vocabulary about crews
+	// and no dependency on the session manager.
+	//
+	// Nil, or a func that reports nobody, means "nothing is writing" and Trigger
+	// behaves exactly as it always has. That is the answer for every solo worker.
+	TreeWriter func(stdctx.Context, domain.SessionRecord) (domain.SessionID, bool, error)
+
 	// PromptOverrides returns the current global per-kind base overrides, read at
 	// trigger time so an edit takes effect on the next reviewer (re)launch. Nil
 	// defaults to the built-in reviewer base — the safe default for a bare Engine.
@@ -96,6 +119,7 @@ type Engine struct {
 	projects         Projects
 	launcher         Launcher
 	head             Head
+	treeWriter       func(stdctx.Context, domain.SessionRecord) (domain.SessionID, bool, error)
 	promptOverrides  func() promptoverrides.Overrides
 	responseLanguage func() string
 	clock            func() time.Time
@@ -129,6 +153,7 @@ func New(d Deps) *Engine {
 		projects:         d.Projects,
 		launcher:         d.Launcher,
 		head:             head,
+		treeWriter:       d.TreeWriter,
 		promptOverrides:  d.PromptOverrides,
 		responseLanguage: d.ResponseLanguage,
 		clock:            clock,
@@ -203,6 +228,16 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 	}
 	if worker.Metadata.WorkspacePath == "" {
 		return TriggerResult{}, fmt.Errorf("%w: worker session %q has no workspace to review", ErrInvalid, workerID)
+	}
+	// A reader must not read a tree being written. This is the ONE scheduling rule
+	// the ephemeral reviewer obeys; it is not a third participant in the crew's
+	// one-awake-at-a-time exclusion, because it never takes the slot and never
+	// stops a member from taking it. It simply occupies the gap.
+	if writer, busy, err := e.treeIsBusy(ctx, worker); err != nil {
+		return TriggerResult{}, err
+	} else if busy {
+		return TriggerResult{}, fmt.Errorf("%w: %s is awake in %s; the review runs once it stands down",
+			ErrTreeBusy, writer, worker.Metadata.WorkspacePath)
 	}
 
 	prs, err := e.prs.ListPRsBySession(ctx, workerID)
@@ -378,6 +413,16 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 		created[i].ReviewID = reviewRow.ID
 	}
 	return TriggerResult{Run: created[0], ReviewerHandleID: handleID, Created: true, Reviews: reviews, CreatedRuns: created}, nil
+}
+
+// treeIsBusy asks the injected TreeWriter who is writing the worker's checkout.
+// An unwired hook reports nobody, which is also the true answer for every solo
+// worker.
+func (e *Engine) treeIsBusy(ctx stdctx.Context, worker domain.SessionRecord) (domain.SessionID, bool, error) {
+	if e.treeWriter == nil {
+		return "", false, nil
+	}
+	return e.treeWriter(ctx, worker)
 }
 
 func reviewLaunchSpec(worker domain.SessionRecord, harness domain.ReviewerHarness, run domain.ReviewRun, queue []ports.ReviewTask, index int) LaunchSpec {

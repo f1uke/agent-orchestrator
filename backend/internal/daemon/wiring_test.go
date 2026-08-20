@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
+	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -180,6 +181,41 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	}
 	if lc == nil {
 		t.Fatal("startSession returned nil session lifecycle")
+	}
+
+	// The reviewer must not read a checkout an agent is writing. That rule lives
+	// on the review engine but its ANSWER comes from the session manager, injected
+	// here as reviewcore.Deps.TreeWriter - and an unwired hook fails open, silently.
+	// So it is pinned end to end: seed a crew whose member holds the awake slot and
+	// prove a trigger against the shared tree is refused.
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "mer", Path: t.TempDir(), RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	dev, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		Metadata:    domain.SessionMetadata{Branch: "feature/task", WorkspacePath: t.TempDir(), RuntimeHandleID: "h-dev"},
+		IsSuspended: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qa, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		Metadata: domain.SessionMetadata{Branch: "feature/task", WorkspacePath: dev.Metadata.WorkspacePath, RuntimeHandleID: "h-qa"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := store.SetSessionCrew(ctx, dev.ID, dev.ID, domain.CrewRoleDev, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetSessionCrew(ctx, qa.ID, dev.ID, domain.CrewRoleQA, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewSvc.Trigger(ctx, dev.ID); !errors.Is(err, reviewcore.ErrTreeBusy) {
+		t.Fatalf("review trigger over a tree an awake crew member is writing = %v, want ErrTreeBusy: the TreeWriter hook is not wired", err)
 	}
 }
 

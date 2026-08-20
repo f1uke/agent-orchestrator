@@ -93,6 +93,25 @@ func TestReviewsTrigger_MissingReviewerBinaryReturns422WithCause(t *testing.T) {
 	}
 }
 
+// A review that arrives while an agent is writing the checkout is not a failure
+// and not bad input: it is "not right now". A 500 would tell the caller the review
+// engine is broken and it would stop asking; a CONFLICT tells it to ask again once
+// the writer stands down.
+func TestReviewsTrigger_TreeBusyReturns409(t *testing.T) {
+	err := fmt.Errorf("%w: mer-2 is awake in /ws/feature/task", reviewsvc.ErrTreeBusy)
+	srv := newReviewTestServer(t, &fakeReviewService{triggerErr: err})
+
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/reviews/trigger", "")
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusConflict, "REVIEW_TREE_BUSY")
+
+	var got errorBody
+	mustJSON(t, body, &got)
+	if !strings.Contains(got.Message, "mer-2") {
+		t.Fatalf("message = %q, want it to name who is writing the tree", got.Message)
+	}
+}
+
 func TestReviewsListIncludesReviewStates(t *testing.T) {
 	srv := newReviewTestServer(t, &fakeReviewService{list: reviewcore.SessionReviews{
 		ReviewerHandleID: "review-mer-1",

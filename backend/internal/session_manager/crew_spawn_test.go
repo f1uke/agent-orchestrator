@@ -13,7 +13,12 @@ import (
 // join, and points the fake workspace at the same path a real gitworktree would
 // hand back for that branch (the directory is named for the BRANCH, so a second
 // session on it resolves to the same tree).
-func seedCrewDev(m *Manager, st *fakeStore, ws *fakeWorkspace) domain.SessionRecord {
+//
+// Its runtime is scripted ALIVE. That matters: a crew member may only be born
+// into a free slot, and the guard probes a row that claims to hold one - so a dev
+// whose runtime is not scripted would be read as a corpse and its slot silently
+// stolen, and every test here would pass without ever meeting the rule.
+func seedCrewDev(m *Manager, st *fakeStore, rt *fakeRuntime, ws *fakeWorkspace) domain.SessionRecord {
 	dev := domain.SessionRecord{
 		ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
 		BaseBranch: "main", PRTarget: "main",
@@ -23,7 +28,24 @@ func seedCrewDev(m *Manager, st *fakeStore, ws *fakeWorkspace) domain.SessionRec
 	st.sessions[dev.ID] = dev
 	st.num = 1
 	ws.path = "/ws/feature/task"
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle["h1"] = true
 	return dev
+}
+
+// standDown frees the crew slot the way a real caller must before adding a
+// member: dev is suspended (card kept, worktree kept, transcript kept) and its
+// tmux reaped, so nothing is writing the tree the new member is about to join.
+func standDown(t *testing.T, m *Manager, rt *fakeRuntime, id domain.SessionID) {
+	t.Helper()
+	if err := m.ReleaseCrewSlot(ctx, id); err != nil {
+		t.Fatalf("release the crew slot held by %s: %v", id, err)
+	}
+	if rt.aliveByHandle != nil {
+		rt.aliveByHandle["h1"] = false
+	}
 }
 
 // TestSpawnCrewMember_JoinsDevsWorktreeAndBranch is the capability itself: a
@@ -32,7 +54,9 @@ func seedCrewDev(m *Manager, st *fakeStore, ws *fakeWorkspace) domain.SessionRec
 // the owner.
 func TestSpawnCrewMember_JoinsDevsWorktreeAndBranch(t *testing.T) {
 	m, st, rt, ws := newManager()
-	dev := seedCrewDev(m, st, ws)
+	dev := seedCrewDev(m, st, rt, ws)
+
+	standDown(t, m, rt, dev.ID)
 
 	qa, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
@@ -70,7 +94,9 @@ func TestSpawnCrewMember_JoinsDevsWorktreeAndBranch(t *testing.T) {
 // non-dev member is named after its session id instead.
 func TestSpawnCrewMember_GetsItsOwnRuntimeName(t *testing.T) {
 	m, st, rt, ws := newManager()
-	dev := seedCrewDev(m, st, ws)
+	dev := seedCrewDev(m, st, rt, ws)
+
+	standDown(t, m, rt, dev.ID)
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
@@ -104,8 +130,8 @@ func TestSpawnCrewMember_GetsItsOwnRuntimeName(t *testing.T) {
 // install`, a symlink pass) into a tree somebody is editing is not a fresh
 // checkout, it is an interruption.
 func TestSpawnCrewMember_LeavesTheSharedTreeAlone(t *testing.T) {
-	m, st, _, ws := newManager()
-	dev := seedCrewDev(m, st, ws)
+	m, st, rt, ws := newManager()
+	dev := seedCrewDev(m, st, rt, ws)
 	st.projects["mer"] = domain.ProjectRecord{
 		ID: "mer", Config: domain.ProjectConfig{
 			Worker:       domain.RoleOverride{Harness: domain.HarnessClaudeCode},
@@ -113,6 +139,8 @@ func TestSpawnCrewMember_LeavesTheSharedTreeAlone(t *testing.T) {
 			PostCreate:   []string{"exit 7"}, // would fail the spawn if it ran
 		},
 	}
+
+	standDown(t, m, rt, dev.ID)
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
@@ -184,7 +212,7 @@ func TestSpawnCrewMember_RefusesAnImpossibleCrew(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m, st, rt, ws := newManager()
-			seedCrewDev(m, st, ws)
+			seedCrewDev(m, st, rt, ws)
 			if tc.seed != nil {
 				tc.seed(st)
 			}

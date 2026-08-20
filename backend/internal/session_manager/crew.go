@@ -305,3 +305,39 @@ func crewSubordinatesFirst(recs []domain.SessionRecord) []domain.SessionRecord {
 	}
 	return append(out, devs...)
 }
+
+// crewDevsFirst moves every crew DEV to the FRONT of a session list, leaving the
+// relative order of everything else alone. A list with no crew in it is returned
+// unchanged, by identity, so the boot restore pass on an ordinary machine
+// iterates exactly the slice it always did.
+//
+// It exists for RestoreAll. Only one member of a crew can hold the awake slot, so
+// only one can carry a restore marker - but a database written before this rule
+// existed, or one a bug got at, can hold two, and then the FIRST one restored wins
+// and the second is refused. Restoring dev first makes that outcome deterministic
+// and puts the slot where it belongs: dev owns the branch, the PR and the report.
+func crewDevsFirst(recs []domain.SessionRecord) []domain.SessionRecord {
+	isCrewDev := func(rec domain.SessionRecord) bool { return rec.InCrew() && rec.CrewRole.IsDev() }
+	anyDev := false
+	for _, rec := range recs {
+		if isCrewDev(rec) {
+			anyDev = true
+			break
+		}
+	}
+	if !anyDev {
+		return recs
+	}
+	out := make([]domain.SessionRecord, 0, len(recs))
+	for _, rec := range recs {
+		if isCrewDev(rec) {
+			out = append(out, rec)
+		}
+	}
+	for _, rec := range recs {
+		if !isCrewDev(rec) {
+			out = append(out, rec)
+		}
+	}
+	return out
+}

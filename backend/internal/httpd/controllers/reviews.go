@@ -175,6 +175,12 @@ func writeReviewError(w http.ResponseWriter, r *http.Request, err error) {
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "REVIEW_INVALID", err.Error(), nil)
 	case errors.Is(err, reviewsvc.ErrNotFound):
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "REVIEW_NOT_FOUND", err.Error(), nil)
+	case errors.Is(err, reviewsvc.ErrTreeBusy):
+		// Not a failure: an agent is writing the checkout this review would read,
+		// so the pass waits for the gap. A CONFLICT says "not right now, ask again"
+		// - a 500 would say the review engine is broken, and the caller would stop
+		// asking.
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "REVIEW_TREE_BUSY", err.Error(), nil)
 	case errors.Is(err, reviewsvc.ErrAgentBinaryNotFound):
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "REVIEWER_BINARY_NOT_FOUND", err.Error(), nil)
 	default:
