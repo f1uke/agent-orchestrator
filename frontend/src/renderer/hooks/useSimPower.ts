@@ -45,7 +45,10 @@ export function useSimPower(sessionId: string, onProblem: (message: string) => v
 		onMutate: () => onProblem(""),
 		onError: (error, { state }) =>
 			onProblem(
-				apiErrorMessage(error, state === "booted" ? "Could not boot the simulator" : "Could not shut the simulator down"),
+				apiErrorMessage(
+					error,
+					state === "booted" ? "Could not boot the simulator" : "Could not shut the simulator down",
+				),
 			),
 		// Both ends: the listing carries the operation while it runs, so it has
 		// to be re-read as soon as one starts, not only when it ends.

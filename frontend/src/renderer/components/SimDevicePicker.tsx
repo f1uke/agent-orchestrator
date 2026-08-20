@@ -240,10 +240,7 @@ function DeviceRow({
 					onClick={onChoose}
 					type="button"
 				>
-					<span
-						aria-hidden
-						className={cn("size-1.5 shrink-0 rounded-full", booted ? "bg-success" : "bg-passive")}
-					/>
+					<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", booted ? "bg-success" : "bg-passive")} />
 					<span className="min-w-0 flex-1">
 						<span className="block truncate text-[12px] text-foreground">{device.name}</span>
 						<span className="block truncate text-[11px] text-muted-foreground">
