@@ -132,6 +132,18 @@ export type TaskLane = {
 	 * the lane speaks for itself - which is always, on a solo task.
 	 */
 	note: string;
+	/**
+	 * The member whose OWN status produced this lane - the one holding the ball.
+	 * The card draws its gutter glyph from it.
+	 *
+	 * It is absent when the lane came from a fact about the TASK rather than about
+	 * a member (`qa · Play the cases` is a fact about the checklist and the human;
+	 * `qa · Ready to wake` is a fact about the baton). Returning the member rather
+	 * than leaving the card to parse the note is not merely tidier: drawing a
+	 * sleeping qa's glyph for "play the cases" would paint the board's only SOLID
+	 * mark - the one reserved for a genuinely live agent - on a dead process.
+	 */
+	holder?: WorkspaceSession;
 };
 
 /**
@@ -180,9 +192,17 @@ function nextUp(qa: WorkspaceSession): CrewRole {
 	return crewChipState(qa) === "working" ? "dev" : "qa";
 }
 
-function roleNote(member: WorkspaceSession, text: string): string {
+/**
+ * `qa · Input needed` - the ROLE in lower case, then the status exactly as the
+ * card would have written it.
+ *
+ * dev gets NO prefix and no note at all: dev is the task, so a card whose ball
+ * holder is dev reads precisely as it reads today. Naming the role only when it
+ * is not dev is what keeps the crew invisible until it has something to say.
+ */
+function roleNote(member: WorkspaceSession): string {
 	const role = member.crew?.role;
-	return role && role !== "dev" ? `${role} · ${text}` : text;
+	return role && role !== "dev" ? `${role} · ${statusLabel(member)}` : "";
 }
 
 /**
@@ -209,33 +229,33 @@ function roleNote(member: WorkspaceSession, text: string): string {
  */
 export function taskLane(task: Task, gates: TaskGates): TaskLane {
 	const { dev, qa, members } = task;
-	if (!qa) return { zone: attentionZone(dev), note: "" };
+	if (!qa) return { zone: attentionZone(dev), note: "", holder: dev };
 
 	if (members.every((member) => attentionZone(member) === "done")) return { zone: "done", note: "" };
-	if (dev.isTodo) return { zone: "todo", note: "" };
+	if (dev.isTodo) return { zone: "todo", note: "", holder: dev };
 
 	const awake = members.filter((member) => crewChipState(member) === "working");
 
 	// 1. A live agent is stuck on something only a person can give it.
 	const blocked = awake.find(isBlockedOnAPerson);
-	if (blocked) return { zone: "action", note: roleNote(blocked, statusLabel(blocked).toLowerCase()) };
+	if (blocked) return { zone: "action", note: roleNote(blocked), holder: blocked };
 
 	// AO's reviewer asked for changes at this head. Nobody has to be awake for
 	// that to be true, and it is dev's to answer.
-	if (gates.review === "changes") return { zone: "action", note: "review · changes" };
+	if (gates.review === "changes") return { zone: "action", note: "review · Changes requested" };
 
 	// 2/3. dev's work can land: the AND, and what is still owed when it cannot.
 	if (attentionZone(dev) === "merge") {
-		if (!dev.crew?.hasRun || !qa.crew?.hasRun) return { zone: "pending", note: "qa · not woken yet" };
-		if (gates.smoke && smokeSettled(gates.smoke)) return { zone: "merge", note: "" };
-		if (awaitingOnlyTheHumansPlay(gates.smoke)) return { zone: "action", note: "qa · play the cases" };
-		return { zone: "pending", note: "qa · not played yet" };
+		if (!dev.crew?.hasRun || !qa.crew?.hasRun) return { zone: "pending", note: "qa · Not woken yet" };
+		if (gates.smoke && smokeSettled(gates.smoke)) return { zone: "merge", note: "", holder: dev };
+		if (awaitingOnlyTheHumansPlay(gates.smoke)) return { zone: "action", note: "qa · Play the cases" };
+		return { zone: "pending", note: "qa · Not played yet" };
 	}
 
 	// 4. Somebody has the turn and is using it.
 	const holder = awake[0];
 	if (holder && attentionZone(holder) !== "action") {
-		return { zone: attentionZone(holder), note: roleNote(holder, statusLabel(holder).toLowerCase()) };
+		return { zone: attentionZone(holder), note: roleNote(holder), holder };
 	}
 
 	// 5. THE BATON IS DOWN. Either nothing is running, or the member that is
@@ -248,7 +268,7 @@ export function taskLane(task: Task, gates: TaskGates): TaskLane {
 	// This is the second half of the trap, and the half that is easy to miss: a
 	// dev that parks without being stood down is still AWAKE, so a rollup that
 	// only skipped asleep members would put it straight back into Needs you.
-	return { zone: "pending", note: `${nextUp(qa)} · ready to wake` };
+	return { zone: "pending", note: `${nextUp(qa)} · Ready to wake` };
 }
 
 /** Every worker task on the board, already grouped and laned. */

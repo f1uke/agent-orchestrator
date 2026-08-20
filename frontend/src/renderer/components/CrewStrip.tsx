@@ -70,10 +70,11 @@ function CrewChip({ member, onOpen }: { member: WorkspaceSession; onOpen: (membe
 						style={{ color: tone, ...(state === "working" && filled ? { fill: "currentColor" } : {}) }}
 						aria-hidden="true"
 					/>
-					{/* The label sheds below ~150px of card width rather than truncating
-					    to an unreadable stub; the glyph is the status and the tooltip
-					    keeps the name. */}
-					<span className="truncate @[150px]/crew:inline hidden" style={{ color: tone }}>
+					{/* The ROLE always shows. It is three characters and it is the whole
+					    point of the chip - a strip of three unlabelled glyphs at the
+					    board's real column width (~122px of content) says nothing at all.
+					    What sheds instead is the gate's word, below. */}
+					<span className="truncate" style={{ color: tone }}>
 						{role}
 					</span>
 				</button>
@@ -101,7 +102,11 @@ function ReviewPip({ state, onOpen }: { state: ReviewGateState; onOpen?: () => v
 					type="button"
 				>
 					<Icon className="h-[9px] w-[9px] shrink-0" style={{ color: tone }} aria-hidden="true" />
-					<span className="truncate @[150px]/crew:inline hidden" style={{ color: tone }}>
+					{/* The gate's word is what sheds when the column is narrow: its three
+					    states already have three unlike silhouettes (check / half-filled /
+					    eye), and the tooltip names the verdict either way - where a chip
+					    stripped to a bare dot would say nothing a person could read. */}
+					<span className="truncate @[190px]/crew:inline hidden" style={{ color: tone }}>
 						{label}
 					</span>
 				</button>
@@ -124,7 +129,10 @@ function SoloMarker({ size }: { size?: TaskSize }) {
 			<TooltipTrigger asChild>
 				<span className="inline-flex min-w-0 items-center gap-1 text-[10px] text-passive" data-crew-solo={size ?? ""}>
 					<Slash className="h-[9px] w-[9px] shrink-0" aria-hidden="true" />
-					<span className="truncate">solo{size ? ` · ${size}` : ""}</span>
+					{/* `mechanical` says both things at once - one agent, and WHY - in one
+					    word that fits a 150px column. Anything else solo just says solo:
+					    "standard" on a one-agent card would be a puzzle, not a fact. */}
+					<span className="truncate">{size === "mechanical" ? "mechanical" : "solo"}</span>
 				</span>
 			</TooltipTrigger>
 			<TooltipContent>

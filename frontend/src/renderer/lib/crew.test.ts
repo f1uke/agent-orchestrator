@@ -130,14 +130,14 @@ describe("taskLane — the NEEDS YOU trap", () => {
 		const { dev, qa } = crew({ status: "needs_input", statusReason: "idle_aged" });
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
 		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · ready to wake");
+		expect(lane.note).toBe("qa · Ready to wake");
 	});
 
 	it("but a dev genuinely blocked at an OPEN PROMPT is still NEEDS YOU", () => {
 		const { dev, qa } = crew({ status: "needs_input", statusReason: "waiting_input" });
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
 		expect(lane.zone).toBe("action");
-		expect(lane.note).toBe("input needed");
+		expect(lane.note).toBe("");
 	});
 
 	it("and a real problem — CI, changes requested, no signal — is still NEEDS YOU", () => {
@@ -159,7 +159,7 @@ describe("taskLane — the NEEDS YOU trap", () => {
 		);
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
 		expect(lane.zone).toBe("action");
-		expect(lane.note).toBe("qa · input needed");
+		expect(lane.note).toBe("qa · Input needed");
 	});
 
 	it("an asleep member never asks for attention on its own account", () => {
@@ -180,7 +180,7 @@ describe("taskLane — READY TO MERGE is an AND", () => {
 		const { dev, qa } = crew(mergeable);
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "approved", smoke: smoke() });
 		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · not woken yet");
+		expect(lane.note).toBe("qa · Not woken yet");
 	});
 
 	it("does not read ready while a person has not played the cases", () => {
@@ -190,7 +190,7 @@ describe("taskLane — READY TO MERGE is an AND", () => {
 			{ review: "approved", smoke: smoke({ total: 2, pending: 2 }) },
 		);
 		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · not played yet");
+		expect(lane.note).toBe("qa · Not played yet");
 	});
 
 	it("asks the human to play once the machine has run and only their judgement is left", () => {
@@ -200,7 +200,7 @@ describe("taskLane — READY TO MERGE is an AND", () => {
 			{ review: "approved", smoke: smoke({ total: 2, pending: 2, agentPass: 2 }) },
 		);
 		expect(lane.zone).toBe("action");
-		expect(lane.note).toBe("qa · play the cases");
+		expect(lane.note).toBe("qa · Play the cases");
 	});
 
 	it("reads ready only when dev can land, qa has played, and review has not objected", () => {
@@ -219,7 +219,7 @@ describe("taskLane — READY TO MERGE is an AND", () => {
 			{ review: "changes", smoke: smoke({ total: 2, pass: 2, checked: 2 }) },
 		);
 		expect(lane.zone).toBe("action");
-		expect(lane.note).toBe("review · changes");
+		expect(lane.note).toBe("review · Changes requested");
 	});
 
 	it("a review that never ran does not block — nothing starts one automatically yet", () => {

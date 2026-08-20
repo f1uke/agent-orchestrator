@@ -46,7 +46,7 @@ describe("CrewStrip", () => {
 		render(<CrewStrip task={{ dev, members: [dev], isCrew: false }} review="not run" onOpenMember={() => {}} />);
 		expect(document.querySelectorAll("[data-crew-chip]")).toHaveLength(0);
 		expect(document.querySelector("[data-crew-solo]")).toHaveAttribute("data-crew-solo", "mechanical");
-		expect(screen.getByText(/solo · mechanical/)).toBeInTheDocument();
+		expect(screen.getByText("mechanical")).toBeInTheDocument();
 	});
 
 	it("opens the member a chip names, without opening the card underneath it", async () => {

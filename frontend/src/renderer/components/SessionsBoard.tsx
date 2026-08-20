@@ -856,10 +856,14 @@ function SessionCard({
 	// as a fact about the task rather than as dev having stalled. On a solo task
 	// the ball holder is the session itself and nothing changes.
 	const lane = taskLane(task, gates ?? { review: "not run" });
-	const ballHolder =
-		task.members.find((m) => m.id === (lane.note.startsWith("qa") ? task.qa?.id : session.id)) ?? session;
-	const { Icon, filled, label: ownStatus } = statusGlyph(ballHolder);
-	const statusText = lane.note !== "" ? lane.note : ownStatus;
+	// The gutter keeps exactly ONE glyph, and it belongs to whoever holds the ball.
+	// When the lane came from a fact about the TASK rather than about a member -
+	// "the checklist is waiting for you", "the baton is down" - there is no member
+	// to draw and the LANE's own shape stands in.
+	const holderGlyph = lane.holder ? statusGlyph(lane.holder) : undefined;
+	const Icon = holderGlyph?.Icon ?? col.Icon;
+	const filled = holderGlyph?.filled ?? col.filled;
+	const statusText = lane.note !== "" ? lane.note : (holderGlyph?.label ?? statusGlyph(session).label);
 	const prSummaries0 = useSessionScmSummary(session.id).data;
 	const review = gates?.review ?? reviewGateState(prSummaries0 ?? []);
 	const issueId = canonicalTrackerIssueId(session.issueId);
@@ -901,7 +905,7 @@ function SessionCard({
 				    decorative (aria-hidden): the status text beside it is the
 				    accessible carrier, and colour is the third, redundant channel. */}
 				<span
-					data-card-status-glyph={ballHolder.status}
+					data-card-status-glyph={(lane.holder ?? session).status}
 					className="flex w-[18px] shrink-0 justify-center pt-px"
 					style={{ color: col.dotVar }}
 				>
