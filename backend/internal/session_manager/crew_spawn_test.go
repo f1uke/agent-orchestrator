@@ -168,6 +168,18 @@ func TestSpawnCrewMember_RefusesAnImpossibleCrew(t *testing.T) {
 			},
 			devID: "mer-1", role: domain.CrewRoleQA,
 		},
+		{
+			// A workspace project materializes MANY worktrees per session, and its
+			// capture/destroy path runs before the shared-worktree guard. Refused
+			// outright rather than half-supported.
+			name: "workspace project",
+			seed: func(st *fakeStore) {
+				p := st.projects["mer"]
+				p.Kind = domain.ProjectKindWorkspace
+				st.projects["mer"] = p
+			},
+			devID: "mer-1", role: domain.CrewRoleQA,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

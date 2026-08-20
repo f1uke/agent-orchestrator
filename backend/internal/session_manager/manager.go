@@ -380,7 +380,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// spawn, which is every spawn a human can make.
 	var crewDev domain.SessionRecord
 	if cfg.CrewOf != "" {
-		dev, err := m.resolveCrewDev(ctx, cfg.CrewOf, cfg.CrewRole)
+		dev, err := m.resolveCrewDev(ctx, project, cfg.CrewOf, cfg.CrewRole)
 		if err != nil {
 			return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
 		}

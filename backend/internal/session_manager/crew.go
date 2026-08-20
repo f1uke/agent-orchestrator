@@ -26,9 +26,18 @@ import (
 // worktree, and it may never outlive dev. So dev must be a live worker, and it
 // must not itself be a subordinate - crews are flat by construction, which is
 // what makes "tear the crew down" a single fan-out rather than a walk.
-func (m *Manager) resolveCrewDev(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+func (m *Manager) resolveCrewDev(ctx context.Context, project domain.ProjectRecord, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
 	if !role.Valid() || role.IsDev() {
 		return domain.SessionRecord{}, fmt.Errorf("%w: role %q is not a joinable crew role", ErrInvalidCrew, role)
+	}
+	// A workspace project materialises MANY worktrees per session, and its
+	// capture/destroy path (saveAndTeardownWorkspaceProject) is reached before the
+	// shared-worktree guard - so a crew there could still remove a live members
+	// trees on a daemon restart. Refused outright rather than half-supported: the
+	// multi-repo shape is not part of this capability and is not exercised by any
+	// of its tests.
+	if project.Kind.WithDefault() == domain.ProjectKindWorkspace {
+		return domain.SessionRecord{}, fmt.Errorf("%w: project %s is a workspace project, which cannot host a crew", ErrInvalidCrew, project.ID)
 	}
 	dev, ok, err := m.store.GetSession(ctx, devID)
 	if err != nil {
