@@ -249,7 +249,11 @@ export function SmokeTestView({
 	});
 
 	const data = query.data;
-	const checks = data?.checks ?? [];
+	// Retired cases are part of the record but not part of what the user is asked
+	// to play, so they stay out of the play list (and out of progressFor's
+	// counts). Surfacing them - "retired 3, now covered by tests" - belongs with
+	// the rest of the Tests-tab rework.
+	const checks = (data?.checks ?? []).filter((c) => !c.retiredAt);
 	const progress = progressFor(checks);
 	const workerLabel = data?.worker || worker || "worker";
 

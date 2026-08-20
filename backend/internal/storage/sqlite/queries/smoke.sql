@@ -1,12 +1,14 @@
 -- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at
-FROM smoke_check WHERE session_id = ? ORDER BY seq, created_at;
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason
+FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at;
 
 -- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason
 FROM smoke_check WHERE id = ?;
 
 -- name: InsertSmokeCheck :exec
+-- A fresh case starts with BOTH results empty: 'pending' is the user's default
+-- (nobody has played it) and '' the machine's (nothing has run it).
 INSERT INTO smoke_check (id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', NULL, NULL, ?, ?);
 
@@ -30,26 +32,49 @@ UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, update
 UPDATE smoke_check SET reported_at = ?, updated_at = ? WHERE session_id = ?;
 
 -- name: InsertSmokeEvidence :exec
-INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSmokeEvidence :one
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
 FROM smoke_evidence WHERE id = ?;
 
 -- name: ListSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
 FROM smoke_evidence WHERE check_id = ? ORDER BY created_at;
 
 -- name: ListSmokeEvidenceCreatedBefore :many
 -- Age-based retention sweep: every evidence row whose created_at predates the
 -- TTL cutoff, across all sessions. Ordered oldest-first so a batch purge is
 -- deterministic.
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
 FROM smoke_evidence WHERE created_at < ? ORDER BY created_at;
 
--- name: DeleteSmokeEvidenceByCheck :exec
-DELETE FROM smoke_evidence WHERE check_id = ?;
+-- name: DeleteUserSmokeEvidenceByCheck :exec
+-- Scoped to the user's own attachments: Reset clears what the USER recorded
+-- while playing a case, and the machine's artifacts are not theirs to drop.
+DELETE FROM smoke_evidence WHERE check_id = ? AND source = 'user';
+
+-- name: ListUserSmokeEvidenceByCheck :many
+-- The rows Reset is about to delete, so the service can remove exactly those
+-- blobs instead of wiping the case's whole evidence directory.
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+FROM smoke_evidence WHERE check_id = ? AND source = 'user' ORDER BY created_at;
 
 -- name: DeleteSmokeEvidence :execrows
 DELETE FROM smoke_evidence WHERE id = ?;
+
+-- name: SetSmokeAgentResult :execrows
+-- The machine's result, written only by `ao smoke record`. Disjoint from the
+-- user-runtime fields by construction: this statement cannot reach verdict,
+-- note, decided_at or the user's evidence rows.
+UPDATE smoke_check SET agent_verdict = ?, agent_note = ?, agent_ran_at = ?, agent_sha = ?, updated_at = ?
+WHERE id = ? AND retired_at IS NULL;
+
+-- name: RetireSmokeCheck :execrows
+-- Retire is not delete: nothing on the row is cleared. The case simply stops
+-- being one the user is asked to play, and the reason it stopped is recorded.
+-- Guarded on retired_at IS NULL so a second retire is a no-op rather than
+-- overwriting the original reason and date.
+UPDATE smoke_check SET retired_at = ?, retired_reason = ?, updated_at = ?
+WHERE id = ? AND retired_at IS NULL;

@@ -37,34 +37,55 @@ func (f *fakeStore) ListSmokeChecksBySession(_ context.Context, id domain.Sessio
 	var out []domain.SmokeCheck
 	for _, c := range f.checks {
 		if c.SessionID == id {
-			c.Evidence = f.evidenceFor(c.ID)
+			f.loadEvidence(&c)
 			out = append(out, c)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Retired() != out[j].Retired() {
+			return !out[i].Retired()
+		}
+		return out[i].Seq < out[j].Seq
+	})
 	return out, nil
 }
 
 func (f *fakeStore) GetSmokeCheck(_ context.Context, id string) (domain.SmokeCheck, bool, error) {
 	c, ok := f.checks[id]
 	if ok {
-		c.Evidence = f.evidenceFor(id)
+		f.loadEvidence(&c)
 	}
 	return c, ok, nil
 }
 
-// evidenceFor mirrors the real store, which loads a case's evidence rows with
-// the case itself; the service reads len(check.Evidence) to decide whether the
-// user has anything invested in a case.
-func (f *fakeStore) evidenceFor(checkID string) []domain.SmokeEvidence {
-	out := []domain.SmokeEvidence{}
+// loadEvidence mirrors the real store, which loads a case's evidence rows with
+// the case itself and SPLITS them by provenance; the service reads
+// len(check.Evidence) to decide whether the user has anything invested in a
+// case, and len(check.AgentEvidence) to accept an evidence-only record. A fake
+// that pooled them would hide exactly the mix-up the split exists to prevent.
+func (f *fakeStore) loadEvidence(check *domain.SmokeCheck) {
+	check.Evidence = []domain.SmokeEvidence{}
+	check.AgentEvidence = []domain.SmokeEvidence{}
+	var rows []domain.SmokeEvidence
 	for _, ev := range f.evidence {
-		if ev.CheckID == checkID {
-			out = append(out, ev)
+		if ev.CheckID == check.ID {
+			rows = append(rows, ev)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	for _, ev := range rows {
+		if ev.Source == domain.SmokeEvidenceAgent {
+			check.AgentEvidence = append(check.AgentEvidence, ev)
+			continue
+		}
+		check.Evidence = append(check.Evidence, ev)
+	}
+}
+
+func (f *fakeStore) evidenceFor(checkID string) []domain.SmokeEvidence {
+	check := domain.SmokeCheck{ID: checkID}
+	f.loadEvidence(&check)
+	return check.Evidence
 }
 
 func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error) {
@@ -90,6 +111,11 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 		if prior.SessionID != sessionID {
 			continue
 		}
+		// A retired case is invisible to the replace: never deleted for being
+		// absent from the payload, never rewritten.
+		if prior.Retired() {
+			continue
+		}
 		if _, ok := keep[id]; !ok {
 			delete(f.checks, id)
 			for evID, ev := range f.evidence {
@@ -107,6 +133,9 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 		// rows are keyed to the id and joined on read, so they follow).
 		if prior, ok := f.checks[c.ID]; ok {
 			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
+			check.AgentVerdict, check.AgentNote = prior.AgentVerdict, prior.AgentNote
+			check.AgentRanAt, check.AgentSHA = prior.AgentRanAt, prior.AgentSHA
+			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
 			check.CreatedAt = prior.CreatedAt
 		}
 		f.checks[c.ID] = check
@@ -132,7 +161,38 @@ func (f *fakeStore) ResetSmokeCheck(_ context.Context, id string, now time.Time)
 	}
 	c.Verdict, c.Note, c.DecidedAt, c.Evidence, c.UpdatedAt = domain.SmokePending, "", nil, nil, now
 	f.checks[id] = c
+	// Like the real store: only the USER's evidence rows go.
+	for evID, ev := range f.evidence {
+		if ev.CheckID == id && ev.Source != domain.SmokeEvidenceAgent {
+			delete(f.evidence, evID)
+		}
+	}
 	return true, nil
+}
+
+func (f *fakeStore) SetSmokeAgentResult(_ context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error) {
+	c, ok := f.checks[id]
+	if !ok || c.Retired() {
+		return false, nil
+	}
+	c.AgentVerdict, c.AgentNote, c.AgentSHA = res.Verdict, res.Note, res.SHA
+	c.AgentRanAt, c.UpdatedAt = &ranAt, now
+	f.checks[id] = c
+	return true, nil
+}
+
+func (f *fakeStore) RetireSmokeCheck(_ context.Context, id, reason string, retiredAt, now time.Time) (bool, error) {
+	c, ok := f.checks[id]
+	if !ok || c.Retired() {
+		return false, nil
+	}
+	c.RetiredAt, c.RetiredReason, c.UpdatedAt = &retiredAt, reason, now
+	f.checks[id] = c
+	return true, nil
+}
+
+func (f *fakeStore) ListUserSmokeEvidence(_ context.Context, checkID string) ([]domain.SmokeEvidence, error) {
+	return f.evidenceFor(checkID), nil
 }
 
 func (f *fakeStore) MarkSmokeReported(_ context.Context, id domain.SessionID, reportedAt, _ time.Time) (int64, error) {

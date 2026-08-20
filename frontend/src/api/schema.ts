@@ -1090,6 +1090,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a machine's result for a smoke-test case, beside (never instead of) the user's */
+        post: operations["recordSmokeAgentResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence": {
         parameters: {
             query?: never;
@@ -1153,6 +1170,23 @@ export interface paths {
         put?: never;
         /** Clear a smoke-test case's verdict/note/evidence */
         post: operations["resetSmokeCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retire a smoke-test case out of the checklist, keeping its results and the reason it went */
+        post: operations["retireSmokeCheck"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2318,6 +2352,14 @@ export interface components {
             enabled: boolean;
             graceMinutes: number;
         };
+        RecordSmokeAgentResultInput: {
+            /** @description What the machine saw. */
+            note?: string;
+            /** @description The commit the case was run against; compare with the PR head to spot a stale result. */
+            sha?: string;
+            /** @description pass | fail | skip, or omitted for an evidence-only run (allowed only when the case already carries agent evidence). */
+            verdict?: string;
+        };
         ReleaseSimHoldResponse: {
             /** @description True when the caller's gesture hold was dropped. */
             released: boolean;
@@ -2380,6 +2422,10 @@ export interface components {
             ok: boolean;
             session: components["schemas"]["ControllersSessionView"];
             sessionId: string;
+        };
+        RetireSmokeCheckInput: {
+            /** @description Why the case is no longer worth playing (e.g. "now covered by TestFoo"). Required - it is the trace retiring leaves behind. */
+            reason: string;
         };
         ReviewRun: {
             batchId: string;
@@ -2802,6 +2848,12 @@ export interface components {
             why?: string;
         };
         SmokeCheck: {
+            agentEvidence: components["schemas"]["SmokeEvidence"][];
+            agentNote?: string;
+            /** Format: date-time */
+            agentRanAt?: null | string;
+            agentSha?: string;
+            agentVerdict?: string;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -2816,6 +2868,9 @@ export interface components {
             projectId: string;
             /** Format: date-time */
             reportedAt?: null | string;
+            /** Format: date-time */
+            retiredAt?: null | string;
+            retiredReason?: string;
             seq: number;
             sessionId: string;
             steps: string[];
@@ -2838,6 +2893,7 @@ export interface components {
             sessionId: string;
             /** Format: int64 */
             sizeBytes: number;
+            source: string;
         };
         SmokeEvidenceResponse: {
             evidence: components["schemas"]["SmokeEvidence"];
@@ -7158,9 +7214,77 @@ export interface operations {
             };
         };
     };
-    uploadSmokeEvidence: {
+    recordSmokeAgentResult: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordSmokeAgentResultInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmokeCheckResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    uploadSmokeEvidence: {
+        parameters: {
+            query?: {
+                /** @description Who attached it: user (default) or agent. Agent files land in the case's separate agentEvidence list so provenance is never ambiguous. */
+                source?: string;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */
@@ -7366,6 +7490,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SmokeCheckResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    retireSmokeCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetireSmokeCheckInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmokeCheckResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */

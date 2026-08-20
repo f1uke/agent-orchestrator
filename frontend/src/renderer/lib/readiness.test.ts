@@ -35,6 +35,9 @@ const smoke = (overrides: Partial<SmokeProgress> = {}): SmokeProgress => ({
 	skip: 0,
 	pending: 0,
 	checked: 0,
+	retired: 0,
+	agentPass: 0,
+	agentFail: 0,
 	...overrides,
 });
 
@@ -546,5 +549,67 @@ describe("deriveReadiness — AO's own review verdict", () => {
 		const r = deriveReadiness({ status: "review_pending", activity: { state: "idle" } }, [pr()], smoke());
 		expect(tones(r).review).toBe("wait");
 		expect(stateOf(r, "review")).toBe("awaiting");
+	});
+});
+
+// A smoke case can carry a machine's result beside the person's. It may move a
+// label or make the tone stricter; it must NEVER stand in for the human verdict,
+// because a machine answers "did the steps run" and a person answers "does this
+// work for a person" - and every regression caught by hand so far lived in that
+// gap. These are the tests that stop the gate ever reading green unplayed.
+describe("deriveReadiness - an agent result never opens the merge gate", () => {
+	const approved = {
+		review: { decision: "approved" as const, hasUnresolvedHumanComments: false, unresolvedBy: [] },
+	};
+
+	it("a machine pass on every pending case still does not make it Ready to Merge", () => {
+		const r = deriveReadiness(
+			{ status: "mergeable" },
+			[pr(approved)],
+			smoke({ total: 2, pending: 2, checked: 0, agentPass: 2 }),
+		);
+		expect(r.verdict.word).not.toBe("Ready to Merge");
+		expect(tones(r).smoke).toBe("wait");
+		expect(stateOf(r, "smoke")).toBe("qa 2/2");
+	});
+
+	it("the human's verdicts alone turn the gate green", () => {
+		const r = deriveReadiness(
+			{ status: "mergeable" },
+			[pr(approved)],
+			smoke({ total: 2, pass: 2, checked: 2, agentPass: 0 }),
+		);
+		expect(r.verdict.word).toBe("Ready to Merge");
+		expect(tones(r).smoke).toBe("pass");
+	});
+
+	it("a machine failure blocks - stricter is allowed, looser is not", () => {
+		const r = deriveReadiness({}, [pr(approved)], smoke({ total: 1, pending: 1, agentFail: 1 }));
+		expect(tones(r).smoke).toBe("block");
+		expect(r.verdict.word).toBe("Smoke Failed");
+	});
+
+	it("a person's verdict overrules a machine failure", () => {
+		// agentFail counts only undecided cases, so once the person has judged
+		// them all there is nothing left for a stale machine run to block.
+		const r = deriveReadiness(
+			{ status: "mergeable" },
+			[pr(approved)],
+			smoke({ total: 1, pass: 1, checked: 1, agentFail: 0 }),
+		);
+		expect(tones(r).smoke).toBe("pass");
+		expect(r.verdict.word).toBe("Ready to Merge");
+	});
+
+	it("retired cases do not hold the gate open", () => {
+		// The checklist shrank to nothing the user still has to play. That is a
+		// green gate, not a permanently pending one.
+		const r = deriveReadiness(
+			{ status: "mergeable" },
+			[pr(approved)],
+			smoke({ total: 1, pass: 1, checked: 1, retired: 3 }),
+		);
+		expect(tones(r).smoke).toBe("pass");
+		expect(r.verdict.word).toBe("Ready to Merge");
 	});
 });

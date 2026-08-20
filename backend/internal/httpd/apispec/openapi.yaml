@@ -3455,10 +3455,77 @@ paths:
         by case id)
       tags:
       - smoke
+  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result:
+    post:
+      operationId: recordSmokeAgentResult
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Smoke-check case identifier.
+        in: path
+        name: checkId
+        required: true
+        schema:
+          description: Smoke-check case identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordSmokeAgentResultInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmokeCheckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Record a machine's result for a smoke-test case, beside (never instead
+        of) the user's
+      tags:
+      - smoke
   /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence:
     post:
       operationId: uploadSmokeEvidence
       parameters:
+      - description: 'Who attached it: user (default) or agent. Agent files land in
+          the case''s separate agentEvidence list so provenance is never ambiguous.'
+        in: query
+        name: source
+        schema:
+          description: 'Who attached it: user (default) or agent. Agent files land
+            in the case''s separate agentEvidence list so provenance is never ambiguous.'
+          type: string
       - description: Session identifier, e.g. project-1.
         in: path
         name: sessionId
@@ -3687,6 +3754,65 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Clear a smoke-test case's verdict/note/evidence
+      tags:
+      - smoke
+  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/retire:
+    post:
+      operationId: retireSmokeCheck
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Smoke-check case identifier.
+        in: path
+        name: checkId
+        required: true
+        schema:
+          description: Smoke-check case identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetireSmokeCheckInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmokeCheckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Retire a smoke-test case out of the checklist, keeping its results
+        and the reason it went
       tags:
       - smoke
   /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict:
@@ -6510,6 +6636,20 @@ components:
       - graceMinutes
       - artifactsEnabled
       type: object
+    RecordSmokeAgentResultInput:
+      properties:
+        note:
+          description: What the machine saw.
+          type: string
+        sha:
+          description: The commit the case was run against; compare with the PR head
+            to spot a stale result.
+          type: string
+        verdict:
+          description: pass | fail | skip, or omitted for an evidence-only run (allowed
+            only when the case already carries agent evidence).
+          type: string
+      type: object
     ReleaseSimHoldResponse:
       properties:
         released:
@@ -6661,6 +6801,15 @@ components:
       - ok
       - sessionId
       - session
+      type: object
+    RetireSmokeCheckInput:
+      properties:
+        reason:
+          description: Why the case is no longer worth playing (e.g. "now covered
+            by TestFoo"). Required - it is the trace retiring leaves behind.
+          type: string
+      required:
+      - reason
       type: object
     ReviewRun:
       properties:
@@ -7683,6 +7832,21 @@ components:
       type: object
     SmokeCheck:
       properties:
+        agentEvidence:
+          items:
+            $ref: '#/components/schemas/SmokeEvidence'
+          type: array
+        agentNote:
+          type: string
+        agentRanAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        agentSha:
+          type: string
+        agentVerdict:
+          type: string
         createdAt:
           format: date-time
           type: string
@@ -7714,6 +7878,13 @@ components:
           type:
           - "null"
           - string
+        retiredAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        retiredReason:
+          type: string
         seq:
           type: integer
         sessionId:
@@ -7743,6 +7914,7 @@ components:
       - verdict
       - note
       - evidence
+      - agentEvidence
       - createdAt
       - updatedAt
       type: object
@@ -7773,6 +7945,8 @@ components:
         sizeBytes:
           format: int64
           type: integer
+        source:
+          type: string
       required:
       - id
       - checkId
@@ -7782,6 +7956,7 @@ components:
       - mime
       - sizeBytes
       - createdAt
+      - source
       type: object
     SmokeEvidenceResponse:
       properties:

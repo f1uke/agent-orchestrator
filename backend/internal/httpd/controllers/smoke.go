@@ -61,6 +61,20 @@ type SetSmokeVerdictInput struct {
 	Note    string `json:"note,omitempty" description:"Optional note about what the user saw."`
 }
 
+// RecordSmokeAgentResultInput is the body of POST .../{checkId}/agent-result:
+// the MACHINE's result for a case, disjoint from the user's verdict/note/
+// evidence and unable to reach them.
+type RecordSmokeAgentResultInput struct {
+	Verdict string `json:"verdict,omitempty" description:"pass | fail | skip, or omitted for an evidence-only run (allowed only when the case already carries agent evidence)."`
+	Note    string `json:"note,omitempty" description:"What the machine saw."`
+	SHA     string `json:"sha,omitempty" description:"The commit the case was run against; compare with the PR head to spot a stale result."`
+}
+
+// RetireSmokeCheckInput is the body of POST .../{checkId}/retire.
+type RetireSmokeCheckInput struct {
+	Reason string `json:"reason" description:"Why the case is no longer worth playing (e.g. \"now covered by TestFoo\"). Required - it is the trace retiring leaves behind."`
+}
+
 // SmokeEvidenceResponse is the { evidence } body returned by an evidence upload.
 type SmokeEvidenceResponse struct {
 	Evidence domain.SmokeEvidence `json:"evidence"`
@@ -103,6 +117,8 @@ func (c *SmokeController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/smoke-checks/report", c.report)
 	r.Post("/sessions/{sessionId}/smoke-checks/jira", c.postJira)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/verdict", c.verdict)
+	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/agent-result", c.agentResult)
+	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/retire", c.retire)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/reset", c.reset)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/evidence", c.uploadEvidence)
 	r.Get("/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", c.serveEvidence)
@@ -171,6 +187,46 @@ func (c *SmokeController) verdict(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, SmokeCheckResponse{Check: check})
 }
 
+func (c *SmokeController) agentResult(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result")
+		return
+	}
+	var in RecordSmokeAgentResultInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	check, err := c.Svc.RecordAgentResult(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), domain.SmokeAgentResult{
+		Verdict: domain.SmokeVerdict(strings.TrimSpace(in.Verdict)),
+		Note:    in.Note,
+		SHA:     in.SHA,
+	})
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SmokeCheckResponse{Check: check})
+}
+
+func (c *SmokeController) retire(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/retire")
+		return
+	}
+	var in RetireSmokeCheckInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	check, err := c.Svc.Retire(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), in.Reason)
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SmokeCheckResponse{Check: check})
+}
+
 func (c *SmokeController) reset(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset")
@@ -196,6 +252,7 @@ func (c *SmokeController) uploadEvidence(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer cleanup()
+	upload.Source = evidenceSourceParam(r)
 	ev, err := c.Svc.AttachEvidence(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), upload)
 	if err != nil {
 		writeSmokeError(w, r, err)
@@ -321,6 +378,18 @@ func readEvidenceUpload(r *http.Request) (smokesvc.EvidenceUpload, func(), error
 	}, noop, nil
 }
 
+// evidenceSourceParam reads ?source=agent. Anything else - including the absent
+// parameter every existing caller sends - is the user, which is what the Tests
+// tab has always meant. The provenance rides on the query string rather than the
+// body because the upload has two body shapes (multipart and raw bytes) and a
+// provenance that only travelled on one of them would be a hole.
+func evidenceSourceParam(r *http.Request) domain.SmokeEvidenceSource {
+	if strings.TrimSpace(r.URL.Query().Get("source")) == string(domain.SmokeEvidenceAgent) {
+		return domain.SmokeEvidenceAgent
+	}
+	return domain.SmokeEvidenceUser
+}
+
 func smokeListResponse(res smokesvc.SessionSmoke) ListSmokeChecksResponse {
 	checks := res.Checks
 	if checks == nil {
@@ -340,20 +409,32 @@ func sanitizeHeaderFilename(name string) string {
 	}, name)
 }
 
+// smokeErrorResponses maps each service sentinel to the status and code the API
+// answers with. The two refusals carry codes of their own rather than folding
+// into SMOKE_INVALID because a caller has to be able to tell them apart: "this
+// payload would destroy results the user recorded" and "this case is frozen, and
+// here is why it went" each have a different fix, and neither is a server fault.
+// First match wins; anything unlisted is a genuine 500.
+var smokeErrorResponses = []struct {
+	sentinel error
+	status   int
+	kind     string
+	code     string
+}{
+	{smokesvc.ErrResultsAtRisk, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_RESULTS_AT_RISK"},
+	{smokesvc.ErrCaseRetired, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_CASE_RETIRED"},
+	{smokesvc.ErrInvalid, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_INVALID"},
+	{smokesvc.ErrNotFound, http.StatusNotFound, "not_found", "SMOKE_NOT_FOUND"},
+}
+
 func writeSmokeError(w http.ResponseWriter, r *http.Request, err error) {
-	switch {
-	case errors.Is(err, smokesvc.ErrResultsAtRisk):
-		// A refused re-author, not a server fault: the payload would have
-		// deleted a case the user already played. Its own code so the caller
-		// can tell it apart from an ordinary validation failure.
-		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_RESULTS_AT_RISK", err.Error(), nil)
-	case errors.Is(err, smokesvc.ErrInvalid):
-		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_INVALID", err.Error(), nil)
-	case errors.Is(err, smokesvc.ErrNotFound):
-		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SMOKE_NOT_FOUND", err.Error(), nil)
-	default:
-		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SMOKE_OPERATION_FAILED", "Smoke operation failed", nil)
+	for _, mapped := range smokeErrorResponses {
+		if errors.Is(err, mapped.sentinel) {
+			envelope.WriteAPIError(w, r, mapped.status, mapped.kind, mapped.code, err.Error(), nil)
+			return
+		}
 	}
+	envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "SMOKE_OPERATION_FAILED", "Smoke operation failed", nil)
 }
 
 // writeSmokeJiraError maps the Post-to-Jira failures. ErrNotLinked gets a distinct

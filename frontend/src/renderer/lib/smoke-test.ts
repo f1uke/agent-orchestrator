@@ -109,18 +109,46 @@ export function verdictMeta(v: string): VerdictMeta {
 }
 
 export type SmokeProgress = {
+	/** Active cases only - a retired case is no longer one the user is asked to play. */
 	total: number;
 	pass: number;
 	fail: number;
 	skip: number;
 	pending: number;
 	checked: number;
+	/** How many cases were retired out of the checklist (excluded from `total`). */
+	retired: number;
+	/**
+	 * The MACHINE's verdicts, counted ONLY over cases the user has not decided.
+	 * They are deliberately not folded into pass/fail: a machine answers "did the
+	 * steps run", a person answers "does this work for a person", and a card must
+	 * never read confirmed with nobody having touched it. Restricting the count
+	 * to undecided cases is what keeps a stale machine failure from going on
+	 * blocking after the person has judged the case themselves.
+	 */
+	agentPass: number;
+	agentFail: number;
 };
 
 /** Counts for the progress bar + counts row. */
 export function progressFor(checks: SmokeCheck[]): SmokeProgress {
-	const p: SmokeProgress = { total: checks.length, pass: 0, fail: 0, skip: 0, pending: 0, checked: 0 };
+	const p: SmokeProgress = {
+		total: 0,
+		pass: 0,
+		fail: 0,
+		skip: 0,
+		pending: 0,
+		checked: 0,
+		retired: 0,
+		agentPass: 0,
+		agentFail: 0,
+	};
 	for (const c of checks) {
+		if (c.retiredAt) {
+			p.retired += 1;
+			continue;
+		}
+		p.total += 1;
 		switch (c.verdict) {
 			case "pass":
 				p.pass += 1;
@@ -133,6 +161,8 @@ export function progressFor(checks: SmokeCheck[]): SmokeProgress {
 				break;
 			default:
 				p.pending += 1;
+				if (c.agentVerdict === "pass") p.agentPass += 1;
+				if (c.agentVerdict === "fail") p.agentFail += 1;
 		}
 	}
 	p.checked = p.total - p.pending;

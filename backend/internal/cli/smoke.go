@@ -2,12 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -55,6 +57,31 @@ type smokeCheckClient struct {
 	FileRef   string                `json:"fileRef"`
 	Evidence  []smokeEvidenceClient `json:"evidence"`
 	DecidedAt *time.Time            `json:"decidedAt,omitempty"`
+	// The machine's result, printed beside the user's and never merged into it.
+	AgentVerdict  string                `json:"agentVerdict"`
+	AgentNote     string                `json:"agentNote"`
+	AgentEvidence []smokeEvidenceClient `json:"agentEvidence"`
+	AgentRanAt    *time.Time            `json:"agentRanAt,omitempty"`
+	AgentSHA      string                `json:"agentSha"`
+	RetiredAt     *time.Time            `json:"retiredAt,omitempty"`
+	RetiredReason string                `json:"retiredReason"`
+}
+
+// smokeCheckResponse mirrors controllers.SmokeCheckResponse.
+type smokeCheckResponse struct {
+	Check smokeCheckClient `json:"check"`
+}
+
+// recordSmokeAgentResultRequest mirrors controllers.RecordSmokeAgentResultInput.
+type recordSmokeAgentResultRequest struct {
+	Verdict string `json:"verdict,omitempty"`
+	Note    string `json:"note,omitempty"`
+	SHA     string `json:"sha,omitempty"`
+}
+
+// retireSmokeCheckRequest mirrors controllers.RetireSmokeCheckInput.
+type retireSmokeCheckRequest struct {
+	Reason string `json:"reason"`
 }
 
 // listSmokeChecksResponse mirrors controllers.ListSmokeChecksResponse.
@@ -77,8 +104,13 @@ different id and the old case falls out of the payload. AO refuses that call whe
 the case in question already carries the user's verdict, note or evidence, naming
 the cases it would have destroyed: re-send them under their existing ids (add
 "id": "<existing-id>" to the case that replaces a reworded one), or ask the user
-to Reset the case in the Tests tab first if it should really go. Cases nobody has
-played are still yours to revise or drop freely.
+to Reset the case in the Tests tab first if it should really go, or retire it
+with "ao smoke retire" - which keeps its results and the reason it went, and then
+lets it fall out of the checklist. Cases nobody has played are still yours to
+revise or drop freely.
+
+Naming a RETIRED case's id is refused rather than reviving it. If a retired case
+must come back, add it under a new id.
 
 The JSON is { "cases": [ ... ] } (a bare [ ... ] array is also accepted). Each case:
 
@@ -106,6 +138,8 @@ func newSmokeCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.AddCommand(newSmokeSetCommand(ctx))
 	cmd.AddCommand(newSmokeListCommand(ctx))
+	cmd.AddCommand(newSmokeRecordCommand(ctx))
+	cmd.AddCommand(newSmokeRetireCommand(ctx))
 	return cmd
 }
 
@@ -210,8 +244,16 @@ expected result — so it can be played straight from this output without openin
 the Tests tab or calling the API. Pass --brief for one line per case (plus
 ref/note/evidence) when you only want to scan verdicts.
 
+A case can carry TWO results and they are printed separately: the user's verdict
+(the "[…]" on the CHECK line) and, indented under it, a machine's result from
+` + "`ao smoke record`" + `. Only the user's decides whether the case is confirmed - a
+machine answers "did the steps run", not "does this work for a person".
+
 Verdicts, notes and evidence are the user's to record while playing the case
-live in the app; there is no CLI command that sets them.`
+live in the app; there is no CLI command that sets them.
+
+Retired cases are listed last, with the reason they went and the results they
+kept. They are no longer part of what the user is asked to play.`
 
 func newSmokeListCommand(ctx *commandContext) *cobra.Command {
 	var session string
@@ -252,8 +294,19 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 		return err
 	}
 	lines := []string{fmt.Sprintf("smoke checklist for %s (worker: %s)", session, res.Worker)}
+	retired := 0
 	for _, check := range res.Checks {
-		lines = append(lines, fmt.Sprintf("  CHECK %d [%s] %s", check.Seq, smokeVerdictLabel(check.Verdict), check.Name))
+		if check.RetiredAt != nil {
+			retired++
+			lines = append(lines,
+				fmt.Sprintf("  RETIRED  id %s  %s", check.ID, check.Name),
+				"        reason: "+check.RetiredReason,
+				fmt.Sprintf("        kept: user verdict %s%s", smokeVerdictLabel(check.Verdict), evidenceSuffix(len(check.Evidence))))
+			continue
+		}
+		lines = append(lines,
+			fmt.Sprintf("  CHECK %d [%s] %s", check.Seq, smokeVerdictLabel(check.Verdict), check.Name),
+			"        id: "+check.ID)
 		if ref := smokeCaseRef(check); ref != "" {
 			lines = append(lines, "        "+ref)
 		}
@@ -266,12 +319,53 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 		if n := len(check.Evidence); n > 0 {
 			lines = append(lines, fmt.Sprintf("        evidence: %d attached", n))
 		}
+		lines = append(lines, smokeAgentLines(check)...)
+	}
+	if retired > 0 {
+		lines = append(lines, fmt.Sprintf("retired: %d case(s), kept with their results", retired))
 	}
 	if res.ReportedAt != nil {
 		lines = append(lines, "reported: "+res.ReportedAt.Format(time.RFC3339))
 	}
 	_, err := fmt.Fprintln(out, strings.Join(lines, "\n"))
 	return err
+}
+
+// smokeAgentLines renders the MACHINE's result for a case, always as its own
+// lines under the user's. Nothing here is folded into the user's verdict: a
+// reader must be able to see at a glance that a machine ran the steps and that a
+// person still has not confirmed the case works.
+func smokeAgentLines(check smokeCheckClient) []string {
+	if check.AgentVerdict == "" && check.AgentRanAt == nil && len(check.AgentEvidence) == 0 {
+		return nil
+	}
+	head := "        agent: "
+	if check.AgentVerdict == "" {
+		head += "ran, did not judge"
+	} else {
+		head += smokeVerdictLabel(check.AgentVerdict)
+	}
+	if check.AgentSHA != "" {
+		head += " at " + shortSHA(check.AgentSHA)
+	}
+	if check.AgentRanAt != nil {
+		head += " on " + check.AgentRanAt.Format(time.RFC3339)
+	}
+	lines := []string{head}
+	if note := strings.TrimSpace(check.AgentNote); note != "" {
+		lines = append(lines, "        agent note: "+note)
+	}
+	if n := len(check.AgentEvidence); n > 0 {
+		lines = append(lines, fmt.Sprintf("        agent evidence: %d captured", n))
+	}
+	return lines
+}
+
+func evidenceSuffix(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d evidence file(s)", n)
 }
 
 func resolveSmokeSession(args []string, session string) string {
@@ -331,4 +425,248 @@ func smokeCaseRef(check smokeCheckClient) string {
 		parts = append(parts, check.FileRef)
 	}
 	return strings.Join(parts, " · ")
+}
+
+const smokeRecordLong = `Record a MACHINE's result for one smoke-test case, beside the user's.
+
+A case carries two results, and they are never merged. This one answers "did the
+steps run" - the user's answers "does this actually work for a person". Every
+regression a person has caught by hand (recording latency, dead drag-scroll,
+keystrokes never arriving, a tab pausing when unfocused, control lost after a
+lease lapse) lives in the gap between those two questions, so a recorded pass
+NEVER stands in for the user's verdict and never opens the merge gate. It moves
+a label; the person still plays the case.
+
+The command is additive by construction: it cannot rewrite a case's authored
+content (name/why/steps/expected), cannot touch the user's verdict, note or
+evidence, and cannot remove a case. Running it again re-records this machine's
+result, which is what re-running a case means.
+
+  ao smoke record "$AO_SESSION_ID" --case mr-appears --verdict pass \
+      --note "3 runs, MR listed within 40s each time"
+
+--sha is the commit the case was run against, so a reader can tell a fresh
+result from one that predates the current head. It defaults to the HEAD of the
+git repository in the current directory, which inside a session's worktree is
+exactly right; pass it explicitly to override.
+
+Attach what the machine saw with --evidence (repeatable). Those files land in
+the case's OWN agent-evidence list, never in the user's - evidence is what you go
+back to when you distrust a verdict, so it must always be obvious who produced
+it. Attaching evidence without --verdict is a legitimate record: it says "I ran
+it and captured this, I am not the one who can judge it", which is the permanent
+state of a paint/focus/timing/feel case.
+
+  ao smoke record "$AO_SESSION_ID" --case tab-stays-live --evidence /tmp/shot.png`
+
+func newSmokeRecordCommand(ctx *commandContext) *cobra.Command {
+	var session, caseID, verdict, note, sha string
+	var evidence []string
+	cmd := &cobra.Command{
+		Use:   "record [session]",
+		Short: "Record a machine's result for a smoke-test case (never the user's)",
+		Long:  smokeRecordLong,
+		Args:  atMostOneArg,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return ctx.recordSmokeAgentResult(cmd, args, smokeRecordOptions{
+				session:  session,
+				caseID:   caseID,
+				verdict:  verdict,
+				note:     note,
+				sha:      sha,
+				evidence: evidence,
+			})
+		},
+	}
+	cmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+		return pflag.NormalizedName(strings.ReplaceAll(name, "_", "-"))
+	})
+	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
+	cmd.Flags().StringVar(&caseID, "case", "", "Case id to record against (required; see `ao smoke list`)")
+	cmd.Flags().StringVar(&verdict, "verdict", "", "pass | fail | skip. Omit for an evidence-only record.")
+	cmd.Flags().StringVar(&note, "note", "", "What the machine saw")
+	cmd.Flags().StringVar(&sha, "sha", "", "Commit the case was run against (default: HEAD of the repo in the current directory)")
+	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "Path to a screenshot/clip the machine captured (repeatable)")
+	return cmd
+}
+
+// smokeRecordOptions groups the record command's flags so the runner stays
+// readable as the flag list grows.
+type smokeRecordOptions struct {
+	session  string
+	caseID   string
+	verdict  string
+	note     string
+	sha      string
+	evidence []string
+}
+
+func (c *commandContext) recordSmokeAgentResult(cmd *cobra.Command, args []string, opts smokeRecordOptions) error {
+	session := resolveSmokeSession(args, opts.session)
+	if session == "" {
+		return usageError{errors.New("usage: session id is required (positional or --session)")}
+	}
+	caseID := strings.TrimSpace(opts.caseID)
+	if caseID == "" {
+		return usageError{errors.New("usage: --case <id> is required (run `ao smoke list` to see the ids)")}
+	}
+	verdict := strings.TrimSpace(opts.verdict)
+	switch verdict {
+	case "", "pass", "fail", "skip":
+	default:
+		return usageError{fmt.Errorf("usage: --verdict must be pass, fail, or skip (got %q); omit it for an evidence-only record", verdict)}
+	}
+	if verdict == "" && len(opts.evidence) == 0 {
+		return usageError{errors.New("usage: give --verdict pass|fail|skip, or --evidence <path> to record what the machine saw without judging it")}
+	}
+	base := "sessions/" + url.PathEscape(session) + "/smoke-checks/" + url.PathEscape(caseID)
+	// Evidence first: an evidence-only record is only accepted once the case
+	// actually carries some, and a failed upload should stop before a verdict
+	// claims a run that produced nothing.
+	for _, path := range opts.evidence {
+		if err := c.uploadAgentEvidence(cmd, base, path); err != nil {
+			return err
+		}
+	}
+	sha := strings.TrimSpace(opts.sha)
+	if sha == "" {
+		sha = c.headSHA(cmd.Context())
+	}
+	var res smokeCheckResponse
+	body := recordSmokeAgentResultRequest{Verdict: verdict, Note: strings.TrimSpace(opts.note), SHA: sha}
+	if err := c.postJSON(cmd.Context(), base+"/agent-result", body, &res); err != nil {
+		return err
+	}
+	summary := "no verdict (evidence only)"
+	if res.Check.AgentVerdict != "" {
+		summary = "agent verdict " + res.Check.AgentVerdict
+	}
+	if res.Check.AgentSHA != "" {
+		summary += " at " + shortSHA(res.Check.AgentSHA)
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "recorded %s on %q - the user's verdict is unchanged (%s)\n",
+		summary, res.Check.Name, smokeVerdictLabel(res.Check.Verdict))
+	return err
+}
+
+// uploadAgentEvidence streams one captured file to the case's evidence endpoint
+// tagged as the machine's, so it can never be mistaken for something a person
+// attached.
+func (c *commandContext) uploadAgentEvidence(cmd *cobra.Command, base, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return usageError{errors.New("usage: --evidence needs a file path")}
+	}
+	contentType, ok := evidenceContentType(path)
+	if !ok {
+		return usageError{fmt.Errorf("usage: %s is not an accepted evidence type (png, jpg, gif, webp, mp4, webm, mov)", filepath.Base(path))}
+	}
+	file, err := os.Open(path) // #nosec G304 -- the operator names the file to attach.
+	if err != nil {
+		return usageError{fmt.Errorf("read evidence: %w", err)}
+	}
+	defer func() { _ = file.Close() }()
+	return c.postBytes(cmd.Context(), base+"/evidence?source=agent", contentType, filepath.Base(path), file, nil)
+}
+
+// evidenceContentTypes mirrors the daemon's upload allow-list so a wrong file
+// fails here, before its bytes travel.
+var evidenceContentTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".mov":  "video/quicktime",
+}
+
+func evidenceContentType(path string) (string, bool) {
+	ct, ok := evidenceContentTypes[strings.ToLower(filepath.Ext(path))]
+	return ct, ok
+}
+
+// headSHA reads the current commit of the repository in the working directory.
+// Best-effort: outside a repo, or with git unavailable, a recorded result simply
+// carries no commit rather than failing the command.
+func (c *commandContext) headSHA(ctx context.Context) string {
+	if c.deps.CommandOutput == nil {
+		return ""
+	}
+	out, err := c.deps.CommandOutput(ctx, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+const smokeRetireLong = `Retire a smoke-test case out of a session's checklist.
+
+Retire is NOT delete. The case stops being something the user is asked to play,
+and everything about it stays: its name, its steps, the verdict, note and
+evidence the user recorded, plus the reason it went and when. That trace is the
+whole point - "retired 3, now covered by tests" is worth far more than three
+cases quietly disappearing, and results the user recorded are the one part of a
+checklist AO cannot regenerate.
+
+This is the sanctioned way to remove a case the user has already played. ` + "`ao smoke set`" + `
+refuses to drop one (SMOKE_RESULTS_AT_RISK) precisely because dropping it would
+destroy those results; retire keeps them and then lets the case fall out of the
+checklist. Cases nobody has played are still yours to revise or drop freely with
+` + "`ao smoke set`" + ` - retiring one is for a case that mattered.
+
+  ao smoke retire "$AO_SESSION_ID" --case drag-scroll --reason "now covered by TestDragScroll"
+
+A retired case is frozen: it takes no verdict, no reset and no machine result,
+and naming its id in a later ` + "`ao smoke set`" + ` payload is refused rather than
+reviving it. If the case genuinely needs to come back, add it under a NEW id -
+it comes back unplayed, which is right, because the old results were recorded
+against the old steps.`
+
+func newSmokeRetireCommand(ctx *commandContext) *cobra.Command {
+	var session, caseID, reason string
+	cmd := &cobra.Command{
+		Use:   "retire [session]",
+		Short: "Retire a case out of the checklist, keeping its results and the reason it went",
+		Long:  smokeRetireLong,
+		Args:  atMostOneArg,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return ctx.retireSmokeCheck(cmd, args, session, caseID, reason)
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
+	cmd.Flags().StringVar(&caseID, "case", "", "Case id to retire (required; see `ao smoke list`)")
+	cmd.Flags().StringVar(&reason, "reason", "", "Why it is no longer worth playing (required)")
+	return cmd
+}
+
+func (c *commandContext) retireSmokeCheck(cmd *cobra.Command, args []string, session, caseID, reason string) error {
+	session = resolveSmokeSession(args, session)
+	if session == "" {
+		return usageError{errors.New("usage: session id is required (positional or --session)")}
+	}
+	caseID = strings.TrimSpace(caseID)
+	if caseID == "" {
+		return usageError{errors.New("usage: --case <id> is required (run `ao smoke list` to see the ids)")}
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return usageError{errors.New("usage: --reason is required - it is the trace retiring leaves behind, e.g. --reason \"now covered by TestFoo\"")}
+	}
+	path := "sessions/" + url.PathEscape(session) + "/smoke-checks/" + url.PathEscape(caseID) + "/retire"
+	var res smokeCheckResponse
+	if err := c.postJSON(cmd.Context(), path, retireSmokeCheckRequest{Reason: reason}, &res); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "retired %q - %s. Its results are kept; it is no longer part of the checklist.\n",
+		res.Check.Name, res.Check.RetiredReason)
+	return err
 }

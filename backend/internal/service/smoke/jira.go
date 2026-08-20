@@ -258,9 +258,16 @@ func (s *Service) uploadEvidence(ctx context.Context, key string, sessionID doma
 
 // runChecks returns, in seq order, the checks that have a verdict set (the "run"
 // rows) — the only cases posted. Untouched "to check" rows are omitted.
+// runChecks is the set of cases worth posting: the ones the user actually
+// decided. A retired case is excluded even when it carries an old verdict - it
+// is no longer part of the checklist this run reports on, and posting it to Jira
+// would present a result the user is no longer being asked to stand behind.
 func runChecks(checks []domain.SmokeCheck) []domain.SmokeCheck {
 	out := make([]domain.SmokeCheck, 0, len(checks))
 	for _, c := range checks {
+		if c.Retired() {
+			continue
+		}
 		if c.Verdict == domain.SmokePass || c.Verdict == domain.SmokeFail || c.Verdict == domain.SmokeSkip {
 			out = append(out, c)
 		}
