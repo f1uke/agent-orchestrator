@@ -27,13 +27,15 @@ import { DashboardSubhead } from "./DashboardSubhead";
 import {
 	type AttentionZone,
 	type WorkspaceSession,
-	attentionZone,
 	canonicalTrackerIssueId,
 	isMergeSuspended,
 	jiraKeyFromIssueId,
 	orchestratorHealth,
 	workerSessions,
 } from "../types/workspace";
+import { type Task, type TaskGates, reviewGateState, taskLane, workerTasks } from "../lib/crew";
+import { useTaskGates } from "../hooks/useTaskGates";
+import { CrewStrip } from "./CrewStrip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
@@ -79,13 +81,19 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const isProjectRestarting = projectId ? restartingProjectIds.has(projectId) : false;
 	const health = workspace ? orchestratorHealth(workspace, isProjectRestarting) : { state: "ok" as const };
 
-	const byZone = new Map<AttentionZone, WorkspaceSession[]>();
-	for (const session of sessions) {
-		const zone = attentionZone(session);
-		(byZone.get(zone) ?? byZone.set(zone, []).get(zone)!).push(session);
+	// The board draws one card per TASK, not per session: a crew's qa is drawn on
+	// its dev's card rather than as a second card for work already on screen.
+	// A solo task is a task of one, so a board with no crews on it groups into
+	// exactly the list it always had.
+	const tasks = workerTasks(sessions);
+	const gates = useTaskGates(tasks);
+	const byZone = new Map<AttentionZone, Task[]>();
+	for (const task of tasks) {
+		const zone = taskLane(task, gates.get(task.dev.id) ?? { review: "not run" }).zone;
+		(byZone.get(zone) ?? byZone.set(zone, []).get(zone)!).push(task);
 	}
 	// Most-recently-moved first, so the session just archived sits at the front.
-	const done = sortDoneRecentFirst(byZone.get("done") ?? []);
+	const done = sortDoneRecentFirst((byZone.get("done") ?? []).map((task) => task.dev));
 	// Collapsed by default, like agent-orchestrator's done-bar: finished and
 	// killed sessions cost one quiet line under the board until expanded.
 	const [doneExpanded, setDoneExpanded] = useState(false);
@@ -152,7 +160,8 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 							<ZoneColumn
 								key={col.key}
 								col={col}
-								sessions={byZone.get(col.key) ?? []}
+								tasks={byZone.get(col.key) ?? []}
+								gates={gates}
 								onOpen={col.key === "todo" ? openTodo : openSession}
 								onStarted={handleTodoStarted}
 							/>
@@ -455,12 +464,14 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 
 function ZoneColumn({
 	col,
-	sessions,
+	tasks,
+	gates,
 	onOpen,
 	onStarted,
 }: {
 	col: LaneConfig;
-	sessions: WorkspaceSession[];
+	tasks: Task[];
+	gates: Map<string, TaskGates>;
 	onOpen: (s: WorkspaceSession) => void;
 	onStarted: (sessionId: string) => void;
 }) {
@@ -485,25 +496,25 @@ function ZoneColumn({
 					{col.label}
 				</span>
 				<span className="ml-auto min-w-[22px] rounded-full border border-border-strong bg-interactive-hover px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5] text-muted-foreground">
-					{sessions.length}
+					{tasks.length}
 				</span>
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-[11px] pb-3">
-				{sessions.length === 0 ? (
+				{tasks.length === 0 ? (
 					<EmptyLane col={col} />
 				) : (
 					<div className="flex flex-col gap-2.5">
-						{sessions.map((session) =>
+						{tasks.map((task) =>
 							isTodo ? (
 								<TodoCard
-									key={session.id}
-									session={session}
+									key={task.dev.id}
+									session={task.dev}
 									col={col}
-									onOpen={() => onOpen(session)}
+									onOpen={() => onOpen(task.dev)}
 									onStarted={onStarted}
 								/>
 							) : (
-								<SessionCard key={session.id} session={session} col={col} onOpen={() => onOpen(session)} />
+								<SessionCard key={task.dev.id} task={task} gates={gates.get(task.dev.id)} col={col} onOpen={onOpen} />
 							),
 						)}
 					</div>
@@ -828,20 +839,41 @@ function TodoCard({
 	);
 }
 
-function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col: LaneConfig; onOpen: () => void }) {
-	const { Icon, filled, label: statusText } = statusGlyph(session);
+function SessionCard({
+	task,
+	gates,
+	col,
+	onOpen,
+}: {
+	task: Task;
+	gates?: TaskGates;
+	col: LaneConfig;
+	onOpen: (s: WorkspaceSession) => void;
+}) {
+	const session = task.dev;
+	// The gutter glyph is whichever member currently HOLDS THE BALL, and the
+	// status text names the role when it is not dev - so `qa · Input needed` reads
+	// as a fact about the task rather than as dev having stalled. On a solo task
+	// the ball holder is the session itself and nothing changes.
+	const lane = taskLane(task, gates ?? { review: "not run" });
+	const ballHolder =
+		task.members.find((m) => m.id === (lane.note.startsWith("qa") ? task.qa?.id : session.id)) ?? session;
+	const { Icon, filled, label: ownStatus } = statusGlyph(ballHolder);
+	const statusText = lane.note !== "" ? lane.note : ownStatus;
+	const prSummaries0 = useSessionScmSummary(session.id).data;
+	const review = gates?.review ?? reviewGateState(prSummaries0 ?? []);
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	// A Jira-linked session gets the richer display-only Jira badge (KEY · type ·
 	// status) below the branch instead of the raw provider-prefixed intake chip.
 	const jiraKey = jiraKeyFromIssueId(session.issueId);
 	const branch = session.branch || "";
 	const showBranch = branch !== "" && !sameLabel(branch, session.title) && !sameLabel(branch, session.id);
-	const prSummaries = sessionPRDisplaySummaries(session, useSessionScmSummary(session.id).data);
+	const prSummaries = sessionPRDisplaySummaries(session, prSummaries0);
 	const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		if (event.currentTarget !== event.target) return;
 		if (event.key !== "Enter" && event.key !== " ") return;
 		event.preventDefault();
-		onOpen();
+		onOpen(session);
 	};
 	return (
 		<div
@@ -855,7 +887,13 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 				border: "1px solid var(--kanban-card-border)",
 			}}
 		>
-			<div onClick={onOpen} onKeyDown={handleKeyDown} role="button" tabIndex={0} className="flex gap-2 px-[13px] pt-3">
+			<div
+				onClick={() => onOpen(session)}
+				onKeyDown={handleKeyDown}
+				role="button"
+				tabIndex={0}
+				className="flex gap-2 px-[13px] pt-3"
+			>
 				{/* Status gutter. The glyph is the silhouette of this card's EXACT
 				    status, not its lane — so the four NEEDS YOU statuses stay four
 				    distinct marks instead of one coral bar. Every card's glyph sits on
@@ -863,7 +901,7 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 				    decorative (aria-hidden): the status text beside it is the
 				    accessible carrier, and colour is the third, redundant channel. */}
 				<span
-					data-card-status-glyph={session.status}
+					data-card-status-glyph={ballHolder.status}
 					className="flex w-[18px] shrink-0 justify-center pt-px"
 					style={{ color: col.dotVar }}
 				>
@@ -930,6 +968,7 @@ function SessionCard({ session, col, onOpen }: { session: WorkspaceSession; col:
 					)}
 				</div>
 			</div>
+			<CrewStrip task={task} review={review} onOpenMember={onOpen} onOpenReviews={() => onOpen(session)} />
 			<div
 				className="flex items-start justify-between gap-2 px-[13px] py-2"
 				style={{ borderTop: "1px solid var(--kanban-card-divider)" }}

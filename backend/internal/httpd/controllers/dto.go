@@ -233,6 +233,16 @@ type SessionView struct {
 type SessionCrew struct {
 	ID   domain.SessionID `json:"id"`
 	Role domain.CrewRole  `json:"role" enum:"dev,qa"`
+	// HasRun is whether this member has ever actually had an agent running.
+	//
+	// It is on the wire because absence of evidence and evidence of absence look
+	// identical without it: a qa that ran and found nothing worth a human's time
+	// leaves the same EMPTY smoke checklist as a qa nobody has woken. Reading the
+	// first as the second would keep a finished task out of Ready to Merge
+	// forever; reading the second as the first would let a card claim it was
+	// tested by an agent that has never opened its eyes - which is the exact lie
+	// this whole feature exists to stop the board telling.
+	HasRun bool `json:"hasRun"`
 }
 
 // SessionTermination is the wire shape of a session's ending.

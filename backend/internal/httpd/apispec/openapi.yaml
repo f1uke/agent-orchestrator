@@ -6980,6 +6980,8 @@ components:
       type: object
     SessionCrew:
       properties:
+        hasRun:
+          type: boolean
         id:
           type: string
         role:
@@ -6990,6 +6992,7 @@ components:
       required:
       - id
       - role
+      - hasRun
       type: object
     SessionEndPayload:
       properties:

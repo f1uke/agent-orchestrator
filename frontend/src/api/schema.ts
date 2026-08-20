@@ -2492,6 +2492,7 @@ export interface components {
             sessionId: string;
         };
         SessionCrew: {
+            hasRun: boolean;
             id: string;
             /** @enum {string} */
             role: "dev" | "qa";

@@ -1236,7 +1236,10 @@ func sessionCrew(s domain.Session) *SessionCrew {
 	if !s.InCrew() {
 		return nil
 	}
-	return &SessionCrew{ID: s.CrewID, Role: s.CrewRole}
+	// A runtime handle is written by MarkSpawned on the first launch and never
+	// cleared, so it is the durable "this member has been up at least once" fact -
+	// unlike the activity state, which a suspend leaves looking like a fresh row.
+	return &SessionCrew{ID: s.CrewID, Role: s.CrewRole, HasRun: s.Metadata.RuntimeHandleID != ""}
 }
 
 // sessionTermination builds the curated ending wire object. It returns nil (so

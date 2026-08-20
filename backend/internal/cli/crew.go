@@ -78,8 +78,8 @@ func newCrewWakeCommand(ctx *commandContext) *cobra.Command {
 			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/wake", nil, &out); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is awake\n", out.Session.ID, crewRoleOf(out.Session))
-			return nil
+			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is awake\n", out.Session.ID, crewRoleOf(out.Session))
+			return printErr
 		},
 	}
 }
@@ -121,17 +121,21 @@ func (c *commandContext) printCrewStatus(ctx context.Context, out io.Writer, pro
 		byCrew[s.Crew.ID] = append(byCrew[s.Crew.ID], s)
 	}
 	if len(order) == 0 {
-		fmt.Fprintln(out, "No crews: every task on the board is one agent working alone.")
-		return nil
+		_, err := fmt.Fprintln(out, "No crews: every task on the board is one agent working alone.")
+		return err
 	}
 	for _, crewID := range order {
-		fmt.Fprintf(out, "%s\n", crewID)
+		if _, err := fmt.Fprintf(out, "%s\n", crewID); err != nil {
+			return err
+		}
 		for _, member := range byCrew[crewID] {
 			state := "awake"
 			if member.IsSuspended {
 				state = "asleep"
 			}
-			fmt.Fprintf(out, "  %-4s %-28s %s\n", crewRoleOf(member), member.ID, state)
+			if _, err := fmt.Fprintf(out, "  %-4s %-28s %s\n", crewRoleOf(member), member.ID, state); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

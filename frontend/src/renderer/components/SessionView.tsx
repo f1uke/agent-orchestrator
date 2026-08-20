@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
+import { CrewBatonBar } from "./CrewBatonBar";
 import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
@@ -638,17 +639,31 @@ export function SessionView({ sessionId }: SessionViewProps) {
 				{/* react-resizable-panels v4: bare numbers are PIXELS; percentages must
             be strings. Numeric sizes here once clamped the inspector to 45px. */}
 				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
-					{splitRoot ? (
-						<SplitTreeView
-							focusedSessionId={sessionId}
-							onFocusPane={goToSession}
-							onRatioChange={handleSplitRatioChange}
-							renderPane={renderSplitPane}
-							root={splitRoot}
-						/>
-					) : (
-						renderFocusedCenter(false)
-					)}
+					<div className="flex h-full min-h-0 flex-col">
+						{/* The baton bar, for a crew member only. It renders nothing for a
+						    solo session - every session on an ordinary board - so the
+						    terminal pane below is unchanged in both geometry and content. */}
+						{session && workspace && (
+							<CrewBatonBar
+								session={session}
+								sessions={workspace.sessions}
+								onOpenMember={(member) => goToSession(member.id)}
+							/>
+						)}
+						<div className="min-h-0 flex-1">
+							{splitRoot ? (
+								<SplitTreeView
+									focusedSessionId={sessionId}
+									onFocusPane={goToSession}
+									onRatioChange={handleSplitRatioChange}
+									renderPane={renderSplitPane}
+									root={splitRoot}
+								/>
+							) : (
+								renderFocusedCenter(false)
+							)}
+						</div>
+					</div>
 				</ResizablePanel>
 				{hasInspector ? (
 					<>

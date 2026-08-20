@@ -683,3 +683,30 @@ func TestPRPipelineStatus_ApprovalRuleEnabled(t *testing.T) {
 		t.Fatalf("unresolved thread: got %s, want changes_requested", got)
 	}
 }
+
+// TestDeriveStatus_ASuspendedSessionThatNeverRanIsNotBroken: no_signal is a
+// diagnosis about a BROKEN HOOK PIPELINE. A suspended session has no process to
+// report with, so its silence proves nothing - and a crew's qa, born suspended
+// and never woken, would otherwise read "no signal" 90 seconds into every
+// standard task and drag its whole card into Needs you.
+func TestDeriveStatus_ASuspendedSessionThatNeverRanIsNotBroken(t *testing.T) {
+	now := time.Now()
+	born := domain.SessionRecord{
+		ID:          "mer-2",
+		Kind:        domain.KindWorker,
+		IsSuspended: true,
+		CrewID:      "mer-1",
+		CrewRole:    domain.CrewRoleQA,
+		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-30 * time.Minute)},
+	}
+	if got := deriveStatus(born, nil, now, true, domain.ApprovalRule{}); got == domain.StatusNoSignal {
+		t.Fatalf("a never-woken suspended member reads %q; it has no process to signal with", got)
+	}
+	// The diagnosis still fires for a LIVE session that has gone quiet - the case
+	// the rule was written for.
+	live := born
+	live.IsSuspended = false
+	if got := deriveStatus(live, nil, now, true, domain.ApprovalRule{}); got != domain.StatusNoSignal {
+		t.Fatalf("a live silent session reads %q, want no_signal", got)
+	}
+}

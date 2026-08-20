@@ -170,7 +170,15 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonIdleAged}
 	}
 
-	if signalCapable && rec.FirstSignalAt.IsZero() && now.Sub(rec.Activity.LastActivityAt) > noSignalGrace {
+	// no_signal means THE HOOK PIPELINE IS BROKEN: a session that should be
+	// reporting has gone quiet for longer than a launch could explain. A SUSPENDED
+	// session has no process at all, so its silence is expected rather than
+	// diagnostic - and a crew's qa, which is born suspended and stays that way
+	// until somebody wakes it, would otherwise cross this line 90 seconds after
+	// its task started and read as broken for the rest of the task. Inert for
+	// every session that exists today: the idle sweep only suspends sessions that
+	// have long since signalled, and those never reach this branch anyway.
+	if signalCapable && !rec.IsSuspended && rec.FirstSignalAt.IsZero() && now.Sub(rec.Activity.LastActivityAt) > noSignalGrace {
 		return statusResult{Status: domain.StatusNoSignal, Reason: domain.ReasonNoSignal}
 	}
 
