@@ -110,7 +110,7 @@ func TestSessionCrew_SurvivesAFullRowUpdate(t *testing.T) {
 // TestSessionCrew_OneDevPerCrewIsEnforcedByTheDatabase: "which member is dev" is
 // the fact teardown fans out on, so a second dev would make the task's owner
 // ambiguous. The partial unique index makes that unrepresentable rather than
-// merely unwritten — and stays exempt for the '' of every solo row.
+// merely unwritten - and stays exempt for the ” of every solo row.
 func TestSessionCrew_OneDevPerCrewIsEnforcedByTheDatabase(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

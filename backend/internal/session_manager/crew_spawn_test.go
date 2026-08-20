@@ -28,7 +28,7 @@ func seedCrewDev(m *Manager, st *fakeStore, ws *fakeWorkspace) domain.SessionRec
 
 // TestSpawnCrewMember_JoinsDevsWorktreeAndBranch is the capability itself: a
 // second long-lived session that works in the SAME tree, on the SAME branch, as
-// the task it belongs to — and a crew recorded on both rows, with dev named as
+// the task it belongs to - and a crew recorded on both rows, with dev named as
 // the owner.
 func TestSpawnCrewMember_JoinsDevsWorktreeAndBranch(t *testing.T) {
 	m, st, rt, ws := newManager()
@@ -43,7 +43,7 @@ func TestSpawnCrewMember_JoinsDevsWorktreeAndBranch(t *testing.T) {
 	}
 
 	if qa.Metadata.WorkspacePath != dev.Metadata.WorkspacePath {
-		t.Fatalf("crew member workspace = %q, want dev's %q — the whole point is one worktree", qa.Metadata.WorkspacePath, dev.Metadata.WorkspacePath)
+		t.Fatalf("crew member workspace = %q, want dev's %q - the whole point is one worktree", qa.Metadata.WorkspacePath, dev.Metadata.WorkspacePath)
 	}
 	if qa.Metadata.Branch != dev.Metadata.Branch {
 		t.Fatalf("crew member branch = %q, want dev's %q", qa.Metadata.Branch, dev.Metadata.Branch)
@@ -123,7 +123,7 @@ func TestSpawnCrewMember_LeavesTheSharedTreeAlone(t *testing.T) {
 }
 
 // TestSpawnCrewMember_RefusesAnImpossibleCrew. Crews are formed only through the
-// Go seam, so these are programming errors — but each one would leave a session
+// Go seam, so these are programming errors - but each one would leave a session
 // attached to work it can never land, so every one is refused BEFORE any durable
 // row exists.
 func TestSpawnCrewMember_RefusesAnImpossibleCrew(t *testing.T) {

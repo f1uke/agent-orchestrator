@@ -129,7 +129,7 @@ SELECT EXISTS(
 UPDATE sessions SET crew_id = ?, crew_role = ?, updated_at = ? WHERE id = ?;
 
 -- NOTE: the `DELETE FROM sessions WHERE id = ? AND <seed-state predicates>`
--- statement is intentionally NOT a sqlc query — same sqlc 1.31 SQLite-parser
+-- statement is intentionally NOT a sqlc query - same sqlc 1.31 SQLite-parser
 -- bug as documented in queries/changelog.sql: trailing string literals (and
 -- placeholders) on the RHS of `=` in a DELETE get silently stripped, so the
 -- generated SQL ends up mid-clause and the row count is meaningless. The

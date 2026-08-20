@@ -75,10 +75,10 @@ type SessionRecord struct {
 	// on it while it is still unresolved. nil/false = OFF (the default: resolving is
 	// left to the reviewer); true = ON. Exposed in the API read model so the
 	// Reviews-tab switch can show/set it. Unlike AutoNudgeComments there is no global
-	// default store — nil is simply OFF.
+	// default store - nil is simply OFF.
 	AutoResolveOnReply *bool `json:"autoResolveOnReply"`
 	// IsTodo marks a session PREPARED BUT NOT STARTED: the board's TODO lane.
-	// No branch/worktree/tmux exists yet — only the spec below is persisted.
+	// No branch/worktree/tmux exists yet - only the spec below is persisted.
 	// Start materializes the row in place (clearing this flag in MarkSpawned),
 	// so the id carries through into the live session. Durable fact; drives the
 	// StatusTodo display status.
@@ -87,7 +87,7 @@ type SessionRecord struct {
 	// free machine resources while KEEPING it on the board in its current lane
 	// (worktree kept on disk). It is deliberately orthogonal to IsTerminated:
 	// status derivation never reads it, so the card stays in its real lane and
-	// the flag only drives a "paused — click to resume" affordance. Opening the
+	// the flag only drives a "paused - click to resume" affordance. Opening the
 	// session resumes it in place (recreate tmux, clear this flag). Durable fact,
 	// surfaced in the API read model for the paused affordance + countdown.
 	IsSuspended bool `json:"isSuspended,omitempty"`
@@ -101,20 +101,20 @@ type SessionRecord struct {
 	// API read model so the toggle reflects its state.
 	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
 	// LastOpenedAt is when the user last OPENED/selected this session in the UI
-	// (the /wake signal). It feeds ONLY the idle-suspend keepalive — idleReference
-	// takes the later of Activity.LastActivityAt and this — so viewing a session
+	// (the /wake signal). It feeds ONLY the idle-suspend keepalive - idleReference
+	// takes the later of Activity.LastActivityAt and this - so viewing a session
 	// refreshes its 72h idle-suspend TTL WITHOUT bumping Activity.LastActivityAt,
 	// which status derivation ages needs_input/working off. Decoupling the two is
 	// what keeps a mere open from flipping a "Needs you" session back to working
 	// with a restarted countdown. Zero = never opened. Internal durable fact, not
-	// in the API read model — its effect rides the derived IdleCloseAt.
+	// in the API read model - its effect rides the derived IdleCloseAt.
 	LastOpenedAt time.Time `json:"-"`
 	// BaseBranch is the branch the worktree is created from and PRTarget is the
 	// branch this session's PR merges INTO. They are NOT synonyms: BaseBranch is
 	// load-bearing (it becomes the base ref of `git worktree add`), while
 	// PRTarget records where the work is headed, which a gitflow hotfix can set
-	// independently. Both are resolved at spawn and persisted on EVERY session —
-	// deferred or immediate — so the target branch is a durable fact rather than
+	// independently. Both are resolved at spawn and persisted on EVERY session -
+	// deferred or immediate - so the target branch is a durable fact rather than
 	// something each reader re-derives; PRTarget is additionally editable by the
 	// human, which retargets a live PR/MR on the SCM to keep the two in step.
 	// (Sessions created before this was recorded carry empty values and fall back
@@ -149,14 +149,14 @@ type SessionRecord struct {
 	// task's behaviour is unchanged rather than merely intended to be.
 	//
 	// Durable facts, set once when the crew is formed and never toggled. Not part
-	// of the API read model — nothing in the UI reads them.
+	// of the API read model - nothing in the UI reads them.
 	CrewID   SessionID `json:"-"`
 	CrewRole CrewRole  `json:"-"`
 	// TokenUsage holds the per-session token totals summed from the harness
 	// transcript (claude-code only; all-zero for agents without a parseable
 	// transcript). Durable measured facts; the raw + cost-weighted totals and the
 	// runaway flag are DERIVED at read time (see the wire mapping), never stored.
-	// json:"-" — exposed via the curated tokenUsage wire object, not raw on the
+	// json:"-" - exposed via the curated tokenUsage wire object, not raw on the
 	// embedded record. Written only by the dedicated token-usage setter, so the
 	// full-row update path never clobbers it.
 	TokenUsage TokenUsage `json:"-"`
@@ -167,7 +167,7 @@ type SessionRecord struct {
 	// who ended it, why, what it was doing, and where its transcript is. Written
 	// by the lifecycle reducer on every terminal transition and cleared on
 	// respawn. Zero for a live session and for sessions terminated before AO kept
-	// this account. json:"-" — exposed via the curated termination wire object.
+	// this account. json:"-" - exposed via the curated termination wire object.
 	Termination Termination     `json:"-"`
 	Metadata    SessionMetadata `json:"-"`
 	CreatedAt   time.Time       `json:"createdAt"`
@@ -222,7 +222,7 @@ type Session struct {
 	// TargetSource names WHERE that answer came from so the UI can distinguish a
 	// value the human set from one inherited off the project. Both are derived on
 	// read from durable facts (the session's stored PRTarget, its PRs, the
-	// project default) — never stored, so they cannot go stale against them.
+	// project default) - never stored, so they cannot go stale against them.
 	// TargetBranch is empty when nothing is known; the UI must say so rather than
 	// assume "main".
 	TargetBranch string `json:"targetBranch,omitempty"`

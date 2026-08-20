@@ -31,7 +31,7 @@ func seedCrew(st *fakeStore) (dev, qa domain.SessionRecord) {
 
 // TestTeardown_SubordinateLeavesDevsWorkspaceStanding is the local case:
 // terminating qa ends qa and nothing else. dev is still running in that tree, so
-// the tree must survive — and the refusal has to be legible, because a caller
+// the tree must survive - and the refusal has to be legible, because a caller
 // that reads Freed=false as "reclaim it later" is the only thing standing between
 // a shared worktree and a disk leak.
 func TestTeardown_SubordinateLeavesDevsWorkspaceStanding(t *testing.T) {
@@ -121,7 +121,7 @@ func TestTeardown_LastMemberStandingFreesTheTree(t *testing.T) {
 
 // TestTeardown_SuspendedSubordinateGoesWithTheTask. A suspended member is
 // PAUSED, not finished: its worktree is exactly what it resumes into. But when
-// the TASK ends, so does it — otherwise the card would sit on the board forever
+// the TASK ends, so does it - otherwise the card would sit on the board forever
 // promising a resume into a tree that has been reclaimed.
 func TestTeardown_SuspendedSubordinateGoesWithTheTask(t *testing.T) {
 	m, st, _, ws := newManager()
@@ -146,7 +146,7 @@ func TestTeardown_SuspendedSubordinateGoesWithTheTask(t *testing.T) {
 // TestTeardown_FanOutFailureKeepsTheTree. The fan-out is best-effort: a member
 // that will not die must not stop dev from terminating, because a task nobody can
 // finish is worse than a worktree that survives. But dev must then REFUSE to
-// remove the tree — the surviving member is still in it — and say why, so the
+// remove the tree - the surviving member is still in it - and say why, so the
 // reclaim log carries the branch and the situation is recoverable.
 func TestTeardown_FanOutFailureKeepsTheTree(t *testing.T) {
 	m, st, rt, ws := newManager()
@@ -213,7 +213,7 @@ func TestTeardown_SoloIsUnchanged(t *testing.T) {
 
 // TestSaveAndTeardownAll_CrewCapturesOnceAndKeepsTheTreeForDev pins the shutdown
 // path. Both members are going down, but only ONE of them may stash and remove
-// the shared tree, and it has to be dev — the preserve ref is filed under the
+// the shared tree, and it has to be dev - the preserve ref is filed under the
 // session that owns the work.
 func TestSaveAndTeardownAll_CrewCapturesOnceAndKeepsTheTreeForDev(t *testing.T) {
 	m, st, _, ws := newManager()
@@ -244,7 +244,7 @@ func TestSaveAndTeardownAll_CrewCapturesOnceAndKeepsTheTreeForDev(t *testing.T) 
 
 // TestReconcileLive_CrewMemberDoesNotDeleteALiveDevsWorktree is the bug this
 // guard exists for. On boot, a member whose tmux died with the daemon is not
-// idle, so it takes the capture-and-ForceDestroy path — which would remove the
+// idle, so it takes the capture-and-ForceDestroy path - which would remove the
 // worktree a still-adopted dev is working in, and the task could not continue.
 func TestReconcileLive_CrewMemberDoesNotDeleteALiveDevsWorktree(t *testing.T) {
 	m, st, rt, ws := newManager()
@@ -274,8 +274,8 @@ func TestReconcileLive_CrewMemberDoesNotDeleteALiveDevsWorktree(t *testing.T) {
 // TestTeardown_AutoReclaimEndsAnAbandonedHalfCrew is the answer to "what happens
 // to a half-terminated crew that is then abandoned".
 //
-// The lifecycle reducer terminates dev directly when its PR merges — no teardown
-// — so a task can reach "dev finished, subordinate still live". The idle sweep
+// The lifecycle reducer terminates dev directly when its PR merges - no teardown
+// - so a task can reach "dev finished, subordinate still live". The idle sweep
 // only ever SUSPENDS, so nothing else would ever terminate that subordinate, and
 // it would pin the worktree forever: a silent disk leak. Auto-reclaim inherits
 // the fan-out, so one grace period after the task ended the subordinate is ended

@@ -1534,7 +1534,7 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 	// A CREW member whose crewmate is still alive in this worktree must not touch
 	// it. This path both STASHES and ForceDestroys, and it is reached at boot
 	// (reconcileLive, when a member's tmux died with the daemon) as well as at
-	// shutdown — so without this guard, restarting the daemon would delete a live
+	// shutdown - so without this guard, restarting the daemon would delete a live
 	// dev's worktree out from under it and the task could not continue. The member
 	// still terminates and still records its restore marker, so RestoreAll
 	// relaunches it into the tree that is still there.
@@ -1544,7 +1544,7 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 		return fmt.Errorf("save %s: crew: %w", rec.ID, err)
 	}
 	if held {
-		return m.saveCrewMemberSharingWorktree(ctx, rec, ws, destroyRuntime)
+		return m.saveKeepingSharedWorktree(ctx, rec, ws, destroyRuntime)
 	}
 
 	// 1. Capture uncommitted work (ref may be "" for clean worktrees).

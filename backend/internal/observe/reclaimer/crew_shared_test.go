@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
 // TestTick_SharedCrewWorktreeIsARefusalNotASuccess.

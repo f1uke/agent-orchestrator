@@ -10,7 +10,7 @@ package domain
 // The two members already share a worktree without any help: a worker's worktree
 // directory is derived from its BRANCH, not its session id, so two sessions on one
 // branch resolve to one directory. What a crew adds is the RELATIONSHIP and the
-// roles — which member owns the PR, and therefore whose teardown ends the task.
+// roles - which member owns the PR, and therefore whose teardown ends the task.
 
 // CrewRole names what one member of a crew is for.
 type CrewRole string
@@ -29,7 +29,7 @@ const (
 )
 
 // Valid reports whether r is a known, explicitly-set role. The empty string is
-// NOT valid — it is the solo marker, not a role — so Valid is what rejects a
+// NOT valid - it is the solo marker, not a role - so Valid is what rejects a
 // garbage value at a boundary.
 func (r CrewRole) Valid() bool {
 	switch r {

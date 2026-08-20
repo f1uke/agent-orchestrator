@@ -12,8 +12,8 @@ import (
 // ONE worktree: dev, which owns the branch, the worktree and the PR, and at most
 // one subordinate (qa) that works in dev's tree.
 //
-// Everything in this file is written so that a SOLO session — every session an
-// ordinary spawn creates — takes the zero-value path. The crew fields are empty,
+// Everything in this file is written so that a SOLO session - every session an
+// ordinary spawn creates - takes the zero-value path. The crew fields are empty,
 // crewMembers returns nothing, and each guard is a no-op. That is deliberate:
 // the lifetime paths this feature touches (teardown, reclaim, the boot and
 // shutdown save-and-teardown) are the paths a regression would be worst in, so
@@ -24,7 +24,7 @@ import (
 //
 // A crew member is not a task of its own: it inherits dev's branch and dev's
 // worktree, and it may never outlive dev. So dev must be a live worker, and it
-// must not itself be a subordinate — crews are flat by construction, which is
+// must not itself be a subordinate - crews are flat by construction, which is
 // what makes "tear the crew down" a single fan-out rather than a walk.
 func (m *Manager) resolveCrewDev(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
 	if !role.Valid() || role.IsDev() {
@@ -108,13 +108,13 @@ func siblingsOf(rec domain.SessionRecord, all []domain.SessionRecord) []domain.S
 //   - A SUBORDINATE never removes it while its dev row exists. The tree is dev's:
 //     dev cut the branch, dev holds the PR, and dev is itself a reclaim candidate
 //     the moment it finishes, so deferring cannot strand the disk. Ownership, not
-//     liveness, is the right test here — it also means a crew teardown removes the
+//     liveness, is the right test here - it also means a crew teardown removes the
 //     tree exactly once, from dev, instead of racing its own fan-out.
 //   - DEV keeps it while any subordinate is still ALIVE on it. Alive is "not
 //     terminated": a suspended member is paused, and that tree is exactly what it
 //     resumes into. In the normal path the fan-out has already ended every
 //     subordinate by the time dev asks, so this only bites when the fan-out could
-//     not — and then keeping the tree is the safe answer, and the reclaim log says
+//     not - and then keeping the tree is the safe answer, and the reclaim log says
 //     so once per reason.
 //
 // It is deliberately CREW-scoped rather than path-scoped. A path-scoped refcount
@@ -186,7 +186,7 @@ func subordinatesFirst(members []domain.SessionRecord) []domain.SessionRecord {
 //
 // The tmux adapter mirrors a session's branch into its tmux session name, which
 // makes `tmux ls` line up with the branch and the worktree directory. That is
-// exactly right while one session owns one branch — and exactly wrong for a crew,
+// exactly right while one session owns one branch - and exactly wrong for a crew,
 // whose members share one branch and would therefore share one tmux: one Destroy
 // would kill both agents, and the idle sweep could not tell whose runtime it was
 // reaping.
@@ -205,7 +205,7 @@ func runtimeNameBranch(branch string, role domain.CrewRole) string {
 // dev itself goes. It is a no-op for a solo session and for a subordinate.
 //
 // Best-effort by design: a member that will not die must not prevent dev from
-// terminating. The consequence of failing is visible and self-correcting — the
+// terminating. The consequence of failing is visible and self-correcting - the
 // surviving member still holds the worktree, so the refcount refuses the destroy
 // and the reclaim log records a `workspace_shared` refusal naming the branch,
 // which is a complete recovery instruction. The consequence of ABORTING dev's
@@ -230,15 +230,20 @@ func (m *Manager) teardownCrewSubordinates(ctx context.Context, dev domain.Sessi
 	}
 }
 
-// saveCrewMemberSharingWorktree is saveAndTeardownOne for a member whose crewmate
-// is still alive in the shared worktree: everything except touching the tree.
+// saveKeepingSharedWorktree is saveAndTeardownOne for a crew member whose share
+// of the worktree is not its to remove: everything except touching the tree.
+//
+// Both roles reach it. A subordinate defers to dev; dev defers to a subordinate
+// that is still alive (a suspended one, say, which the shutdown sweep skips
+// entirely). Either way nothing is removed, so there is nothing to preserve: the
+// uncommitted work simply stays in the tree it is already in.
 //
 // It writes the same restore marker a solo save writes, with an EMPTY preserved
-// ref — there is nothing to preserve, because nothing was removed. RestoreAll
+// ref - there is nothing to preserve, because nothing was removed. RestoreAll
 // then relaunches the member into the worktree that is still on disk (Restore
 // returns an already-registered worktree rather than re-adding it), so the member
 // comes back exactly where it was.
-func (m *Manager) saveCrewMemberSharingWorktree(ctx context.Context, rec domain.SessionRecord, ws ports.WorkspaceInfo, destroyRuntime bool) error {
+func (m *Manager) saveKeepingSharedWorktree(ctx context.Context, rec domain.SessionRecord, ws ports.WorkspaceInfo, destroyRuntime bool) error {
 	row := domain.SessionWorktreeRecord{
 		SessionID:    rec.ID,
 		RepoName:     domain.RootWorkspaceRepoName,
@@ -258,7 +263,7 @@ func (m *Manager) saveCrewMemberSharingWorktree(ctx context.Context, rec domain.
 			m.logger.Warn("save-teardown: crew member runtime destroy failed", "sessionID", rec.ID, "error", err)
 		}
 	}
-	m.logger.Info("save-teardown: kept a crew worktree a live member is still in",
+	m.logger.Info("save-teardown: kept a crew worktree that is not this session to remove",
 		"sessionID", rec.ID, "crew", rec.CrewID, "path", ws.Path)
 	return nil
 }

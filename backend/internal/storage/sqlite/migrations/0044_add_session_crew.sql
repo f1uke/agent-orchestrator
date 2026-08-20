@@ -5,7 +5,7 @@
 -- sessions already share a worktree without any schema help: a worker's worktree
 -- directory is derived from its BRANCH, not its session id, and workspace_path
 -- carries no unique constraint. What is NOT representable today is the
--- RELATIONSHIP between the members, and which of them is dev — the member that
+-- RELATIONSHIP between the members, and which of them is dev - the member that
 -- owns the PR and that every PR-driven nudge already goes to.
 --
 -- crew_id is the DEV member's session id, so the crew key and the id a human
@@ -13,7 +13,7 @@
 -- than derived from `id = crew_id`: the role is a fact about the member, not
 -- about which id happened to be allocated first.
 --
--- Both default to '' — a SOLO session, which is every row that exists today and
+-- Both default to '' - a SOLO session, which is every row that exists today and
 -- every row a normal spawn still creates. Existing rows stay valid without
 -- backfill, and every solo code path reads a zero value, which is what keeps the
 -- solo lifetime (teardown, reclaim, idle sweep) byte-for-byte unchanged.
