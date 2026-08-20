@@ -188,12 +188,18 @@ afterEach(() => {
 });
 
 describe("SimulatorPanel device selection", () => {
-	it("says nothing is booted, and never offers to boot one", async () => {
-		serveDevices(devicesPayload([], null, "no simulator is booted"));
+	// This used to be a dead end - the panel said AO never boots one and left
+	// the human to go and do it in Simulator.app. Booting is now something this
+	// tab does, so the empty state points at the control that does it.
+	it("says nothing is booted, and sends you to the picker to boot one", async () => {
+		serveDevices(devicesPayload([device({ state: "Shutdown" })], null, "no simulator is booted"));
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 
 		expect(await screen.findByText(/no simulator is booted/i)).toBeInTheDocument();
-		expect(screen.getByText(/AO never boots, shuts down or erases one/i)).toBeInTheDocument();
+		expect(screen.getByText(/pick one above to boot it/i)).toBeInTheDocument();
+		expect(screen.queryByText(/AO never boots/i)).not.toBeInTheDocument();
+		// Nothing is watched, so nothing is captured: offering to boot a device
+		// is not the same as opening a socket to one.
 		expect(openSockets()).toHaveLength(0);
 	});
 
@@ -288,8 +294,8 @@ describe("SimulatorPanel remembering a worker", () => {
 		);
 		const first = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await screen.findByText(/2 simulators are booted/i);
-		await userEvent.click(screen.getByRole("combobox", { name: /simulator to watch/i }));
-		await userEvent.click(await screen.findByRole("option", { name: /iPhone 17 Pro ·/i }));
+		await userEvent.click(screen.getByRole("button", { name: /simulator to watch/i }));
+		await userEvent.click(await screen.findByRole("button", { name: /watch iPhone 17 Pro$/i }));
 		await waitFor(() => expect(openSockets()[0]?.url).toContain("/sim-stream/UDID-B"));
 		first.unmount();
 

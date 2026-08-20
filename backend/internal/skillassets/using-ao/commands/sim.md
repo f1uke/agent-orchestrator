@@ -2,7 +2,7 @@
 
 Local iOS Simulators on this machine: list them, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, and claim one so other AO sessions keep off it while you work.
 
-`ao sim` never boots, shuts down, reboots or erases a simulator. It runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator.
+`ao sim` never powers a simulator on or off: there is no boot, shutdown, reboot or erase subcommand, and nothing you can run here changes a device's power state. It runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator. The desktop app's Device tab can boot a simulator and shut one down; that is a human pressing a button, and it is deliberately not reachable from here.
 
 Simulators are shared: another AO session, or a human working in Xcode, may be driving the same device. A captured frame can therefore be mid-interaction and is not proof that you put the app in that state.
 
@@ -361,7 +361,7 @@ ao sim ax                              # confirm what actually happened
 | `... is mid-gesture`                  | Another command holds the finger right now. Nothing was sent. Retry in a moment - it never queues, because two overlapping gestures merge into one touch. |
 | `node was not found on PATH`          | The interaction commands need Node.js 20+. `ao sim shot` and `ao sim list` still work.                                                                    |
 | `the simulator bridge could not load` | The native bridge calls private Apple frameworks and an Xcode/macOS upgrade broke it. Report it with your Xcode version; screenshots still work.          |
-| `... is not booted`                   | Boot it yourself in Xcode or Simulator.app. AO never boots a device.                                                                                      |
+| `... is not booted`                   | Ask the human to boot it from the desktop app's Device tab, or boot it yourself in Xcode or Simulator.app. No `ao sim` command powers a device on.                                                                                      |
 | exit 2                                | Bad arguments (a coordinate outside 0..1, an unknown button, `--paste` and `--raw-keys` together). Nothing reached the device.                            |
 
 - **`ao sim tap` can take the NAME of the element instead of its point.** `--label` matches the name `ao sim ax` prints for an element (its label, or its value when it has none); `--id` matches its accessibility identifier. This reads the screen first, so it costs one accessibility read - and it replaces the `ao sim ax` you would have run anyway, so the loop is shorter, not longer. The coordinate form reads nothing and is unchanged.

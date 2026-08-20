@@ -24,6 +24,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -49,6 +50,52 @@ type fakeScreen struct {
 	keyboardUDID  string
 	keyboardCalls int
 	pasteboard    *fakePasteboard
+
+	// The power surface: what was asked of the machine, and what the machine
+	// is reporting back about operations already in flight.
+	powerErr    error
+	powerOps    []powerCall
+	powerStatus map[string]simpower.Status
+	cleared     []string
+}
+
+// powerCall is one boot or shutdown the route asked for, with the callback it
+// passed - the shutdown path uses that callback to give a lease back, so a
+// test has to be able to fire it.
+type powerCall struct {
+	UDID string
+	Op   simpower.Op
+	Done func()
+}
+
+func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, done func()) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.powerErr != nil {
+		return f.powerErr
+	}
+	f.powerOps = append(f.powerOps, powerCall{UDID: udid, Op: op, Done: done})
+	return nil
+}
+
+func (f *fakeScreen) PowerStatus() map[string]simpower.Status {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.powerStatus
+}
+
+func (f *fakeScreen) ClearPower(udid string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleared = append(f.cleared, udid)
+}
+
+func (f *fakeScreen) powered() []powerCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]powerCall, len(f.powerOps))
+	copy(out, f.powerOps)
+	return out
 }
 
 func (f *fakeScreen) keyboardAsked() (string, int) {

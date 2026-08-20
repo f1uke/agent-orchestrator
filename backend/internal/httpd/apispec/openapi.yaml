@@ -2742,6 +2742,72 @@ paths:
         gesture hold `ao sim tap` uses
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-devices/{udid}/power:
+    post:
+      operationId: setSimDevicePower
+      parameters:
+      - description: Session identifier, e.g. project-1. The gesture is arbitrated
+          as this session.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1. The gesture is arbitrated
+            as this session.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSimPowerInput'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersSimPowerResponse'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Boot a simulator or shut one down from the desktop app's Device tab
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-flows:
     get:
       operationId: listSimFlows
@@ -5315,6 +5381,26 @@ components:
       - thickness
       - radius
       type: object
+    ControllersSimDevicePowerView:
+      properties:
+        op:
+          description: boot or shutdown.
+          type: string
+        reason:
+          description: Why it failed, in the machine's own words where there are any.
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        state:
+          description: running while the operation is in flight; failed when it did
+            not work.
+          type: string
+      required:
+      - op
+      - state
+      - startedAt
+      type: object
     ControllersSimFlowResponse:
       properties:
         flow:
@@ -5375,6 +5461,32 @@ components:
           type: boolean
       required:
       - code
+      type: object
+    ControllersSimPowerInput:
+      properties:
+        confirmHolder:
+          description: The session that currently leases the device. Required, and
+            must match, when another session holds it.
+          type: string
+        state:
+          description: booted or shutdown.
+          type: string
+      required:
+      - state
+      type: object
+    ControllersSimPowerResponse:
+      properties:
+        detail:
+          type: string
+        state:
+          description: The state the device is being taken to.
+          type: string
+        udid:
+          type: string
+      required:
+      - udid
+      - state
+      - detail
       type: object
     ControllersWorkspaceResolveCandidateDTO:
       properties:
@@ -7251,6 +7363,8 @@ components:
           $ref: '#/components/schemas/SimDeviceLeaseView'
         name:
           type: string
+        power:
+          $ref: '#/components/schemas/ControllersSimDevicePowerView'
         runtime:
           description: Human-readable runtime, e.g. iOS 26.3.
           type: string

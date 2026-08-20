@@ -1,8 +1,11 @@
 // Package sim is the daemon's device-lease service for local iOS Simulators.
 // A lease is bookkeeping about a device, never an operation on one: nothing
-// here boots, shuts down, reboots or erases a simulator, and the daemon never
-// shells out to simctl (device discovery stays in the `ao sim` CLI, which is
-// the only part that must run on a macOS box with Xcode).
+// here boots, shuts down, reboots or erases a simulator, and this service
+// never shells out to simctl, so it runs on any OS. (The daemon as a whole is
+// no longer simctl-free: the Device tab's picker boots and shuts down devices
+// through internal/simpower, and the shutdown path arbitrates through THIS
+// service - see SimScreenController.arbitrateShutdown, which takes a lease so
+// a device cannot lose power mid-gesture.)
 //
 // The exclusion itself is not implemented here. It is the sim_lease schema:
 // udid is the primary key and acquire is a single conditional upsert, so two

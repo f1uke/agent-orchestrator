@@ -4638,8 +4638,11 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		"ao sim claim",
 		"ao sim ax",
 		// The two rules that keep a shared device usable: claim before driving,
-		// and never change what the device is.
-		"never boots",
+		// and know that powering the device is not yours to do. The second is
+		// phrased about the CLI rather than about AO, because the desktop app's
+		// Device tab DOES boot devices - the guidance has to stay true about
+		// which of them the agent is.
+		"no `ao sim` command powers a device on or off",
 		// The defect an agent would otherwise walk into: an element the tree
 		// lists but cannot be touched from here.
 		"off screen",

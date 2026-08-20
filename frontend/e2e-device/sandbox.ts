@@ -284,8 +284,12 @@ export async function openDevicePane(sandbox: Sandbox): Promise<void> {
 	// explicitly, rather than the pane guessing on its behalf.
 	if (!(await page.getByTestId("sim-canvas").isVisible())) {
 		const name = deviceName(sandbox);
-		await page.getByRole("combobox", { name: "Simulator to watch" }).click();
-		await page.getByRole("option", { name: new RegExp(escapeRegExp(name)) }).click();
+		await page.getByRole("button", { name: "Simulator to watch" }).click();
+		// The picker is a popover of rows rather than a Select of options, since
+		// it now also boots and shuts devices down. A booted device is chosen by
+		// its "Watch <name>" row; the trailing $ keeps "iPhone 17 Pro" off
+		// "iPhone 17 Pro Max".
+		await page.getByRole("button", { name: new RegExp(`^Watch ${escapeRegExp(name)}$`) }).click();
 	}
 
 	await page.getByTestId("sim-canvas").waitFor({ state: "visible", timeout: 60_000 });

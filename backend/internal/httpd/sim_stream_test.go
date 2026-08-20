@@ -22,12 +22,22 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
 // streamScreen is a screen whose subscription the test drives, and which
 // records whether the subscription's context was cancelled - the signal the hub
 // uses to stop a capture.
+// The power surface is not what this file is about: a stream fake answers it
+// with "nothing is happening", which is the truth for a device nobody is
+// powering on or off.
+func (s *streamScreen) StartPower(context.Context, string, simpower.Op, func()) error { return nil }
+
+func (s *streamScreen) PowerStatus() map[string]simpower.Status { return nil }
+
+func (s *streamScreen) ClearPower(string) {}
+
 type streamScreen struct {
 	events chan simstream.Event
 	subErr error

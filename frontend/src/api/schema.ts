@@ -933,6 +933,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Boot a simulator or shut one down from the desktop app's Device tab */
+        post: operations["setSimDevicePower"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/sim-flows": {
         parameters: {
             query?: never;
@@ -1838,6 +1855,16 @@ export interface components {
              */
             thickness: number;
         };
+        ControllersSimDevicePowerView: {
+            /** @description boot or shutdown. */
+            op: string;
+            /** @description Why it failed, in the machine's own words where there are any. */
+            reason?: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** @description running while the operation is in flight; failed when it did not work. */
+            state: string;
+        };
         ControllersSimFlowResponse: {
             flow: components["schemas"]["ControllersSimFlowView"];
         };
@@ -1865,6 +1892,18 @@ export interface components {
             code: string;
             /** @description Shift was held. Part of the key press, not of the character. */
             shift?: boolean;
+        };
+        ControllersSimPowerInput: {
+            /** @description The session that currently leases the device. Required, and must match, when another session holds it. */
+            confirmHolder?: string;
+            /** @description booted or shutdown. */
+            state: string;
+        };
+        ControllersSimPowerResponse: {
+            detail: string;
+            /** @description The state the device is being taken to. */
+            state: string;
+            udid: string;
         };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
@@ -2621,6 +2660,7 @@ export interface components {
             frame?: components["schemas"]["ControllersSimDeviceFrameView"];
             lease: components["schemas"]["SimDeviceLeaseView"];
             name: string;
+            power?: components["schemas"]["ControllersSimDevicePowerView"];
             /** @description Human-readable runtime, e.g. iOS 26.3. */
             runtime: string;
             runtimeIdentifier: string;
@@ -6287,6 +6327,80 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSimDevicePower: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. The gesture is arbitrated as this session. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersSimPowerInput"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersSimPowerResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
