@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -589,7 +590,10 @@ func evidenceContentType(path string) (string, bool) {
 
 // headSHA reads the current commit of the repository in the working directory.
 // Best-effort: outside a repo, or with git unavailable, a recorded result simply
-// carries no commit rather than failing the command.
+// carries no commit rather than failing the command. The output is checked to
+// LOOK like a commit before it is used - it comes from a combined stdout+stderr
+// read, and a stale-looking sha would be read as a real staleness signal, which
+// is worse than recording none.
 func (c *commandContext) headSHA(ctx context.Context) string {
 	if c.deps.CommandOutput == nil {
 		return ""
@@ -598,8 +602,15 @@ func (c *commandContext) headSHA(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	sha := strings.TrimSpace(string(out))
+	if !commitSHA.MatchString(sha) {
+		return ""
+	}
+	return sha
 }
+
+// commitSHA matches a bare git object name, and nothing that came along with it.
+var commitSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
 func shortSHA(sha string) string {
 	if len(sha) > 12 {

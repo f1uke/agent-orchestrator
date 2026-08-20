@@ -256,3 +256,27 @@ func TestSmokeListPrintsBothResults(t *testing.T) {
 		t.Errorf("the machine's verdict was rendered as the user's:\n%s", out)
 	}
 }
+
+// TestSmokeRecordIgnoresNonSHAGitOutput: the commit is read from a combined
+// stdout+stderr capture, so anything that is not a bare object name is dropped -
+// a plausible-looking wrong sha would be read as a real staleness signal.
+func TestSmokeRecordIgnoresNonSHAGitOutput(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, seen := smokeMultiServer(t, recordedCheck)
+	writeRunFileFor(t, cfg, srv)
+
+	deps := aliveDeps()
+	deps.CommandOutput = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("warning: core.hooksPath overridden\nabc123def4567\n"), nil
+	}
+	if _, errOut, err := executeCLI(t, deps, "smoke", "record", "w1", "--case", "a", "--verdict", "pass"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var body recordSmokeAgentResultRequest
+	if err := json.Unmarshal([]byte((*seen)[0].body), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.SHA != "" {
+		t.Fatalf("sha = %q, want empty rather than something that only looks like a commit", body.SHA)
+	}
+}
