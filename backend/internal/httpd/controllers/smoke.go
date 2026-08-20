@@ -25,7 +25,7 @@ const maxSmokeUploadBytes int64 = (200 << 20) + (1 << 20)
 // tag is derived (CHECK N) from position on read and accepted only for
 // forward-compatibility; it is not persisted.
 type SmokeAuthoredCaseInput struct {
-	ID       string   `json:"id,omitempty" description:"Stable case id. Optional — derived from the name (slugified) when omitted. Supplying it keeps the user's verdict/note/evidence across a re-author."`
+	ID       string   `json:"id,omitempty" description:"Stable case id. Optional — derived from the name (slugified) when omitted, so rewording a name changes it. Supplying it keeps the user's verdict/note/evidence across a re-author; dropping a played case is refused (422 SMOKE_RESULTS_AT_RISK)."`
 	Tag      string   `json:"tag,omitempty" description:"Derived display tag (CHECK N); accepted but not persisted."`
 	Name     string   `json:"name" description:"One-line 'what to verify'."`
 	Why      string   `json:"why,omitempty" description:"Why it matters / what it confirms."`
@@ -36,7 +36,9 @@ type SmokeAuthoredCaseInput struct {
 }
 
 // AuthorSmokeChecksInput is the body of PUT .../smoke-checks: the whole
-// checklist, replacing any prior one (results preserved by case id).
+// checklist, replacing any prior one (results preserved by case id). A payload
+// that would drop a case the user already played is refused with 422
+// SMOKE_RESULTS_AT_RISK rather than deleting their verdict/note/evidence.
 type AuthorSmokeChecksInput struct {
 	Cases []SmokeAuthoredCaseInput `json:"cases" description:"The full 3–6 case checklist."`
 }
@@ -340,6 +342,11 @@ func sanitizeHeaderFilename(name string) string {
 
 func writeSmokeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, smokesvc.ErrResultsAtRisk):
+		// A refused re-author, not a server fault: the payload would have
+		// deleted a case the user already played. Its own code so the caller
+		// can tell it apart from an ordinary validation failure.
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_RESULTS_AT_RISK", err.Error(), nil)
 	case errors.Is(err, smokesvc.ErrInvalid):
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_INVALID", err.Error(), nil)
 	case errors.Is(err, smokesvc.ErrNotFound):

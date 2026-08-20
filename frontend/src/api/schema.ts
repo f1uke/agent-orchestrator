@@ -2777,7 +2777,7 @@ export interface components {
             expected?: string;
             /** @description file:line the change touched. */
             fileRef?: string;
-            /** @description Stable case id. Optional — derived from the name (slugified) when omitted. Supplying it keeps the user's verdict/note/evidence across a re-author. */
+            /** @description Stable case id. Optional — derived from the name (slugified) when omitted, so rewording a name changes it. Supplying it keeps the user's verdict/note/evidence across a re-author; dropping a played case is refused (422 SMOKE_RESULTS_AT_RISK). */
             id?: string;
             /** @description One-line 'what to verify'. */
             name: string;

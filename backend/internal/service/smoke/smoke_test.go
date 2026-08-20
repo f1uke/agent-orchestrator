@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -36,15 +37,34 @@ func (f *fakeStore) ListSmokeChecksBySession(_ context.Context, id domain.Sessio
 	var out []domain.SmokeCheck
 	for _, c := range f.checks {
 		if c.SessionID == id {
+			c.Evidence = f.evidenceFor(c.ID)
 			out = append(out, c)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out, nil
 }
 
 func (f *fakeStore) GetSmokeCheck(_ context.Context, id string) (domain.SmokeCheck, bool, error) {
 	c, ok := f.checks[id]
+	if ok {
+		c.Evidence = f.evidenceFor(id)
+	}
 	return c, ok, nil
+}
+
+// evidenceFor mirrors the real store, which loads a case's evidence rows with
+// the case itself; the service reads len(check.Evidence) to decide whether the
+// user has anything invested in a case.
+func (f *fakeStore) evidenceFor(checkID string) []domain.SmokeEvidence {
+	out := []domain.SmokeEvidence{}
+	for _, ev := range f.evidence {
+		if ev.CheckID == checkID {
+			out = append(out, ev)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error) {
@@ -58,12 +78,40 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 			return nil, nil, fmt.Errorf("UNIQUE constraint failed: smoke_check.id (%s owned by %s)", c.ID, prior.SessionID)
 		}
 	}
+	keep := make(map[string]struct{}, len(cases))
+	for _, c := range cases {
+		keep[c.ID] = struct{}{}
+	}
+	// The real store deletes a session's cases that the payload leaves out (their
+	// evidence rows cascade) and reports them back so the caller can sweep the
+	// blobs. A fake that skipped that could not express the loss this guards.
+	var removed []string
+	for id, prior := range f.checks {
+		if prior.SessionID != sessionID {
+			continue
+		}
+		if _, ok := keep[id]; !ok {
+			delete(f.checks, id)
+			for evID, ev := range f.evidence {
+				if ev.CheckID == id {
+					delete(f.evidence, evID)
+				}
+			}
+			removed = append(removed, id)
+		}
+	}
+	sort.Strings(removed)
 	for _, c := range cases {
 		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Seq: c.Seq, Name: c.Name, Steps: c.Steps, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
+		// An id already present keeps what the user recorded on it.
+		if prior, ok := f.checks[c.ID]; ok {
+			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
+			check.Evidence, check.CreatedAt = prior.Evidence, prior.CreatedAt
+		}
 		f.checks[c.ID] = check
 		out = append(out, check)
 	}
-	return out, nil, nil
+	return out, removed, nil
 }
 
 func (f *fakeStore) SetSmokeVerdict(_ context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error) {
@@ -703,5 +751,180 @@ func TestPurgeSessionEvidenceRemovesTree(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("session evidence dir still present: %v", err)
+	}
+}
+
+// TestAuthorRefusesToDropPlayedCases pins the property: any one of verdict,
+// note or evidence makes a case undroppable by an author call, and the refusal
+// carries ErrResultsAtRisk so the HTTP layer answers 422 rather than 500.
+func TestAuthorRefusesToDropPlayedCases(t *testing.T) {
+	ctx := context.Background()
+	cases := []domain.SmokeAuthoredCase{{ID: "played", Name: "Played case"}, {ID: "draft", Name: "Draft case"}}
+
+	for _, tc := range []struct {
+		name string
+		play func(t *testing.T, svc *Service, store *fakeStore)
+		want string
+	}{
+		{
+			name: "verdict",
+			play: func(t *testing.T, svc *Service, _ *fakeStore) {
+				if _, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokeFail, ""); err != nil {
+					t.Fatalf("set verdict: %v", err)
+				}
+			},
+			want: "verdict fail",
+		},
+		{
+			name: "note only",
+			play: func(t *testing.T, _ *Service, store *fakeStore) {
+				c := store.checks["played"]
+				c.Note = "the toast never showed"
+				store.checks["played"] = c
+			},
+			want: "a note",
+		},
+		{
+			name: "evidence only",
+			play: func(t *testing.T, svc *Service, _ *fakeStore) {
+				if _, err := svc.AttachEvidence(ctx, "w1", "played", EvidenceUpload{
+					Filename: "shot.png", Mime: "image/png", Reader: strings.NewReader("PNG"),
+				}); err != nil {
+					t.Fatalf("attach evidence: %v", err)
+				}
+			},
+			want: "1 evidence file",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+			svc := newTestService(t, store, nil)
+			if _, err := svc.Author(ctx, "w1", cases); err != nil {
+				t.Fatalf("author: %v", err)
+			}
+			tc.play(t, svc, store)
+
+			// The agent rewords the played case's name: a new derived id, so the
+			// old case would fall out of the payload and be deleted.
+			_, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Played case, reworded"}, {ID: "draft", Name: "Draft case"}})
+			if !errors.Is(err, ErrResultsAtRisk) {
+				t.Fatalf("re-author err = %v, want ErrResultsAtRisk", err)
+			}
+			for _, want := range []string{`"Played case"`, `"played"`, tc.want, `"id": "played"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal missing %s: %v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), `"draft"`) {
+				t.Errorf("refusal names the unplayed case too: %v", err)
+			}
+			if _, ok := store.checks["played"]; !ok {
+				t.Fatal("the played case was deleted anyway")
+			}
+			if store.checks["played"].Name != "Played case" {
+				t.Errorf("the refused payload was applied: name = %q", store.checks["played"].Name)
+			}
+		})
+	}
+}
+
+// TestAuthorNamesEveryCaseAtRisk: the caller has to be able to fix the payload
+// in one pass, so every played case that would be lost is listed, in seq order.
+func TestAuthorNamesEveryCaseAtRisk(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{
+		{Name: "First case"}, {Name: "Second case"}, {Name: "Third case"},
+	}); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	for _, id := range []string{"first-case", "third-case"} {
+		if _, err := svc.SetVerdict(ctx, "w1", id, domain.SmokePass, ""); err != nil {
+			t.Fatalf("set verdict %s: %v", id, err)
+		}
+	}
+	_, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Second case"}})
+	if !errors.Is(err, ErrResultsAtRisk) {
+		t.Fatalf("re-author err = %v, want ErrResultsAtRisk", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "2 cases the user already played are missing") {
+		t.Errorf("refusal does not count the cases: %v", err)
+	}
+	first, third := strings.Index(msg, `"first-case"`), strings.Index(msg, `"third-case"`)
+	if first < 0 || third < 0 {
+		t.Fatalf("refusal does not name both cases: %v", err)
+	}
+	if first > third {
+		t.Errorf("cases not listed in seq order: %v", err)
+	}
+}
+
+// TestAuthorRevisesUnplayedCasesFreely: the guard must not freeze a draft
+// checklist — an agent legitimately rewords, drops and adds cases nobody has
+// played yet, and the blobs of a dropped case are still swept off disk.
+func TestAuthorRevisesUnplayedCasesFreely(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	dir := t.TempDir()
+	svc := New(store, dir, nil, WithClock(func() time.Time { return time.Unix(0, 0).UTC() }))
+	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Draft one"}, {Name: "Draft two"}}); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	// A dropped case's evidence dir is swept even when nothing played it (a
+	// reset leaves the directory behind, and the export copies live inside it).
+	stale := filepath.Join(dir, "evidence", "w1", "draft-two")
+	if err := os.MkdirAll(stale, 0o750); err != nil {
+		t.Fatalf("seed stale dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "leftover"), []byte("bytes"), 0o600); err != nil {
+		t.Fatalf("seed stale blob: %v", err)
+	}
+
+	res, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Draft one, reworded"}, {Name: "Draft three"}})
+	if err != nil {
+		t.Fatalf("re-author of an unplayed checklist: %v", err)
+	}
+	if len(res.Checks) != 2 {
+		t.Fatalf("checks = %d, want 2", len(res.Checks))
+	}
+	if _, ok := store.checks["draft-two"]; ok {
+		t.Error("dropped unplayed case survived")
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("dropped case's blobs not swept: %v", err)
+	}
+}
+
+// TestAuthorKeepsResultsWhenTheIDIsSupplied: the way out of the refusal has to
+// work — carrying the existing id across a rename keeps the user's results.
+func TestAuthorKeepsResultsWhenTheIDIsSupplied(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
+	svc := newTestService(t, store, nil)
+	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Played case"}}); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	if _, err := svc.SetVerdict(ctx, "w1", "played-case", domain.SmokePass, "looked right"); err != nil {
+		t.Fatalf("set verdict: %v", err)
+	}
+	res, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{ID: "played-case", Name: "Played case, reworded"}})
+	if err != nil {
+		t.Fatalf("re-author with the id supplied: %v", err)
+	}
+	if len(res.Checks) != 1 {
+		t.Fatalf("checks = %d, want 1", len(res.Checks))
+	}
+	got := res.Checks[0]
+	if got.Name != "Played case, reworded" {
+		t.Errorf("name = %q, want the reworded one", got.Name)
+	}
+	if got.Verdict != domain.SmokePass || got.Note != "looked right" {
+		t.Errorf("results lost across the rename: verdict=%q note=%q", got.Verdict, got.Note)
 	}
 }

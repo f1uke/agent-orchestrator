@@ -72,11 +72,19 @@ on your branch. Re-running set is a keyed upsert: a case whose "id" matches an
 existing one keeps the user's verdict/note/evidence; new ids are added; ids absent
 from the payload are removed.
 
+An id is DERIVED FROM THE NAME when you omit it, so rewording a name produces a
+different id and the old case falls out of the payload. AO refuses that call when
+the case in question already carries the user's verdict, note or evidence, naming
+the cases it would have destroyed: re-send them under their existing ids (add
+"id": "<existing-id>" to the case that replaces a reworded one), or ask the user
+to Reset the case in the Tests tab first if it should really go. Cases nobody has
+played are still yours to revise or drop freely.
+
 The JSON is { "cases": [ ... ] } (a bare [ ... ] array is also accepted). Each case:
 
   {
     "id":       "gitlab-mr-appears",   // optional; derived from name when omitted.
-                                       //   Supply it to keep results across a re-author.
+                                       //   Supply it to keep results across a rename.
     "name":     "A fresh MR shows up in Reviews on its own",   // required
     "why":      "Confirms re-polling surfaces a new MR without a manual refresh.",
     "steps":    ["Open the Reviews tab.", "Open a new MR.", "Wait ~60s."],
@@ -137,10 +145,25 @@ func (c *commandContext) setSmokeChecklist(cmd *cobra.Command, args []string, se
 	path := "sessions/" + url.PathEscape(session) + "/smoke-checks"
 	var res listSmokeChecksResponse
 	if err := c.putJSON(cmd.Context(), path, authorSmokeChecksRequest{Cases: cases}, &res); err != nil {
-		return err
+		return explainSmokeResultsAtRisk(err)
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "authored %d smoke check(s) for %s\n", len(res.Checks), session)
 	return err
+}
+
+// explainSmokeResultsAtRisk turns the daemon's refusal to destroy recorded
+// results into a usage error (exit 2): the payload is what has to change, and
+// the daemon's message already names which cases and how. Anything else passes
+// through unchanged.
+func explainSmokeResultsAtRisk(err error) error {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != "SMOKE_RESULTS_AT_RISK" {
+		return err
+	}
+	if strings.TrimSpace(apiErr.ErrorBody.Message) == "" {
+		return err
+	}
+	return usageError{errors.New(apiErr.ErrorBody.Message)}
 }
 
 // readSmokeCases reads the checklist JSON from a file or stdin ("-"). It accepts
