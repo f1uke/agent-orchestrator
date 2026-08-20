@@ -206,20 +206,23 @@ const trackerBotDefault = "A bot left a new comment on your tracker issue. Addre
 // aoReviewerBatchDefault reproduces the pre-templating loop in
 // ApplyReviewBatch. The leading intro line ends with "\n"; each review begins
 // with a blank line ("\n" before "Review N"). A GitHub review carries an id to
-// reply on; a GitLab merge request has none ({{.ReviewID}} is empty), so the
-// {{else}} branch drops the id but keeps the same instruction - the reviewer's
-// resolvable discussion threads must still be resolved (otherwise the MR stays
-// blocked on unresolved comments), just not before the human confirms the reply.
+// reply on; a GitLab merge request has none ({{.ReviewID}} is empty), so that
+// branch drops the id but keeps the same instruction - the reviewer's resolvable
+// discussion threads must still be resolved (otherwise the MR stays blocked on
+// unresolved comments), just not before the human confirms the reply. An empty
+// {{.PRURL}} is a PRE-MR pass: nothing was posted anywhere, so the reply/resolve
+// instruction would point at a thread that does not exist and is dropped.
 const aoReviewerBatchDefault = "[AO reviewer] AO's internal code reviewer submitted {{.Count}} review(s) requesting changes.\n" +
-	"{{range .Reviews}}\nReview {{.Index}}\nPR: {{.PRURL}}\nVerdict: {{.Verdict}}" +
+	"{{range .Reviews}}\nReview {{.Index}}\n{{if .PRURL}}PR: {{.PRURL}}{{else}}Reviewed: this branch, before any PR/MR exists{{end}}\nVerdict: {{.Verdict}}" +
 	"{{if .TargetSHA}}\nHead commit: {{.TargetSHA}}{{end}}" +
-	"{{if .ReviewID}}\nReview: {{.ReviewID}}\nMake the requested code change, then draft a reply for review {{.ReviewID}} summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{else}}\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{end}}" +
+	"{{if not .PRURL}}\nThere is no PR/MR yet, so there is no thread to reply to and nothing to resolve: make the requested code change, and say what you changed in your next message. The review body below is the whole review.{{else if .ReviewID}}\nReview: {{.ReviewID}}\nMake the requested code change, then draft a reply for review {{.ReviewID}} summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{else}}\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{end}}" +
 	"{{if .Body}}\n\nReview body:\n{{.Body}}\n{{end}}{{end}}"
 
 // aoReviewerSingleDefault reproduces the pre-templating ApplyReviewResult text.
-// As with the batch template, the {{else}} branch covers GitLab merge requests
-// (no review id) so the worker is still told to resolve the threads - once the
-// human has confirmed its drafted reply.
-const aoReviewerSingleDefault = "[AO reviewer] AO's internal code reviewer submitted a review.\n\nPR: {{.PRURL}}\nVerdict: {{.Verdict}}" +
-	"{{if .ReviewID}}\nReview: {{.ReviewID}}\n\nMake the requested code change, then draft a reply for review {{.ReviewID}} summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{else}}\n\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{end}}" +
+// As with the batch template, the no-review-id branch covers GitLab merge
+// requests so the worker is still told to resolve the threads - once the human
+// has confirmed its drafted reply - and an empty {{.PRURL}} marks a pre-MR pass
+// with no thread to reply to at all.
+const aoReviewerSingleDefault = "[AO reviewer] AO's internal code reviewer submitted a review.\n\n{{if .PRURL}}PR: {{.PRURL}}{{else}}Reviewed: this branch, before any PR/MR exists{{end}}\nVerdict: {{.Verdict}}" +
+	"{{if not .PRURL}}\n\nThere is no PR/MR yet, so there is no thread to reply to and nothing to resolve: make the requested code change, and say what you changed in your next message. The review body below is the whole review.{{else if .ReviewID}}\nReview: {{.ReviewID}}\n\nMake the requested code change, then draft a reply for review {{.ReviewID}} summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{else}}\n\nMake the requested code change, then draft a reply summarizing how you addressed it and show it to the human. Do not post the reply or resolve the review comment threads until the human confirms.{{end}}" +
 	"{{if .Body}}\n\nReview body:\n{{.Body}}{{end}}"

@@ -34,9 +34,12 @@ type LaunchSpec struct {
 	Harness       domain.ReviewerHarness
 	WorkspacePath string
 	PRURL         string
-	TargetSHA     string
-	ReviewQueue   []ports.ReviewTask
-	ReviewIndex   int
+	// Branch is the worker checkout's branch, set only for a pre-MR pass (no PR).
+	// It is what the review is keyed on in place of a PR URL.
+	Branch      string
+	TargetSHA   string
+	ReviewQueue []ports.ReviewTask
+	ReviewIndex int
 	// ProjectID is the worker's project, used to render the reviewer base's
 	// {{.ProjectID}} template action to a concrete project id — the reviewer
 	// analogue of the orchestrator/worker project-id substitution.

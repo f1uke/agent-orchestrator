@@ -1795,6 +1795,15 @@ export interface components {
              */
             failed: number;
         };
+        ControllersSessionPRAOReviewSummary: {
+            preMr?: boolean;
+            /** Format: date-time */
+            reviewedAt: string;
+            runId: string;
+            targetSha: string;
+            /** @enum {string} */
+            verdict: "approved" | "changes_requested";
+        };
         ControllersSessionView: {
             activity: components["schemas"]["DomainActivity"];
             autoNameBranch?: boolean;
@@ -2221,6 +2230,7 @@ export interface components {
             projectName?: string;
         };
         PRReviewState: {
+            branch?: string;
             latestRun?: components["schemas"]["ReviewRun"];
             prNumber: number;
             prUrl: string;
@@ -2490,6 +2500,7 @@ export interface components {
         };
         SessionPRSummary: {
             additions: number;
+            aoReview?: components["schemas"]["ControllersSessionPRAOReviewSummary"];
             author: string;
             changedFiles: number;
             ci: components["schemas"]["SessionPRCISummary"];

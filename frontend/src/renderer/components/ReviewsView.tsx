@@ -103,9 +103,10 @@ export function ReviewsView({
 
 	// --- reviews (AO reviewer state per PR) ----------------------------------
 	const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+	// Not gated on hasPr: AO reviews a branch before any PR exists, and that pass's
+	// body lives nowhere else, so skipping the fetch would hide it entirely.
 	const reviewsQuery = useQuery({
 		queryKey: ["session-reviews", sessionId],
-		enabled: hasPr,
 		refetchInterval: (query) => {
 			const data = query.state.data as ReviewsResponse | undefined;
 			return (data?.reviews ?? []).some((review) => review.status === "running") ? 2500 : false;
@@ -121,7 +122,6 @@ export function ReviewsView({
 	});
 	const projectConfigQuery = useQuery({
 		queryKey: ["project-config", session.workspaceId],
-		enabled: hasPr,
 		queryFn: async () => {
 			if (usePreviewData) return mockProjectConfig();
 			const { data, error } = await apiClient.GET("/api/v1/projects/{id}", {
@@ -240,6 +240,10 @@ export function ReviewsView({
 
 	// --- merge PRs (facts) + reviews + comment groups into per-PR blocks ------
 	const blocks = useMemo(() => mergeBlocks(prs, reviewStates, groups), [prs, reviewStates, groups]);
+	// With no PR the planner returns a single branch-keyed state instead of one per
+	// PR. That is a real review with a real body, and mergeBlocks (which zips by PR
+	// number) has nothing to hang it on — so it gets its own card.
+	const preMRState = !hasPr ? reviewStates.find((r) => !r.prUrl) : undefined;
 	const totalUnresolved = blocks.reduce((n, b) => n + b.unresolved.length, 0);
 	const commentPrCount = blocks.filter((b) => b.unresolved.length > 0).length;
 	const resolvedItems = groups.flatMap((g) =>
@@ -280,7 +284,10 @@ export function ReviewsView({
 	};
 
 	// --- render --------------------------------------------------------------
-	const loading = hasPr && (reviewsQuery.isLoading || commentsQuery.isLoading);
+	// With no PR there are no comments to wait for, but the reviews fetch still
+	// runs — showing "Nothing to review yet" while it is in flight would flash a
+	// wrong answer at a session that does have a pre-MR review.
+	const loading = reviewsQuery.isLoading || (hasPr && commentsQuery.isLoading);
 	const err = reviewsQuery.error
 		? apiErrorMessage(reviewsQuery.error, "Unable to load reviews")
 		: commentsQuery.error
@@ -309,7 +316,7 @@ export function ReviewsView({
 				onToggleSelect={exitSelect}
 			/>
 
-			{hasPr && (
+			{(hasPr || preMRState) && (
 				<ReviewerStrip
 					harness={harness}
 					aggregate={sessionReviewVerdict(reviewStates)}
@@ -362,7 +369,7 @@ export function ReviewsView({
 				{loading && <p style={{ padding: 16, fontSize: 12.5, color: P.muted2 }}>Loading reviews…</p>}
 				{!loading && err && <p style={{ padding: 16, fontSize: 12.5, color: P.red }}>{err}</p>}
 
-				{!loading && !err && !hasPr && <NoPrEmptyState />}
+				{!loading && !err && !hasPr && (preMRState ? <PreMRReviewCard state={preMRState} /> : <NoPrEmptyState />)}
 
 				{!loading &&
 					!err &&
@@ -1510,6 +1517,56 @@ function ResolvedSection({ items }: { items: { group: Group; thread: Thread }[] 
 	);
 }
 
+/**
+ * A review that ran before any PR existed. There was nowhere to post it, so the
+ * submitted body is the entire review — which is why this renders the body in
+ * full rather than linking out to a provider thread that does not exist.
+ */
+function PreMRReviewCard({ state }: { state: PRReviewState }) {
+	const verdict = reviewVerdict(state);
+	const run = state.latestRun;
+	return (
+		<div
+			style={{
+				border: `1px solid ${P.borderCard}`,
+				borderRadius: 10,
+				background: P.cardBg,
+				padding: 14,
+				marginBottom: 12,
+			}}
+		>
+			<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+				<span style={{ fontSize: 13, fontWeight: 600, color: P.text }}>Pre-merge review</span>
+				<StatusPill color={TONE_COLOR[verdict.tone]} label={verdict.label} />
+			</div>
+			<div style={{ fontSize: 11.5, color: P.muted2, fontFamily: MONO, marginBottom: run?.body ? 10 : 0 }}>
+				{state.branch || "this branch"}
+				{state.targetSha ? ` · ${state.targetSha.slice(0, 12)}` : ""}
+			</div>
+			{run?.body ? (
+				<pre
+					style={{
+						margin: 0,
+						fontSize: 12,
+						lineHeight: 1.55,
+						color: P.secondary,
+						whiteSpace: "pre-wrap",
+						wordBreak: "break-word",
+						fontFamily: "inherit",
+					}}
+				>
+					{run.body}
+				</pre>
+			) : (
+				<div style={{ fontSize: 12.5, color: P.muted2, lineHeight: 1.5 }}>
+					No PR exists yet, so this review is not posted anywhere — its findings will appear here
+					once the pass submits.
+				</div>
+			)}
+		</div>
+	);
+}
+
 function NoPrEmptyState() {
 	return (
 		<div
@@ -1525,10 +1582,11 @@ function NoPrEmptyState() {
 		>
 			<div style={{ fontSize: 30, marginBottom: 14, opacity: 0.5 }}>◌</div>
 			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 4 }}>
-				No pull request opened yet.
+				Nothing to review yet.
 			</div>
-			<div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 240 }}>
-				Reviews and review comments appear here once this session opens a PR or MR.
+			<div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 260 }}>
+				AO can review this branch before a PR exists — it just needs a commit on it first. Review
+				comments appear here once a PR or MR is opened.
 			</div>
 		</div>
 	);

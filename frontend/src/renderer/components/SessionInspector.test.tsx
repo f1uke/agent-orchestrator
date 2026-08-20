@@ -592,7 +592,7 @@ describe("SessionInspector reviews tab", () => {
 		renderWithQuery(<SessionInspector session={session([])} />);
 		await userEvent.click(screen.getByRole("tab", { name: /Reviews/ }));
 
-		expect(await screen.findByText("No pull request opened yet.")).toBeInTheDocument();
+		expect(await screen.findByText("Nothing to review yet.")).toBeInTheDocument();
 	});
 });
 

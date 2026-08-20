@@ -317,9 +317,45 @@ describe("ReviewsView (merged reviews + comments)", () => {
 		expect(await screen.findByText("No unresolved comments.")).toBeInTheDocument();
 	});
 
-	it("shows the overall empty state when the session owns no PRs", async () => {
+	// A review that ran before any PR existed has nowhere to post, so its submitted
+	// body is the whole review. mergeBlocks zips by PR number and has nothing to
+	// hang a branch-keyed state on, so it gets its own card - without it the body
+	// would be persisted and then shown nowhere.
+	it("renders a pre-merge review's body when the session has no PR yet", async () => {
+		reviewsData = {
+			reviewerHandleId: "",
+			reviews: [
+				{
+					prUrl: "",
+					prNumber: 0,
+					branch: "feat/retry",
+					title: "",
+					targetSha: "abc123def456789",
+					status: "changes_requested",
+					latestRun: {
+						id: "run-1",
+						prUrl: "",
+						targetSha: "abc123def456789",
+						status: "delivered",
+						verdict: "changes_requested",
+						body: "backend/a.go:10 - this retry loop never terminates.",
+					},
+				},
+			],
+		} as unknown as ReturnType<typeof reviewsPayload>;
 		renderView([]);
-		expect(await screen.findByText("No pull request opened yet.")).toBeInTheDocument();
+
+		expect(await screen.findByText("Pre-merge review")).toBeInTheDocument();
+		expect(screen.getByText("Changes requested")).toBeInTheDocument();
+		expect(screen.getByText(/feat\/retry/)).toBeInTheDocument();
+		expect(screen.getByText("backend/a.go:10 - this retry loop never terminates.")).toBeInTheDocument();
+		// The reviewer strip is reachable with no PR, so a pre-MR pass can be re-run.
+		expect(screen.getByRole("button", { name: /review/i })).toBeInTheDocument();
+	});
+
+	it("shows the overall empty state when the session owns no PRs and nothing was reviewed", async () => {
+		renderView([]);
+		expect(await screen.findByText("Nothing to review yet.")).toBeInTheDocument();
 	});
 
 	// A draft PR IS reviewable: getting reviewer feedback before marking the PR

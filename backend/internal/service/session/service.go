@@ -52,6 +52,10 @@ type Store interface {
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
 	ListPRReviewThreads(ctx context.Context, prURL string) ([]domain.PullRequestReviewThread, error)
 	ListPRComments(ctx context.Context, prURL string) ([]domain.PullRequestComment, error)
+	// ListReviewRunsBySession is AO's OWN review verdicts, as distinct from the
+	// provider decisions ListPRReviews returns. The PR read model carries both:
+	// they are different actors and neither substitutes for the other.
+	ListReviewRunsBySession(ctx context.Context, id domain.SessionID) ([]domain.ReviewRun, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
 }
 
