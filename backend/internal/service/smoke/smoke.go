@@ -235,6 +235,11 @@ func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases 
 	if err != nil {
 		return SessionSmoke{}, err
 	}
+	// Read the stored checklist and refuse before writing anything. The read is
+	// outside the replace transaction, so a verdict recorded in the microseconds
+	// between the two would still be replaced; closing that would mean pushing
+	// the rule into the store's tx, which is not worth the API for a window this
+	// narrow (one agent's re-author racing one human click).
 	existing, err := s.store.ListSmokeChecksBySession(ctx, sessionID)
 	if err != nil {
 		return SessionSmoke{}, err
