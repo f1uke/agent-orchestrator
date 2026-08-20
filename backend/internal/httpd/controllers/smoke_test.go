@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -447,4 +448,116 @@ func TestSmokeReportReturnsOutcome(t *testing.T) {
 			t.Fatalf("body missing %s: %s", want, body)
 		}
 	}
+}
+
+// TestSmokeReauthorRewordedNameKeepsHumanResults drives the REAL service over a
+// REAL store because the loss it guards lives below the controller: a case id is
+// derived from the case NAME, so an agent that merely rewords a name produces a
+// different id, the old case falls out of the payload, and the author call used
+// to delete it - taking the verdict, the note and the evidence blob the user
+// recorded while playing it.
+func TestSmokeReauthorRewordedNameKeepsHumanResults(t *testing.T) {
+	st, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := st.UpsertProject(ctx, domain.ProjectRecord{ID: "proj", Path: "/tmp/proj", RegisteredAt: now}); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	rec, err := st.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "proj", Kind: domain.KindWorker,
+		Activity:  domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	session := string(rec.ID)
+	dataDir := t.TempDir()
+	srv := newSmokeTestServer(t, smokesvc.New(st, dataDir, nil))
+	base := "/api/v1/sessions/" + session + "/smoke-checks"
+
+	// 1. The worker authors the checklist.
+	body, status, _ := doRequest(t, srv, "PUT", base,
+		`{"cases":[{"name":"A fresh MR shows up in Reviews","why":"w","steps":["open"],"expected":"e"},{"name":"Second case","why":"w2","steps":["x"],"expected":"e2"}]}`)
+	if status != http.StatusOK {
+		t.Fatalf("author: status = %d body=%s", status, body)
+	}
+
+	// 2. The user plays the first case: verdict + note + a screenshot.
+	checkID := "a-fresh-mr-shows-up-in-reviews"
+	body, status, _ = doRequest(t, srv, "POST", base+"/"+checkID+"/verdict", `{"verdict":"pass","note":"looked right"}`)
+	if status != http.StatusOK {
+		t.Fatalf("verdict: status = %d body=%s", status, body)
+	}
+	evidenceID := uploadSmokeEvidence(t, srv, session, checkID)
+	blob := filepath.Join(dataDir, "evidence", session, checkID, evidenceID)
+	if _, err := os.Stat(blob); err != nil {
+		t.Fatalf("evidence blob not written: %v", err)
+	}
+
+	// 3. The worker re-authors and merely REWORDS the played case's name.
+	body, status, _ = doRequest(t, srv, "PUT", base,
+		`{"cases":[{"name":"A fresh MR shows up in the Reviews tab","why":"w","steps":["open"],"expected":"e"},{"name":"Second case","why":"w2","steps":["x"],"expected":"e2"}]}`)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("re-author with a reworded played case: status = %d, want 422; body=%s", status, body)
+	}
+	for _, want := range []string{"A fresh MR shows up in Reviews", checkID} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("refusal does not name the case at risk (%q): %s", want, body)
+		}
+	}
+
+	// 4. Nothing the user recorded was touched.
+	got, ok, err := st.GetSmokeCheck(ctx, checkID)
+	if err != nil || !ok {
+		t.Fatalf("played case gone: ok=%v err=%v", ok, err)
+	}
+	if got.Verdict != domain.SmokePass || got.Note != "looked right" || len(got.Evidence) != 1 {
+		t.Fatalf("results lost: verdict=%q note=%q evidence=%d", got.Verdict, got.Note, len(got.Evidence))
+	}
+	if _, err := os.Stat(blob); err != nil {
+		t.Fatalf("evidence blob deleted: %v", err)
+	}
+}
+
+// uploadSmokeEvidence posts one screenshot the way the Tests tab does and
+// returns the stored evidence id.
+func uploadSmokeEvidence(t *testing.T, srv *httptest.Server, session, checkID string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	hdr := map[string][]string{
+		"Content-Disposition": {`form-data; name="file"; filename="shot.png"`},
+		"Content-Type":        {"image/png"},
+	}
+	part, err := mw.CreatePart(hdr)
+	if err != nil {
+		t.Fatalf("create part: %v", err)
+	}
+	if _, err := part.Write([]byte("PNGBYTES")); err != nil {
+		t.Fatalf("write part: %v", err)
+	}
+	_ = mw.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/sessions/"+session+"/smoke-checks/"+checkID+"/evidence", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("upload evidence: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload evidence: status = %d body=%s", resp.StatusCode, body)
+	}
+	var out struct {
+		Evidence domain.SmokeEvidence `json:"evidence"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode evidence: %v", err)
+	}
+	return out.Evidence.ID
 }

@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -32,6 +33,15 @@ var (
 	ErrInvalid  = errors.New("smoke: invalid request")
 	ErrNotFound = errors.New("smoke: not found")
 )
+
+// ErrResultsAtRisk refuses an Author call that would delete a case the user has
+// already played. A case id is derived from the case NAME when the payload omits
+// an explicit "id", so an agent that merely rewords a name produces a different
+// id: the old case falls out of the payload and would be dropped together with
+// the verdict, note and evidence bytes the user recorded on it. Those are the
+// one part of a checklist AO cannot regenerate, so authoring fails loudly
+// instead, naming the cases and how to keep them. The controller maps it to 422.
+var ErrResultsAtRisk = errors.New("smoke: author would discard recorded results")
 
 // Evidence size caps (user decision 2026-07-11): 25 MB image / 200 MB video.
 const (
@@ -194,8 +204,10 @@ func (s *Service) List(ctx context.Context, sessionID domain.SessionID) (Session
 }
 
 // Author registers or replaces a session's whole checklist. Cases matched by
-// stable id keep their verdict/note/evidence (see ReplaceSmokeChecks); ids
-// absent from the payload are removed and their evidence blobs deleted.
+// stable id keep their verdict/note/evidence (see ReplaceSmokeChecks); an id
+// absent from the payload is removed and its evidence blobs deleted - but only
+// while nobody has played it. A missing case that carries a verdict, a note or
+// evidence fails the whole call with ErrResultsAtRisk rather than being deleted.
 func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error) {
 	if sessionID == "" {
 		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
@@ -221,6 +233,18 @@ func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases 
 		return ok && existing.SessionID != sessionID, nil
 	})
 	if err != nil {
+		return SessionSmoke{}, err
+	}
+	// Read the stored checklist and refuse before writing anything. The read is
+	// outside the replace transaction, so a verdict recorded in the microseconds
+	// between the two would still be replaced; closing that would mean pushing
+	// the rule into the store's tx, which is not worth the API for a window this
+	// narrow (one agent's re-author racing one human click).
+	existing, err := s.store.ListSmokeChecksBySession(ctx, sessionID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if err := checkResultsAtRisk(existing, resolved); err != nil {
 		return SessionSmoke{}, err
 	}
 	_, removed, err := s.store.ReplaceSmokeChecks(ctx, sessionID, rec.ProjectID, resolved, s.now())
@@ -697,6 +721,75 @@ func resolveCases(sessionID domain.SessionID, cases []domain.SmokeAuthoredCase, 
 		})
 	}
 	return out, nil
+}
+
+// checkResultsAtRisk refuses a re-author that would delete played cases. It runs
+// on the RESOLVED ids, so it sees exactly what ReplaceSmokeChecks would drop.
+func checkResultsAtRisk(existing []domain.SmokeCheck, resolved []domain.SmokeAuthoredCase) error {
+	keep := make(map[string]struct{}, len(resolved))
+	for _, c := range resolved {
+		keep[c.ID] = struct{}{}
+	}
+	var atRisk []domain.SmokeCheck
+	for _, c := range existing {
+		if _, ok := keep[c.ID]; ok {
+			continue
+		}
+		if played(c) {
+			atRisk = append(atRisk, c)
+		}
+	}
+	if len(atRisk) == 0 {
+		return nil
+	}
+	sort.Slice(atRisk, func(i, j int) bool {
+		if atRisk[i].Seq != atRisk[j].Seq {
+			return atRisk[i].Seq < atRisk[j].Seq
+		}
+		return atRisk[i].ID < atRisk[j].ID
+	})
+	return resultsAtRiskError(atRisk)
+}
+
+// played reports whether a case carries work only the user can produce: a
+// verdict they recorded, a note they wrote, or evidence they attached.
+func played(c domain.SmokeCheck) bool {
+	return (c.Verdict != "" && c.Verdict != domain.SmokePending) ||
+		strings.TrimSpace(c.Note) != "" ||
+		len(c.Evidence) > 0
+}
+
+// resultsAtRiskError names every case that would have been destroyed and both
+// ways out, so the caller can fix the payload instead of guessing.
+func resultsAtRiskError(atRisk []domain.SmokeCheck) error {
+	listed := make([]string, 0, len(atRisk))
+	for _, c := range atRisk {
+		listed = append(listed, fmt.Sprintf("%q (id %q, %s)", c.Name, c.ID, playedSummary(c)))
+	}
+	subject := fmt.Sprintf("%d cases the user already played are", len(atRisk))
+	if len(atRisk) == 1 {
+		subject = "1 case the user already played is"
+	}
+	return fmt.Errorf("%w: %s missing from the payload: %s. A case id is derived from its name, so rewording a name drops the old case: re-send each one under the id it already has (e.g. add \"id\": \"%s\" to the case that replaces it), or ask the user to Reset the case in the Tests tab before dropping it",
+		ErrResultsAtRisk, subject, strings.Join(listed, "; "), atRisk[0].ID)
+}
+
+// playedSummary describes what the user recorded on a case, for the refusal.
+func playedSummary(c domain.SmokeCheck) string {
+	var parts []string
+	if c.Verdict != "" && c.Verdict != domain.SmokePending {
+		parts = append(parts, "verdict "+string(c.Verdict))
+	}
+	if strings.TrimSpace(c.Note) != "" {
+		parts = append(parts, "a note")
+	}
+	switch n := len(c.Evidence); {
+	case n == 1:
+		parts = append(parts, "1 evidence file")
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("%d evidence files", n))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // resolveID picks an id this checklist has not used and no OTHER session owns.

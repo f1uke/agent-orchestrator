@@ -273,3 +273,34 @@ func TestSmokeListJSONKeepsAuthoredFields(t *testing.T) {
 		}
 	}
 }
+
+// TestSmokeSetSurfacesResultsAtRiskAsUsageError: the daemon refuses a payload
+// that would delete results the user recorded. That is the caller's payload to
+// fix, so it has to exit 2 with the daemon's message (which names the cases and
+// their ids) intact — not a bare "daemon returned HTTP 422".
+func TestSmokeSetSurfacesResultsAtRiskAsUsageError(t *testing.T) {
+	cfg := setConfigEnv(t)
+	const msg = `smoke: author would discard recorded results: 1 case the user already played is missing from the payload: "A fresh MR shows up" (id "a-fresh-mr-shows-up", verdict pass, 1 evidence file). A case id is derived from its name, so rewording a name drops the old case: keep each id in the payload (add "id": "a-fresh-mr-shows-up" to the case that replaces it), or ask the user to Reset the case in the Tests tab before dropping it`
+	body, err := json.Marshal(map[string]string{"message": msg, "code": "SMOKE_RESULTS_AT_RISK"})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	srv, _ := reviewServer(t, 422, string(body))
+	writeRunFileFor(t, cfg, srv)
+
+	deps := aliveDeps()
+	deps.In = strings.NewReader(`{"cases":[{"name":"A fresh MR shows up in the Reviews tab"}]}`)
+
+	_, _, err = executeCLI(t, deps, "smoke", "set", "w1", "--from-file", "-")
+	if err == nil {
+		t.Fatal("err = nil, want the refusal")
+	}
+	if code := ExitCode(err); code != 2 {
+		t.Errorf("exit code = %d, want 2 (usage)", code)
+	}
+	for _, want := range []string{`"A fresh MR shows up"`, `"a-fresh-mr-shows-up"`, "Reset the case"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message missing %s: %v", want, err)
+		}
+	}
+}
