@@ -1480,11 +1480,11 @@ func TestApplyReviewResultNoopsWhenIrrelevant(t *testing.T) {
 			result: ReviewResult{RunID: "run-1", PRURL: "pr1", Verdict: domain.VerdictChangesRequested},
 			rec:    func() domain.SessionRecord { r := working("mer-1"); r.IsTerminated = true; return r }(),
 		},
-		{
-			name:   "worker waiting input",
-			result: ReviewResult{RunID: "run-1", PRURL: "pr1", Verdict: domain.VerdictChangesRequested},
-			rec:    domain.SessionRecord{ID: "mer-1", Activity: domain.Activity{State: domain.ActivityWaitingInput}},
-		},
+		// A worker in waiting_input is deliberately NOT in this table any more. It
+		// used to no-op here, which is how a changes-requested verdict was lost for
+		// good while an agent sat at a permission prompt. The verdict now reaches the
+		// messenger, which HOLDS it until the agent is listening; see
+		// TestNudgesReachTheMessengerForAWaitingSession.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

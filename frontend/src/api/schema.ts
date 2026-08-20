@@ -2546,7 +2546,7 @@ export interface components {
             /** Format: date-time */
             at: string;
             /** @enum {string} */
-            lastState?: "active" | "idle" | "waiting_input" | "blocked" | "exited";
+            lastState?: "active" | "idle" | "waiting_input" | "parked" | "blocked" | "exited";
             /** @description The harness's own end reason when source is agent, or the named AO cause otherwise. 'unknown' when the ending is real but unexplained. */
             reason: string;
             /**
@@ -2584,7 +2584,7 @@ export interface components {
              * @description Agent activity state reported by an agent hook.
              * @enum {string}
              */
-            state: "active" | "idle" | "waiting_input" | "exited";
+            state: "active" | "idle" | "waiting_input" | "parked" | "exited";
         };
         SetActivityResponse: {
             ok: boolean;

@@ -31,7 +31,7 @@ export function QueuedMessagesChip({ session, compact = false }: { session: Work
 		: `${waiting} message${waiting === 1 ? "" : "s"} waiting for this session's agent`;
 	const title = failedOnly
 		? label
-		: `${label}. Held while the session is asleep; delivered once its agent is listening again.`;
+		: `${label}. Held while it is not listening — asleep, or sitting at a prompt — and delivered once its agent is listening again.`;
 	const tone = failedOnly ? "var(--red)" : "var(--fg-passive)";
 
 	if (compact) {

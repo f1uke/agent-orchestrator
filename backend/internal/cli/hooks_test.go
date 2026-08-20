@@ -172,11 +172,13 @@ func TestHooks_NotificationReportsWaitingInput(t *testing.T) {
 }
 
 // A recap / auto-summary turn ends the turn and Claude Code emits an idle_prompt
-// Notification while the session sits quiet. It is informational — the agent is
-// not requesting input — so the hook reports nothing to the daemon and the
-// session keeps whatever status its durable facts already imply (e.g. a
-// ready-to-merge PR).
-func TestHooks_IdlePromptIsNoOp(t *testing.T) {
+// Notification while the session sits quiet. The agent is NOT requesting input —
+// it has simply settled at its prompt — so this reports parked, never
+// waiting_input. The distinction is load-bearing in both directions: parked must
+// not short-circuit the status deriver ahead of an open PR's pipeline status, and
+// it must not put the session behind the "nothing may be typed at this pane" bar
+// that a real permission prompt raises.
+func TestHooks_IdlePromptReportsParked(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "ao-7")
 	cfg := setConfigEnv(t)
 	srv, capture := activityServer(t, http.StatusOK, `{}`)
@@ -189,8 +191,11 @@ func TestHooks_IdlePromptIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if capture.hits != 0 {
-		t.Errorf("expected no daemon call for an informational idle_prompt, got %d", capture.hits)
+	if capture.hits != 1 {
+		t.Fatalf("expected one daemon call for idle_prompt, got %d", capture.hits)
+	}
+	if got := capturedState(t, capture); got != "parked" {
+		t.Errorf("state = %q, want parked", got)
 	}
 }
 

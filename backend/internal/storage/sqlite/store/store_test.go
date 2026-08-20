@@ -244,6 +244,40 @@ func TestSessionRenameUpdatesDisplayName(t *testing.T) {
 	}
 }
 
+// Every activity state the daemon can report must survive a write. The column
+// carries a CHECK constraint, so a state the migrations did not widen it for
+// fails the UPDATE outright rather than degrading - which is how a new state
+// would take the board down instead of just looking wrong.
+func TestSessionActivityStatesAllRoundTrip(t *testing.T) {
+	states := []domain.ActivityState{
+		domain.ActivityActive,
+		domain.ActivityIdle,
+		domain.ActivityWaitingInput,
+		domain.ActivityParked,
+		domain.ActivityExited,
+	}
+	for _, state := range states {
+		t.Run(string(state), func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+			seedProject(t, s, "mer")
+			r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+
+			r.Activity = domain.Activity{State: state, LastActivityAt: r.CreatedAt}
+			if err := s.UpdateSession(ctx, r); err != nil {
+				t.Fatalf("UpdateSession(%s): %v", state, err)
+			}
+			got, ok, err := s.GetSession(ctx, r.ID)
+			if err != nil || !ok {
+				t.Fatalf("GetSession: ok=%v err=%v", ok, err)
+			}
+			if got.Activity.State != state {
+				t.Fatalf("activity state = %q, want %q", got.Activity.State, state)
+			}
+		})
+	}
+}
+
 func TestSessionUpdateActivityAndTermination(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

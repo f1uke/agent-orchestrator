@@ -139,16 +139,18 @@ func Run() error {
 
 	// The durable inbox for sessions that cannot receive a message right now: a
 	// suspended session's tmux is gone, so typing at its stored handle fails and
-	// the message is lost. It delivers through the SAME gated runtime, so a held
-	// message lands on an empty input line like any other. Built before the
-	// messenger, which hands it anything addressed to a sleeping session.
+	// the message is lost, and a session sitting at a permission prompt has a
+	// dialog on the keyboard that would eat the text and could be ANSWERED by its
+	// trailing Enter. It delivers through the SAME gated runtime, so a held message
+	// lands on an empty input line like any other. Built before the messenger,
+	// which hands it anything addressed to a session that is not listening.
 	// The readiness signal is the runtime's own agent-liveness probe, taken from
 	// the UNWRAPPED adapter: gatedRuntime's method set is the union interface it
 	// embeds, which does not carry AgentAlive (conpty cannot implement it), so
 	// asking the wrapper for the capability would silently find nothing.
 	messageQueue := msgqueue.New(store, gatedRuntime, agentLivenessProber(runtimeAdapter), log)
 	// The agent messenger sends validated user input to the session's live
-	// runtime pane, or queues it when the session is asleep. Built before the
+	// runtime pane, or queues it when the session cannot receive it. Built before the
 	// Lifecycle Manager so the LCM can use it for SCM-driven agent nudges (CI
 	// failure, review feedback, merge conflict). It injects through the gated
 	// runtime so delivery waits for a typing gap.

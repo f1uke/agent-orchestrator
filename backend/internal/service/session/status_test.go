@@ -49,6 +49,14 @@ func activeAgedRec(age time.Duration) domain.SessionRecord {
 	}
 }
 
+// parkedUnsignalledRec builds a session reading parked whose hook pipeline never
+// delivered a first signal, seeded `age` before the derivation time.
+func parkedUnsignalledRec(age time.Duration) domain.SessionRecord {
+	return domain.SessionRecord{
+		Activity: domain.Activity{State: domain.ActivityParked, LastActivityAt: statusNow.Add(-age)},
+	}
+}
+
 func statusPR(facts domain.PRFacts) []domain.PRFacts { return []domain.PRFacts{facts} }
 
 func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
@@ -121,6 +129,18 @@ func TestServiceDerivesStatusFromSessionFactsAndPR(t *testing.T) {
 		// WaitingInput (a real prompt) is resolved before the open-PR branch, so
 		// a genuine block still surfaces as needs_input even over a problem PR.
 		{"waiting-input-ci-failing-pr-needs-input", statusRec(domain.ActivityWaitingInput, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusNeedsInput},
+		// PARKED is the other half of the split and must NOT behave like
+		// waiting_input here. A parked agent is not asking the human for anything,
+		// so it is derived AFTER the open-PR branch exactly as an idle is: an open
+		// PR keeps its pipeline status, and only a session with nothing else to say
+		// reads as "your turn". These four pin the whole difference.
+		{"parked-ci-failing-pr-stays-ci-failed", statusRec(domain.ActivityParked, false), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusCIFailed},
+		{"parked-mergeable-pr-stays-mergeable", statusRec(domain.ActivityParked, false), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable},
+		{"parked-review-pending-pr-stays-review", statusRec(domain.ActivityParked, false), statusPR(domain.PRFacts{Review: domain.ReviewRequired}), false, domain.StatusReviewPending},
+		{"parked-no-pr-needs-you", statusRec(domain.ActivityParked, false), nil, false, domain.StatusNeedsInput},
+		// A parked session that never signalled cannot be parked in any meaningful
+		// sense; it falls through to the no-signal downgrade like an idle one.
+		{"parked-never-signalled-is-no-signal", parkedUnsignalledRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal},
 
 		// A live session whose hook-capable agent never signaled is no_signal
 		// once the grace passes — never a confident idle.
@@ -432,6 +452,11 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 		{"active-stale", activeAgedRec(2 * activeStaleGrace), nil, false, domain.StatusNeedsInput, domain.ReasonActiveStale, ""},
 		{"waiting-input", statusRec(domain.ActivityWaitingInput, false), nil, false, domain.StatusNeedsInput, domain.ReasonWaitingInput, ""},
 		{"idle-aged", idleAgedRec(2 * waitingInputGrace), nil, false, domain.StatusNeedsInput, domain.ReasonIdleAged, ""},
+		// parked reports idle_aged, not waiting_input: the harness said the turn is
+		// over, which is the same fact waitingInputGrace otherwise has to infer from
+		// silence. ReasonWaitingInput stays reserved for a real prompt — the
+		// companion's live roster keys "the agent is asking you something" on it.
+		{"parked", statusRec(domain.ActivityParked, false), nil, false, domain.StatusNeedsInput, domain.ReasonIdleAged, ""},
 		{"idle-fresh-signalled", idleAgedRec(waitingInputGrace / 2), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNeedsInput},
 		{"idle-fresh-never-signalled", silentRec(10 * time.Second), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNoSignal},
 		{"no-signal", silentRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal, domain.ReasonNoSignal, ""},

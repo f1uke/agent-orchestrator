@@ -7110,6 +7110,7 @@ components:
           - active
           - idle
           - waiting_input
+          - parked
           - blocked
           - exited
           type: string
@@ -7186,6 +7187,7 @@ components:
           - active
           - idle
           - waiting_input
+          - parked
           - exited
           type: string
       required:

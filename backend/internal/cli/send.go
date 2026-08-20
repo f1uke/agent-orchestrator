@@ -79,7 +79,7 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	}
 	if res.Queued {
 		_, err := fmt.Fprintf(c.deps.Out,
-			"queued for %s: the session is asleep, so the message is held and will be delivered once its agent is listening again (%d waiting)\n",
+			"queued for %s: the agent is not listening right now, so the message is held and will be delivered once it is (%d waiting)\n",
 			session, res.PendingMessages)
 		return err
 	}

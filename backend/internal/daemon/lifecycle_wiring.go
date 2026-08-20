@@ -263,10 +263,19 @@ func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message
 		// happens - the exact confusion the queue exists to remove.
 		return ports.SendOutcome{}, fmt.Errorf("session %s: %w", id, sessionmanager.ErrTerminated)
 	}
-	if rec.IsSuspended && m.queue != nil {
-		// Suspended: the record and the worktree are intact but the tmux was reaped,
-		// so the stored handle points at a pane that no longer exists. Hold the
-		// message instead of typing it at nothing.
+	if !rec.CanReceiveMessage() && m.queue != nil {
+		// The session cannot take the message right now, for one of two reasons:
+		//
+		//   - SUSPENDED: the record and the worktree are intact but the tmux was
+		//     reaped, so the stored handle points at a pane that no longer exists.
+		//     Typing at it would fail and lose the message.
+		//   - AT A PROMPT (waiting_input): the pane exists, but a permission dialog
+		//     owns the keyboard. Text typed now is consumed by the dialog and the
+		//     trailing Enter can ANSWER it — a nudge that silently approves a tool
+		//     call is far worse than a late one.
+		//
+		// Either way the message is HELD, not dropped, and the queue delivers it
+		// once the agent is genuinely listening again.
 		stored, pending, qErr := m.queue.Enqueue(ctx, id, message)
 		if qErr != nil {
 			return ports.SendOutcome{}, qErr

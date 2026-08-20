@@ -71,8 +71,8 @@ func DeriveActivityState(event string, payload []byte) (domain.ActivityState, bo
 		// End of a turn: the agent is idle but alive (not exited). This is how a
 		// recap/auto-summary turn ends too — informational, not a request for
 		// input. A sustained idle is promoted to needs-input by the status deriver
-		// (waitingInputGrace), which correctly keeps its hands off an open PR; a
-		// later Notification(idle_prompt) carries no new signal (see below).
+		// (waitingInputGrace); a later Notification(idle_prompt) says the same thing
+		// outright and reports parked (see below).
 		return domain.ActivityIdle, true
 	case "notification":
 		return notificationState(payload)
@@ -83,20 +83,27 @@ func DeriveActivityState(event string, payload []byte) (domain.ActivityState, bo
 	}
 }
 
-// notificationState reports waiting_input only for a permission_prompt: a
-// pending tool-permission decision genuinely blocks the agent on the human, and
+// notificationState splits Claude Code's Notification into the two states it
+// actually carries.
+//
+// permission_prompt is waiting_input: a pending tool-permission decision
+// genuinely blocks the agent on the human, a dialog is open in the pane, and
 // waiting_input is sticky so it survives until answered.
 //
-// idle_prompt is deliberately NOT treated as waiting_input. It only means the
-// agent has been sitting idle at the prompt — the same state a Stop hook already
-// recorded, and exactly what a recap/auto-summary turn leaves behind. Promoting
-// it to the sticky waiting_input made an idle, finished session look like it was
-// "requesting input": it short-circuited the status deriver ahead of the open-PR
-// check and demoted a ready-to-merge PR back to needs_input on every recap.
-// Leaving it as plain idle lets the deriver's sustained-idle promotion
-// (waitingInputGrace) surface "your turn" for sessions with no PR, while an open
-// PR keeps its pipeline status. Other types (auth_success, elicitation_*) carry
-// no activity meaning, as does a malformed payload.
+// idle_prompt is parked. It means the agent has settled at an ordinary, empty
+// prompt with the turn over — nothing is open and nothing is blocked. It used to
+// map to waiting_input, which was wrong twice over: it made a finished session
+// look like it was "requesting input" (short-circuiting the status deriver ahead
+// of the open-PR check, demoting a ready-to-merge PR back to needs_input on every
+// recap), and it put the session behind the "do not type at this pane" bar that
+// waiting_input carries, so CI/review/conflict nudges were dropped for a session
+// that was perfectly able to receive them. It was then mapped to nothing at all,
+// which fixed the status regression by throwing the signal away. parked keeps the
+// signal AND keeps it out of waiting_input's way: the deriver reads it as the
+// sustained idle it is, and nudges flow.
+//
+// Other types (auth_success, elicitation_*) carry no activity meaning, as does a
+// malformed payload.
 func notificationState(payload []byte) (domain.ActivityState, bool) {
 	var p struct {
 		NotificationType string `json:"notification_type"`
@@ -105,6 +112,8 @@ func notificationState(payload []byte) (domain.ActivityState, bool) {
 	switch p.NotificationType {
 	case "permission_prompt":
 		return domain.ActivityWaitingInput, true
+	case "idle_prompt":
+		return domain.ActivityParked, true
 	default:
 		return "", false
 	}

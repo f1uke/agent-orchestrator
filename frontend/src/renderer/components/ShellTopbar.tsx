@@ -20,6 +20,9 @@ const TOPBAR_ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: 
 	active: { label: "Working", tone: "var(--orange)", breathe: true },
 	idle: { label: "Idle", tone: "var(--fg-muted)", breathe: false },
 	waiting_input: { label: "Input Needed", tone: "var(--amber)", breathe: false },
+	// Parked is a finished turn, not a question: it reads like idle, not like the
+	// amber "the agent is asking you something".
+	parked: { label: "Your Turn", tone: "var(--fg-muted)", breathe: false },
 	exited: { label: "Exited", tone: "var(--fg-muted)", breathe: false },
 	unknown: { label: "Unknown", tone: "var(--fg-muted)", breathe: false },
 };

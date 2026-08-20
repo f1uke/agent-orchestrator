@@ -35,7 +35,13 @@ flowchart LR
 
 The only persistent session state is:
 
-- `activity_state` — What the agent last reported (`active`, `idle`, `waiting_input`, `exited`)
+- `activity_state` — What the agent last reported (`active`, `idle`, `waiting_input`,
+  `parked`, `exited`). `waiting_input` and `parked` are NOT interchangeable:
+  `waiting_input` means a permission prompt is open in the pane and the agent is
+  blocked on the human, so nothing may be typed at it (a message would be eaten by
+  the dialog and its trailing Enter could answer it); `parked` means the turn ended
+  and the agent is sitting at an ordinary prompt, listening. Messages for a session
+  that cannot receive one are HELD by the message queue, never dropped.
 - `is_terminated` — Whether the session should be treated as over
 - `termination_*` — How the session ended: `source` (`agent` — the harness reported its
   own exit; `ao` — a teardown AO initiated; `runtime_gone` — the reaper inferred it from a
@@ -457,7 +463,10 @@ flowchart TD
     PRState -->|open| PROpen[pr_open]
 
     CheckActive -->|Yes| Working[working]
-    CheckActive -->|No| CheckSignal{Signal capable<br/>&& no signal?}
+    CheckActive -->|No| CheckParked{activity_state<br/>== parked?}
+
+    CheckParked -->|Yes| ParkedNeedsInput[needs_input - idle_aged]
+    CheckParked -->|No| CheckSignal{Signal capable<br/>&& no signal?}
 
     CheckSignal -->|Yes| NoSignal[no_signal]
     CheckSignal -->|No| Idle[idle]
@@ -535,13 +544,16 @@ stateDiagram-v2
     Active --> Idle: activity_state = idle
     Active --> Working: activity_state = active
     Active --> Waiting: activity_state = waiting_input
+    Active --> Parked: activity_state = parked
     Active --> Exited: activity_state = exited
     Working --> Active: work completes
     Waiting --> Active: user responds
+    Parked --> Active: new work arrives
     Idle --> Active: agent starts work
     Exited --> Terminated: process exit
     Active --> Terminated: Kill()
     Waiting --> Terminated: Kill()
+    Parked --> Terminated: Kill()
     Idle --> Terminated: Kill()
     Terminated --> [*]
 
