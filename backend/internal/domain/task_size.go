@@ -38,3 +38,16 @@ func (s TaskSize) WithDefault() TaskSize {
 	}
 	return TaskSizeStandard
 }
+
+// WantsCrew reports whether a task of this size is worked by a CREW (dev + qa)
+// rather than by dev alone.
+//
+// It is the ONE place the crew shape is decided, and it is decided at spawn from
+// a tag a human already had to choose. `standard` and `deep` get a qa member;
+// `mechanical` - a rename, a copy tweak, a config bump - does not, because below
+// roughly 70 turns every crew shape costs more than a single worker (design §3).
+// An unset size resolves to standard through WithDefault, so a spawn that says
+// nothing gets the crew: the tag is what OPTS OUT of it.
+func (s TaskSize) WantsCrew() bool {
+	return s.WithDefault() != TaskSizeMechanical
+}

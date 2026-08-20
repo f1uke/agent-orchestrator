@@ -572,6 +572,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/crew/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Give this task's one awake slot to this crew member, standing the current holder down */
+        post: operations["wakeCrewMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/diff-context": {
         parameters: {
             query?: never;
@@ -1848,6 +1865,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             createdBy?: string;
+            crew?: components["schemas"]["SessionCrew"];
             displayName?: string;
             harness?: string;
             id: string;
@@ -1879,6 +1897,8 @@ export interface components {
             targetBranch?: string;
             /** @enum {string} */
             targetSource?: "pr" | "session_pr_target" | "session_base" | "project";
+            /** @enum {string} */
+            taskSize?: "mechanical" | "standard" | "deep";
             terminalHandleId?: string;
             termination?: components["schemas"]["SessionTermination"];
             tokenUsage?: components["schemas"]["SessionTokenUsage"];
@@ -2470,6 +2490,11 @@ export interface components {
             /** Format: date-time */
             queuedAt?: null | string;
             sessionId: string;
+        };
+        SessionCrew: {
+            id: string;
+            /** @enum {string} */
+            role: "dev" | "qa";
         };
         SessionEndPayload: {
             /** @description The harness's own end reason, e.g. prompt_input_exit. Empty when the harness reports none. */
@@ -5042,6 +5067,65 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    wakeCrewMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeSessionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

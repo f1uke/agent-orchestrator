@@ -69,6 +69,9 @@ type SessionService interface {
 	// Wake resumes a suspended session in place or resets a live session's
 	// idle-close countdown; the UI calls it when the user opens/selects a session.
 	Wake(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	// WakeCrewMember hands the task's one awake slot to this member, standing the
+	// current holder down first.
+	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	Delete(ctx context.Context, id domain.SessionID, force bool) error
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (sessionsvc.RollbackOutcome, error)
@@ -149,6 +152,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/restore", c.restore)
 	r.Post("/sessions/{sessionId}/restart", c.restart)
 	r.Post("/sessions/{sessionId}/wake", c.wake)
+	r.Post("/sessions/{sessionId}/crew/wake", c.crewWake)
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
@@ -765,6 +769,28 @@ func (c *SessionsController) wake(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, WakeSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
 }
 
+// crewWake gives this task's one awake slot to the named member: whoever holds
+// it is stood down (suspended, tmux reaped) and this member is resumed in its
+// place. It is how a human - or the orchestrator, via `ao crew wake` - says
+// "qa's turn now"; AO deliberately makes no automatic decision about when that
+// should happen.
+//
+// It is a different verb from /wake on purpose. /wake is "I am looking at this
+// session" and must never disturb anything else; this one CHANGES which agent is
+// running, so it is asked for explicitly.
+func (c *SessionsController) crewWake(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/wake")
+		return
+	}
+	sess, err := c.Svc.WakeCrewMember(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, WakeSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
+}
+
 // rollback undoes a partially-completed spawn: if the session row is still in
 // seed state (no workspace, no runtime handle yet), the row is deleted
 // outright. If anything observable has landed it falls back to Kill so the
@@ -1197,7 +1223,20 @@ func sessionView(s domain.Session) SessionView {
 	if s.IsTodo {
 		prompt = s.Metadata.Prompt
 	}
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s)}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize}
+}
+
+// sessionCrew builds the curated crew wire object, or nil for a SOLO session.
+//
+// nil rather than an empty object on purpose: absence is what "this task is one
+// agent" looks like, and it is the reading every session on an ordinary board has
+// today. An empty {id:"",role:""} would say "there is a crew and we do not know
+// which member this is", which is a different and false claim.
+func sessionCrew(s domain.Session) *SessionCrew {
+	if !s.InCrew() {
+		return nil
+	}
+	return &SessionCrew{ID: s.CrewID, Role: s.CrewRole}
 }
 
 // sessionTermination builds the curated ending wire object. It returns nil (so

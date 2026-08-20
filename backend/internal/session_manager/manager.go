@@ -431,8 +431,14 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// Materialize the freshly-seeded row: a hard failure deletes the seed
 	// outright (keepTodo=false) so it never lingers as a terminated orphan.
 	out, err := m.materialize(ctx, project, cfg, rec.ID, prompt, systemPrompt, false)
-	if err != nil || cfg.CrewOf == "" {
+	if err != nil {
 		return out, err
+	}
+	if cfg.CrewOf == "" {
+		// An ordinary spawn: give the new task the crew its --task-size asks for.
+		// `mechanical` (and anything that is not a plain single-repo worker) comes
+		// back untouched, which is what keeps a solo task solo.
+		return m.formCrew(ctx, project, out), nil
 	}
 	// The member exists and is running in dev's worktree: only now is there a
 	// crew to record. Writing it earlier would leave dev flagged as a crew owner
@@ -657,7 +663,14 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: prompt: %w", id, err)
 	}
-	return m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true)
+	out, err := m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true)
+	if err != nil {
+		return out, err
+	}
+	// A TODO carries its --task-size through to Start (it is replayed into cfg
+	// above), so a standard task staged as a TODO forms its crew when it starts,
+	// exactly as it would have at spawn.
+	return m.formCrew(ctx, project, out), nil
 }
 
 // UpdateTodoSpec persists edits to a prepared TODO's spec (name, agent, base/new
@@ -1394,7 +1407,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	}
 	// The system prompt is derived, not persisted: recompute it so a restored
 	// session keeps its standing instructions across the relaunch.
-	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.TaskSize)
+	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.TaskSize, rec.CrewRole)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
 	}
@@ -2702,7 +2715,7 @@ func buildPrompt(cfg ports.SpawnConfig) string {
 // empty input box rather than receiving an auto-generated kickoff turn.
 func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig) (prompt, systemPrompt string, err error) {
 	prompt = buildPrompt(cfg)
-	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID, cfg.TaskSize)
+	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID, cfg.TaskSize, cfg.CrewRole)
 	if err != nil {
 		return "", "", err
 	}
@@ -2713,7 +2726,7 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig) (p
 // given kind from current store state. Restore recomputes them through here
 // rather than persisting them, so a restored worker points at the orchestrator
 // that is active now, not the one from its original spawn.
-func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, taskSize domain.TaskSize) (string, error) {
+func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, taskSize domain.TaskSize, crewRole domain.CrewRole) (string, error) {
 	// Resolve the project's convention so the orchestrator/worker prompts carry the
 	// branch prefix and base branch. A missing project yields a zero config, which
 	// resolves to no convention (prompts unchanged from the pre-convention default).
@@ -2738,6 +2751,18 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			orchestratorGitConventionPrompt(conv, cfg.DefaultBranch) +
 			orchestratorSpawnConfirmPrompt(m.confirmBeforeSpawn(), conv, cfg.DefaultBranch)
 	case domain.KindWorker:
+		// A crew's qa is a worker SESSION doing a different job, so it assembles
+		// from its own base and is deliberately never handed the orchestrator
+		// report block: "dev reports" is then structural rather than a request.
+		// A solo worker - every session an ordinary spawn creates - takes the
+		// second branch, byte-for-byte unchanged.
+		if crewRole == domain.CrewRoleQA {
+			base = m.effectiveBase(prompts.KindQA, projectID) +
+				prompts.Section(adds.Worker) +
+				prompts.CoordinationFloor(prompts.KindQA) +
+				workerGitConventionPrompt(conv, cfg.DefaultBranch)
+			break
+		}
 		orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)
 		if err != nil {
 			return "", err
@@ -2763,17 +2788,32 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	// placed here (not in the editable base) so it survives a cleared/overridden
 	// base, same as the reference convention.
 	if kind == domain.KindWorker {
-		base += prompts.SmokeChecklistProtocol()
+		// The smoke checklist is the CHECKLIST's owner's block. On a crew that is
+		// qa - it authors, runs and retires the cases - so dev is not handed a
+		// protocol for a list it does not keep. A SOLO worker keeps it, because
+		// there is nobody else to keep it.
+		if crewRole != domain.CrewRoleDev {
+			base += prompts.SmokeChecklistProtocol()
+		}
 		// A project that targets iOS has a device its workers can look at. Only
-		// they are told: the orchestrator dispatches rather than drives.
+		// they are told: the orchestrator dispatches rather than drives. On a crew
+		// the device is qa's instrument, so dev gets the short "hand it to qa"
+		// form instead of the driving catalog.
 		if cfg.HasIOSSimulator {
-			base += prompts.SimulatorGuidance()
+			if crewRole == domain.CrewRoleDev {
+				base += prompts.SimulatorGuidanceCrewDev()
+			} else {
+				base += prompts.SimulatorGuidance()
+			}
 		}
 		// The task-size directive right-sizes ceremony: a mechanical worker is
 		// authorized to skip the process skills. Only mechanical renders anything;
 		// standard/deep add nothing. Injected here (not the editable base) so it
 		// survives a cleared/overridden base, like the smoke + reference blocks.
-		base += prompts.TaskSizeDirective(string(taskSize.WithDefault()))
+		// A mechanical task never has a qa, so this is dev's/solo's alone.
+		if crewRole != domain.CrewRoleQA {
+			base += prompts.TaskSizeDirective(string(taskSize.WithDefault()))
+		}
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {

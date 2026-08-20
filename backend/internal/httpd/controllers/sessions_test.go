@@ -25,6 +25,7 @@ import (
 )
 
 type fakeSessionService struct {
+	crewWoken             []domain.SessionID
 	sendOutcome           ports.SendOutcome
 	sessions              map[domain.SessionID]domain.Session
 	previewDisabled       bool
@@ -257,6 +258,16 @@ func (f *fakeSessionService) Restart(_ context.Context, id domain.SessionID) (do
 }
 
 func (f *fakeSessionService) Wake(_ context.Context, id domain.SessionID) (domain.Session, error) {
+	s := f.sessions[id]
+	s.IsSuspended = false
+	f.sessions[id] = s
+	return s, nil
+}
+
+// crewWoken records the id the crew-wake route asked for, so a test can assert
+// the controller reached the handover rather than the ordinary wake.
+func (f *fakeSessionService) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.Session, error) {
+	f.crewWoken = append(f.crewWoken, id)
 	s := f.sessions[id]
 	s.IsSuspended = false
 	f.sessions[id] = s

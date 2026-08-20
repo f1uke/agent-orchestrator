@@ -535,13 +535,50 @@ func TestWorkerDefault_ConfirmBeforeReviewReply(t *testing.T) {
 }
 
 func TestKnownKindsAndValid(t *testing.T) {
-	if len(KnownKinds()) != 3 {
-		t.Fatalf("want 3 kinds, got %d", len(KnownKinds()))
+	want := []Kind{KindOrchestrator, KindWorker, KindQA, KindReviewer}
+	got := KnownKinds()
+	if len(got) != len(want) {
+		t.Fatalf("want %d kinds, got %d: %v", len(want), len(got), got)
+	}
+	for i, k := range want {
+		if got[i] != k {
+			t.Fatalf("kind %d = %q, want %q (KnownKinds order is the order the editors render in)", i, got[i], k)
+		}
+		if !k.Valid() {
+			t.Fatalf("%q must be valid", k)
+		}
+		if DefaultBase(k) == "" {
+			t.Fatalf("%q has no built-in default, so Reset-to-default would blank it", k)
+		}
 	}
 	if Kind("nope").Valid() {
 		t.Fatal("unknown kind must be invalid")
 	}
-	if !KindReviewer.Valid() {
-		t.Fatal("reviewer must be valid")
+}
+
+// TestQADefaultIsQAsJobAndNotDevs pins the two halves of the qa base that make it
+// a different agent rather than a second dev: what it owns (triage, running,
+// recording, the four human-only shapes) and what it must not do (implement, open
+// the PR, report to the orchestrator).
+func TestQADefaultIsQAsJobAndNotDevs(t *testing.T) {
+	base := DefaultBase(KindQA)
+	for _, want := range []string{
+		"qa",
+		"ao smoke record",
+		"ao smoke retire",
+		"paint",
+		"focus",
+		"timing",
+		"feel",
+		"do not open or update the pull request",
+		"test:",
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("qa default missing %q:\n%s", want, base)
+		}
+	}
+	// It is qa's own base, not a copy of dev's.
+	if strings.Contains(base, "Most sessions open one pull request") {
+		t.Fatal("the qa base carries dev's pull-request instructions")
 	}
 }

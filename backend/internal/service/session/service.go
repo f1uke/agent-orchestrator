@@ -82,6 +82,10 @@ type commander interface {
 	// Wake is the user-open hook: resume a suspended session in place, or reset a
 	// live session's idle-close countdown; terminated sessions are left untouched.
 	Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// WakeCrewMember gives the crew slot to one member of a task, standing the
+	// current holder down first. It is the human's (and the orchestrator's) way of
+	// saying "qa's turn now" while automatic handover is deliberately not built.
+	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	// Teardown is Kill reporting the full outcome, including WHY a workspace was
 	// preserved. The auto-reclaim loop needs that distinction; Kill's bool loses it.
@@ -490,6 +494,21 @@ func (s *Service) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 // returned unchanged — reviving one is Restore's job, not an idle-timer reset.
 func (s *Service) Wake(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	rec, err := s.manager.Wake(ctx, id)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// WakeCrewMember hands the task's one awake slot to `id`: whoever holds it is
+// stood down (suspended, tmux reaped) and `id` is resumed in its place. It goes
+// through the same exclusion every other wake route does, so it can only ever
+// leave one member of a crew running.
+//
+// A member that already holds the slot is returned unchanged - "qa's turn" when
+// it is already qa's turn is a no-op, not an error.
+func (s *Service) WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error) {
+	rec, err := s.manager.WakeCrewMember(ctx, id)
 	if err != nil {
 		return domain.Session{}, toAPIError(err)
 	}
@@ -1003,6 +1022,12 @@ func toAPIError(err error) error {
 		return apierr.Invalid("AGENT_BINARY_NOT_FOUND", err.Error(), nil)
 	case errors.Is(err, ports.ErrRuntimePrerequisite):
 		return apierr.Invalid("RUNTIME_PREREQUISITE_MISSING", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrCrewBusy):
+		// "Not right now", not "the daemon is broken": the other member of this
+		// task is running, so the caller should stand it down and ask again.
+		return apierr.Conflict("CREW_SLOT_BUSY", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrInvalidCrew):
+		return apierr.Invalid("INVALID_CREW", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrNotTodo):
 		return apierr.Conflict("SESSION_NOT_TODO", "Session is not a prepared TODO (already started or never was one)", nil)
 	case errors.Is(err, sessionmanager.ErrNotTerminal):

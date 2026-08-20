@@ -385,6 +385,8 @@ type fakeCommander struct {
 	spawnRecord     domain.SessionRecord
 	restartRecord   domain.SessionRecord
 	woken           []domain.SessionID
+	crewWoken       []domain.SessionID
+	crewWakeErr     error
 	wakeRecord      domain.SessionRecord
 	spawned         bool
 	killsAtSpawn    int
@@ -432,6 +434,11 @@ func (f *fakeCommander) Restore(context.Context, domain.SessionID) (domain.Sessi
 func (f *fakeCommander) Wake(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	f.woken = append(f.woken, id)
 	return f.wakeRecord, nil
+}
+
+func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	f.crewWoken = append(f.crewWoken, id)
+	return f.wakeRecord, f.crewWakeErr
 }
 func (f *fakeCommander) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 	res, err := f.Teardown(ctx, id, domain.TerminationCauseKill)
@@ -1609,5 +1616,20 @@ func TestReclaim_RefusesWhenTheRecordCannotBeRead(t *testing.T) {
 	}
 	if len(fc.killed) != 0 {
 		t.Fatalf("teardown ran without knowing the session was finished: %v", fc.killed)
+	}
+}
+
+// TestWakeCrewMember_BusyIsAConflictNotAFailure: "the other member is running"
+// is a state the caller can act on (stand it down, ask again), not a broken
+// daemon. It must surface as a 409 with a named code, the same way the review
+// engine's tree-busy refusal does.
+func TestWakeCrewMember_BusyIsAConflictNotAFailure(t *testing.T) {
+	fc := &fakeCommander{crewWakeErr: fmt.Errorf("wrap: %w", sessionmanager.ErrCrewBusy)}
+	svc := &Service{store: newFakeStore(), manager: fc}
+
+	_, err := svc.WakeCrewMember(context.Background(), "mer-2")
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "CREW_SLOT_BUSY" {
+		t.Fatalf("err = %v, want apierr Conflict CREW_SLOT_BUSY", err)
 	}
 }

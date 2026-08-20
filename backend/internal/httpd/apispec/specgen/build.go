@@ -182,6 +182,7 @@ var schemaNames = map[string]string{
 	"ControllersSessionPRFacts":                   "SessionPRFacts",
 	"ControllersSessionTokenUsage":                "SessionTokenUsage",
 	"ControllersSessionTermination":               "SessionTermination",
+	"ControllersSessionCrew":                      "SessionCrew",
 	"ControllersSessionEndPayload":                "SessionEndPayload",
 	"ControllersSessionPRSummary":                 "SessionPRSummary",
 	"ControllersSessionPRCISummary":               "SessionPRCISummary",
@@ -1489,6 +1490,18 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.RestartSessionResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/wake", id: "wakeCrewMember", tag: "sessions",
+			summary:    "Give this task's one awake slot to this crew member, standing the current holder down",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WakeSessionResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
