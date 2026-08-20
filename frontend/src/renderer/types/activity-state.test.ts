@@ -56,7 +56,11 @@ describe("attentionZone is unaffected by the activity split", () => {
 	});
 
 	it("leaves a parked session with an open PR in its PR lane", () => {
-		const s = boardSession({ status: "mergeable", statusReason: "pr_pipeline", activity: { state: "parked", lastActivityAt: "" } });
+		const s = boardSession({
+			status: "mergeable",
+			statusReason: "pr_pipeline",
+			activity: { state: "parked", lastActivityAt: "" },
+		});
 		expect(attentionZone(s)).toBe("merge");
 	});
 });
