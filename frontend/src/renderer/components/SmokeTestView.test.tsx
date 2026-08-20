@@ -38,10 +38,17 @@ function check(overrides: Record<string, unknown>) {
 }
 
 let checks: ReturnType<typeof check>[];
+// The tab reads the session's PR summaries too, for the staleness rule: a
+// machine result is stale when the commit it ran against is no longer head.
+let prs: { number: number; headSha: string }[];
 
 beforeEach(() => {
 	checks = [check({})];
-	getMock.mockReset().mockImplementation(async () => ({ data: { worker: "fix gl note", checks }, error: undefined }));
+	prs = [];
+	getMock.mockReset().mockImplementation(async (path: string) => {
+		if (path === "/api/v1/sessions/{sessionId}/pr") return { data: { prs }, error: undefined };
+		return { data: { worker: "fix gl note", checks }, error: undefined };
+	});
 	postMock
 		.mockReset()
 		.mockResolvedValue({ data: { delivered: true, target: "worker", summary: "1 pass" }, error: undefined });
@@ -509,6 +516,173 @@ describe("SmokeTestView", () => {
 			fireEvent.click(removeBtn);
 			await waitFor(() => expect(deleteMock).toHaveBeenCalled());
 			expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		});
+	});
+	// -----------------------------------------------------------------------
+	// The machine's lane. jsdom cannot see paint, so these pin only what is
+	// logic: which state the tab believes it is in, and - the load-bearing one -
+	// that no machine result is ever rendered as a case a person has finished.
+	describe("a machine result beside the human's", () => {
+		const HEAD = "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118";
+		const OLD = "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5";
+		const RAN = "2026-07-11T09:00:00Z";
+
+		it("shows nothing in the machine's slot when it has not run", async () => {
+			renderView();
+			expect(await screen.findByText("A fresh MR shows up")).toBeInTheDocument();
+			expect(screen.queryByText(/^qa · /)).not.toBeInTheDocument();
+			expect(screen.queryByText("WHAT QA SAW")).not.toBeInTheDocument();
+		});
+
+		it("renders a run that declined to judge distinctly from one that never ran", async () => {
+			// agentRanAt set with an empty agentVerdict is a real, deliberate state:
+			// qa captured the screen and left the judgement to a person, because
+			// paint / focus / timing / feel are not machine-judgeable. Reading it as
+			// "not run yet" sends the person to fix the wrong thing.
+			checks = [check({ agentRanAt: RAN, agentSha: HEAD })];
+			renderView();
+			expect(await screen.findByText("qa · evidence only")).toBeInTheDocument();
+			expect(screen.getByText(/left the judgement to you/)).toBeInTheDocument();
+			expect(screen.getByText(/no agent verdict coming/)).toBeInTheDocument();
+			// And it is never phrased as an absence.
+			expect(screen.queryByText(/qa · ran/)).not.toBeInTheDocument();
+		});
+
+		it("never renders a machine pass as a case that is done", async () => {
+			checks = [check({ agentRanAt: RAN, agentVerdict: "pass", agentSha: HEAD })];
+			renderView();
+			// The case's own status stays "To check": the human's verdict is the
+			// only thing that can retire a case from the play list.
+			expect(await screen.findByText("To check")).toBeInTheDocument();
+			expect(screen.getByText("qa · ran")).toBeInTheDocument();
+			// The completion count does not move.
+			expect(screen.getByText(/of 1 verified/)).toBeInTheDocument();
+			expect(screen.getByText("0")).toBeInTheDocument();
+			expect(screen.getByText("1 to check")).toBeInTheDocument();
+			// And the tab says out loud what the machine pass is not.
+			expect(screen.getByText(/not a check off your list/)).toBeInTheDocument();
+			// The report bar (which only appears once a person has decided
+			// something) stays away.
+			expect(screen.queryByRole("button", { name: /Report results to worker/ })).not.toBeInTheDocument();
+			// The play controls are exactly where they were.
+			expect(screen.getByRole("button", { name: /Works — Pass/ })).toBeInTheDocument();
+		});
+
+		it("keeps the machine's note and evidence in their own lane, not the human's", async () => {
+			checks = [
+				check({
+					agentRanAt: RAN,
+					agentVerdict: "fail",
+					agentSha: HEAD,
+					agentNote: "Save went through with an empty name",
+					agentEvidence: [
+						{
+							id: "ag1",
+							checkId: "c1",
+							sessionId: "s1",
+							kind: "image",
+							filename: "agent-shot.png",
+							mime: "image/png",
+							sizeBytes: 3,
+							createdAt: RAN,
+							source: "agent",
+						},
+					],
+				}),
+			];
+			renderView();
+			expect(await screen.findByText("qa · failed")).toBeInTheDocument();
+			expect(screen.getByText("Save went through with an empty name")).toBeInTheDocument();
+			// Labelled as qa's, and read-only: no × on a machine artefact.
+			expect(screen.getByText(/CAPTURED BY QA/)).toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: "Remove agent-shot.png" })).not.toBeInTheDocument();
+			// The human's own dropzone is untouched and still empty.
+			expect(screen.getByText(/YOUR EVIDENCE/)).toBeInTheDocument();
+			expect(screen.getByLabelText("Drop or paste evidence")).toBeInTheDocument();
+		});
+
+		it("marks a run stale when the commit it ran against is no longer head", async () => {
+			checks = [check({ prNum: 322, agentRanAt: RAN, agentVerdict: "pass", agentSha: OLD })];
+			prs = [{ number: 322, headSha: HEAD }];
+			renderView();
+			expect(await screen.findByText(/qa · ran · stale/)).toBeInTheDocument();
+			expect(screen.getByText("Stale.")).toBeInTheDocument();
+			// The sha it ran against is shown twice (the run's header line and the
+			// stale note); head is shown once, beside it.
+			expect(screen.getAllByText(OLD.slice(0, 7)).length).toBeGreaterThan(0);
+			expect(screen.getByText(HEAD.slice(0, 7))).toBeInTheDocument();
+		});
+
+		it("does not mark it stale when the run is at head, or when head is unknown", async () => {
+			checks = [check({ prNum: 322, agentRanAt: RAN, agentVerdict: "pass", agentSha: HEAD })];
+			prs = [{ number: 322, headSha: HEAD }];
+			renderView();
+			expect(await screen.findByText("qa · ran")).toBeInTheDocument();
+			expect(screen.queryByText("Stale.")).not.toBeInTheDocument();
+		});
+
+		it("leaves the human's flow exactly as it was when a machine result is present", async () => {
+			checks = [check({ agentRanAt: RAN, agentVerdict: "fail", agentSha: HEAD, agentNote: "step 2 errored" })];
+			renderView();
+			// Same two clicks as a case with no machine result: type the note, press Pass.
+			const note = await screen.findByLabelText(/Note for A fresh MR shows up/);
+			await userEvent.type(note, "looks fine to me");
+			await userEvent.click(screen.getByRole("button", { name: /Works — Pass/ }));
+			const call = postMock.mock.calls.find(
+				([p]) => p === "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict",
+			);
+			expect(call![1].body).toEqual({ verdict: "pass", note: "looks fine to me" });
+		});
+	});
+
+	describe("retired cases", () => {
+		const retired = (over: Record<string, unknown> = {}) =>
+			check({
+				id: "gone",
+				seq: 2,
+				name: "The legacy toggle still writes the old key",
+				retiredAt: "2026-07-10T10:00:00Z",
+				retiredReason: "The legacy key was deleted; a Go test covers the migration.",
+				...over,
+			});
+
+		it("keeps a retired case out of the playable list and out of the counts", async () => {
+			checks = [check({}), retired()];
+			renderView();
+			await screen.findByText("A fresh MR shows up");
+			// One case to play, not two.
+			expect(screen.getByText(/of 1 verified/)).toBeInTheDocument();
+			// The retired one is not rendered as a card: no play controls for it.
+			expect(screen.queryByLabelText(/Note for The legacy toggle/)).not.toBeInTheDocument();
+			expect(screen.queryByText("The legacy toggle still writes the old key")).not.toBeInTheDocument();
+		});
+
+		it("surfaces it, with its reason, in a collapsed record at the foot of the list", async () => {
+			// Retiring is how the checklist shrinks. It has to shrink AUDITABLY:
+			// "1 retired, now covered by a test" rather than a case vanishing.
+			checks = [check({}), retired({ verdict: "pass", decidedAt: "2026-07-09T10:00:00Z" })];
+			renderView();
+			const disclosure = await screen.findByRole("button", { name: /1 retired from this checklist/ });
+			expect(disclosure).toHaveAttribute("aria-expanded", "false");
+			await userEvent.click(disclosure);
+			expect(await screen.findByText("The legacy toggle still writes the old key")).toBeInTheDocument();
+			expect(screen.getByText(/The legacy key was deleted/)).toBeInTheDocument();
+			// Frozen: the verdict a person recorded before it retired is kept and
+			// shown, and there is nothing here to play or change.
+			expect(screen.getByText(/your verdict: passed/)).toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: "Change" })).not.toBeInTheDocument();
+			// No play surface for it: no note field, no verdict buttons of its own
+			// (the live case above still has its pair, untouched).
+			expect(screen.queryByLabelText(/Note for The legacy toggle/)).not.toBeInTheDocument();
+			expect(screen.getAllByRole("button", { name: /Works — Pass/ })).toHaveLength(1);
+		});
+
+		it("does not claim there is no checklist when every case has retired", async () => {
+			checks = [retired()];
+			renderView();
+			expect(await screen.findByText("Nothing left to play")).toBeInTheDocument();
+			expect(screen.queryByText("No smoke checks yet")).not.toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /1 retired from this checklist/ })).toBeInTheDocument();
 		});
 	});
 });

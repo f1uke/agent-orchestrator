@@ -1,21 +1,31 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, FolderOpen } from "lucide-react";
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { CircleSlash, Contrast, ExternalLink, Eye, FolderOpen, OctagonX } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage, getApiBaseUrl } from "../lib/api-client";
 import { aoBridge } from "../lib/bridge";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { sessionSmokeQueryKey, useSessionSmokeChecks, type SmokeChecksResponse } from "../hooks/useSessionSmokeChecks";
+import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
 import {
 	ACCENT,
 	MONO,
 	PALETTE as P,
 	accentMix,
+	activeChecks,
+	agentMeta,
+	agentState,
 	checkTag,
+	headShaFor,
+	isAgentStale,
 	progressFor,
 	progressSegments,
 	relativeTime,
+	retiredChecks,
+	shortSha,
 	verdictMeta,
+	type AgentState,
+	type HeadRef,
 	type SmokeCheck,
 	type SmokeEvidence,
 	type SmokeProgress,
@@ -248,12 +258,20 @@ export function SmokeTestView({
 		onSettled: () => invalidate(),
 	});
 
+	// Head commits, for the staleness rule below. Same query key as the Summary
+	// tab's readiness strip, so this is a cache read rather than a second request.
+	const scmQuery = useSessionScmSummary(sessionId);
+	const heads: HeadRef[] = (scmQuery.data ?? []).map((pr) => ({ number: pr.number, headSha: pr.headSha }));
+
 	const data = query.data;
 	// Retired cases are part of the record but not part of what the user is asked
 	// to play, so they stay out of the play list (and out of progressFor's
-	// counts). Surfacing them - "retired 3, now covered by tests" - belongs with
-	// the rest of the Tests-tab rework.
-	const checks = (data?.checks ?? []).filter((c) => !c.retiredAt);
+	// counts). They are not hidden either - they surface, frozen and with their
+	// reason, in the "retired from this checklist" disclosure at the foot of the
+	// list, because "3 retired, now covered by tests" is the auditable form of a
+	// checklist shrinking and three cases silently vanishing is not.
+	const checks = activeChecks(data?.checks ?? []);
+	const retired = retiredChecks(data?.checks ?? []);
 	const progress = progressFor(checks);
 	const workerLabel = data?.worker || worker || "worker";
 
@@ -286,7 +304,9 @@ export function SmokeTestView({
 						{apiErrorMessage(query.error, "Unable to load smoke checks")}
 					</p>
 				)}
-				{!query.isLoading && !query.error && checks.length === 0 && <EmptyState />}
+				{!query.isLoading && !query.error && checks.length === 0 && (
+					<EmptyState allRetired={retired.length > 0} retired={retired.length} />
+				)}
 				{!query.isLoading &&
 					!query.error &&
 					checks.map((check) => (
@@ -294,6 +314,7 @@ export function SmokeTestView({
 							key={check.id}
 							sessionId={sessionId}
 							check={check}
+							heads={heads}
 							busy={setVerdict.isPending || resetCheck.isPending}
 							onDecide={(verdict, note) => decide(check, verdict, note)}
 							onChange={() => resetCheck.mutate(check.id)}
@@ -302,6 +323,13 @@ export function SmokeTestView({
 							onRevealEvidence={(evidenceId, mode) => revealEvidence(check.id, evidenceId, mode)}
 						/>
 					))}
+				{!query.isLoading && !query.error && retired.length > 0 && (
+					<RetiredSection
+						sessionId={sessionId}
+						checks={retired}
+						onRevealEvidence={(checkId, evidenceId, mode) => revealEvidence(checkId, evidenceId, mode)}
+					/>
+				)}
 			</div>
 
 			{progress.checked > 0 && (
@@ -397,6 +425,87 @@ function Header({ worker, progress }: { worker: string; progress: SmokeProgress 
 				{progress.skip > 0 && <CountChip color={P.muted2} text={`${progress.skip} skipped`} />}
 				{progress.pending > 0 && <CountChip color={P.segSkip} text={`${progress.pending} to check`} />}
 			</div>
+
+			<QaBanner progress={progress} />
+		</div>
+	);
+}
+
+/**
+ * What the machine did, said once at the top - and deliberately kept OUT of the
+ * progress bar and the counts row above it. Those two say how far a PERSON has
+ * got; folding a machine result into either is the exact mistake this tab must
+ * not make, because "2 of 4 verified" with nobody having touched the app is a
+ * lie that reads as progress.
+ *
+ * So the machine gets a sentence instead of a number, and the sentence always
+ * says what the result is not.
+ */
+function QaBanner({ progress }: { progress: SmokeProgress }) {
+	const lines: { icon: typeof Contrast; color: string; text: ReactNode }[] = [];
+	if (progress.agentFail > 0) {
+		lines.push({
+			icon: OctagonX,
+			color: P.segFail,
+			text: (
+				<>
+					<b style={{ fontWeight: 600 }}>
+						qa hit a failure on {progress.agentFail} case{progress.agentFail === 1 ? "" : "s"}
+					</b>{" "}
+					you haven&apos;t played. Read what it saw, then judge it yourself.
+				</>
+			),
+		});
+	}
+	if (progress.agentPass > 0) {
+		lines.push({
+			icon: Contrast,
+			color: P.qaFg,
+			text: (
+				<>
+					<b style={{ fontWeight: 600 }}>
+						qa ran {progress.agentPass} of the {progress.pending} still open
+					</b>{" "}
+					and the steps passed. That is not a check off your list; nobody has seen it behave yet.
+				</>
+			),
+		});
+	}
+	if (progress.agentCaptured > 0) {
+		lines.push({
+			icon: Eye,
+			color: P.qaFg,
+			text: (
+				<>
+					<b style={{ fontWeight: 600 }}>
+						qa captured the screen on {progress.agentCaptured} case{progress.agentCaptured === 1 ? "" : "s"}
+					</b>{" "}
+					it can&apos;t judge, so you can call {progress.agentCaptured === 1 ? "that one" : "those"} from the evidence
+					without driving the app yourself.
+				</>
+			),
+		});
+	}
+	if (lines.length === 0) return null;
+	return (
+		<div
+			style={{
+				marginTop: 10,
+				border: `1px solid ${P.qaBorder}`,
+				background: P.qaBg,
+				borderRadius: 8,
+				padding: "8px 10px",
+				display: "flex",
+				flexDirection: "column",
+				gap: 6,
+			}}
+		>
+			{lines.map(({ icon: Icon, color, text }, i) => (
+				<div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+					<Icon size={12} strokeWidth={2.2} color={color} aria-hidden="true" style={{ flex: "none", marginTop: 1 }} />
+					<span style={{ fontSize: 11.5, lineHeight: 1.45, color: P.qaFg }}>{text}</span>
+				</div>
+			))}
 		</div>
 	);
 }
@@ -413,6 +522,7 @@ function CountChip({ color, text }: { color: string; text: string }) {
 function CaseCard({
 	sessionId,
 	check,
+	heads,
 	busy,
 	onDecide,
 	onChange,
@@ -422,6 +532,7 @@ function CaseCard({
 }: {
 	sessionId: string;
 	check: SmokeCheck;
+	heads: HeadRef[];
 	busy: boolean;
 	onDecide: (verdict: "pass" | "fail" | "skip", note: string) => void;
 	onChange: () => void;
@@ -434,6 +545,12 @@ function CaseCard({
 	const meta = verdictMeta(check.verdict);
 	const decided = check.verdict !== "pending";
 	const hasEvidence = check.evidence.length > 0;
+	// The machine's lane, read alongside the human's - never in place of it. The
+	// leading glyph box below stays the HUMAN's verdict, so the one mark that
+	// reads as "this case is done" can only ever be earned by a person.
+	const qa = agentState(check);
+	const qaStale = isAgentStale(check, heads);
+	const qaShots = (check.agentEvidence ?? []).length;
 
 	return (
 		<div
@@ -469,11 +586,12 @@ function CaseCard({
 					{meta.icon}
 				</span>
 				<div style={{ flex: 1, minWidth: 0 }}>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+					<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 5 }}>
 						<span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: ".05em", color: P.muted }}>
 							{checkTag(check.seq)}
 						</span>
 						<StatusPill meta={meta} />
+						<QaChip state={qa} stale={qaStale} />
 					</div>
 					<div
 						style={{
@@ -486,8 +604,19 @@ function CaseCard({
 					>
 						{check.name}
 					</div>
-					<div style={{ marginTop: 6, fontSize: 10.5, color: hasEvidence ? P.evidenceOn : P.muted }}>
-						{hasEvidence ? "▣ evidence attached" : "□ no evidence yet"}
+					<div style={{ marginTop: 6, fontSize: 10.5 }}>
+						<span style={{ color: hasEvidence ? P.evidenceOn : P.muted }}>
+							{hasEvidence ? "▣ evidence attached" : "□ no evidence yet"}
+						</span>
+						{/* qa's screenshots are worth advertising here: on a case a machine
+						    cannot judge, they are what lets the person decide without
+						    re-driving the app. Named as qa's, never merged into "yours". */}
+						{qaShots > 0 && (
+							<span style={{ color: P.qaFg }}>
+								{" · "}
+								{qaShots} from qa
+							</span>
+						)}
 					</div>
 				</div>
 				<span aria-hidden="true" style={{ flex: "none", fontSize: 14, color: P.secondary, width: 14 }}>
@@ -500,6 +629,14 @@ function CaseCard({
 					<WhyBox check={check} />
 					{check.steps.length > 0 && <Steps steps={check.steps} />}
 					{check.expected && <Expected expected={check.expected} />}
+					{/* Sits above the human's own controls, which are untouched below: it
+					    is context for playing the case, not a substitute for playing it. */}
+					<QaBlock
+						sessionId={sessionId}
+						check={check}
+						heads={heads}
+						onReveal={(evidenceId, mode) => onRevealEvidence(evidenceId, mode)}
+					/>
 					<EvidenceSection
 						sessionId={sessionId}
 						check={check}
@@ -563,6 +700,192 @@ function StatusPill({ meta }: { meta: ReturnType<typeof verdictMeta> }) {
 		>
 			{meta.label}
 		</span>
+	);
+}
+
+/** Glyphs for the machine's lane. Drawn icons, where the human's verdicts are
+ * the tab's typographic glyphs (✓ ✗ ○ ⊘) - so the two actors differ by SHAPE and
+ * wording, not by colour alone. `Contrast` (a half-filled disc) is the shape the
+ * design gives "the machine ran, a person has not": half of the answer. */
+const QA_ICON: Record<Exclude<AgentState, "none">, typeof Contrast> = {
+	pass: Contrast,
+	fail: OctagonX,
+	skip: CircleSlash,
+	captured: Eye,
+};
+
+/**
+ * The machine's mark on a collapsed case, beside the human's status pill.
+ *
+ * Never a check, never green, and never in the leading glyph box: that box is
+ * the human's verdict and is the only mark on this tab that means "done".
+ * A case the machine has not touched shows NOTHING here - an empty circle in
+ * this slot would read "qa hasn't got to it yet" on a case where no machine
+ * verdict is ever coming, which is the reading that sends a person to fix the
+ * wrong thing.
+ */
+function QaChip({ state, stale }: { state: AgentState; stale: boolean }) {
+	const meta = agentMeta(state);
+	if (!meta) return null;
+	const Icon = QA_ICON[state as Exclude<AgentState, "none">];
+	return (
+		<span
+			title={
+				stale
+					? `${meta.headline}. ${meta.caption} It ran against an older commit.`
+					: `${meta.headline}. ${meta.caption}`
+			}
+			style={{
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 5,
+				fontSize: 10.5,
+				fontWeight: 600,
+				// A stale result is muted rather than recoloured: the word "stale"
+				// carries the meaning, and dimming keeps it from competing with the
+				// human's pill for attention.
+				color: stale ? P.muted : meta.color,
+				background: P.qaBg,
+				border: `1px solid ${P.qaBorder}`,
+				borderRadius: 999,
+				padding: "1px 8px",
+			}}
+		>
+			<Icon size={10} strokeWidth={2.2} aria-hidden="true" />
+			{meta.label}
+			{stale ? " · stale" : ""}
+		</span>
+	);
+}
+
+/**
+ * The machine's result, in full, inside an expanded case: what it did, what it
+ * said, what it captured, and against which commit. Flat and neutral - the
+ * verdict hues on this tab belong to the person.
+ */
+function QaBlock({
+	sessionId,
+	check,
+	heads,
+	onReveal,
+}: {
+	sessionId: string;
+	check: SmokeCheck;
+	heads: HeadRef[];
+	onReveal: (evidenceId: string, mode: "reveal" | "open") => void;
+}) {
+	const [now] = useState(() => Date.now());
+	const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+	const triggerRef = useRef<HTMLElement | null>(null);
+	const state = agentState(check);
+	const meta = agentMeta(state);
+	if (!meta) return null;
+
+	const Icon = QA_ICON[state as Exclude<AgentState, "none">];
+	const stale = isAgentStale(check, heads);
+	const head = headShaFor(check, heads);
+	const shots = check.agentEvidence ?? [];
+	const ran = relativeTime(check.agentRanAt, now);
+
+	return (
+		<div
+			data-testid={`qa-block-${check.id}`}
+			style={{
+				marginTop: 12,
+				border: `1px solid ${P.qaBorder}`,
+				background: P.qaBg,
+				borderRadius: 8,
+				padding: "9px 11px",
+			}}
+		>
+			<div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", rowGap: 4 }}>
+				<span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg }}>WHAT QA SAW</span>
+				<span style={{ fontSize: 10.5, color: P.muted }}>
+					{ran ? `ran ${ran}` : "ran"}
+					{check.agentSha ? " · " : ""}
+					{check.agentSha && <span style={{ fontFamily: MONO }}>{shortSha(check.agentSha)}</span>}
+				</span>
+			</div>
+
+			<div style={{ marginTop: 7, display: "flex", alignItems: "flex-start", gap: 8 }}>
+				<Icon
+					size={13}
+					strokeWidth={2.2}
+					color={stale ? P.muted : meta.color}
+					aria-hidden="true"
+					style={{ flex: "none", marginTop: 2 }}
+				/>
+				<div style={{ minWidth: 0 }}>
+					<div style={{ fontSize: 12.5, fontWeight: 600, color: stale ? P.muted : meta.color, lineHeight: 1.45 }}>
+						{meta.headline}
+					</div>
+					<div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.5, color: P.secondary2 }}>{meta.caption}</div>
+				</div>
+			</div>
+
+			{check.agentNote && (
+				<div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: P.qaFg }}>{check.agentNote}</div>
+			)}
+
+			{/* qa's own artefacts, kept in their own list. Merging them into "your
+			    evidence" would destroy the provenance you go back to when you distrust
+			    a verdict - so these are read-only here: no × and no dropzone. */}
+			{shots.length > 0 && (
+				<>
+					<div style={{ marginTop: 9, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg }}>
+						CAPTURED BY QA{" "}
+						<span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}>· not yours, and not deletable</span>
+					</div>
+					<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+						{shots.map((ev, i) => (
+							<EvidenceThumb
+								key={ev.id}
+								sessionId={sessionId}
+								checkId={check.id}
+								evidence={ev}
+								onOpen={(trigger) => {
+									triggerRef.current = trigger;
+									setLightboxIndex(i);
+								}}
+								onReveal={() => onReveal(ev.id, "reveal")}
+								onOpenFile={() => onReveal(ev.id, "open")}
+							/>
+						))}
+					</div>
+					{lightboxIndex !== null && (
+						<MediaLightbox
+							items={shots.map((e) => ({
+								id: e.id,
+								filename: e.filename,
+								mime: e.mime,
+								src: evidenceUrl(sessionId, check.id, e.id),
+							}))}
+							index={lightboxIndex}
+							onIndexChange={setLightboxIndex}
+							onClose={() => setLightboxIndex(null)}
+							triggerRef={triggerRef}
+						/>
+					)}
+				</>
+			)}
+
+			{stale && (
+				<div
+					style={{
+						marginTop: 9,
+						paddingTop: 8,
+						borderTop: `1px solid ${P.qaBorder}`,
+						fontSize: 11,
+						lineHeight: 1.5,
+						color: P.muted,
+					}}
+				>
+					<b style={{ fontWeight: 600 }}>Stale.</b> Ran against{" "}
+					<span style={{ fontFamily: MONO }}>{shortSha(check.agentSha)}</span>; head is now{" "}
+					<span style={{ fontFamily: MONO }}>{shortSha(head)}</span>. The code moved after this ran.
+				</div>
+			)}
+		</div>
 	);
 }
 
@@ -1171,7 +1494,137 @@ function ReportBar({
 	);
 }
 
-function EmptyState() {
+/**
+ * Retired cases - out of the checklist, still on the record.
+ *
+ * Retiring is how a checklist shrinks: a case covered by a real test now, or one
+ * whose steps no longer describe the product, leaves the play list instead of
+ * being deleted. Deleting would take the human's verdict and screenshots with it
+ * (the one part of a checklist AO cannot regenerate) and, more quietly, it
+ * would make the shrinking invisible: "3 retired, now covered by tests" is
+ * auditable, three cases vanishing between two visits is not.
+ *
+ * So they live here: at the FOOT of the list, collapsed, never in the counts,
+ * never playable, each carrying the reason it went and the date it went. Being
+ * collapsed and last is what keeps the live checklist's layout from shifting as
+ * the retired pile grows.
+ */
+function RetiredSection({
+	sessionId,
+	checks,
+	onRevealEvidence,
+}: {
+	sessionId: string;
+	checks: SmokeCheck[];
+	onRevealEvidence: (checkId: string, evidenceId: string, mode: "reveal" | "open") => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const [now] = useState(() => Date.now());
+	return (
+		<div style={{ marginTop: 14 }}>
+			<button
+				type="button"
+				aria-expanded={open}
+				onClick={() => setOpen((o) => !o)}
+				style={{
+					width: "100%",
+					display: "flex",
+					alignItems: "center",
+					gap: 8,
+					// The caption drops to its own line on a narrow rail rather than
+					// interleaving with the label mid-phrase.
+					flexWrap: "wrap",
+					rowGap: 2,
+					background: "transparent",
+					border: "none",
+					padding: "6px 2px",
+					cursor: "pointer",
+					textAlign: "left",
+				}}
+			>
+				<span aria-hidden="true" style={{ fontSize: 12, color: P.muted, width: 10 }}>
+					{open ? "▾" : "▸"}
+				</span>
+				<span style={{ fontSize: 12, fontWeight: 600, color: P.secondary }}>
+					{checks.length} retired from this checklist
+				</span>
+				<span style={{ fontSize: 11.5, color: P.muted }}>· kept for the record, not yours to play</span>
+			</button>
+
+			{open &&
+				checks.map((check) => {
+					const meta = verdictMeta(check.verdict);
+					const when = relativeTime(check.retiredAt, now);
+					const shots = [...check.evidence, ...(check.agentEvidence ?? [])];
+					return (
+						<div
+							key={check.id}
+							style={{
+								marginTop: 8,
+								border: `1px solid ${P.borderCard}`,
+								borderRadius: 10,
+								padding: "10px 12px",
+								background: P.cardBg,
+								// Retired is frozen; the whole card reads one step back from
+								// the live ones so it never competes for attention.
+								opacity: 0.78,
+							}}
+						>
+							<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 5 }}>
+								<span
+									style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: ".05em", color: P.muted }}
+								>
+									{checkTag(check.seq)}
+								</span>
+								<span
+									style={{
+										fontSize: 10.5,
+										fontWeight: 600,
+										color: P.muted,
+										background: P.pillBg,
+										border: `1px solid ${P.borderPill}`,
+										borderRadius: 999,
+										padding: "1px 8px",
+									}}
+								>
+									⊖ Retired{when ? ` · ${when}` : ""}
+								</span>
+								{/* A verdict a person recorded before it retired is kept and
+								    shown: it is history, and history is the point of not
+								    deleting. It counts towards nothing. */}
+								{check.verdict !== "pending" && (
+									<span style={{ fontSize: 10.5, color: P.muted }}>your verdict: {meta.label.toLowerCase()}</span>
+								)}
+							</div>
+							<div style={{ marginTop: 4, fontSize: 12.5, color: P.secondary2, lineHeight: 1.42 }}>{check.name}</div>
+							{check.retiredReason && (
+								<div style={{ marginTop: 6, fontSize: 11.5, lineHeight: 1.5, color: P.body }}>
+									<span style={{ color: P.muted }}>Why it went: </span>
+									{check.retiredReason}
+								</div>
+							)}
+							{shots.length > 0 && (
+								<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+									{shots.map((ev) => (
+										<EvidenceThumb
+											key={ev.id}
+											sessionId={sessionId}
+											checkId={check.id}
+											evidence={ev}
+											onReveal={() => onRevealEvidence(check.id, ev.id, "reveal")}
+											onOpenFile={() => onRevealEvidence(check.id, ev.id, "open")}
+										/>
+									))}
+								</div>
+							)}
+						</div>
+					);
+				})}
+		</div>
+	);
+}
+
+function EmptyState({ allRetired, retired }: { allRetired?: boolean; retired?: number }) {
 	return (
 		<div
 			style={{
@@ -1185,10 +1638,21 @@ function EmptyState() {
 			}}
 		>
 			<div style={{ fontSize: 32, marginBottom: 14, opacity: 0.6 }}>✓</div>
-			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 5 }}>No smoke checks yet</div>
+			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 5 }}>
+				{allRetired ? "Nothing left to play" : "No smoke checks yet"}
+			</div>
 			<div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 300 }}>
-				The worker hasn&apos;t authored a checklist for this session. When it finishes a change whose behavior needs a
-				live look, cases will appear here to play.
+				{allRetired ? (
+					<>
+						All {retired} case{retired === 1 ? "" : "s"} in this checklist have been retired: covered elsewhere, or no
+						longer describing the product. They are listed below with the reason each one went.
+					</>
+				) : (
+					<>
+						The worker hasn&apos;t authored a checklist for this session. When it finishes a change whose behavior needs
+						a live look, cases will appear here to play.
+					</>
+				)}
 			</div>
 		</div>
 	);
