@@ -1,6 +1,7 @@
 package sessionmanager
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -118,10 +119,11 @@ func TestTeardown_LastMemberStandingFreesTheTree(t *testing.T) {
 	}
 }
 
-// TestTeardown_SuspendedMemberStillHoldsTheTree. A suspended session is PAUSED,
-// not finished: its worktree is exactly what it resumes into. Reading "no tmux"
-// as "done with the disk" would delete a task the user only walked away from.
-func TestTeardown_SuspendedMemberStillHoldsTheTree(t *testing.T) {
+// TestTeardown_SuspendedSubordinateGoesWithTheTask. A suspended member is
+// PAUSED, not finished: its worktree is exactly what it resumes into. But when
+// the TASK ends, so does it — otherwise the card would sit on the board forever
+// promising a resume into a tree that has been reclaimed.
+func TestTeardown_SuspendedSubordinateGoesWithTheTask(t *testing.T) {
 	m, st, _, ws := newManager()
 	dev, qa := seedCrew(st)
 	rec := st.sessions[qa.ID]
@@ -129,21 +131,46 @@ func TestTeardown_SuspendedMemberStillHoldsTheTree(t *testing.T) {
 	rec.Metadata.RuntimeHandleID = ""
 	st.sessions[qa.ID] = rec
 
-	// Tear down dev WITHOUT the fan-out by pretending it is the subordinate: the
-	// point here is only that a suspended holder counts.
-	devRec := st.sessions[dev.ID]
-	devRec.CrewRole = domain.CrewRoleQA
-	st.sessions[dev.ID] = devRec
+	res, err := m.Teardown(ctx, dev.ID, domain.TerminationCauseKill)
+	if err != nil {
+		t.Fatalf("Teardown(dev): %v", err)
+	}
+	if !res.Freed || ws.destroyed != 1 {
+		t.Fatalf("task teardown = freed %v (reason %q), destroys %d; want freed exactly once", res.Freed, res.Reason, ws.destroyed)
+	}
+	if !st.sessions[qa.ID].IsTerminated {
+		t.Fatal("a suspended crew member was left on the board pointing at a reclaimed worktree")
+	}
+}
+
+// TestTeardown_FanOutFailureKeepsTheTree. The fan-out is best-effort: a member
+// that will not die must not stop dev from terminating, because a task nobody can
+// finish is worse than a worktree that survives. But dev must then REFUSE to
+// remove the tree — the surviving member is still in it — and say why, so the
+// reclaim log carries the branch and the situation is recoverable.
+func TestTeardown_FanOutFailureKeepsTheTree(t *testing.T) {
+	m, st, rt, ws := newManager()
+	dev, qa := seedCrew(st)
+	rt.destroyErrByHandle = map[string]error{"h-qa": errors.New("tmux refused")}
 
 	res, err := m.Teardown(ctx, dev.ID, domain.TerminationCauseKill)
 	if err != nil {
-		t.Fatalf("Teardown: %v", err)
+		t.Fatalf("a crew member that would not die must not fail dev's teardown: %v", err)
 	}
-	if res.Freed || res.Reason != ReasonWorkspaceShared {
-		t.Fatalf("a suspended crewmate did not hold the worktree: freed=%v reason=%q", res.Freed, res.Reason)
+	if !st.sessions[dev.ID].IsTerminated {
+		t.Fatal("dev must still terminate when its crew member cannot be reaped")
+	}
+	if st.sessions[qa.ID].IsTerminated {
+		t.Fatal("the fake failed the member teardown, so it should still read as live")
+	}
+	if res.Freed {
+		t.Fatal("dev removed the worktree while a member it could not reap was still in it")
+	}
+	if res.Reason != ReasonWorkspaceShared {
+		t.Fatalf("reason = %q, want %q so the reclaim log explains the refusal", res.Reason, ReasonWorkspaceShared)
 	}
 	if ws.destroyed != 0 {
-		t.Fatal("the worktree a suspended member resumes into was destroyed")
+		t.Fatalf("workspace destroyed %d time(s)", ws.destroyed)
 	}
 }
 
@@ -241,5 +268,69 @@ func TestReconcileLive_CrewMemberDoesNotDeleteALiveDevsWorktree(t *testing.T) {
 	}
 	if got := st.sessions[dev.ID].Metadata.WorkspacePath; got != crewPath {
 		t.Fatalf("dev workspace = %q, want %q", got, crewPath)
+	}
+}
+
+// TestTeardown_AutoReclaimEndsAnAbandonedHalfCrew is the answer to "what happens
+// to a half-terminated crew that is then abandoned".
+//
+// The lifecycle reducer terminates dev directly when its PR merges — no teardown
+// — so a task can reach "dev finished, subordinate still live". The idle sweep
+// only ever SUSPENDS, so nothing else would ever terminate that subordinate, and
+// it would pin the worktree forever: a silent disk leak. Auto-reclaim inherits
+// the fan-out, so one grace period after the task ended the subordinate is ended
+// with it and the tree is freed. The row it leaves names auto_reclaim, so who
+// took it is answerable from the record.
+func TestTeardown_AutoReclaimEndsAnAbandonedHalfCrew(t *testing.T) {
+	m, st, _, ws := newManager()
+	dev, qa := seedCrew(st)
+	// dev merged and was terminated by the reducer; qa never heard about it.
+	rec := st.sessions[dev.ID]
+	rec.IsTerminated = true
+	st.sessions[dev.ID] = rec
+
+	res, err := m.Teardown(ctx, dev.ID, domain.TerminationCauseAutoReclaim)
+	if err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+	if !res.Freed {
+		t.Fatalf("an abandoned half-crew kept its worktree forever (reason %q)", res.Reason)
+	}
+	if ws.destroyed != 1 {
+		t.Fatalf("workspace destroyed %d time(s), want 1", ws.destroyed)
+	}
+	if !st.sessions[qa.ID].IsTerminated {
+		t.Fatal("the abandoned crew member is still live on a worktree that no longer exists")
+	}
+	lcm, ok := m.lcm.(*fakeLCM)
+	if !ok {
+		t.Fatal("expected the fake lifecycle recorder")
+	}
+	causes := lcm.terminationCauses[qa.ID]
+	if len(causes) != 1 || causes[0] != domain.TerminationCauseAutoReclaim {
+		t.Fatalf("crew member termination causes = %v, want [%s] so the record names who took it", causes, domain.TerminationCauseAutoReclaim)
+	}
+}
+
+// TestTeardown_SubordinateNeverEndsItsDev is the other half of the rule, and the
+// one that would be a disaster to get wrong: a qa session that finishes, is
+// killed, or dies must never take the task down with it.
+func TestTeardown_SubordinateNeverEndsItsDev(t *testing.T) {
+	m, st, _, _ := newManager()
+	dev, qa := seedCrew(st)
+
+	for _, cause := range []string{domain.TerminationCauseKill, domain.TerminationCauseAutoReclaim} {
+		st.sessions[qa.ID] = domain.SessionRecord{
+			ID: qa.ID, ProjectID: "mer", Kind: domain.KindWorker,
+			CrewID: dev.ID, CrewRole: domain.CrewRoleQA,
+			Metadata: domain.SessionMetadata{Branch: "feature/task", WorkspacePath: crewPath, RuntimeHandleID: "h-qa"},
+			Activity: domain.Activity{State: domain.ActivityActive},
+		}
+		if _, err := m.Teardown(ctx, qa.ID, cause); err != nil {
+			t.Fatalf("Teardown(qa, %s): %v", cause, err)
+		}
+		if st.sessions[dev.ID].IsTerminated {
+			t.Fatalf("tearing a subordinate down with cause %s terminated its dev", cause)
+		}
 	}
 }

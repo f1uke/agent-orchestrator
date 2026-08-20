@@ -142,8 +142,12 @@ func TestSpawnCrewMember_RefusesAnImpossibleCrew(t *testing.T) {
 			devID: "mer-1", role: domain.CrewRoleQA,
 		},
 		{
-			name:  "orchestrator dev",
-			seed:  func(st *fakeStore) { r := st.sessions["mer-1"]; r.Kind = domain.KindOrchestrator; st.sessions["mer-1"] = r },
+			name: "orchestrator dev",
+			seed: func(st *fakeStore) {
+				r := st.sessions["mer-1"]
+				r.Kind = domain.KindOrchestrator
+				st.sessions["mer-1"] = r
+			},
 			devID: "mer-1", role: domain.CrewRoleQA,
 		},
 		{
@@ -156,8 +160,12 @@ func TestSpawnCrewMember_RefusesAnImpossibleCrew(t *testing.T) {
 			devID: "mer-1", role: domain.CrewRoleQA,
 		},
 		{
-			name:  "dev has no worktree yet",
-			seed:  func(st *fakeStore) { r := st.sessions["mer-1"]; r.Metadata.WorkspacePath = ""; st.sessions["mer-1"] = r },
+			name: "dev has no worktree yet",
+			seed: func(st *fakeStore) {
+				r := st.sessions["mer-1"]
+				r.Metadata.WorkspacePath = ""
+				st.sessions["mer-1"] = r
+			},
 			devID: "mer-1", role: domain.CrewRoleQA,
 		},
 	}

@@ -101,41 +101,59 @@ func siblingsOf(rec domain.SessionRecord, all []domain.SessionRecord) []domain.S
 	return out
 }
 
-// workspaceHeldByLiveCrewMember reports whether tearing rec's worktree down would
-// pull it out from under a crewmate that is still alive on it.
+// crewKeepsWorkspace reports whether this session must leave the shared worktree
+// standing. It is the refcount, and it asks a different question of each role,
+// because the two roles have a different relationship to the tree.
 //
-// This is the refcount, and it is deliberately CREW-scoped rather than
-// path-scoped. A path-scoped refcount would be more general, but every
-// orchestrator of a project already shares ONE worktree path (the directory is
-// named for the project, not the session) and SpawnOrchestrator's check-then-spawn
-// is explicitly not atomic, so a project can legitimately hold two non-terminated
-// orchestrator rows on one path. Path-scoping would start refusing orchestrator
-// teardowns that succeed today — a visible change on the solo path, which is the
-// one thing this capability may not cause. Crew-scoping is a no-op for every
-// session that is not in a crew.
+//   - A SUBORDINATE never removes it while its dev row exists. The tree is dev's:
+//     dev cut the branch, dev holds the PR, and dev is itself a reclaim candidate
+//     the moment it finishes, so deferring cannot strand the disk. Ownership, not
+//     liveness, is the right test here — it also means a crew teardown removes the
+//     tree exactly once, from dev, instead of racing its own fan-out.
+//   - DEV keeps it while any subordinate is still ALIVE on it. Alive is "not
+//     terminated": a suspended member is paused, and that tree is exactly what it
+//     resumes into. In the normal path the fan-out has already ended every
+//     subordinate by the time dev asks, so this only bites when the fan-out could
+//     not — and then keeping the tree is the safe answer, and the reclaim log says
+//     so once per reason.
 //
-// "Alive" is NOT terminated. A suspended member is paused, not finished: its
-// worktree is exactly what it resumes into.
-func (m *Manager) workspaceHeldByLiveCrewMember(ctx context.Context, rec domain.SessionRecord) (bool, error) {
+// It is deliberately CREW-scoped rather than path-scoped. A path-scoped refcount
+// would be more general, but every orchestrator of a project already shares ONE
+// worktree path (the directory is named for the project, not the session) and
+// SpawnOrchestrator's check-then-spawn is explicitly not atomic, so a project can
+// legitimately hold two non-terminated orchestrator rows on one path. Path-scoping
+// would start refusing orchestrator teardowns that succeed today - a visible
+// change on the solo path, which is the one thing this capability may not cause.
+// A session that is not in a crew takes neither branch.
+func (m *Manager) crewKeepsWorkspace(ctx context.Context, rec domain.SessionRecord) (bool, error) {
+	if !rec.InCrew() || rec.Metadata.WorkspacePath == "" {
+		return false, nil
+	}
 	members, err := m.crewMembers(ctx, rec)
 	if err != nil {
 		return false, err
 	}
-	return anyLiveHolder(rec, members), nil
+	return crewKeepsWorkspaceGiven(rec, members), nil
 }
 
-// anyLiveHolder is workspaceHeldByLiveCrewMember's decision, over an already-read
+// crewKeepsWorkspaceGiven is crewKeepsWorkspace's decision over an already-read
 // member list.
-func anyLiveHolder(rec domain.SessionRecord, members []domain.SessionRecord) bool {
-	if rec.Metadata.WorkspacePath == "" {
+func crewKeepsWorkspaceGiven(rec domain.SessionRecord, members []domain.SessionRecord) bool {
+	if !rec.InCrew() || rec.Metadata.WorkspacePath == "" {
 		return false
 	}
 	for _, other := range members {
-		if other.IsTerminated {
+		if other.Metadata.WorkspacePath != rec.Metadata.WorkspacePath {
 			continue
 		}
-		if other.Metadata.WorkspacePath == rec.Metadata.WorkspacePath {
-			return true
+		if rec.CrewRole.IsDev() {
+			if !other.IsTerminated {
+				return true // a live subordinate is still working in it
+			}
+			continue
+		}
+		if other.CrewRole.IsDev() {
+			return true // not ours to remove
 		}
 	}
 	return false
@@ -203,6 +221,8 @@ func (m *Manager) teardownCrewSubordinates(ctx context.Context, dev domain.Sessi
 		if member.CrewRole.IsDev() || member.IsTerminated {
 			continue
 		}
+		m.logger.Info("teardown: ending crew member with its dev",
+			"sessionID", member.ID, "crew", dev.CrewID, "role", string(member.CrewRole), "cause", cause)
 		if _, err := m.Teardown(ctx, member.ID, cause); err != nil {
 			m.logger.Error("teardown: crew member teardown failed; its worktree will be kept",
 				"sessionID", member.ID, "crew", dev.CrewID, "error", err)

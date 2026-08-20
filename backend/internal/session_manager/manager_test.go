@@ -241,6 +241,10 @@ type fakeRuntime struct {
 	// (distinct from session existence); missing = false.
 	agentAliveByHandle map[string]bool
 	agentAliveErr      error
+	// destroyErrByHandle fails Destroy for specific handles only, so a test can
+	// break ONE session's teardown inside a multi-session sweep. Missing = use
+	// destroyErr.
+	destroyErrByHandle map[string]error
 }
 
 func (r *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
@@ -254,6 +258,9 @@ func (r *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.
 func (r *fakeRuntime) Destroy(_ context.Context, handle ports.RuntimeHandle) error {
 	r.destroyed++
 	r.destroyedIDs = append(r.destroyedIDs, handle.ID)
+	if err, ok := r.destroyErrByHandle[handle.ID]; ok {
+		return err
+	}
 	return r.destroyErr
 }
 func (r *fakeRuntime) IsAlive(_ context.Context, handle ports.RuntimeHandle) (bool, error) {

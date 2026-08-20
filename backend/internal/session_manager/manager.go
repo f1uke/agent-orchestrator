@@ -1070,6 +1070,16 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	// The fan-out lives here rather than in Kill so that every route which ends a
 	// session - kill, purge, daemon shutdown, auto-reclaim - inherits it, and
 	// there is still exactly one teardown code path.
+	//
+	// AUTO-RECLAIM inheriting it is deliberate, and it is what closes the only
+	// leak this shape could otherwise create. The lifecycle reducer terminates dev
+	// directly when its PR merges, without a teardown, so a task can reach
+	// "dev finished, subordinate still live" - and a live subordinate would pin
+	// that worktree forever, since the idle sweep only ever SUSPENDS. Letting the
+	// reclaimer's teardown fan out means the tree is freed one grace period after
+	// the task ended. The subordinate it ends is not a task anybody is waiting on,
+	// and the row it leaves names auto_reclaim as its cause, so "who took my
+	// session?" is answered by the record rather than by correlating logs.
 	if rec.InCrew() && rec.CrewRole.IsDev() {
 		m.teardownCrewSubordinates(ctx, rec, cause)
 	}
@@ -1087,11 +1097,12 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	// reaps the reviewer.
 	m.reapReviewer(ctx, id)
 	res := TeardownResult{WorkspacePath: ws.Path}
-	// The refcount: a crewmate that is still alive on this exact worktree keeps
-	// it. Checked AFTER the fan-out above, so tearing a whole task down still
-	// frees the disk in one pass, and BEFORE any destroy, so a live member never
-	// loses its tree. A solo session has no crewmates and takes neither branch.
-	held, err := m.workspaceHeldByLiveCrewMember(ctx, rec)
+	// The refcount (crewKeepsWorkspace): a subordinate never removes dev's tree,
+	// and dev keeps it while a subordinate is still alive on it. Checked AFTER the
+	// fan-out above, so tearing a whole task down still frees the disk in one
+	// pass, and BEFORE any destroy, so a live member never loses its tree. A solo
+	// session has no crew and takes neither branch.
+	held, err := m.crewKeepsWorkspace(ctx, rec)
 	if err != nil {
 		return TeardownResult{}, fmt.Errorf("kill %s: crew: %w", id, err)
 	}
@@ -1528,7 +1539,7 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 	// still terminates and still records its restore marker, so RestoreAll
 	// relaunches it into the tree that is still there.
 	ws := workspaceInfo(rec)
-	held, err := m.workspaceHeldByLiveCrewMember(ctx, rec)
+	held, err := m.crewKeepsWorkspace(ctx, rec)
 	if err != nil {
 		return fmt.Errorf("save %s: crew: %w", rec.ID, err)
 	}
