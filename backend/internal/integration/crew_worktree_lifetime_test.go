@@ -30,6 +30,7 @@ type crewStack struct {
 	store *sqlite.Store
 	svc   *sessionsvc.Service
 	mgr   *sessionmanager.Manager
+	lcm   *lifecycle.Manager
 	rt    *stubRuntime
 	repo  string
 	root  string
@@ -37,6 +38,14 @@ type crewStack struct {
 }
 
 func newCrewStack(t *testing.T) *crewStack {
+	t.Helper()
+	return newCrewStackWithIdle(t, 0)
+}
+
+// newCrewStackWithIdle is newCrewStack with the idle-close window configured, for
+// the tests that drive the sweep. Zero disables it, which is what every other
+// test here wants.
+func newCrewStackWithIdle(t *testing.T, idleTTL time.Duration) *crewStack {
 	t.Helper()
 	git, err := exec.LookPath("git")
 	if err != nil {
@@ -73,13 +82,20 @@ func newCrewStack(t *testing.T) *crewStack {
 	}
 	msg := &captureMessenger{}
 	lcm := lifecycle.New(store, msg)
-	rt := &stubRuntime{}
+	// Distinct handles per session: two crew members that shared one handle id
+	// could not be told apart by a liveness probe, and the one-awake-at-a-time
+	// guard would be probing the wrong agent. Real tmux already names them apart
+	// (a non-dev member launches with an empty branch, which selects the
+	// session-id fallback), so this is fidelity, not convenience.
+	rt := &stubRuntime{perSessionHandles: true, trackLiveness: true}
 	st := &crewStack{store: store, rt: rt, repo: repo, root: managed, now: time.Now()}
+	st.lcm = lcm
 	st.mgr = sessionmanager.New(sessionmanager.Deps{
 		Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg,
-		Lifecycle: lcm,
-		LookPath:  func(string) (string, error) { return "/usr/bin/true", nil },
-		Clock:     func() time.Time { return st.now },
+		Lifecycle:    lcm,
+		LookPath:     func(string) (string, error) { return "/usr/bin/true", nil },
+		Clock:        func() time.Time { return st.now },
+		IdleCloseTTL: idleTTL,
 	})
 	st.svc = sessionsvc.New(st.mgr, store)
 	return st
@@ -120,12 +136,22 @@ func (s *crewStack) spawnCrew(t *testing.T) (dev, qa domain.SessionRecord) {
 	if err != nil {
 		t.Fatalf("spawn dev: %v", err)
 	}
+	// ONE AWAKE AT A TIME: dev has to stand down before a second member may be
+	// born into its tree. This is the release half of a handover, and it is the
+	// only way a crew can be formed.
+	if err := s.mgr.ReleaseCrewSlot(ctx, devRec.ID); err != nil {
+		t.Fatalf("release dev's slot: %v", err)
+	}
 	qaRec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test it",
 		CrewOf: devRec.ID, CrewRole: domain.CrewRoleQA,
 	})
 	if err != nil {
 		t.Fatalf("spawn crew member: %v", err)
+	}
+	devRec, ok, err := s.store.GetSession(ctx, devRec.ID)
+	if err != nil || !ok {
+		t.Fatalf("re-read dev: %v", err)
 	}
 	if devRec.Metadata.WorkspacePath == "" || qaRec.Metadata.WorkspacePath != devRec.Metadata.WorkspacePath {
 		t.Fatalf("crew is not on one worktree: dev %q, member %q", devRec.Metadata.WorkspacePath, qaRec.Metadata.WorkspacePath)

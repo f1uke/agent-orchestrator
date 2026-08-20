@@ -198,6 +198,11 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		PRs:      store,
 		Projects: store,
 		Launcher: reviewcore.NewLauncher(reviewers, runtime),
+		// The ephemeral reviewer is a READER of the worker's checkout, so it must
+		// not start while an agent is writing that checkout. Only a shared worktree
+		// (a crew) ever reports a writer; for every solo worker this reports nobody
+		// and Trigger is unchanged.
+		TreeWriter: mgr.CrewTreeWriter,
 		// The reviewer base is assembled from the same global overrides at launch,
 		// so an edit through the settings API takes effect on the next review run.
 		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },

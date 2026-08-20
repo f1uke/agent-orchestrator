@@ -36,6 +36,9 @@ type fakeStore struct {
 	sharedLog *[]string
 	// purged records every session ID PurgeSession was called with.
 	purged map[domain.SessionID]bool
+	// listAllCalls counts ListAllSessions, so a test can assert that a guard
+	// costs a solo session nothing at all rather than merely returning nil.
+	listAllCalls int
 }
 
 func newFakeStore() *fakeStore {
@@ -78,6 +81,7 @@ func (f *fakeStore) ListSessions(_ context.Context, p domain.ProjectID) ([]domai
 	return out, nil
 }
 func (f *fakeStore) ListAllSessions(context.Context) ([]domain.SessionRecord, error) {
+	f.listAllCalls++
 	var out []domain.SessionRecord
 	for _, r := range f.sessions {
 		out = append(out, r)
@@ -241,6 +245,9 @@ type fakeRuntime struct {
 	// (distinct from session existence); missing = false.
 	agentAliveByHandle map[string]bool
 	agentAliveErr      error
+	// aliveCalls counts IsAlive probes, so a test can assert that a guard costs a
+	// solo session nothing at all.
+	aliveCalls int
 	// destroyErrByHandle fails Destroy for specific handles only, so a test can
 	// break ONE session's teardown inside a multi-session sweep. Missing = use
 	// destroyErr.
@@ -264,6 +271,7 @@ func (r *fakeRuntime) Destroy(_ context.Context, handle ports.RuntimeHandle) err
 	return r.destroyErr
 }
 func (r *fakeRuntime) IsAlive(_ context.Context, handle ports.RuntimeHandle) (bool, error) {
+	r.aliveCalls++
 	if r.aliveErr != nil {
 		return false, r.aliveErr
 	}

@@ -23,24 +23,82 @@ type stubRuntime struct {
 	// that all other tests relied on.
 	aliveByHandle    map[string]bool
 	destroyedHandles []string
+	// perSessionHandles makes Create hand out a handle named after the session
+	// instead of the shared "h1". Opt-in, because most tests here seed their own
+	// handles and assert on "h1"; the crew tests need it, since two members that
+	// shared one handle id could not be probed apart and the exclusion would be
+	// testing nothing.
+	perSessionHandles bool
+	// aliveErr makes every IsAlive probe fail. A failed probe is never proof of
+	// death anywhere in this daemon, so the tests that need to prove that use it.
+	aliveErr error
+	// trackLiveness makes the stub keep a real ledger instead of answering from a
+	// fixed script: Create marks a handle alive, Destroy marks it dead, and
+	// IsAlive reads that back. Opt-in, because most tests here seed rows by hand
+	// and want the "absent means alive" default - but a test that RELAUNCHES an
+	// agent needs the ledger, or a handle scripted dead before the relaunch stays
+	// dead afterwards and the test silently measures the wrong thing.
+	trackLiveness bool
+	live          map[string]bool
+	// createErr fails the next Create, so a test can make a wake fail on purpose
+	// and check what the failure leaves behind.
+	createErr error
 }
 
-func (s *stubRuntime) Create(context.Context, ports.RuntimeConfig) (ports.RuntimeHandle, error) {
+func (s *stubRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
 	s.created++
-	return ports.RuntimeHandle{ID: "h1"}, nil
+	if s.createErr != nil {
+		err := s.createErr
+		s.createErr = nil
+		return ports.RuntimeHandle{}, err
+	}
+	id := "h1"
+	if s.perSessionHandles {
+		id = "h-" + string(cfg.SessionID)
+	}
+	s.setLive(id, true)
+	return ports.RuntimeHandle{ID: id}, nil
 }
 func (s *stubRuntime) Destroy(_ context.Context, h ports.RuntimeHandle) error {
 	s.destroyed++
 	s.destroyedHandles = append(s.destroyedHandles, h.ID)
+	s.setLive(h.ID, false)
 	return nil
 }
 func (s *stubRuntime) IsAlive(_ context.Context, h ports.RuntimeHandle) (bool, error) {
+	if s.aliveErr != nil {
+		return false, s.aliveErr
+	}
+	if s.trackLiveness {
+		return s.live[h.ID], nil
+	}
 	if s.aliveByHandle != nil {
 		if alive, ok := s.aliveByHandle[h.ID]; ok {
 			return alive, nil
 		}
 	}
 	return true, nil
+}
+
+func (s *stubRuntime) setLive(id string, alive bool) {
+	if !s.trackLiveness {
+		return
+	}
+	if s.live == nil {
+		s.live = map[string]bool{}
+	}
+	s.live[id] = alive
+}
+
+// kill ends one pane out of band - an agent that crashed, or a user who typed
+// `tmux kill-session`. Nothing in AO is told.
+func (s *stubRuntime) kill(id string) { s.setLive(id, false) }
+
+// killAll is the daemon dying and taking every pane with it.
+func (s *stubRuntime) killAll() {
+	for id := range s.live {
+		s.live[id] = false
+	}
 }
 
 // wasDestroyed reports whether Destroy was called with the given handle ID.

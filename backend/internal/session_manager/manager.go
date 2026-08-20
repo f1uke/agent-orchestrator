@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -58,6 +59,12 @@ var (
 	// through the Go seam, so this is a programming error rather than user input;
 	// it is a sentinel so a test can assert the refusal instead of a string.
 	ErrInvalidCrew = errors.New("session: invalid crew")
+	// ErrCrewBusy means another member of the same crew is already awake, so this
+	// one may not be brought up: the two share ONE worktree and running both at
+	// once is what makes a shared worktree unsafe (see crew_slot.go). Solo
+	// sessions can never produce it - they are in no crew - so it is a sentinel
+	// the crew routes assert on rather than a condition an ordinary spawn meets.
+	ErrCrewBusy = errors.New("session: another crew member is awake")
 )
 
 // Env vars a spawned process reads to learn who it is.
@@ -196,6 +203,13 @@ type Manager struct {
 	// by the daemon after the smoke service is built, same as reviewerReaper; nil
 	// in tests/wiring that omit it, in which case purge simply skips it.
 	smokeEvidencePurger func(context.Context, domain.SessionID) error
+
+	// crewMu guards crewLocks; crewLocks holds one mutex per CREW so the routes
+	// that can make a member awake serialise per task (see lockCrew). A session in
+	// no crew never touches either, so an ordinary session is serialised against
+	// nothing - which is what keeps the solo path unchanged.
+	crewMu    sync.Mutex
+	crewLocks map[domain.SessionID]*sync.Mutex
 }
 
 // Deps are the collaborators a Session Manager needs; New wires them together.
@@ -382,6 +396,20 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if cfg.CrewOf != "" {
 		dev, err := m.resolveCrewDev(ctx, project, cfg.CrewOf, cfg.CrewRole)
 		if err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
+		}
+		// ONE AWAKE AT A TIME: a new member may only be born into a FREE slot. The
+		// tree it is about to join is dev's, and dev is normally the one working in
+		// it, so this refuses far more often than it lets through - deliberately.
+		// The caller releases dev first (ReleaseCrewSlot), which is the same
+		// release half of a handover.
+		//
+		// Held until this spawn has finished materializing, so a second spawn (or a
+		// wake of dev) cannot read the same free slot and take it too. dev's id is
+		// the crew key whether or not the crew exists yet, which is exactly why
+		// crew_id IS dev's session id.
+		defer m.lockCrew(dev.ID)()
+		if err := m.crewSlotGuardForNewMember(ctx, dev, routeSpawn); err != nil {
 			return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
 		}
 		crewDev = dev
@@ -1307,6 +1335,14 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	if meta.WorkspacePath == "" || meta.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", id, ErrIncompleteHandle)
 	}
+	// ONE AWAKE AT A TIME, ahead of the adopt-if-alive branch below: adopting
+	// clears the terminal flag without creating a runtime, which would make a
+	// second crew member awake just as surely as a relaunch. Solo: a no-op, and
+	// the lock is a no-op too.
+	defer m.lockCrew(rec.CrewID)()
+	if err := m.crewSlotGuard(ctx, rec, routeRestore); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", id, err)
+	}
 	// A session can be terminated in the store while its runtime is still alive:
 	// e.g. its PR merged and the reaper/reclaim marked it done, but the agent
 	// process is still attached. Relaunching would then collide with the existing
@@ -1345,6 +1381,13 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 }
 
 func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.SessionRecord, project domain.ProjectRecord, ws ports.WorkspaceInfo) (domain.SessionRecord, error) {
+	// ONE AWAKE AT A TIME, at the chokepoint. Restore, Resume and Restart guard
+	// their own entry too, but RestoreAll calls straight in here at boot - so this
+	// is the call that closes restore-after-restart, and it is deliberately BEFORE
+	// anything is launched. Solo: a no-op.
+	if err := m.crewSlotGuard(ctx, rec, routeRelaunch); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("relaunch %s: %w", rec.ID, err)
+	}
 	agent, ok := m.agents.Agent(rec.Harness)
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: no agent adapter for harness %q", rec.ID, rec.Harness)
@@ -1438,6 +1481,16 @@ func (m *Manager) restartInPlace(ctx context.Context, rec domain.SessionRecord) 
 	// an impossible restart costs the user nothing instead of killing their agent.
 	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, ErrIncompleteHandle)
+	}
+	// ONE AWAKE AT A TIME, and deliberately HERE rather than only at the relaunch
+	// chokepoint below. restartInPlace destroys the runtime and marks the session
+	// terminated before it relaunches; a refusal discovered at the relaunch would
+	// leave the member terminated with its agent already killed - a restart that
+	// cost the user their session and gave nothing back. Refuse while it is still
+	// free. Solo: a no-op.
+	defer m.lockCrew(rec.CrewID)()
+	if err := m.crewSlotGuard(ctx, rec, routeRestart); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
 	}
 	// Fallible reads run before the runtime is destroyed, so a failure here leaves
 	// the running agent untouched.
@@ -1939,6 +1992,15 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.Sessi
 	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, ErrIncompleteHandle)
 	}
+	// ONE AWAKE AT A TIME, ahead of the adopt-if-alive branch below for the same
+	// reason as Restore. This is also the route a HUMAN takes: opening a crew
+	// member's card calls Wake, which calls Resume - and two clicks are the most
+	// likely way two wakes ever arrive at once, which is what the lock is for.
+	// Solo: both are no-ops.
+	defer m.lockCrew(rec.CrewID)()
+	if err := m.crewSlotGuard(ctx, rec, routeResume); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, err)
+	}
 	// The tmux was torn down at suspend, but defensively adopt a still-alive
 	// runtime (e.g. a suspend that raced this open) instead of colliding on
 	// `tmux new-session` — mirror Restore's adopt-if-alive guard.
@@ -2006,7 +2068,9 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("restore-all: list sessions: %w", err)
 	}
-	for _, rec := range recs {
+	// Crew devs before their subordinates: see crewDevsFirst. Identity for a list
+	// with no crew in it, which is every ordinary machine.
+	for _, rec := range crewDevsFirst(recs) {
 		if !rec.IsTerminated {
 			continue
 		}
@@ -2094,13 +2158,27 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 			}
 		}
 
-		// Step 3: relaunch the agent in the restored workspace.
-		if _, err := m.relaunchRestoredSession(ctx, rec, project, ws); err != nil {
+		// Step 3: relaunch the agent in the restored workspace. Held under the crew
+		// lock so the boot pass and a wake arriving over HTTP cannot both read a
+		// free slot: the guard and the launch it protects are inside this call.
+		// A no-op lock for every session that is not in a crew.
+		unlockCrew := m.lockCrew(rec.CrewID)
+		_, relaunchErr := m.relaunchRestoredSession(ctx, rec, project, ws)
+		unlockCrew()
+		if err := relaunchErr; err != nil {
 			// A promptless, unresumable worker is intentionally left terminated
 			// (ErrNotResumable): expected, not an operational failure, so log it
 			// quietly rather than as an error.
 			if errors.Is(err, ErrNotResumable) {
 				m.logger.Warn("restore-all: session left terminated (nothing to resume)", "sessionID", rec.ID)
+			} else if errors.Is(err, ErrCrewBusy) {
+				// A crewmate already holds the awake slot on this boot. Refusing is
+				// the point, not a failure - and the marker is deliberately LEFT in
+				// place, so this member is still restorable the moment the slot frees
+				// (by hand, or on the next boot). Nothing is lost and nothing runs
+				// twice in the shared tree.
+				m.logger.Warn("restore-all: crew member left terminated; a crewmate holds the awake slot",
+					"sessionID", rec.ID, "crew", rec.CrewID, "error", err)
 			} else {
 				m.logger.Error("restore-all: relaunch failed", "sessionID", rec.ID, "error", err)
 			}
