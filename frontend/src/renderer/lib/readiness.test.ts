@@ -471,7 +471,12 @@ describe("the Work gate on a session that stopped with nothing to show", () => {
 // the provider's decision, so an AO approval was invisible on the board no matter
 // how durably it was recorded.
 describe("deriveReadiness — AO's own review verdict", () => {
-	const aoApproved = { verdict: "approved" as const, runId: "run-1", targetSha: "abc123", reviewedAt: "2026-06-15T00:00:00Z" };
+	const aoApproved = {
+		verdict: "approved" as const,
+		runId: "run-1",
+		targetSha: "abc123",
+		reviewedAt: "2026-06-15T00:00:00Z",
+	};
 	const aoChanges = {
 		verdict: "changes_requested" as const,
 		runId: "run-1",
@@ -480,7 +485,11 @@ describe("deriveReadiness — AO's own review verdict", () => {
 	};
 
 	it("an AO approval answers 'nobody has looked' and turns the gate green", () => {
-		const r = deriveReadiness({ status: "review_pending", activity: { state: "idle" } }, [pr({ aoReview: aoApproved })], smoke());
+		const r = deriveReadiness(
+			{ status: "review_pending", activity: { state: "idle" } },
+			[pr({ aoReview: aoApproved })],
+			smoke(),
+		);
 		expect(tones(r).review).toBe("pass");
 		expect(stateOf(r, "review")).toBe("AO approved");
 		expect(r.verdict.word).toBe("Ready to Merge");
@@ -497,7 +506,12 @@ describe("deriveReadiness — AO's own review verdict", () => {
 	it("an AO approval does not satisfy an explicit review_required", () => {
 		const r = deriveReadiness(
 			{},
-			[pr({ review: { decision: "review_required", hasUnresolvedHumanComments: false, unresolvedBy: [] }, aoReview: aoApproved })],
+			[
+				pr({
+					review: { decision: "review_required", hasUnresolvedHumanComments: false, unresolvedBy: [] },
+					aoReview: aoApproved,
+				}),
+			],
 			smoke(),
 		);
 		expect(tones(r).review).toBe("wait");

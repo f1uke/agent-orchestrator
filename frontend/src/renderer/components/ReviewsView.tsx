@@ -1567,8 +1567,7 @@ function PreMRReviewCard({ state }: { state: PRReviewState }) {
 				</pre>
 			) : (
 				<div style={{ fontSize: 12.5, color: P.muted2, lineHeight: 1.5 }}>
-					No PR exists yet, so this review is not posted anywhere — its findings will appear here
-					once the pass submits.
+					No PR exists yet, so this review is not posted anywhere — its findings will appear here once the pass submits.
 				</div>
 			)}
 		</div>
@@ -1589,12 +1588,10 @@ function NoPrEmptyState() {
 			}}
 		>
 			<div style={{ fontSize: 30, marginBottom: 14, opacity: 0.5 }}>◌</div>
-			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 4 }}>
-				Nothing to review yet.
-			</div>
+			<div style={{ fontSize: 14, fontWeight: 600, color: P.secondary, marginBottom: 4 }}>Nothing to review yet.</div>
 			<div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 260 }}>
-				AO can review this branch before a PR exists — it just needs a commit on it first. Review
-				comments appear here once a PR or MR is opened.
+				AO can review this branch before a PR exists — it just needs a commit on it first. Review comments appear here
+				once a PR or MR is opened.
 			</div>
 		</div>
 	);
@@ -1711,7 +1708,7 @@ function mockReviewsResponse(session: WorkspaceSession): ReviewsResponse {
 					branch: session.branch,
 					latestRun: {
 						batchId: `demo-batch-${session.id}`,
-						body: "No blocking findings.\n\ndocs/install.md:12 - the prerequisites list repeats step 2; fold it into the table above.\ndocs/install.md:47 - \"see below\" points at a section that moved.",
+						body: 'No blocking findings.\n\ndocs/install.md:12 - the prerequisites list repeats step 2; fold it into the table above.\ndocs/install.md:47 - "see below" points at a section that moved.',
 						createdAt: new Date(Date.now() - 9 * 60 * 1000).toISOString(),
 						githubReviewId: "",
 						harness: "codex",

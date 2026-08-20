@@ -165,8 +165,7 @@ function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 			if (count) return gate("review", "Review", "wait", count);
 			// AO reviewed this head and approved it. That is not "nobody has looked" —
 			// which is the whole reason REVIEW_AWAITING exists — so say who looked.
-			if (aoApproved && !pr.review.hasUnresolvedHumanComments)
-				return gate("review", "Review", "pass", "AO approved");
+			if (aoApproved && !pr.review.hasUnresolvedHumanComments) return gate("review", "Review", "pass", "AO approved");
 			// Nobody has reviewed it yet. That is a review still owed, not an
 			// inapplicable gate: `idle` is the tone for "there was nothing to look
 			// at" (no PR, closed PR), and reading it here is what let an unreviewed
