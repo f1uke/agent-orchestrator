@@ -33,7 +33,7 @@ import {
 	orchestratorHealth,
 	workerSessions,
 } from "../types/workspace";
-import { type Task, type TaskGates, reviewGateState, taskLane, workerTasks } from "../lib/crew";
+import { type Task, type TaskGates, crewChipState, reviewGateState, taskLane, workerTasks } from "../lib/crew";
 import { useTaskGates } from "../hooks/useTaskGates";
 import { CrewStrip } from "./CrewStrip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
@@ -864,6 +864,11 @@ function SessionCard({
 	const Icon = holderGlyph?.Icon ?? col.Icon;
 	const filled = holderGlyph?.filled ?? col.filled;
 	const statusText = lane.note !== "" ? lane.note : (holderGlyph?.label ?? statusGlyph(session).label);
+	// dev is asleep because it handed the turn over, not because the task stalled.
+	const batonHeldByAnother =
+		task.isCrew &&
+		session.isSuspended &&
+		task.members.some((m) => m.id !== session.id && crewChipState(m) === "working");
 	const prSummaries0 = useSessionScmSummary(session.id).data;
 	const review = gates?.review ?? reviewGateState(prSummaries0 ?? []);
 	const issueId = canonicalTrackerIssueId(session.issueId);
@@ -943,7 +948,12 @@ function SessionCard({
 							{isMergeSuspended(session) ? (
 								<MergeSuspendChip session={session} />
 							) : (
-								<IdleStatusChip session={session} />
+								// "Paused - open to resume" is a fact about a session, and on a
+								// crew card it would be read as a fact about the TASK - which is
+								// not paused at all while its other member is running. The crew
+								// strip already says which member is asleep, in the place where
+								// per-member facts live.
+								!batonHeldByAnother && <IdleStatusChip session={session} />
 							)}
 							<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
 								{agentLabel(session.provider)}
