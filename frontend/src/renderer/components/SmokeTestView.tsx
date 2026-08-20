@@ -1531,6 +1531,10 @@ function RetiredSection({
 					display: "flex",
 					alignItems: "center",
 					gap: 8,
+					// The caption drops to its own line on a narrow rail rather than
+					// interleaving with the label mid-phrase.
+					flexWrap: "wrap",
+					rowGap: 2,
 					background: "transparent",
 					border: "none",
 					padding: "6px 2px",
