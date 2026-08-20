@@ -143,6 +143,20 @@ func (f *fakeStore) PurgeSession(_ context.Context, id domain.SessionID) error {
 	return nil
 }
 
+// SetSessionCrew mirrors the real store: the sole writer of the crew columns,
+// leaving every other field on the row untouched.
+func (f *fakeStore) SetSessionCrew(_ context.Context, id, crewID domain.SessionID, role domain.CrewRole, updatedAt time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	rec.CrewID = crewID
+	rec.CrewRole = role
+	rec.UpdatedAt = updatedAt
+	f.sessions[id] = rec
+	return true, nil
+}
+
 type fakeLCM struct {
 	store     *fakeStore
 	completed int

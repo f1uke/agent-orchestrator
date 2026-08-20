@@ -50,6 +50,20 @@ type SpawnConfig struct {
 	// mechanical task is authorized to skip the process skills) and is persisted on
 	// the session. Empty resolves to standard (full ceremony) via WithDefault.
 	TaskSize domain.TaskSize
+	// CrewOf and CrewRole spawn this session as an ADDITIONAL member of an
+	// existing task rather than as a task of its own: it joins the named dev
+	// session on its branch, in its worktree, as a second long-lived agent.
+	//
+	// This is the deliberate, non-default seam for the crew capability. It is
+	// reachable only from Go — no CLI flag, no HTTP route, no DTO — so `ao spawn`
+	// still creates exactly one session for every task size and nothing a human
+	// touches can form a crew by accident. Leave both zero for every ordinary
+	// spawn.
+	//
+	// CrewOf names the DEV member. CrewRole must be a non-dev role (dev is the
+	// session being joined, and one-dev-per-crew is a database invariant).
+	CrewOf   domain.SessionID
+	CrewRole domain.CrewRole
 }
 
 // TodoSpecPatch carries the editable fields of a prepared TODO. A nil pointer

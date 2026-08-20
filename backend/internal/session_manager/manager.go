@@ -52,6 +52,12 @@ var (
 	// ErrNotTerminal means a delete was requested for a session that is not
 	// finished (neither merged nor terminated). The API maps it to 409.
 	ErrNotTerminal = errors.New("session: not terminal")
+	// ErrInvalidCrew means a crew spawn named a dev session that cannot take a
+	// crew member (missing, terminated, an orchestrator, or itself a subordinate),
+	// or asked for a role that is not a valid non-dev role. Crews are formed only
+	// through the Go seam, so this is a programming error rather than user input;
+	// it is a sentinel so a test can assert the refusal instead of a string.
+	ErrInvalidCrew = errors.New("session: invalid crew")
 )
 
 // Env vars a spawned process reads to learn who it is.
@@ -132,6 +138,12 @@ type Store interface {
 	// PurgeSession hard-deletes a session row and its cascading dependents,
 	// regardless of state. Callers gate on terminal status; the branch is kept.
 	PurgeSession(ctx context.Context, id domain.SessionID) error
+	// SetSessionCrew records which CREW a session belongs to and what it is for.
+	// crewID is the dev member's session id, carried by every member including
+	// dev; an empty id with an empty role returns the session to SOLO. It is the
+	// sole writer of those columns, so the full-row UpdateSession above can never
+	// blank a crew. ok=false means the session id does not exist.
+	SetSessionCrew(ctx context.Context, id, crewID domain.SessionID, role domain.CrewRole, updatedAt time.Time) (ok bool, err error)
 }
 
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
@@ -361,6 +373,24 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		return domain.SessionRecord{}, fmt.Errorf("spawn: prompt: %w", err)
 	}
 
+	// A CREW spawn joins an existing task instead of starting one: validate the
+	// dev member and inherit its branch BEFORE seeding, so an invalid crew never
+	// leaves a row behind, and so the worktree lookup downstream resolves to dev's
+	// existing tree rather than cutting a second one. Zero for every ordinary
+	// spawn, which is every spawn a human can make.
+	var crewDev domain.SessionRecord
+	if cfg.CrewOf != "" {
+		dev, err := m.resolveCrewDev(ctx, cfg.CrewOf, cfg.CrewRole)
+		if err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
+		}
+		crewDev = dev
+		cfg.Branch = dev.Metadata.Branch
+		cfg.BaseBranch = dev.BaseBranch
+		cfg.PRTarget = dev.PRTarget
+		cfg.AutoNameBranch = false
+	}
+
 	// Resolve the branch pair ONCE, before seeding, so the row records the same
 	// values materialization acts on. Leaving these to be re-derived downstream
 	// is what made a session's target branch unknowable.
@@ -372,7 +402,18 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	}
 	// Materialize the freshly-seeded row: a hard failure deletes the seed
 	// outright (keepTodo=false) so it never lingers as a terminated orphan.
-	return m.materialize(ctx, project, cfg, rec.ID, prompt, systemPrompt, false)
+	out, err := m.materialize(ctx, project, cfg, rec.ID, prompt, systemPrompt, false)
+	if err != nil || cfg.CrewOf == "" {
+		return out, err
+	}
+	// The member exists and is running in dev's worktree: only now is there a
+	// crew to record. Writing it earlier would leave dev flagged as a crew owner
+	// after a spawn that failed part-way, and dev would then refuse to free its
+	// own worktree waiting for a member that never launched.
+	if err := m.recordCrew(ctx, crewDev, out.ID, cfg.CrewRole); err != nil {
+		return domain.SessionRecord{}, err
+	}
+	return m.getRecord(ctx, out.ID)
 }
 
 // materialize runs the branch → worktree → provision → agent-prep → runtime →
@@ -437,10 +478,16 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 
 	// Per-project workspace provisioning: symlink shared files, then run any
 	// post-create commands (e.g. `pnpm install`) before the agent launches.
-	if err := m.provisionWorkspace(ctx, project, ws.Path); err != nil {
-		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
-		disposeSeed()
-		return domain.SessionRecord{}, fmt.Errorf("spawn %s: provision: %w", id, err)
+	//
+	// A CREW member skips it: the tree it joined was provisioned when dev was
+	// spawned, and re-running post-create commands would fire an install into a
+	// worktree a live agent is working in.
+	if cfg.CrewOf == "" {
+		if err := m.provisionWorkspace(ctx, project, ws.Path); err != nil {
+			m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+			disposeSeed()
+			return domain.SessionRecord{}, fmt.Errorf("spawn %s: provision: %w", id, err)
+		}
 	}
 
 	agent, ok := m.agents.Agent(cfg.Harness)
@@ -482,7 +529,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
 		SessionID:     id,
 		ProjectID:     cfg.ProjectID,
-		Branch:        ws.Branch,
+		Branch:        runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
 		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, cfg.Kind, project.Config.Env),
@@ -1274,7 +1321,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
 		SessionID:     rec.ID,
 		ProjectID:     rec.ProjectID,
-		Branch:        ws.Branch,
+		Branch:        runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
 		Env:           m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, project.Config.Env),
