@@ -696,14 +696,52 @@ func TestQADefault_MayDriveAnyCaseAndJudgeNoHumanOne(t *testing.T) {
 	}
 }
 
+// TestCrewProtocol_DevIsToldWhatSummonsItsQA. dev's system prompt is fixed when
+// its runtime launches, and under lazy creation the crew does not exist then -
+// so the block has to be true BOTH before and after the join, and it has to name
+// the event, because that event is something dev does.
+func TestCrewProtocol_DevIsToldWhatSummonsItsQA(t *testing.T) {
+	dev := CrewProtocol("dev")
+	for _, want := range []string{
+		"You are working this task ALONE right now",
+		"AO creates a qa the first time you touch the app's runtime",
+		"ao sim",
+		"ao preview",
+		// It is an observation, not a request: dev must not treat it as a decision
+		// about its own work, which is the incentive problem the design rejected.
+		"That is an observation, not a request",
+		// And what changes when it happens.
+		"both running at once",
+	} {
+		if !strings.Contains(dev, want) {
+			t.Fatalf("crew dev is not told what creates its qa: missing %q:\n%s", want, dev)
+		}
+	}
+	// qa's opening is unchanged in substance: by the time a qa exists, dev has
+	// been working for a while and is still working.
+	qa := CrewProtocol("qa")
+	if !strings.Contains(qa, "you are both running right now") {
+		t.Fatalf("qa is not told its crewmate is live:\n%s", qa)
+	}
+	if strings.Contains(qa, "AO creates a qa the first time") {
+		t.Fatalf("qa was handed dev's account of how it got here:\n%s", qa)
+	}
+}
+
 // MISSING 3, layer 1 - dev's prompt was SILENT about the checklist, and silence
 // loses an argument it is not present for: every brief that asked dev for smoke
-// cases was obeyed. The negative turns that override into a contradiction the
-// human can see in dev's own output.
+// cases was obeyed. The block turns that override into a contradiction the human
+// can see in dev's own output.
+//
+// Under lazy creation it is a WINDOW rather than a flat prohibition, and the
+// window is the one AO enforces: dev owns the list until a qa exists - which on a
+// task that never touches a runtime surface is for ever - and loses it the moment
+// one does.
 func TestCrewProtocol_DevIsToldTheChecklistIsQAs(t *testing.T) {
 	dev := CrewProtocol("dev")
 	for _, want := range []string{
-		"do not author or edit the smoke checklist",
+		"The checklist is yours only while you have no qa",
+		"From that moment do not author or edit the checklist",
 		// It names the enforcement, so dev knows this is not a preference.
 		"REFUSED by AO",
 		// The load-bearing clause: a brief asking for cases is named as stale,
@@ -718,7 +756,7 @@ func TestCrewProtocol_DevIsToldTheChecklistIsQAs(t *testing.T) {
 	}
 	// qa is the owner, so the negative must not reach it - and a SOLO worker is
 	// in no crew at all, so it renders nothing.
-	if strings.Contains(CrewProtocol("qa"), "The checklist is qa's, not yours") {
+	if strings.Contains(CrewProtocol("qa"), "The checklist is yours only while you have no qa") {
 		t.Fatal("qa was handed dev's negative about the checklist")
 	}
 	if CrewProtocol("") != "" {

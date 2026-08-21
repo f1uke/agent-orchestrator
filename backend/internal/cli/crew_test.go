@@ -190,7 +190,7 @@ func TestSpawnHelp_SaysWhatTaskSizeCostsNow(t *testing.T) {
 // what actually happened: the member exists and is ASLEEP. Getting that wrong -
 // letting a person think they just added a second running agent - is the one
 // misunderstanding this command can cause.
-func TestCrewAdd_PostsToTheMembersRouteAndSaysTheMemberIsAsleep(t *testing.T) {
+func TestCrewAdd_PostsToTheMembersRouteAndSaysTheMemberIsWorking(t *testing.T) {
 	cfg := setConfigEnv(t)
 	var paths []string
 	var bodies []string
@@ -205,7 +205,7 @@ func TestCrewAdd_PostsToTheMembersRouteAndSaysTheMemberIsAsleep(t *testing.T) {
 		bodies = append(bodies, string(raw))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-2","session":{"id":"demo-9","isSuspended":true,"crew":{"id":"demo-2","role":"qa"}}}`)
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-2","session":{"id":"demo-9","crew":{"id":"demo-2","role":"qa","joinReason":"manual"}}}`)
 	}))
 	t.Cleanup(srv.Close)
 	writeRunFileFor(t, cfg, srv)
@@ -226,8 +226,8 @@ func TestCrewAdd_PostsToTheMembersRouteAndSaysTheMemberIsAsleep(t *testing.T) {
 	if !strings.Contains(out, "demo-9") {
 		t.Fatalf("output does not name the new member: %q", out)
 	}
-	if !strings.Contains(out, "asleep") {
-		t.Fatalf("output does not say the member is asleep: %q", out)
+	if !strings.Contains(out, "working") {
+		t.Fatalf("output does not say the member is already working: %q", out)
 	}
 }
 

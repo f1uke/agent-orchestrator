@@ -71,7 +71,8 @@ type SessionService interface {
 	// idle-close countdown; the UI calls it when the user opens/selects a session.
 	Wake(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	// AttachCrewMember adds a member in the given role to the task this session
-	// belongs to, born suspended. It is how a task spawned solo gains a qa.
+	// belongs to, and starts it. It is how a human adds a qa to a task AO did not
+	// give one to.
 	AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error)
 	// SendToCrewmate delivers a message addressed by ROLE - the only address a
 	// crew member can rely on, since a crew is formed after dev's runtime is
@@ -784,14 +785,15 @@ func (c *SessionsController) wake(w http.ResponseWriter, r *http.Request) {
 
 // crewAddMember attaches a member to the task this session belongs to.
 //
-// It is a CREATE, and that is the whole point of it existing: the design offers
-// "add qa to a solo task" as a wake, which is true only for a task whose qa was
-// formed at spawn. A `mechanical` task - and every task older than the crew -
-// never had one, so there is nothing to wake and something to make.
+// It is a CREATE, and that is the whole point of it existing: no task has a qa
+// until something creates one. AO does it by observing dev (a simulator claim, an
+// `ao preview`); this route is how a HUMAN does it - for a `mechanical` task,
+// which is never eligible automatically, or for a backend-only one that never
+// trips the trigger.
 //
-// The new member is born SUSPENDED: a row and an id, no runtime and no terminal.
-// dev is not disturbed, so the task keeps running straight through this, and
-// there is no instant at which two members of the crew are awake.
+// The new member arrives WORKING, in dev's worktree. dev is not disturbed: the
+// task keeps running straight through this, with both members awake at once,
+// which is the shape.
 func (c *SessionsController) crewAddMember(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/members")
@@ -1329,7 +1331,7 @@ func sessionCrew(s domain.Session) *SessionCrew {
 	// A runtime handle is written by MarkSpawned on the first launch and never
 	// cleared, so it is the durable "this member has been up at least once" fact -
 	// unlike the activity state, which a suspend leaves looking like a fresh row.
-	return &SessionCrew{ID: s.CrewID, Role: s.CrewRole, HasRun: s.Metadata.RuntimeHandleID != ""}
+	return &SessionCrew{ID: s.CrewID, Role: s.CrewRole, HasRun: s.Metadata.RuntimeHandleID != "", JoinReason: s.CrewJoinReason}
 }
 
 // sessionTermination builds the curated ending wire object. It returns nil (so

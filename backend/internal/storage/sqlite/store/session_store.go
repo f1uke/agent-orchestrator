@@ -393,6 +393,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		TaskSize:           domain.TaskSize(row.TaskSize),
 		CrewID:             domain.SessionID(row.CrewID),
 		CrewRole:           domain.CrewRole(row.CrewRole),
+		CrewJoinReason:     domain.CrewJoinReason(row.CrewJoinReason),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -465,6 +466,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		TaskSize:                  string(rec.TaskSize.WithDefault()),
 		CrewID:                    string(rec.CrewID),
 		CrewRole:                  string(rec.CrewRole),
+		CrewJoinReason:            string(rec.CrewJoinReason),
 		TerminationSource:         rec.Termination.Source,
 		TerminationReason:         rec.Termination.Reason,
 		TerminationLastState:      rec.Termination.LastState,

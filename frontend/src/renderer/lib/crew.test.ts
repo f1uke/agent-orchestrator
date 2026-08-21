@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { canAttachRole, crewChipState, neverStarted, reviewGateState, taskLane, tasksFrom, workerTasks } from "./crew";
+import {
+	canAttachRole,
+	crewChipState,
+	crewJoinLine,
+	neverStarted,
+	reviewGateState,
+	taskLane,
+	tasksFrom,
+	workerTasks,
+} from "./crew";
 import type { SmokeProgress } from "./smoke-test";
 import { attentionZone, type SessionStatus, type WorkspaceSession } from "../types/workspace";
 
@@ -24,7 +33,11 @@ const running = { state: "active", lastActivityAt: "2026-08-21T00:00:00Z" } as c
 /** The activity reading of a member that has ENDED its turn and sits at its prompt. */
 const parked = { state: "parked", lastActivityAt: "2026-08-21T00:00:00Z" } as const;
 
-/** dev + a qa asleep beside it, in the state a `standard` spawn leaves them. */
+/**
+ * dev + the qa the trigger created beside it. `hasRun: false` is the state a
+ * member is in only when its start failed, and several tests below start there
+ * deliberately.
+ */
 function crew(devOver: Partial<WorkspaceSession> = {}, qaOver: Partial<WorkspaceSession> = {}) {
 	const dev = session("demo-1", {
 		activity: running,
@@ -478,5 +491,71 @@ describe("canAttachRole", () => {
 		// Not a task at all: an orchestrator shares one worktree with every other
 		// orchestrator of its project.
 		expect(canAttachRole(soloTask({ kind: "orchestrator" }))).toBe(false);
+	});
+});
+
+describe("taskLane — a task with NO qa is a pass, not a pending", () => {
+	// Lazy creation makes this the common shape, not an edge case: a change with
+	// nothing to drive never gets a qa, so a smoke gate that waited for a verdict
+	// nobody will ever record would hold it out of Ready to merge for ever.
+	const mergeable = { status: "mergeable" as SessionStatus, statusReason: "pr_pipeline" as const };
+
+	it("reads ready to merge with no qa and no checklist at all", () => {
+		const dev = session("demo-1", { ...mergeable, activity: running });
+		const lane = taskLane({ dev, members: [dev], isCrew: false }, { review: "approved" });
+		expect(lane.zone).toBe("merge");
+		expect(lane.note).toBe("");
+	});
+
+	it("still reads ready when the checklist loaded and is empty", () => {
+		const dev = session("demo-1", { ...mergeable, activity: running });
+		const lane = taskLane({ dev, members: [dev], isCrew: false }, { review: "approved", smoke: smoke() });
+		expect(lane.zone).toBe("merge");
+	});
+
+	it("is what a standard task reads before its qa exists", () => {
+		// dev carries no crew columns until something creates a qa, so the board
+		// sees exactly one session and lanes it exactly as it lanes a solo one.
+		const dev = session("demo-1", { ...mergeable, activity: running, taskSize: "standard" });
+		const [task] = workerTasks([dev]);
+		expect(task.isCrew).toBe(false);
+		expect(taskLane(task, { review: "not run" }).zone).toBe("merge");
+	});
+
+	it("goes back one lane when the qa finally appears, which is the gate gaining an input", () => {
+		const before = session("demo-1", { ...mergeable, activity: running });
+		expect(taskLane({ dev: before, members: [before], isCrew: false }, { review: "approved" }).zone).toBe("merge");
+
+		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } });
+		const after = taskLane(
+			{ dev, qa, members: [dev, qa], isCrew: true },
+			{ review: "approved", smoke: smoke({ total: 2, pending: 2 }) },
+		);
+		expect(after.zone).toBe("pending");
+		expect(after.note).toBe("qa · Not played yet");
+	});
+});
+
+describe("crewJoinLine", () => {
+	it("names what dev did, so a card that changed shape explains itself", () => {
+		const { dev, qa } = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } });
+		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · dev opened the simulator");
+	});
+
+	it("distinguishes a preview from a device", () => {
+		const { dev, qa } = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "preview" } });
+		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · dev opened a preview");
+	});
+
+	it("names the person when a person asked", () => {
+		const { dev, qa } = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "manual" } });
+		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · you added it");
+	});
+
+	it("says nothing for a solo task, or for a member whose reason was never recorded", () => {
+		const dev = session("demo-1");
+		expect(crewJoinLine({ dev, members: [dev], isCrew: false })).toBeUndefined();
+		const pair = crew();
+		expect(crewJoinLine({ dev: pair.dev, qa: pair.qa, members: pair.sessions, isCrew: true })).toBeUndefined();
 	});
 });

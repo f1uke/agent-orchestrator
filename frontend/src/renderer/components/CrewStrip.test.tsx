@@ -118,4 +118,29 @@ describe("CrewStrip", () => {
 		expect(document.querySelector('[data-crew-chip="qa"]')).toHaveAttribute("data-crew-chip-state", "done");
 		expect(document.querySelector('[data-crew-gate="review"]')).toHaveAttribute("data-crew-gate-state", "changes");
 	});
+
+	it("says how the task gained its qa, so a card that changed shape explains itself", () => {
+		render(
+			<CrewStrip
+				task={crewTask({ crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } })}
+				review="not run"
+				onOpenMember={() => {}}
+			/>,
+		);
+		const line = document.querySelector("[data-crew-join]");
+		expect(line).toHaveAttribute("data-crew-join", "sim");
+		expect(line).toHaveTextContent("qa joined · dev opened the simulator");
+	});
+
+	it("says nothing about joining on a solo task, or when the reason was never recorded", () => {
+		const dev = member("demo-9", { taskSize: "standard" });
+		const { unmount } = render(
+			<CrewStrip task={{ dev, members: [dev], isCrew: false }} review="not run" onOpenMember={() => {}} />,
+		);
+		expect(document.querySelector("[data-crew-join]")).toBeNull();
+		unmount();
+
+		render(<CrewStrip task={crewTask()} review="not run" onOpenMember={() => {}} />);
+		expect(document.querySelector("[data-crew-join]")).toBeNull();
+	});
 });

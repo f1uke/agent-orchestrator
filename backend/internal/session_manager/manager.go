@@ -468,10 +468,10 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		return out, err
 	}
 	if cfg.CrewOf == "" {
-		// An ordinary spawn: give the new task the crew its --task-size asks for.
-		// `mechanical` (and anything that is not a plain single-repo worker) comes
-		// back untouched, which is what keeps a solo task solo.
-		return m.formCrew(ctx, project, out), nil
+		// An ordinary spawn creates ONE session, whatever its --task-size says. A
+		// `standard` task is dev alone until dev touches a runtime surface, and a
+		// task that never touches one is dev alone for ever (crew_join.go).
+		return out, nil
 	}
 	// The member exists and is running in dev's worktree: only now is there a
 	// crew to record. Writing it earlier would leave dev flagged as a crew owner
@@ -700,10 +700,9 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err != nil {
 		return out, err
 	}
-	// A TODO carries its --task-size through to Start (it is replayed into cfg
-	// above), so a standard task staged as a TODO forms its crew when it starts,
-	// exactly as it would have at spawn.
-	return m.formCrew(ctx, project, out), nil
+	// A started TODO is an ordinary spawn: one session, and the crew its work
+	// turns out to need, if it needs one at all (crew_join.go).
+	return out, nil
 }
 
 // UpdateTodoSpec persists edits to a prepared TODO's spec (name, agent, base/new
@@ -2834,29 +2833,31 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	// placed here (not in the editable base) so it survives a cleared/overridden
 	// base, same as the reference convention.
 	if kind == domain.KindWorker {
-		// The smoke checklist is the CHECKLIST's owner's block. On a crew that is
-		// qa - it authors, runs and retires the cases - so dev is not handed a
-		// protocol for a list it does not keep. A SOLO worker keeps it, because
-		// there is nobody else to keep it.
-		if crewRole != domain.CrewRoleDev {
-			base += prompts.SmokeChecklistProtocol()
-		}
+		// The smoke checklist protocol goes to EVERY worker again, dev included.
+		// It was taken off a crew's dev when a crew was formed at spawn, on the
+		// grounds that qa owned the list. Under lazy creation dev owns it until a
+		// qa exists - and on a task that never touches a runtime surface, that is
+		// for ever - so withholding it would silently leave a whole class of
+		// standard tasks with no checklist and nobody able to write one. dev's crew
+		// block (CrewProtocol) carries the handover instead, in the same window AO
+		// enforces: `ao smoke set` from a crew's dev is refused once a qa exists.
+		base += prompts.SmokeChecklistProtocol()
 		// A project that targets iOS has a device its workers can look at. Only
-		// they are told: the orchestrator dispatches rather than drives. On a crew
-		// the device is qa's instrument, so dev gets the short "hand it to qa"
-		// form instead of the driving catalog.
+		// they are told: the orchestrator dispatches rather than drives. A crew's
+		// dev keeps the whole catalog - it is alone until it claims, and CLAIMING
+		// IS WHAT CREATES ITS QA, so telling it not to would leave an iOS task
+		// with no qa for ever - plus the short note on what changes when it does.
 		if cfg.HasIOSSimulator {
-			if crewRole == domain.CrewRoleDev {
-				base += prompts.SimulatorGuidanceCrewDev()
-			} else {
-				base += prompts.SimulatorGuidance()
+			base += prompts.SimulatorGuidance()
+			switch crewRole {
+			case domain.CrewRoleDev:
+				base += prompts.SimulatorHandoverToQA()
+			case domain.CrewRoleQA:
 				// The record -> flow -> retire loop is qa's alone: it is how a
 				// human's ONE play becomes a committed flow and a retired case.
 				// A solo worker does not get it - there is nobody to ask for that
 				// play, and its prompt stays byte-for-byte what it was.
-				if crewRole == domain.CrewRoleQA {
-					base += prompts.RecordedFlowLoop()
-				}
+				base += prompts.RecordedFlowLoop()
 			}
 		}
 		// The task-size directive right-sizes ceremony: a mechanical worker is

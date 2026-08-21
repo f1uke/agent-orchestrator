@@ -2,6 +2,7 @@ import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import {
 	type AttentionZone,
 	type CrewRole,
+	type SessionCrew,
 	type WorkspaceSession,
 	attentionZone,
 	isOrchestratorSession,
@@ -13,11 +14,17 @@ import type { SmokeProgress } from "./smoke-test";
  * A TASK, and the lane it belongs in.
  *
  * A task is one worktree, one branch, one pull request - and one or two
- * long-lived agents. `mechanical` gets dev alone; `standard`/`deep` get dev plus
- * a qa that writes, runs and records the tests. The board draws one card per
- * TASK, never one per session, so this file is what turns a flat session list
- * into tasks and answers the two questions a card asks: which lane am I in, and
- * what is each member doing.
+ * long-lived agents. Every task starts as dev alone. It GAINS a qa when the work
+ * turns out to need one - when dev first drives the app, or when a human asks -
+ * and a task with nothing to exercise never gains one at all. The board draws one
+ * card per TASK, never one per session, so this file is what turns a flat session
+ * list into tasks and answers the two questions a card asks: which lane am I in,
+ * and what is each member doing.
+ *
+ * Because membership CHANGES mid-task, two things follow and both are deliberate:
+ * a card can gain a chip while you are looking at it, and it can move BACKWARD
+ * one lane when it does (the merge gate gains a real input it did not have). The
+ * join line - {@link crewJoinLine} - is what makes that legible.
  *
  * Everything here is keyed on the presence of `session.crew`. A solo session
  * carries none, so every function below answers for it exactly as the app
@@ -96,8 +103,10 @@ export function crewChipState(member: WorkspaceSession): CrewChipState {
 
 /**
  * Whether this member has NEVER RUN: it is on the task and nothing has been
- * spent on it. A crew's qa is created as a row - dev's branch, dev's worktree,
- * its first turn already written - and stays that way until somebody starts it.
+ * spent on it. A member is created and started in one breath now, so this is no
+ * longer the ordinary state of a fresh qa - it is what is left when that START
+ * FAILED, which is deliberately not fatal: the member is on the task, visible,
+ * and opening its card starts it.
  *
  * It is what the card and the pane read instead of a sleep state, because
  * "asleep" and "never started" answer different questions and only one of them
@@ -146,6 +155,10 @@ function isWorking(member: WorkspaceSession): boolean {
  * Whether this task can still GAIN a member - which is what decides whether the
  * card offers `+ qa` at all.
  *
+ * It is offered on every solo task, which is now every task that has not needed
+ * a qa yet - a card gaining a `+ qa` button is not a sign that something went
+ * wrong with its crew.
+ *
  * An affordance that can only fail is worse than no affordance, so the three
  * refusals the daemon would give are asked here first:
  *
@@ -166,6 +179,39 @@ export function canAttachRole(task: Task): boolean {
 	if (dev.status === "todo") return false;
 	return crewChipState(dev) !== "done";
 }
+
+/**
+ * `qa joined · dev opened the simulator` - one sentence, under the crew strip.
+ *
+ * It exists because the card can CHANGE SHAPE while somebody is looking at it,
+ * and once it does, the merge gate has an input it did not have a moment ago: a
+ * task reading READY TO MERGE can drop to IN REVIEW. That is the gate working,
+ * not a glitch, and this line is the difference between those two readings.
+ *
+ * It is DERIVED, not stored: there is exactly one transition (absent -> present,
+ * one way, once), so the daemon records one small enum on the member's row and
+ * everything else - when, and to which task - is already on the record.
+ *
+ * Undefined for a solo task and for a member created before AO recorded the
+ * reason: saying nothing is the honest answer, and a card with no crew has
+ * nothing to explain.
+ */
+export function crewJoinLine(task: Task): string | undefined {
+	const reason = task.qa?.crew?.joinReason;
+	if (!reason) return undefined;
+	return `qa joined · ${CREW_JOIN_CAUSE[reason]}`;
+}
+
+/**
+ * What each reason SAYS. Two of them name what dev did, because that is the
+ * event and it is also the first thing worth looking at; the third names the
+ * person, because a human asking is its own explanation.
+ */
+const CREW_JOIN_CAUSE: Record<NonNullable<SessionCrew["joinReason"]>, string> = {
+	sim: "dev opened the simulator",
+	preview: "dev opened a preview",
+	manual: "you added it",
+};
 
 /**
  * The review GATE - not a teammate.
@@ -305,6 +351,12 @@ function roleNote(member: WorkspaceSession): string {
  */
 export function taskLane(task: Task, gates: TaskGates): TaskLane {
 	const { dev, qa, members } = task;
+	// NO QA IS A PASS, NOT A PENDING - and under lazy creation this is the branch
+	// most tasks live in, not an edge case. A task that never needs a qa never
+	// gets one, so a smoke gate that waited for a verdict nobody will ever record
+	// would hold every backend change out of Ready to merge for ever. The absent
+	// member is simply not an input: the task reads exactly as a solo task does,
+	// which is also what keeps the solo board byte-for-byte what it is today.
 	if (!qa) return { zone: attentionZone(dev), note: "", holder: dev };
 
 	// The terminal lanes, which is what "and the task is not over" means below: a

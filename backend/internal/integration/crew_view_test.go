@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -25,8 +26,24 @@ import (
 // These tests drive the REAL manager, lifecycle reducer, SQLite store and git
 // worktree, and they call the same service method the endpoint calls.
 
-// setupCrew spawns a standard task, which forms dev + a born-suspended qa.
+// setupCrew spawns a standard task and makes it gain its qa the way a real one
+// does: dev touches the app's runtime. The member it produces is AWAKE, which is
+// what the trigger creates.
 func setupCrew(t *testing.T, s *crewStack) (dev, qa domain.SessionRecord) {
+	t.Helper()
+	return setupCrewWithStartFailure(t, s, nil)
+}
+
+// setupCrewNeverStarted produces the one state a crew member can still be in
+// without ever having run: the trigger created it and its LAUNCH failed. Starting
+// is best effort - the member is on the task, visible and openable - and this is
+// the state the glance rule below is about.
+func setupCrewNeverStarted(t *testing.T, s *crewStack) (dev, qa domain.SessionRecord) {
+	t.Helper()
+	return setupCrewWithStartFailure(t, s, errors.New("stub: no tmux for the new member"))
+}
+
+func setupCrewWithStartFailure(t *testing.T, s *crewStack, startErr error) (dev, qa domain.SessionRecord) {
 	t.Helper()
 	ctx := context.Background()
 	devRec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
@@ -36,14 +53,24 @@ func setupCrew(t *testing.T, s *crewStack) (dev, qa domain.SessionRecord) {
 	if err != nil {
 		t.Fatalf("spawn dev: %v", err)
 	}
+	if _, ok, _ := s.qaOf(ctx, devRec.ID); ok {
+		t.Fatal("a standard spawn created a qa; it must start as dev alone")
+	}
+	// createErr fails exactly the next Create, which is the new member's launch.
+	s.rt.createErr = startErr
+	s.mgr.NoteRuntimeTouch(ctx, devRec.ID, domain.CrewJoinSim)
+
 	qaRec, ok, err := s.qaOf(ctx, devRec.ID)
 	if err != nil || !ok {
-		t.Fatalf("the standard spawn formed no crew: %v", err)
+		t.Fatalf("touching the runtime created no qa: %v", err)
 	}
-	if !qaRec.IsSuspended {
-		t.Fatal("qa was not born suspended")
+	if startErr == nil && qaRec.IsSuspended {
+		t.Fatal("qa was created asleep; there is nothing left to start it")
 	}
-	return devRec, qaRec
+	if startErr != nil && !qaRec.NeverStarted() {
+		t.Fatalf("qa carries a runtime handle %q after a failed start", qaRec.Metadata.RuntimeHandleID)
+	}
+	return s.record(t, devRec.ID), qaRec
 }
 
 // qaOf finds the qa member of dev's crew.
@@ -66,7 +93,7 @@ func (s *crewStack) qaOf(ctx context.Context, dev domain.SessionID) (domain.Sess
 func TestCrewView_OpeningQAAfterDevEndsDoesNotStartIt(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, qa := setupCrew(t, s)
+	dev, qa := setupCrewNeverStarted(t, s)
 
 	// The merge reducer's own call: all PRs merged -> the worker is done.
 	if err := s.lcm.MarkTerminated(ctx, dev.ID, domain.TerminationCauseWorkComplete); err != nil {
@@ -81,8 +108,9 @@ func TestCrewView_OpeningQAAfterDevEndsDoesNotStartIt(t *testing.T) {
 	if got := s.record(t, qa.ID); got.Awake() {
 		t.Fatalf("VIEWING qa woke it (suspended=%v): nobody asked for qa's turn", got.IsSuspended)
 	}
-	if s.rt.created != 1 {
-		t.Fatalf("runtimes created = %d, want 1 (dev's): viewing qa launched an agent", s.rt.created)
+	// dev's launch, and the one that failed. Viewing qa must not add a third.
+	if s.rt.created != 2 {
+		t.Fatalf("runtimes created = %d, want 2 (dev's, and the failed start): viewing qa launched an agent", s.rt.created)
 	}
 }
 
@@ -92,7 +120,7 @@ func TestCrewView_OpeningQAAfterDevEndsDoesNotStartIt(t *testing.T) {
 func TestCrewView_OpeningANeverStartedMemberWhileTheOtherWorks(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, qa := setupCrew(t, s)
+	dev, qa := setupCrewNeverStarted(t, s)
 
 	if _, err := s.svc.Wake(ctx, qa.ID); err != nil {
 		t.Fatalf("opening a sleeping crew member's view must not error: %v", err)
@@ -113,7 +141,7 @@ func TestCrewView_OpeningANeverStartedMemberWhileTheOtherWorks(t *testing.T) {
 func TestCrewView_ASleepingMemberInASplitPaneStaysAsleep(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, qa := setupCrew(t, s)
+	dev, qa := setupCrewNeverStarted(t, s)
 	if err := s.lcm.MarkTerminated(ctx, dev.ID, domain.TerminationCauseWorkComplete); err != nil {
 		t.Fatalf("terminate dev: %v", err)
 	}
@@ -139,7 +167,7 @@ func TestCrewView_ASleepingMemberInASplitPaneStaysAsleep(t *testing.T) {
 func TestCrewView_AnExplicitStartBringsItUpBesideDev(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, qa := setupCrew(t, s)
+	dev, qa := setupCrewNeverStarted(t, s)
 
 	if _, err := s.svc.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("explicit start: %v", err)
@@ -200,15 +228,15 @@ func TestSolo_AnIdleSweptSessionStillWakesOnOpen(t *testing.T) {
 func TestCrewView_TheWakeIsAttributed(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, qa := setupCrew(t, s)
+	dev, qa := setupCrewNeverStarted(t, s)
 
 	// A fresh spawn was never asleep, so there is no wake to attribute.
 	if got := s.record(t, dev.ID); got.WokenBy != "" {
 		t.Fatalf("a fresh spawn recorded wokenBy=%q, want empty", got.WokenBy)
 	}
-	// A born-suspended qa is asleep the way anything with no process is asleep.
-	// What makes it different is that it has never RUN, which is on the row
-	// already: no runtime handle.
+	// A member whose start failed is asleep the way anything with no process is
+	// asleep. What makes it different is that it has never RUN, which is on the
+	// row already: no runtime handle.
 	if got := s.record(t, qa.ID); !got.NeverStarted() {
 		t.Fatalf("a born-suspended qa carries a runtime handle %q", got.Metadata.RuntimeHandleID)
 	}

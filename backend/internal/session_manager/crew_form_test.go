@@ -1,7 +1,6 @@
 package sessionmanager
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -31,10 +30,11 @@ func crewOf(t *testing.T, st *fakeStore, devID domain.SessionID) (domain.Session
 	return dev, qa
 }
 
-// TestSpawn_StandardFormsACrew is the switch being ON: a task whose size says it
-// wants a crew comes out as TWO sessions on ONE worktree, with dev holding the
-// slot and qa asleep beside it.
-func TestSpawn_StandardFormsACrew(t *testing.T) {
+// TestSpawn_StandardCreatesOneSession is lazy creation at the spawn seam: a
+// `standard` task is ALLOWED a qa, and still comes out as ONE session. Nothing
+// exists to be tested yet, so nothing is spent on testing it - and a task that
+// never touches a runtime surface stays exactly this shape for ever.
+func TestSpawn_StandardCreatesOneSession(t *testing.T) {
 	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeDeep, ""} {
 		t.Run(string(size)+"|", func(t *testing.T) {
 			m, st, rt, ws := newManager()
@@ -44,54 +44,14 @@ func TestSpawn_StandardFormsACrew(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Spawn: %v", err)
 			}
-			devRow, qa := crewOf(t, st, dev.ID)
-
-			if !devRow.CrewRole.IsDev() || devRow.CrewID != devRow.ID {
-				t.Fatalf("dev row role=%q crew=%q, want dev/%s", devRow.CrewRole, devRow.CrewID, devRow.ID)
+			if len(st.sessions) != 1 {
+				t.Fatalf("a %q spawn produced %d rows, want exactly 1", size, len(st.sessions))
 			}
-			if qa.CrewRole != domain.CrewRoleQA || qa.CrewID != devRow.ID {
-				t.Fatalf("qa row role=%q crew=%q, want qa/%s", qa.CrewRole, qa.CrewID, devRow.ID)
+			if dev.InCrew() {
+				t.Fatalf("a fresh spawn is already in a crew: crew=%q role=%q", dev.CrewID, dev.CrewRole)
 			}
-			// BORN SUSPENDED: a row and an id, and nothing else. The runtime and the
-			// workspace were touched exactly once - by dev.
-			if !qa.IsSuspended || qa.Awake() {
-				t.Fatalf("qa is not born suspended: suspended=%v awake=%v", qa.IsSuspended, qa.Awake())
-			}
-			if qa.Metadata.RuntimeHandleID != "" {
-				t.Fatalf("qa took a runtime handle %q; it must have no tmux at all", qa.Metadata.RuntimeHandleID)
-			}
-			if rt.created != 1 {
-				t.Fatalf("runtime created %d times, want 1 (dev only)", rt.created)
-			}
-			if ws.createCalls != 1 {
-				t.Fatalf("workspace created %d times, want 1 (the tree is shared)", ws.createCalls)
-			}
-			// One worktree, one branch: the share the whole design rests on.
-			if qa.Metadata.WorkspacePath != devRow.Metadata.WorkspacePath || qa.Metadata.Branch != devRow.Metadata.Branch {
-				t.Fatalf("qa is not in dev's tree: %q@%q vs %q@%q",
-					qa.Metadata.WorkspacePath, qa.Metadata.Branch, devRow.Metadata.WorkspacePath, devRow.Metadata.Branch)
-			}
-			// dev is still running. Forming the crew must not disturb it.
-			if devRow.IsSuspended || !devRow.Awake() {
-				t.Fatalf("forming the crew stood dev down: suspended=%v awake=%v", devRow.IsSuspended, devRow.Awake())
-			}
-			// qa has a turn waiting for it: a promptless worker cannot be relaunched
-			// at all (ErrNotResumable), so an empty prompt would make qa unwakeable.
-			if !strings.Contains(qa.Metadata.Prompt, "build the thing") {
-				t.Fatalf("qa's kickoff does not carry dev's brief:\n%s", qa.Metadata.Prompt)
-			}
-			// And the turn it is given ENDS somewhere: the run that stalled ended
-			// with qa's work done and dev never told, so the first turn qa reads
-			// names the handback and what it has to carry.
-			for _, want := range []string{
-				"ao send --crew dev --about",
-				"the commit you tested",
-				"what is left for the human",
-				"even if the answer is that there was nothing to exercise",
-			} {
-				if !strings.Contains(qa.Metadata.Prompt, want) {
-					t.Fatalf("qa's kickoff is missing the handback %q:\n%s", want, qa.Metadata.Prompt)
-				}
+			if rt.created != 1 || ws.createCalls != 1 {
+				t.Fatalf("spawn touched the world %d/%d times, want 1/1", rt.created, ws.createCalls)
 			}
 		})
 	}
@@ -136,66 +96,30 @@ func TestSpawn_OrchestratorNeverGetsACrew(t *testing.T) {
 	}
 }
 
-// TestStartTodo_FormsTheCrewItsSizeAsksFor: a task staged as a TODO carries its
-// size to Start, so it must come up with the same crew a direct spawn would give
-// it - and a mechanical TODO must still come up alone.
-func TestStartTodo_FormsTheCrewItsSizeAsksFor(t *testing.T) {
-	t.Run("standard", func(t *testing.T) {
-		m, st, _, _ := newManager()
-		todo, err := m.PrepareTodo(ctx, ports.SpawnConfig{
-			ProjectID: "mer", Kind: domain.KindWorker, Prompt: "staged work",
-			Harness: domain.HarnessClaudeCode, TaskSize: domain.TaskSizeStandard,
+// TestStartTodo_StartsOneSessionWhateverItsSize: starting a staged task is an
+// ordinary spawn, so it creates one session at every size. A qa arrives later or
+// not at all, exactly as it would have for a direct spawn.
+func TestStartTodo_StartsOneSessionWhateverItsSize(t *testing.T) {
+	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeMechanical} {
+		t.Run(string(size), func(t *testing.T) {
+			m, st, _, _ := newManager()
+			todo, err := m.PrepareTodo(ctx, ports.SpawnConfig{
+				ProjectID: "mer", Kind: domain.KindWorker, Prompt: "staged work",
+				Harness: domain.HarnessClaudeCode, TaskSize: size,
+			})
+			if err != nil {
+				t.Fatalf("PrepareTodo: %v", err)
+			}
+			if len(st.sessions) != 1 {
+				t.Fatalf("a staged TODO created %d rows, want 1 - nothing exists until it starts", len(st.sessions))
+			}
+			if _, err := m.StartTodo(ctx, todo.ID); err != nil {
+				t.Fatalf("StartTodo: %v", err)
+			}
+			if len(st.sessions) != 1 {
+				t.Fatalf("a started %q TODO is %d rows, want 1", size, len(st.sessions))
+			}
 		})
-		if err != nil {
-			t.Fatalf("PrepareTodo: %v", err)
-		}
-		if len(st.sessions) != 1 {
-			t.Fatalf("a staged TODO created %d rows, want 1 - nothing exists until it starts", len(st.sessions))
-		}
-		if _, err := m.StartTodo(ctx, todo.ID); err != nil {
-			t.Fatalf("StartTodo: %v", err)
-		}
-		_, qa := crewOf(t, st, todo.ID)
-		if !qa.IsSuspended {
-			t.Fatalf("a started TODO's qa is awake; it must be born suspended")
-		}
-	})
-	t.Run("mechanical", func(t *testing.T) {
-		m, st, _, _ := newManager()
-		todo, err := m.PrepareTodo(ctx, ports.SpawnConfig{
-			ProjectID: "mer", Kind: domain.KindWorker, Prompt: "staged tweak",
-			Harness: domain.HarnessClaudeCode, TaskSize: domain.TaskSizeMechanical,
-		})
-		if err != nil {
-			t.Fatalf("PrepareTodo: %v", err)
-		}
-		if _, err := m.StartTodo(ctx, todo.ID); err != nil {
-			t.Fatalf("StartTodo: %v", err)
-		}
-		if len(st.sessions) != 1 {
-			t.Fatalf("a mechanical TODO started as %d rows, want 1", len(st.sessions))
-		}
-	})
-}
-
-// TestFormCrew_IsBestEffort: dev is already running with a worktree by the time
-// the crew is formed, so a failure to add qa must leave a working solo task
-// behind rather than rolling the whole spawn back.
-func TestFormCrew_IsBestEffort(t *testing.T) {
-	m, st, _, _ := newManager()
-	st.failCreateAfter = 1 // dev's row lands; qa's create explodes
-
-	rec, err := m.Spawn(ctx, ports.SpawnConfig{
-		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "work", TaskSize: domain.TaskSizeStandard,
-	})
-	if err != nil {
-		t.Fatalf("Spawn must survive a crew that could not form: %v", err)
-	}
-	if rec.InCrew() {
-		t.Fatalf("dev claims a crew that was never formed: crew=%q role=%q", rec.CrewID, rec.CrewRole)
-	}
-	if len(st.sessions) != 1 {
-		t.Fatalf("a failed crew left %d rows behind, want 1", len(st.sessions))
 	}
 }
 
@@ -211,8 +135,6 @@ func TestWakeCrewMember_StartsItWithoutStoppingDev(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	_, qa := crewOf(t, st, dev.ID)
-
 	// dev's agent is genuinely running: the wake routes probe a crewmate that
 	// claims to be awake and put a CORPSE to sleep, which is the half of the old
 	// guard that survives.
@@ -220,6 +142,14 @@ func TestWakeCrewMember_StartsItWithoutStoppingDev(t *testing.T) {
 		rt.aliveByHandle = map[string]bool{}
 	}
 	rt.aliveByHandle["h1"] = true
+
+	m.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
+	_, qa := crewOf(t, st, dev.ID)
+	// Put it back to sleep: this test is about the WAKE, and a member created by
+	// the trigger is already awake.
+	if err := m.SuspendRuntime(ctx, qa.ID); err != nil {
+		t.Fatalf("SuspendRuntime qa: %v", err)
+	}
 
 	woken, err := m.WakeCrewMember(ctx, qa.ID)
 	if err != nil {

@@ -255,6 +255,18 @@ type SessionCrew struct {
 	// tested by an agent that has never opened its eyes - which is the exact lie
 	// this whole feature exists to stop the board telling.
 	HasRun bool `json:"hasRun"`
+	// JoinReason is WHAT CREATED this member, and it is on the wire so the board
+	// can say so in one sentence under the crew strip ("qa joined · dev opened the
+	// simulator").
+	//
+	// A crew is no longer decided at spawn: a task starts as dev alone and gains a
+	// qa when dev first touches a runtime surface. So the shape of a card can
+	// CHANGE mid-task, and gaining a qa gives the merge gate a real input it did
+	// not have - which can move a card BACKWARD, from ready-to-merge to in-review.
+	// That is correct, and this is what makes it legible rather than surprising.
+	//
+	// Omitted for dev, and for a member created before this was recorded.
+	JoinReason domain.CrewJoinReason `json:"joinReason,omitempty" enum:"sim,preview,manual" description:"What created this member: dev took the simulator lease, dev pointed ao preview at the app, or a human asked for it."`
 }
 
 // SessionTermination is the wire shape of a session's ending.
@@ -458,8 +470,8 @@ type AddCrewMemberRequest struct {
 }
 
 // AddCrewMemberResponse is the body of POST /api/v1/sessions/{sessionId}/crew/members.
-// `session` is the NEW member - born suspended, so it has an id and a row and no
-// terminal - not the session named in the path.
+// `session` is the NEW member - created and started, in dev's worktree - not the
+// session named in the path.
 type AddCrewMemberResponse struct {
 	OK bool `json:"ok"`
 	// SessionID echoes the session named in the PATH, not the new member's id.

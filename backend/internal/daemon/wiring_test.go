@@ -564,6 +564,7 @@ func TestProjectRepoResolver_ResolvesRegisteredProject(t *testing.T) {
 // assert the daemon wiring invokes the correct methods without needing a real
 // runtime or worktree.
 type fakeSessionLifecycle struct {
+	runtimeTouched         bool
 	reconcileCalled        bool
 	restoreAllCalled       bool
 	syncOrchestratorCalled bool
@@ -586,6 +587,10 @@ func (f *fakeSessionLifecycle) CloseIdleSessions(_ context.Context) error { retu
 func (f *fakeSessionLifecycle) SyncOrchestratorWorkspaces(_ context.Context) error {
 	f.syncOrchestratorCalled = true
 	return nil
+}
+
+func (f *fakeSessionLifecycle) NoteRuntimeTouch(_ context.Context, _ domain.SessionID, _ domain.CrewJoinReason) {
+	f.runtimeTouched = true
 }
 
 // TestWiring_SessionLifecycleInterfaceInvokedByDaemon asserts the

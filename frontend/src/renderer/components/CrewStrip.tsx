@@ -6,6 +6,7 @@ import {
 	type Task,
 	canAttachRole,
 	crewChipState,
+	crewJoinLine,
 	neverStarted,
 } from "../lib/crew";
 import { statusGlyph, statusLabel } from "../lib/status-glyph";
@@ -28,9 +29,14 @@ import type { TaskSize, WorkspaceSession } from "../types/workspace";
  *    not sleep.
  *
  * A SOLO task draws no empty seats. It gets a quiet `⊘ solo · mechanical` marker
- * instead: the missing chip is a structural fact about a task that deliberately
- * chose one agent, and nagging about a chair nobody meant to fill is the wrong
- * signal on the quietest card on the board.
+ * instead: the missing chip is a structural fact about a task that has not
+ * needed a second agent, and nagging about a chair nobody meant to fill is the
+ * wrong signal on the quietest card on the board.
+ *
+ * A crew task additionally carries ONE LINE saying how it became a crew, because
+ * it did not start as one: a card can gain its qa while you are looking at it,
+ * and gaining one gives the merge gate a real input - which can move the card
+ * back a lane. The line is what makes that read as the gate working.
  */
 
 // What a chip's state MEANS, in the words a person would use. There is no
@@ -168,10 +174,10 @@ function SoloMarker({ size }: { size?: TaskSize }) {
  * unobtrusive `+ add a role`, never empty seats" - so it reads as an offer
  * rather than as a chair nobody filled.
  *
- * What it does is worth being plain about, because it is easy to assume it
- * starts a second agent: it does not. The new member arrives as a row and
- * nothing is spent until somebody starts it - and when they do, the agent that
- * is already working keeps working.
+ * What it does is worth being plain about: it STARTS a second agent, right now,
+ * in the same worktree. There is nothing left for a new member to wait for, and
+ * a member created asleep with no control to start it is exactly the dead end
+ * this replaced. The agent already working is not interrupted.
  */
 function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolean }) {
 	return (
@@ -192,8 +198,9 @@ function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolea
 				</button>
 			</TooltipTrigger>
 			<TooltipContent>
-				Add a qa to this task. It arrives in the same worktree without starting - nothing that is running now is
-				interrupted - and you start it when you want it. Both members then work at the same time.
+				Add a qa to this task. It starts working in the same worktree straight away, beside the agent that is already
+				there - nothing that is running now is interrupted. AO adds one by itself the first time this task drives the
+				app.
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -246,6 +253,30 @@ export function CrewStrip({
 				<span aria-hidden="true" className="mx-0.5 h-2.5 w-px shrink-0 bg-[var(--kanban-card-divider)]" />
 				<ReviewPip state={review} onOpen={onOpenReviews} />
 			</div>
+			<CrewJoinLine task={task} />
 		</TooltipProvider>
+	);
+}
+
+/**
+ * The join line, under the strip: `qa joined · dev opened the simulator`.
+ *
+ * Quiet and passive - it is background, not a status - and it renders nothing at
+ * all for a solo task or a member whose reason predates this. It sits BELOW the
+ * chips rather than inside them because the strip is a row of live things and
+ * this is a fact about the past; and because the card's column is narrow enough
+ * that anything added to that row would push a chip off it.
+ */
+function CrewJoinLine({ task }: { task: Task }) {
+	const line = crewJoinLine(task);
+	if (!line) return null;
+	return (
+		<div
+			className="truncate px-[13px] pb-1.5 text-[10px] text-passive"
+			data-crew-join={task.qa?.crew?.joinReason}
+			onClick={(event) => event.stopPropagation()}
+		>
+			{line}
+		</div>
 	);
 }

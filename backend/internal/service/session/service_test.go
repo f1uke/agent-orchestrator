@@ -328,7 +328,7 @@ func TestSessionSetPreviewPersistsURL(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
 
-	sess, err := (&Service{store: st, clock: time.Now}).SetPreview(context.Background(), "mer-1", "file:///tmp/index.html")
+	sess, err := (&Service{store: st, clock: time.Now, manager: &fakeCommander{}}).SetPreview(context.Background(), "mer-1", "file:///tmp/index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,9 +340,37 @@ func TestSessionSetPreviewPersistsURL(t *testing.T) {
 	}
 }
 
+// TestSessionSetPreview_ReportsTheRuntimeTouch. `ao preview` moving a session's
+// preview is the second half of the lazy-creation trigger: it says this task has
+// a running surface, which is what a qa is for. Reported only for a preview that
+// actually LANDED - an unknown session has no task to give a member to.
+func TestSessionSetPreview_ReportsTheRuntimeTouch(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	fc := &fakeCommander{}
+	svc := &Service{store: st, clock: time.Now, manager: fc}
+
+	if _, err := svc.SetPreview(context.Background(), "mer-1", "http://localhost:5173"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.runtimeTouches) != 1 {
+		t.Fatalf("setting a preview reported %d runtime touches, want 1", len(fc.runtimeTouches))
+	}
+	if got := fc.runtimeTouches[0]; got.id != "mer-1" || got.reason != domain.CrewJoinPreview {
+		t.Fatalf("reported %s/%q, want mer-1/%q", got.id, got.reason, domain.CrewJoinPreview)
+	}
+
+	if _, err := svc.SetPreview(context.Background(), "ghost-1", "http://x"); err == nil {
+		t.Fatal("want an error for an unknown session")
+	}
+	if len(fc.runtimeTouches) != 1 {
+		t.Fatalf("a preview on an unknown session reported a runtime touch: %d", len(fc.runtimeTouches))
+	}
+}
+
 func TestSessionSetPreviewUnknownSession(t *testing.T) {
 	st := newFakeStore()
-	if _, err := (&Service{store: st}).SetPreview(context.Background(), "ghost-1", "http://x"); err == nil {
+	if _, err := (&Service{store: st, manager: &fakeCommander{}}).SetPreview(context.Background(), "ghost-1", "http://x"); err == nil {
 		t.Fatal("want error for unknown session")
 	}
 }
@@ -416,6 +444,13 @@ type crewSeat struct {
 	role domain.CrewRole
 }
 
+// crewTouch is one "this task has a runtime surface" report: which session, and
+// what it did.
+type crewTouch struct {
+	id     domain.SessionID
+	reason domain.CrewJoinReason
+}
+
 type fakeCommander struct {
 	sendOutcome     ports.SendOutcome
 	teardownCauses  []string
@@ -442,6 +477,7 @@ type fakeCommander struct {
 	crewMembers     map[crewSeat]domain.SessionRecord
 	crewWakeErr     error
 	crewAttached    []domain.SessionID
+	runtimeTouches  []crewTouch
 	crewDevOf       map[domain.SessionID]domain.SessionRecord
 	wakeRecord      domain.SessionRecord
 	spawned         bool
@@ -512,6 +548,12 @@ func (f *fakeCommander) AttachCrewMember(_ context.Context, devID domain.Session
 	rec.CrewID = devID
 	rec.CrewRole = role
 	return rec, nil
+}
+
+// noteRuntimeTouch records what the service reported and WHY, which is the whole
+// of the preview half of the lazy-creation trigger.
+func (f *fakeCommander) NoteRuntimeTouch(_ context.Context, id domain.SessionID, reason domain.CrewJoinReason) {
+	f.runtimeTouches = append(f.runtimeTouches, crewTouch{id: id, reason: reason})
 }
 
 func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {

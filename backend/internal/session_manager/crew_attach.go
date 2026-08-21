@@ -7,23 +7,20 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-// ATTACHING A MEMBER to a task that already exists.
+// ATTACHING A MEMBER BY HAND to a task that already exists.
 //
-// The design (design-multi-agent-per-task-ux §1.1) offers "add qa to a solo
-// task" as a manual escape hatch and calls it a WAKE - "the session exists,
-// suspended". That is true for a `standard` or `deep` task, whose qa was formed
-// at spawn. It is NOT true for a `mechanical` one, or for any task spawned
-// before the crew was turned on: qa was never created, so adding one is a
-// CREATE, and until this file there was no way to create a crew member outside
-// the spawn path. This is the hole that closes.
+// This is the manual half of lazy creation. AO creates a qa when dev touches a
+// runtime surface (crew_join.go); a task that never touches one - a backend-only
+// change, or a `mechanical` task, which is never eligible automatically - still
+// gets a qa the moment a human asks for one, from `ao crew add` or the card's
+// `+ qa`. Nothing else about it differs: same write, same worktree, same branch,
+// and `crew_join_reason` records that a person asked rather than AO observing.
 //
-// Two properties carry over from formCrew unchanged, because it is literally the
-// same write:
+// Two properties matter and are the same on both paths:
 //
-//   - The new member is BORN SUSPENDED - one INSERT with is_suspended set. It
-//     never holds the crew slot, so #225's exclusion is never argued with in
-//     order to add the member it protects, and there is no instant at which two
-//     members of the crew are awake.
+//   - The member is created and then STARTED. It arrives working, because there
+//     is nothing left for it to wait for: both members run at once, and a member
+//     created asleep with no control to start it is the stall this replaced.
 //   - dev is not touched at all. No suspend, no reap, no relaunch: dev keeps
 //     working straight through the attach, which is the whole point of being
 //     able to do this to a task in flight.
@@ -40,17 +37,37 @@ import (
 // its own, and `ao session restore` is how it comes back - the same id
 // returning, rather than a second one inheriting the first's artefacts.
 
-// AttachCrewMember adds a member in `role` to the task dev works on.
-//
-// It is check-then-create, so the whole thing runs under the crew lock: two
-// racing attaches must not both see a free seat. The database pins the same rule
-// independently (0047_session_crew_role_unique), because a mutex is a property
-// of one process and the invariant should be a property of the data.
+// AttachCrewMember adds a member in `role` to the task dev works on, and starts
+// it.
 //
 // The "is this task finished?" refusal is NOT here: it needs the session's
 // derived status, which is assembled from PR facts at service read time. See
 // Service.AttachCrewMember.
+//
+// Starting is BEST EFFORT and deliberately not fatal: the member is on the task
+// either way, and a human who asked for a qa would rather have one they can open
+// than an error and no member at all.
 func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+	member, err := m.attachCrewMemberRow(ctx, devID, role)
+	if err != nil {
+		return domain.SessionRecord{}, err
+	}
+	started, err := m.startCrewMember(ctx, member.ID)
+	if err != nil {
+		m.logger.Warn("crew: member was attached but could not be started; open its card to start it",
+			"crew", devID, "member", member.ID, "error", err)
+		return member, nil
+	}
+	return started, nil
+}
+
+// attachCrewMemberRow is the check-then-create half, so the whole of it runs
+// under the crew lock: two racing attaches must not both see a free seat. The
+// database pins the same rule independently (0047_session_crew_role_unique),
+// because a mutex is a property of one process and the invariant should be a
+// property of the data. Starting the member happens after this returns, because
+// Resume takes the same lock and lockCrew is not reentrant.
+func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
 	defer m.lockCrew(devID)()
 
 	dev, err := m.getRecord(ctx, devID)
@@ -59,8 +76,7 @@ func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, 
 	}
 	// A prepared TODO has no branch and no worktree to share. resolveCrewDev
 	// would refuse it too, but "there is no materialized worktree" is a puzzle
-	// where the actual answer is one sentence: start it, and StartTodo forms the
-	// crew its size asks for on the way through.
+	// where the actual answer is one sentence: start it first, and then attach.
 	if dev.IsTodo {
 		return domain.SessionRecord{}, fmt.Errorf("%w: %s has not been started yet; start it first", ErrInvalidCrew, devID)
 	}
@@ -86,7 +102,7 @@ func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, 
 		}
 	}
 
-	member, err := m.spawnSuspendedCrewMemberLocked(ctx, project, dev, role, joinedLate)
+	member, err := m.spawnSuspendedCrewMemberLocked(ctx, project, dev, role, domain.CrewJoinManual)
 	if err != nil {
 		return domain.SessionRecord{}, err
 	}

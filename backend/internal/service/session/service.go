@@ -107,6 +107,12 @@ type commander interface {
 	// a role is the only address that cannot go stale: a crew is formed after
 	// dev's runtime is launched, so dev's environment can never carry qa's id.
 	CrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.SessionRecord, bool, error)
+	// NoteRuntimeTouch reports that this session just did something only a running
+	// app can be the point of - here, pointing `ao preview` at one. It is how a
+	// task that turns out to have a runtime surface gains the qa that verifies it
+	// (design §1.12.1). Best effort and silent: a preview must not fail because a
+	// crew could not be formed.
+	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
 	// WakeCrewMember gives the crew slot to one member of a task, standing the
 	// current holder down first. It is the human's (and the orchestrator's) way of
 	// saying "qa's turn now" while automatic handover is deliberately not built.
@@ -922,6 +928,10 @@ func (s *Service) SetPreview(ctx context.Context, id domain.SessionID, previewUR
 	if !updated {
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
+	// `ao preview` is one of the two things that says this task HAS a runtime
+	// surface, which is what a qa is for. Reported after the write, so the trigger
+	// only ever fires for a preview that actually landed.
+	s.manager.NoteRuntimeTouch(ctx, id, domain.CrewJoinPreview)
 	return s.Get(ctx, id)
 }
 

@@ -1551,7 +1551,7 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/members", id: "addCrewMember", tag: "sessions",
-			summary:    "Attach a member (qa) to the task this session belongs to, born suspended",
+			summary:    "Attach a member (qa) to the task this session belongs to, and start it",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.AddCrewMemberRequest{},
 			resps: []respUnit{
