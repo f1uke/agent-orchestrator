@@ -128,9 +128,31 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				],
 				commitMessage: "prepare readme screenshot data",
 				prs: [],
+				taskSize: "standard",
+				crew: { id: "demo-working", role: "dev", hasRun: true },
+			},
+			{
+				// A crew's qa, born asleep: a row and an id, no terminal. It is drawn on
+				// dev's card as a chip and under dev in the sidebar - never as a card of
+				// its own, which is what `tasksFrom` is for.
+				id: "demo-working-qa",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Build screenshot-ready dashboard data",
+				provider: "codex",
+				branch: "demo/dashboard-screenshot",
+				status: "idle",
+				isSuspended: true,
+				createdAt: hoursAgo(3),
+				updatedAt: hoursAgo(3),
+				activity: { state: "idle", lastActivityAt: hoursAgo(3) },
+				prs: [],
+				taskSize: "standard",
+				crew: { id: "demo-working", role: "qa", hasRun: false },
 			},
 			{
 				id: "demo-needs-input",
+				taskSize: "mechanical",
 				terminalHandleId: "demo-needs-input/terminal_0",
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
@@ -266,6 +288,26 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 					{ path: "docs/assets/readme/session-terminal.png", additions: 1, deletions: 0 },
 				],
 				prs: [demoPr(323, "open", "passing", "approved")],
+				taskSize: "standard",
+				crew: { id: "demo-ready", role: "dev", hasRun: true },
+			},
+			{
+				// qa has had its turn here (hasRun), so this task's card is held out of
+				// Ready to Merge by the CHECKLIST rather than by an unwoken agent.
+				id: "demo-ready-qa",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Merge README screenshot asset update",
+				provider: "codex",
+				branch: "demo/readme-assets",
+				status: "idle",
+				isSuspended: true,
+				createdAt: hoursAgo(9),
+				updatedAt: minutesAgo(12),
+				activity: { state: "idle", lastActivityAt: minutesAgo(12) },
+				prs: [],
+				taskSize: "standard",
+				crew: { id: "demo-ready", role: "qa", hasRun: true },
 			},
 			{
 				id: "demo-ci-failed",
@@ -1064,6 +1106,37 @@ export function mockJiraProjects(query: string): components["schemas"]["JiraProj
 // Tests tab and the Summary readiness strip read the same mock.
 export function mockSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
 	if (sessionId === "demo-in-review") return mockAgentSmokeChecks(sessionId, worker);
+	// demo-ready is a CREW task whose dev can land and whose qa has already run:
+	// what holds it out of Ready to Merge is a case only a person can judge, which
+	// is the AND this feature exists to make visible.
+	if (sessionId === "demo-ready") {
+		return {
+			worker: worker || "readme assets",
+			checks: [
+				{
+					id: "asset-renders",
+					sessionId,
+					projectId: "agent-orchestrator",
+					seq: 1,
+					name: "The new screenshot renders crisply at 2x",
+					why: "Only a person can say whether an image looks right; a machine can only say the file loaded.",
+					steps: ["Open docs/readme.md in the preview.", "Look at the dashboard screenshot at 200%."],
+					expected: "No blur, no banding, text in the screenshot is legible.",
+					prNum: 323,
+					fileRef: "docs/assets/readme/dashboard.png:1",
+					verdict: "pending",
+					note: "",
+					evidence: [],
+					agentVerdict: "pass",
+					agentNote: "Image loads and is 2560x1600.",
+					agentRanAt: minutesAgo(12),
+					agentEvidence: [],
+					createdAt: minutesAgo(20),
+					updatedAt: minutesAgo(12),
+				},
+			],
+		} as components["schemas"]["ListSmokeChecksResponse"];
+	}
 	if (sessionId !== "demo-working") {
 		return { worker: worker || "worker", checks: [] };
 	}

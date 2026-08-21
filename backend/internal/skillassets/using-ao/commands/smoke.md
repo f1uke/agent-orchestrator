@@ -53,7 +53,14 @@ ao smoke <subcommand> [session] [flags]
 ```
 
 The session id is positional or `--session`; inside a worker it is
-`"$AO_SESSION_ID"`.
+`"$AO_CREW_ID"`.
+
+**Use `$AO_CREW_ID`, not `$AO_SESSION_ID`.** A checklist belongs to the TASK, and
+a task can be worked by two agents on one worktree - dev, which owns the branch
+and the pull request, and qa, which writes and runs the tests. The human plays the
+checklist on DEV's card, so a checklist qa writes against its own session id is
+one nobody ever sees. `$AO_CREW_ID` is dev's id on a crew and your own id when you
+are working alone, so it is right in both shapes.
 
 ## Subcommands
 
@@ -164,7 +171,7 @@ against the old steps.
 
 ```bash
 # Author the checklist (JSON on stdin so nothing lands in your checkout)
-cat <<'JSON' | ao smoke set "$AO_SESSION_ID" --from-file -
+cat <<'JSON' | ao smoke set "$AO_CREW_ID" --from-file -
 { "cases": [ { "name": "A fresh MR shows up in Reviews on its own",
                "why": "Confirms re-polling surfaces a new MR without a refresh.",
                "steps": ["Open the Reviews tab.", "Open a new MR.", "Wait ~60s."],
@@ -175,21 +182,21 @@ JSON
 
 ```bash
 # Read it back, with ids, to see what the user has played
-ao smoke list "$AO_SESSION_ID"
+ao smoke list "$AO_CREW_ID"
 ```
 
 ```bash
 # Record that a machine ran a case (the user's verdict is untouched)
-ao smoke record "$AO_SESSION_ID" --case gitlab-mr-appears --verdict pass \
+ao smoke record "$AO_CREW_ID" --case gitlab-mr-appears --verdict pass \
     --note "3 runs, MR listed within 40s each time"
 ```
 
 ```bash
 # Record what a machine saw without judging it
-ao smoke record "$AO_SESSION_ID" --case tab-stays-live --evidence /tmp/shot.png
+ao smoke record "$AO_CREW_ID" --case tab-stays-live --evidence /tmp/shot.png
 ```
 
 ```bash
 # Retire a case that a real test now covers
-ao smoke retire "$AO_SESSION_ID" --case drag-scroll --reason "now covered by TestDragScroll"
+ao smoke retire "$AO_CREW_ID" --case drag-scroll --reason "now covered by TestDragScroll"
 ```

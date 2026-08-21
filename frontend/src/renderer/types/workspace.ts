@@ -370,6 +370,38 @@ export type WorkspaceSession = {
 	 * nothing rather than inventing an ending.
 	 */
 	termination?: SessionTermination;
+	/**
+	 * The TASK this session belongs to and the role it plays in it, when the task
+	 * is worked by a CREW of two agents on one worktree. Absent for a solo session
+	 * - every `mechanical` task and every session that predates the crew - and
+	 * absence is the honest reading: one agent working alone, not a crew with a
+	 * member missing.
+	 */
+	crew?: SessionCrew;
+	/**
+	 * The ceremony level chosen at spawn. It now decides the SHAPE of the task
+	 * (mechanical = dev alone; standard/deep = dev + qa), which is why the card
+	 * shows it: the choice is visible next to its consequence.
+	 */
+	taskSize?: TaskSize;
+};
+
+export type TaskSize = "mechanical" | "standard" | "deep";
+
+export type CrewRole = "dev" | "qa";
+
+/** A session's membership of a two-agent task. */
+export type SessionCrew = {
+	/** The crew key, which IS dev's session id. */
+	id: string;
+	role: CrewRole;
+	/**
+	 * Whether this member has ever actually had an agent running. A qa nobody has
+	 * woken has not - and it leaves exactly the same empty checklist behind as a
+	 * qa that ran and found nothing worth a human's time, which is why the daemon
+	 * answers this rather than leaving the board to guess.
+	 */
+	hasRun: boolean;
 };
 
 /**

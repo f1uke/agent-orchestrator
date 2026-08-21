@@ -235,13 +235,18 @@ func TestSpawnCrewMember_RefusesAnImpossibleCrew(t *testing.T) {
 	}
 }
 
-// TestSpawn_SoloIsUntouched is the preservation guard for the spawn path: an
-// ordinary spawn names no crew, so it must still cut its own branch, provision
-// its own tree, take a branch-named runtime handle, and come out SOLO.
+// TestSpawn_SoloIsUntouched is the preservation guard for the spawn path: a
+// MECHANICAL spawn is worked by dev alone, so it must still cut its own branch,
+// provision its own tree, take a branch-named runtime handle, and come out SOLO
+// - one row, one card, exactly as every spawn did before the crew was switched
+// on.
 func TestSpawn_SoloIsUntouched(t *testing.T) {
 	m, st, rt, ws := newManager()
 
-	rec, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "work"})
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "work",
+		TaskSize: domain.TaskSizeMechanical,
+	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

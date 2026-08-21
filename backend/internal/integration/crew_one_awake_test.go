@@ -72,6 +72,9 @@ func TestCrewOneAwake_SpawnCannotBringUpASecondMember(t *testing.T) {
 	s := newCrewStack(t)
 	dev, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/task", Prompt: "build it",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -341,6 +344,9 @@ func TestCrewOneAwake_HandoverRefusesWhatWouldNotBeAHandover(t *testing.T) {
 	}
 	solo, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/other", Prompt: "unrelated",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -485,6 +491,9 @@ func TestSolo_TheTreeIsNeverReportedBusy(t *testing.T) {
 	s := newCrewStack(t)
 	rec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/solo", Prompt: "work",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -504,6 +513,9 @@ func TestSolo_LifecycleIsUnchanged(t *testing.T) {
 	s := newCrewStack(t)
 	rec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/solo", Prompt: "work",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical,
 	})
 	if err != nil {
 		t.Fatalf("solo spawn: %v", err)
@@ -578,6 +590,9 @@ func TestSolo_IdleSweepIsUnchanged(t *testing.T) {
 	s := newCrewStackWithIdle(t, time.Hour)
 	rec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/solo", Prompt: "work",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical,
 	})
 	if err != nil {
 		t.Fatal(err)

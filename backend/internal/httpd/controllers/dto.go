@@ -213,6 +213,36 @@ type SessionView struct {
 	// renders as "no ending recorded" rather than inventing one. Shadows the
 	// json:"-" domain field with the curated wire shape.
 	Termination *SessionTermination `json:"termination,omitempty"`
+	// Crew names the TASK this session belongs to and the role it plays in it, on
+	// the two sessions of a crew. Omitted entirely for a solo session - every
+	// session created by a `mechanical` spawn, and every session that predates the
+	// crew - so a client that reads nothing here is reading the truth: this is one
+	// agent working alone, not a crew with a missing member. Curated from the
+	// json:"-" domain crew fields.
+	Crew *SessionCrew `json:"crew,omitempty"`
+	// TaskSize is the ceremony level chosen at spawn. It is surfaced because it
+	// now decides the SHAPE of the task (mechanical = dev alone; standard/deep =
+	// dev + qa), so the board can say which choice was made on a card whose crew
+	// it is already drawing. Empty for a row that predates the field.
+	TaskSize domain.TaskSize `json:"taskSize,omitempty" enum:"mechanical,standard,deep"`
+}
+
+// SessionCrew is the wire shape of "these sessions are one task": the crew id
+// (which IS the dev member's session id, so `ao send --session <crewId>` reaches
+// dev) and this member's role in it.
+type SessionCrew struct {
+	ID   domain.SessionID `json:"id"`
+	Role domain.CrewRole  `json:"role" enum:"dev,qa"`
+	// HasRun is whether this member has ever actually had an agent running.
+	//
+	// It is on the wire because absence of evidence and evidence of absence look
+	// identical without it: a qa that ran and found nothing worth a human's time
+	// leaves the same EMPTY smoke checklist as a qa nobody has woken. Reading the
+	// first as the second would keep a finished task out of Ready to Merge
+	// forever; reading the second as the first would let a card claim it was
+	// tested by an agent that has never opened its eyes - which is the exact lie
+	// this whole feature exists to stop the board telling.
+	HasRun bool `json:"hasRun"`
 }
 
 // SessionTermination is the wire shape of a session's ending.

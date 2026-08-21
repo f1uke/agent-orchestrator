@@ -132,6 +132,9 @@ func (s *crewStack) spawnCrew(t *testing.T) (dev, qa domain.SessionRecord) {
 	ctx := context.Background()
 	devRec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/task", Prompt: "build it",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical,
 	})
 	if err != nil {
 		t.Fatalf("spawn dev: %v", err)
@@ -405,7 +408,10 @@ func TestCrew_AbandonedHalfCrewIsReclaimed(t *testing.T) {
 func TestSolo_ReclaimIsUnchanged(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	rec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/solo", Prompt: "work"})
+	rec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/solo", Prompt: "work",
+		// mechanical is what makes this a SOLO spawn: a standard task now forms
+		// its own crew, which is a different scenario from the one under test.
+		TaskSize: domain.TaskSizeMechanical})
 	if err != nil {
 		t.Fatal(err)
 	}

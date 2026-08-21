@@ -1619,6 +1619,52 @@ paths:
       summary: Mark a PR review thread resolved on behalf of the session's SCM identity
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/crew/wake:
+    post:
+      operationId: wakeCrewMember
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeSessionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Give this task's one awake slot to this crew member, standing the current
+        holder down
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/diff-context:
     get:
       operationId: sessionDiffContext
@@ -5395,6 +5441,8 @@ components:
           type: string
         createdBy:
           type: string
+        crew:
+          $ref: '#/components/schemas/SessionCrew'
         displayName:
           type: string
         harness:
@@ -5496,6 +5544,12 @@ components:
           - session_pr_target
           - session_base
           - project
+          type: string
+        taskSize:
+          enum:
+          - mechanical
+          - standard
+          - deep
           type: string
         terminalHandleId:
           type: string
@@ -6923,6 +6977,22 @@ components:
       - ok
       - sessionId
       - message
+      type: object
+    SessionCrew:
+      properties:
+        hasRun:
+          type: boolean
+        id:
+          type: string
+        role:
+          enum:
+          - dev
+          - qa
+          type: string
+      required:
+      - id
+      - role
+      - hasRun
       type: object
     SessionEndPayload:
       properties:

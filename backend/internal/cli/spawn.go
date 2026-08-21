@@ -259,7 +259,13 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs")
-	f.StringVar(&opts.taskSize, "task-size", "", "Worker ceremony level: mechanical | standard | deep (default standard). `mechanical` authorizes the worker to skip the brainstorm/plan/TDD process skills and go straight to edit + verify; use only for small, well-scoped changes")
+	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
+		"  mechanical  ONE agent. Skips the brainstorm/plan/TDD skills and goes straight to edit + verify.\n"+
+		"              For a small, well-scoped change: a rename, a copy tweak, a config bump, a one-line fix.\n"+
+		"  standard    (default) TWO agents on one worktree: dev implements and owns the PR, qa writes,\n"+
+		"              runs and records the tests. Full ceremony. qa starts asleep and costs nothing until woken.\n"+
+		"  deep        As standard, and flags a high-stakes task.\n"+
+		"Tag it mechanical when it really is small: a crew is cheaper than one agent on a long task and dearer on a short one")
 	return cmd
 }
 

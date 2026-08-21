@@ -39,6 +39,10 @@ type fakeStore struct {
 	// listAllCalls counts ListAllSessions, so a test can assert that a guard
 	// costs a solo session nothing at all rather than merely returning nil.
 	listAllCalls int
+	// failCreateAfter makes CreateSession fail once this many rows already
+	// exist, so a test can break the SECOND create of a spawn (forming the crew)
+	// while leaving the first (dev) intact.
+	failCreateAfter int
 }
 
 func newFakeStore() *fakeStore {
@@ -58,6 +62,9 @@ func (f *fakeStore) ListWorkspaceRepos(_ context.Context, projectID string) ([]d
 	return f.workspaceRepo[projectID], nil
 }
 func (f *fakeStore) CreateSession(_ context.Context, rec domain.SessionRecord) (domain.SessionRecord, error) {
+	if f.failCreateAfter > 0 && len(f.sessions) >= f.failCreateAfter {
+		return domain.SessionRecord{}, errors.New("create exploded")
+	}
 	f.num++
 	rec.ID = domain.SessionID(fmt.Sprintf("%s-%d", rec.ProjectID, f.num))
 	f.sessions[rec.ID] = rec
@@ -1938,7 +1945,7 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 			lookPath := func(string) (string, error) { return "/bin/true", nil }
 			m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
-			sp, err := m.buildSystemPrompt(ctx, tc.kind, "mer", domain.TaskSizeStandard)
+			sp, err := m.buildSystemPrompt(ctx, tc.kind, "mer", domain.TaskSizeStandard, "")
 			if err != nil {
 				t.Fatalf("buildSystemPrompt: %v", err)
 			}
@@ -1976,7 +1983,7 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, ResponseLanguage: func() string { return globalLang }})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -2088,7 +2095,7 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -2187,7 +2194,7 @@ func TestSystemPrompt_SpawnConfirm(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, SpawnConfirmEnabled: enabled})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4412,7 +4419,7 @@ func TestBuildSystemPrompt_WorkerLayers(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: "CUSTOM WORKER BASE"}}
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard)
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4445,7 +4452,7 @@ func TestBuildSystemPrompt_OrchestratorDefaultSubstitutesProjectID(t *testing.T)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
 	m := layeredManager(st, nil) // nil getter ⇒ built-in defaults
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindOrchestrator, "mer", domain.TaskSizeStandard)
+	got, err := m.buildSystemPrompt(ctx, domain.KindOrchestrator, "mer", domain.TaskSizeStandard, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4466,7 +4473,7 @@ func TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: ""}} // fully cleared
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard)
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4491,7 +4498,7 @@ func TestBuildSystemPrompt_TaskSizeDirective(t *testing.T) {
 			}
 		}
 		m := layeredManager(st, getter)
-		sp, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", size)
+		sp, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", size, "")
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4604,7 +4611,7 @@ func TestSystemPrompt_SkillPointerFollowsProjectWebUI(t *testing.T) {
 		}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
 		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4654,7 +4661,7 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
 		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard)
+		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}

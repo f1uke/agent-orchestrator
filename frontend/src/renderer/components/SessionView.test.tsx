@@ -178,6 +178,9 @@ vi.mock("../lib/api-client", () => ({ apiClient: { POST: wakeMock } }));
 vi.mock("@tanstack/react-query", () => ({
 	useQueryClient: () => queryClientMock,
 	useQuery: () => ({ data: changesData.current }),
+	// The crew baton bar (rendered above the terminal for a crew member, and
+	// nothing at all for a solo one) owns a hand-over mutation.
+	useMutation: () => ({ mutate: () => {}, isPending: false, error: null }),
 }));
 
 // jsdom has no layout engine, so the real react-resizable-panels would never
