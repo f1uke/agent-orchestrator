@@ -129,6 +129,9 @@ func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project do
 		// mechanism: no runtime is created, so nothing has to be torn down, and
 		// Awake() is false, so the crew slot is never taken.
 		IsSuspended: true,
+		// ...and asleep for a REASON that is recorded, so that merely opening qa's
+		// card does not hand it the turn dev is still holding (domain/sleep.go).
+		SleepReason: domain.SleepReasonTurn,
 		Metadata: domain.SessionMetadata{
 			// dev's tree, dev's branch. The worktree directory is derived from the
 			// BRANCH, so these two fields ARE the share (#224).
@@ -265,7 +268,7 @@ func (m *Manager) WakeCrewMember(ctx context.Context, id domain.SessionID) (doma
 	}
 	if !ok {
 		// Nobody holds it - the ordinary resume path takes it, guard and all.
-		return m.Resume(ctx, id)
+		return m.Resume(ctx, id, domain.WokenByWake)
 	}
-	return m.HandOverCrewSlot(ctx, holder.ID, id)
+	return m.HandOverCrewSlot(ctx, holder.ID, id, domain.WokenByWake)
 }

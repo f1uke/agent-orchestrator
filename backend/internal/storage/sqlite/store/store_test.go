@@ -787,6 +787,81 @@ func TestSessionSuspendedRoundTripAndCDC(t *testing.T) {
 	}
 }
 
+// TestSessionSleepProvenanceRoundTripAndCDC covers the two columns that say WHY a
+// session is asleep and WHAT woke it. Both must round-trip, and - the point of
+// having them at all - both must reach the session_updated payload, because
+// change_log is where the question "who woke this?" actually gets asked.
+func TestSessionSleepProvenanceRoundTripAndCDC(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+
+	r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+	base, _ := s.LatestSeq(ctx)
+
+	r.IsSuspended = true
+	r.SleepReason = domain.SleepReasonTurn
+	if err := s.UpdateSession(ctx, r); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok {
+		t.Fatalf("get session: found=%v err=%v", ok, err)
+	}
+	if got.SleepReason != domain.SleepReasonTurn {
+		t.Fatalf("sleep_reason did not round-trip: %q", got.SleepReason)
+	}
+	if p := lastSessionUpdatePayload(t, s, base); p["sleepReason"] != string(domain.SleepReasonTurn) {
+		t.Fatalf("sleepReason payload = %v, want %q", p["sleepReason"], domain.SleepReasonTurn)
+	}
+
+	base2, _ := s.LatestSeq(ctx)
+	got.IsSuspended = false
+	got.SleepReason = ""
+	got.WokenBy = domain.WokenByView
+	if err := s.UpdateSession(ctx, got); err != nil {
+		t.Fatalf("update wake: %v", err)
+	}
+	back, _, err := s.GetSession(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.WokenBy != domain.WokenByView {
+		t.Fatalf("woken_by did not round-trip: %q", back.WokenBy)
+	}
+	p := lastSessionUpdatePayload(t, s, base2)
+	if p["wokenBy"] != string(domain.WokenByView) {
+		t.Fatalf("wokenBy payload = %v, want %q", p["wokenBy"], domain.WokenByView)
+	}
+	if p["sleepReason"] != "" {
+		t.Fatalf("sleepReason payload = %v, want it cleared alongside the wake", p["sleepReason"])
+	}
+}
+
+// lastSessionUpdatePayload returns the payload of the last session_updated event
+// after seq.
+func lastSessionUpdatePayload(t *testing.T, s *sqlite.Store, after int64) map[string]any {
+	t.Helper()
+	evs, err := s.EventsAfter(context.Background(), after, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	for _, e := range evs {
+		if string(e.Type) != "session_updated" {
+			continue
+		}
+		out = map[string]any{}
+		if err := json.Unmarshal([]byte(e.Payload), &out); err != nil {
+			t.Fatalf("session payload JSON: %v", err)
+		}
+	}
+	if out == nil {
+		t.Fatalf("no session_updated event after seq %d", after)
+	}
+	return out
+}
+
 // TestSessionLastOpenedAtRoundTripAndNoCDC covers the user-open keepalive
 // timestamp: it must persist through UpdateSession/GetSession, and stamping it
 // alone (the /wake path — activity + is_terminated unchanged) must fire NO

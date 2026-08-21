@@ -766,8 +766,15 @@ func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 	// A suspended session is paused, not finished, and until now nothing in this
 	// output said so - which made "why did my message not arrive?" unanswerable
 	// from the CLI. Only shown when true, so a live session's output is unchanged.
+	// The note follows the REASON: a crew member waiting for the baton does NOT
+	// come back when you open it, and saying it does would send the reader off to
+	// click a card that will not answer.
 	if sess.IsSuspended {
-		fields = append(fields, [2]string{"suspended", "true (paused; opening it resumes it in place)"})
+		note := "true (paused; opening it resumes it in place)"
+		if sess.AsleepForTurn() {
+			note = "true (asleep; it is not this member's turn - `ao crew wake " + string(sess.ID) + "` hands it over)"
+		}
+		fields = append(fields, [2]string{"suspended", note})
 	}
 	// Messages AO is holding for this session. Shown only when there are any.
 	if sess.QueuedMessages > 0 {

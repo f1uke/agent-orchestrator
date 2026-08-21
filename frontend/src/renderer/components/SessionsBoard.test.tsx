@@ -274,6 +274,26 @@ describe("SessionsBoard", () => {
 		expect(screen.queryByRole("button", { name: /Done \/ Terminated/i })).not.toBeInTheDocument();
 	});
 
+	// A crew member asleep for TURN reasons is not "paused to free resources", and
+	// opening its card will not bring it back - the daemon leaves it asleep on
+	// purpose. So the chip must not promise that it will.
+	it("says a turn-asleep crew member is asleep, not paused-open-to-resume", () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [
+				{
+					id: "proj-1",
+					sessions: [{ ...activeSession("sess-9", "needs_input"), isSuspended: true, sleepReason: "turn" }],
+				},
+			],
+			isError: false,
+		});
+		renderBoard();
+
+		expect(screen.getByText("Asleep")).toBeInTheDocument();
+		expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+		expect(screen.getByLabelText("Asleep")).toHaveAttribute("title", expect.stringContaining("turn"));
+	});
+
 	it("shows an escalating idle countdown when a live session nears suspension", () => {
 		const soon = new Date(Date.now() + 40 * 60_000).toISOString(); // 40m out
 		workspaceQueryMock.mockReturnValue({

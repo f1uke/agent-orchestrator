@@ -169,7 +169,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		// orchestrator — still TERMINATES (auto-archives to Done) exactly as before,
 		// so the common case is unchanged.
 		if rec.Kind != domain.KindOrchestrator && rec.KeepWarmOnMerge {
-			if err := m.MarkSuspended(ctx, id); err != nil {
+			if err := m.MarkSuspended(ctx, id, domain.SleepReasonMerged); err != nil {
 				return err
 			}
 			if m.runtimeSuspender != nil {

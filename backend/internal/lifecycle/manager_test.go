@@ -167,7 +167,7 @@ func TestMarkSuspended_SetsFlagKeepsLaneFacts(t *testing.T) {
 	rec := working("mer-1")
 	rec.Activity = domain.Activity{State: domain.ActivityWaitingInput, LastActivityAt: time.Now().Add(-80 * time.Hour)}
 	st.sessions["mer-1"] = rec
-	if err := m.MarkSuspended(ctx, "mer-1"); err != nil {
+	if err := m.MarkSuspended(ctx, "mer-1", domain.SleepReasonIdle); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
@@ -187,7 +187,7 @@ func TestMarkSuspended_TerminatedIsNoOp(t *testing.T) {
 	rec := working("mer-1")
 	rec.IsTerminated = true
 	st.sessions["mer-1"] = rec
-	if err := m.MarkSuspended(ctx, "mer-1"); err != nil {
+	if err := m.MarkSuspended(ctx, "mer-1", domain.SleepReasonIdle); err != nil {
 		t.Fatal(err)
 	}
 	if st.sessions["mer-1"].IsSuspended {
@@ -249,7 +249,7 @@ func TestMarkSpawned_ClearsSuspended(t *testing.T) {
 	rec.IsSuspended = true
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now().Add(-80 * time.Hour)}
 	st.sessions["mer-1"] = rec
-	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h-new"}); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h-new"}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
@@ -409,7 +409,7 @@ func TestMarkSpawned_MergeCompletedResumesReactivated(t *testing.T) {
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()}
 	st.sessions["mer-1"] = rec
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
-	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h-new"}); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h-new"}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
@@ -484,7 +484,7 @@ func TestMarkSpawnedStoresRuntimeMetadata(t *testing.T) {
 	st.sessions["mer-1"] = working("mer-1")
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", IsTerminated: true}
 	metadata := domain.SessionMetadata{Branch: "b", WorkspacePath: "/ws", RuntimeHandleID: "h1", AgentSessionID: "agent", Prompt: "prompt"}
-	if err := m.MarkSpawned(ctx, "mer-1", metadata); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", metadata, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
@@ -500,7 +500,7 @@ func TestMarkSpawnedStoresRuntimeMetadata(t *testing.T) {
 func TestMarkSpawned_StampsUTCActivity(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", IsTerminated: true}
-	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h1"}); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h1"}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	if loc := st.sessions["mer-1"].Activity.LastActivityAt.Location(); loc != time.UTC {
@@ -1749,7 +1749,7 @@ func TestMarkSpawnedMarksReactivationFromTerminalState(t *testing.T) {
 	m, st, _ := newManager()
 	// Reviving a terminated session (restore / board Reopen) is a reactivation.
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", IsTerminated: true}
-	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h1"}); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{RuntimeHandleID: "h1"}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	if got := st.sessions["mer-1"]; !got.Reactivated {
@@ -1757,7 +1757,7 @@ func TestMarkSpawnedMarksReactivationFromTerminalState(t *testing.T) {
 	}
 	// A fresh spawn (was not terminated) must not be marked reactivated.
 	st.sessions["fresh-1"] = domain.SessionRecord{ID: "fresh-1", ProjectID: "mer", IsTerminated: false}
-	if err := m.MarkSpawned(ctx, "fresh-1", domain.SessionMetadata{RuntimeHandleID: "h2"}); err != nil {
+	if err := m.MarkSpawned(ctx, "fresh-1", domain.SessionMetadata{RuntimeHandleID: "h2"}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	if got := st.sessions["fresh-1"]; got.Reactivated {
@@ -1770,7 +1770,7 @@ func TestMarkSpawnedClearsFirstSignal(t *testing.T) {
 	rec := working("mer-1")
 	rec.FirstSignalAt = time.Now().Add(-time.Hour)
 	st.sessions["mer-1"] = rec
-	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{}); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 	if got := st.sessions["mer-1"]; !got.FirstSignalAt.IsZero() {

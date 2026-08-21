@@ -114,12 +114,16 @@ func TestCrewOneAwake_EveryWakeRouteIsClosed(t *testing.T) {
 		// prepare puts dev into the state this route starts from.
 		prepare func(t *testing.T, s *crewStack, dev domain.SessionRecord)
 		wake    func(s *crewStack, dev domain.SessionID) error
+		// quiet marks a route that must leave the member asleep WITHOUT reporting
+		// a refusal. Only the user-open hook is quiet: opening a card is not a
+		// request to run anything, so there is nothing for the human to be told.
+		quiet bool
 	}{
 		{
 			name:    "resume a suspended member",
 			prepare: func(*testing.T, *crewStack, domain.SessionRecord) {},
 			wake: func(s *crewStack, dev domain.SessionID) error {
-				_, err := s.mgr.Resume(context.Background(), dev)
+				_, err := s.mgr.Resume(context.Background(), dev, domain.WokenByWake)
 				return err
 			},
 		},
@@ -130,6 +134,7 @@ func TestCrewOneAwake_EveryWakeRouteIsClosed(t *testing.T) {
 				_, err := s.mgr.Wake(context.Background(), dev)
 				return err
 			},
+			quiet: true,
 		},
 		{
 			name:    "restart a suspended member",
@@ -163,7 +168,10 @@ func TestCrewOneAwake_EveryWakeRouteIsClosed(t *testing.T) {
 
 			before := s.rt.created
 			err := route.wake(s, dev.ID)
-			if !errors.Is(err, sessionmanager.ErrCrewBusy) {
+			switch {
+			case route.quiet && err != nil:
+				t.Fatalf("%s while %s holds the slot returned %v, want a quiet no-op", route.name, qa.ID, err)
+			case !route.quiet && !errors.Is(err, sessionmanager.ErrCrewBusy):
 				t.Fatalf("%s while %s holds the slot returned %v, want ErrCrewBusy", route.name, qa.ID, err)
 			}
 			if s.rt.created != before {
@@ -192,13 +200,13 @@ func TestCrewOneAwake_ARefusedRestartDoesNotKillTheSession(t *testing.T) {
 	dev, qa := s.spawnCrew(t)
 
 	// Hand the slot to dev so the member being restarted is the LIVE one.
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID); err != nil {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("hand over: %v", err)
 	}
 	// Now contrive the forbidden state the guard exists for: bring qa back behind
 	// the manager's back, exactly as a bug or a stale row would.
 	qaRec := s.record(t, qa.ID)
-	if err := s.lcm.MarkSpawned(ctx, qa.ID, qaRec.Metadata); err != nil {
+	if err := s.lcm.MarkSpawned(ctx, qa.ID, qaRec.Metadata, domain.WokenByWake); err != nil {
 		t.Fatal(err)
 	}
 	s.rt.setLive(qaRec.Metadata.RuntimeHandleID, true) // and its pane really is back
@@ -231,7 +239,7 @@ func TestCrewOneAwake_ADeadHolderDoesNotDeadlockTheCrew(t *testing.T) {
 		t.Fatal("precondition: qa's row must still claim the slot")
 	}
 
-	if _, err := s.mgr.Resume(ctx, dev.ID); err != nil {
+	if _, err := s.mgr.Resume(ctx, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("the crew is deadlocked behind a dead holder: %v", err)
 	}
 	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
@@ -255,7 +263,7 @@ func TestCrewOneAwake_AnUnprobeableHolderKeepsTheSlot(t *testing.T) {
 	dev, qa := s.spawnCrew(t)
 
 	s.rt.aliveErr = errors.New("tmux server not responding")
-	if _, err := s.mgr.Resume(ctx, dev.ID); !errors.Is(err, sessionmanager.ErrCrewBusy) {
+	if _, err := s.mgr.Resume(ctx, dev.ID, domain.WokenByWake); !errors.Is(err, sessionmanager.ErrCrewBusy) {
 		t.Fatalf("resume with an unprobeable holder returned %v, want ErrCrewBusy", err)
 	}
 	if got := s.record(t, qa.ID); got.IsSuspended {
@@ -265,7 +273,7 @@ func TestCrewOneAwake_AnUnprobeableHolderKeepsTheSlot(t *testing.T) {
 	// And it is not a deadlock: the next attempt probes again.
 	s.rt.aliveErr = nil
 	s.rt.kill(s.record(t, qa.ID).Metadata.RuntimeHandleID)
-	if _, err := s.mgr.Resume(ctx, dev.ID); err != nil {
+	if _, err := s.mgr.Resume(ctx, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("the retry after a recovered probe failed: %v", err)
 	}
 	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
@@ -285,12 +293,12 @@ func TestCrewOneAwake_HandoverPassesTheSlotAndOnlyTheSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID); err != nil {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("hand the slot to dev: %v", err)
 	}
 	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
 
-	if _, err := s.mgr.HandOverCrewSlot(ctx, dev.ID, qa.ID); err != nil {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, dev.ID, qa.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("hand the slot back to qa: %v", err)
 	}
 	s.assertOneAwake(t, qa.ID, dev.ID, qa.ID)
@@ -317,7 +325,7 @@ func TestCrewOneAwake_AFailedHandoverLeavesTheSlotFreeNotHeld(t *testing.T) {
 	// dev's pane really is gone (it stood down), so the wake must go through the
 	// full relaunch rather than adopting a live runtime - and that relaunch fails.
 	s.rt.createErr = errors.New("tmux: no space left on device")
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID); err == nil {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID, domain.WokenByWake); err == nil {
 		t.Fatal("the handover reported success although the taker never came up")
 	}
 	if got := s.awakeMembers(t, dev.ID, qa.ID); len(got) != 0 {
@@ -326,7 +334,7 @@ func TestCrewOneAwake_AFailedHandoverLeavesTheSlotFreeNotHeld(t *testing.T) {
 
 	// Free means takeable - by either member, which is what "cannot deadlock"
 	// means in practice.
-	if _, err := s.mgr.Resume(ctx, dev.ID); err != nil {
+	if _, err := s.mgr.Resume(ctx, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("the slot could not be taken after a failed handover: %v", err)
 	}
 	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
@@ -339,7 +347,7 @@ func TestCrewOneAwake_HandoverRefusesWhatWouldNotBeAHandover(t *testing.T) {
 	s := newCrewStack(t)
 	dev, qa := s.spawnCrew(t)
 
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, qa.ID); !errors.Is(err, sessionmanager.ErrInvalidCrew) {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, qa.ID, domain.WokenByWake); !errors.Is(err, sessionmanager.ErrInvalidCrew) {
 		t.Fatalf("handing the slot to its own holder returned %v, want ErrInvalidCrew", err)
 	}
 	solo, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
@@ -351,7 +359,7 @@ func TestCrewOneAwake_HandoverRefusesWhatWouldNotBeAHandover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, solo.ID); !errors.Is(err, sessionmanager.ErrInvalidCrew) {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, solo.ID, domain.WokenByWake); !errors.Is(err, sessionmanager.ErrInvalidCrew) {
 		t.Fatalf("handing the slot to a session in another task returned %v, want ErrInvalidCrew", err)
 	}
 	// Nothing was released on the way to either refusal.
@@ -428,7 +436,7 @@ func TestCrewOneAwake_BootBringsUpAtMostOneEvenWithTwoMarkers(t *testing.T) {
 
 	// Contrive the corrupt state: both members awake, then a clean shutdown, which
 	// markers both of them.
-	if err := s.lcm.MarkSpawned(ctx, dev.ID, s.record(t, dev.ID).Metadata); err != nil {
+	if err := s.lcm.MarkSpawned(ctx, dev.ID, s.record(t, dev.ID).Metadata, domain.WokenByWake); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.awakeMembers(t, dev.ID, qa.ID)) != 2 {
@@ -477,7 +485,7 @@ func TestCrewOneAwake_TheReviewerReadsOnlyInTheGap(t *testing.T) {
 	}
 	// Reading never takes the slot: after the reviewer's turn either member can
 	// still be woken, which is what "not a third participant" means.
-	if _, err := s.mgr.Resume(ctx, dev.ID); err != nil {
+	if _, err := s.mgr.Resume(ctx, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("the slot was not takeable after the reviewer's gap: %v", err)
 	}
 	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
@@ -529,7 +537,7 @@ func TestSolo_LifecycleIsUnchanged(t *testing.T) {
 	}
 
 	// Suspend (what the idle sweep does) then wake: resumes in place.
-	if err := s.lcm.MarkSuspended(ctx, rec.ID); err != nil {
+	if err := s.lcm.MarkSuspended(ctx, rec.ID, domain.SleepReasonIdle); err != nil {
 		t.Fatalf("solo suspend: %v", err)
 	}
 	if err := s.mgr.SuspendRuntime(ctx, rec.ID); err != nil {
@@ -650,7 +658,7 @@ func TestCrewOneAwake_TheMessageQueueCannotBringAMemberUp(t *testing.T) {
 	}
 
 	// And the message is not lost: it lands when that member takes the slot.
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID); err != nil {
+	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID, domain.WokenByWake); err != nil {
 		t.Fatalf("hand over: %v", err)
 	}
 	for range 3 {
@@ -666,9 +674,13 @@ func TestCrewOneAwake_TheMessageQueueCannotBringAMemberUp(t *testing.T) {
 
 // TestCrewOneAwake_ConcurrentWakesStillBringUpOnlyOne. The guard is a
 // check-then-act, so it is only as good as what serialises it. Two wakes that
-// arrive together - two clicks on the board, a wake racing the boot restore pass
-// - could otherwise both read a free slot and both take it, which is the exact
-// state everything here exists to make impossible.
+// arrive together - two clicks on the baton bar, a wake racing the boot restore
+// pass - could otherwise both read a free slot and both take it, which is the
+// exact state everything here exists to make impossible.
+//
+// The racers are EXPLICIT wakes. Merely opening a card no longer takes the turn
+// at all (a view leaves a turn-asleep member asleep), so it cannot race for a
+// slot it will not accept - see TestCrewView_*.
 func TestCrewOneAwake_ConcurrentWakesStillBringUpOnlyOne(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
@@ -690,7 +702,7 @@ func TestCrewOneAwake_ConcurrentWakesStillBringUpOnlyOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = s.mgr.Wake(ctx, id)
+			_, errs[i] = s.mgr.WakeCrewMember(ctx, id)
 		}()
 	}
 	close(start)

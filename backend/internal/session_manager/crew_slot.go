@@ -145,7 +145,9 @@ func (m *Manager) refuseWhileAnyAwake(ctx context.Context, candidates []domain.S
 		m.logger.Warn("crew slot: the holder's runtime is gone; releasing the slot it still claimed",
 			"sessionID", other.ID, "crew", other.CrewID, "role", string(other.CrewRole),
 			"handle", other.Metadata.RuntimeHandleID, "route", route, "requestedBy", requester)
-		if err := m.lcm.MarkSuspended(ctx, other.ID); err != nil {
+		// SleepReasonTurn, not idle: the slot is being taken by another member, so
+		// what this row is waiting for is its turn to come round again.
+		if err := m.lcm.MarkSuspended(ctx, other.ID, domain.SleepReasonTurn); err != nil {
 			return fmt.Errorf("crew slot: release dead holder %s: %w", other.ID, err)
 		}
 	}
@@ -226,7 +228,9 @@ func (m *Manager) crewHolderOf(ctx context.Context, rec domain.SessionRecord) (d
 }
 
 // ReleaseCrewSlot puts a session to sleep so the crew's slot is free: mark it
-// suspended, then reap its tmux. It is exactly the pair the idle sweep uses
+// suspended WITH THE REASON "not its turn", then reap its tmux. The reason is
+// what stops the next person who merely LOOKS at the card from handing the turn
+// straight back (domain/sleep.go). It is exactly the pair the idle sweep uses
 // (MarkSuspended then reapRuntimeIfAlive), in that order, so the reaped agent's
 // late "exited" hook is ignored rather than racing in to terminate the card.
 //
@@ -256,7 +260,7 @@ func (m *Manager) ReleaseCrewSlot(ctx context.Context, id domain.SessionID) erro
 	if !rec.Awake() {
 		return nil
 	}
-	if err := m.lcm.MarkSuspended(ctx, id); err != nil {
+	if err := m.lcm.MarkSuspended(ctx, id, domain.SleepReasonTurn); err != nil {
 		return fmt.Errorf("release crew slot %s: %w", id, err)
 	}
 	if err := m.reapRuntimeIfAlive(ctx, id, runtimeHandle(rec.Metadata)); err != nil {
@@ -280,7 +284,7 @@ func (m *Manager) ReleaseCrewSlot(ctx context.Context, id domain.SessionID) erro
 // afterwards, by this call again or by a human opening the card. The opposite
 // order - wake first - would have to hold both awake for an instant, which is the
 // one state this whole file exists to make impossible.
-func (m *Manager) HandOverCrewSlot(ctx context.Context, from, to domain.SessionID) (domain.SessionRecord, error) {
+func (m *Manager) HandOverCrewSlot(ctx context.Context, from, to domain.SessionID, by domain.WokenBy) (domain.SessionRecord, error) {
 	if from == to {
 		return domain.SessionRecord{}, fmt.Errorf("%w: cannot hand the crew slot to its own holder %s", ErrInvalidCrew, from)
 	}
@@ -302,5 +306,5 @@ func (m *Manager) HandOverCrewSlot(ctx context.Context, from, to domain.SessionI
 		return domain.SessionRecord{}, err
 	}
 	m.logger.Info("crew slot: handing over", "crew", fromRec.CrewID, "from", from, "to", to)
-	return m.Resume(ctx, to)
+	return m.Resume(ctx, to, by)
 }
