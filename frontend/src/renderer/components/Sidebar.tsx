@@ -2,7 +2,6 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import {
-	Check,
 	ChevronRight,
 	CheckCircle2,
 	Folder,
@@ -22,7 +21,7 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import { Fragment, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
@@ -36,7 +35,7 @@ import {
 	type WorkspaceSummary,
 	workerSessions,
 } from "../types/workspace";
-import { crewChipState, neverStarted, tasksFrom } from "../lib/crew";
+import { tasksFrom } from "../lib/crew";
 import { aoBridge } from "../lib/bridge";
 import { CopyButton } from "./CopyButton";
 import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
@@ -928,27 +927,23 @@ function ProjectItem({
           sessions read as children without adding a persistent guide rail. */}
 			{expanded && sessions.length > 0 && (
 				<SidebarMenuSub className="mx-0 ml-[18px] translate-x-0 gap-0 border-l-0 px-0 py-1 pl-2.5">
+					{/* ONE ROW PER TASK, and a crew gets no second row and no child row.
+					    A crew is one piece of work - one worktree, one branch, one pull
+					    request - and the sidebar is the list of things being worked on,
+					    so a task that gained a qa must not grow in it. WHICH MEMBER you
+					    are looking at is a fact about the open session, and it is
+					    answered by the member switcher in the topbar; the row's job stops
+					    at "this task is open".
+					    The row is therefore ACTIVE for either member, and clicking it
+					    lands on dev - which owns the branch, the pull request and the
+					    report, and is where opening a task is defined to land. */}
 					{tasks.map((task) => (
-						<Fragment key={task.dev.id}>
-							<SessionRow
-								session={task.dev}
-								active={selection.activeSessionId === task.dev.id}
-								onOpen={() => selection.goSession(workspace.id, task.dev.id)}
-							/>
-							{/* A crew's qa NESTS under its dev rather than taking a row of its
-							    own: it is the same task, the same branch and the same
-							    worktree, and a second top-level row would read as a second
-							    piece of work. One extra indented line, always visible - a
-							    crew is exactly two members, so a caret would cost a click to
-							    reveal a fact that already fits on one line. */}
-							{task.qa && (
-								<CrewMemberRow
-									member={task.qa}
-									active={selection.activeSessionId === task.qa.id}
-									onOpen={() => selection.goSession(workspace.id, task.qa!.id)}
-								/>
-							)}
-						</Fragment>
+						<SessionRow
+							active={task.members.some((member) => member.id === selection.activeSessionId)}
+							key={task.dev.id}
+							onOpen={() => selection.goSession(workspace.id, task.dev.id)}
+							session={task.dev}
+						/>
 					))}
 				</SidebarMenuSub>
 			)}
@@ -1124,63 +1119,6 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 				type="button"
 			>
 				<Pencil aria-hidden="true" />
-			</button>
-		</SidebarMenuSubItem>
-	);
-}
-
-/**
- * A crew member NESTED under its dev: one quiet, indented line saying which role
- * it is and whether it is running.
- *
- * It is deliberately NOT a second SessionRow. A crew member is not a second
- * piece of work - it has no branch of its own, no pull request of its own and no
- * name of its own - so it gets no rename, no `@id` line and no drag handle. What
- * it does get is the two facts that make it worth showing at all: the role, and
- * whether it is awake. Clicking it opens that agent, exactly as clicking a chip
- * on the board card does.
- */
-function CrewMemberRow({ member, active, onOpen }: { member: WorkspaceSession; active: boolean; onOpen: () => void }) {
-	const role = member.crew?.role ?? "qa";
-	const state = crewChipState(member);
-	// "not started" and "paused" are different things to a person: one has a Start
-	// button on its card and the other comes back the moment you open it.
-	const notStarted = neverStarted(member);
-	return (
-		<SidebarMenuSubItem>
-			<button
-				aria-current={active ? "page" : undefined}
-				aria-label={`Open ${role} on ${member.title}`}
-				className={cn(
-					"relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[3px] pl-[26px] pr-1.5 text-left transition-[color]",
-					"before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-px before:rounded-full before:bg-transparent",
-					"focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-					active && "before:bg-accent",
-				)}
-				onClick={onOpen}
-				type="button"
-			>
-				{state === "working" ? (
-					<SessionGlyph session={member} />
-				) : (
-					<span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center text-passive">
-						{state === "done" ? <Check className="h-[11px] w-[11px]" /> : <Moon className="h-[11px] w-[11px]" />}
-					</span>
-				)}
-				<span
-					className={cn(
-						"min-w-0 flex-1 truncate text-[11.5px]",
-						state === "working" ? "text-muted-foreground" : "text-passive",
-					)}
-					data-crew-row={role}
-					data-crew-row-state={state}
-				>
-					{role}
-					<span className="text-passive">
-						{" "}
-						· {state === "working" ? "working" : state === "done" ? "finished" : notStarted ? "not started" : "paused"}
-					</span>
-				</span>
 			</button>
 		</SidebarMenuSubItem>
 	);

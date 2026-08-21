@@ -179,6 +179,55 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+describe("Sidebar — a crew task keeps ONE row", () => {
+	// The sidebar is the list of things being worked on, and a crew is ONE thing:
+	// one worktree, one branch, one pull request. So a task that gains a qa must
+	// not grow a row, a child row or a nested line here. WHICH member you have
+	// open is answered by the member switcher in the topbar, one level in.
+	const crewDev: WorkspaceSession = {
+		...session,
+		id: "proj-1-1",
+		title: "crew thing",
+		crew: { id: "proj-1-1", role: "dev", hasRun: true },
+	};
+	const crewQa: WorkspaceSession = {
+		...session,
+		id: "proj-1-2",
+		title: "crew thing",
+		crew: { id: "proj-1-1", role: "qa", hasRun: true },
+	};
+
+	function renderCrew() {
+		renderSidebar({ workspaces: [{ ...workspace, sessions: [crewDev, crewQa] }] });
+	}
+
+	it("draws one row for the task and no row for the qa", () => {
+		renderCrew();
+
+		expect(screen.getAllByRole("button", { name: "Open crew thing" })).toHaveLength(1);
+		expect(screen.queryByText("qa · working")).not.toBeInTheDocument();
+		expect(screen.queryByText("@proj-1-2")).not.toBeInTheDocument();
+	});
+
+	it("marks the row active for EITHER member, so opening qa does not blank the sidebar", () => {
+		mockParams.projectId = "proj-1";
+		mockParams.sessionId = "proj-1-2";
+		renderCrew();
+
+		expect(screen.getByRole("button", { name: "Open crew thing" })).toHaveAttribute("aria-current", "page");
+	});
+
+	it("lands on dev when the row is opened — dev owns the branch, the PR and the report", async () => {
+		renderCrew();
+
+		await userEvent.click(screen.getByRole("button", { name: "Open crew thing" }));
+
+		expect(navigateMock).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "proj-1-1" } }),
+		);
+	});
+});
+
 describe("Sidebar", () => {
 	it("orders sessions by state: working → needs → review → merge", () => {
 		const mk = (id: string, title: string, status: WorkspaceSession["status"]): WorkspaceSession => ({

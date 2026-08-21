@@ -173,3 +173,75 @@ describe("ShellTopbar worker session actions", () => {
 		expect(screen.queryByRole("button", { name: "Open orchestrator" })).not.toBeInTheDocument();
 	});
 });
+
+describe("ShellTopbar — the member switcher, and where it has to live", () => {
+	// The switcher is drawn HERE, not in the terminal toolbar, and the reason is
+	// cardinality: `CenterPane` draws its toolbar once per PANE, so a switcher put
+	// there appears twice the moment the split view is used. This header is
+	// rendered once by the shell for the whole session route. The other half of
+	// that proof - that the center pane draws none, however many panes there are -
+	// lives in SessionView.test.tsx.
+	function renderCrew(activeIsQa: boolean) {
+		const dev = sessionWith({ id: "dev-1", crew: { id: "dev-1", role: "dev", hasRun: true } });
+		const qa = sessionWith({ id: "dev-1-qa", crew: { id: "dev-1", role: "qa", hasRun: true } });
+		useWorkspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", name: "my-app", path: "/repo/my-app", sessions: [dev, qa] }] as WorkspaceSummary[],
+			isError: false,
+			isLoading: false,
+		});
+		paramsMock.projectId = "proj-1";
+		paramsMock.sessionId = activeIsQa ? qa.id : dev.id;
+		pathnameMock.value = `/projects/proj-1/sessions/${paramsMock.sessionId}`;
+		return render(
+			<QueryClientProvider client={new QueryClient()}>
+				<ShellTopbar />
+			</QueryClientProvider>,
+		);
+	}
+
+	it("draws EXACTLY ONE switcher on a crew session, with a chip per member", () => {
+		renderCrew(false);
+
+		expect(document.querySelectorAll("[data-crew-switcher]")).toHaveLength(1);
+		expect(document.querySelectorAll("[data-crew-switcher-chip]")).toHaveLength(2);
+	});
+
+	it("marks the routed member, so switching is visible without reading the branch", () => {
+		renderCrew(true);
+
+		expect(document.querySelector("[data-crew-switcher-chip='qa']")).toHaveAttribute(
+			"data-crew-switcher-chip-active",
+			"true",
+		);
+		expect(document.querySelector("[data-crew-switcher-chip='dev']")).toHaveAttribute(
+			"data-crew-switcher-chip-active",
+			"false",
+		);
+	});
+
+	it("navigates to the other member when its chip is pressed", async () => {
+		renderCrew(false);
+
+		await userEvent.click(document.querySelector("[data-crew-switcher-chip='qa']") as HTMLElement);
+
+		expect(navigateMock).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "dev-1-qa" } }),
+		);
+	});
+
+	it("costs a SOLO session one quiet `+ qa` and nothing else", () => {
+		renderTopbar(sessionWith());
+
+		expect(document.querySelector("[data-crew-switcher]")).toHaveAttribute("data-crew-switcher", "solo");
+		expect(document.querySelector("[data-crew-switcher-add='qa']")).not.toBeNull();
+		// No chips and no gate: the identity slot still reads branch + status pill.
+		expect(document.querySelectorAll("[data-crew-switcher-chip]")).toHaveLength(0);
+		expect(document.querySelector("[data-crew-switcher-gate='review']")).toBeNull();
+	});
+
+	it("draws no switcher at all on an orchestrator session — a crew there is a category error", () => {
+		renderTopbar(sessionWith({ kind: "orchestrator" }));
+
+		expect(document.querySelector("[data-crew-switcher]")).toBeNull();
+	});
+});

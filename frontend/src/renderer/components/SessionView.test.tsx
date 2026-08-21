@@ -56,6 +56,22 @@ const { workspaces, panels } = vi.hoisted(() => {
 		{ length: 10 },
 		(_, i) => ({ ...worker, id: `sess-x${i}`, title: `extra ${i}` }) satisfies WorkspaceSession,
 	);
+	// A CREW: two members, one task. `crew.id` is dev's id, which is what makes a
+	// task id derivable from either member without another lookup.
+	const crewDev = {
+		...worker,
+		id: "crew-dev",
+		title: "crew thing",
+		branch: "ao/crew",
+		crew: { id: "crew-dev", role: "dev" as const, hasRun: true },
+	} satisfies WorkspaceSession;
+	const crewQa = {
+		...worker,
+		id: "crew-qa",
+		title: "crew thing",
+		branch: "ao/crew",
+		crew: { id: "crew-dev", role: "qa" as const, hasRun: true },
+	} satisfies WorkspaceSession;
 	const workspaces: WorkspaceSummary[] = [
 		{
 			id: "proj-1",
@@ -63,7 +79,7 @@ const { workspaces, panels } = vi.hoisted(() => {
 			path: "/p",
 			type: "main",
 			hasWebUI: true,
-			sessions: [worker, worker2, worker3, orchestrator, todo, ...extraWorkers],
+			sessions: [worker, worker2, worker3, orchestrator, todo, crewDev, crewQa, ...extraWorkers],
 		},
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
@@ -845,5 +861,84 @@ describe("SessionView drag-and-drop wiring", () => {
 		window.dispatchEvent(pointer("pointerup", 700, 200));
 
 		expect(paneSessionIds(storedLayout()!)).toEqual(["sess-2", "sess-1"]);
+	});
+});
+
+describe("SessionView — the center pane draws no member switcher, at any pane count", () => {
+	beforeEach(() => {
+		useUiStore.setState({ isInspectorOpen: true, splitLayouts: {} });
+		panels.clear();
+		navigateMock.mockReset();
+		wakeMock.mockReset().mockResolvedValue({ error: undefined });
+	});
+
+	// The other half of the cardinality proof (ShellTopbar.test.tsx has the first
+	// half). `CenterPane` draws its toolbar ONCE PER PANE, so a member switcher
+	// placed there would be drawn once per pane the moment the split view is used
+	// - two switchers on screen, each claiming to switch the thing containing it.
+	// It is drawn by the shell topbar instead, which renders once per route, so
+	// this whole subtree must contain none however many panes there are.
+	it("renders none in the single view", () => {
+		const { container } = render(<SessionView sessionId="sess-1" />);
+
+		expect(screen.getByTestId("center-sess-1")).toBeInTheDocument();
+		expect(container.querySelectorAll("[data-crew-switcher]")).toHaveLength(0);
+	});
+
+	it("renders none in a two-pane split, where a per-pane control would be drawn twice", () => {
+		useUiStore.getState().setSplitLayout("proj-1", {
+			kind: "split",
+			orientation: "horizontal",
+			ratio: 0.5,
+			first: leaf("sess-1"),
+			second: leaf("sess-2"),
+		});
+		const { container } = render(<SessionView sessionId="sess-1" />);
+
+		// Two panes, each with its own toolbar - and no switcher in either.
+		expect(screen.getByTestId("center-sess-1")).toBeInTheDocument();
+		expect(screen.getByTestId("center-sess-2")).toBeInTheDocument();
+		expect(container.querySelectorAll("[data-crew-switcher]")).toHaveLength(0);
+	});
+});
+
+describe("SessionView — the rail does not move when you switch MEMBERS", () => {
+	beforeEach(() => {
+		useUiStore.setState({ isInspectorOpen: true, splitLayouts: {}, inspectorViewRequest: null });
+		panels.clear();
+		wakeMock.mockReset().mockResolvedValue({ error: undefined });
+	});
+
+	function railView(): string | null {
+		return screen.getByText("pop browser").getAttribute("data-view");
+	}
+
+	it("keeps the selected tab across a member switch, and resets it on a different TASK", async () => {
+		const { rerender } = render(<SessionView sessionId="crew-dev" />);
+		expect(railView()).toBe("summary");
+
+		// Put the rail somewhere other than its default, the way the topbar's
+		// review pip does.
+		act(() => useUiStore.getState().requestInspectorView("reviews"));
+		await waitFor(() => expect(railView()).toBe("reviews"));
+
+		// dev -> qa: the same task, so four of the six tabs answer identically and
+		// re-selecting Summary would be churn with no information behind it.
+		rerender(<SessionView sessionId="crew-qa" />);
+		expect(railView()).toBe("reviews");
+
+		// A different task is a different pull request, checklist and worktree, so
+		// the rail starts over - exactly as it always has.
+		rerender(<SessionView sessionId="sess-2" />);
+		await waitFor(() => expect(railView()).toBe("summary"));
+	});
+
+	it("honours a rail tab asked for from outside, then clears the request", async () => {
+		render(<SessionView sessionId="sess-1" />);
+
+		act(() => useUiStore.getState().requestInspectorView("tests"));
+
+		await waitFor(() => expect(railView()).toBe("tests"));
+		expect(useUiStore.getState().inspectorViewRequest).toBeNull();
 	});
 });

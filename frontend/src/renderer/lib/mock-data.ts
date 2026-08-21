@@ -37,6 +37,10 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 		// last), docs-site leaves it unset like every project that never opts in
 		// (four tabs, no Browser).
 		hasWebUI: true,
+		// The demo project targets iOS too, so the harness can show the sixth rail
+		// tab and the member switcher's device pip. Without it the Device tab does
+		// not render here at all and neither can be looked at.
+		hasIOSSimulator: true,
 		orchestratorAgent: "codex",
 		accentColor: "#6ee7b7",
 		sessions: [
@@ -553,6 +557,25 @@ const prSummary = (sessionId: string, number: number, overrides: Partial<Session
 		...overrides,
 	};
 };
+
+/**
+ * The TASK a mock session belongs to - the harness's stand-in for the daemon's
+ * `TaskScoped` middleware (#242).
+ *
+ * A crew's two members share one worktree, one branch, one pull request and one
+ * smoke checklist, and the daemon resolves any member to its dev before it
+ * answers those four surfaces. The mock fixtures are keyed by session, so
+ * without this the harness would show a qa an empty Summary and an empty
+ * checklist - the very bug the daemon no longer has, reintroduced by the fake
+ * data and easy to mistake for a real one.
+ *
+ * A solo session is its own task, so this is the identity for every session
+ * without a crew.
+ */
+export function mockTaskId(sessionId: string): string {
+	const session = mockWorkspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
+	return session?.crew?.id ?? sessionId;
+}
 
 export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 	"fix-auth-timeouts": [
@@ -1140,6 +1163,44 @@ export function mockJiraProjects(query: string): components["schemas"]["JiraProj
 	return mockJiraProjectPool.filter(
 		(p) => (p.key ?? "").toLowerCase().includes(q) || (p.name ?? "").toLowerCase().includes(q),
 	);
+}
+
+/**
+ * The machine's simulators, for the VITE_NO_ELECTRON harness.
+ *
+ * TWO booted devices with DIFFERENT holders, deliberately: that is the case the
+ * two-agent task creates and the one nothing else can show - dev driving one
+ * simulator while qa drives another. It is what makes the switcher's device pip
+ * and the Device tab's role-named holder line visible without a Mac, an Xcode
+ * and two running agents.
+ */
+export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"] {
+	return {
+		defaultUdid: null,
+		defaultReason: "two simulators are booted, so an unqualified command has no default",
+		devices: [
+			{
+				udid: "MOCK-UDID-A",
+				name: "iPhone 16 Pro",
+				runtime: "iOS 26.3",
+				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+				state: "Booted",
+				available: true,
+				default: false,
+				lease: { state: "held", holder: "demo-ready" },
+			},
+			{
+				udid: "MOCK-UDID-B",
+				name: "iPhone 15",
+				runtime: "iOS 26.3",
+				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+				state: "Booted",
+				available: true,
+				default: false,
+				lease: { state: "held", holder: "demo-ready-qa" },
+			},
+		],
+	};
 }
 
 // Mock smoke checklist for the VITE_NO_ELECTRON renderer harness (no daemon).

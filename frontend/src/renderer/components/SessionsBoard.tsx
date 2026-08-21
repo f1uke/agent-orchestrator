@@ -23,6 +23,7 @@ import {
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { captureRendererEvent } from "../lib/telemetry";
+import { useAddCrewRole } from "../hooks/useAddCrewRole";
 import { DashboardSubhead } from "./DashboardSubhead";
 import {
 	type AttentionZone,
@@ -872,21 +873,10 @@ function SessionCard({
 		task.members.some((m) => m.id !== session.id && crewChipState(m) === "working");
 	const prSummaries0 = useSessionScmSummary(session.id).data;
 	const review = gates?.review ?? reviewGateState(prSummaries0 ?? []);
-	// `+ qa` on a solo card. The member arrives as a ROW and nothing is spent until
-	// somebody starts it, so this changes nothing about the agent that is running -
-	// the card simply gains a crew strip.
-	const queryClient = useQueryClient();
-	const addRole = useMutation({
-		mutationFn: async () => {
-			void captureRendererEvent("ao.renderer.crew_add", { project_id: session.workspaceId });
-			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/crew/members", {
-				params: { path: { sessionId: session.id } },
-				body: { role: "qa" },
-			});
-			if (apiError) throw new Error(apiErrorMessage(apiError, "Unable to add a qa to this task"));
-		},
-		onSuccess: () => void queryClient.invalidateQueries({ queryKey: workspaceQueryKey }),
-	});
+	// `+ qa` on a solo card. Shared with the session topbar's member switcher,
+	// which offers the same affordance from the other end - one mutation, so the
+	// two entry points cannot start a member two different ways.
+	const addRole = useAddCrewRole(session);
 	const addRoleError = addRole.error instanceof Error ? addRole.error.message : null;
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	// A Jira-linked session gets the richer display-only Jira badge (KEY · type ·

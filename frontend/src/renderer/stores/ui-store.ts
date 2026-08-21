@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { InspectorView } from "../components/SessionInspector";
 import { parseSplitLayouts, serializeSplitLayouts, type SplitNode } from "../lib/split-layout";
 
 export type Theme = "light" | "dark";
@@ -40,6 +41,17 @@ type UiState = {
 	 * it is a single navigation, and the Settings pane clears it once honoured.
 	 */
 	petLibraryRequest: string | null;
+	/**
+	 * A rail tab something OUTSIDE the session view has asked for, or null.
+	 *
+	 * The selected tab is `SessionView`'s own state - it is reset per session and
+	 * driven by rail and terminal interactions that all live inside that tree. The
+	 * shell topbar sits above it (see `CrewSwitcher` for why the switcher has to),
+	 * so its review pip asks through here rather than by lifting the whole
+	 * selection into the store. Ephemeral and never persisted: `SessionView`
+	 * honours it once, opens the rail if it is shut, and clears it.
+	 */
+	inspectorViewRequest: InspectorView | null;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
 	toggleTheme: () => void;
@@ -53,6 +65,8 @@ type UiState = {
 	setOrchestratorReplacementError: (projectId: string, message: string | null) => void;
 	/** Ask the Pet library to open on a session, or with null, forget the request. */
 	requestPetLibrary: (sessionRef: string | null) => void;
+	/** Ask the session rail to show a tab, or with null, forget the request. */
+	requestInspectorView: (view: InspectorView | null) => void;
 };
 
 const sidebarStorageKey = "ao.sidebar.open";
@@ -124,6 +138,7 @@ export const useUiStore = create<UiState>((set) => ({
 	splitLayouts: parseSplitLayouts(getLocalStorage()?.getItem(splitLayoutsStorageKey) ?? null),
 	orchestratorReplacementErrors: {},
 	petLibraryRequest: null,
+	inspectorViewRequest: null,
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setTheme: (theme) => {
 		getLocalStorage()?.setItem(themeStorageKey, theme);
@@ -196,4 +211,5 @@ export const useUiStore = create<UiState>((set) => ({
 			return { orchestratorReplacementErrors };
 		}),
 	requestPetLibrary: (sessionRef) => set({ petLibraryRequest: sessionRef }),
+	requestInspectorView: (view) => set({ inspectorViewRequest: view }),
 }));

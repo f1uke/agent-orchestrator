@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Loader2, Power } from "lucide-react";
 import type { SimDevice } from "../hooks/useSimDevices";
+import { crewHolderLabel, type Task } from "../lib/crew";
 import type { SimPowerRequest } from "../hooks/useSimPower";
 import { cn } from "../lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -53,6 +54,7 @@ export function SimDevicePicker({
 	onChoose,
 	onPower,
 	sessionId,
+	task,
 }: {
 	chosen: string | null;
 	devices: SimDevice[];
@@ -60,6 +62,12 @@ export function SimDevicePicker({
 	onChoose: (udid: string) => void;
 	onPower: (request: SimPowerRequest) => void;
 	sessionId: string;
+	/**
+	 * The task this pane belongs to, so a device held by the crewmate is named by
+	 * its ROLE rather than by a raw session id. Undefined names every holder by id
+	 * - which is what a solo task wants anyway.
+	 */
+	task?: Task;
 }) {
 	const [open, setOpen] = useState(false);
 	// Which row is mid-confirmation, if any. Held here rather than per row so
@@ -130,6 +138,7 @@ export function SimDevicePicker({
 								onConfirm={setConfirming}
 								onPower={onPower}
 								sessionId={sessionId}
+								task={task}
 								watching={device.udid === chosen}
 							/>
 						))}
@@ -146,6 +155,7 @@ export function SimDevicePicker({
 								onConfirm={setConfirming}
 								onPower={onPower}
 								sessionId={sessionId}
+								task={task}
 								watching={false}
 							/>
 						))}
@@ -197,11 +207,13 @@ function DeviceRow({
 	onConfirm,
 	onPower,
 	sessionId,
+	task,
 	watching,
 }: {
 	bootedCount: number;
 	confirming: boolean;
 	device: SimDevice;
+	task?: Task;
 	onChoose: () => void;
 	onConfirm: (udid: string | null) => void;
 	onPower: (request: SimPowerRequest) => void;
@@ -238,6 +250,7 @@ function DeviceRow({
 					className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
 					disabled={!booted}
 					onClick={onChoose}
+					title={heldByOther ? `Leased by @${holder}` : undefined}
 					type="button"
 				>
 					<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", booted ? "bg-success" : "bg-passive")} />
@@ -246,7 +259,11 @@ function DeviceRow({
 						<span className="block truncate text-[11px] text-muted-foreground">
 							{device.runtime}
 							{watching ? " · watching" : ""}
-							{heldByOther ? ` · leased by @${holder}` : ""}
+							{/* The holder in the ROLE's words where it is this task's other
+							    member (`leased by qa`), and by `@id` for anything else. Same
+							    vocabulary as the member switcher in the topbar; the raw id
+							    stays on the row's tooltip either way. */}
+							{heldByOther ? ` · leased by ${crewHolderLabel(task, holder)}` : ""}
 						</span>
 					</span>
 				</button>
@@ -271,7 +288,7 @@ function DeviceRow({
 				<Confirm
 					booted={booted}
 					bootedCount={bootedCount}
-					holder={heldByOther ? holder : ""}
+					holder={heldByOther ? crewHolderLabel(task, holder) : ""}
 					name={device.name}
 					onCancel={() => onConfirm(null)}
 					onConfirm={act}
@@ -357,6 +374,7 @@ function Confirm({
 }: {
 	booted: boolean;
 	bootedCount: number;
+	/** The holder as a person would say it: a role, or an `@id`. Empty if none. */
 	holder: string;
 	name: string;
 	onCancel: () => void;
@@ -365,7 +383,7 @@ function Confirm({
 	let question: string;
 	if (booted) {
 		question = holder
-			? `Shut ${name} down? @${holder} is leasing it, and loses the device and everything running on it.`
+			? `Shut ${name} down? ${holder} is leasing it, and loses the device and everything running on it.`
 			: `Shut ${name} down? Everything running on it is lost.`;
 	} else if (bootedCount >= 2) {
 		question =

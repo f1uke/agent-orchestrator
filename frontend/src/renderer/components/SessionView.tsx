@@ -7,6 +7,7 @@ import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
 import { neverStarted } from "../lib/crew";
+import { useSessionTask } from "../hooks/useSessionTask";
 import { CrewMemberNotStartedPane } from "./CrewMemberNotStartedPane";
 import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
@@ -186,13 +187,40 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	useEffect(() => {
 		setTerminalTarget({ kind: "worker" });
 		setBrowserPoppedOut(false);
-		setInspectorView("summary");
 		setFileView(null);
 		setWorkspaceFile(null);
 		setChangesFocus(null);
 		setActiveChangedPath(null);
 		setRevealInTree(null);
 	}, [sessionId]);
+
+	// THE RAIL DOES NOT MOVE WHEN YOU SWITCH MEMBERS — which is what makes the
+	// topbar's member switcher cheap enough to be the primary gesture.
+	//
+	// The daemon answers a task's own surfaces for the TASK (#242), so Summary,
+	// Reviews, Files and Tests are identical whichever member is routed; only the
+	// terminal and the two genuinely per-agent tabs (Browser, Device) differ. So
+	// the selected tab is reset per TASK, not per session: a task id is the crew's
+	// id, and a solo session is its own task — the same identity `CrewDevOf`
+	// relies on, so this is a no-op for every task with one agent. Resetting on
+	// every session change would throw a reader off Tests every time they glanced
+	// at their crewmate's terminal, which is exactly the churn the design rejects.
+	const taskId = session ? (session.crew?.id ?? session.id) : undefined;
+	useEffect(() => {
+		if (!taskId) return;
+		setInspectorView("summary");
+	}, [taskId]);
+
+	// A rail tab asked for from OUTSIDE this tree — the topbar's review pip. It is
+	// honoured once, opens the rail if it is shut, and is cleared.
+	const inspectorViewRequest = useUiStore((state) => state.inspectorViewRequest);
+	const requestInspectorView = useUiStore((state) => state.requestInspectorView);
+	useEffect(() => {
+		if (!inspectorViewRequest) return;
+		setInspectorView(inspectorViewRequest);
+		if (!useUiStore.getState().isInspectorOpen) toggleInspector();
+		requestInspectorView(null);
+	}, [inspectorViewRequest, requestInspectorView, toggleInspector]);
 
 	// Opening/selecting a session counts as activity: POST /wake so the daemon
 	// resumes it in place if the idle sweep suspended it (recreate tmux, clear the
@@ -420,6 +448,10 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		[workspace, splitRoot, session],
 	);
 	const splitAtCap = splitRoot !== undefined && paneCount(splitRoot) >= MAX_SPLIT_PANES;
+	// The task's own members, offered first in the split picker: the switcher in
+	// the topbar swaps between them, and split is how you watch both at once.
+	const task = useSessionTask(sessionId);
+	const taskMemberIds = useMemo(() => new Set(task?.members.map((member) => member.id) ?? []), [task]);
 
 	// `ao preview` sets session.previewUrl and bumps previewRevision (streamed over
 	// CDC); surface a *live* preview in the inspector rail's Browser tab (opening
@@ -549,6 +581,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			<SplitSessionPicker
 				atCap={splitAtCap}
 				eligible={eligibleForSplit}
+				taskMemberIds={taskMemberIds}
 				onSplit={(direction, newSessionId) => splitFromPane(paneSessionId, direction, newSessionId)}
 				onUnsplit={splitRoot ? () => unsplitTo(paneSessionId) : undefined}
 			/>

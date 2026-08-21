@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { House, Keyboard, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
+import { useSessionTask } from "../hooks/useSessionTask";
+import { crewHolderLabel, type Task } from "../lib/crew";
 import { useSimKeyboard } from "../hooks/useSimKeyboard";
 import { useSimPower, type SimPowerRequest } from "../hooks/useSimPower";
 import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
@@ -190,6 +192,9 @@ export function SimulatorPanel({
 	const watching = paused === null;
 
 	const devices = useSimDevices(watching);
+	// The task this pane belongs to, so a lease held by the crewmate can be named
+	// by its role rather than by a raw session id.
+	const task = useSessionTask(sessionId);
 	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
 	// 🗝 What the human ASKED for, which is not the same as what they may do.
 	// Driving itself is derived below, from this and the lease together.
@@ -360,7 +365,7 @@ export function SimulatorPanel({
 		if (canDrive) return "";
 		if (!chosen) return "No simulator is chosen yet, so there is nothing to touch. Pick one first.";
 		if (heldByOther) {
-			return `@${lease?.holder} is holding this device, so nothing here may touch it. Take it over to drive it.`;
+			return `${crewHolderLabel(task, lease?.holder)} is holding this device, so nothing here may touch it. Take it over to drive it.`;
 		}
 		if (!heldByThisSession) {
 			return "This session is not holding this device, so nothing here may touch it. Claim it to drive it.";
@@ -572,6 +577,7 @@ export function SimulatorPanel({
 					paused={paused}
 					sessionId={sessionId}
 					status={stream}
+					task={task}
 				/>
 
 				<div
@@ -686,6 +692,7 @@ export function SimulatorPanel({
 							device={device}
 							heldByOther={Boolean(heldByOther)}
 							heldByThisSession={heldByThisSession}
+							holder={crewHolderLabel(task, lease?.holder)}
 							onRefresh={refreshDevices}
 							onRelease={() => device && release.mutate(device.udid)}
 							sessionId={sessionId}
@@ -720,7 +727,7 @@ export function SimulatorPanel({
 							label={
 								<span className="block max-w-[220px]">
 									{heldByOther
-										? `Take the device from @${device.lease?.holder}. Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
+										? `Take the device from ${crewHolderLabel(task, device.lease?.holder)} (@${device.lease?.holder}). Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
 										: "Take the same lease `ao sim tap` takes. Watching never needs one; touching the device always does."}
 								</span>
 							}
@@ -728,7 +735,9 @@ export function SimulatorPanel({
 							<button
 								// Named after the holder, so taking a device from another
 								// session reads as a decision rather than a slip.
-								aria-label={heldByOther ? `Take over from @${device.lease?.holder}` : "Claim to drive"}
+								aria-label={
+									heldByOther ? `Take over from ${crewHolderLabel(task, device.lease?.holder)}` : "Claim to drive"
+								}
 								className="flex h-9 items-center rounded-full border border-border bg-raised px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay disabled:opacity-40 disabled:hover:bg-raised"
 								disabled={claim.isPending}
 								onClick={() => claim.mutate({ udid: device.udid, takeOver: heldByOther ? true : undefined })}
@@ -892,6 +901,7 @@ function DevicePill({
 	paused,
 	sessionId,
 	status,
+	task,
 }: {
 	chosen: string | null;
 	devices: SimDevice[];
@@ -901,6 +911,8 @@ function DevicePill({
 	paused: PausedReason | null;
 	sessionId: string;
 	status: SimStreamStatus;
+	/** This pane's task, so a crewmate holding a device is named by its role. */
+	task?: Task;
 }) {
 	return (
 		<div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-raised py-0.5 pl-1 pr-2.5">
@@ -911,6 +923,7 @@ function DevicePill({
 				onChoose={onChoose}
 				onPower={onPower}
 				sessionId={sessionId}
+				task={task}
 			/>
 			<Freshness chosen={Boolean(chosen)} paused={paused} status={status} />
 		</div>
@@ -1009,6 +1022,7 @@ function DeviceMenu({
 	device,
 	heldByOther,
 	heldByThisSession,
+	holder,
 	onRefresh,
 	onRelease,
 	sessionId,
@@ -1017,6 +1031,8 @@ function DeviceMenu({
 	device: SimDevice | null;
 	heldByOther: boolean;
 	heldByThisSession: boolean;
+	/** The other holder, named by role where it is this task's other member. */
+	holder: string;
 	onRefresh: () => void;
 	onRelease: () => void;
 	sessionId: string;
@@ -1044,7 +1060,9 @@ function DeviceMenu({
 							{heldByThisSession ? (
 								<span className="text-success">Leased by this session (@{sessionId})</span>
 							) : heldByOther ? (
-								<span className="text-warning">Leased by @{lease?.holder}. Watching is always allowed.</span>
+								<span className="text-warning" title={`@${lease?.holder}`}>
+									Leased by {holder}. Watching is always allowed.
+								</span>
 							) : (
 								/* Never "free": AO knows its own leases and nothing else. */
 								<span className="text-muted-foreground">Lease: unknown - {lease?.reason}</span>

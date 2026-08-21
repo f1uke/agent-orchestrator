@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient } from "../lib/api-client";
-import { mockSessionScmSummaries } from "../lib/mock-data";
+import { mockSessionScmSummaries, mockTaskId } from "../lib/mock-data";
 
 export type SessionPRSummary = components["schemas"]["SessionPRSummary"];
 
@@ -23,7 +23,9 @@ export function sessionScmSummaryQueryOptions(sessionId: string) {
 		queryKey: sessionScmSummaryQueryKey(sessionId),
 		enabled: Boolean(sessionId),
 		queryFn: () =>
-			usePreviewData ? Promise.resolve(mockSessionScmSummaries[sessionId] ?? []) : fetchSessionScmSummary(sessionId),
+			usePreviewData
+				? Promise.resolve(mockSessionScmSummaries[mockTaskId(sessionId)] ?? [])
+				: fetchSessionScmSummary(sessionId),
 		retry: 1,
 	};
 }
@@ -33,7 +35,9 @@ export function useSessionScmSummary(sessionId?: string) {
 		queryKey: sessionScmSummaryQueryKey(sessionId),
 		enabled: Boolean(sessionId),
 		queryFn: () =>
-			usePreviewData ? Promise.resolve(mockSessionScmSummaries[sessionId!] ?? []) : fetchSessionScmSummary(sessionId!),
+			usePreviewData
+				? Promise.resolve(mockSessionScmSummaries[mockTaskId(sessionId!)] ?? [])
+				: fetchSessionScmSummary(sessionId!),
 		retry: 1,
 	});
 }

@@ -9,6 +9,13 @@ import { SessionGlyph } from "./SessionGlyph";
 type SplitSessionPickerProps = {
 	/** Live sessions that may fill the new pane (lib/split-layout eligibleSplitSessions). */
 	eligible: readonly WorkspaceSession[];
+	/**
+	 * Members of the task this pane belongs to. They are offered FIRST, under
+	 * their own heading: "show me both members of this task" is the one split a
+	 * crew actually asks for, and the switcher above deliberately cannot do it.
+	 * Empty for a solo task, which then sees exactly the list it sees today.
+	 */
+	taskMemberIds?: ReadonlySet<string>;
 	/** The layout is at MAX_SPLIT_PANES: offer no split, say why instead. */
 	atCap: boolean;
 	/** Fill a new pane beside/below this picker's pane with the chosen session. */
@@ -23,9 +30,15 @@ type SplitSessionPickerProps = {
  * ones already on screen — a session can never appear in two panes, so it is
  * never offered again (spawning new workers happens elsewhere, never here).
  */
-export function SplitSessionPicker({ eligible, atCap, onSplit, onUnsplit }: SplitSessionPickerProps) {
+export function SplitSessionPicker({ eligible, atCap, onSplit, onUnsplit, taskMemberIds }: SplitSessionPickerProps) {
 	const [direction, setDirection] = useState<SplitDirection>("right");
 	const [open, setOpen] = useState(false);
+	const crewmates = taskMemberIds ? eligible.filter((session) => taskMemberIds.has(session.id)) : [];
+	const others = taskMemberIds ? eligible.filter((session) => !taskMemberIds.has(session.id)) : eligible;
+	const choose = (sessionId: string) => {
+		setOpen(false);
+		onSplit(direction, sessionId);
+	};
 	return (
 		<Popover onOpenChange={setOpen} open={open}>
 			<PopoverTrigger asChild>
@@ -70,37 +83,21 @@ export function SplitSessionPicker({ eligible, atCap, onSplit, onUnsplit }: Spli
 								</button>
 							))}
 						</div>
-						<div className="px-2 pb-1 pt-2 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-							Running sessions in this project
-						</div>
-						{eligible.length === 0 ? (
+						{crewmates.length > 0 ? (
+							<>
+								<GroupHeading>This task</GroupHeading>
+								{crewmates.map((session) => (
+									<SessionChoice key={session.id} onChoose={choose} session={session} />
+								))}
+							</>
+						) : null}
+						<GroupHeading>Running sessions in this project</GroupHeading>
+						{others.length === 0 ? (
 							<div className="px-2 py-3 text-[12px] text-muted-foreground">
 								No other running sessions in this project.
 							</div>
 						) : (
-							eligible.map((session) => (
-								<button
-									key={session.id}
-									type="button"
-									onClick={() => {
-										setOpen(false);
-										onSplit(direction, session.id);
-									}}
-									className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12px] text-foreground transition hover:bg-interactive-hover"
-								>
-									<SessionGlyph session={session} />
-									<span className="min-w-0 flex-1">
-										<span className="block truncate">
-											{session.kind === "orchestrator" ? "Orchestrator" : session.title}
-										</span>
-										{session.branch ? (
-											<span className="block truncate font-mono text-[10px] text-muted-foreground">
-												{session.branch}
-											</span>
-										) : null}
-									</span>
-								</button>
-							))
+							others.map((session) => <SessionChoice key={session.id} onChoose={choose} session={session} />)
 						)}
 					</>
 				)}
@@ -121,5 +118,36 @@ export function SplitSessionPicker({ eligible, atCap, onSplit, onUnsplit }: Spli
 				) : null}
 			</PopoverContent>
 		</Popover>
+	);
+}
+
+function GroupHeading({ children }: { children: React.ReactNode }) {
+	return (
+		<div className="px-2 pb-1 pt-2 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+			{children}
+		</div>
+	);
+}
+
+function SessionChoice({ session, onChoose }: { session: WorkspaceSession; onChoose: (sessionId: string) => void }) {
+	const role = session.crew?.role;
+	return (
+		<button
+			className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12px] text-foreground transition hover:bg-interactive-hover"
+			onClick={() => onChoose(session.id)}
+			type="button"
+		>
+			<SessionGlyph session={session} />
+			<span className="min-w-0 flex-1">
+				<span className="block truncate">{session.kind === "orchestrator" ? "Orchestrator" : session.title}</span>
+				{session.branch ? (
+					<span className="block truncate font-mono text-[10px] text-muted-foreground">{session.branch}</span>
+				) : null}
+			</span>
+			{/* The role, only where there is one. In the "This task" group both rows
+			    carry the same title and the same branch - because they are the same
+			    task - so the role is the only thing telling them apart. */}
+			{role ? <span className="shrink-0 font-mono text-[10px] text-passive">{role}</span> : null}
+		</button>
 	);
 }

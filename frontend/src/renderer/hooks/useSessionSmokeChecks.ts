@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { mockSmokeChecks } from "../lib/mock-data";
+import { mockSmokeChecks, mockTaskId } from "../lib/mock-data";
 
 export type SmokeChecksResponse = components["schemas"]["ListSmokeChecksResponse"];
 
@@ -25,7 +25,7 @@ export function useSessionSmokeChecks(sessionId: string, worker?: string) {
 			return (data?.checks ?? []).some((c) => c.verdict === "pending") ? 6000 : false;
 		},
 		queryFn: async () => {
-			if (usePreviewData) return mockSmokeChecks(sessionId, worker);
+			if (usePreviewData) return mockSmokeChecks(mockTaskId(sessionId), worker);
 			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/smoke-checks", {
 				params: { path: { sessionId } },
 			});
