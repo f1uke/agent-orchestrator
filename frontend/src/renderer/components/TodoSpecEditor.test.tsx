@@ -109,6 +109,19 @@ describe("TodoSpecEditor", () => {
 		expect(patchMock).not.toHaveBeenCalled();
 	});
 
+	it("paints Start work with the design system's primary token, never an inline lane colour", () => {
+		renderEditor();
+		const start = screen.getByRole("button", { name: /Start work/ });
+
+		// A lane hue inverts lightness between themes (--lane-todo-bright is light
+		// in dark mode, dark in light mode) while a hardcoded ink cannot follow it,
+		// so an inline fill here is illegible in one theme by construction. The
+		// primary variant resolves --accent / --accent-fg per theme instead.
+		expect(start.getAttribute("style")).toBeFalsy();
+		expect(start.className).toContain("bg-primary");
+		expect(start.className).toContain("text-primary-foreground");
+	});
+
 	it("starts the task via POST /start and reports the started id", async () => {
 		const { onStarted } = renderEditor();
 		const user = userEvent.setup();
