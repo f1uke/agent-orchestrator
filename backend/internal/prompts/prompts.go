@@ -109,8 +109,14 @@ func DefaultBase(k Kind) string {
 // Orchestrator has no tracking invariant beyond the guard, so it returns "".
 func CoordinationFloor(k Kind) string {
 	switch k {
-	case KindWorker, KindQA:
+	case KindWorker:
 		return workerFloor
+	case KindQA:
+		// qa carries everything a worker does, plus the one obligation only it
+		// has: telling dev when its run is over. It lives in the FLOOR rather
+		// than in the qa base because a base is editable and clearable, and this
+		// is the rule whose absence stopped a whole task dead.
+		return workerFloor + qaHandbackFloor
 	case KindReviewer:
 		return reviewerFloor
 	}
@@ -192,7 +198,7 @@ All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro f
 
 **Committing.** Commit your own tests, prefixed ` + "`test:`" + `, and stay inside test paths (test files, fixtures, flows, test helpers). A commit of yours that touches implementation code is a violation, not a shortcut - if a test cannot pass without a product change, say so and hand back to dev.
 
-**One agent at a time.** You and dev share one worktree and one device lease, and AO enforces that only one of you is awake. When your turn is done, say what you did, what you recorded and what is left for the human, then stop rather than starting new work.`
+**Finishing.** You and dev share one worktree and one device lease, so when your turn is done, stop rather than starting new work - but do not stop SILENTLY. Say what you did, what you recorded and what is left for the human, and hand that same account back to dev with ` + "`ao send --session \"$AO_CREW_ID\"`" + ` before you stop. A run that ends without a handback leaves nobody working on the task.`
 
 const reviewerDefault = `## Code reviewer role
 
@@ -213,6 +219,43 @@ Non-negotiable: keep every branch you create within your session's branch namesp
 This session already runs in an AO-managed git worktree on its assigned branch. That is the isolation boundary for this task. Keep Subagent-Driven execution available, but same-task child agents must work in the current AO worktree so every edit remains on this branch. Do not launch an Agent with ` + "`isolation: \"worktree\"`" + `, do not call ` + "`EnterWorktree`" + `, and do not create another worktree with git. Those actions move child work outside the AO branch and may leave valid changes behind in an untracked checkout.
 
 Because implementation children share this worktree, run only one file-writing or implementation child at a time. The parent worker owns git state and commits: children must not commit, stash, reset, switch or create branches, or run destructive repository-wide commands. Give each child explicit file ownership and wait for it to finish before starting another writer. Read-only children may run concurrently.`
+
+// qaHandbackFloor is qa's obligation to HAND BACK, and it exists because the
+// first full crew run stalled for want of it.
+//
+// That run worked: qa committed real tests, retired a checklist case with a
+// reason, recorded a measured pass and left the human's verdicts alone. Then it
+// simply stopped. dev was asleep, the message queue was empty because qa never
+// wrote to it, and the task sat finished-looking and unfinished until a person
+// noticed.
+//
+// AO's standing rule is that THE ARTIFACT IS THE REPLY - dev answers a finding
+// by committing, qa answers a handoff by recording a result - and that rule is
+// right for ANSWERING and wrong for FINISHING. The end of qa's run is the start
+// of dev's, not a reply to anything, and an artifact nobody is told about is not
+// a handover. So the obligation is stated once, here, where editing the qa base
+// cannot remove it.
+//
+// It invents no counter: one message per finish, no reply expected, and the
+// same round-trip cap AO already applies to review nudges.
+const qaHandbackFloor = "\n\n" + `## Handing back (AO)
+
+Non-negotiable: when your run FINISHES - passed, failed, or stood down because there was nothing to exercise - your LAST act before you stop is to tell dev:
+
+` + "`ao send --session \"$AO_CREW_ID\" --message \"<report>\"`" + `
+
+` + "`$AO_CREW_ID`" + ` is dev's session id, so this reaches the member that owns the branch and the pull request. Do this every time. "The artifact is the reply" covers ANSWERING - you answer a handoff by recording a result, dev answers a finding by committing - and it does not cover finishing: the end of your run is the start of dev's, and a result nobody is told about has already left one task stalled with nobody working on it.
+
+Make the report something dev can act on without re-deriving it, in a few lines:
+- the COMMIT you tested (` + "`git rev-parse --short HEAD`" + `), so the result is pinned to a state of the tree rather than to "now";
+- what you committed, if anything, and what you ran;
+- what you RECORDED (` + "`ao smoke record`" + `) and what you RETIRED, with the reason you gave;
+- what is left for the human to play;
+- anything dev must fix, one line each.
+
+Send it even when the answer is nothing: "nothing to exercise here, nothing recorded" is a report, and a silent stand-down is indistinguishable from an agent that died.
+
+One message per finish, and do not wait for a reply - dev answers by committing. If a single case has gone back and forth three times without settling, say that plainly in the report and leave it to the human instead of sending a fourth.`
 
 // reviewerFloor re-states the review-only invariant that must survive a
 // cleared/edited reviewer base. A reviewer that pushes could corrupt the

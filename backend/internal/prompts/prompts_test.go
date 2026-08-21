@@ -582,3 +582,60 @@ func TestQADefaultIsQAsJobAndNotDevs(t *testing.T) {
 		t.Fatal("the qa base carries dev's pull-request instructions")
 	}
 }
+
+// THE HANDBACK. The first full crew run stalled because qa finished and simply
+// stopped: dev was asleep, the queue was empty, and nothing on the board said
+// nobody was working. qa's obligation to report is what closes that, and it
+// lives in the FLOOR because a base is editable and this rule is not.
+func TestCoordinationFloor_QAMustHandBackWhenItFinishes(t *testing.T) {
+	qa := CoordinationFloor(KindQA)
+	for _, want := range []string{
+		// It reaches dev, by the id every crew command already uses.
+		`ao send --session "$AO_CREW_ID"`,
+		// Always - a stand-down is a result too.
+		"passed, failed, or stood down",
+		// What dev needs in order to act without re-deriving it.
+		"git rev-parse --short HEAD",
+		"ao smoke record",
+		"RETIRED",
+		"left for the human to play",
+		// The stopping rule, reusing the cap AO already has rather than a new one.
+		"One message per finish",
+		"three times without settling",
+	} {
+		if !strings.Contains(qa, want) {
+			t.Fatalf("qa floor missing handback rule %q:\n%s", want, qa)
+		}
+	}
+	// qa is a worker session, so it keeps every worker invariant as well.
+	if !strings.Contains(qa, "namespace") || !strings.Contains(qa, "already runs in an AO-managed git worktree") {
+		t.Fatalf("qa floor dropped the worker invariants:\n%s", qa)
+	}
+	if !strings.HasPrefix(qa, "\n\n") {
+		t.Fatal("floor blocks must be prefixed with \\n\\n")
+	}
+}
+
+// A SOLO worker is what almost every session on this machine is, and it has no
+// dev to hand back to. The obligation must not reach it.
+func TestCoordinationFloor_SoloWorkerHasNoHandbackObligation(t *testing.T) {
+	worker := CoordinationFloor(KindWorker)
+	if strings.Contains(worker, "Handing back (AO)") {
+		t.Fatalf("the worker floor must not carry qa's handback obligation:\n%s", worker)
+	}
+	if CoordinationFloor(KindQA) != worker+qaHandbackFloor {
+		t.Fatal("the qa floor must be the worker floor plus the handback block, so worker invariants cannot drift apart")
+	}
+}
+
+// The base says what qa is FOR and is editable; it must still point at the
+// handback rather than telling qa to stop, so base and floor do not contradict.
+func TestQABase_TellsItToHandBackRatherThanJustStop(t *testing.T) {
+	base := DefaultBase(KindQA)
+	if !strings.Contains(base, `ao send --session "$AO_CREW_ID"`) {
+		t.Fatalf("qa base does not point at the handback:\n%s", base)
+	}
+	if !strings.Contains(base, "do not stop SILENTLY") {
+		t.Fatalf("qa base still ends the turn without a handback:\n%s", base)
+	}
+}

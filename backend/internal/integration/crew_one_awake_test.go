@@ -712,19 +712,29 @@ func TestCrewOneAwake_ConcurrentWakesStillBringUpOnlyOne(t *testing.T) {
 	if len(awake) != 1 {
 		t.Fatalf("awake members after two simultaneous wakes = %v, want exactly one", awake)
 	}
-	// One won and one was told why, rather than one failing for some other reason.
-	won, lost := 0, 0
+	// Somebody took the slot, and whoever did not was told why rather than failing
+	// for some other reason.
+	//
+	// WHICH of the two happens to the loser is a matter of nanoseconds and is
+	// deliberately NOT asserted. A wake that reads the slot while it is still free
+	// races for it and is refused with ErrCrewBusy; a wake that arrives after the
+	// winner has taken it reads a HOLDER instead, and WakeCrewMember's answer to
+	// that is a handover - which succeeds, and is the correct answer to "give the
+	// slot to this member". Both outcomes end with exactly one member awake, which
+	// is the invariant asserted above and the only one this file defends. Asserting
+	// one-of-each instead made the test fail on a loaded runner, where the second
+	// goroutine reliably arrives late.
+	won := 0
 	for _, err := range errs {
 		switch {
 		case err == nil:
 			won++
 		case errors.Is(err, sessionmanager.ErrCrewBusy):
-			lost++
 		default:
 			t.Fatalf("a racing wake failed for an unrelated reason: %v", err)
 		}
 	}
-	if won != 1 || lost != 1 {
-		t.Fatalf("racing wakes = %d won, %d refused; want exactly one of each (%v)", won, lost, errs)
+	if won == 0 {
+		t.Fatalf("both racing wakes were refused; the slot was free, so one of them had to take it (%v)", errs)
 	}
 }
