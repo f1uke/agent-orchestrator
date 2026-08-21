@@ -104,6 +104,11 @@ type SessionService interface {
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
 	ResolveThread(ctx context.Context, id domain.SessionID, prURL, threadID string) error
+	// TaskDevOf resolves any session to the id of the TASK it belongs to - its
+	// dev's, and for a solo session its own. It is what lets a task-owned
+	// resource answer the same way whichever member's id names it (see
+	// TaskScoped).
+	TaskDevOf(ctx context.Context, id domain.SessionID) (domain.SessionID, error)
 	ListPRSummaries(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error)
 	ListPRCommentThreads(ctx context.Context, id domain.SessionID) ([]sessionsvc.PRCommentGroup, error)
 	ClaimPR(ctx context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error)
@@ -155,8 +160,6 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Put("/sessions/{sessionId}/keep-warm", c.setKeepWarm)
 	r.Put("/sessions/{sessionId}/target", c.setTargetBranch)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
-	r.Get("/sessions/{sessionId}/pr", c.listPRs)
-	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Get("/sessions/{sessionId}/workspace/resolve", c.resolveWorkspaceRef)
 	r.Get("/sessions/{sessionId}/workspace/file", c.readWorkspaceFile)
@@ -175,13 +178,30 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
-	r.Post("/sessions/{sessionId}/comment-dispatch", c.commentDispatch)
-	r.Post("/sessions/{sessionId}/comment-reply", c.commentReply)
-	r.Post("/sessions/{sessionId}/comment-resolve", c.commentResolve)
 	r.Post("/sessions/{sessionId}/activity", c.activity)
 	r.Get("/orchestrators", c.listOrchestrators)
 	r.Post("/orchestrators", c.spawnOrchestrator)
 	r.Get("/orchestrators/{id}", c.getOrchestrator)
+}
+
+// RegisterTaskScoped mounts the session routes whose subject is the TASK rather
+// than the agent: the branch's pull request, and the comment threads on it. Both
+// members of a crew share one pull request, so both must read - and answer - the
+// same one. The caller mounts these under TaskScoped; see httpd.API.Register.
+//
+// `pr/claim` is deliberately NOT here. It BINDS a pull request to a session's
+// own row - an act of ownership by the agent that opened it - rather than
+// reading one the task already has.
+func (c *SessionsController) RegisterTaskScoped(r chi.Router) {
+	r.Get("/sessions/{sessionId}/pr", c.listPRs)
+	r.Get("/sessions/{sessionId}/pr-comments", c.listPRComments)
+	// The three actions the Reviews tab offers ON those threads. They are the
+	// same object the list is: dispatching a comment hands it to whoever owns the
+	// branch it is about, which is dev, and replying/resolving writes to the
+	// forge through the PR the task holds.
+	r.Post("/sessions/{sessionId}/comment-dispatch", c.commentDispatch)
+	r.Post("/sessions/{sessionId}/comment-reply", c.commentReply)
+	r.Post("/sessions/{sessionId}/comment-resolve", c.commentResolve)
 }
 
 func (c *SessionsController) list(w http.ResponseWriter, r *http.Request) {
@@ -1157,7 +1177,15 @@ func (c *SessionsController) getOrchestrator(w http.ResponseWriter, r *http.Requ
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(sess)})
 }
 
+// sessionID is the session a request is ABOUT. On a route mounted task-scoped
+// (see TaskScoped) that is the task's dev, so a handler reading a task-owned
+// resource - the pull request, its comments, the review verdicts, the smoke
+// checklist - answers the same whichever crew member's id the path names. Every
+// other route, and every solo session, gets the path's id unchanged.
 func sessionID(r *http.Request) domain.SessionID {
+	if id, ok := taskScopeOf(r.Context()); ok {
+		return id
+	}
 	return domain.SessionID(chi.URLParam(r, "sessionId"))
 }
 

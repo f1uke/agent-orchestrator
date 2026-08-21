@@ -57,6 +57,11 @@ type fakeSessionService struct {
 
 var _ controllers.SessionService = (*fakeSessionService)(nil)
 
+// This fake has no crew, so every session is its own task.
+func (f *fakeSessionService) TaskDevOf(_ context.Context, id domain.SessionID) (domain.SessionID, error) {
+	return id, nil
+}
+
 func (f *fakeSessionService) List(context.Context, sessionsvc.ListFilter) ([]domain.Session, error) {
 	return nil, nil
 }
