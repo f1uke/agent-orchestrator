@@ -82,6 +82,53 @@ func TestCrewRunStart_WarnsWhenTheDetectorIsDown(t *testing.T) {
 	}
 }
 
+// TestCrewRunStart_NamesACrewmatesOpenRun. Both members work in one worktree, so
+// a build can now start while the other member is already running one. Nothing
+// waits or refuses on that - what a member gets is the one piece of advice AO can
+// honestly give, because two `xcodebuild` runs against ONE shared DerivedData is
+// exactly the case nothing here verifies.
+func TestCrewRunStart_NamesACrewmatesOpenRun(t *testing.T) {
+	cfg := setConfigEnv(t)
+	withSession(t, "demo-3")
+	var seen []string
+	srv := crewRunServer(t, map[string]string{
+		"/crew/runs": `{"run":{"id":"run-2","kind":"build","detector":"live"},"certified":true,` +
+			`"crewmateRun":{"id":"run-1","sessionId":"demo-1","role":"dev","kind":"build","label":"xcodebuild"}}`,
+	}, &seen)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "run", "--start", "--kind", "build")
+	if err != nil {
+		t.Fatalf("ao crew run --start: %v stderr=%s", err, errOut)
+	}
+	// It says WHO and WHAT, and it does not pretend to be a refusal.
+	for _, want := range []string{"dev", "build", "xcodebuild", "consider waiting", "run-2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the crewmate advisory is missing %q: %q", want, out)
+		}
+	}
+}
+
+// And a member whose crewmate is running NOTHING is told nothing: the advisory
+// must not become noise on every start.
+func TestCrewRunStart_SaysNothingWhenTheCrewmateIsQuiet(t *testing.T) {
+	cfg := setConfigEnv(t)
+	withSession(t, "demo-3")
+	var seen []string
+	srv := crewRunServer(t, map[string]string{
+		"/crew/runs": `{"run":{"id":"run-2","kind":"build","detector":"live"},"certified":true}`,
+	}, &seen)
+	writeRunFileFor(t, cfg, srv)
+
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "run", "--start", "--kind", "build")
+	if err != nil {
+		t.Fatalf("ao crew run --start: %v", err)
+	}
+	if strings.Contains(out, "NOTE:") {
+		t.Fatalf("a quiet crewmate produced an advisory anyway: %q", out)
+	}
+}
+
 // The end bracket's wording is the whole point of the third state: a discarded
 // run must not read as the pass it reported.
 func TestCrewRunEndLines(t *testing.T) {
