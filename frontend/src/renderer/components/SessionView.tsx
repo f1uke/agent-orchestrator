@@ -200,6 +200,13 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// pushed forward) lands immediately — a live-session touch changes no
 	// CDC-watched column, so we invalidate explicitly rather than wait for an
 	// event. Idempotent, so React StrictMode's double-invoke is harmless.
+	//
+	// LOOKING IS NOT A REQUEST TO RUN. A crew member that is asleep because it is
+	// not its turn stays asleep: the daemon decides that from the reason it
+	// recorded when it put the session down, and answers this POST with the
+	// unchanged session rather than a refusal. Deliberately enforced THERE and not
+	// by withholding the request here — the CLI and any other client open sessions
+	// too, and a rule about which agent may run cannot live in one renderer.
 	useEffect(() => {
 		let cancelled = false;
 		void (async () => {
@@ -265,7 +272,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 
 	// Being placed in a pane counts as being watched: wake each pane's session
 	// once (resume if the idle sweep suspended it, else reset its idle
-	// countdown) — the same contract as the routed session's wake above.
+	// countdown) — the same contract as the routed session's wake above, including
+	// that a crew member asleep for turn reasons is left asleep.
 	const wokenPanesRef = useRef(new Set<string>());
 	useEffect(() => {
 		if (!splitRoot) return;

@@ -210,6 +210,8 @@ type Session struct {
 	TerminatedAt              sql.NullTime
 	CrewID                    string
 	CrewRole                  string
+	SleepReason               string
+	WokenBy                   string
 }
 
 type SessionMessageQueue struct {

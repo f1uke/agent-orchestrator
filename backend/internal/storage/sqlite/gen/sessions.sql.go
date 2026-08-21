@@ -20,7 +20,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role
+    crew_id, crew_role, sleep_reason, woken_by
 FROM sessions WHERE id = ?
 `
 
@@ -73,6 +73,8 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.TerminatedAt,
 		&i.CrewID,
 		&i.CrewRole,
+		&i.SleepReason,
+		&i.WokenBy,
 	)
 	return i, err
 }
@@ -84,10 +86,10 @@ INSERT INTO sessions (
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
-    crew_id, crew_role,
+    crew_id, crew_role, sleep_reason, woken_by,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -123,6 +125,8 @@ type InsertSessionParams struct {
 	TaskSize                  string
 	CrewID                    string
 	CrewRole                  string
+	SleepReason               string
+	WokenBy                   string
 	TerminationSource         domain.TerminationSource
 	TerminationReason         string
 	TerminationLastState      domain.ActivityState
@@ -166,6 +170,8 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.TaskSize,
 		arg.CrewID,
 		arg.CrewRole,
+		arg.SleepReason,
+		arg.WokenBy,
 		arg.TerminationSource,
 		arg.TerminationReason,
 		arg.TerminationLastState,
@@ -184,7 +190,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role
+    crew_id, crew_role, sleep_reason, woken_by
 FROM sessions ORDER BY project_id, num
 `
 
@@ -243,6 +249,8 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.TerminatedAt,
 			&i.CrewID,
 			&i.CrewRole,
+			&i.SleepReason,
+			&i.WokenBy,
 		); err != nil {
 			return nil, err
 		}
@@ -264,7 +272,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role
+    crew_id, crew_role, sleep_reason, woken_by
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -323,6 +331,8 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.TerminatedAt,
 			&i.CrewID,
 			&i.CrewRole,
+			&i.SleepReason,
+			&i.WokenBy,
 		); err != nil {
 			return nil, err
 		}
@@ -594,7 +604,7 @@ UPDATE sessions SET
     activity_state = ?, activity_last_at = ?, first_signal_at = ?, is_terminated = ?, reactivated = ?,
     branch = ?, workspace_path = ?, runtime_handle_id = ?, agent_session_id = ?, prompt = ?,
     preview_url = ?, preview_revision = ?, auto_nudge_comments = ?, auto_resolve_on_reply = ?,
-    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, last_opened_at = ?, keep_warm_on_merge = ?, task_size = ?,
+    is_todo = ?, base_branch = ?, auto_name_branch = ?, pr_target = ?, created_by = ?, is_suspended = ?, sleep_reason = ?, woken_by = ?, last_opened_at = ?, keep_warm_on_merge = ?, task_size = ?,
     termination_source = ?, termination_reason = ?, termination_last_state = ?, termination_transcript_path = ?, terminated_at = ?,
     updated_at = ?
 WHERE id = ?
@@ -625,6 +635,8 @@ type UpdateSessionParams struct {
 	PRTarget                  string
 	CreatedBy                 string
 	IsSuspended               bool
+	SleepReason               string
+	WokenBy                   string
 	LastOpenedAt              sql.NullTime
 	KeepWarmOnMerge           bool
 	TaskSize                  string
@@ -663,6 +675,8 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) er
 		arg.PRTarget,
 		arg.CreatedBy,
 		arg.IsSuspended,
+		arg.SleepReason,
+		arg.WokenBy,
 		arg.LastOpenedAt,
 		arg.KeepWarmOnMerge,
 		arg.TaskSize,

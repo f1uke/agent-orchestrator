@@ -112,11 +112,17 @@ const (
 const hookBinaryName = "ao"
 
 type lifecycleRecorder interface {
-	MarkSpawned(ctx context.Context, id domain.SessionID, metadata domain.SessionMetadata) error
+	// MarkSpawned records a launch. `by` names what brought the runtime up and is
+	// kept on the row only when the session it revives was ASLEEP - the audit
+	// trail for an unexplained wake. See domain/sleep.go.
+	MarkSpawned(ctx context.Context, id domain.SessionID, metadata domain.SessionMetadata, by domain.WokenBy) error
 	MarkTerminated(ctx context.Context, id domain.SessionID, cause string) error
-	// MarkSuspended records that the idle sweep tore a session's runtime down
-	// while keeping it on the board (not terminated). See CloseIdleSessions.
-	MarkSuspended(ctx context.Context, id domain.SessionID) error
+	// MarkSuspended records that a session's runtime was torn down while keeping
+	// it on the board (not terminated), and WHY - "paused to free resources"
+	// (CloseIdleSessions) reads differently from "not its turn"
+	// (ReleaseCrewSlot), and only the reason tells a view whether it may bring
+	// the session back.
+	MarkSuspended(ctx context.Context, id domain.SessionID, reason domain.SleepReason) error
 	// TouchIdleClose stamps a session's user-open time (LastOpenedAt) to now,
 	// restarting only the idle-close (suspend) countdown. It deliberately does
 	// NOT touch Activity.LastActivityAt, so a user-open never re-ages the
@@ -597,7 +603,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 	}
 
 	metadata := domain.SessionMetadata{Branch: ws.Branch, WorkspacePath: ws.Path, RuntimeHandleID: handle.ID, Prompt: prompt}
-	if err := m.lcm.MarkSpawned(ctx, id, metadata); err != nil {
+	if err := m.lcm.MarkSpawned(ctx, id, metadata, domain.WokenBySpawn); err != nil {
 		_ = m.runtime.Destroy(ctx, handle)
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		// Runtime came up but the completing DB write failed. A fresh spawn
@@ -1388,7 +1394,7 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	// is not proof of death, so it also falls through rather than adopting.
 	if handleID := strings.TrimSpace(meta.RuntimeHandleID); handleID != "" {
 		if alive, err := m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID}); err == nil && alive {
-			if err := m.lcm.MarkSpawned(ctx, id, meta); err != nil {
+			if err := m.lcm.MarkSpawned(ctx, id, meta, domain.WokenByRestore); err != nil {
 				return domain.SessionRecord{}, fmt.Errorf("restore %s: adopt live runtime: %w", id, err)
 			}
 			return m.getRecord(ctx, id)
@@ -1412,10 +1418,12 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: workspace: %w", id, err)
 	}
-	return m.relaunchRestoredSession(ctx, rec, project, ws)
+	return m.relaunchRestoredSession(ctx, rec, project, ws, domain.WokenByRestore)
 }
 
-func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.SessionRecord, project domain.ProjectRecord, ws ports.WorkspaceInfo) (domain.SessionRecord, error) {
+// `by` names what asked for this relaunch; it reaches MarkSpawned, which keeps
+// it on the row when the session it revives was asleep. See domain/sleep.go.
+func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.SessionRecord, project domain.ProjectRecord, ws ports.WorkspaceInfo, by domain.WokenBy) (domain.SessionRecord, error) {
 	// ONE AWAKE AT A TIME, at the chokepoint. Restore, Resume and Restart guard
 	// their own entry too, but RestoreAll calls straight in here at boot - so this
 	// is the call that closes restore-after-restart, and it is deliberately BEFORE
@@ -1455,7 +1463,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
 	}
 	metadata := domain.SessionMetadata{Branch: ws.Branch, WorkspacePath: ws.Path, RuntimeHandleID: handle.ID, AgentSessionID: rec.Metadata.AgentSessionID, Prompt: rec.Metadata.Prompt}
-	if err := m.lcm.MarkSpawned(ctx, rec.ID, metadata); err != nil {
+	if err := m.lcm.MarkSpawned(ctx, rec.ID, metadata, by); err != nil {
 		_ = m.runtime.Destroy(ctx, handle)
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: completed: %w", rec.ID, err)
 	}
@@ -1548,7 +1556,7 @@ func (m *Manager) restartInPlace(ctx context.Context, rec domain.SessionRecord) 
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restart %s: workspace: %w", rec.ID, err)
 	}
-	return m.relaunchRestoredSession(ctx, rec, project, ws)
+	return m.relaunchRestoredSession(ctx, rec, project, ws, domain.WokenByRestore)
 }
 
 func (m *Manager) getRecord(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
@@ -1725,7 +1733,7 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 	// worktree in place, so this boot does not relaunch a session the user let go
 	// idle past the window — the user resumes it on demand.
 	if m.idleCloseTTL > 0 && m.clock().Sub(idleReference(rec)) > m.idleCloseTTL {
-		if err := m.lcm.MarkSuspended(ctx, rec.ID); err != nil {
+		if err := m.lcm.MarkSuspended(ctx, rec.ID, domain.SleepReasonIdle); err != nil {
 			return fmt.Errorf("reconcile %s: mark suspended (idle): %w", rec.ID, err)
 		}
 		return nil
@@ -1908,7 +1916,7 @@ func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveH
 	// fire its SessionEnd hook, and setting is_suspended first guarantees that
 	// late "exited" signal is ignored (ApplyActivitySignal skips suspended
 	// sessions) rather than racing in to terminate the card into Done.
-	if err := m.lcm.MarkSuspended(ctx, rec.ID); err != nil {
+	if err := m.lcm.MarkSuspended(ctx, rec.ID, domain.SleepReasonIdle); err != nil {
 		return fmt.Errorf("close idle %s: mark suspended: %w", rec.ID, err)
 	}
 	// Only tear the tmux down when no live sibling is still using it. When one is,
@@ -2013,7 +2021,13 @@ func IdleReference(rec domain.SessionRecord) time.Time {
 // never terminated, only paused — so it does not re-mark it reactivated and does
 // not touch restore markers. A session that is not suspended is returned
 // unchanged (idempotent), so a double-open is a safe no-op.
-func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+//
+// Resume is the ONE way out of suspension (its adopt-if-alive branch and the
+// shared relaunch chokepoint are both below), so `by` — what asked for the wake —
+// is recorded here and nowhere else. Resume itself never refuses a turn-asleep
+// member: an EXPLICIT wake is allowed to take the turn, and deciding that is
+// Wake's job, not this one's.
+func (m *Manager) Resume(ctx context.Context, id domain.SessionID, by domain.WokenBy) (domain.SessionRecord, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, err)
@@ -2041,7 +2055,7 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.Sessi
 	// `tmux new-session` — mirror Restore's adopt-if-alive guard.
 	if handleID := strings.TrimSpace(rec.Metadata.RuntimeHandleID); handleID != "" {
 		if alive, aliveErr := m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID}); aliveErr == nil && alive {
-			if err := m.lcm.MarkSpawned(ctx, id, rec.Metadata); err != nil {
+			if err := m.lcm.MarkSpawned(ctx, id, rec.Metadata, by); err != nil {
 				return domain.SessionRecord{}, fmt.Errorf("resume %s: adopt live runtime: %w", id, err)
 			}
 			return m.getRecord(ctx, id)
@@ -2055,7 +2069,7 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.Sessi
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("resume %s: workspace: %w", id, err)
 	}
-	return m.relaunchRestoredSession(ctx, rec, project, ws)
+	return m.relaunchRestoredSession(ctx, rec, project, ws, by)
 }
 
 // Wake is the user-open hook that keeps a session's idle-close timer honest: a
@@ -2066,6 +2080,15 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID) (domain.Sessi
 // needs-input/working status. A terminated session is left untouched — reviving
 // one is Restore's job, not an idle-timer reset — so Wake can never resurrect a
 // session the user finished. Returns the resulting record.
+//
+// LOOKING AT A SESSION IS NOT AN ACTION, AND MUST NEVER TAKE A TURN. Opening a
+// card resumes a session that was paused TO FREE RESOURCES — the behaviour this
+// hook exists for — but leaves a crew member that is asleep because it is not its
+// turn exactly as it found it. The two used to be one flag, so the daemon
+// resumed either, and a qa nobody had woken was found running twelve seconds
+// after its dev's PR merged (domain/sleep.go). An explicit wake — the baton bar's
+// button, `ao crew wake`, WakeCrewMember — still takes the turn: an action may,
+// a glance may not.
 func (m *Manager) Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
@@ -2074,8 +2097,20 @@ func (m *Manager) Wake(ctx context.Context, id domain.SessionID) (domain.Session
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("wake %s: %w", id, ErrNotFound)
 	}
+	if rec.AsleepForTurn() {
+		return rec, nil
+	}
 	if rec.IsSuspended {
-		return m.Resume(ctx, id)
+		resumed, err := m.Resume(ctx, id, domain.WokenByView)
+		// The crew slot was not free. That is not a failure the viewer asked for
+		// and can do nothing about — a card that is merely being LOOKED at must not
+		// report a refusal — so the session is returned as it stands, still asleep.
+		// Solo sessions never reach this: the guard is a no-op without a crew.
+		if errors.Is(err, ErrCrewBusy) {
+			m.logger.Debug("wake: left asleep, another crew member holds the slot", "sessionID", id, "crew", rec.CrewID)
+			return rec, nil
+		}
+		return resumed, err
 	}
 	if rec.IsTerminated {
 		return rec, nil
@@ -2198,7 +2233,7 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 		// free slot: the guard and the launch it protects are inside this call.
 		// A no-op lock for every session that is not in a crew.
 		unlockCrew := m.lockCrew(rec.CrewID)
-		_, relaunchErr := m.relaunchRestoredSession(ctx, rec, project, ws)
+		_, relaunchErr := m.relaunchRestoredSession(ctx, rec, project, ws, domain.WokenByBoot)
 		unlockCrew()
 		if err := relaunchErr; err != nil {
 			// A promptless, unresumable worker is intentionally left terminated

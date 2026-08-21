@@ -182,14 +182,19 @@ type fakeLCM struct {
 	touched map[domain.SessionID]int
 }
 
-func (l *fakeLCM) MarkSpawned(_ context.Context, id domain.SessionID, metadata domain.SessionMetadata) error {
+func (l *fakeLCM) MarkSpawned(_ context.Context, id domain.SessionID, metadata domain.SessionMetadata, by domain.WokenBy) error {
 	l.completed++
 	rec := l.store.sessions[id]
 	rec.IsTerminated = false
 	// Mirror the real lifecycle manager: a spawned session is no longer a TODO
-	// and no longer suspended (a (re)launch brings its runtime back).
+	// and no longer suspended (a (re)launch brings its runtime back), and a wake
+	// records what asked for it while a fresh spawn records nothing.
 	rec.IsTodo = false
+	if rec.IsSuspended {
+		rec.WokenBy = by
+	}
 	rec.IsSuspended = false
+	rec.SleepReason = ""
 	rec.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()}
 	rec.Metadata = metadata
 	l.store.sessions[id] = rec
@@ -210,7 +215,7 @@ func (l *fakeLCM) MarkTerminated(_ context.Context, id domain.SessionID, cause s
 	l.store.sessions[id] = rec
 	return nil
 }
-func (l *fakeLCM) MarkSuspended(_ context.Context, id domain.SessionID) error {
+func (l *fakeLCM) MarkSuspended(_ context.Context, id domain.SessionID, reason domain.SleepReason) error {
 	if l.suspended == nil {
 		l.suspended = map[domain.SessionID]int{}
 	}
@@ -220,6 +225,8 @@ func (l *fakeLCM) MarkSuspended(_ context.Context, id domain.SessionID) error {
 	}
 	l.suspended[id]++
 	rec.IsSuspended = true
+	rec.SleepReason = reason
+	rec.WokenBy = ""
 	l.store.sessions[id] = rec
 	return nil
 }
@@ -3997,7 +4004,7 @@ func TestResume_RecreatesRuntimeClearsSuspended(t *testing.T) {
 		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-80 * time.Hour)},
 		CreatedAt:   now.Add(-90 * time.Hour),
 	}
-	rec, err := m.Resume(ctx, "s1")
+	rec, err := m.Resume(ctx, "s1", domain.WokenByView)
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
@@ -4025,7 +4032,7 @@ func TestResume_NotSuspendedIsNoOp(t *testing.T) {
 		Activity:  domain.Activity{State: domain.ActivityActive, LastActivityAt: now},
 		CreatedAt: now,
 	}
-	if _, err := m.Resume(ctx, "s1"); err != nil {
+	if _, err := m.Resume(ctx, "s1", domain.WokenByView); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	if rt.created != 0 {

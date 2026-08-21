@@ -311,12 +311,21 @@ export type WorkspaceSession = {
 	 */
 	isTerminated?: boolean;
 	/**
-	 * True when the idle sweep tore this session's tmux down to free resources
-	 * while KEEPING it on the board in its current lane (worktree kept on disk).
-	 * Orthogonal to {@link status} — the card stays in its real lane and this only
-	 * drives a "paused — click to resume" affordance. Opening it resumes in place.
+	 * True when this session's tmux was torn down while KEEPING it on the board in
+	 * its current lane (worktree kept on disk). Orthogonal to {@link status} — the
+	 * card stays in its real lane and this only drives a "paused" affordance.
+	 * Whether OPENING it brings it back depends on {@link sleepReason}.
 	 */
 	isSuspended?: boolean;
+	/**
+	 * WHY {@link isSuspended} is set, and therefore what opening the card will do.
+	 * `"idle"`/`"merged"` (and an absent value, which is every row written before
+	 * the daemon recorded this) come back when the session is opened — the
+	 * behaviour the "open to resume" copy promises. `"turn"` does NOT: it is a
+	 * crew member waiting for the baton, and only an explicit wake may take the
+	 * turn, so a card that says "open to resume" about one would be lying.
+	 */
+	sleepReason?: "idle" | "turn" | "merged";
 	/**
 	 * True when this worker is expected to open MORE PRs, so a PR merge SUSPENDS it
 	 * in place (card stays on the board, resumable) instead of terminating it to

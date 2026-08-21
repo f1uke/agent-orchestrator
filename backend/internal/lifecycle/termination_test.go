@@ -156,7 +156,7 @@ func TestMarkSpawned_ClearsAPreviousTermination(t *testing.T) {
 	}
 	st.sessions["mer-1"] = rec
 
-	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{}); err != nil {
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{}, domain.WokenByRestore); err != nil {
 		t.Fatal(err)
 	}
 

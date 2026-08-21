@@ -91,6 +91,33 @@ type SessionRecord struct {
 	// session resumes it in place (recreate tmux, clear this flag). Durable fact,
 	// surfaced in the API read model for the paused affordance + countdown.
 	IsSuspended bool `json:"isSuspended,omitempty"`
+	// SleepReason says WHY IsSuspended is set. The flag itself carried two facts
+	// that need different answers from exactly one caller (the user-open hook):
+	// "paused to free resources", which SHOULD come back when somebody looks at
+	// it, and "not its turn" (a crew member released by #225's ReleaseCrewSlot, or
+	// born asleep waiting for the baton), which must NOT. Every other reader of
+	// IsSuspended - the message queue, the reaper, boot reconciliation, the
+	// shutdown sweep, status derivation - wants the same answer for both ("there
+	// is no process here"), which is why this is an ANNOTATION on the existing
+	// state rather than a new state: Awake() keeps meaning exactly what it means
+	// to #225's exclusion.
+	//
+	// Empty means "not recorded" - every row written before this field existed,
+	// and any path that forgets. Unknown behaves exactly as it did before, so only
+	// SleepReasonTurn changes behaviour. Written when IsSuspended is set and
+	// cleared when the runtime comes back, so at most one of this and WokenBy is
+	// set at a time. Surfaced in the API read model: a card that says "open to
+	// resume" must not say it about a session that opening will not resume.
+	SleepReason SleepReason `json:"sleepReason,omitempty" enum:"idle,turn,merged"`
+	// WokenBy records WHAT brought this session's runtime back after a suspend.
+	// change_log fans out the is_suspended flip but not the actor, so a wake that
+	// nobody remembers ordering (the incident this field was added for) could only
+	// be reasoned about from timestamps. Written by MarkSpawned when - and only
+	// when - the row it is reviving was suspended, so a fresh spawn leaves it
+	// empty, and cleared again on the next suspend. Internal durable fact: it
+	// rides the session_updated CDC payload, which is where the question gets
+	// asked.
+	WokenBy WokenBy `json:"-"`
 	// KeepWarmOnMerge marks a WORKER expected to open MORE PRs after the current
 	// one merges (an orchestrator-dispatched multi-slice worker). When true, a PR
 	// merge that would finish the session SUSPENDS it in place (card stays on the

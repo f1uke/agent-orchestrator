@@ -21,8 +21,12 @@ const LEVEL_BORDER: Record<IdleCountdownLevel, string> = {
  * The board-card / sidebar-row idle affordance. Two mutually exclusive states,
  * both orthogonal to the session's lane (the card never leaves its column):
  *
- *  - Suspended: a "Paused — open to resume" chip (the idle sweep freed its tmux;
- *    the worktree is kept and opening the session resumes it in place).
+ *  - Suspended: a moon chip. Its copy follows the REASON, because the two kinds
+ *    of sleep answer "what happens if I open this" differently — the idle sweep
+ *    freed its tmux and opening resumes it in place, but a crew member waiting
+ *    for the baton stays asleep however long you look at it, and only an explicit
+ *    Wake takes the turn. Saying "open to resume" about the second would promise
+ *    something the daemon refuses.
  *  - Approaching suspension: an escalating countdown chip, surfaced ONLY within
  *    ~1d of the deadline (amber ≤6h, red + pulse ≤1h) so a session far from
  *    expiry stays quiet.
@@ -38,18 +42,22 @@ export function IdleStatusChip({ session, compact = false }: { session: Workspac
 	if (isMergeSuspended(session)) return null;
 
 	if (session.isSuspended) {
-		const title = "Paused to free resources — open to resume";
+		const notItsTurn = session.sleepReason === "turn";
+		const label = notItsTurn ? "Asleep" : "Paused";
+		const title = notItsTurn
+			? "Asleep until it is this agent's turn — use Wake to hand it the turn"
+			: "Paused to free resources — open to resume";
 		if (compact) {
-			return <Moon aria-label="Paused" className="h-3 w-3 shrink-0 text-passive" strokeWidth={2} />;
+			return <Moon aria-label={label} className="h-3 w-3 shrink-0 text-passive" strokeWidth={2} title={title} />;
 		}
 		return (
 			<span
-				aria-label="Paused — open to resume"
+				aria-label={label}
 				className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--fg-passive)_30%,transparent)] px-1.5 py-0.5 text-[10px] font-medium text-passive"
 				title={title}
 			>
 				<Moon className="h-3 w-3" strokeWidth={2} />
-				Paused
+				{label}
 			</span>
 		);
 	}

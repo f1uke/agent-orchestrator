@@ -5578,6 +5578,12 @@ components:
           type: integer
         queuedMessagesFailed:
           type: integer
+        sleepReason:
+          enum:
+          - idle
+          - turn
+          - merged
+          type: string
         status:
           enum:
           - todo

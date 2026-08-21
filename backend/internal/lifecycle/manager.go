@@ -374,8 +374,15 @@ func (m *Manager) emitNotification(ctx context.Context, intent *ports.Notificati
 	}
 }
 
-// MarkSpawned marks a newly spawned or restored session live and stores runtime/workspace handles.
-func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata domain.SessionMetadata) error {
+// MarkSpawned marks a newly spawned or restored session live and stores
+// runtime/workspace handles.
+//
+// `by` names what brought the runtime up, and it is RECORDED only when the row
+// being revived was actually asleep — a fresh spawn was never suspended, so it
+// leaves WokenBy empty. That is the audit trail change_log was missing: the flip
+// of is_suspended was fanned out, but not who ordered it, so a wake nobody
+// remembers asking for could only be reasoned about from timestamps.
+func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata domain.SessionMetadata, by domain.WokenBy) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rec, ok, err := m.store.GetSession(ctx, id)
@@ -406,7 +413,11 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 	// suspend flag: resuming a suspended session, or restoring a terminated one,
 	// un-pauses the card. A suspended session is non-terminated here, so the
 	// Reactivated read above stays false (resume must not land it in "Needs you").
+	if rec.IsSuspended {
+		rec.WokenBy = by
+	}
 	rec.IsSuspended = false
+	rec.SleepReason = ""
 	// A session that has been spawned is, by definition, no longer a prepared
 	// TODO. Clearing the flag here (a no-op for a normal spawn where it is
 	// already false) is what materializes a queued TODO in place on Start, and
@@ -443,18 +454,27 @@ func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID, cause
 	})
 }
 
-// MarkSuspended flags a session as runtime-suspended by the idle sweep. The
-// runtime (tmux) is torn down separately by the session manager; this records
-// the durable fact. It deliberately leaves activity_state and is_terminated
-// untouched so status derivation keeps the card in its real board lane — the
-// flag only drives a "paused — click to resume" affordance. A terminated
-// session is never suspended (nothing to pause). Idempotent.
-func (m *Manager) MarkSuspended(ctx context.Context, id domain.SessionID) error {
+// MarkSuspended flags a session as runtime-suspended. The runtime (tmux) is torn
+// down separately by the session manager; this records the durable fact. It
+// deliberately leaves activity_state and is_terminated untouched so status
+// derivation keeps the card in its real board lane — the flag only drives a
+// "paused" affordance. A terminated session is never suspended (nothing to
+// pause). Idempotent.
+//
+// `reason` says WHY, and it is a required argument rather than an optional one
+// because exactly one caller — the user-open hook — has to tell "paused to free
+// resources" (open it and it comes back) from "not its turn" (it must not).
+// Recording it at every site is what makes that answer available; see
+// domain/sleep.go. It also clears WokenBy: the two describe opposite halves of
+// the same transition, so at most one of them is ever set.
+func (m *Manager) MarkSuspended(ctx context.Context, id domain.SessionID, reason domain.SleepReason) error {
 	return m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated || cur.IsSuspended {
 			return cur, false
 		}
 		cur.IsSuspended = true
+		cur.SleepReason = reason
+		cur.WokenBy = ""
 		return cur, true
 	})
 }

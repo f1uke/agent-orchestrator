@@ -1917,6 +1917,8 @@ export interface components {
             queuedMessages?: number;
             queuedMessagesFailed?: number;
             /** @enum {string} */
+            sleepReason?: "idle" | "turn" | "merged";
+            /** @enum {string} */
             status: "todo" | "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** @enum {string} */
             statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged";
