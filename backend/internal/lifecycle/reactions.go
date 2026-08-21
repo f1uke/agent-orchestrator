@@ -127,6 +127,41 @@ type pendingNudge struct {
 	maxAttempts int
 }
 
+// terminateFinished ends a session whose WORK IS OVER - its PRs all merged or
+// closed, or its tracker issue closed - and ends its crew with it.
+//
+// A crew is one TASK on one worktree: dev owns the branch, the worktree and the
+// PR, so a subordinate still running after dev finished is an agent working on
+// something nobody will land. The session manager's Teardown already fans out to
+// subordinates for exactly this reason, and every route that ends a session -
+// kill, purge, daemon shutdown, auto-reclaim - inherits it from there. A merged
+// PR is the one route that does not go through Teardown: it terminates the ROW
+// and nothing else. So this is where the same fan-out has to be reachable, and
+// it is reached through the injected crewReaper rather than by giving the fact
+// layer a session manager (which already depends on it).
+//
+// Order is the crew's order (members first, then dev, then the single disk
+// reclaim): the reaper runs BEFORE the row is terminated. It is best-effort for
+// the same reason the fan-out is internally - a member that will not die must
+// not stop dev from recording that its work is done. The consequence is visible
+// and self-correcting: the surviving member still holds the worktree, so the
+// reclaim log records a workspace_shared refusal naming the branch.
+//
+// The DISK is deliberately untouched here. A merged worker keeps its worktree
+// and its restore marker for the whole auto-reclaim grace so it can be restored
+// to open the next PR, and that is true of a crew's dev exactly as it is of a
+// solo worker. A solo session has no crew, so the reaper finds nothing and this
+// is MarkTerminated by another name.
+func (m *Manager) terminateFinished(ctx context.Context, id domain.SessionID, cause string) error {
+	if m.crewReaper != nil {
+		if err := m.crewReaper(ctx, id, cause); err != nil {
+			slog.Default().Warn("lifecycle: crew teardown on finish failed; the member keeps its worktree",
+				"session", id, "cause", cause, "err", err)
+		}
+	}
+	return m.MarkTerminated(ctx, id, cause)
+}
+
 // ApplyPRObservation reacts to a fetched PR observation after the PR service has
 // persisted it. It does not write PR rows; it owns PR-driven lifecycle effects
 // and sends actionable agent nudges such as rebase, fix-CI, and
@@ -182,7 +217,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			}
 			return nil
 		}
-		return m.MarkTerminated(ctx, id, domain.TerminationCauseWorkComplete)
+		return m.terminateFinished(ctx, id, domain.TerminationCauseWorkComplete)
 	}
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil || !ok {
@@ -747,7 +782,7 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 		return nil
 	}
 	if isTerminalTrackerState(o.Issue.State) {
-		return m.MarkTerminated(ctx, id, domain.TerminationCauseIssueClosed)
+		return m.terminateFinished(ctx, id, domain.TerminationCauseIssueClosed)
 	}
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil || !ok {
