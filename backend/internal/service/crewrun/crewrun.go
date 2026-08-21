@@ -127,6 +127,15 @@ type Service struct {
 	// rather than needing a check.
 	mu     sync.Mutex
 	leases map[string]*treewatch.Lease
+
+	// sessionMu serialises Start/End per SESSION. Without it a start is a
+	// check-then-act - read the open run, supersede it, insert a new one - so two
+	// that arrive together can both find no open run and both insert, leaving one
+	// of them open forever and the board claiming a build is running that nothing
+	// is running. The review engine's lockWorker is the same shape for the same
+	// reason.
+	sessionsMu sync.Mutex
+	sessionMu  map[domain.SessionID]*sync.Mutex
 }
 
 // New builds the service. A nil Watcher is legal and makes every run
@@ -142,13 +151,30 @@ func New(opts Options) *Service {
 		opts.GitBinary = "git"
 	}
 	return &Service{
-		store:   opts.Store,
-		watcher: opts.Watcher,
-		git:     opts.GitBinary,
-		logger:  opts.Logger,
-		now:     opts.Now,
-		leases:  map[string]*treewatch.Lease{},
+		store:     opts.Store,
+		watcher:   opts.Watcher,
+		git:       opts.GitBinary,
+		logger:    opts.Logger,
+		now:       opts.Now,
+		leases:    map[string]*treewatch.Lease{},
+		sessionMu: map[domain.SessionID]*sync.Mutex{},
 	}
+}
+
+// lockSession serialises this session's brackets and returns the unlock.
+func (s *Service) lockSession(id domain.SessionID) func() {
+	s.sessionsMu.Lock()
+	if s.sessionMu == nil {
+		s.sessionMu = map[domain.SessionID]*sync.Mutex{}
+	}
+	mu, ok := s.sessionMu[id]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.sessionMu[id] = mu
+	}
+	s.sessionsMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 // Start opens a bracket: attach the detector to the session's worktree, read the
@@ -157,6 +183,7 @@ func (s *Service) Start(ctx context.Context, sessionID domain.SessionID, in Star
 	if !in.Kind.Valid() {
 		return StartResult{}, fmt.Errorf("%w: kind must be build, test or device", ErrInvalid)
 	}
+	defer s.lockSession(sessionID)()
 	rec, ok, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return StartResult{}, err
@@ -269,6 +296,7 @@ func (s *Service) End(ctx context.Context, sessionID domain.SessionID, in EndInp
 	if in.Result != domain.CrewRunResultNone && !in.Result.Valid() {
 		return EndResult{}, fmt.Errorf("%w: result must be pass or fail", ErrInvalid)
 	}
+	defer s.lockSession(sessionID)()
 	run, err := s.openRun(ctx, sessionID, in.RunID)
 	if err != nil {
 		return EndResult{}, err

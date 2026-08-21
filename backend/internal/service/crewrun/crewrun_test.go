@@ -514,3 +514,37 @@ func TestStartRefusesASessionWithNoWorkspace(t *testing.T) {
 		t.Fatal("a session with no workspace started a run")
 	}
 }
+
+// Two starts that arrive together must not both insert. Without the per-session
+// lock a start is a check-then-act, and the loser leaves a run open forever with
+// the board claiming a build is running that nothing is running.
+func TestConcurrentStartsLeaveExactlyOneRunOpen(t *testing.T) {
+	worktree := gitWorktree(t)
+	svc, store := newService(t, worktree, liveWatcher(t))
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := svc.Start(ctx, sessionID, StartInput{Kind: domain.CrewRunTest}); err != nil {
+				t.Errorf("Start: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	store.mu.Lock()
+	open := 0
+	for _, run := range store.runs {
+		if run.Open() {
+			open++
+		}
+	}
+	total := len(store.runs)
+	store.mu.Unlock()
+	if open != 1 {
+		t.Fatalf("%d runs left open out of %d, want exactly 1", open, total)
+	}
+}
