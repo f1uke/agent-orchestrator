@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,5 +249,76 @@ func TestWorkspaceIntegrationStashCleanWorktree(t *testing.T) {
 	// Cleanup.
 	if err := ws.Destroy(ctx, info); err != nil {
 		t.Fatalf("destroy clean worktree: %v", err)
+	}
+}
+
+// TestStashUncommittedWritesItsOwnIdentity: the preserve commit is AO's, not the
+// human's, and it must not depend on the machine having a git identity at all.
+//
+// This is not hypothetical. A repository with no `user.name` - a fresh CI
+// runner, a container, a new laptop - makes `git commit-tree` fail with "empty
+// ident name", and the failure is NOT cosmetic: the teardown is abandoned, so
+// the agent's uncommitted work is never captured AND the session is left with no
+// restore marker, which means it does not come back at the next boot. AO must
+// not lose a worker's work because a machine has no gitconfig.
+//
+// Asserting the AUTHOR is what makes this portable: on a developer machine that
+// does have an identity, a preserve commit written without the explicit flags
+// would carry the HUMAN's name, and this test would catch that too.
+func TestStashUncommittedWritesItsOwnIdentity(t *testing.T) {
+	git := requireGit(t)
+	tmp := t.TempDir()
+	repo := setupOriginClone(t, git, tmp)
+	// Take the identity away again: this repo now looks like a machine that has
+	// never been configured.
+	runGit(t, git, repo, "config", "--unset", "user.email")
+	runGit(t, git, repo, "config", "--unset", "user.name")
+
+	ws, err := New(Options{Binary: git, ManagedRoot: filepath.Join(tmp, "managed"), RepoResolver: StaticRepoResolver{"proj": repo}})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ctx := context.Background()
+	info, err := ws.Create(ctx, ports.WorkspaceConfig{ProjectID: "proj", SessionID: "sess-ident", Branch: "feature/ident"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "wip.txt"), []byte("half-written work\n"), 0o600); err != nil {
+		t.Fatalf("write wip: %v", err)
+	}
+
+	ref, err := ws.StashUncommitted(ctx, info)
+	if err != nil {
+		t.Fatalf("StashUncommitted in a repo with no git identity: %v", err)
+	}
+	if ref == "" {
+		t.Fatal("no preserve ref for a dirty worktree")
+	}
+
+	out, err := exec.Command(git, "-C", info.Path, "log", "-1", "--format=%an <%ae>", ref).CombinedOutput()
+	if err != nil {
+		t.Fatalf("read the preserve commit: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != preserveIdentityName+" <"+preserveIdentityEmail+">" {
+		t.Fatalf("preserve commit author = %q, want AO's own identity", got)
+	}
+}
+
+// TestCommitTreeArgsCarryAOsIdentity pins the flags themselves, so the identity
+// cannot be dropped by a refactor that the integration test above (which needs
+// git on PATH) would skip on a machine without it.
+func TestCommitTreeArgsCarryAOsIdentity(t *testing.T) {
+	args := strings.Join(commitTreeArgs("/ws", "tree-sha", "head-sha", "ao preserved sess-1"), " ")
+	for _, want := range []string{
+		"-c user.name=" + preserveIdentityName,
+		"-c user.email=" + preserveIdentityEmail,
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("commit-tree args %q are missing %q", args, want)
+		}
+	}
+	// The identity has to come BEFORE the subcommand, or git rejects it outright.
+	if strings.Index(args, "-c user.name=") > strings.Index(args, "commit-tree") {
+		t.Fatalf("the identity is passed after the subcommand: %q", args)
 	}
 }

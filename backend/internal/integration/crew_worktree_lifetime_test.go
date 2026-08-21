@@ -122,6 +122,13 @@ func seedCrewRepo(t *testing.T, git, dir string) string {
 		}
 	}
 	run("init", "--initial-branch=main")
+	// A git identity ON THE REPO, not just in this helper's environment. Every
+	// git command AO runs inside this repo's worktrees inherits the repo config,
+	// and a machine with no global identity (a CI runner, a container) has
+	// nothing else to fall back on - which is how a teardown that captures a
+	// worker's uncommitted work came to fail on Linux and pass on macOS.
+	run("config", "user.email", "ao@example.com")
+	run("config", "user.name", "ao")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("seed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
