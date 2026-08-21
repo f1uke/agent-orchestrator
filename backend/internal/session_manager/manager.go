@@ -417,7 +417,10 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
 	}
 
-	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg)
+	// The role the prompt is written for is the role this session is ABOUT to
+	// have: dev's qa is created after it is materialized, and its prompt is
+	// already fixed by then (promptCrewRole).
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, promptCrewRole(project, cfg))
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: prompt: %w", err)
 	}
@@ -689,7 +692,7 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err := m.validateRuntimePrerequisites(); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
-	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg)
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, promptCrewRole(project, cfg))
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: prompt: %w", id, err)
 	}
@@ -2744,14 +2747,16 @@ func buildPrompt(cfg ports.SpawnConfig) string {
 }
 
 // buildSpawnTexts returns the user-facing prompt and the system prompt to
-// deliver separately to the agent. Orchestrator role instructions and worker
+// deliver separately to the agent. `role` is the crew role the prompt is written
+// FOR, which the caller derives with promptCrewRole rather than reading off the
+// config: a dev's crew does not exist yet at this point in a spawn. Orchestrator role instructions and worker
 // coordination hints are placed in the system prompt so they are treated as
 // standing instructions rather than part of the human's task request. A
 // promptless spawn delivers no user prompt at all: the agent simply lands at an
 // empty input box rather than receiving an auto-generated kickoff turn.
-func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig) (prompt, systemPrompt string, err error) {
+func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, role domain.CrewRole) (prompt, systemPrompt string, err error) {
 	prompt = buildPrompt(cfg)
-	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID, cfg.TaskSize, cfg.CrewRole)
+	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID, cfg.TaskSize, role)
 	if err != nil {
 		return "", "", err
 	}
@@ -2845,6 +2850,13 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 				base += prompts.SimulatorGuidanceCrewDev()
 			} else {
 				base += prompts.SimulatorGuidance()
+				// The record -> flow -> retire loop is qa's alone: it is how a
+				// human's ONE play becomes a committed flow and a retired case.
+				// A solo worker does not get it - there is nobody to ask for that
+				// play, and its prompt stays byte-for-byte what it was.
+				if crewRole == domain.CrewRoleQA {
+					base += prompts.RecordedFlowLoop()
+				}
 			}
 		}
 		// The task-size directive right-sizes ceremony: a mechanical worker is

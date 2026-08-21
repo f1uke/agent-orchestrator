@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
@@ -129,5 +130,150 @@ func TestBuildSystemPrompt_QABaseIsEditableLikeEveryOther(t *testing.T) {
 	}
 	if !strings.Contains(got, "## Required coordination (AO)") || !strings.Contains(got, "Standing-instruction confidentiality") {
 		t.Fatalf("an edited qa base still has to carry the floor and the guard:\n%s", got)
+	}
+}
+
+// The record -> flow -> retire loop is qa's, and it is DEVICE work: it goes to
+// the member that drives the device, on a project that has one.
+func TestBuildSystemPrompt_OnlyQAGetsTheRecordedFlowLoop(t *testing.T) {
+	m := layeredManager(crewPromptStore(t), nil)
+
+	qa, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Turning a played scenario into a test (AO)",
+		"ao sim record start --name",
+		"ao smoke retire",
+	} {
+		if !strings.Contains(qa, want) {
+			t.Fatalf("qa was not given the recorded-flow loop (%q):\n%s", want, qa)
+		}
+	}
+
+	// dev hands the device over; a SOLO worker has nobody to ask for a play and
+	// keeps the prompt it had.
+	for _, role := range []domain.CrewRole{domain.CrewRoleDev, ""} {
+		got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, "## Turning a played scenario into a test (AO)") {
+			t.Fatalf("role %q was handed qa's recorded-flow loop:\n%s", role, got)
+		}
+	}
+}
+
+// A project with no simulator gets no device instructions at all: every command
+// in the loop fails on that machine, and an instruction an agent cannot follow
+// is worse than none - the same rule SimulatorGuidance is gated by.
+func TestBuildSystemPrompt_NoSimulatorMeansNoRecordedFlowLoop(t *testing.T) {
+	st := crewPromptStore(t)
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
+	m := layeredManager(st, nil)
+
+	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "## Turning a played scenario into a test (AO)") {
+		t.Fatalf("qa on a project with no device was told to record a device flow:\n%s", got)
+	}
+	// It still owns the checklist - that part has nothing to do with a device.
+	if !strings.Contains(got, "## Smoke-test checklist (AO)") {
+		t.Fatalf("qa lost the checklist protocol on a non-iOS project:\n%s", got)
+	}
+}
+
+// LAYER 1 of the three-layer fix. dev's prompt used to say NOTHING about the
+// checklist, so a brief asking it to author one met no contradiction and was
+// simply obeyed - in both real crew runs. The block does not prevent that (the
+// `ao smoke set` refusal does); it makes the override visible in dev's own
+// output.
+func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsQAs(t *testing.T) {
+	m := layeredManager(crewPromptStore(t), nil)
+
+	dev, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// It still does not carry the protocol itself - the negative REPLACES it.
+	if strings.Contains(dev, "## Smoke-test checklist (AO)") {
+		t.Fatalf("crew dev carries qa's checklist protocol again:\n%s", dev)
+	}
+	for _, want := range []string{
+		"do not author or edit the smoke checklist",
+		"that brief predates the crew",
+	} {
+		if !strings.Contains(dev, want) {
+			t.Fatalf("crew dev prompt missing the checklist negative %q:\n%s", want, dev)
+		}
+	}
+
+	// A solo worker is in no crew, so it is told none of this and keeps the
+	// protocol it has always had.
+	solo, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(solo, "do not author or edit the smoke checklist") {
+		t.Fatalf("a solo worker was told not to author the checklist it owns:\n%s", solo)
+	}
+	if !strings.Contains(solo, "## Smoke-test checklist (AO)") {
+		t.Fatalf("a solo worker lost the checklist protocol:\n%s", solo)
+	}
+}
+
+// THE ORDERING THAT MADE THE SPLIT INERT. A crew is formed AFTER dev is
+// materialized (formCrew needs the tree to share), and dev's system prompt is
+// fixed when its runtime launches, several steps earlier - so reading the ROW
+// answered "solo" for every dev that was about to get a qa. A real
+// `--task-size standard` spawn therefore launched dev with the SOLO prompt: the
+// smoke-checklist protocol still in it, no word of a crewmate, and the split
+// only taking effect if something later restored the session.
+func TestSpawn_StandardTaskLaunchesDevWithTheCrewPrompt(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	agent := &recordingAgent{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, TaskSize: domain.TaskSizeStandard}); err != nil {
+		t.Fatal(err)
+	}
+	launched := agent.lastLaunch.SystemPrompt
+	if !strings.Contains(launched, "## Your crewmate (AO)") {
+		t.Fatalf("dev was launched without knowing it has a crewmate:\n%s", launched)
+	}
+	if !strings.Contains(launched, "do not author or edit the smoke checklist") {
+		t.Fatalf("dev was launched without the checklist negative:\n%s", launched)
+	}
+	if strings.Contains(launched, "## Smoke-test checklist (AO)") {
+		t.Fatalf("dev was launched still carrying qa's checklist protocol:\n%s", launched)
+	}
+}
+
+// A MECHANICAL task is dev alone, so it must be launched with the solo prompt it
+// has always had - the checklist protocol included, because there is nobody else
+// to keep it.
+func TestSpawn_MechanicalTaskLaunchesTheSoloPrompt(t *testing.T) {
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	agent := &recordingAgent{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, TaskSize: domain.TaskSizeMechanical}); err != nil {
+		t.Fatal(err)
+	}
+	launched := agent.lastLaunch.SystemPrompt
+	if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
+		t.Fatalf("a mechanical worker lost the checklist protocol it owns:\n%s", launched)
+	}
+	for _, gone := range []string{"## Your crewmate (AO)", "do not author or edit the smoke checklist"} {
+		if strings.Contains(launched, gone) {
+			t.Fatalf("a mechanical worker was told about a crew it does not have (%q):\n%s", gone, launched)
+		}
 	}
 }

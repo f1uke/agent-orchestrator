@@ -24,15 +24,17 @@ import (
 )
 
 type fakeSmokeService struct {
-	list        smokesvc.SessionSmoke
-	authored    []domain.SmokeAuthoredCase
-	verdictErr  error
-	lastUpload  smokesvc.EvidenceUpload
-	uploadBytes []byte
-	blob        smokesvc.EvidenceBlob
-	reported    smokesvc.ReportOutcome
-	jiraOutcome smokesvc.JiraPostOutcome
-	jiraErr     error
+	list         smokesvc.SessionSmoke
+	authored     []domain.SmokeAuthoredCase
+	authoredFrom domain.SessionID
+	authorErr    error
+	verdictErr   error
+	lastUpload   smokesvc.EvidenceUpload
+	uploadBytes  []byte
+	blob         smokesvc.EvidenceBlob
+	reported     smokesvc.ReportOutcome
+	jiraOutcome  smokesvc.JiraPostOutcome
+	jiraErr      error
 
 	agentResult   domain.SmokeAgentResult
 	agentErr      error
@@ -54,8 +56,12 @@ func (f *fakeSmokeService) List(context.Context, domain.SessionID) (smokesvc.Ses
 	return f.list, nil
 }
 
-func (f *fakeSmokeService) Author(_ context.Context, _ domain.SessionID, cases []domain.SmokeAuthoredCase) (smokesvc.SessionSmoke, error) {
+func (f *fakeSmokeService) Author(_ context.Context, from, _ domain.SessionID, cases []domain.SmokeAuthoredCase) (smokesvc.SessionSmoke, error) {
+	if f.authorErr != nil {
+		return smokesvc.SessionSmoke{}, f.authorErr
+	}
 	f.authored = cases
+	f.authoredFrom = from
 	return f.list, nil
 }
 
@@ -671,6 +677,38 @@ func TestSmokeEvidenceSourceParam(t *testing.T) {
 		}
 		if svc.lastUpload.Source != tc.want {
 			t.Errorf("%s: source = %q, want %q", tc.path, svc.lastUpload.Source, tc.want)
+		}
+	}
+}
+
+// The caller's own id rides in the BODY, because the path names the task rather
+// than the sender: on a crew both members author against dev's session id, so
+// `from` is the only thing that tells them apart.
+func TestSmokeAuthorPassesTheCallerThrough(t *testing.T) {
+	svc := &fakeSmokeService{}
+	srv := newSmokeTestServer(t, svc)
+	payload := `{"from":"mer-1","cases":[{"name":"Case one"}]}`
+	if body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/mer-1/smoke-checks", payload); status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	if svc.authoredFrom != "mer-1" {
+		t.Fatalf("from = %q, want the calling session", svc.authoredFrom)
+	}
+}
+
+// A crew dev's checklist call is refused with a code of its own: nothing about
+// the payload is wrong, so it is a 409 rather than the 422 a bad payload gets,
+// and the message names the qa that owns the list.
+func TestSmokeAuthorQAOwnsChecklistIs409(t *testing.T) {
+	svc := &fakeSmokeService{authorErr: fmt.Errorf("%w: qa @mer-2 owns this task's checklist", smokesvc.ErrQAOwnsChecklist)}
+	srv := newSmokeTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/mer-1/smoke-checks", `{"from":"mer-1","cases":[{"name":"Case one"}]}`)
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", status, body)
+	}
+	for _, want := range []string{"SMOKE_QA_OWNS_CHECKLIST", "@mer-2"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s: %s", want, body)
 		}
 	}
 }

@@ -33,6 +33,11 @@ type smokeAuthoredCaseInput struct {
 // authorSmokeChecksRequest mirrors controllers.AuthorSmokeChecksInput.
 type authorSmokeChecksRequest struct {
 	Cases []smokeAuthoredCaseInput `json:"cases"`
+	// From names the SENDING session, the same way `ao send` does. The daemon
+	// needs it because both crew members author against the same target - the
+	// checklist belongs to the task, and $AO_CREW_ID is dev's id - so the path
+	// cannot say which of them is calling.
+	From string `json:"from,omitempty"`
 }
 
 // smokeEvidenceClient mirrors domain.SmokeEvidence (display subset).
@@ -113,6 +118,10 @@ revise or drop freely.
 Naming a RETIRED case's id is refused rather than reviving it. If a retired case
 must come back, add it under a new id.
 
+On a crew the checklist belongs to QA: this command is refused for the dev member
+(naming the qa) for as long as that task has a qa. A task with no qa - dev alone,
+and every solo worker - authors its own checklist exactly as before.
+
 The JSON is { "cases": [ ... ] } (a bare [ ... ] array is also accepted). Each case:
 
   {
@@ -179,20 +188,25 @@ func (c *commandContext) setSmokeChecklist(cmd *cobra.Command, args []string, se
 	}
 	path := "sessions/" + url.PathEscape(session) + "/smoke-checks"
 	var res listSmokeChecksResponse
-	if err := c.putJSON(cmd.Context(), path, authorSmokeChecksRequest{Cases: cases}, &res); err != nil {
-		return explainSmokeResultsAtRisk(err)
+	body := authorSmokeChecksRequest{Cases: cases, From: strings.TrimSpace(os.Getenv("AO_SESSION_ID"))}
+	if err := c.putJSON(cmd.Context(), path, body, &res); err != nil {
+		return explainSmokeRefusal(err)
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "authored %d smoke check(s) for %s\n", len(res.Checks), session)
 	return err
 }
 
-// explainSmokeResultsAtRisk turns the daemon's refusal to destroy recorded
-// results into a usage error (exit 2): the payload is what has to change, and
-// the daemon's message already names which cases and how. Anything else passes
-// through unchanged.
-func explainSmokeResultsAtRisk(err error) error {
+// explainSmokeRefusal turns the daemon's two author refusals into a usage error
+// (exit 2), because neither is a failure of the command: SMOKE_RESULTS_AT_RISK
+// means the payload has to change and already names which cases and how, and
+// SMOKE_QA_OWNS_CHECKLIST means the wrong crew member sent it and names the one
+// that owns it. Anything else passes through unchanged.
+func explainSmokeRefusal(err error) error {
 	var apiErr apiResponseError
-	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != "SMOKE_RESULTS_AT_RISK" {
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	if apiErr.ErrorBody.Code != "SMOKE_RESULTS_AT_RISK" && apiErr.ErrorBody.Code != "SMOKE_QA_OWNS_CHECKLIST" {
 		return err
 	}
 	if strings.TrimSpace(apiErr.ErrorBody.Message) == "" {

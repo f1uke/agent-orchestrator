@@ -41,6 +41,12 @@ type SmokeAuthoredCaseInput struct {
 // SMOKE_RESULTS_AT_RISK rather than deleting their verdict/note/evidence.
 type AuthorSmokeChecksInput struct {
 	Cases []SmokeAuthoredCaseInput `json:"cases" description:"The full 3–6 case checklist."`
+	// From is the CALLER's own session id (`ao` sends $AO_SESSION_ID), which is
+	// the only thing that can tell a crew's dev from its qa: both author against
+	// the same target, because $AO_CREW_ID is dev's session id. Omitted by the
+	// desktop app and by an older `ao`, and an unidentified caller is never
+	// refused.
+	From string `json:"from,omitempty" description:"The calling session's own id. A crew's dev is refused (409 SMOKE_QA_OWNS_CHECKLIST) while its task has a qa; omitted or unknown callers are never refused."`
 }
 
 // ListSmokeChecksResponse is the body of GET .../smoke-checks.
@@ -161,7 +167,7 @@ func (c *SmokeController) author(w http.ResponseWriter, r *http.Request) {
 			FileRef:  item.FileRef,
 		})
 	}
-	res, err := c.Svc.Author(r.Context(), sessionID(r), cases)
+	res, err := c.Svc.Author(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), cases)
 	if err != nil {
 		writeSmokeError(w, r, err)
 		return
@@ -410,7 +416,9 @@ func sanitizeHeaderFilename(name string) string {
 }
 
 // smokeErrorResponses maps each service sentinel to the status and code the API
-// answers with. The two refusals carry codes of their own rather than folding
+// answers with. SMOKE_QA_OWNS_CHECKLIST is a 409 rather than a 422 because
+// nothing about the payload is wrong - the wrong member sent it. The two 422
+// refusals carry codes of their own rather than folding
 // into SMOKE_INVALID because a caller has to be able to tell them apart: "this
 // payload would destroy results the user recorded" and "this case is frozen, and
 // here is why it went" each have a different fix, and neither is a server fault.
@@ -421,6 +429,7 @@ var smokeErrorResponses = []struct {
 	kind     string
 	code     string
 }{
+	{smokesvc.ErrQAOwnsChecklist, http.StatusConflict, "conflict", "SMOKE_QA_OWNS_CHECKLIST"},
 	{smokesvc.ErrResultsAtRisk, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_RESULTS_AT_RISK"},
 	{smokesvc.ErrCaseRetired, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_CASE_RETIRED"},
 	{smokesvc.ErrInvalid, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_INVALID"},

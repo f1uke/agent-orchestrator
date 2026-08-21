@@ -1853,6 +1853,8 @@ export interface components {
         AuthorSmokeChecksInput: {
             /** @description The full 3–6 case checklist. */
             cases: components["schemas"]["SmokeAuthoredCaseInput"][];
+            /** @description The calling session's own id. A crew's dev is refused (409 SMOKE_QA_OWNS_CHECKLIST) while its task has a qa; omitted or unknown callers are never refused. */
+            from?: string;
         };
         AutoNudgeSettingsResponse: {
             enabled: boolean;

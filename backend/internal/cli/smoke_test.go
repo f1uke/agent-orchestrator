@@ -304,3 +304,56 @@ func TestSmokeSetSurfacesResultsAtRiskAsUsageError(t *testing.T) {
 		}
 	}
 }
+
+// The daemon cannot tell a crew's dev from its qa by the PATH - both author
+// against the crew id, which is dev's session id - so `ao` names the sender the
+// same way `ao send` does. Without this field the refusal can never fire.
+func TestSmokeSetSendsTheCallersOwnSessionID(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := reviewServer(t, 200, `{"worker":"w","checks":[]}`)
+	writeRunFileFor(t, cfg, srv)
+	t.Setenv("AO_SESSION_ID", "mer-2")
+
+	deps := aliveDeps()
+	deps.In = strings.NewReader(`{"cases":[{"name":"A"}]}`)
+	if _, errOut, err := executeCLI(t, deps, "smoke", "set", "mer-1", "--from-file", "-"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var req authorSmokeChecksRequest
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if req.From != "mer-2" {
+		t.Fatalf("from = %q, want the caller's own session id", req.From)
+	}
+}
+
+// A crew dev refused by the daemon has nothing to fix in its payload - it sent
+// the wrong command entirely - so the refusal must arrive as the daemon wrote
+// it (naming the qa and how to hand over), at exit 2, not as "HTTP 409".
+func TestSmokeSetSurfacesTheQAOwnsChecklistRefusal(t *testing.T) {
+	cfg := setConfigEnv(t)
+	const msg = "smoke: qa owns this task's checklist: qa @mer-2 owns this task's checklist - it authors the cases, runs them and retires them. If a brief asked you for smoke cases, that brief predates the crew: say so, and hand it over with `ao send --crew qa --about <sha>`"
+	body, err := json.Marshal(map[string]string{"message": msg, "code": "SMOKE_QA_OWNS_CHECKLIST"})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	srv, _ := reviewServer(t, 409, string(body))
+	writeRunFileFor(t, cfg, srv)
+
+	deps := aliveDeps()
+	deps.In = strings.NewReader(`{"cases":[{"name":"A"}]}`)
+
+	_, _, err = executeCLI(t, deps, "smoke", "set", "mer-1", "--from-file", "-")
+	if err == nil {
+		t.Fatal("err = nil, want the refusal")
+	}
+	if code := ExitCode(err); code != 2 {
+		t.Errorf("exit code = %d, want 2 (usage)", code)
+	}
+	for _, want := range []string{"@mer-2", "ao send --crew qa"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message missing %s: %v", want, err)
+		}
+	}
+}

@@ -43,6 +43,20 @@ var (
 // instead, naming the cases and how to keep them. The controller maps it to 422.
 var ErrResultsAtRisk = errors.New("smoke: author would discard recorded results")
 
+// ErrQAOwnsChecklist refuses an Author call made BY a crew's dev while that task
+// has a qa. It is the one layer of the dev/qa split that a brief cannot argue
+// with: dev's prompt merely says the checklist is qa's, and both real crew runs
+// showed a brief asking dev for cases wins that argument every time - a prompt
+// that says nothing cannot contradict a brief, and a prompt that asks politely
+// is still only asking.
+//
+// The predicate is A QA EXISTS, deliberately not "the caller is a crew dev". A
+// task is dev-alone until a qa is created for it, and during that window dev
+// authoring the checklist is CORRECT: it is the only member there, and it is
+// still handed the smoke protocol. A solo worker - no crew, no qa - can never
+// reach this at all. The controller maps it to 409.
+var ErrQAOwnsChecklist = errors.New("smoke: qa owns this task's checklist")
+
 // ErrCaseRetired refuses any write to a retired case. Retiring one is how a
 // checklist shrinks AUDITABLY: the case stops being something the user is asked
 // to play, and the row - its name, its steps, the user's verdict, note and
@@ -76,7 +90,7 @@ var evidenceKinds = map[string]string{
 // Manager is the smoke surface the HTTP controller depends on.
 type Manager interface {
 	List(ctx context.Context, sessionID domain.SessionID) (SessionSmoke, error)
-	Author(ctx context.Context, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error)
+	Author(ctx context.Context, from, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error)
 	SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note string) (domain.SmokeCheck, error)
 	RecordAgentResult(ctx context.Context, sessionID domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error)
 	Retire(ctx context.Context, sessionID domain.SessionID, checkID, reason string) (domain.SmokeCheck, error)
@@ -233,7 +247,7 @@ func (s *Service) List(ctx context.Context, sessionID domain.SessionID) (Session
 // (surviving one is what retiring a case means) and ReplaceSmokeChecks leaves
 // them alone, so a checklist that has shrunk stays shrunk. Naming a retired id
 // in the payload is refused with ErrCaseRetired rather than reviving it.
-func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error) {
+func (s *Service) Author(ctx context.Context, from, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error) {
 	if sessionID == "" {
 		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
 	}
@@ -242,6 +256,9 @@ func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases 
 	}
 	if len(cases) > 50 {
 		return SessionSmoke{}, fmt.Errorf("%w: a checklist may have at most 50 cases", ErrInvalid)
+	}
+	if err := s.checkChecklistOwner(ctx, from); err != nil {
+		return SessionSmoke{}, err
 	}
 	rec, ok, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
@@ -283,6 +300,47 @@ func (s *Service) Author(ctx context.Context, sessionID domain.SessionID, cases 
 		_ = os.RemoveAll(s.checkDir(sessionID, checkID))
 	}
 	return s.List(ctx, sessionID)
+}
+
+// checkChecklistOwner refuses an author call made by a crew's DEV while that
+// task has a live qa, naming the qa so dev hands the work over rather than
+// hunting for who owns it.
+//
+// `from` is the CALLER, which is the only thing that can decide this: both
+// members author against the same target (`$AO_CREW_ID` is dev's session id, so
+// qa's own `ao smoke set` names dev's row too), and the path cannot tell them
+// apart. An empty or unknown `from` is NOT refused: the desktop app, a direct
+// API call and an older `ao` all send nothing, and refusing what AO cannot
+// identify would break authoring for every caller the rule is not about.
+//
+// Alive is "not terminated", matching how the crew refcounts its worktree: a
+// SUSPENDED qa is asleep on the task and still owns the checklist it will wake
+// up to, while a terminated one leaves rows behind that must not keep dev out.
+func (s *Service) checkChecklistOwner(ctx context.Context, from domain.SessionID) error {
+	if from == "" {
+		return nil
+	}
+	caller, ok, err := s.store.GetSession(ctx, from)
+	if err != nil {
+		return err
+	}
+	if !ok || !caller.InCrew() || !caller.CrewRole.IsDev() {
+		return nil
+	}
+	members, err := s.store.ListSessions(ctx, caller.ProjectID)
+	if err != nil {
+		return err
+	}
+	for _, other := range members {
+		if other.ID == caller.ID || other.CrewID != caller.CrewID {
+			continue
+		}
+		if other.CrewRole != domain.CrewRoleQA || other.IsTerminated {
+			continue
+		}
+		return fmt.Errorf("%w: qa @%s owns this task's checklist - it authors the cases, runs them and retires them. If a brief asked you for smoke cases, that brief predates the crew: say so, and hand it over with `ao send --crew qa --about <sha>`", ErrQAOwnsChecklist, other.ID)
+	}
+	return nil
 }
 
 // SetVerdict records the user's verdict + note for a case.
