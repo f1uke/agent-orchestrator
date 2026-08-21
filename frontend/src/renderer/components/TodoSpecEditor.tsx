@@ -370,12 +370,7 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 									Cancel
 								</Button>
 							) : null}
-							<Button
-								type="button"
-								onClick={() => start.mutate()}
-								disabled={busy}
-								style={{ background: "var(--lane-todo-bright)", color: "#12121a" }}
-							>
+							<Button type="button" onClick={() => start.mutate()} disabled={busy}>
 								{start.isPending ? (
 									<Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
 								) : (

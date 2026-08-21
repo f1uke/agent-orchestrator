@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+// The WCAG maths already lives in the companion palette; a second copy here would
+// be a second thing to keep right.
+import { contrastRatio } from "../companion/palette";
 
 // Comments are stripped first: a `/* … */` block can hold braces and commas that
 // would otherwise read as a selector.
@@ -86,4 +89,85 @@ describe("renderer stylesheet cascade", () => {
 			.map((rule) => rule.selector.replace(/\s+/g, " "));
 		expect(offenders).toEqual([]);
 	});
+});
+
+/**
+ * `Button`'s primary variant paints `bg-primary` / `text-primary-foreground`,
+ * which resolve through `@theme inline` to `--accent` / `--accent-fg`. So the
+ * legibility of EVERY primary action in the app - the TODO "Start work" button
+ * among them - is a property of those two tokens in each theme and of nothing
+ * else, and a component test asserting the button carries `bg-primary` proves
+ * only that it stopped hardcoding a colour, never that what it switched TO is
+ * readable.
+ *
+ * What broke originally was structural rather than a low number: the fill came
+ * from `--lane-todo-bright`, which deliberately inverts lightness between themes
+ * (#a6a6be dark, #6b6b85 light), while the ink beside it was a hardcoded
+ * `#12121a` that could not follow. Measured, that pair ran 7.82:1 in dark and
+ * 3.61:1 in light - so the light theme was not merely dim, it was a dark slab
+ * wearing near-black text, and no single hardcoded ink could have served both.
+ * The guard that matters is therefore that BOTH halves of the pair are declared
+ * in BOTH theme blocks, which is what resolving each token per theme asserts;
+ * the ratio floor below is the second line of defence.
+ */
+describe("primary action legibility", () => {
+	const THEMES = [
+		{ name: "dark", selector: ":root" },
+		{ name: "light", selector: ':root[data-theme="light"]' },
+	];
+
+	/** The value of a custom property declared directly in `selector`'s own block. */
+	function token(selector: string, prop: string): string {
+		const at = STYLES.search(new RegExp(`(^|\\})\\s*${escapeForRegex(selector)}\\s*\\{`, "m"));
+		expect(at, `no ${selector} block in styles.css`).toBeGreaterThanOrEqual(0);
+		const open = STYLES.indexOf("{", at);
+		const block = STYLES.slice(open + 1, matchingBrace(STYLES, open));
+		const found = block.match(new RegExp(`(^|[\\s;])${escapeForRegex(prop)}\\s*:\\s*([^;]+);`));
+		// A token the theme does not restate is a token frozen at the other theme's
+		// value - exactly the half-inverted pair this whole test exists to prevent.
+		expect(found?.[2], `${selector} declares no ${prop}`).toBeTruthy();
+		return (found?.[2] ?? "").trim();
+	}
+
+	function escapeForRegex(literal: string): string {
+		return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	}
+
+	function matchingBrace(css: string, open: number): number {
+		let depth = 0;
+		for (let i = open; i < css.length; i++) {
+			if (css[i] === "{") depth++;
+			else if (css[i] === "}" && --depth === 0) return i;
+		}
+		return css.length;
+	}
+
+	for (const theme of THEMES) {
+		it(`resolves --accent and --accent-fg together in the ${theme.name} theme`, () => {
+			const fill = token(theme.selector, "--accent");
+			const ink = token(theme.selector, "--accent-fg");
+
+			// ⚠ This assertion is what makes the ratio below mean anything. `contrastRatio`
+			// reads `#rrggbb` and nothing else, and it does NOT throw on a value it cannot
+			// parse - `parseInt("kl", 16)` is NaN, and a NaN luminance quietly collapses the
+			// result into a number that was never measured. Tailwind v4 ships `oklch()`
+			// colours, so the day someone restates an accent in that space this test would
+			// keep passing while checking nothing. Refuse the input instead: red here means
+			// go re-measure in a checker that speaks oklch, not that the colour got worse.
+			for (const [what, value] of [
+				["--accent", fill],
+				["--accent-fg", ink],
+			]) {
+				expect(value, `${what} is "${value}" - contrastRatio() reads #rrggbb only`).toMatch(/^#[0-9a-f]{6}$/i);
+			}
+
+			// 3:1 is the WCAG 1.4.11 floor, and deliberately NOT 4.5:1, because today's
+			// accent does not clear 4.5 in dark: white on #4d8dff measures 3.20:1, against
+			// 5.17:1 for white on #2563eb in light. That shortfall is app-wide - every
+			// primary button in the renderer sits on this same pair - so it is an accent
+			// decision for a human, not something to pin a red bar on here. Recorded rather
+			// than hidden: a green bar on this test does not certify AA for body text.
+			expect(contrastRatio(fill, ink), `${fill} on ${ink}`).toBeGreaterThanOrEqual(3);
+		});
+	}
 });
