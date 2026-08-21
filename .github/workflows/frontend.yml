@@ -5,9 +5,10 @@ name: Frontend
 # vitest.config.ts, and the repo had neither until #171) — this job is the
 # guard against that happening again.
 #
-# Typecheck is intentionally NOT run here yet: forge.config.ts and
-# update-electron-app carry pre-existing type errors. Add `npm run typecheck`
-# once those are fixed.
+# Typecheck is not run here: it lives in typecheck.yml, which runs on every
+# pull request rather than only the frontend-touching ones this workflow is
+# filtered to. The forge.config.ts / update-electron-app errors that used to
+# block it are fixed.
 
 on:
   push:

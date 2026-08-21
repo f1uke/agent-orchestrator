@@ -1,0 +1,62 @@
+name: Typecheck
+
+# `npm run frontend:typecheck` as a CI gate.
+#
+# The renderer is bundled by esbuild, which strips types without checking them,
+# so no build job can ever go red on a type error. #231 shipped a TS2322 into
+# main with all 11 checks green and it stayed broken until #232. tsc is the only
+# thing that sees these; this job is that thing.
+#
+# Runs on EVERY pull request, deliberately unfiltered. A `paths:` filter would
+# buy ~40s of runner time and cost correctness twice over: a path-filtered
+# workflow that does not run reports nothing at all, so the moment anyone makes
+# this a required check every non-frontend PR blocks forever on a check that
+# will never arrive; and a PR opened against the wrong base has a wildly wrong
+# changed-file set, which is exactly how the `format` job once blamed an author
+# for 337 commits of other people's files. Nothing here is diff-scoped — tsc
+# always checks the whole tree at HEAD — so an unfiltered run cannot produce a
+# result that depends on which base the PR happens to point at.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # Same `tsc --noEmit` the `typecheck` script runs; `--pretty false` keeps
+      # one diagnostic per line ("src/f.tsx(51,94): error TS2322: ...") so the
+      # log reads as file/line/code/message and the next step can turn each one
+      # into an annotation.
+      - name: TypeScript typecheck (tsc --noEmit)
+        id: tsc
+        run: |
+          npx tsc --noEmit --pretty false 2>&1 | tee "$RUNNER_TEMP/tsc.log"
+          exit "${PIPESTATUS[0]}"
+
+      # Republish each diagnostic as a workflow annotation so the error shows up
+      # on the PR's Files-changed tab and at the top of the run summary. Someone
+      # seeing this job red should read the type error without opening the log.
+      - name: Annotate TypeScript errors
+        if: failure() && steps.tsc.outcome == 'failure'
+        run: |
+          sed -n 's#^\([^ (][^(]*\)(\([0-9]*\),\([0-9]*\)): error \(.*\)$#::error file=frontend/\1,line=\2,col=\3,title=TypeScript error::\4#p' \
+            "$RUNNER_TEMP/tsc.log"
