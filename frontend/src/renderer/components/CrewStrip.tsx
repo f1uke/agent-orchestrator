@@ -49,7 +49,12 @@ const CHIP_STATE_TITLE: Record<CrewChipState, string> = {
 	done: "finished",
 };
 
-const REVIEW_PIP: Record<ReviewGateState, { Icon: LucideIcon; label: string; tone: string }> = {
+/**
+ * What the review gate LOOKS like in each verdict. Exported because the session
+ * topbar's member switcher is the same vocabulary one level down and must draw
+ * the same pip - one table, so the board and the topbar cannot drift.
+ */
+export const REVIEW_PIP: Record<ReviewGateState, { Icon: LucideIcon; label: string; tone: string }> = {
 	approved: { Icon: Check, label: "approved", tone: "var(--lane-merge-bright)" },
 	changes: { Icon: Contrast, label: "changes", tone: "var(--lane-needs-bright)" },
 	"not run": { Icon: Eye, label: "not run", tone: "var(--fg-passive)" },

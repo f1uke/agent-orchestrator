@@ -214,6 +214,25 @@ const CREW_JOIN_CAUSE: Record<NonNullable<SessionCrew["joinReason"]>, string> = 
 };
 
 /**
+ * What to CALL the session holding one of this task's exclusive resources - a
+ * simulator lease, today.
+ *
+ * Two agents on one task can hold two simulators at once, and "who has which"
+ * is asked at the device more than anywhere else, so the answer has to be in the
+ * vocabulary of the member switcher one strip above it. A holder that is a
+ * member of THIS task is named by its role (`dev`, `qa`); anything else keeps
+ * its `@id`, because a bare role would be a lie about which task it belongs to.
+ * The id is never lost - callers put it in the tooltip.
+ *
+ * A solo session has no role at all, so every one-agent task reads exactly as it
+ * reads today.
+ */
+export function crewHolderLabel(task: Task | undefined, holder: string | undefined): string {
+	const role = task?.members.find((member) => member.id === holder)?.crew?.role;
+	return role ?? `@${holder ?? "another session"}`;
+}
+
+/**
  * The review GATE - not a teammate.
  *
  * Review has no session: each pass is an ephemeral run that reads the diff,

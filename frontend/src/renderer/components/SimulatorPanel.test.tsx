@@ -5,11 +5,17 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SimulatorPanel } from "./SimulatorPanel";
 
-const { getMock, postMock, deleteMock } = vi.hoisted(() => ({
+const { getMock, postMock, deleteMock, sessionTask } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	postMock: vi.fn(),
 	deleteMock: vi.fn(),
+	// The task this pane belongs to, which is how a lease held by the crewmate
+	// gets named by its ROLE instead of by a raw session id. Undefined - the
+	// default - is a session with no crew, i.e. every solo task.
+	sessionTask: { value: undefined as unknown },
 }));
+
+vi.mock("../hooks/useSessionTask", () => ({ useSessionTask: () => sessionTask.value }));
 
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock, POST: postMock, DELETE: deleteMock },
@@ -1208,5 +1214,46 @@ describe("SimulatorPanel driving", () => {
 				expect.objectContaining({ body: { kind: "button", name: "home" } }),
 			),
 		);
+	});
+});
+
+describe("SimulatorPanel — who holds the device, in the role's words", () => {
+	// Two agents on one task can hold two simulators at once, and "who has which"
+	// is asked here more than anywhere else. `@agent-orchestrator-241` is the
+	// wrong vocabulary for the answer when the holder is the crewmate sitting in
+	// the switcher one strip above.
+	const crewDev = { id: "p-1", crew: { id: "p-1", role: "dev" } };
+	const crewQa = { id: "qa-9", crew: { id: "p-1", role: "qa" } };
+
+	beforeEach(() => {
+		sessionTask.value = { dev: crewDev, qa: crewQa, members: [crewDev, crewQa], isCrew: true };
+	});
+
+	afterEach(() => {
+		sessionTask.value = undefined;
+	});
+
+	it("names the crewmate by role, and keeps the raw id in the tooltip", async () => {
+		serveDevices(
+			devicesPayload([device({ lease: { state: "held", holder: "qa-9" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		const menu = await openMenu();
+		const line = within(menu).getByText(/Leased by qa\./i);
+		expect(line).toBeInTheDocument();
+		// The id is never lost - it rides along on the tooltip.
+		expect(line).toHaveAttribute("title", "@qa-9");
+		expect(within(menu).queryByText(/@qa-9\./i)).not.toBeInTheDocument();
+	});
+
+	it("keeps the `@id` for a holder that is NOT on this task — a bare role would name the wrong task", async () => {
+		serveDevices(
+			devicesPayload([device({ lease: { state: "held", holder: "other-7" } })], "UDID-A", "the only booted simulator"),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		const menu = await openMenu();
+		expect(within(menu).getByText(/Leased by @other-7/i)).toBeInTheDocument();
 	});
 });

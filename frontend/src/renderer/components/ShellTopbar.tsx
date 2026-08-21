@@ -8,6 +8,12 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { useUiStore } from "../stores/ui-store";
 import { OrchestratorIcon } from "./icons";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { CrewSwitcher } from "./CrewSwitcher";
+import { useAddCrewRole } from "../hooks/useAddCrewRole";
+import { useSessionTask } from "../hooks/useSessionTask";
+import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
+import { useSimDevices } from "../hooks/useSimDevices";
+import { reviewGateState } from "../lib/crew";
 import { cn } from "../lib/utils";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
@@ -77,6 +83,38 @@ export function ShellTopbar() {
 	// while its own full-page surface (/projects/<id>/jira) is showing.
 	const isJiraRoute = /\/projects\/[^/]+\/jira$/.test(pathname);
 
+	// THE MEMBER SWITCHER lives here, and the choice is load-bearing: this header
+	// is rendered ONCE by the shell for the whole session route, whereas
+	// `CenterPane`'s toolbar is drawn once per PANE — so a switcher put there
+	// would appear twice the moment the split view is used. See `CrewSwitcher`.
+	const task = useSessionTask(isSessionRoute && !isOrchestrator ? params.sessionId : undefined);
+	const isCrew = task?.isCrew ?? false;
+	// The review verdict comes from the task's own pull requests. Asked for dev,
+	// because dev owns the PR — and the daemon task-scopes this route anyway, so
+	// either member answers the same.
+	const reviewPRs = useSessionScmSummary(task && isCrew ? task.dev.id : undefined).data ?? [];
+	// The device pip is a crew-only affordance on an iOS project, so nothing else
+	// pays for the poll: a solo task has no second chip to tell apart, and a
+	// project with no simulator has no lease that could ever land on one.
+	const wantsDevicePip = isCrew && Boolean(project?.hasIOSSimulator);
+	const simDevices = useSimDevices(wantsDevicePip);
+	const deviceHolders = new Set(
+		(simDevices.data?.devices ?? [])
+			.map((device) => (device.lease?.state === "held" ? device.lease.holder : null))
+			.filter((holder): holder is string => Boolean(holder)),
+	);
+	const addRole = useAddCrewRole(task?.dev);
+	const addRoleError = addRole.error instanceof Error ? addRole.error.message : null;
+	const requestInspectorView = useUiStore((state) => state.requestInspectorView);
+
+	const openMember = (member: WorkspaceSession) => {
+		if (member.id === params.sessionId) return;
+		void navigate({
+			to: "/projects/$projectId/sessions/$sessionId",
+			params: { projectId: member.workspaceId, sessionId: member.id },
+		});
+	};
+
 	const openNewTask = () => {
 		if (!projectId || isProjectRestarting) return;
 		setIsNewTaskOpen(true);
@@ -119,6 +157,28 @@ export function ShellTopbar() {
 							<span className="truncate">{session?.branch || `session/${session?.id ?? ""}`}</span>
 						</div>
 						{session ? <SessionStatusPill session={session} /> : null}
+						{/* AFTER the pill, deliberately: on a solo task this appends one
+						    quiet `+ qa` and moves nothing that is already on screen, which
+						    is the whole cost of this feature to the majority case. */}
+						{task && params.sessionId ? (
+							<CrewSwitcher
+								activeSessionId={params.sessionId}
+								addRolePending={addRole.isPending}
+								deviceHolders={deviceHolders}
+								onAddRole={() => addRole.mutate()}
+								onOpenMember={openMember}
+								onOpenReviews={() => requestInspectorView("reviews")}
+								review={reviewGateState(reviewPRs)}
+								showDevicePip={wantsDevicePip}
+								style={noDragStyle}
+								task={task}
+							/>
+						) : null}
+						{addRoleError ? (
+							<span className="truncate text-[11px] text-destructive" role="status">
+								{addRoleError}
+							</span>
+						) : null}
 					</div>
 				) : isProjectBoardRoute ? null : (
 					<div className="topbar-project-line">

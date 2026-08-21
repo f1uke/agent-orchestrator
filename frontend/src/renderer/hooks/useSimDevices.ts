@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient } from "../lib/api-client";
+import { mockSimDevices } from "../lib/mock-data";
+
+const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
 export type SimDevice = components["schemas"]["SimDeviceView"];
 export type SimDevicesResponse = components["schemas"]["ListSimDevicesResponse"];
@@ -35,6 +38,7 @@ export function useSimDevices(enabled: boolean) {
 			(query.state.data?.devices ?? []).some((device) => device.power?.state === "running") ? 1_000 : 5_000,
 		refetchIntervalInBackground: false,
 		queryFn: async ({ signal }): Promise<SimDevicesResponse> => {
+			if (usePreviewData) return mockSimDevices();
 			const { data, error, response } = await apiClient.GET("/api/v1/sim/devices", { signal });
 			if (error || !data) {
 				// 501 is a machine that cannot list simulators at all - not a

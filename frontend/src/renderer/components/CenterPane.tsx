@@ -163,6 +163,20 @@ export function CenterPane({
 					    the TERMINAL eyebrow (redundant when every pane is a terminal). */}
 					{pane && session ? <SessionGlyph session={session} /> : null}
 					{pane ? null : <span className="terminal-toolbar__eyebrow">TERMINAL</span>}
+					{/* A CREW MEMBER'S ROLE, ahead of the title. Two members of one task
+					    share a title AND a branch - they are the same piece of work - so
+					    in the split view, which is precisely where you put both of them on
+					    screen to compare them, the role is the ONLY thing that tells the
+					    two panes apart. Same three-letter word as the topbar's switcher
+					    chip, so the two surfaces name a member the same way. */}
+					{pane && session?.crew ? (
+						<span
+							className="shrink-0 rounded-full border border-border-strong px-1.5 py-px font-mono text-[10px] leading-none text-muted-foreground"
+							data-pane-role={session.crew.role}
+						>
+							{session.crew.role}
+						</span>
+					) : null}
 					<span className="terminal-toolbar__session">{paneHeaderTitle}</span>
 					{pane && session?.branch ? (
 						<span className="hidden min-w-0 truncate font-mono text-[10px] text-muted-foreground md:inline">
