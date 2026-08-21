@@ -886,15 +886,13 @@ describe("SessionView — the center pane draws no member switcher, at any pane 
 	});
 
 	it("renders none in a two-pane split, where a per-pane control would be drawn twice", () => {
-		useUiStore
-			.getState()
-			.setSplitLayout("proj-1", {
-				kind: "split",
-				orientation: "horizontal",
-				ratio: 0.5,
-				first: leaf("sess-1"),
-				second: leaf("sess-2"),
-			});
+		useUiStore.getState().setSplitLayout("proj-1", {
+			kind: "split",
+			orientation: "horizontal",
+			ratio: 0.5,
+			first: leaf("sess-1"),
+			second: leaf("sess-2"),
+		});
 		const { container } = render(<SessionView sessionId="sess-1" />);
 
 		// Two panes, each with its own toolbar - and no switcher in either.
