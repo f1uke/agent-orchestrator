@@ -143,12 +143,9 @@ func (s *crewStack) spawnCrew(t *testing.T) (dev, qa domain.SessionRecord) {
 	if err != nil {
 		t.Fatalf("spawn dev: %v", err)
 	}
-	// ONE AWAKE AT A TIME: dev has to stand down before a second member may be
-	// born into its tree. This is the release half of a handover, and it is the
-	// only way a crew can be formed.
-	if err := s.mgr.ReleaseCrewSlot(ctx, devRec.ID); err != nil {
-		t.Fatalf("release dev's slot: %v", err)
-	}
+	// dev keeps working straight through: a second member is born into a tree its
+	// crewmate is writing, which is the normal state of a crew and no longer
+	// something anything has to stand down for.
 	qaRec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test it",
 		CrewOf: devRec.ID, CrewRole: domain.CrewRoleQA,

@@ -73,6 +73,13 @@ type SessionService interface {
 	// AttachCrewMember adds a member in the given role to the task this session
 	// belongs to, born suspended. It is how a task spawned solo gains a qa.
 	AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error)
+	// SendToCrewmate delivers a message addressed by ROLE - the only address a
+	// crew member can rely on, since a crew is formed after dev's runtime is
+	// already launched and dev's environment can never carry qa's id.
+	SendToCrewmate(ctx context.Context, from domain.SessionID, role domain.CrewRole, message, subject string) (domain.SessionID, ports.SendOutcome, error)
+	// SendFrom is Send with the SENDER named, which is what lets the daemon cap a
+	// runaway conversation between two agents.
+	SendFrom(ctx context.Context, id domain.SessionID, message string, talk sessionsvc.CrewTalk) (ports.SendOutcome, error)
 	// WakeCrewMember hands the task's one awake slot to this member, standing the
 	// current holder down first.
 	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error)
@@ -158,6 +165,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/wake", c.wake)
 	r.Post("/sessions/{sessionId}/crew/members", c.crewAddMember)
 	r.Post("/sessions/{sessionId}/crew/wake", c.crewWake)
+	r.Post("/sessions/{sessionId}/crew/send", c.crewSend)
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
 	r.Post("/sessions/{sessionId}/send", c.send)
@@ -809,15 +817,12 @@ func (c *SessionsController) crewAddMember(w http.ResponseWriter, r *http.Reques
 	envelope.WriteJSON(w, http.StatusCreated, AddCrewMemberResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
 }
 
-// crewWake gives this task's one awake slot to the named member: whoever holds
-// it is stood down (suspended, tmux reaped) and this member is resumed in its
-// place. It is how a human - or the orchestrator, via `ao crew wake` - says
-// "qa's turn now"; AO deliberately makes no automatic decision about when that
-// should happen.
+// crewWake starts the named member and touches nobody else. It is how a human -
+// or the orchestrator, via `ao crew wake` - says "get qa going"; the crewmate
+// keeps running throughout, because both members of a crew work at once.
 //
 // It is a different verb from /wake on purpose. /wake is "I am looking at this
-// session" and must never disturb anything else; this one CHANGES which agent is
-// running, so it is asked for explicitly.
+// session"; this one is asked for by name.
 func (c *SessionsController) crewWake(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/wake")
@@ -829,6 +834,51 @@ func (c *SessionsController) crewWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, WakeSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
+}
+
+// crewSend delivers a message from one crew member to the other, addressed by
+// ROLE. It is the only address that cannot go stale - a crew is formed after
+// dev's runtime is launched, so dev's environment never carries qa's id - and
+// it is the path the caps are enforced on.
+func (c *SessionsController) crewSend(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/send")
+		return
+	}
+	var in CrewSendRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if in.Message == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_REQUIRED", "Message is required", nil)
+		return
+	}
+	if len(in.Message) > maxAgentMessageLen {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Message is too long", nil)
+		return
+	}
+	message := domain.SanitizeControlChars(in.Message)
+	peer, outcome, err := c.Svc.SendToCrewmate(r.Context(), sessionID(r), in.Role, message, in.About)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	// SessionID is the RECIPIENT, as it is on every other send: the caller asked
+	// for a role and this is what the role resolved to.
+	resp := SendSessionMessageResponse{OK: true, SessionID: peer, Message: message}
+	if outcome.Queued {
+		// Held, not delivered - a crewmate that has not been started yet is the
+		// common case, and its mail waits for it.
+		queuedAt := outcome.QueuedAt
+		resp.Queued = true
+		resp.QueuedAt = &queuedAt
+		resp.PendingMessages = outcome.Pending
+		envelope.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+	c.publishActivity(r.Context(), activityEventFromMessage(peer, message))
+	envelope.WriteJSON(w, http.StatusOK, resp)
 }
 
 // rollback undoes a partially-completed spawn: if the session row is still in
@@ -886,7 +936,7 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := domain.SanitizeControlChars(in.Message)
-	outcome, err := c.Svc.Send(r.Context(), sessionID(r), message)
+	outcome, err := c.Svc.SendFrom(r.Context(), sessionID(r), message, sessionsvc.CrewTalk{From: in.From, Subject: in.About})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

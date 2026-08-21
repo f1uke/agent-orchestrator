@@ -800,7 +800,7 @@ func TestSessionSleepProvenanceRoundTripAndCDC(t *testing.T) {
 	base, _ := s.LatestSeq(ctx)
 
 	r.IsSuspended = true
-	r.SleepReason = domain.SleepReasonTurn
+	r.SleepReason = domain.SleepReasonIdle
 	if err := s.UpdateSession(ctx, r); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -808,11 +808,11 @@ func TestSessionSleepProvenanceRoundTripAndCDC(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("get session: found=%v err=%v", ok, err)
 	}
-	if got.SleepReason != domain.SleepReasonTurn {
+	if got.SleepReason != domain.SleepReasonIdle {
 		t.Fatalf("sleep_reason did not round-trip: %q", got.SleepReason)
 	}
-	if p := lastSessionUpdatePayload(t, s, base); p["sleepReason"] != string(domain.SleepReasonTurn) {
-		t.Fatalf("sleepReason payload = %v, want %q", p["sleepReason"], domain.SleepReasonTurn)
+	if p := lastSessionUpdatePayload(t, s, base); p["sleepReason"] != string(domain.SleepReasonIdle) {
+		t.Fatalf("sleepReason payload = %v, want %q", p["sleepReason"], domain.SleepReasonIdle)
 	}
 
 	base2, _ := s.LatestSeq(ctx)

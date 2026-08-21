@@ -363,3 +363,36 @@ func crewDevsFirst(recs []domain.SessionRecord) []domain.SessionRecord {
 	}
 	return out
 }
+
+// crewIDs is the two members' session ids, for the environment a member is
+// launched with. Empty for a solo session, which is what keeps a solo
+// environment byte-for-byte what it always was.
+type crewIDs struct {
+	dev domain.SessionID
+	qa  domain.SessionID
+}
+
+// crewIDs resolves them. dev is free - the CREW ID IS DEV'S SESSION ID - and qa
+// costs a lookup only when the caller is not qa itself, which is the case where
+// the answer cannot be known any other way.
+func (m *Manager) crewIDs(ctx context.Context, self, crewID domain.SessionID, role domain.CrewRole) crewIDs {
+	if crewID == "" {
+		return crewIDs{}
+	}
+	out := crewIDs{dev: crewID}
+	if role == domain.CrewRoleQA {
+		out.qa = self
+		return out
+	}
+	all, err := m.store.ListAllSessions(ctx)
+	if err != nil {
+		return out
+	}
+	for _, other := range all {
+		if other.CrewID == crewID && other.CrewRole == domain.CrewRoleQA {
+			out.qa = other.ID
+			break
+		}
+	}
+	return out
+}

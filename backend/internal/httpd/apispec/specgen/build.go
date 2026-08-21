@@ -1563,8 +1563,21 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/send", id: "sendToCrewmate", tag: "sessions",
+			summary:    "Message the other member of this session's task, addressed by role. The path names the SENDER",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.CrewSendRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SendSessionMessageResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/wake", id: "wakeCrewMember", tag: "sessions",
-			summary:    "Give this task's one awake slot to this crew member, standing the current holder down",
+			summary:    "Start this crew member. Its crewmate keeps running: both members of a crew work at once",
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WakeSessionResponse{}},

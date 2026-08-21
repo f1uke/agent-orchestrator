@@ -94,22 +94,14 @@ func TestAttachCrewMember_LeavesDevRunningAndHoldingTheSlot(t *testing.T) {
 		t.Fatalf("attaching disturbed dev's terminal: handle %q->%q, destroys %d->%d",
 			handleBefore, devRow.Metadata.RuntimeHandleID, destroyedBefore, rt.destroyed)
 	}
-	// Exactly one member holds the slot, and it is dev.
-	holder, ok, err := m.CrewSlotHolder(ctx, dev.ID)
-	if err != nil || !ok || holder.ID != dev.ID {
-		t.Fatalf("crew slot holder = %v/%v/%v, want dev %s", holder.ID, ok, err, dev.ID)
-	}
-	awake := 0
-	for _, rec := range st.sessions {
-		if rec.CrewID == devRow.CrewID && rec.Awake() {
-			awake++
-		}
-	}
-	if awake != 1 {
-		t.Fatalf("%d members of the crew are awake, want exactly 1", awake)
-	}
+	// The new member is a ROW, not a running agent: attaching costs nothing until
+	// somebody starts it. That is not an exclusion - both members run at once -
+	// it is that nobody has asked for this one to start yet.
 	if qa.Awake() {
-		t.Fatal("the attached member is awake")
+		t.Fatal("the attached member started without anybody asking for it")
+	}
+	if qa.Metadata.RuntimeHandleID != "" {
+		t.Fatalf("the attached member has a runtime handle %q; it should never have been launched", qa.Metadata.RuntimeHandleID)
 	}
 }
 
@@ -329,30 +321,34 @@ func TestCrewDevOf_ResolvesEitherIdToTheTask(t *testing.T) {
 	}
 }
 
-// TestAttachCrewMember_WakingTheAttachedMemberGoesThroughTheExclusion: an
-// attached qa is woken by exactly the route a spawn-time one is, so the handover
-// is #225's, not a second mechanism.
-func TestAttachCrewMember_WakingTheAttachedMemberGoesThroughTheExclusion(t *testing.T) {
+// TestAttachCrewMember_StartingTheAttachedMemberLeavesDevRunning: starting one
+// member is not a handover any more. dev keeps its agent, its terminal and its
+// turn, because there is no turn - both members work at the same time.
+func TestAttachCrewMember_StartingTheAttachedMemberLeavesDevRunning(t *testing.T) {
 	m, st, rt, _ := newManager()
 	dev := spawnMechanical(t, m)
 	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
+	// dev's agent is genuinely running: the wake routes probe a crewmate that
+	// claims to be awake and put a CORPSE to sleep, which is the half of the old
+	// guard that survives.
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle["h1"] = true
+
 	if _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
 	}
 
 	devRow, qaRow := st.sessions[dev.ID], st.sessions[qa.ID]
-	if !devRow.IsSuspended || devRow.Awake() {
-		t.Fatalf("dev still holds the slot after the handover: suspended=%v awake=%v", devRow.IsSuspended, devRow.Awake())
+	if devRow.IsSuspended || !devRow.Awake() {
+		t.Fatalf("starting qa stood dev down: suspended=%v awake=%v", devRow.IsSuspended, devRow.Awake())
 	}
 	if qaRow.IsSuspended || !qaRow.Awake() {
 		t.Fatalf("qa did not come up: suspended=%v awake=%v", qaRow.IsSuspended, qaRow.Awake())
-	}
-	holder, ok, err := m.CrewSlotHolder(ctx, dev.ID)
-	if err != nil || !ok || holder.ID != qa.ID {
-		t.Fatalf("crew slot holder = %v/%v/%v, want qa %s", holder.ID, ok, err, qa.ID)
 	}
 	// qa is launched under a SESSION-ID handle, not dev's branch handle: two crew
 	// members sharing one tmux name is what #224 had to break apart.

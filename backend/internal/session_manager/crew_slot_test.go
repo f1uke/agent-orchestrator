@@ -8,63 +8,117 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-// TestCrewSlotGuard_IsFreeForASoloSession is the preservation guard at its
-// cheapest: a session in no crew must not cost the guard a single query or probe.
-// Solo is the zero value, and this is what keeps it a no-op path rather than a
-// branch somebody has to remember to keep correct.
-func TestCrewSlotGuard_IsFreeForASoloSession(t *testing.T) {
+// TestReconcileCrewPeers_IsFreeForASoloSession is the preservation guard at its
+// cheapest: a session in no crew must not cost a single query or probe. Solo is
+// the zero value, and this is what keeps it a no-op path rather than a branch
+// somebody has to remember to keep correct.
+func TestReconcileCrewPeers_IsFreeForASoloSession(t *testing.T) {
 	m, st, rt, _ := newManager()
 	solo := mkLive("mer-1")
 	st.sessions[solo.ID] = solo
 
-	if err := m.crewSlotGuard(ctx, solo, routeResume); err != nil {
-		t.Fatalf("the guard refused a solo session: %v", err)
-	}
+	m.reconcileCrewPeers(ctx, solo, routeResume)
+
 	if st.listAllCalls != 0 {
-		t.Fatalf("the guard read the session list %d times for a solo session; want 0", st.listAllCalls)
+		t.Fatalf("a solo session cost %d session-list reads; want 0", st.listAllCalls)
 	}
 	if rt.aliveCalls != 0 {
-		t.Fatalf("the guard probed a runtime %d times for a solo session; want 0", rt.aliveCalls)
-	}
-	if holder, ok, err := m.CrewSlotHolder(ctx, solo.ID); err != nil || ok {
-		t.Fatalf("CrewSlotHolder for a solo session = %s (%v), %v; want none", holder.ID, ok, err)
+		t.Fatalf("a solo session cost %d runtime probes; want 0", rt.aliveCalls)
 	}
 }
 
-// TestReleaseCrewSlot_RefusesAnOrchestrator. Every orchestrator of a project
-// already shares ONE worktree with every other orchestrator of that project, and
-// they are not task members. Standing one down in the name of a crew's slot would
-// be suspending an unrelated session.
-func TestReleaseCrewSlot_RefusesAnOrchestrator(t *testing.T) {
-	m, st, _, _ := newManager()
-	orch := mkLive("mer-1")
-	orch.Kind = domain.KindOrchestrator
-	st.sessions[orch.ID] = orch
-
-	if err := m.ReleaseCrewSlot(ctx, orch.ID); !errors.Is(err, ErrInvalidCrew) {
-		t.Fatalf("ReleaseCrewSlot(orchestrator) = %v, want ErrInvalidCrew", err)
-	}
-	if st.sessions[orch.ID].IsSuspended {
-		t.Fatal("the refused release still suspended the orchestrator")
-	}
-}
-
-// TestReleaseCrewSlot_IsIdempotent: a caller may release unconditionally, which
-// is what lets a handover put the release first without checking anything.
-func TestReleaseCrewSlot_IsIdempotent(t *testing.T) {
+// TestReconcileCrewPeers_LeavesALiveCrewmateAlone. This is the whole change in
+// one assertion: the crewmate is AWAKE AND RUNNING, and the member coming up is
+// allowed to come up anyway. Under #225 this was the refusal.
+func TestReconcileCrewPeers_LeavesALiveCrewmateAlone(t *testing.T) {
 	m, st, rt, ws := newManager()
 	dev := seedCrewDev(m, st, rt, ws)
+	qa := mkLive("mer-2")
+	qa.CrewID, qa.CrewRole = dev.ID, domain.CrewRoleQA
+	st.sessions[qa.ID] = qa
+	devRow := st.sessions[dev.ID]
+	devRow.CrewID, devRow.CrewRole = dev.ID, domain.CrewRoleDev
+	st.sessions[dev.ID] = devRow
+	rt.aliveByHandle["h1"] = true
 
-	for i := range 2 {
-		if err := m.ReleaseCrewSlot(ctx, dev.ID); err != nil {
-			t.Fatalf("release %d: %v", i+1, err)
-		}
+	m.reconcileCrewPeers(ctx, st.sessions[qa.ID], routeResume)
+
+	if got := st.sessions[dev.ID]; got.IsSuspended || !got.Awake() {
+		t.Fatalf("bringing qa up put a live dev to sleep: suspended=%v awake=%v", got.IsSuspended, got.Awake())
 	}
-	if !st.sessions[dev.ID].IsSuspended {
-		t.Fatal("the release did not suspend the member")
+}
+
+// TestReconcileCrewPeers_SleepsACorpse. The refusal is gone but the PROBE is not,
+// and this is why: a member whose agent died still reads as awake off its row,
+// and "nobody is working on this" is derived from exactly that column. A crew
+// showing a dead member as working is the lie that rule exists to catch.
+func TestReconcileCrewPeers_SleepsACorpse(t *testing.T) {
+	m, st, rt, ws := newManager()
+	dev := seedCrewDev(m, st, rt, ws)
+	qa := mkLive("mer-2")
+	qa.CrewID, qa.CrewRole = dev.ID, domain.CrewRoleQA
+	st.sessions[qa.ID] = qa
+	devRow := st.sessions[dev.ID]
+	devRow.CrewID, devRow.CrewRole = dev.ID, domain.CrewRoleDev
+	st.sessions[dev.ID] = devRow
+	rt.aliveByHandle["h1"] = false // dev's pane is gone
+
+	m.reconcileCrewPeers(ctx, st.sessions[qa.ID], routeResume)
+
+	got := st.sessions[dev.ID]
+	if !got.IsSuspended {
+		t.Fatal("a member whose runtime is gone still reads as awake")
 	}
-	if rt.destroyed != 1 {
-		t.Fatalf("runtime destroyed %d times across two releases, want 1", rt.destroyed)
+	if got.SleepReason != domain.SleepReasonIdle {
+		t.Fatalf("sleep reason = %q, want idle: there are no turns to be waiting for", got.SleepReason)
+	}
+}
+
+// TestReconcileCrewPeers_AnUnprobeableCrewmateIsLeftAlone. A failed probe is
+// never proof of death - a load-bearing rule everywhere else in this daemon -
+// and the cost of guessing wrong is now only a stale row the next route settles.
+func TestReconcileCrewPeers_AnUnprobeableCrewmateIsLeftAlone(t *testing.T) {
+	m, st, rt, ws := newManager()
+	dev := seedCrewDev(m, st, rt, ws)
+	qa := mkLive("mer-2")
+	qa.CrewID, qa.CrewRole = dev.ID, domain.CrewRoleQA
+	st.sessions[qa.ID] = qa
+	devRow := st.sessions[dev.ID]
+	devRow.CrewID, devRow.CrewRole = dev.ID, domain.CrewRoleDev
+	st.sessions[dev.ID] = devRow
+	rt.aliveErr = errors.New("tmux unreachable")
+
+	m.reconcileCrewPeers(ctx, st.sessions[qa.ID], routeResume)
+
+	if st.sessions[dev.ID].IsSuspended {
+		t.Fatal("an unprobeable member was declared dead and put to sleep")
+	}
+}
+
+// TestSpawnCrewMember_IsAllowedWhileDevIsAwake is the inverse of what #225
+// asserted, at the spawn route. dev is normally the one working in the tree the
+// new member is about to join, so a rule that waited for a quiet one would mean
+// a crew could essentially never be formed.
+func TestSpawnCrewMember_IsAllowedWhileDevIsAwake(t *testing.T) {
+	m, st, rt, ws := newManager()
+	dev := seedCrewDev(m, st, rt, ws)
+	if dev.InCrew() {
+		t.Fatal("precondition: dev is still solo when the crew spawn arrives")
+	}
+	rt.aliveByHandle["h1"] = true
+
+	qa, err := m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
+		CrewOf: dev.ID, CrewRole: domain.CrewRoleQA,
+	})
+	if err != nil {
+		t.Fatalf("crew spawn into a running dev's tree: %v", err)
+	}
+	if got := st.sessions[dev.ID]; got.IsSuspended {
+		t.Fatal("forming the crew stood dev down")
+	}
+	if !qa.InCrew() || qa.CrewID != dev.ID {
+		t.Fatalf("the new member is not on dev's task: %q/%q", qa.CrewID, qa.CrewRole)
 	}
 }
 
@@ -97,32 +151,5 @@ func TestCrewDevsFirst_PutsDevInFront(t *testing.T) {
 	// Everything that is not a crew dev keeps its relative order.
 	if got[1].ID != qa.ID || got[2].ID != other.ID {
 		t.Fatalf("the non-dev tail was reordered: %s, %s", got[1].ID, got[2].ID)
-	}
-}
-
-// TestSpawnCrewMember_RefusedWhileDevIsAwake is the spawn route at the unit level:
-// the guard has to look at the crew that is ABOUT to exist, because dev is still
-// SOLO at this moment - recordCrew writes the membership only after the new member
-// materializes. Asking dev whether it is "in a crew" answers no, and a guard that
-// stopped there would wave every crew spawn through.
-func TestSpawnCrewMember_RefusedWhileDevIsAwake(t *testing.T) {
-	m, st, rt, ws := newManager()
-	dev := seedCrewDev(m, st, rt, ws)
-	if dev.InCrew() {
-		t.Fatal("precondition: dev must still be solo when the guard runs")
-	}
-
-	_, err := m.Spawn(ctx, ports.SpawnConfig{
-		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
-		CrewOf: dev.ID, CrewRole: domain.CrewRoleQA,
-	})
-	if !errors.Is(err, ErrCrewBusy) {
-		t.Fatalf("crew spawn into a running dev's tree = %v, want ErrCrewBusy", err)
-	}
-	if rt.created != 0 {
-		t.Fatal("the refused spawn launched an agent into the shared tree")
-	}
-	if got := st.sessions[dev.ID]; got.InCrew() {
-		t.Fatalf("the refused spawn recorded a crew on dev: %q/%q", got.CrewID, got.CrewRole)
 	}
 }

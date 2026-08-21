@@ -47,6 +47,12 @@ type Store interface {
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	SessionQueuedMessageCounts(ctx context.Context, id domain.SessionID) (domain.QueuedMessageCounts, error)
+	// The crew conversation's counters. Every one of them reads a table that
+	// stays empty unless two members of one task actually message each other.
+	InsertCrewMessage(ctx context.Context, msg domain.CrewMessage) error
+	CrewMessagesOnSubject(ctx context.Context, crewID domain.SessionID, subject string, from domain.SessionID) (int, error)
+	CrewMessagesSince(ctx context.Context, crewID domain.SessionID, since time.Time) (int, error)
+	LatestCrewMessageFrom(ctx context.Context, from domain.SessionID) (domain.CrewMessage, bool, error)
 	// OpenCrewRunForSession and ConsecutiveCrewRunDiscards are the bracketed-run
 	// facts the read model needs: what this member is running RIGHT NOW (which
 	// nothing else in the daemon can answer - see domain.Session.CrewRun) and how
@@ -96,6 +102,11 @@ type commander interface {
 	// CrewDevOf resolves any session to the DEV of the task it belongs to; a solo
 	// session answers with itself.
 	CrewDevOf(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// CrewMember resolves the session filling `role` on this session's task, so a
+	// member can address its crewmate by role. It answers for either member, and
+	// a role is the only address that cannot go stale: a crew is formed after
+	// dev's runtime is launched, so dev's environment can never carry qa's id.
+	CrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.SessionRecord, bool, error)
 	// WakeCrewMember gives the crew slot to one member of a task, standing the
 	// current holder down first. It is the human's (and the orchestrator's) way of
 	// saying "qa's turn now" while automatic handover is deliberately not built.
@@ -843,7 +854,40 @@ func (s *Service) Delete(ctx context.Context, id domain.SessionID, force bool) e
 
 // Send delegates agent messaging to the internal manager, passing back whether
 // the message reached the agent or was queued for a session that is asleep.
+//
+// `talk` names the SENDER when a session sent it. That is what makes the crew
+// conversation cappable: a message from one crew member to the other is the one
+// runaway class this daemon cannot leave to good behaviour, so it is counted,
+// recorded and - at the cap - refused (crew_message.go). Every other message,
+// which is nearly all of them, carries an empty CrewTalk and takes exactly the
+// path it always has.
 func (s *Service) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
+	return s.SendFrom(ctx, id, message, CrewTalk{})
+}
+
+// SendFrom is Send with the sender named. See Send.
+func (s *Service) SendFrom(ctx context.Context, id domain.SessionID, message string, talk CrewTalk) (ports.SendOutcome, error) {
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil {
+		return ports.SendOutcome{}, fmt.Errorf("send %s: %w", id, err)
+	}
+	if !ok {
+		return ports.SendOutcome{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	entry, err := s.crewTalkCheck(ctx, rec, talk)
+	if err != nil {
+		return ports.SendOutcome{}, err
+	}
+	if entry != nil {
+		// Recorded whatever the answer: a refusal is not a non-event, it is the
+		// signal that parks the task at NEEDS YOU.
+		if err := s.store.InsertCrewMessage(ctx, *entry); err != nil {
+			return ports.SendOutcome{}, fmt.Errorf("record crew message: %w", err)
+		}
+		if entry.Refused() {
+			return ports.SendOutcome{}, apierr.Conflict("CREW_MESSAGE_CAPPED", entry.RefusedReason, nil)
+		}
+	}
 	outcome, err := s.manager.Send(ctx, id, message)
 	return outcome, toAPIError(err)
 }
@@ -1071,10 +1115,6 @@ func toAPIError(err error) error {
 		return apierr.Invalid("AGENT_BINARY_NOT_FOUND", err.Error(), nil)
 	case errors.Is(err, ports.ErrRuntimePrerequisite):
 		return apierr.Invalid("RUNTIME_PREREQUISITE_MISSING", err.Error(), nil)
-	case errors.Is(err, sessionmanager.ErrCrewBusy):
-		// "Not right now", not "the daemon is broken": the other member of this
-		// task is running, so the caller should stand it down and ask again.
-		return apierr.Conflict("CREW_SLOT_BUSY", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrInvalidCrew):
 		return apierr.Invalid("INVALID_CREW", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrCrewRoleTaken):
@@ -1116,7 +1156,14 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("crew run discards %s: %w", rec.ID, err)
 	}
-	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule, crewRunFacts{Discards: discards})
+	// One more indexed lookup on a table that stays empty unless two members of
+	// one task actually message each other, and it is skipped outright for a solo
+	// session.
+	talkCapped, err := s.crewTalkRefused(ctx, rec)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("crew talk %s: %w", rec.ID, err)
+	}
+	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule, crewRunFacts{Discards: discards, TalkCapped: talkCapped})
 	// Resolve the target branch from facts already loaded above — no extra query
 	// and no subprocess, so this stays affordable on the sessions LIST endpoint.
 	// That budget is why the chain stops at the project default here: the

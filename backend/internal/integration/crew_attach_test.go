@@ -55,13 +55,15 @@ func TestCrewAttach_AMechanicalTaskGainsASleepingQA(t *testing.T) {
 			createdBefore, s.rt.created, destroyedBefore, s.rt.destroyed)
 	}
 
-	// dev is untouched and still holds the slot. This is the no-two-awake
-	// guarantee from the attach side: nothing was released, so nothing could race.
+	// dev is untouched. Attaching costs the running task NOTHING: the member is a
+	// row until somebody starts it.
 	devRow := s.record(t, dev.ID)
 	if devRow.IsSuspended || !devRow.Awake() {
 		t.Fatalf("attaching stood dev down: suspended=%v awake=%v", devRow.IsSuspended, devRow.Awake())
 	}
-	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
+	if got := s.awakeMembers(t, dev.ID, qa.ID); len(got) != 1 || got[0] != dev.ID {
+		t.Fatalf("awake after an attach = %v, want only dev: nothing was started", got)
+	}
 
 	// One REAL worktree, still on disk, with dev's work in it.
 	if qa.Metadata.WorkspacePath != devRow.Metadata.WorkspacePath || qa.Metadata.Branch != devRow.Metadata.Branch {
@@ -111,9 +113,11 @@ func TestCrewAttach_TheNewMemberIsReachableBeforeItWakes(t *testing.T) {
 	if typed := pane.typed(); len(typed) != 0 {
 		t.Fatalf("draining delivered %v to a member with no terminal", typed)
 	}
-	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
+	if got := s.awakeMembers(t, dev.ID, qa.ID); len(got) != 1 || got[0] != dev.ID {
+		t.Fatalf("awake after a held message = %v, want only dev: a message must not start an agent", got)
+	}
 
-	// And it is not lost: it lands when the member takes the slot.
+	// And it is not lost: it lands when the member is started.
 	if _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("wake the attached member: %v", err)
 	}
@@ -128,11 +132,11 @@ func TestCrewAttach_TheNewMemberIsReachableBeforeItWakes(t *testing.T) {
 	}
 }
 
-// TestCrewAttach_WakingItIsAHandoverThroughTheExclusion. An attached member is
-// woken by exactly the route a spawn-time one is: the holder is stood down FIRST
-// and its terminal reaped, then the taker comes up. At no observable moment do
-// two agents have the shared checkout.
-func TestCrewAttach_WakingItIsAHandoverThroughTheExclusion(t *testing.T) {
+// TestCrewAttach_StartingItLeavesDevRunning. An attached member is started by
+// exactly the route a spawn-time one is - and starting it takes nothing from the
+// member already working. Both agents then have the shared checkout, which is
+// the point of this chunk and the state its predecessor existed to prevent.
+func TestCrewAttach_StartingItLeavesDevRunning(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	s.rt.perSessionHandles = true
@@ -143,17 +147,17 @@ func TestCrewAttach_WakingItIsAHandoverThroughTheExclusion(t *testing.T) {
 	if _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
 	}
-	s.assertOneAwake(t, qa.ID, dev.ID, qa.ID)
-	if !s.rt.wasDestroyed(devHandle) {
-		t.Fatalf("dev's terminal %q was left running while qa came up", devHandle)
+	s.assertBothAwake(t, dev.ID, qa.ID)
+	if s.rt.wasDestroyed(devHandle) {
+		t.Fatalf("dev's terminal %q was reaped when qa started", devHandle)
 	}
 	devRow := s.record(t, dev.ID)
-	if !devRow.IsSuspended || devRow.IsTerminated {
-		t.Fatalf("dev = suspended %v terminated %v; standing down must keep the card and the tree",
+	if devRow.IsSuspended || devRow.IsTerminated {
+		t.Fatalf("dev = suspended %v terminated %v; starting qa must leave it working",
 			devRow.IsSuspended, devRow.IsTerminated)
 	}
 	if !dirExists(t, devRow.Metadata.WorkspacePath) {
-		t.Fatal("the handover removed the shared worktree")
+		t.Fatal("starting the second member removed the shared worktree")
 	}
 
 	// AO_CREW_ID is dev's id for the member that just came up, so the checklist it
@@ -167,11 +171,12 @@ func TestCrewAttach_WakingItIsAHandoverThroughTheExclusion(t *testing.T) {
 		t.Fatalf("dev's crew id %q is not its own id %q, so its AO_CREW_ID is now stale", devRow.CrewID, devRow.ID)
 	}
 
-	// Handing back is symmetric, and the slot never holds two.
+	// Asking for the member that is already running is a no-op, not an error and
+	// not a stand-down of anybody.
 	if _, err := s.mgr.WakeCrewMember(ctx, dev.ID); err != nil {
-		t.Fatalf("hand the turn back: %v", err)
+		t.Fatalf("start the member that is already running: %v", err)
 	}
-	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
+	s.assertBothAwake(t, dev.ID, qa.ID)
 }
 
 // TestCrewAttach_RefusesAFinishedTask goes through the SERVICE, because that is

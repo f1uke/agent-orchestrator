@@ -3,12 +3,14 @@ package review
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
+	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
 )
 
 type fakeStore struct {
@@ -18,9 +20,10 @@ type fakeStore struct {
 	prs       []domain.PullRequest
 	review    *domain.Review
 
-	updateCalls int
-	markCalls   int
-	markedIDs   []string
+	updateCalls    int
+	markCalls      int
+	markedIDs      []string
+	supersededBody string
 }
 
 func (f *fakeStore) GetReviewRun(_ context.Context, id string) (domain.ReviewRun, bool, error) {
@@ -316,8 +319,13 @@ func (f *fakeStore) InsertReviewRun(_ context.Context, r domain.ReviewRun) error
 	return nil
 }
 
-func (f *fakeStore) SupersedeReviewRun(context.Context, string, string) (bool, error) {
-	return false, nil
+func (f *fakeStore) SupersedeReviewRun(_ context.Context, id, body string) (bool, error) {
+	f.supersededBody = body
+	if f.run.ID == id {
+		f.run.Status = domain.ReviewRunFailed
+		f.run.Body = body
+	}
+	return true, nil
 }
 
 func (f *fakeStore) SupersedeStaleRunningReviewRuns(context.Context, domain.SessionID, string, string, string) (int64, error) {
@@ -458,4 +466,120 @@ func TestSubmitDeliversAPreMRChangesRequestedVerdict(t *testing.T) {
 	if run.Status != domain.ReviewRunDelivered {
 		t.Fatalf("run = %+v, want delivered", run)
 	}
+}
+
+// A REVIEW THE TREE MOVED UNDER IS NOT A VERDICT.
+//
+// The reviewer reads a checkout both crew members are writing. It used to refuse
+// to start while anybody was awake in that tree; with both awake continuously
+// that refusal would fire every time and review would never run. So a pass over a
+// SHARED checkout is bracketed with the tree-write detector, and one it cannot
+// vouch for is superseded - no verdict at all - rather than recorded.
+//
+// This is the SERVICE half of that: the submit path has to ask, and act on the
+// answer. The detector's own arithmetic is proved in internal/review.
+func TestSubmit_DiscardsAPassNothingWatched(t *testing.T) {
+	ctx := context.Background()
+	st := &fakeStore{
+		run: domain.ReviewRun{ID: "run-1", SessionID: "mer-1", Status: domain.ReviewRunRunning, PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1"},
+		ok:  true,
+	}
+	// A CREW worker (its tree has a second writer) on a daemon that has a
+	// detector, and a run that carries no lease - which is what a review that
+	// spanned a daemon restart looks like.
+	engine := reviewcore.New(reviewcore.Deps{
+		Store:    st,
+		Sessions: crewSessions{},
+		PRs:      noPRs{},
+		Projects: noProjects{},
+		Launcher: noLauncher{},
+		Watcher:  neverWatches{},
+	})
+	svc := New(engine, st)
+
+	run, err := svc.Submit(ctx, "mer-1", "run-1", domain.VerdictApproved, "looks good", "")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if run.Verdict != domain.VerdictNone {
+		t.Fatalf("verdict = %q, want none: a pass nothing watched must not certify anything", run.Verdict)
+	}
+	if st.updateCalls != 0 {
+		t.Fatalf("the verdict was recorded anyway (%d updates)", st.updateCalls)
+	}
+	if !strings.Contains(st.supersededBody, "Discarded") {
+		t.Fatalf("the discarded run does not say why: %q", st.supersededBody)
+	}
+}
+
+// And the preservation half: a SOLO worker is never bracketed, because its tree
+// has one writer and that writer is the session under review. Its verdict is
+// recorded exactly as it always was, on the same daemon, with the same detector
+// wired.
+func TestSubmit_ASoloWorkersVerdictIsRecordedAsItAlwaysWas(t *testing.T) {
+	ctx := context.Background()
+	st := &fakeStore{
+		run: domain.ReviewRun{ID: "run-1", SessionID: "mer-1", Status: domain.ReviewRunRunning, PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1"},
+		ok:  true,
+	}
+	engine := reviewcore.New(reviewcore.Deps{
+		Store: st, Sessions: soloSessions{}, PRs: noPRs{}, Projects: noProjects{},
+		Launcher: noLauncher{}, Watcher: neverWatches{},
+	})
+	svc := New(engine, st)
+
+	run, err := svc.Submit(ctx, "mer-1", "run-1", domain.VerdictApproved, "looks good", "")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if run.Verdict != domain.VerdictApproved || st.updateCalls != 1 {
+		t.Fatalf("a solo review = verdict %q after %d updates, want approved after 1", run.Verdict, st.updateCalls)
+	}
+}
+
+// noLauncher stands in for the reviewer runtime: nothing here launches a pane,
+// and the close-on-submit sweep must not need one to be able to run.
+type noLauncher struct{}
+
+func (noLauncher) Spawn(context.Context, reviewcore.LaunchSpec) (string, error) { return "", nil }
+func (noLauncher) Notify(context.Context, string, reviewcore.LaunchSpec) error  { return nil }
+func (noLauncher) Alive(context.Context, string) (bool, error)                  { return false, nil }
+func (noLauncher) Teardown(context.Context, domain.SessionID) error             { return nil }
+
+type crewSessions struct{}
+
+func (crewSessions) GetSession(context.Context, domain.SessionID) (domain.SessionRecord, bool, error) {
+	return domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", CrewID: "mer-1", CrewRole: domain.CrewRoleDev,
+		Metadata: domain.SessionMetadata{WorkspacePath: "/ws/mer-1"},
+	}, true, nil
+}
+
+type soloSessions struct{}
+
+func (soloSessions) GetSession(context.Context, domain.SessionID) (domain.SessionRecord, bool, error) {
+	return domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer",
+		Metadata: domain.SessionMetadata{WorkspacePath: "/ws/mer-1"},
+	}, true, nil
+}
+
+type noPRs struct{}
+
+func (noPRs) ListPRsBySession(context.Context, domain.SessionID) ([]domain.PullRequest, error) {
+	return nil, nil
+}
+
+type noProjects struct{}
+
+func (noProjects) GetProject(context.Context, string) (domain.ProjectRecord, bool, error) {
+	return domain.ProjectRecord{}, false, nil
+}
+
+// neverWatches is a detector that is present but cannot attach - the honest
+// stand-in for a run whose lease is gone.
+type neverWatches struct{}
+
+func (neverWatches) Attach(context.Context, string) (*treewatch.Lease, error) {
+	return nil, errors.New("no watcher in this test")
 }

@@ -257,7 +257,13 @@ func Run() error {
 		return fmt.Errorf("reclaim settings: %w", err)
 	}
 
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, log)
+	// The tree-write detector. The registry holds a filesystem watch per worktree
+	// only while a run is bracketed, so a solo session - and a crew that never
+	// brackets - costs nothing here. Two consumers share it and therefore share one
+	// counter per worktree: qa's `ao crew run` bracket, and a review pass over a
+	// crew's shared checkout.
+	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, treeWatchers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -304,13 +310,9 @@ func Run() error {
 		log:      log,
 	}
 
-	// The tree-write detector and the run bracket that reads it. The registry
-	// holds a filesystem watch per worktree only while a run is bracketed, so a
-	// solo session - and a crew that never brackets - costs nothing here. Runs
-	// left open by a previous process are closed as UNCERTIFIED at boot: their
-	// watchers died with that process, and a run nothing watched can never be
-	// certified after the fact.
-	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
+	// The run bracket that reads the tree-write detector. Runs left open by a
+	// previous process are closed as UNCERTIFIED at boot: their watchers died with
+	// that process, and a run nothing watched can never be certified after the fact.
 	crewRunSvc := crewrunsvc.New(crewrunsvc.Options{Store: store, Watcher: treeWatchers, Logger: log})
 	if err := crewRunSvc.ReconcileOpenRuns(ctx); err != nil {
 		log.Warn("crew runs: could not close runs left open by a previous daemon", "err", err)

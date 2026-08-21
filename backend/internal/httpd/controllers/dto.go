@@ -512,6 +512,25 @@ type CleanupSessionsResponse struct {
 // what may be pasted into a live agent, not a transport limit.
 type SendSessionMessageRequest struct {
 	Message string `json:"message" minLength:"1" maxLength:"131072"`
+	// From names the SESSION that sent this, when a session did. It is what lets
+	// the daemon recognise a message between two members of one crew - the one
+	// conversation that can run away with nobody watching - and cap it. Empty for
+	// a human, the orchestrator, or any tool, all of which are uncapped.
+	From domain.SessionID `json:"from,omitempty"`
+	// About is the commit SHA or smoke case id this message concerns. Required
+	// between crewmates (a message with no subject is refused, so there is no
+	// "what do you think?" to answer) and ignored otherwise.
+	About string `json:"about,omitempty"`
+}
+
+// CrewSendRequest is the body of POST /api/v1/sessions/{sessionId}/send to a
+// crewmate addressed by ROLE. The path names the SENDER, not the recipient: a
+// crew member knows its own id from the environment and can never rely on
+// knowing its crewmate's.
+type CrewSendRequest struct {
+	Role    domain.CrewRole `json:"role" enum:"dev,qa"`
+	Message string          `json:"message" minLength:"1" maxLength:"131072"`
+	About   string          `json:"about,omitempty"`
 }
 
 // SendSessionMessageResponse is the body of POST /api/v1/sessions/{sessionId}/send.

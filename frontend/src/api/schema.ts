@@ -624,6 +624,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/crew/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Message the other member of this session's task, addressed by role. The path names the SENDER */
+        post: operations["sendToCrewmate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/crew/wake": {
         parameters: {
             query?: never;
@@ -633,7 +650,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Give this task's one awake slot to this crew member, standing the current holder down */
+        /** Start this crew member. Its crewmate keeps running: both members of a crew work at once */
         post: operations["wakeCrewMember"];
         delete?: never;
         options?: never;
@@ -1878,6 +1895,12 @@ export interface components {
             session: components["schemas"]["ControllersSessionView"];
             sessionId: string;
         };
+        ControllersCrewSendRequest: {
+            about?: string;
+            message: string;
+            /** @enum {string} */
+            role: "dev" | "qa";
+        };
         ControllersDaemonLoop: {
             description: string;
             displayName: string;
@@ -2595,6 +2618,8 @@ export interface components {
             sessionId: string;
         };
         SendSessionMessageRequest: {
+            about?: string;
+            from?: string;
             message: string;
         };
         SendSessionMessageResponse: {
@@ -5447,6 +5472,69 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    sendToCrewmate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersCrewSendRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendSessionMessageResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

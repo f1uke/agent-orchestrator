@@ -9,13 +9,18 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-// LOOKING AT A CREW MEMBER MUST NOT TAKE ITS TURN.
+// LOOKING AT A CREW MEMBER MUST NOT START AN AGENT NOBODY ASKED FOR.
 //
 // The incident: dev's PR merged, so lifecycle terminated it; twelve seconds
-// later qa - asleep because it was not its turn - was running, and nobody had
-// pressed anything. The desktop app POSTs /api/v1/sessions/{id}/wake whenever a
-// session view opens or a session is placed in a split pane, and that endpoint is
-// Service.Wake, which resumed qa because the slot was free.
+// later qa - which had never run - was running, and nobody had pressed anything.
+// The desktop app POSTs /api/v1/sessions/{id}/wake whenever a session view opens
+// or a session is placed in a split pane, and that endpoint is Service.Wake.
+//
+// The TURN part of that rule is gone: both members run at once, so bringing one
+// up takes nothing from the other and a card no longer has to refuse to wake. The
+// part that survives is the part that was never about turns - starting an agent
+// for the FIRST time spends money and is a decision, while resuming one that was
+// paused is what a glance has always done.
 //
 // These tests drive the REAL manager, lifecycle reducer, SQLite store and git
 // worktree, and they call the same service method the endpoint calls.
@@ -55,11 +60,10 @@ func (s *crewStack) qaOf(ctx context.Context, dev domain.SessionID) (domain.Sess
 	return domain.SessionRecord{}, false, nil
 }
 
-// TestCrewView_OpeningQAAfterDevEndsDoesNotWakeIt is the incident itself: dev's
-// PR merged and lifecycle terminated it, so the crew slot is FREE. Opening qa's
-// view must still leave qa asleep - its turn has not come, and nobody said it
-// had.
-func TestCrewView_OpeningQAAfterDevEndsDoesNotWakeIt(t *testing.T) {
+// TestCrewView_OpeningQAAfterDevEndsDoesNotStartIt is the incident itself: dev's
+// PR merged and lifecycle terminated it. Opening qa's view must still leave qa
+// asleep - it has never run, and nobody asked for it to.
+func TestCrewView_OpeningQAAfterDevEndsDoesNotStartIt(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	dev, qa := setupCrew(t, s)
@@ -82,10 +86,10 @@ func TestCrewView_OpeningQAAfterDevEndsDoesNotWakeIt(t *testing.T) {
 	}
 }
 
-// TestCrewView_OpeningASleepingMemberWhileTheOtherWorks covers the same defect
-// from the other side: dev holds the slot. Opening qa must be a quiet no-op -
-// not a refusal the user has to read, and certainly not a handover.
-func TestCrewView_OpeningASleepingMemberWhileTheOtherWorks(t *testing.T) {
+// TestCrewView_OpeningANeverStartedMemberWhileTheOtherWorks covers the same
+// defect from the other side: dev is working. Opening qa must be a quiet no-op -
+// not a refusal the user has to read, and not a second agent nobody asked for.
+func TestCrewView_OpeningANeverStartedMemberWhileTheOtherWorks(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	dev, qa := setupCrew(t, s)
@@ -94,9 +98,11 @@ func TestCrewView_OpeningASleepingMemberWhileTheOtherWorks(t *testing.T) {
 		t.Fatalf("opening a sleeping crew member's view must not error: %v", err)
 	}
 	if got := s.record(t, qa.ID); got.Awake() {
-		t.Fatal("VIEWING qa woke it while dev was working: two agents in one worktree")
+		t.Fatal("VIEWING qa started it while dev was working: nobody asked for a second agent")
 	}
-	s.assertOneAwake(t, dev.ID, dev.ID, qa.ID)
+	if got := s.awakeMembers(t, dev.ID, qa.ID); len(got) != 1 || got[0] != dev.ID {
+		t.Fatalf("awake = %v, want only dev", got)
+	}
 }
 
 // TestCrewView_ASleepingMemberInASplitPaneStaysAsleep is the second way the
@@ -120,37 +126,31 @@ func TestCrewView_ASleepingMemberInASplitPaneStaysAsleep(t *testing.T) {
 	}
 
 	if got := s.record(t, qa.ID); got.Awake() {
-		t.Fatal("qa woke because it was put in a split pane")
+		t.Fatal("qa started because it was put in a split pane")
 	}
 	if got := s.record(t, dev.ID); !got.IsTerminated {
 		t.Fatal("the pane wake resurrected a terminated session")
 	}
 }
 
-// TestCrewView_AnExplicitWakeStillTakesTheTurn is the other half of the rule. An
-// ACTION may take the turn - that is what the baton bar's button and
-// `ao crew wake` are for - and only a glance may not.
-func TestCrewView_AnExplicitWakeStillTakesTheTurn(t *testing.T) {
+// TestCrewView_AnExplicitStartBringsItUpBesideDev is the other half of the rule.
+// An ACTION starts an agent - that is what `ao crew wake` and the Start
+// affordance on the card are for - and a glance does not.
+func TestCrewView_AnExplicitStartBringsItUpBesideDev(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	dev, qa := setupCrew(t, s)
 
-	// dev is awake and holds the slot, so this is the full handover.
 	if _, err := s.svc.WakeCrewMember(ctx, qa.ID); err != nil {
-		t.Fatalf("explicit wake: %v", err)
+		t.Fatalf("explicit start: %v", err)
 	}
-	s.assertOneAwake(t, qa.ID, dev.ID, qa.ID)
+	s.assertBothAwake(t, dev.ID, qa.ID)
 
-	// And dev, stood down for the handover, is now the one that a view may not
-	// bring back: the reason travelled with the release.
+	// dev is exactly where it was. Nothing was taken off it.
 	devRec := s.record(t, dev.ID)
-	if !devRec.AsleepForTurn() {
-		t.Fatalf("dev was stood down without recording why: suspended=%v reason=%q", devRec.IsSuspended, devRec.SleepReason)
+	if devRec.IsSuspended || !devRec.Awake() {
+		t.Fatalf("starting qa stood dev down: suspended=%v reason=%q", devRec.IsSuspended, devRec.SleepReason)
 	}
-	if _, err := s.svc.Wake(ctx, dev.ID); err != nil {
-		t.Fatalf("viewing dev: %v", err)
-	}
-	s.assertOneAwake(t, qa.ID, dev.ID, qa.ID)
 }
 
 // TestSolo_AnIdleSweptSessionStillWakesOnOpen is the behaviour that must NOT
@@ -206,8 +206,11 @@ func TestCrewView_TheWakeIsAttributed(t *testing.T) {
 	if got := s.record(t, dev.ID); got.WokenBy != "" {
 		t.Fatalf("a fresh spawn recorded wokenBy=%q, want empty", got.WokenBy)
 	}
-	if got := s.record(t, qa.ID); got.SleepReason != domain.SleepReasonTurn {
-		t.Fatalf("a born-suspended qa recorded sleepReason=%q, want %q", got.SleepReason, domain.SleepReasonTurn)
+	// A born-suspended qa is asleep the way anything with no process is asleep.
+	// What makes it different is that it has never RUN, which is on the row
+	// already: no runtime handle.
+	if got := s.record(t, qa.ID); !got.NeverStarted() {
+		t.Fatalf("a born-suspended qa carries a runtime handle %q", got.Metadata.RuntimeHandleID)
 	}
 
 	if _, err := s.svc.WakeCrewMember(ctx, qa.ID); err != nil {
@@ -216,11 +219,10 @@ func TestCrewView_TheWakeIsAttributed(t *testing.T) {
 	if got := s.record(t, qa.ID); got.WokenBy != domain.WokenByWake {
 		t.Fatalf("an explicit wake recorded wokenBy=%q, want %q", got.WokenBy, domain.WokenByWake)
 	}
-	// The member it displaced is asleep again, and its own attribution is gone:
-	// the two fields describe opposite halves of one transition, so at most one of
-	// them is ever set.
+	// And nobody was displaced: dev is still running, with no sleep reason of its
+	// own, because starting one member takes nothing from the other.
 	devRec := s.record(t, dev.ID)
-	if devRec.SleepReason != domain.SleepReasonTurn || devRec.WokenBy != "" {
-		t.Fatalf("the displaced member recorded reason=%q wokenBy=%q, want %q and empty", devRec.SleepReason, devRec.WokenBy, domain.SleepReasonTurn)
+	if devRec.IsSuspended || devRec.SleepReason != "" {
+		t.Fatalf("dev recorded suspended=%v reason=%q; starting qa must not touch it", devRec.IsSuspended, devRec.SleepReason)
 	}
 }

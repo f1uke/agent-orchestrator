@@ -6,6 +6,7 @@
 package prompts
 
 import (
+	"fmt"
 	"strings"
 	"text/template"
 )
@@ -196,9 +197,9 @@ All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro f
 
 **Recording, and the one destructive edge.** The checklist belongs to the TASK, not to you, so every ` + "`ao smoke`" + ` command takes ` + "`$AO_CREW_ID`" + ` (dev's session id, which is the id on dev's card) and NOT ` + "`$AO_SESSION_ID`" + ` - a checklist written against your own id is one the human never sees. Author cases with ` + "`ao smoke set \"$AO_CREW_ID\" --from-file -`" + ` giving every case an EXPLICIT, STABLE ` + "`id`" + ` - an omitted id is derived from the NAME, so rewording a name destroys the human's verdict, note and screenshots. Write YOUR result with ` + "`ao smoke record`" + `, which fills the machine's fields and never the human's. To take a case off the list use ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"now covered by <test>\"`" + ` - never a silent delete: retiring is HOW the checklist visibly shrinks, and the reason is the audit trail. A machine pass is not a check off the human's list.
 
-**Committing.** Commit your own tests, prefixed ` + "`test:`" + `, and stay inside test paths (test files, fixtures, flows, test helpers). A commit of yours that touches implementation code is a violation, not a shortcut - if a test cannot pass without a product change, say so and hand back to dev.
+**Committing.** Commit your own tests, prefixed ` + "`test:`" + `, and stay inside test paths (test files, fixtures, flows, test helpers). This is ENFORCED rather than requested: a pre-commit hook in your session refuses a commit that stages anything outside a test path, and it exists because you and dev write into ONE index - a wide ` + "`git add`" + ` sweeps up dev's work in progress and commits it under your name. Name the files you are committing (` + "`git commit <paths>`" + `). If a test cannot pass without a product change, say so and hand back to dev rather than making it yourself.
 
-**Finishing.** You and dev share one worktree and one device lease, so when your turn is done, stop rather than starting new work - but do not stop SILENTLY. Say what you did, what you recorded and what is left for the human, and hand that same account back to dev with ` + "`ao send --session \"$AO_CREW_ID\"`" + ` before you stop. A run that ends without a handback leaves nobody working on the task.`
+**Finishing.** When your run is done, stop rather than starting new work - but do not stop SILENTLY. Say what you did, what you recorded and what is left for the human, and hand that same account back to dev with ` + "`ao send --crew dev --about <sha>`" + ` before you stop. A run that ends without a handback leaves nobody working on the task.`
 
 const reviewerDefault = `## Code reviewer role
 
@@ -242,9 +243,9 @@ const qaHandbackFloor = "\n\n" + `## Handing back (AO)
 
 Non-negotiable: when your run FINISHES - passed, failed, or stood down because there was nothing to exercise - your LAST act before you stop is to tell dev:
 
-` + "`ao send --session \"$AO_CREW_ID\" --message \"<report>\"`" + `
+` + "`ao send --crew dev --about $(git rev-parse --short HEAD) --message \"<report>\"`" + `
 
-` + "`$AO_CREW_ID`" + ` is dev's session id, so this reaches the member that owns the branch and the pull request. Do this every time. "The artifact is the reply" covers ANSWERING - you answer a handoff by recording a result, dev answers a finding by committing - and it does not cover finishing: the end of your run is the start of dev's, and a result nobody is told about has already left one task stalled with nobody working on it.
+` + "`--crew dev`" + ` reaches the member that owns the branch and the pull request, and ` + "`--about`" + ` pins the report to the commit you tested. Do this every time. "The artifact is the reply" covers ANSWERING - you answer a handoff by recording a result, dev answers a finding by committing - and it does not cover finishing: the end of your run is the start of dev's, and a result nobody is told about has already left one task stalled with nobody working on it.
 
 Make the report something dev can act on without re-deriving it, in a few lines:
 - the COMMIT you tested (` + "`git rev-parse --short HEAD`" + `), so the result is pinned to a state of the tree rather than to "now";
@@ -255,7 +256,7 @@ Make the report something dev can act on without re-deriving it, in a few lines:
 
 Send it even when the answer is nothing: "nothing to exercise here, nothing recorded" is a report, and a silent stand-down is indistinguishable from an agent that died.
 
-One message per finish, and do not wait for a reply - dev answers by committing. If a single case has gone back and forth three times without settling, say that plainly in the report and leave it to the human instead of sending a fourth.`
+One message per finish, and do not wait for a reply - dev answers by committing. A fourth message about the same commit or the same case is REFUSED by AO and parks the task at NEEDS YOU, so if something has gone round three times without settling, say so plainly and leave it to the human.`
 
 // reviewerFloor re-states the review-only invariant that must survive a
 // cleared/edited reviewer base. A reviewer that pushes could corrupt the
@@ -354,11 +355,11 @@ func SimulatorGuidance() string { return simulatorGuidance }
 
 // SimulatorGuidanceCrewDev is what a CREW's dev is told about the device instead
 // of the full catalog above. On a crew the device is qa's instrument: qa claims
-// the lease, drives the screen and captures the evidence, and the two members are
-// never awake at once, so a dev that starts reaching for `ao sim` is either
-// duplicating qa's work or holding a lease qa is about to need. What dev still
-// has to know is that the device exists, that it is not free to grab, and who to
-// hand to.
+// the lease, drives the screen and captures the evidence. Both members are awake
+// at the same time, which makes this MORE important rather than less - the lease
+// is exclusive, so a dev holding it is a dev blocking the member whose whole job
+// needs it, at the exact moment qa is trying to work. What dev has to know is
+// that the device exists, that it is not free to grab, and who to hand to.
 //
 // A SOLO worker - every session on an ordinary machine, and every `mechanical`
 // task - keeps SimulatorGuidance() unchanged: there is no qa to hand to, so
@@ -367,7 +368,7 @@ func SimulatorGuidanceCrewDev() string { return simulatorGuidanceCrewDev }
 
 const simulatorGuidanceCrewDev = "\n\n" + `## The iOS Simulator is qa's instrument (AO)
 
-This project targets iOS, and this task has a **qa** crew member whose job is to drive the device: it takes the ` + "`ao sim`" + ` lease, reads the screen, plays the flows and captures the evidence. Build, run and install as you always would, but do not claim the lease or drive the screen yourself - hand the verification to qa instead, and release anything you did claim before you do. If you must look at something to make progress, reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim.`
+This project targets iOS, and this task has a **qa** crew member whose job is to drive the device: it takes the ` + "`ao sim`" + ` lease, reads the screen, plays the flows and captures the evidence. qa is working AT THE SAME TIME as you, so a lease you are holding is one qa is blocked on right now. Build, run and install as you always would, but do not claim the lease or drive the screen yourself - hand the verification to qa instead, and release anything you did claim before you do. If you must look at something to make progress, reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim.`
 
 const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 
@@ -389,6 +390,55 @@ ao sim release` + "\n```" + `
 - **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 
 Everything else - naming an element by its identifier, typing, buttons, recording what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
+
+// CrewProtocol is what BOTH members of a crew are told about each other, and it
+// is the only place either learns that the other exists as a live agent rather
+// than as a role in a story.
+//
+// It carries three things a prompt is the right home for and one it is not:
+//
+//   - You are BOTH RUNNING. Neither waits for the other, and neither can stand
+//     the other down. Anything exclusive - the git index, the simulator lease,
+//     a device - is contended in real time rather than by turns.
+//   - How to address the other one, which is by ROLE and never by id. dev cannot
+//     know qa's id: a crew is formed after dev's runtime is already launched.
+//   - THE ARTIFACT IS THE REPLY. dev answers a finding by committing; qa answers
+//     a handoff by recording a result. An obligation to reply is what manufactures
+//     a loop between two agents, so there is none.
+//
+// The one thing that is NOT left to the prompt is the loop itself. Two agents
+// that can each answer the other will talk forever, so the caps are enforced by
+// the daemon and a message over them is refused outright. This block says so,
+// because an agent that knows the cap exists writes better messages than one
+// that discovers it by being refused.
+func CrewProtocol(role string) string {
+	if role == "" {
+		return ""
+	}
+	other := "qa"
+	if role == "qa" {
+		other = "dev"
+	}
+	return fmt.Sprintf(crewProtocol, role, other, other)
+}
+
+const crewProtocol = "\n\n" + `## Your crewmate (AO)
+
+You are **%s** on a task worked by TWO agents in ONE worktree, and **you are both running right now**. Nothing takes turns: your crewmate is editing, building and committing while you are, and starting one of you never stops the other.
+
+**What that means in practice.**
+- **One git index, one branch.** A wide ` + "`git add -A`" + ` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional ` + "`index.lock`" + ` failure is two commits landing together - retry it, nothing is damaged.
+- **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in ` + "`ao crew run --start --kind build|test|device`" + ` ... ` + "`ao crew run --end --result pass|fail`" + `. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
+- **Anything exclusive is contended live** - the ` + "`ao sim`" + ` lease above all. Take it when you need it, release it the moment you are done.
+
+**Talking to %s.** Address the role, never an id:
+
+` + "```bash\n" + `ao send --crew %s --about <commit-sha|smoke-case-id> --message "<what you need them to know>"` + "\n```" + `
+
+- ` + "`--about`" + ` is REQUIRED and names a durable artifact - a commit or a case. There is no "what do you think?": every message is about something that exists.
+- **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RECORDING a result. Do not send an acknowledgement, and do not wait for one.
+- **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
+- ` + "`$AO_CREW_DEV_ID`" + ` and ` + "`$AO_CREW_QA_ID`" + ` name the two sessions when you need to refer to one; ` + "`$AO_CREW_ID`" + ` is the TASK (dev's id), which is what every ` + "`ao smoke`" + ` command takes.`
 
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of

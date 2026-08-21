@@ -62,6 +62,11 @@ type crewRunFacts struct {
 	// counted from the most recent one backwards. One run that ends any other way
 	// resets it to zero, which is what makes the escalation clear itself.
 	Discards int
+	// TalkCapped is true when the LAST thing this member tried to say to its
+	// crewmate was refused by the conversation caps. Same shape as Discards: a
+	// fact about the most recent attempt, so a later message that goes through
+	// clears it with nothing to unwind.
+	TalkCapped bool
 }
 
 // deriveStatusDetail computes the display status AND the reason that produced it,
@@ -103,6 +108,14 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 	// unwind and nothing for a human to reset.
 	if runs.Discards >= domain.CappedRepeat {
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonRunsDiscarded}
+	}
+
+	// The two agents talked themselves to a standstill. It sits here for the same
+	// reason as the discards above: the refusal already stopped the loop, and what
+	// is left is a task where one agent has something to say and no way to say it.
+	// A card reading "mergeable" through that is the failure.
+	if runs.TalkCapped {
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonCrewTalkCapped}
 	}
 
 	open := openPRs(prs)

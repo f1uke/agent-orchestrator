@@ -590,8 +590,9 @@ func TestQADefaultIsQAsJobAndNotDevs(t *testing.T) {
 func TestCoordinationFloor_QAMustHandBackWhenItFinishes(t *testing.T) {
 	qa := CoordinationFloor(KindQA)
 	for _, want := range []string{
-		// It reaches dev, by the id every crew command already uses.
-		`ao send --session "$AO_CREW_ID"`,
+		// It reaches dev by ROLE - the only address that cannot go stale, since a
+		// crew is formed after dev's runtime is already launched.
+		"ao send --crew dev --about",
 		// Always - a stand-down is a result too.
 		"passed, failed, or stood down",
 		// What dev needs in order to act without re-deriving it.
@@ -599,9 +600,10 @@ func TestCoordinationFloor_QAMustHandBackWhenItFinishes(t *testing.T) {
 		"ao smoke record",
 		"RETIRED",
 		"left for the human to play",
-		// The stopping rule, reusing the cap AO already has rather than a new one.
+		// The stopping rule, reusing the cap AO already has rather than a new one -
+		// and it is now MECHANISM, so the prompt says what actually happens.
 		"One message per finish",
-		"three times without settling",
+		"REFUSED by AO",
 	} {
 		if !strings.Contains(qa, want) {
 			t.Fatalf("qa floor missing handback rule %q:\n%s", want, qa)
@@ -632,7 +634,7 @@ func TestCoordinationFloor_SoloWorkerHasNoHandbackObligation(t *testing.T) {
 // handback rather than telling qa to stop, so base and floor do not contradict.
 func TestQABase_TellsItToHandBackRatherThanJustStop(t *testing.T) {
 	base := DefaultBase(KindQA)
-	if !strings.Contains(base, `ao send --session "$AO_CREW_ID"`) {
+	if !strings.Contains(base, "ao send --crew dev --about") {
 		t.Fatalf("qa base does not point at the handback:\n%s", base)
 	}
 	if !strings.Contains(base, "do not stop SILENTLY") {

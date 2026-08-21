@@ -91,23 +91,18 @@ type SessionRecord struct {
 	// session resumes it in place (recreate tmux, clear this flag). Durable fact,
 	// surfaced in the API read model for the paused affordance + countdown.
 	IsSuspended bool `json:"isSuspended,omitempty"`
-	// SleepReason says WHY IsSuspended is set. The flag itself carried two facts
-	// that need different answers from exactly one caller (the user-open hook):
-	// "paused to free resources", which SHOULD come back when somebody looks at
-	// it, and "not its turn" (a crew member released by #225's ReleaseCrewSlot, or
-	// born asleep waiting for the baton), which must NOT. Every other reader of
-	// IsSuspended - the message queue, the reaper, boot reconciliation, the
-	// shutdown sweep, status derivation - wants the same answer for both ("there
-	// is no process here"), which is why this is an ANNOTATION on the existing
-	// state rather than a new state: Awake() keeps meaning exactly what it means
-	// to #225's exclusion.
+	// SleepReason says WHY IsSuspended is set. Every reader of IsSuspended except
+	// the card's copy - the message queue, the reaper, boot reconciliation, the
+	// shutdown sweep, status derivation - wants the same answer whatever the
+	// reason ("there is no process here"), which is why this is an ANNOTATION on
+	// the existing state rather than a second state.
 	//
 	// Empty means "not recorded" - every row written before this field existed,
-	// and any path that forgets. Unknown behaves exactly as it did before, so only
-	// SleepReasonTurn changes behaviour. Written when IsSuspended is set and
-	// cleared when the runtime comes back, so at most one of this and WokenBy is
-	// set at a time. Surfaced in the API read model: a card that says "open to
-	// resume" must not say it about a session that opening will not resume.
+	// and any path that forgets. It behaves exactly as an unannotated suspend
+	// always did, which since the crew's turn-taking was removed is what EVERY
+	// reason does: opening a suspended session resumes it. Written when
+	// IsSuspended is set and cleared when the runtime comes back, so at most one
+	// of this and WokenBy is set at a time.
 	SleepReason SleepReason `json:"sleepReason,omitempty" enum:"idle,turn,merged"`
 	// WokenBy records WHAT brought this session's runtime back after a suspend.
 	// change_log fans out the is_suspended flip but not the actor, so a wake that
@@ -212,6 +207,21 @@ type SessionRecord struct {
 // Termination is deliberately not folded in: a terminated session is not
 // "temporarily unable to receive", it is over, and holding a message for it
 // would be a promise AO cannot keep. Callers refuse that case outright.
+// NeverStarted reports whether this session has never had a runtime at all - no
+// tmux, no agent, nothing spent. A crew's qa is created as a ROW (dev's branch,
+// dev's worktree, its kickoff prompt) and stays that way until somebody starts
+// it, and a runtime handle is written the first time one is launched and never
+// cleared afterwards.
+//
+// It is the fact behind the ONE thing that survived the crew's turn-taking:
+// LOOKING AT A CARD MUST NOT START AN AGENT. Resuming a session that was paused
+// is what a glance should do and always has; starting one for the first time
+// spends money and is a decision, and it was a glance doing exactly that which
+// left a qa nobody had woken running twelve seconds after its dev's PR merged.
+func (r SessionRecord) NeverStarted() bool {
+	return r.Metadata.RuntimeHandleID == ""
+}
+
 func (r SessionRecord) CanReceiveMessage() bool {
 	return !r.IsSuspended && r.Activity.State.IsListening()
 }
