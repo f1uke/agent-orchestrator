@@ -641,3 +641,87 @@ func TestQABase_TellsItToHandBackRatherThanJustStop(t *testing.T) {
 		t.Fatalf("qa base still ends the turn without a handback:\n%s", base)
 	}
 }
+
+// MISSING 1 - the record -> flow -> retire loop was NOBODY's. The tooling shipped
+// long ago and no prompt said whose job it was, so the checklist never shrank.
+// This holds the loop to the commands that actually exist (verified against the
+// real `ao` binary): a prompt naming a flag the CLI does not have is worse than
+// no prompt.
+func TestRecordedFlowLoop_IsQAsAndTeachesTheWholeLoop(t *testing.T) {
+	loop := RecordedFlowLoop()
+	for _, want := range []string{
+		"ao sim claim",
+		"ao sim record start --name",
+		"ao sim record status",
+		"ao sim record stop --entry",
+		"ao sim flow check",
+		"ao sim flow run",
+		`ao smoke retire "$AO_CREW_ID" --case <id> --reason`,
+		// The fact that makes one human play usable at all: the recorder hooks
+		// the hold, so their tap and qa's command are captured identically.
+		"Device tab",
+		"captured identically",
+		// The loop only pays off if the case comes OFF the human's list.
+		"retire the case",
+	} {
+		if !strings.Contains(loop, want) {
+			t.Fatalf("the recorded-flow loop is missing %q:\n%s", want, loop)
+		}
+	}
+	if !strings.HasPrefix(loop, "\n\n") {
+		t.Fatal("injected blocks must be prefixed with \\n\\n")
+	}
+}
+
+// MISSING 2 - qa can read the paint/focus/timing/feel SHAPE two opposite wrong
+// ways ("not my business" / "I ran it, so it passed"). The rule is: drive
+// anything, judge nothing.
+func TestQADefault_MayDriveAnyCaseAndJudgeNoHumanOne(t *testing.T) {
+	base := DefaultBase(KindQA)
+	for _, want := range []string{
+		// Driving a human's case is ALLOWED - it is how the evidence gets captured.
+		"re-drive ANY case",
+		// Judging one is not.
+		"never do is JUDGE",
+		// And here is the shape of the record that says exactly that.
+		"--evidence <file>",
+		"NO `--verdict`",
+		"without concluding",
+		// The restriction the code cannot enforce: qa deciding a paint case is fine.
+		"on your own authority",
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("the qa base does not state drive-yes/judge-no: missing %q:\n%s", want, base)
+		}
+	}
+}
+
+// MISSING 3, layer 1 - dev's prompt was SILENT about the checklist, and silence
+// loses an argument it is not present for: every brief that asked dev for smoke
+// cases was obeyed. The negative turns that override into a contradiction the
+// human can see in dev's own output.
+func TestCrewProtocol_DevIsToldTheChecklistIsQAs(t *testing.T) {
+	dev := CrewProtocol("dev")
+	for _, want := range []string{
+		"do not author or edit the smoke checklist",
+		// It names the enforcement, so dev knows this is not a preference.
+		"REFUSED by AO",
+		// The load-bearing clause: a brief asking for cases is named as stale,
+		// and dev is told to SAY SO rather than quietly comply.
+		"that brief predates the crew",
+		"say so in your own output",
+		"ao send --crew qa",
+	} {
+		if !strings.Contains(dev, want) {
+			t.Fatalf("crew dev is not told the checklist is qa's: missing %q:\n%s", want, dev)
+		}
+	}
+	// qa is the owner, so the negative must not reach it - and a SOLO worker is
+	// in no crew at all, so it renders nothing.
+	if strings.Contains(CrewProtocol("qa"), "The checklist is qa's, not yours") {
+		t.Fatal("qa was handed dev's negative about the checklist")
+	}
+	if CrewProtocol("") != "" {
+		t.Fatalf("a solo worker must render no crew block:\n%s", CrewProtocol(""))
+	}
+}

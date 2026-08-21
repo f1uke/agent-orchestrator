@@ -70,7 +70,7 @@ func TestRetireIsTheWayPastTheResultsAtRiskRefusal(t *testing.T) {
 	shrunk := []domain.SmokeAuthoredCase{{ID: "draft", Name: "Draft case"}}
 
 	// Before: the guard fires, exactly as #221 made it.
-	_, err := svc.Author(ctx, "w1", shrunk)
+	_, err := svc.Author(ctx, "", "w1", shrunk)
 	if !errors.Is(err, ErrResultsAtRisk) {
 		t.Fatalf("author err = %v, want ErrResultsAtRisk", err)
 	}
@@ -87,7 +87,7 @@ func TestRetireIsTheWayPastTheResultsAtRiskRefusal(t *testing.T) {
 
 	// After: the same payload is accepted, and the case is still there with
 	// everything the user recorded on it.
-	res, err := svc.Author(ctx, "w1", shrunk)
+	res, err := svc.Author(ctx, "", "w1", shrunk)
 	if err != nil {
 		t.Fatalf("author after retire: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestAuthorRefusesToReviveARetiredCase(t *testing.T) {
 		t.Fatalf("retire: %v", err)
 	}
 
-	_, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{
+	_, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{
 		{ID: "played", Name: "Played case, rewritten"},
 		{ID: "draft", Name: "Draft case"},
 	})
@@ -187,7 +187,7 @@ func TestRetiredCaseIsFrozen(t *testing.T) {
 func TestAuthorStillRefusesADroppedPlayedCaseThatWasNeverRetired(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := seedPlayedCase(ctx, t)
-	_, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{ID: "draft", Name: "Draft case"}})
+	_, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{ID: "draft", Name: "Draft case"}})
 	if !errors.Is(err, ErrResultsAtRisk) {
 		t.Fatalf("author err = %v, want ErrResultsAtRisk", err)
 	}

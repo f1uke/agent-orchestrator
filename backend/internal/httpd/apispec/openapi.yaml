@@ -5494,6 +5494,11 @@ components:
           items:
             $ref: '#/components/schemas/SmokeAuthoredCaseInput'
           type: array
+        from:
+          description: The calling session's own id. A crew's dev is refused (409
+            SMOKE_QA_OWNS_CHECKLIST) while its task has a qa; omitted or unknown callers
+            are never refused.
+          type: string
       required:
       - cases
       type: object

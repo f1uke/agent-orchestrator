@@ -270,7 +270,7 @@ func TestAuthorResolvesIdsAndSeq(t *testing.T) {
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", Kind: domain.KindWorker}
 	svc := newTestService(t, store, nil)
 
-	_, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{
+	_, err := svc.Author(context.Background(), "", "w1", []domain.SmokeAuthoredCase{
 		{Name: "A fresh MR shows up"},
 		{Name: "A fresh MR shows up"}, // duplicate name → deduped id
 		{ID: "explicit-id", Name: "Third"},
@@ -363,11 +363,11 @@ func TestAuthorThaiChecklistNoCollision(t *testing.T) {
 		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
 		{Name: "กดปุ่มบันทึกแล้วขึ้นข้อความสำเร็จ"},
 	}
-	if _, err := svc.Author(context.Background(), "w1", cases); err != nil {
+	if _, err := svc.Author(context.Background(), "", "w1", cases); err != nil {
 		t.Fatalf("first session author: %v", err)
 	}
 	// A different session, different Thai names: must not collide.
-	if _, err := svc.Author(context.Background(), "w2", []domain.SmokeAuthoredCase{
+	if _, err := svc.Author(context.Background(), "", "w2", []domain.SmokeAuthoredCase{
 		{Name: "ลบรายการแล้วหายจากลิสต์"},
 	}); err != nil {
 		t.Fatalf("second session author: %v", err)
@@ -388,13 +388,13 @@ func TestAuthorAvoidsIDOwnedByAnotherSession(t *testing.T) {
 	store.sessions["w2"] = domain.SessionRecord{ID: "w2", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
 
-	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{{Name: "Build passes"}}); err != nil {
+	if _, err := svc.Author(context.Background(), "", "w1", []domain.SmokeAuthoredCase{{Name: "Build passes"}}); err != nil {
 		t.Fatalf("first session: %v", err)
 	}
 	if store.lastCases[0].ID != "build-passes" {
 		t.Fatalf("first session id = %q, want unchanged slug", store.lastCases[0].ID)
 	}
-	if _, err := svc.Author(context.Background(), "w2", []domain.SmokeAuthoredCase{{Name: "Build passes"}}); err != nil {
+	if _, err := svc.Author(context.Background(), "", "w2", []domain.SmokeAuthoredCase{{Name: "Build passes"}}); err != nil {
 		t.Fatalf("second session: %v", err)
 	}
 	second := store.lastCases[0].ID
@@ -416,7 +416,7 @@ func TestAuthorIDsStableAcrossReauthor(t *testing.T) {
 
 	// Another session holds the ids w1 would otherwise derive, forcing w1 down
 	// the collision path — the ids must still be reproducible.
-	if _, err := svc.Author(context.Background(), "other", []domain.SmokeAuthoredCase{
+	if _, err := svc.Author(context.Background(), "", "other", []domain.SmokeAuthoredCase{
 		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
 		{Name: "Shared name"},
 	}); err != nil {
@@ -428,7 +428,7 @@ func TestAuthorIDsStableAcrossReauthor(t *testing.T) {
 		{Name: "Shared name"},
 		{Name: "กดปุ่มบันทึกแล้วขึ้นข้อความสำเร็จ"},
 	}
-	if _, err := svc.Author(context.Background(), "w1", cases); err != nil {
+	if _, err := svc.Author(context.Background(), "", "w1", cases); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	first := make([]string, 0, len(store.lastCases))
@@ -436,7 +436,7 @@ func TestAuthorIDsStableAcrossReauthor(t *testing.T) {
 		first = append(first, c.ID)
 	}
 	// Re-author the identical checklist: same ids, or verdicts detach.
-	if _, err := svc.Author(context.Background(), "w1", cases); err != nil {
+	if _, err := svc.Author(context.Background(), "", "w1", cases); err != nil {
 		t.Fatalf("re-author: %v", err)
 	}
 	for i, c := range store.lastCases {
@@ -453,7 +453,7 @@ func TestAuthorDedupesNonASCIIDuplicatesWithinChecklist(t *testing.T) {
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
 
-	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{
+	if _, err := svc.Author(context.Background(), "", "w1", []domain.SmokeAuthoredCase{
 		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
 		{Name: "เปิดแอปแล้วเห็นหน้าแรก"},
 		{Name: "---"},
@@ -479,7 +479,7 @@ func TestAuthorExplicitIDWithoutASCII(t *testing.T) {
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
 
-	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{
+	if _, err := svc.Author(context.Background(), "", "w1", []domain.SmokeAuthoredCase{
 		{ID: "***", Name: "เปิดแอปแล้วเห็นหน้าแรก"},
 	}); err != nil {
 		t.Fatalf("author: %v", err)
@@ -494,10 +494,10 @@ func TestAuthorRejectsEmptyNameAndEmptyList(t *testing.T) {
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
 
-	if _, err := svc.Author(context.Background(), "w1", nil); !errors.Is(err, ErrInvalid) {
+	if _, err := svc.Author(context.Background(), "", "w1", nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty list err = %v, want ErrInvalid", err)
 	}
-	if _, err := svc.Author(context.Background(), "w1", []domain.SmokeAuthoredCase{{Name: "  "}}); !errors.Is(err, ErrInvalid) {
+	if _, err := svc.Author(context.Background(), "", "w1", []domain.SmokeAuthoredCase{{Name: "  "}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty name err = %v, want ErrInvalid", err)
 	}
 }
@@ -861,14 +861,14 @@ func TestAuthorRefusesToDropPlayedCases(t *testing.T) {
 			store := newFakeStore()
 			store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 			svc := newTestService(t, store, nil)
-			if _, err := svc.Author(ctx, "w1", cases); err != nil {
+			if _, err := svc.Author(ctx, "", "w1", cases); err != nil {
 				t.Fatalf("author: %v", err)
 			}
 			tc.play(t, svc, store)
 
 			// The agent rewords the played case's name: a new derived id, so the
 			// old case would fall out of the payload and be deleted.
-			_, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Played case, reworded"}, {ID: "draft", Name: "Draft case"}})
+			_, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{Name: "Played case, reworded"}, {ID: "draft", Name: "Draft case"}})
 			if !errors.Is(err, ErrResultsAtRisk) {
 				t.Fatalf("re-author err = %v, want ErrResultsAtRisk", err)
 			}
@@ -897,7 +897,7 @@ func TestAuthorNamesEveryCaseAtRisk(t *testing.T) {
 	store := newFakeStore()
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
-	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{
+	if _, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{
 		{Name: "First case"}, {Name: "Second case"}, {Name: "Third case"},
 	}); err != nil {
 		t.Fatalf("author: %v", err)
@@ -907,7 +907,7 @@ func TestAuthorNamesEveryCaseAtRisk(t *testing.T) {
 			t.Fatalf("set verdict %s: %v", id, err)
 		}
 	}
-	_, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Second case"}})
+	_, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{Name: "Second case"}})
 	if !errors.Is(err, ErrResultsAtRisk) {
 		t.Fatalf("re-author err = %v, want ErrResultsAtRisk", err)
 	}
@@ -933,7 +933,7 @@ func TestAuthorRevisesUnplayedCasesFreely(t *testing.T) {
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	dir := t.TempDir()
 	svc := New(store, dir, nil, WithClock(func() time.Time { return time.Unix(0, 0).UTC() }))
-	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Draft one"}, {Name: "Draft two"}}); err != nil {
+	if _, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{Name: "Draft one"}, {Name: "Draft two"}}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	// A dropped case's evidence dir is swept even when nothing played it (a
@@ -946,7 +946,7 @@ func TestAuthorRevisesUnplayedCasesFreely(t *testing.T) {
 		t.Fatalf("seed stale blob: %v", err)
 	}
 
-	res, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Draft one, reworded"}, {Name: "Draft three"}})
+	res, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{Name: "Draft one, reworded"}, {Name: "Draft three"}})
 	if err != nil {
 		t.Fatalf("re-author of an unplayed checklist: %v", err)
 	}
@@ -968,13 +968,13 @@ func TestAuthorKeepsResultsWhenTheIDIsSupplied(t *testing.T) {
 	store := newFakeStore()
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
-	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{Name: "Played case"}}); err != nil {
+	if _, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{Name: "Played case"}}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	if _, err := svc.SetVerdict(ctx, "w1", "played-case", domain.SmokePass, "looked right"); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
-	res, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{{ID: "played-case", Name: "Played case, reworded"}})
+	res, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{ID: "played-case", Name: "Played case, reworded"}})
 	if err != nil {
 		t.Fatalf("re-author with the id supplied: %v", err)
 	}

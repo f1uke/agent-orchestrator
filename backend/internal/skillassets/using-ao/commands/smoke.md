@@ -74,6 +74,14 @@ ids absent from the payload are removed - subject to the refusal above. Retired
 cases are outside all of this: they are never dropped for being absent, and
 naming a retired id is refused rather than reviving it.
 
+**On a crew, the checklist is qa's.** `ao smoke set` from the **dev** member is
+refused (`SMOKE_QA_OWNS_CHECKLIST`, naming the qa) for as long as that task has a
+qa - qa authors the cases, runs them and retires them, and dev owns the branch,
+the implementation and the pull request. A task with no qa is unaffected: dev
+alone, and every solo worker, authors its own checklist exactly as before. If a
+brief asks dev for smoke cases, that brief predates the crew - say so, and hand
+it to qa with `ao send --crew qa --about <sha>`.
+
 **Flags:**
 
 | Flag | Meaning | Default / Required |

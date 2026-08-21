@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // FORMING THE CREW: turning `--task-size` into a second session.
@@ -68,16 +69,56 @@ func (m *Manager) formCrew(ctx context.Context, project domain.ProjectRecord, de
 // wantsCrew is the whole eligibility test, in one place so the answer is the same
 // from Spawn and from StartTodo.
 func wantsCrew(project domain.ProjectRecord, dev domain.SessionRecord) bool {
-	if dev.Kind != domain.KindWorker || dev.InCrew() {
+	if dev.InCrew() {
 		return false
 	}
-	if !dev.TaskSize.WantsCrew() {
-		return false
-	}
-	if project.Kind.WithDefault() == domain.ProjectKindWorkspace {
+	if !crewEligible(project, dev.Kind, dev.TaskSize) {
 		return false
 	}
 	return dev.Metadata.Branch != "" && dev.Metadata.WorkspacePath != ""
+}
+
+// crewEligible is the part of the eligibility test that is knowable BEFORE the
+// session is materialized: what kind of session this is, how big the task is,
+// and what kind of project it lives in. It is split out because dev's SYSTEM
+// PROMPT has to be built from it (promptCrewRole), and the prompt is built
+// before there is a materialized record to ask.
+func crewEligible(project domain.ProjectRecord, kind domain.SessionKind, size domain.TaskSize) bool {
+	if kind != domain.KindWorker {
+		return false
+	}
+	if !size.WantsCrew() {
+		return false
+	}
+	return project.Kind.WithDefault() != domain.ProjectKindWorkspace
+}
+
+// promptCrewRole answers WHOSE PROMPT this spawn is building, which is not the
+// same question as "is this session in a crew yet".
+//
+// It exists because of an ordering the crew cannot escape: a crew is formed
+// AFTER dev is materialized (formCrew needs the tree it will share), and dev's
+// system prompt is fixed when its runtime launches, several steps earlier. So
+// asking the ROW would answer "solo" for every dev that is about to get a qa -
+// which is exactly what shipped: on a real `--task-size standard` spawn, dev was
+// launched with the SOLO prompt, still carrying the smoke-checklist protocol and
+// never told it had a crewmate, and only picked up its crew prompt if something
+// happened to restore or resume it later.
+//
+// So the prompt is built from the spawn's INTENT instead. The cost is stated:
+// formCrew is best effort, so a spawn whose qa fails to be created leaves dev
+// holding a prompt that names a crewmate it does not have. That is a logged
+// warning ("crew: could not form the crew"), it does not stop dev working, and
+// the `ao smoke set` refusal is keyed on a qa EXISTING - so a dev whose crew
+// never formed can still author the checklist nobody else will.
+func promptCrewRole(project domain.ProjectRecord, cfg ports.SpawnConfig) domain.CrewRole {
+	if cfg.CrewRole != "" {
+		return cfg.CrewRole
+	}
+	if crewEligible(project, cfg.Kind, cfg.TaskSize) {
+		return domain.CrewRoleDev
+	}
+	return ""
 }
 
 // spawnSuspendedCrewMember creates one crew member asleep in dev's worktree.

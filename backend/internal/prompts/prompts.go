@@ -195,6 +195,8 @@ All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro f
 
 **Push as much as you can into committed tests, so the human's checklist SHRINKS.** What is left for a person has a shape, and it is only these four: **paint** (does it look right), **focus** (does the keyboard/pointer land where it should), **timing** (latency, races, a tab that pauses), **feel** (does driving it feel wrong). A check a machine can execute was never a checklist entry.
 
+**What you may do instead of the human, and what you may never do.** You may re-drive ANY case, including one written for a person: driving it is how you capture the screenshot, the log or the recording that saves them walking the screens themselves. What you may never do is JUDGE a **paint / focus / timing / feel** case - a screen that renders wrong, input landing in the wrong place, a lag or a dropped frame, a gesture that feels wrong. Those four are what your taps cannot decide. Attach what you captured and leave their verdict EMPTY: ` + "`ao smoke record \"$AO_CREW_ID\" --case <id> --evidence <file>`" + ` with NO ` + "`--verdict`" + ` is a complete record, and it says "I ran it and captured this, I am not the one who can judge it". Say what you SAW, without concluding. The command can only write the machine's fields anyway - what this rule defends is you deciding, on your own authority, that a paint case is fine.
+
 **Recording, and the one destructive edge.** The checklist belongs to the TASK, not to you, so every ` + "`ao smoke`" + ` command takes ` + "`$AO_CREW_ID`" + ` (dev's session id, which is the id on dev's card) and NOT ` + "`$AO_SESSION_ID`" + ` - a checklist written against your own id is one the human never sees. Author cases with ` + "`ao smoke set \"$AO_CREW_ID\" --from-file -`" + ` giving every case an EXPLICIT, STABLE ` + "`id`" + ` - an omitted id is derived from the NAME, so rewording a name destroys the human's verdict, note and screenshots. Write YOUR result with ` + "`ao smoke record`" + `, which fills the machine's fields and never the human's. To take a case off the list use ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"now covered by <test>\"`" + ` - never a silent delete: retiring is HOW the checklist visibly shrinks, and the reason is the audit trail. A machine pass is not a check off the human's list.
 
 **Committing.** Commit your own tests, prefixed ` + "`test:`" + `, and stay inside test paths (test files, fixtures, flows, test helpers). This is ENFORCED rather than requested: a pre-commit hook in your session refuses a commit that stages anything outside a test path, and it exists because you and dev write into ONE index - a wide ` + "`git add`" + ` sweeps up dev's work in progress and commits it under your name. Name the files you are committing (` + "`git commit <paths>`" + `). If a test cannot pass without a product change, say so and hand back to dev rather than making it yourself.
@@ -391,6 +393,45 @@ ao sim release` + "\n```" + `
 
 Everything else - naming an element by its identifier, typing, buttons, recording what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
 
+// RecordedFlowLoop is the record -> flow -> retire loop, and it is qa's alone.
+//
+// The tooling for it shipped long ago - `ao sim record start|status|stop`,
+// `--name`, `--entry`, `--out`, then `ao sim flow check|run` - and NOTHING said
+// whose job it was: Maestro is named a dozen times across the skill page and the
+// prompts, always as a capability and never as an assignment. So it was nobody's,
+// and the checklist never shrank.
+//
+// The fact that makes it work without building anything: the recorder hooks the
+// HOLD lifecycle, so a human driving the Device tab of this session is captured
+// exactly like an agent's `ao sim tap` (sim_screen.go says so outright). That is
+// what turns "the human plays the scenario once" - which is also the only
+// description anyone has of how to REACH that screen - into a committed test,
+// instead of qa reverse-engineering the navigation from a case's steps.
+//
+// Injected for qa only, and only on a project that has a simulator: every command
+// here fails on a machine with no device, and an instruction an agent cannot
+// follow is worse than none - the same reason SimulatorGuidance is gated. A crew
+// dev never sees it (the device is qa's instrument), and a SOLO worker never sees
+// it either, which keeps the lone-worker prompt byte-for-byte what it was.
+func RecordedFlowLoop() string { return recordedFlowLoop }
+
+const recordedFlowLoop = "\n\n" + `## Turning a played scenario into a test (AO)
+
+The cheapest committed UI test is not one you write from scratch - it is the one somebody already played. ` + "`ao sim record`" + ` hooks the hold lifecycle, so **a human's tap in YOUR Device tab and your own ` + "`ao sim tap`" + ` are captured identically**: one play, by the person who knows the scenario, becomes a flow that runs forever. This loop is YOURS - nobody else on this task does it.
+
+` + "```bash\n" + `ao sim claim                                   # a recording never claims a device for you
+ao sim record start --name "<the case>"        # then drive it yourself, or ask the human to
+                                               # play it ONCE in your Device tab
+ao sim record status                           # what it has captured, without stopping it
+ao sim record stop --entry <entry flow>        # writes the Maestro flow
+ao sim flow check <flow.yaml>                  # parses it; needs no device at all
+ao sim flow run <flow.yaml> --udid <scratch>   # a flow relaunches the app: never the human's device
+ao smoke retire "$AO_CREW_ID" --case <id> --reason "now covered by <flow>"` + "\n```" + `
+
+- ` + "`--entry`" + ` answers *how do you even reach that screen*: a recording starts wherever the app already was, and ` + "`--entry`" + ` prepends a shared entry-point flow as ` + "`runFlow`" + ` rather than re-recording the way in every time.
+- ` + "`stop`" + ` writes the flow into your session's artifact directory, OUTSIDE any repository, so committing it is a deliberate act: ` + "`--out`" + ` it into a test path, then ` + "`git commit <paths>`" + ` prefixed ` + "`test:`" + `.
+- **Then retire the case, naming the flow as the reason.** Asking for one play is a fair thing to ask a person, because it is the LAST time they play it. A flow you never retire against is work you added.`
+
 // CrewProtocol is what BOTH members of a crew are told about each other, and it
 // is the only place either learns that the other exists as a live agent rather
 // than as a role in a story.
@@ -419,7 +460,11 @@ func CrewProtocol(role string) string {
 	if role == "qa" {
 		other = "dev"
 	}
-	return fmt.Sprintf(crewProtocol, role, other, other)
+	block := fmt.Sprintf(crewProtocol, role, other, other)
+	if role == "dev" {
+		block += crewDevChecklistIsQAs
+	}
+	return block
 }
 
 const crewProtocol = "\n\n" + `## Your crewmate (AO)
@@ -439,6 +484,23 @@ You are **%s** on a task worked by TWO agents in ONE worktree, and **you are bot
 - **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RECORDING a result. Do not send an acknowledgement, and do not wait for one.
 - **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
 - ` + "`$AO_CREW_DEV_ID`" + ` and ` + "`$AO_CREW_QA_ID`" + ` name the two sessions when you need to refer to one; ` + "`$AO_CREW_ID`" + ` is the TASK (dev's id), which is what every ` + "`ao smoke`" + ` command takes.`
+
+// crewDevChecklistIsQAs is dev's half of the ownership split, and it exists
+// because SILENCE LOSES AN ARGUMENT IT IS NOT PRESENT FOR.
+//
+// The assembly layer already stops handing a crew dev the smoke protocol, and
+// that was believed to be enough. It was not: the orchestrator put "author the
+// smoke checklist" back BY HAND in every brief it wrote, and dev did it in both
+// real crew runs - not because it overrode anything, but because a prompt that
+// says nothing cannot contradict a brief that says something.
+//
+// So this states the negative, and the load-bearing clause is the LAST one: a
+// brief that asks for cases is named as predating the crew, and dev is told to
+// SAY SO. That turns a silent override into a visible contradiction in dev's own
+// output, where a human can see it. It does not prevent anything - `ao smoke set`
+// refusing a crew dev while a qa exists is the layer that actually holds - and it
+// is deliberately shorter than the 324-token protocol block dev stopped carrying.
+const crewDevChecklistIsQAs = "\n\n" + `**The checklist is qa's, not yours.** qa owns what VERIFIES this change: the cases, running them, recording machine results, and the smoke-test checklist itself. You own the branch, the implementation and the pull request, and you are the only one who reports to the orchestrator. So do not author or edit the smoke checklist and do not record test results - ` + "`ao smoke set`" + ` from you is REFUSED by AO for as long as a qa is on this task. **If a brief asks you for smoke cases, that brief predates the crew: say so in your own output, and hand it to qa** (` + "`ao send --crew qa --about <sha>`" + `) rather than writing them yourself.`
 
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of

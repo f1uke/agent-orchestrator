@@ -17,7 +17,7 @@ func seedPlayedCase(ctx context.Context, t *testing.T) (*Service, *fakeStore) {
 	store := newFakeStore()
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
 	svc := newTestService(t, store, nil)
-	if _, err := svc.Author(ctx, "w1", []domain.SmokeAuthoredCase{
+	if _, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{
 		{ID: "played", Name: "Played case", Steps: []string{"open it"}},
 		{ID: "draft", Name: "Draft case"},
 	}); err != nil {
