@@ -89,10 +89,11 @@ export function ShellTopbar() {
 	// would appear twice the moment the split view is used. See `CrewSwitcher`.
 	const task = useSessionTask(isSessionRoute && !isOrchestrator ? params.sessionId : undefined);
 	const isCrew = task?.isCrew ?? false;
-	// The review verdict comes from the task's own pull requests. Asked for dev,
-	// because dev owns the PR — and the daemon task-scopes this route anyway, so
-	// either member answers the same.
-	const reviewPRs = useSessionScmSummary(task && isCrew ? task.dev.id : undefined).data ?? [];
+	// The review verdict comes from the task's own pull requests, asked for the
+	// ROUTED session rather than for dev. The daemon task-scopes `/pr` (#242), so
+	// either member answers the same — and asking with the id the rail already
+	// asks with shares one query instead of opening a second one beside it.
+	const reviewPRs = useSessionScmSummary(isCrew ? params.sessionId : undefined).data ?? [];
 	// The device pip is a crew-only affordance on an iOS project, so nothing else
 	// pays for the poll: a solo task has no second chip to tell apart, and a
 	// project with no simulator has no lease that could ever land on one.
