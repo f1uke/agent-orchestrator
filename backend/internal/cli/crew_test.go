@@ -76,6 +76,79 @@ func TestCrewStatus_GroupsByCrewAndNamesTheHolder(t *testing.T) {
 	}
 }
 
+// The regression this file exists for: a crew whose members have TERMINATED read
+// "awake" forever, because the listing mirrored only isSuspended out of the three
+// facts domain.Awake() is defined on. A finished task then claimed two awake
+// members, which is both false and the exact opposite of the rule AO enforces.
+func TestCrewStatus_DoesNotCallATerminatedMemberAwake(t *testing.T) {
+	cfg := setConfigEnv(t)
+	// Exactly the shape on the wire for a finished task: dev's PR merged (so its
+	// derived status is "merged", not "terminated") and qa torn down. Neither
+	// carries isSuspended.
+	body := `{"sessions":[
+		{"id":"demo-2","isTerminated":true,"status":"merged","crew":{"id":"demo-2","role":"dev"}},
+		{"id":"demo-3","isTerminated":true,"status":"terminated","crew":{"id":"demo-2","role":"qa"}},
+		{"id":"demo-4","isTodo":true,"crew":{"id":"demo-4","role":"dev"}}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "status")
+	if err != nil {
+		t.Fatalf("ao crew status: %v stderr=%s", err, errOut)
+	}
+	if strings.Contains(out, "awake") {
+		t.Fatalf("a crew with no running agent reports a member awake:\n%s", out)
+	}
+	// And it says which kind of stopped each member is, rather than flattening a
+	// torn-down task into the word for "waiting for its turn".
+	if strings.Count(out, "finished") != 2 {
+		t.Fatalf("both terminated members should read finished:\n%s", out)
+	}
+	if !strings.Contains(out, "not started") {
+		t.Fatalf("a TODO member should not read awake or asleep:\n%s", out)
+	}
+	if strings.Contains(out, "asleep") {
+		t.Fatalf("nothing here is merely suspended:\n%s", out)
+	}
+}
+
+// The other half of the same rule: a LIVE crew still renders exactly as it did -
+// the member holding the turn is awake, the one waiting is asleep.
+func TestCrewStatus_LiveCrewStillReadsAwakeAndAsleep(t *testing.T) {
+	cfg := setConfigEnv(t)
+	body := `{"sessions":[
+		{"id":"demo-2","isTerminated":false,"status":"working","crew":{"id":"demo-2","role":"dev"}},
+		{"id":"demo-3","isTerminated":false,"isSuspended":true,"status":"idle","crew":{"id":"demo-2","role":"qa"}}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "status")
+	if err != nil {
+		t.Fatalf("ao crew status: %v stderr=%s", err, errOut)
+	}
+	if strings.Count(out, "awake") != 1 || !strings.Contains(out, "asleep") {
+		t.Fatalf("a live crew no longer reads one awake and one asleep:\n%s", out)
+	}
+}
+
 func TestCrewStatus_SaysWhenThereAreNoCrews(t *testing.T) {
 	cfg := setConfigEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

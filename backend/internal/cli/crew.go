@@ -17,9 +17,15 @@ type crewSessionView struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
 	Status      string `json:"status"`
-	IsSuspended bool   `json:"isSuspended"`
-	TaskSize    string `json:"taskSize"`
-	Crew        *struct {
+	// The three facts domain.SessionRecord.Awake() is defined on. All three are
+	// mirrored, not just isSuspended: a member that is TERMINATED or still a TODO
+	// has no running agent either, and reading only the suspend flag made a
+	// finished crew print two awake members forever.
+	IsTerminated bool   `json:"isTerminated"`
+	IsSuspended  bool   `json:"isSuspended"`
+	IsTodo       bool   `json:"isTodo"`
+	TaskSize     string `json:"taskSize"`
+	Crew         *struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`
 	} `json:"crew"`
@@ -149,7 +155,14 @@ func newCrewStatusCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "List the crews on the board and which member is awake",
-		Args:  noArgs,
+		Long: "Groups the board's sessions into the tasks they are working and says, for each\n" +
+			"member, whether it has a running agent right now:\n\n" +
+			"  awake        this member holds the task's turn\n" +
+			"  asleep       suspended, waiting for a turn - `ao crew wake` gives it one\n" +
+			"  finished     torn down; `ao session restore` is what brings it back\n" +
+			"  not started  a prepared TODO that has never been started\n\n" +
+			"A solo task is not a crew and is not listed here; use `ao session ls` for those.",
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return ctx.printCrewStatus(cmd.Context(), cmd.OutOrStdout(), project)
 		},
@@ -189,16 +202,35 @@ func (c *commandContext) printCrewStatus(ctx context.Context, out io.Writer, pro
 			return err
 		}
 		for _, member := range byCrew[crewID] {
-			state := "awake"
-			if member.IsSuspended {
-				state = "asleep"
-			}
-			if _, err := fmt.Fprintf(out, "  %-4s %-28s %s\n", crewRoleOf(member), member.ID, state); err != nil {
+			if _, err := fmt.Fprintf(out, "  %-4s %-28s %s\n", crewRoleOf(member), member.ID, crewMemberState(member)); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// crewMemberState is this listing's word for "does this member have a running
+// agent right now?", and it is the CLI's mirror of domain.Awake() - the same
+// three facts, in the same order of precedence, so the two can never disagree
+// again.
+//
+// A terminated member gets its OWN word rather than sharing "asleep" with a
+// suspended one. Both are true statements about a stopped agent, but they are
+// answers to different questions: an asleep member is waiting for its turn and
+// `ao crew wake` gives it one, while a finished member is gone and only
+// `ao session restore` brings it back. Collapsing them would leave a completed
+// task looking like one that is merely between turns.
+func crewMemberState(s crewSessionView) string {
+	switch {
+	case s.IsTerminated:
+		return "finished"
+	case s.IsTodo:
+		return "not started"
+	case s.IsSuspended:
+		return "asleep"
+	}
+	return "awake"
 }
 
 func crewRoleOf(s crewSessionView) string {
