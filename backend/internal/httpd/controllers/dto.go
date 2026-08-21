@@ -436,6 +436,28 @@ type RestartSessionResponse struct {
 // WakeSessionResponse is the body of POST /api/v1/sessions/{sessionId}/wake:
 // the fresh read model after resuming a suspended session or resetting a live
 // session's idle-close countdown.
+// AddCrewMemberRequest is the body of POST /api/v1/sessions/{sessionId}/crew/members.
+//
+// The session named in the path may be EITHER member of the task (or the solo
+// session that is about to become dev): it is resolved to the task's dev, which
+// is the crew's root, so a caller holding one id never has to know which it has.
+type AddCrewMemberRequest struct {
+	// Role the new member fills. Empty means `qa`, which is the only joinable
+	// role: `dev` is the crew's root rather than a seat, and the design names no
+	// third role yet.
+	Role domain.CrewRole `json:"role,omitempty" enum:"qa"`
+}
+
+// AddCrewMemberResponse is the body of POST /api/v1/sessions/{sessionId}/crew/members.
+// `session` is the NEW member - born suspended, so it has an id and a row and no
+// terminal - not the session named in the path.
+type AddCrewMemberResponse struct {
+	OK bool `json:"ok"`
+	// SessionID echoes the session named in the PATH, not the new member's id.
+	SessionID domain.SessionID `json:"sessionId"`
+	Session   SessionView      `json:"session"`
+}
+
 type WakeSessionResponse struct {
 	OK        bool             `json:"ok"`
 	SessionID domain.SessionID `json:"sessionId"`

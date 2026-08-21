@@ -49,7 +49,7 @@ func (m *Manager) formCrew(ctx context.Context, project domain.ProjectRecord, de
 	if !wantsCrew(project, dev) {
 		return dev
 	}
-	qa, err := m.spawnSuspendedCrewMember(ctx, project, dev, domain.CrewRoleQA)
+	qa, err := m.spawnSuspendedCrewMember(ctx, project, dev, domain.CrewRoleQA, joinedAtSpawn)
 	if err != nil {
 		m.logger.Warn("crew: could not form the crew; the task continues solo",
 			"sessionID", dev.ID, "role", string(domain.CrewRoleQA), "error", err)
@@ -87,14 +87,26 @@ func wantsCrew(project domain.ProjectRecord, dev domain.SessionRecord) bool {
 // provisioning to run (re-running post-create commands would fire an install into
 // a tree somebody is working in) and no runtime to launch. What is left is the
 // row, and the row is written already suspended.
-func (m *Manager) spawnSuspendedCrewMember(ctx context.Context, project domain.ProjectRecord, dev domain.SessionRecord, role domain.CrewRole) (domain.SessionRecord, error) {
-	if !role.Valid() || role.IsDev() {
-		return domain.SessionRecord{}, fmt.Errorf("%w: role %q is not a joinable crew role", ErrInvalidCrew, role)
-	}
+func (m *Manager) spawnSuspendedCrewMember(ctx context.Context, project domain.ProjectRecord, dev domain.SessionRecord, role domain.CrewRole, join crewJoin) (domain.SessionRecord, error) {
 	// Serialized against every other slot decision for this crew, exactly as a
 	// crew Spawn is. dev's id is the crew key whether or not the crew exists yet.
 	defer m.lockCrew(dev.ID)()
+	return m.spawnSuspendedCrewMemberLocked(ctx, project, dev, role, join)
+}
 
+// spawnSuspendedCrewMemberLocked is the body above, for a caller that ALREADY
+// holds the crew lock.
+//
+// It exists because AttachCrewMember is check-then-create - "does this task
+// already have a qa?" then "create one" - and those two have to be atomic
+// together or two racing attaches both see a free seat. lockCrew is not
+// reentrant (#225 takes it at the OUTER entries only, so the guard beneath it
+// cannot re-enter), so the lock has to move out to the entry point rather than
+// be taken twice.
+func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project domain.ProjectRecord, dev domain.SessionRecord, role domain.CrewRole, join crewJoin) (domain.SessionRecord, error) {
+	if !role.Valid() || role.IsDev() {
+		return domain.SessionRecord{}, fmt.Errorf("%w: role %q is not a joinable crew role", ErrInvalidCrew, role)
+	}
 	harness := effectiveHarness(dev.Harness, domain.KindWorker, project.Config)
 	if _, ok := m.agents.Agent(harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("%w: %q", ErrUnknownHarness, harness)
@@ -127,7 +139,7 @@ func (m *Manager) spawnSuspendedCrewMember(ctx context.Context, project domain.P
 			// resume, which on a first wake is always the case - and a promptless
 			// worker is refused outright (ErrNotResumable), so this must not be
 			// empty.
-			Prompt: crewMemberKickoff(role, dev),
+			Prompt: crewMemberKickoff(role, dev, join),
 		},
 	}
 	rec, err := m.store.CreateSession(ctx, seed)
@@ -143,6 +155,21 @@ func (m *Manager) spawnSuspendedCrewMember(ctx context.Context, project domain.P
 	return m.getRecord(ctx, rec.ID)
 }
 
+// crewJoin says WHEN a member was added to its crew. It is the one thing the
+// kickoff prompt has to differ on, so it is a named type rather than a bare bool
+// at the call sites.
+type crewJoin bool
+
+const (
+	// joinedAtSpawn: the crew was decided by --task-size and formed while dev was
+	// still materializing. Nothing about the task exists yet that qa has to be
+	// careful of.
+	joinedAtSpawn crewJoin = false
+	// joinedLate: a human attached this member to a task that was already
+	// running, and possibly already finished its work. See crewLateArrival.
+	joinedLate crewJoin = true
+)
+
 // crewMemberKickoff is the first turn a woken crew member reads.
 //
 // It carries dev's own brief verbatim, because the thing qa has to judge is
@@ -150,11 +177,15 @@ func (m *Manager) spawnSuspendedCrewMember(ctx context.Context, project domain.P
 // dev's conversation is somewhere qa cannot see. Everything else qa needs is
 // standing instruction (prompts.KindQA), not a per-task message, so this stays
 // short: a task with no brief still yields a non-empty prompt.
-func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord) string {
+func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, join crewJoin) string {
 	var b strings.Builder
 	b.WriteString("You are ")
 	b.WriteString(string(role))
 	b.WriteString(" on this task, and it is your turn. dev has been working in the worktree you are in now - read the branch's diff against its base branch to see what actually changed, rather than assuming the brief below was followed.")
+	if join == joinedLate {
+		b.WriteString("\n\n")
+		b.WriteString(crewLateArrival)
+	}
 	if brief := strings.TrimSpace(dev.Metadata.Prompt); brief != "" {
 		b.WriteString("\n\nThe brief dev was given:\n\n")
 		b.WriteString(brief)
@@ -162,6 +193,23 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord) string {
 	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, record what you found, and hand back to dev.")
 	return b.String()
 }
+
+// crewLateArrival is the ONE thing a qa attached after the fact has to be told
+// that a spawn-time qa does not.
+//
+// Everything else a late arrival inherits is inherited the same way either
+// way - dev's branch, dev's worktree, dev's brief, dev's id as AO_CREW_ID - and
+// the sentence above ("read the diff, do not assume the brief was followed") was
+// already written for an agent with no shared history.
+//
+// What is genuinely different is that DEV DID NOT KNOW IT WOULD GET A QA. A
+// spawn-time qa arrives before there is a PR and before anyone has written a
+// checklist. A late one arrives after: dev has been running the whole time with
+// the SOLO system prompt, which carries the smoke-checklist protocol, so a
+// checklist may already exist, may already carry the human's verdicts, and is
+// exactly the artefact #226's id trap destroys when a case is re-sent under a
+// new name.
+const crewLateArrival = "You were added to this task AFTER it started, so treat what is already there as work in progress rather than a blank page. dev has been running alone with the solo instructions, which include the smoke-checklist protocol: read the PR and `ao smoke list \"$AO_CREW_ID\"` BEFORE you write anything. If a case is already on that checklist, re-send it under the id it already has - `ao smoke set` replaces the whole list, and a case whose name changes loses the human's verdict, note and screenshots. There may also be an open PR with CI and review history; read it rather than re-deriving it."
 
 // CrewMember returns the session filling `role` on this session's task, if any.
 // It answers for either member (ask dev for its qa, or qa for its dev), so a

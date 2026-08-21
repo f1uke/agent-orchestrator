@@ -1619,6 +1619,57 @@ paths:
       summary: Mark a PR review thread resolved on behalf of the session's SCM identity
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/crew/members:
+    post:
+      operationId: addCrewMember
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersAddCrewMemberRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersAddCrewMemberResponse'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Attach a member (qa) to the task this session belongs to, born suspended
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/crew/wake:
     post:
       operationId: wakeCrewMember
@@ -5329,6 +5380,26 @@ components:
       required:
       - sessionId
       - reason
+      type: object
+    ControllersAddCrewMemberRequest:
+      properties:
+        role:
+          enum:
+          - qa
+          type: string
+      type: object
+    ControllersAddCrewMemberResponse:
+      properties:
+        ok:
+          type: boolean
+        session:
+          $ref: '#/components/schemas/ControllersSessionView'
+        sessionId:
+          type: string
+      required:
+      - ok
+      - sessionId
+      - session
       type: object
     ControllersDaemonLoop:
       properties:

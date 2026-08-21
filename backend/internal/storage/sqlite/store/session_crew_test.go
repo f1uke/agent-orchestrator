@@ -150,3 +150,67 @@ func TestSessionCrew_OneDevPerCrewIsEnforcedByTheDatabase(t *testing.T) {
 		t.Fatal("an untouched session must still read as solo")
 	}
 }
+
+// TestSessionCrew_OneMemberPerRoleIsEnforcedByTheDatabase covers what 0044's dev
+// index does not: a second QA on a crew that already has one.
+//
+// It could not happen while the only way to gain a member was formCrew, which
+// runs on a dev that is still solo. Attaching a qa to a task that already exists
+// is a second entry point, and a Go-side check-then-create is a rule a racing
+// caller can step around - so the invariant lives in the database.
+//
+// A TERMINATED qa still holds the seat: standing qa down is how an attach is
+// undone, and its id stays referenced by smoke_check rows, their evidence
+// directories and review_run rows. A second qa row would leave those pointing at
+// a stranger; `ao session restore` brings the SAME id back instead.
+func TestSessionCrew_OneMemberPerRoleIsEnforcedByTheDatabase(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "proj-1")
+
+	mk := func() domain.SessionRecord {
+		t.Helper()
+		rec, err := s.CreateSession(ctx, domain.SessionRecord{ProjectID: "proj-1", Kind: domain.KindWorker})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+	dev, qa, second := mk(), mk(), mk()
+
+	now := time.Now().UTC()
+	if _, err := s.SetSessionCrew(ctx, dev.ID, dev.ID, domain.CrewRoleDev, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSessionCrew(ctx, qa.ID, dev.ID, domain.CrewRoleQA, now); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := s.SetSessionCrew(ctx, second.ID, dev.ID, domain.CrewRoleQA, now)
+	if err == nil {
+		t.Fatal("a second qa in one crew was accepted; the partial unique index must refuse it")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+		t.Fatalf("want a UNIQUE constraint failure, got %v", err)
+	}
+
+	// The seat stays taken once qa is stood down: terminating is how an attach is
+	// undone, and the id must not be replaceable by a different one.
+	terminated := qa
+	terminated.IsTerminated = true
+	if err := s.UpdateSession(ctx, terminated); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSessionCrew(ctx, second.ID, dev.ID, domain.CrewRoleQA, now); err == nil {
+		t.Fatal("a replacement qa was accepted after the first was stood down; restore the original id instead")
+	}
+
+	// A DIFFERENT crew may of course have its own qa: the index is per crew.
+	otherDev, otherQA := mk(), mk()
+	if _, err := s.SetSessionCrew(ctx, otherDev.ID, otherDev.ID, domain.CrewRoleDev, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSessionCrew(ctx, otherQA.ID, otherDev.ID, domain.CrewRoleQA, now); err != nil {
+		t.Fatalf("a second crew must be able to have its own qa: %v", err)
+	}
+}

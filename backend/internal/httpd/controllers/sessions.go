@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,6 +70,9 @@ type SessionService interface {
 	// Wake resumes a suspended session in place or resets a live session's
 	// idle-close countdown; the UI calls it when the user opens/selects a session.
 	Wake(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	// AttachCrewMember adds a member in the given role to the task this session
+	// belongs to, born suspended. It is how a task spawned solo gains a qa.
+	AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error)
 	// WakeCrewMember hands the task's one awake slot to this member, standing the
 	// current holder down first.
 	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error)
@@ -152,6 +156,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/restore", c.restore)
 	r.Post("/sessions/{sessionId}/restart", c.restart)
 	r.Post("/sessions/{sessionId}/wake", c.wake)
+	r.Post("/sessions/{sessionId}/crew/members", c.crewAddMember)
 	r.Post("/sessions/{sessionId}/crew/wake", c.crewWake)
 	r.Post("/sessions/{sessionId}/kill", c.kill)
 	r.Post("/sessions/{sessionId}/rollback", c.rollback)
@@ -767,6 +772,41 @@ func (c *SessionsController) wake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, WakeSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
+}
+
+// crewAddMember attaches a member to the task this session belongs to.
+//
+// It is a CREATE, and that is the whole point of it existing: the design offers
+// "add qa to a solo task" as a wake, which is true only for a task whose qa was
+// formed at spawn. A `mechanical` task - and every task older than the crew -
+// never had one, so there is nothing to wake and something to make.
+//
+// The new member is born SUSPENDED: a row and an id, no runtime and no terminal.
+// dev is not disturbed, so the task keeps running straight through this, and
+// there is no instant at which two members of the crew are awake.
+func (c *SessionsController) crewAddMember(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/members")
+		return
+	}
+	// The body is entirely optional: `qa` is the only joinable role, so "add a
+	// member to this task" is a complete request on its own and a bare POST must
+	// not be a 400. Anything that IS sent still has to parse.
+	var in AddCrewMemberRequest
+	if err := decodeJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	role := in.Role
+	if role == "" {
+		role = domain.CrewRoleQA
+	}
+	sess, err := c.Svc.AttachCrewMember(r.Context(), sessionID(r), role)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusCreated, AddCrewMemberResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
 }
 
 // crewWake gives this task's one awake slot to the named member: whoever holds

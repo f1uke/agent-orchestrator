@@ -26,6 +26,8 @@ import (
 
 type fakeSessionService struct {
 	crewWoken             []domain.SessionID
+	crewAdded             []domain.CrewRole
+	crewAddErr            error
 	sendOutcome           ports.SendOutcome
 	sessions              map[domain.SessionID]domain.Session
 	previewDisabled       bool
@@ -262,6 +264,19 @@ func (f *fakeSessionService) Wake(_ context.Context, id domain.SessionID) (domai
 	s.IsSuspended = false
 	f.sessions[id] = s
 	return s, nil
+}
+
+// crewAdded records the role the attach route asked for, so a test can assert
+// the controller defaulted it rather than passing an empty role down.
+func (f *fakeSessionService) AttachCrewMember(_ context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error) {
+	if f.crewAddErr != nil {
+		return domain.Session{}, f.crewAddErr
+	}
+	f.crewAdded = append(f.crewAdded, role)
+	member := domain.Session{SessionRecord: domain.SessionRecord{ID: id + "-qa", IsSuspended: true}}
+	member.CrewID = id
+	member.CrewRole = role
+	return member, nil
 }
 
 // crewWoken records the id the crew-wake route asked for, so a test can assert
@@ -2020,5 +2035,83 @@ func TestSessionsAPI_SendOmitsQueuedForADeliveredMessage(t *testing.T) {
 	}
 	if strings.Contains(string(body), "\"queued\"") || strings.Contains(string(body), "pendingMessages") {
 		t.Fatalf("delivered send reported queue fields: %s", body)
+	}
+}
+
+// TestSessionsAPI_AddCrewMemberReturnsTheNewMember: POST
+// /sessions/{id}/crew/members answers 201 with the MEMBER that was created - not
+// the session named in the path - and that member is born suspended, which is
+// the property the whole feature rests on. An omitted role means `qa`, the only
+// joinable one.
+func TestSessionsAPI_AddCrewMemberReturnsTheNewMember(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"role omitted", "{}"},
+		{"role explicit", `{"role":"qa"}`},
+		{"no body at all", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newFakeSessionService()
+			srv := newSessionTestServer(t, svc)
+
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/members", tc.body)
+			if status != http.StatusCreated {
+				t.Fatalf("attach = %d, want 201; body=%s", status, body)
+			}
+			var got struct {
+				OK        bool   `json:"ok"`
+				SessionID string `json:"sessionId"`
+				Session   struct {
+					ID          string `json:"id"`
+					IsSuspended bool   `json:"isSuspended"`
+					Crew        *struct {
+						ID   string `json:"id"`
+						Role string `json:"role"`
+					} `json:"crew"`
+				} `json:"session"`
+			}
+			mustJSON(t, body, &got)
+			if !got.OK || got.SessionID != "ao-1" {
+				t.Fatalf("attach response = %#v", got)
+			}
+			if got.Session.ID != "ao-1-qa" {
+				t.Fatalf("session = %q, want the NEW member ao-1-qa", got.Session.ID)
+			}
+			if !got.Session.IsSuspended {
+				t.Fatal("the attached member must be born suspended")
+			}
+			if got.Session.Crew == nil || got.Session.Crew.Role != "qa" || got.Session.Crew.ID != "ao-1" {
+				t.Fatalf("crew = %#v, want qa on crew ao-1", got.Session.Crew)
+			}
+			if len(svc.crewAdded) != 1 || svc.crewAdded[0] != domain.CrewRoleQA {
+				t.Fatalf("service saw roles %v, want exactly [qa]", svc.crewAdded)
+			}
+		})
+	}
+}
+
+// TestSessionsAPI_AddCrewMemberSurfacesRefusals: attaching is refused for real
+// reasons (the seat is taken, the task is over) and those are CONFLICTS - "not
+// this task" rather than "the daemon is broken" - so a caller can tell them from
+// a bug.
+func TestSessionsAPI_AddCrewMemberSurfacesRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"the seat is taken", apierr.Conflict("CREW_ROLE_TAKEN", "already has a qa", nil), http.StatusConflict},
+		{"the task is finished", apierr.Conflict("CREW_TASK_FINISHED", "ao-1 is merged", nil), http.StatusConflict},
+		{"nothing can host a crew here", apierr.Invalid("INVALID_CREW", "orchestrator", nil), http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newFakeSessionService()
+			svc.crewAddErr = tc.err
+			srv := newSessionTestServer(t, svc)
+
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/members", `{"role":"qa"}`)
+			if status != tc.want {
+				t.Fatalf("attach = %d, want %d; body=%s", status, tc.want, body)
+			}
+		})
 	}
 }

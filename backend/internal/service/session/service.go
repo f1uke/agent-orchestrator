@@ -82,6 +82,13 @@ type commander interface {
 	// Wake is the user-open hook: resume a suspended session in place, or reset a
 	// live session's idle-close countdown; terminated sessions are left untouched.
 	Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// AttachCrewMember adds a member in `role` to the task dev works on, born
+	// SUSPENDED. It is how a task that was spawned solo - every `mechanical` one,
+	// and every task older than the crew - gains a qa.
+	AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error)
+	// CrewDevOf resolves any session to the DEV of the task it belongs to; a solo
+	// session answers with itself.
+	CrewDevOf(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	// WakeCrewMember gives the crew slot to one member of a task, standing the
 	// current holder down first. It is the human's (and the orchestrator's) way of
 	// saying "qa's turn now" while automatic handover is deliberately not built.
@@ -509,6 +516,41 @@ func (s *Service) Wake(ctx context.Context, id domain.SessionID) (domain.Session
 // it is already qa's turn is a no-op, not an error.
 func (s *Service) WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error) {
 	rec, err := s.manager.WakeCrewMember(ctx, id)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
+// AttachCrewMember adds a member in `role` to the task `id` belongs to.
+//
+// `id` may name either member: a crew member resolves to its dev, and a solo
+// session is its own task - the same equality AO_CREW_ID relies on - so a caller
+// holding one id never has to know which kind it has.
+//
+// The FINISHED refusal lives here rather than in the manager because it needs
+// the session's DERIVED status, which is assembled from PR facts at read time
+// (the repo does not store a display status). A task whose PR has merged, or
+// whose dev has been torn down, is over: attaching to it would create a session
+// with a worktree that is about to be reclaimed, a branch nobody will push and
+// no turn it could ever be given. Refusing is the honest answer.
+//
+// A SUSPENDED dev is not finished - it is parked - and attaching is allowed
+// there: the new member is born asleep, so nothing wakes and nothing changes
+// until a human moves the baton.
+func (s *Service) AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error) {
+	dev, err := s.manager.CrewDevOf(ctx, id)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	sess, err := s.toSession(ctx, dev)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if sess.Status == domain.StatusMerged || sess.Status == domain.StatusTerminated {
+		return domain.Session{}, toAPIError(fmt.Errorf("%w: %s is %s", sessionmanager.ErrCrewTaskFinished, dev.ID, sess.Status))
+	}
+	rec, err := s.manager.AttachCrewMember(ctx, dev.ID, role)
 	if err != nil {
 		return domain.Session{}, toAPIError(err)
 	}
@@ -1028,6 +1070,12 @@ func toAPIError(err error) error {
 		return apierr.Conflict("CREW_SLOT_BUSY", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrInvalidCrew):
 		return apierr.Invalid("INVALID_CREW", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrCrewRoleTaken):
+		// The task is already the shape it was asked to become - a conflict with
+		// what exists, not a malformed request.
+		return apierr.Conflict("CREW_ROLE_TAKEN", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrCrewTaskFinished):
+		return apierr.Conflict("CREW_TASK_FINISHED", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrNotTodo):
 		return apierr.Conflict("SESSION_NOT_TODO", "Session is not a prepared TODO (already started or never was one)", nil)
 	case errors.Is(err, sessionmanager.ErrNotTerminal):
