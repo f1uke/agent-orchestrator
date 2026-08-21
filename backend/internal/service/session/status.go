@@ -51,7 +51,17 @@ type statusResult struct {
 //
 //nolint:unparam // rule is kept to preserve deriveStatusDetail's signature for callers/tests, even though current callers pass the zero (disabled) rule
 func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, rule domain.ApprovalRule) domain.SessionStatus {
-	return deriveStatusDetail(rec, prs, now, signalCapable, rule).Status
+	return deriveStatusDetail(rec, prs, now, signalCapable, rule, crewRunFacts{}).Status
+}
+
+// crewRunFacts is the slice of a member's bracketed-run history the status
+// derivation reads. Zero for every solo session and for every crew that has
+// never bracketed a run, so those sessions take the same path they always have.
+type crewRunFacts struct {
+	// Discards is the CURRENT streak of runs thrown away because the tree moved,
+	// counted from the most recent one backwards. One run that ends any other way
+	// resets it to zero, which is what makes the escalation clear itself.
+	Discards int
 }
 
 // deriveStatusDetail computes the display status AND the reason that produced it,
@@ -65,7 +75,7 @@ func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time,
 // status is the worst-wins aggregate across its open PRs; stacked children whose
 // parent is still open are exempt from the aggregation since they cannot merge
 // until the parent does. Merged/closed PRs only matter once no open PR remains.
-func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, rule domain.ApprovalRule) statusResult {
+func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, rule domain.ApprovalRule, runs crewRunFacts) statusResult {
 	// A prepared-but-not-started TODO has no runtime to observe: it reads todo
 	// until Start materializes it (MarkSpawned clears IsTodo, at which point the
 	// normal derivation below takes over).
@@ -82,6 +92,17 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 
 	if rec.Activity.State == domain.ActivityWaitingInput {
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonWaitingInput}
+	}
+
+	// CappedRepeat runs thrown away in a row means this member cannot get a quiet
+	// window in its own worktree and the automatic retry is spent. It sits ABOVE
+	// the PR branches on purpose: the failure being surfaced is that NOTHING this
+	// task claims has been verified, and a card reading "mergeable" while that is
+	// true is precisely the laundering the detector exists to stop. It clears
+	// itself the moment one run ends any other way, so there is no state to
+	// unwind and nothing for a human to reset.
+	if runs.Discards >= domain.CappedRepeat {
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonRunsDiscarded}
 	}
 
 	open := openPRs(prs)

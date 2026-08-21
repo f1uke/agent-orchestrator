@@ -220,6 +220,18 @@ type SessionView struct {
 	// agent working alone, not a crew with a missing member. Curated from the
 	// json:"-" domain crew fields.
 	Crew *SessionCrew `json:"crew,omitempty"`
+	// CrewRun is the build/test/device run this member has OPEN right now, and it
+	// is the ONLY thing that can tell the board "qa is running a build" rather
+	// than the far weaker "qa is awake": activity state comes from the agent's own
+	// hooks and cannot tell a build from an agent reading a file. It rides the
+	// session payload the workspace query already streams, so the card gets it for
+	// nothing. Omitted entirely when the member is not running one - which is the
+	// truth for every solo session and every crew that never brackets a run.
+	CrewRun *domain.CrewRun `json:"crewRun,omitempty"`
+	// CrewRunDiscards is the CURRENT streak of this member's runs thrown away
+	// because the tree moved under them. At domain.CappedRepeat the task parks at
+	// NEEDS YOU; one run that ends any other way clears it. Derived on read.
+	CrewRunDiscards int `json:"crewRunDiscards,omitempty"`
 	// TaskSize is the ceremony level chosen at spawn. It is surfaced because it
 	// now decides the SHAPE of the task (mechanical = dev alone; standard/deep =
 	// dev + qa), so the board can say which choice was made on a card whose crew

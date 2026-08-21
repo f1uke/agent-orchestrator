@@ -474,7 +474,7 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := deriveStatusDetail(tt.rec, tt.pr, statusNow, !tt.hookless, domain.ApprovalRule{})
+			got := deriveStatusDetail(tt.rec, tt.pr, statusNow, !tt.hookless, domain.ApprovalRule{}, crewRunFacts{})
 			if got.Status != tt.wantStatus {
 				t.Fatalf("status: got %q want %q", got.Status, tt.wantStatus)
 			}
@@ -500,21 +500,21 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 func TestDeriveStatusDetailCountdownTimestamps(t *testing.T) {
 	// active within grace flips to needs_input at last + activeStaleGrace.
 	active := activeAgedRec(activeStaleGrace / 2)
-	got := deriveStatusDetail(active, nil, statusNow, true, domain.ApprovalRule{})
+	got := deriveStatusDetail(active, nil, statusNow, true, domain.ApprovalRule{}, crewRunFacts{})
 	wantAt := active.Activity.LastActivityAt.Add(activeStaleGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("active nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
 	}
 	// idle-fresh (signalled) flips to needs_input at last + waitingInputGrace.
 	idle := idleAgedRec(waitingInputGrace / 2)
-	got = deriveStatusDetail(idle, nil, statusNow, true, domain.ApprovalRule{})
+	got = deriveStatusDetail(idle, nil, statusNow, true, domain.ApprovalRule{}, crewRunFacts{})
 	wantAt = idle.Activity.LastActivityAt.Add(waitingInputGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("idle nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
 	}
 	// active over a PROBLEM PR flips to that problem status at last + activeStaleGrace.
 	activePR := statusRec(domain.ActivityActive, false)
-	got = deriveStatusDetail(activePR, statusPR(domain.PRFacts{CI: domain.CIFailing}), statusNow, true, domain.ApprovalRule{})
+	got = deriveStatusDetail(activePR, statusPR(domain.PRFacts{CI: domain.CIFailing}), statusNow, true, domain.ApprovalRule{}, crewRunFacts{})
 	wantAt = activePR.Activity.LastActivityAt.Add(activeStaleGrace)
 	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) {
 		t.Fatalf("active problem-PR nextTransitionAt: got %v want %v", got.NextTransitionAt, wantAt)
@@ -708,5 +708,51 @@ func TestDeriveStatus_ASuspendedSessionThatNeverRanIsNotBroken(t *testing.T) {
 	live.IsSuspended = false
 	if got := deriveStatus(live, nil, now, true, domain.ApprovalRule{}); got != domain.StatusNoSignal {
 		t.Fatalf("a live silent session reads %q, want no_signal", got)
+	}
+}
+
+// A member whose runs keep being thrown away parks at NEEDS YOU once the
+// automatic retry is spent - and it must do so OVER a healthy-looking pull
+// request, because "mergeable" while nothing has been verified is exactly the
+// laundered reading the detector exists to prevent.
+func TestDeriveStatusEscalatesAfterCappedDiscards(t *testing.T) {
+	rec := statusRec(domain.ActivityIdle, false)
+	mergeable := statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable, CI: domain.CIPassing})
+
+	for _, tc := range []struct {
+		name       string
+		discards   int
+		wantStatus domain.SessionStatus
+		wantReason domain.StatusReason
+	}{
+		{"no runs at all is untouched", 0, domain.StatusMergeable, domain.ReasonPRPipeline},
+		{"under the cap keeps retrying quietly", domain.CappedRepeat - 1, domain.StatusMergeable, domain.ReasonPRPipeline},
+		{"at the cap parks at needs you", domain.CappedRepeat, domain.StatusNeedsInput, domain.ReasonRunsDiscarded},
+		{"past the cap stays parked", domain.CappedRepeat + 2, domain.StatusNeedsInput, domain.ReasonRunsDiscarded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveStatusDetail(rec, mergeable, statusNow, true, domain.ApprovalRule{}, crewRunFacts{Discards: tc.discards})
+			if got.Status != tc.wantStatus || got.Reason != tc.wantReason {
+				t.Fatalf("got %q/%q, want %q/%q", got.Status, got.Reason, tc.wantStatus, tc.wantReason)
+			}
+		})
+	}
+}
+
+// A solo session - which can never bracket a run as a crew member, and whose
+// crew-run facts are therefore always zero - derives exactly what it did before
+// this existed.
+func TestDeriveStatusIsUnchangedWithoutCrewRuns(t *testing.T) {
+	for _, rec := range []domain.SessionRecord{
+		statusRec(domain.ActivityActive, false),
+		statusRec(domain.ActivityIdle, false),
+		idleAgedRec(waitingInputGrace * 2),
+		activeAgedRec(activeStaleGrace * 2),
+	} {
+		before := deriveStatus(rec, nil, statusNow, true, domain.ApprovalRule{})
+		after := deriveStatusDetail(rec, nil, statusNow, true, domain.ApprovalRule{}, crewRunFacts{}).Status
+		if before != after {
+			t.Fatalf("a session with no bracketed runs derived %q, was %q", after, before)
+		}
 	}
 }

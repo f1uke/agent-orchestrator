@@ -312,6 +312,13 @@ var schemaNames = map[string]string{
 	// domain smoke entities
 	"DomainSmokeCheck":    "SmokeCheck",
 	"DomainSmokeEvidence": "SmokeEvidence",
+	// httpd/controllers — crew-run (tree-write detector) wire envelopes
+	"ControllersStartCrewRunInput":    "StartCrewRunInput",
+	"ControllersStartCrewRunResponse": "StartCrewRunResponse",
+	"ControllersEndCrewRunInput":      "EndCrewRunInput",
+	"ControllersEndCrewRunResponse":   "EndCrewRunResponse",
+	"ControllersListCrewRunsResponse": "ListCrewRunsResponse",
+	"DomainCrewRun":                   "CrewRun",
 	// httpd/controllers: import wire envelopes
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
@@ -425,6 +432,7 @@ func operations() []operation {
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, smokeOperations()...)
+	ops = append(ops, crewRunOperations()...)
 	ops = append(ops, simOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, activityOperations()...)
@@ -958,6 +966,52 @@ func simOperations() []operation {
 // smokeOperations declares the session-scoped /smoke-checks operations. Must
 // stay 1:1 with the routes SmokeController.Register mounts (enforced by the
 // parity test).
+// crewRunOperations is the bracket a crew member puts around a build or test
+// run: the tree-write detector's two readings, and the "this member is running
+// something right now" signal that falls out of the same call.
+func crewRunOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/crew/runs", id: "listCrewRuns", tag: "sessions",
+			summary:    "List a session's bracketed build/test runs, newest first",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListCrewRunsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/runs", id: "startCrewRun", tag: "sessions",
+			summary:    "Open a run bracket: attach the tree-write detector and read the worktree's write generation",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.StartCrewRunInput{},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.StartCrewRunResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/runs/end", id: "endCrewRun", tag: "sessions",
+			summary:    "Close a run bracket and decide whether its result can be trusted",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.EndCrewRunInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.EndCrewRunResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
 func smokeOperations() []operation {
 	return []operation{
 		{

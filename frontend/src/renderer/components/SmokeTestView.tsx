@@ -7,6 +7,7 @@ import { aoBridge } from "../lib/bridge";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { sessionSmokeQueryKey, useSessionSmokeChecks, type SmokeChecksResponse } from "../hooks/useSessionSmokeChecks";
 import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
+import { useSessionCrewRuns } from "../hooks/useSessionCrewRuns";
 import {
 	ACCENT,
 	MONO,
@@ -30,6 +31,7 @@ import {
 	type SmokeEvidence,
 	type SmokeProgress,
 } from "../lib/smoke-test";
+import { CrewRunStrip } from "./CrewRunStrip";
 import { Toast } from "./inbox-ui";
 import { MediaLightbox, MediaThumb } from "./MediaLightbox";
 import { JiraLinkDialog } from "./JiraLinkDialog";
@@ -270,6 +272,7 @@ export function SmokeTestView({
 	// reason, in the "retired from this checklist" disclosure at the foot of the
 	// list, because "3 retired, now covered by tests" is the auditable form of a
 	// checklist shrinking and three cases silently vanishing is not.
+	const crewRuns = useSessionCrewRuns(sessionId);
 	const checks = activeChecks(data?.checks ?? []);
 	const retired = retiredChecks(data?.checks ?? []);
 	const progress = progressFor(checks);
@@ -298,6 +301,11 @@ export function SmokeTestView({
 			<Header worker={workerLabel} progress={progress} />
 
 			<div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 24px" }}>
+				{/* The machine's bracketed runs sit ABOVE the checklist: a run thrown
+				    away because the tree moved under it is a fact about whether
+				    anything below can be believed, so it must be read first. Renders
+				    nothing at all when the session has never bracketed a run. */}
+				<CrewRunStrip runs={crewRuns.data?.runs ?? []} />
 				{query.isLoading && <p style={{ padding: 16, fontSize: 12.5, color: P.muted2 }}>Loading smoke checks…</p>}
 				{query.error && (
 					<p style={{ padding: 16, fontSize: 12.5, color: P.danger }}>

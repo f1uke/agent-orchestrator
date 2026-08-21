@@ -13,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
@@ -38,6 +39,11 @@ type APIDeps struct {
 	Reviews  reviewsvc.Manager
 	Smoke    smokesvc.Manager
 	Sim      simsvc.Manager
+	// CrewRuns is the bracket a crew member puts around a build or a test run -
+	// the tree-write detector's two readings, and the "this member is running
+	// something right now" signal that falls out of them. nil answers 501, which
+	// is what a daemon with no detector should say rather than a quiet success.
+	CrewRuns crewrunsvc.Manager
 	// SimScreen is the machine-local simulator surface behind the desktop app's
 	// Simulator tab: device discovery, the live frame stream, and the driver a
 	// click goes through. nil on a machine that cannot capture or touch a
@@ -79,6 +85,7 @@ type API struct {
 	prs           *controllers.PRsController
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
+	crewRuns      *controllers.CrewRunsController
 	sim           *controllers.SimController
 	simFlows      *controllers.SimFlowsController
 	simScreen     *controllers.SimScreenController
@@ -111,6 +118,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
+		crewRuns:      &controllers.CrewRunsController{Svc: deps.CrewRuns},
 		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen)},
 		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags},
@@ -144,6 +152,7 @@ func (a *API) Register(root chi.Router) {
 			a.prs.Register(r)
 			a.reviews.Register(r)
 			a.smoke.Register(r)
+			a.crewRuns.Register(r)
 			a.sim.Register(r)
 			a.simFlows.Register(r)
 			a.simScreen.Register(r)

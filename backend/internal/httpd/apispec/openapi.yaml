@@ -1670,6 +1670,153 @@ paths:
       summary: Attach a member (qa) to the task this session belongs to, born suspended
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/crew/runs:
+    get:
+      operationId: listCrewRuns
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListCrewRunsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List a session's bracketed build/test runs, newest first
+      tags:
+      - sessions
+    post:
+      operationId: startCrewRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartCrewRunInput'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartCrewRunResponse'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Open a run bracket: attach the tree-write detector and read the worktree''s
+        write generation'
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/crew/runs/end:
+    post:
+      operationId: endCrewRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndCrewRunInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndCrewRunResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Close a run bracket and decide whether its result can be trusted
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/crew/wake:
     post:
       operationId: wakeCrewMember
@@ -5514,6 +5661,10 @@ components:
           type: string
         crew:
           $ref: '#/components/schemas/SessionCrew'
+        crewRun:
+          $ref: '#/components/schemas/CrewRun'
+        crewRunDiscards:
+          type: integer
         displayName:
           type: string
         harness:
@@ -5612,6 +5763,7 @@ components:
           - pr_pipeline
           - terminated
           - merged
+          - runs_discarded
           type: string
         targetBranch:
           type: string
@@ -5783,6 +5935,73 @@ components:
       - path
       - inWorkspace
       type: object
+    CrewRun:
+      properties:
+        attempt:
+          type: integer
+        changedPaths:
+          items:
+            type: string
+          type: array
+        createdAt:
+          format: date-time
+          type: string
+        crewId:
+          type: string
+        detector:
+          type: string
+        detectorReason:
+          type: string
+        endedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        genAtEnd:
+          minimum: 0
+          type: integer
+        genAtStart:
+          minimum: 0
+          type: integer
+        headSha:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        label:
+          type: string
+        outcome:
+          type: string
+        projectId:
+          type: string
+        result:
+          type: string
+        role:
+          type: string
+        sessionId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        worktreePath:
+          type: string
+      required:
+      - id
+      - sessionId
+      - projectId
+      - kind
+      - attempt
+      - detector
+      - genAtStart
+      - genAtEnd
+      - startedAt
+      - createdAt
+      - updatedAt
+      type: object
     DegradedProject:
       properties:
         id:
@@ -5897,6 +6116,45 @@ components:
           type: string
         worker:
           type: string
+      type: object
+    EndCrewRunInput:
+      properties:
+        result:
+          description: What the build or test said. Omitted records a run that did
+            not judge itself.
+          enum:
+          - pass
+          - fail
+          type: string
+        runId:
+          description: Run to close. Omitted closes the session's open run.
+          type: string
+      type: object
+    EndCrewRunResponse:
+      properties:
+        attempt:
+          description: This run's position in the current discard streak.
+          type: integer
+        escalated:
+          description: 'The cap is spent: stop re-running; the task parks at NEEDS
+            YOU.'
+          type: boolean
+        maxAttempts:
+          description: How many discards are retried automatically before a human
+            decides.
+          type: integer
+        retry:
+          description: The run was discarded and an automatic re-run is still within
+            the cap.
+          type: boolean
+        run:
+          $ref: '#/components/schemas/CrewRun'
+      required:
+      - run
+      - retry
+      - attempt
+      - maxAttempts
+      - escalated
       type: object
     EvidenceExportResponse:
       properties:
@@ -6283,6 +6541,15 @@ components:
       - supported
       - installed
       - authorized
+      type: object
+    ListCrewRunsResponse:
+      properties:
+        runs:
+          items:
+            $ref: '#/components/schemas/CrewRun'
+          type: array
+      required:
+      - runs
       type: object
     ListNotificationsResponse:
       properties:
@@ -8202,6 +8469,38 @@ components:
           type: string
       required:
       - projectId
+      type: object
+    StartCrewRunInput:
+      properties:
+        kind:
+          description: 'What is about to run: build, test or device.'
+          enum:
+          - build
+          - test
+          - device
+          type: string
+        label:
+          description: Free-text label for the run (e.g. the command), shown in the
+            Tests tab.
+          type: string
+      required:
+      - kind
+      type: object
+    StartCrewRunResponse:
+      properties:
+        certified:
+          description: Whether a tree-write detector is watching this run. False means
+            the result will be uncertified.
+          type: boolean
+        run:
+          $ref: '#/components/schemas/CrewRun'
+        supersededRunId:
+          description: A run this start had to abandon because it was left open; it
+            was closed as uncertified.
+          type: string
+      required:
+      - run
+      - certified
       type: object
     StartSimRecordingInput:
       properties:

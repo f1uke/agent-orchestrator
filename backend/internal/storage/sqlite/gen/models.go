@@ -21,6 +21,30 @@ type ChangeLog struct {
 	CreatedAt time.Time
 }
 
+type CrewRun struct {
+	ID             string
+	SessionID      domain.SessionID
+	ProjectID      domain.ProjectID
+	CrewID         domain.SessionID
+	Role           domain.CrewRole
+	WorktreePath   string
+	Kind           domain.CrewRunKind
+	Label          string
+	Attempt        int64
+	Detector       domain.CrewRunDetector
+	DetectorReason string
+	GenAtStart     int64
+	GenAtEnd       int64
+	StartedAt      time.Time
+	EndedAt        sql.NullTime
+	Outcome        domain.CrewRunOutcome
+	Result         domain.CrewRunResult
+	ChangedPaths   string
+	HeadSha        string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Notification struct {
 	ID        string
 	SessionID domain.SessionID

@@ -49,4 +49,10 @@ const (
 	ReasonPRPipeline   StatusReason = "pr_pipeline"   // status came from the open-PR aggregate
 	ReasonTerminated   StatusReason = "terminated"    // session terminated
 	ReasonMerged       StatusReason = "merged"        // merged branch / terminated with a merged PR
+	// ReasonRunsDiscarded is CappedRepeat runs in a row thrown away because the
+	// tree moved under each of them. The member cannot get a quiet window, and
+	// the automatic retry is spent, so a human decides: pause the other member,
+	// or accept an uncertified result. It outranks the PR pipeline deliberately -
+	// a card must not read "mergeable" while nothing it says has been verified.
+	ReasonRunsDiscarded StatusReason = "runs_discarded"
 )

@@ -35,6 +35,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
+	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
@@ -45,6 +46,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
+	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
 )
 
 // Run starts the daemon and blocks until it exits. SIGINT/SIGTERM drive
@@ -302,6 +304,19 @@ func Run() error {
 		log:      log,
 	}
 
+	// The tree-write detector and the run bracket that reads it. The registry
+	// holds a filesystem watch per worktree only while a run is bracketed, so a
+	// solo session - and a crew that never brackets - costs nothing here. Runs
+	// left open by a previous process are closed as UNCERTIFIED at boot: their
+	// watchers died with that process, and a run nothing watched can never be
+	// certified after the fact.
+	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
+	crewRunSvc := crewrunsvc.New(crewrunsvc.Options{Store: store, Watcher: treeWatchers, Logger: log})
+	if err := crewRunSvc.ReconcileOpenRuns(ctx); err != nil {
+		log.Warn("crew runs: could not close runs left open by a previous daemon", "err", err)
+	}
+	defer treeWatchers.Close()
+
 	previewDone := preview.NewPoller(store, sessionSvc, "http://"+cfg.Addr(), preview.PollerConfig{Logger: log}).Start(ctx)
 	// Per-session token telemetry: a background poll that reads claude-code session
 	// transcripts and persists token/cost totals on the session row (additive; never
@@ -322,6 +337,7 @@ func Run() error {
 		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
+		CrewRuns:           crewRunSvc,
 		Sim:                newSimService(store, simScreen),
 		SimScreen:          simScreen,
 		SimDrags:           simDrags,
