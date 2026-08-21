@@ -10,9 +10,11 @@ import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import {
 	approvalLabel,
 	approvalProgress,
+	prFactsFromSummary,
 	prRef,
 	prTitleLabel,
 	providerFromPRURL,
+	sessionPRDisplaySummaries,
 	type ApprovalProgress,
 } from "../lib/pr-display";
 import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
@@ -97,7 +99,19 @@ export function ReviewsView({
 	onOpenFile?: (target: FileDiffTarget) => void;
 }) {
 	const sessionId = session.id;
-	const prs = sortedPRs(session);
+	// The task's pull requests, not this session ROW's. A crew shares one branch
+	// and one PR, but only DEV's row carries it - the daemon answers `/pr` for the
+	// whole task, so reading the row directly is what left qa's Reviews tab
+	// claiming the task had nothing to review, and gave the Run review button a
+	// blocked-reason computed from an empty list. Merged rather than swapped, so
+	// the row's own facts still stand while the read is in flight (and for every
+	// solo session, where the two say the same thing anyway).
+	const scmData = useSessionScmSummary(sessionId).data;
+	const scmSummaries = useMemo(() => scmData ?? [], [scmData]);
+	const prs = useMemo(
+		() => sessionPRDisplaySummaries(session, scmSummaries).map(prFactsFromSummary),
+		[session, scmSummaries],
+	);
 	const hasPr = prs.length > 0;
 	const queryClient = useQueryClient();
 
@@ -229,9 +243,8 @@ export function ReviewsView({
 	const { resolve, dispatch, send, busy, toast, showToast, doResolve, doReply, doSendQuick, doSendPrompt } =
 		useInboxActions(sessionId);
 
-	// Approval-progress facts live on the SCM summary (the /pr read model), keyed
-	// by PR number so each block can show its human-approval pill.
-	const scmSummaries = useSessionScmSummary(sessionId).data ?? [];
+	// Approval-progress facts come off the same SCM summary read, keyed by PR
+	// number so each block can show its human-approval pill.
 	const approvalByNumber = useMemo(() => {
 		const m = new Map<number, ApprovalProgress | null>();
 		for (const s of scmSummaries) m.set(s.number, approvalProgress(s.review));

@@ -443,3 +443,65 @@ describe("ReviewsView (merged reviews + comments)", () => {
 		});
 	});
 });
+
+/**
+ * A crew's two members share one branch and one pull request, but only dev's
+ * session ROW carries it: the daemon answers `/pr` for the task, while the
+ * session payload stays per-agent. Reading the PR list off the session object is
+ * what left qa's Reviews tab claiming the task has nothing to review - and it is
+ * not only a display: the Run review button's blocked-reason is computed from
+ * the same empty list.
+ */
+describe("ReviewsView reads the task's pull requests, not the session row's", () => {
+	it("shows the task's PR when the session row carries none", async () => {
+		getMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/reviews") return { data: reviewsData, error: undefined };
+			if (path === "/api/v1/sessions/{sessionId}/pr-comments") return { data: commentsData, error: undefined };
+			if (path === "/api/v1/sessions/{sessionId}/pr") {
+				return {
+					data: {
+						prs: [
+							{
+								url: PR_URL,
+								htmlUrl: PR_URL,
+								number: 1,
+								title: "wire retry",
+								state: "open",
+								provider: "github",
+								repo: "o/agent-orchestrator",
+								author: "ada",
+								sourceBranch: "feat/retry",
+								targetBranch: "main",
+								headSha: "abc123",
+								additions: 1,
+								deletions: 0,
+								changedFiles: 1,
+								ci: { state: "passing", failingChecks: [] },
+								review: { decision: "changes_requested", hasUnresolvedHumanComments: true, unresolvedBy: [] },
+								mergeability: { state: "mergeable", reasons: [], prUrl: PR_URL, conflictFiles: [] },
+								updatedAt: "2026-07-09T00:00:00Z",
+							},
+						],
+					},
+					error: undefined,
+				};
+			}
+			return { data: undefined, error: undefined };
+		});
+
+		renderView([]); // qa: no PR on its own session row
+
+		expect(await screen.findByText("PR #1")).toBeInTheDocument();
+		expect(screen.getByText("CI passed")).toBeInTheDocument();
+		expect(screen.queryByText("No pull requests yet")).toBeNull();
+		expect(screen.queryByText("Nothing to review yet")).toBeNull();
+	});
+
+	it("still shows the session row's PRs when the task read has not landed", async () => {
+		// The /pr query is absent here, so the row's own facts are all there is -
+		// which is every solo session, and dev while the summary is in flight.
+		renderView([pr(1, "open")]);
+		expect(await screen.findByText("PR #1")).toBeInTheDocument();
+		expect(screen.getByText("CI passed")).toBeInTheDocument();
+	});
+});

@@ -162,6 +162,28 @@ export function sessionPRDisplaySummaries(
 	return [...fromFacts, ...summaryOnly].sort(comparePRDisplaySummaries);
 }
 
+/**
+ * The narrow PR shape a session ROW carries, read back off the richer `/pr`
+ * summary - the inverse of {@link sessionPRFactToSummary}.
+ *
+ * It exists because a crew's pull request lives on DEV's session row while the
+ * `/pr` route answers for the whole task: a surface that reads the row directly
+ * sees nothing at all from qa. Going through the read model instead is what lets
+ * the Reviews tab and the Summary strip agree about which PRs a task has.
+ */
+export function prFactsFromSummary(pr: SessionPRSummary): PullRequestFacts {
+	return {
+		url: pr.url,
+		number: pr.number,
+		state: pr.state,
+		ci: pr.ci.state,
+		review: pr.review.decision,
+		mergeability: pr.mergeability.state,
+		reviewComments: pr.review.hasUnresolvedHumanComments,
+		updatedAt: pr.updatedAt,
+	};
+}
+
 function sessionPRFactToSummary(session: WorkspaceSession, pr: PullRequestFacts): SessionPRSummary {
 	return {
 		url: pr.url,
