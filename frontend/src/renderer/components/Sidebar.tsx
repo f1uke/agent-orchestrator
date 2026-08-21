@@ -107,9 +107,7 @@ const HOVER_ACTION_CLASS =
 // section box (per the redesign prototype): a full-width split of two 36px
 // segments. Plain clickable — hover lifts the surface, press flashes
 // refined-blue. The resting (inactive) look; the ACTIVE view's segment layers
-// SEG_ACTIVE_CLASS on top (see below). font-size/weight take `!` because
-// styles.css resets `button { font: inherit }` (unlayered → beats Tailwind's
-// layered utilities); `!important` is the codebase's override idiom.
+// SEG_ACTIVE_CLASS on top (see below).
 // `flex-auto min-w-0` is load-bearing, and the pair has to be exactly this:
 //   - `flex-1` (basis 0) would split the row 50/50 and ellipsize the longer
 //     "Orchestrator" label even at the default rail width. `flex-auto` sizes each
@@ -122,7 +120,7 @@ const HOVER_ACTION_CLASS =
 // Together with the truncating labels below, the segments stay inside the card
 // across the whole 200-420px resize range.
 const SEG_CLASS =
-	"flex flex-auto min-w-0 items-center justify-center gap-[7px] h-9 rounded-[9px] border text-[12.5px]! font-semibold! " +
+	"flex flex-auto min-w-0 items-center justify-center gap-[7px] h-9 rounded-[9px] border text-[12.5px] font-semibold " +
 	"bg-raised border-border-strong text-muted-foreground transition-colors " +
 	"hover:bg-overlay hover:text-foreground " +
 	"active:border-accent-dim active:bg-accent-weak active:text-accent " +
