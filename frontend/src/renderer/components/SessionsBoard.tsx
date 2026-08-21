@@ -174,12 +174,12 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				<div className="shrink-0 border-t border-border px-[18px]">
 					{/* agent-orchestrator's done-bar (Dashboard.tsx + globals.css):
 					    a full-width chevron + label + count toggle row. min-h matches
-					    the sidebar footer (7px pad ×2 + 37px Settings button) so this
-					    border-t aligns with the sidebar's footer border. The button is
-					    37px (not the 35.5px its text-[13px] implies) because the
-					    unlayered `button { font: inherit }` in styles.css outranks
-					    Tailwind's layered text utilities, leaving it at 14px/21px. */}
-					<div className="flex min-h-[51px] w-full items-center gap-2 py-2">
+					    the sidebar footer so this border-t aligns with the sidebar's
+					    footer border: 7px pad ×2 + a 35.5px Settings button (p-2 = 8px
+					    ×2 around a 13px/1.5 = 19.5px line). Both bars are bottom-
+					    anchored, so a mismatch here shows up as two borders 1-2px
+					    apart across the bottom of the window. */}
+					<div className="flex min-h-[49.5px] w-full items-center gap-2 py-2">
 						<button
 							aria-expanded={doneExpanded}
 							className="group flex flex-1 items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"

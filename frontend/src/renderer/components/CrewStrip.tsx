@@ -163,12 +163,6 @@ function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolea
 				<button
 					className="inline-flex shrink-0 items-center gap-0.5 rounded-full px-1 py-px text-[10px] text-passive transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
 					data-crew-add="qa"
-					// The size is set inline because the renderer's `button { font: inherit }`
-					// reset is UNLAYERED, and unlayered rules beat Tailwind's layered
-					// utilities - so `text-[10px]` on a button silently loses to the
-					// inherited 14px. Left to the class, this label renders half again as
-					// large as the `mechanical` marker it sits beside.
-					style={{ fontSize: "10px", lineHeight: "1.4" }}
 					disabled={pending}
 					onClick={(event) => {
 						event.stopPropagation();
