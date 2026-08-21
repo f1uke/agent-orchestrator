@@ -210,6 +210,28 @@ func runtimeNameBranch(branch string, role domain.CrewRole) string {
 	return branch
 }
 
+// TeardownCrewSubordinates ends every non-dev member of id's crew, leaving id
+// itself, its runtime and the shared worktree alone. It is the lifecycle
+// reducer's half of a crew teardown: a merged PR terminates dev's ROW without
+// going through Teardown, so the reducer calls this to get the same fan-out
+// Teardown would have given it, in the same order (members first, then dev,
+// then the single disk reclaim, which auto-reclaim still owns).
+//
+// It is a no-op for anything that is not a crew DEV: a solo session has no crew,
+// and a subordinate whose own PR merged fans out to nobody, so dev keeps working.
+// Wired in daemon/lifecycle_wiring.go via lifecycle.SetCrewReaper.
+func (m *Manager) TeardownCrewSubordinates(ctx context.Context, id domain.SessionID, cause string) error {
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return fmt.Errorf("crew teardown %s: %w", id, err)
+	}
+	if !ok || !rec.InCrew() || !rec.CrewRole.IsDev() {
+		return nil
+	}
+	m.teardownCrewSubordinates(ctx, rec, cause)
+	return nil
+}
+
 // teardownCrewSubordinates tears down every non-dev member of rec's crew before
 // dev itself goes. It is a no-op for a solo session and for a subordinate.
 //

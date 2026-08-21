@@ -157,6 +157,13 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// idle sweep. Wired after the manager exists; lifecycle has no runtime of its
 	// own (feature/merge-suspend-in-place).
 	lcm.SetRuntimeSuspender(mgr.SuspendRuntime)
+	// A crew is one task on one worktree. When the reducer terminates a dev
+	// because its PR merged (or its issue closed) it writes one row and nothing
+	// else - so without this its qa would keep running, awake, on a worktree
+	// whose owner is gone. This hands the reducer the same subordinates-first
+	// fan-out Teardown already gives kill, purge, shutdown and auto-reclaim.
+	// A solo session has no crew and takes a no-op path.
+	lcm.SetCrewReaper(mgr.TeardownCrewSubordinates)
 	// The PR-claim path shares the observer's provider set so a claimed GitLab
 	// merge request resolves through the same GitLab client + auth as background
 	// observation, not GitHub alone. GitHub is always present; GitLab is added

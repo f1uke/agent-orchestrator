@@ -334,3 +334,91 @@ func TestTeardown_SubordinateNeverEndsItsDev(t *testing.T) {
 		}
 	}
 }
+
+// TeardownCrewSubordinates is the lifecycle reducer's half of a crew teardown:
+// the merge path terminates dev's ROW without going through Teardown, so it
+// calls this to get the same subordinates-first fan-out. These pin what it must
+// and must not touch.
+
+// The crew case: qa ends, its pane is destroyed, and NOTHING dev owns is - not
+// its row, not its pane, and above all not the shared worktree, which stays for
+// the reclaim pass exactly as a solo merged worker's does.
+func TestTeardownCrewSubordinates_EndsTheMemberAndLeavesDevAlone(t *testing.T) {
+	m, st, rt, ws := newManager()
+	lcm := m.lcm.(*fakeLCM)
+	dev, qa := seedCrew(st)
+
+	if err := m.TeardownCrewSubordinates(ctx, dev.ID, domain.TerminationCauseWorkComplete); err != nil {
+		t.Fatalf("TeardownCrewSubordinates: %v", err)
+	}
+	if !st.sessions[qa.ID].IsTerminated {
+		t.Fatal("the crew member outlived the dev whose work is done")
+	}
+	if got := lcm.terminationCauses[qa.ID]; len(got) != 1 || got[0] != domain.TerminationCauseWorkComplete {
+		t.Fatalf("member termination causes = %v, want [%s]: it ends for the same reason its dev does",
+			got, domain.TerminationCauseWorkComplete)
+	}
+	if got := lcm.terminationCauses[dev.ID]; len(got) != 0 {
+		t.Fatalf("the fan-out terminated dev: %v; that is the reducer's own write, after this returns", got)
+	}
+	if st.sessions[dev.ID].IsTerminated {
+		t.Fatal("the fan-out terminated dev's row; that is the reducer's own write, after this returns")
+	}
+	if ws.destroyed != 0 {
+		t.Fatalf("workspace destroyed %d time(s); the disk is auto-reclaim's, after its grace", ws.destroyed)
+	}
+	if got := st.sessions[dev.ID].Metadata.WorkspacePath; got != crewPath {
+		t.Fatalf("dev workspace = %q, want it untouched at %q", got, crewPath)
+	}
+	if len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != "h-qa" {
+		t.Fatalf("runtimes destroyed = %v, want only the member's own pane [h-qa]", rt.destroyedIDs)
+	}
+}
+
+// The solo case - every task on this machine that is not a crew. Nothing at all
+// happens, because there is no crew to find.
+func TestTeardownCrewSubordinates_SoloIsANoOp(t *testing.T) {
+	m, st, rt, ws := newManager()
+	solo := domain.SessionRecord{
+		ID: "mer-9", ProjectID: "mer", Kind: domain.KindWorker,
+		Metadata: domain.SessionMetadata{Branch: "feature/solo", WorkspacePath: "/ws/solo", RuntimeHandleID: "h-solo"},
+		Activity: domain.Activity{State: domain.ActivityActive},
+	}
+	st.sessions[solo.ID] = solo
+
+	if err := m.TeardownCrewSubordinates(ctx, solo.ID, domain.TerminationCauseWorkComplete); err != nil {
+		t.Fatalf("TeardownCrewSubordinates(solo): %v", err)
+	}
+	if st.sessions[solo.ID] != solo {
+		t.Fatalf("a solo session's row was touched: %+v", st.sessions[solo.ID])
+	}
+	if len(rt.destroyedIDs) != 0 || ws.destroyed != 0 {
+		t.Fatalf("a solo session lost resources: runtimes %v, workspaces %d", rt.destroyedIDs, ws.destroyed)
+	}
+}
+
+// A SUBORDINATE whose own PR merged fans out to nobody: dev keeps working.
+func TestTeardownCrewSubordinates_FromASubordinateIsANoOp(t *testing.T) {
+	m, st, rt, ws := newManager()
+	dev, qa := seedCrew(st)
+
+	if err := m.TeardownCrewSubordinates(ctx, qa.ID, domain.TerminationCauseWorkComplete); err != nil {
+		t.Fatalf("TeardownCrewSubordinates(qa): %v", err)
+	}
+	if st.sessions[dev.ID].IsTerminated || st.sessions[qa.ID].IsTerminated {
+		t.Fatalf("a subordinate's fan-out ended someone: dev=%v qa=%v",
+			st.sessions[dev.ID].IsTerminated, st.sessions[qa.ID].IsTerminated)
+	}
+	if len(rt.destroyedIDs) != 0 || ws.destroyed != 0 {
+		t.Fatalf("a subordinate's fan-out destroyed resources: runtimes %v, workspaces %d", rt.destroyedIDs, ws.destroyed)
+	}
+}
+
+// A session that is already gone is a benign race, not an error: the reducer
+// must still be able to record the termination it was called for.
+func TestTeardownCrewSubordinates_MissingSessionIsBenign(t *testing.T) {
+	m, _, _, _ := newManager()
+	if err := m.TeardownCrewSubordinates(ctx, "mer-404", domain.TerminationCauseWorkComplete); err != nil {
+		t.Fatalf("a vanished session must not fail the fan-out: %v", err)
+	}
+}

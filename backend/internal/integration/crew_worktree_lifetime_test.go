@@ -97,6 +97,10 @@ func newCrewStackWithIdle(t *testing.T, idleTTL time.Duration) *crewStack {
 		Clock:        func() time.Time { return st.now },
 		IdleCloseTTL: idleTTL,
 	})
+	// Mirror daemon/lifecycle_wiring.go: the reducer terminates a finished dev's
+	// row without going through Teardown, so it needs the session manager's crew
+	// fan-out injected or a merged dev leaves its qa running.
+	lcm.SetCrewReaper(st.mgr.TeardownCrewSubordinates)
 	st.svc = sessionsvc.New(st.mgr, store)
 	return st
 }
@@ -355,11 +359,14 @@ func TestCrew_ReclaimFreesTheTreeOnlyWhenNoMemberNeedsIt(t *testing.T) {
 	}
 }
 
-// TestCrew_AbandonedHalfCrewIsReclaimed pins the behaviour chosen for the case the
-// brief singles out: dev finished (the lifecycle reducer terminates it directly
-// when its PR merges, with no teardown) and the subordinate was left running.
-// Nothing else would ever end that subordinate - the idle sweep only suspends - so
-// the tree would be pinned forever. Auto-reclaim ends the crew and frees it.
+// TestCrew_AbandonedHalfCrewIsReclaimed pins auto-reclaim's SAFETY NET: dev's row
+// terminated while the subordinate was left running, with no teardown in between.
+// The merge path no longer produces that state (it fans out to the crew first -
+// see crew_merge_ends_the_crew_test.go), but a fan-out that failed, or a row a
+// crash left half-written, still can. Nothing else would ever end that
+// subordinate - the idle sweep only suspends - so the tree would be pinned
+// forever. Auto-reclaim ends the crew and frees it. It is a backstop, not the
+// common case, which is exactly why it is still here.
 func TestCrew_AbandonedHalfCrewIsReclaimed(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)

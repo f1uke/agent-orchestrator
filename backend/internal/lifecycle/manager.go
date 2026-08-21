@@ -117,6 +117,13 @@ type Manager struct {
 	// this via SetRuntimeSuspender after it is built. Nil until wired (the flag
 	// flip alone still keeps the card in its lane); best-effort when set.
 	runtimeSuspender func(context.Context, domain.SessionID) error
+	// crewReaper ends the crew MEMBERS of a dev this reducer is about to
+	// terminate because its work is done. Lifecycle owns the fact ("the task is
+	// over") but has no runtime and no crew of its own, so the session manager
+	// injects its existing fan-out via SetCrewReaper. Nil until wired, and a
+	// no-op for every solo session (which has no crew), so the common path is
+	// decided by the absence of data rather than by a branch.
+	crewReaper func(context.Context, domain.SessionID, string) error
 }
 
 // SetRuntimeSuspender wires the hook the merge-suspend path uses to tear a
@@ -127,6 +134,24 @@ type Manager struct {
 // reaped later (agent exit / daemon restart).
 func (m *Manager) SetRuntimeSuspender(fn func(context.Context, domain.SessionID) error) {
 	m.runtimeSuspender = fn
+}
+
+// SetCrewReaper wires the hook that ends a finished dev's crew members, injected
+// by the session manager (like SetRuntimeSuspender above) because lifecycle has
+// no runtime and no view of a crew.
+//
+// It exists because a PR merge is the ONE route to termination that does not go
+// through the session manager's Teardown, and Teardown is where the crew fan-out
+// lives. Without it a merged dev's row terminates while its qa keeps running,
+// awake, on a worktree whose owner is gone and whose work has already landed -
+// until auto-reclaim's 24-hour grace finally ends it.
+//
+// It deliberately does NOT tear dev itself down: a merged worker keeps its
+// worktree and its restore marker for the whole reclaim grace, and that is the
+// solo behaviour this must not change. A Manager with no reaper set skips the
+// fan-out entirely.
+func (m *Manager) SetCrewReaper(fn func(context.Context, domain.SessionID, string) error) {
+	m.crewReaper = fn
 }
 
 // anyMergedPR reports whether the session owns at least one merged PR. MarkSpawned
