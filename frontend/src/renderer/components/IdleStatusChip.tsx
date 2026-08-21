@@ -48,7 +48,14 @@ export function IdleStatusChip({ session, compact = false }: { session: Workspac
 			? "Asleep until it is this agent's turn — use Wake to hand it the turn"
 			: "Paused to free resources — open to resume";
 		if (compact) {
-			return <Moon aria-label={label} className="h-3 w-3 shrink-0 text-passive" strokeWidth={2} title={title} />;
+			// The title rides a wrapping span: lucide's icon props do not include one,
+			// and the sidebar row is exactly where a reader hovers to ask which kind
+			// of sleep this is.
+			return (
+				<span className="inline-flex shrink-0" title={title}>
+					<Moon aria-label={label} className="h-3 w-3 text-passive" strokeWidth={2} />
+				</span>
+			);
 		}
 		return (
 			<span
