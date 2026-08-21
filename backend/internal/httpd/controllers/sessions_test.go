@@ -31,6 +31,7 @@ type fakeSessionService struct {
 	sendOutcome           ports.SendOutcome
 	sessions              map[domain.SessionID]domain.Session
 	previewDisabled       bool
+	previewFromAgent      []domain.SessionID
 	sent                  string
 	sentFrom              domain.SessionID
 	sentAbout             string
@@ -188,6 +189,14 @@ func (f *fakeSessionService) SetPreview(_ context.Context, id domain.SessionID, 
 	s.Metadata.PreviewRevision++
 	f.sessions[id] = s
 	return s, nil
+}
+
+// SetPreviewFromAgent is the same write plus the crew's runtime-touch report.
+// The fake records that it was the route taken, because WHICH of the two the
+// controller calls is the whole of what decides whether a task gains a qa.
+func (f *fakeSessionService) SetPreviewFromAgent(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error) {
+	f.previewFromAgent = append(f.previewFromAgent, id)
+	return f.SetPreview(ctx, id, previewURL)
 }
 
 // previewDisabled makes EnsurePreviewAllowed refuse, standing in for a project
@@ -667,6 +676,29 @@ func TestSessionsAPI_SetPreviewExplicitURLPersists(t *testing.T) {
 	}
 	if got := svc.sessions["ao-1"].Metadata.PreviewURL; got != "http://localhost:5173/" {
 		t.Fatalf("persisted previewUrl = %q, want explicit url", got)
+	}
+}
+
+// THE ROUTE DECIDES WHETHER A TASK GAINS A QA, so which service call each one
+// makes is asserted rather than assumed. `ao preview <url>` is dev pointing at
+// what it built - a runtime touch, and one of the two things that create a qa -
+// while `ao preview clear` is the opposite and must say nothing.
+func TestSessionsAPI_SetPreviewIsTheAgentsTouchAndClearIsNot(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/preview", `{"url":"http://localhost:5173/"}`); status != http.StatusOK {
+		t.Fatalf("set preview = %d, want 200", status)
+	}
+	if len(svc.previewFromAgent) != 1 || svc.previewFromAgent[0] != "ao-1" {
+		t.Fatalf("setting a preview took the wrong path: %v", svc.previewFromAgent)
+	}
+
+	if _, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/ao-1/preview", ""); status != http.StatusOK {
+		t.Fatalf("clear preview = %d, want 200", status)
+	}
+	if len(svc.previewFromAgent) != 1 {
+		t.Fatalf("clearing a preview reported a runtime touch: %v", svc.previewFromAgent)
 	}
 }
 

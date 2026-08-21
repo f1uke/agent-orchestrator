@@ -340,17 +340,18 @@ func TestSessionSetPreviewPersistsURL(t *testing.T) {
 	}
 }
 
-// TestSessionSetPreview_ReportsTheRuntimeTouch. `ao preview` moving a session's
-// preview is the second half of the lazy-creation trigger: it says this task has
-// a running surface, which is what a qa is for. Reported only for a preview that
-// actually LANDED - an unknown session has no task to give a member to.
-func TestSessionSetPreview_ReportsTheRuntimeTouch(t *testing.T) {
+// TestSessionSetPreviewFromAgent_ReportsTheRuntimeTouch. `ao preview` pointing at
+// what dev built is the second half of the lazy-creation trigger: it says this
+// task has a running surface, which is what a qa is for. Reported only for a
+// preview that actually LANDED - an unknown session has no task to give a member
+// to.
+func TestSessionSetPreviewFromAgent_ReportsTheRuntimeTouch(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
 	fc := &fakeCommander{}
 	svc := &Service{store: st, clock: time.Now, manager: fc}
 
-	if _, err := svc.SetPreview(context.Background(), "mer-1", "http://localhost:5173"); err != nil {
+	if _, err := svc.SetPreviewFromAgent(context.Background(), "mer-1", "http://localhost:5173"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fc.runtimeTouches) != 1 {
@@ -360,11 +361,35 @@ func TestSessionSetPreview_ReportsTheRuntimeTouch(t *testing.T) {
 		t.Fatalf("reported %s/%q, want mer-1/%q", got.id, got.reason, domain.CrewJoinPreview)
 	}
 
-	if _, err := svc.SetPreview(context.Background(), "ghost-1", "http://x"); err == nil {
+	if _, err := svc.SetPreviewFromAgent(context.Background(), "ghost-1", "http://x"); err == nil {
 		t.Fatal("want an error for an unknown session")
 	}
 	if len(fc.runtimeTouches) != 1 {
 		t.Fatalf("a preview on an unknown session reported a runtime touch: %d", len(fc.runtimeTouches))
+	}
+}
+
+// TestSessionSetPreview_SaysNothingAboutACrew. The plain write has two other
+// callers and NEITHER means "this task has a runtime surface": the background
+// poller, which publishes an HTML file it found in the worktree that nobody
+// asked for, and `ao preview clear`, which is the opposite of a touch. Either
+// one creating a qa would be the trigger firing on its own.
+func TestSessionSetPreview_SaysNothingAboutACrew(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	fc := &fakeCommander{}
+	svc := &Service{store: st, clock: time.Now, manager: fc}
+
+	// The poller publishing a file it discovered.
+	if _, err := svc.SetPreview(context.Background(), "mer-1", "http://127.0.0.1:3001/preview/files/mer-1/report.html"); err != nil {
+		t.Fatal(err)
+	}
+	// `ao preview clear`.
+	if _, err := svc.SetPreview(context.Background(), "mer-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.runtimeTouches) != 0 {
+		t.Fatalf("a preview nobody asked for reported %d runtime touches, want 0", len(fc.runtimeTouches))
 	}
 }
 

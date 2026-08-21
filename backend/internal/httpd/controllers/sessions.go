@@ -90,6 +90,11 @@ type SessionService interface {
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
 	SetPreview(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
+	// SetPreviewFromAgent is SetPreview for the write the AGENT asked for. It is
+	// the one that also says "this task has a runtime surface", which is what
+	// creates its qa - so `ao preview clear` and the background poller keep using
+	// SetPreview and say nothing.
+	SetPreviewFromAgent(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error)
 	EnsurePreviewAllowed(ctx context.Context, id domain.SessionID) error
 	SetAutoNudge(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	SetAutoResolve(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
@@ -444,7 +449,7 @@ func (c *SessionsController) setPreview(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	updated, err := c.Svc.SetPreview(r.Context(), sessionID(r), previewURL)
+	updated, err := c.Svc.SetPreviewFromAgent(r.Context(), sessionID(r), previewURL)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

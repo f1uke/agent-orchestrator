@@ -928,11 +928,32 @@ func (s *Service) SetPreview(ctx context.Context, id domain.SessionID, previewUR
 	if !updated {
 		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
-	// `ao preview` is one of the two things that says this task HAS a runtime
-	// surface, which is what a qa is for. Reported after the write, so the trigger
-	// only ever fires for a preview that actually landed.
-	s.manager.NoteRuntimeTouch(ctx, id, domain.CrewJoinPreview)
 	return s.Get(ctx, id)
+}
+
+// SetPreviewFromAgent is SetPreview when the AGENT asked for it - `ao preview
+// <url>`, or a bare `ao preview` that autodetected an entry point in its own
+// workspace - and it is the only preview write that says anything about a crew.
+//
+// The distinction is load-bearing, not decorative. Pointing a preview at what
+// you built is dev's own act and one of the two things that mean "this task has
+// a runtime surface", which is what creates its qa (design §1.12.1). Two other
+// writers go through SetPreview and must NOT count:
+//
+//   - the preview POLLER, which publishes an HTML file it found in the worktree.
+//     Nobody asked for it, and an agent that wrote a report page has not built a
+//     running app.
+//   - `ao preview clear`, which is the opposite of a touch.
+//
+// The touch is reported AFTER the write lands, so a preview that 404s or is
+// refused for a project with no web UI creates nothing.
+func (s *Service) SetPreviewFromAgent(ctx context.Context, id domain.SessionID, previewURL string) (domain.Session, error) {
+	out, err := s.SetPreview(ctx, id, previewURL)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	s.manager.NoteRuntimeTouch(ctx, id, domain.CrewJoinPreview)
+	return out, nil
 }
 
 // SetAutoNudge sets (or clears, when override is nil) the per-session override
