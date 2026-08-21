@@ -29,6 +29,19 @@ type crewSessionView struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`
 	} `json:"crew"`
+	// CrewRun is the bracketed build/test run this member has OPEN right now, and
+	// it is what lets this listing say "running a build" instead of the far
+	// weaker "awake". Nothing else on the wire can answer that: the activity state
+	// comes from the agent's own hooks and cannot tell a build from an agent
+	// reading a file. Absent for every member that is not running one.
+	CrewRun *struct {
+		Kind      string `json:"kind"`
+		Label     string `json:"label"`
+		StartedAt string `json:"startedAt"`
+	} `json:"crewRun"`
+	// CrewRunDiscards is the current streak of runs thrown away because the tree
+	// moved under them. At the cap the task is at NEEDS YOU.
+	CrewRunDiscards int `json:"crewRunDiscards"`
 }
 
 type crewWakeResponse struct {
@@ -70,6 +83,7 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.AddCommand(newCrewAddCommand(ctx))
 	cmd.AddCommand(newCrewWakeCommand(ctx))
+	cmd.AddCommand(newCrewRunCommand(ctx))
 	cmd.AddCommand(newCrewStatusCommand(ctx))
 	return cmd
 }
@@ -205,6 +219,11 @@ func (c *commandContext) printCrewStatus(ctx context.Context, out io.Writer, pro
 			if _, err := fmt.Fprintf(out, "  %-4s %-28s %s\n", crewRoleOf(member), member.ID, crewMemberState(member)); err != nil {
 				return err
 			}
+			for _, note := range crewRunNotes(member) {
+				if _, err := fmt.Fprintf(out, "       %s\n", note); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -231,6 +250,32 @@ func crewMemberState(s crewSessionView) string {
 		return "asleep"
 	}
 	return "awake"
+}
+
+// crewRunNotes says what this member is DOING, when the bracket knows. "awake"
+// is far weaker advice than "running a build": a member deciding whether now is
+// a good moment to start its own run needs the second, and the bracket is the
+// only place it exists.
+//
+// The streak line is the other half. Three discards in a row means the member
+// cannot get a quiet window, and that has to be readable here rather than only
+// on the board.
+func crewRunNotes(s crewSessionView) []string {
+	notes := []string{}
+	if s.CrewRun != nil {
+		line := "running a " + s.CrewRun.Kind
+		if s.CrewRun.Label != "" {
+			line += " - " + s.CrewRun.Label
+		}
+		if since := relativeStart(s.CrewRun.StartedAt); since != "" {
+			line += " (started " + since + ")"
+		}
+		notes = append(notes, line)
+	}
+	if s.CrewRunDiscards > 0 {
+		notes = append(notes, fmt.Sprintf("%d run(s) in a row discarded - the tree moved under each", s.CrewRunDiscards))
+	}
+	return notes
 }
 
 func crewRoleOf(s crewSessionView) string {

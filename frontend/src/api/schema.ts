@@ -589,6 +589,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/crew/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a session's bracketed build/test runs, newest first */
+        get: operations["listCrewRuns"];
+        put?: never;
+        /** Open a run bracket: attach the tree-write detector and read the worktree's write generation */
+        post: operations["startCrewRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/crew/runs/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close a run bracket and decide whether its result can be trusted */
+        post: operations["endCrewRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/crew/wake": {
         parameters: {
             query?: never;
@@ -1892,6 +1927,8 @@ export interface components {
             createdAt: string;
             createdBy?: string;
             crew?: components["schemas"]["SessionCrew"];
+            crewRun?: components["schemas"]["CrewRun"];
+            crewRunDiscards?: number;
             displayName?: string;
             harness?: string;
             id: string;
@@ -1921,7 +1958,7 @@ export interface components {
             /** @enum {string} */
             status: "todo" | "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** @enum {string} */
-            statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged";
+            statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged" | "runs_discarded";
             targetBranch?: string;
             /** @enum {string} */
             targetSource?: "pr" | "session_pr_target" | "session_base" | "project";
@@ -2000,6 +2037,33 @@ export interface components {
             inWorkspace: boolean;
             path: string;
         };
+        CrewRun: {
+            attempt: number;
+            changedPaths?: string[];
+            /** Format: date-time */
+            createdAt: string;
+            crewId?: string;
+            detector: string;
+            detectorReason?: string;
+            /** Format: date-time */
+            endedAt?: null | string;
+            genAtEnd: number;
+            genAtStart: number;
+            headSha?: string;
+            id: string;
+            kind: string;
+            label?: string;
+            outcome?: string;
+            projectId: string;
+            result?: string;
+            role?: string;
+            sessionId: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            worktreePath?: string;
+        };
         DegradedProject: {
             id: string;
             kind: string;
@@ -2045,6 +2109,26 @@ export interface components {
             orchestrator?: string;
             reviewer?: string;
             worker?: string;
+        };
+        EndCrewRunInput: {
+            /**
+             * @description What the build or test said. Omitted records a run that did not judge itself.
+             * @enum {string}
+             */
+            result?: "pass" | "fail";
+            /** @description Run to close. Omitted closes the session's open run. */
+            runId?: string;
+        };
+        EndCrewRunResponse: {
+            /** @description This run's position in the current discard streak. */
+            attempt: number;
+            /** @description The cap is spent: stop re-running; the task parks at NEEDS YOU. */
+            escalated: boolean;
+            /** @description How many discards are retried automatically before a human decides. */
+            maxAttempts: number;
+            /** @description The run was discarded and an automatic re-run is still within the cap. */
+            retry: boolean;
+            run: components["schemas"]["CrewRun"];
         };
         EvidenceExportResponse: {
             /** @description Absolute path of the exported, openable copy on the local machine. */
@@ -2213,6 +2297,9 @@ export interface components {
             installed: components["schemas"]["AgentInfo"][];
             /** @description Agents supported by this daemon build. */
             supported: components["schemas"]["AgentInfo"][];
+        };
+        ListCrewRunsResponse: {
+            runs: components["schemas"]["CrewRun"][];
         };
         ListNotificationsResponse: {
             notifications: components["schemas"]["NotificationResponse"][];
@@ -2980,6 +3067,22 @@ export interface components {
             startImmediately?: null | boolean;
             /** @enum {string} */
             taskSize?: "mechanical" | "standard" | "deep";
+        };
+        StartCrewRunInput: {
+            /**
+             * @description What is about to run: build, test or device.
+             * @enum {string}
+             */
+            kind: "build" | "test" | "device";
+            /** @description Free-text label for the run (e.g. the command), shown in the Tests tab. */
+            label?: string;
+        };
+        StartCrewRunResponse: {
+            /** @description Whether a tree-write detector is watching this run. False means the result will be uncertified. */
+            certified: boolean;
+            run: components["schemas"]["CrewRun"];
+            /** @description A run this start had to abandon because it was left open; it was closed as uncertified. */
+            supersededRunId?: string;
         };
         StartSimRecordingInput: {
             /** @description Optional label for the recording, e.g. the flow it will become. */
@@ -5159,6 +5262,191 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listCrewRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCrewRunsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startCrewRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartCrewRunInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartCrewRunResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    endCrewRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndCrewRunInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndCrewRunResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

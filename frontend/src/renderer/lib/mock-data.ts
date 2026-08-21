@@ -1616,3 +1616,105 @@ export function mockWorkspaceFileDiff(path: string): DiffContextResponse {
 
 	return { available: true, truncated: false, mode: "file", path, lines };
 }
+
+/**
+ * Bracketed machine runs for the Tests tab's "Machine runs" strip.
+ *
+ * `demo-working` is the interesting one: three runs discarded in a row, which is
+ * the state the escalation exists for. `demo-ready` shows the ordinary case - a
+ * clean run whose result can be believed - and every other session returns
+ * NOTHING, because a session that never brackets a run must get exactly the
+ * Tests tab it had before this existed.
+ */
+export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrewRunsResponse"] {
+	const run = (over: Partial<components["schemas"]["CrewRun"]>): components["schemas"]["CrewRun"] =>
+		({
+			id: `${sessionId}-${over.id ?? "r"}`,
+			sessionId,
+			projectId: "agent-orchestrator",
+			attempt: 1,
+			detector: "live",
+			genAtStart: 0,
+			genAtEnd: 0,
+			kind: "test",
+			startedAt: minutesAgo(10),
+			createdAt: minutesAgo(10),
+			updatedAt: minutesAgo(10),
+			...over,
+		}) as components["schemas"]["CrewRun"];
+
+	if (sessionId === "demo-working") {
+		return {
+			runs: [
+				run({
+					id: "d3",
+					kind: "test",
+					label: "go test ./internal/service/...",
+					startedAt: minutesAgo(3),
+					endedAt: minutesAgo(2),
+					outcome: "discarded",
+					result: "pass",
+					attempt: 3,
+					changedPaths: ["backend/internal/service/session/status.go", "backend/internal/domain/crewrun.go"],
+				}),
+				run({
+					id: "d2",
+					kind: "test",
+					label: "go test ./internal/service/...",
+					startedAt: minutesAgo(6),
+					endedAt: minutesAgo(5),
+					outcome: "discarded",
+					result: "pass",
+					attempt: 2,
+					changedPaths: ["backend/internal/service/session/status.go"],
+				}),
+				run({
+					id: "d1",
+					kind: "build",
+					label: "go build ./...",
+					startedAt: minutesAgo(9),
+					endedAt: minutesAgo(8),
+					outcome: "discarded",
+					attempt: 1,
+					changedPaths: ["backend/internal/domain/crewrun.go"],
+				}),
+				run({
+					id: "u1",
+					kind: "device",
+					label: "ao sim pass on the Reviews tab",
+					startedAt: minutesAgo(21),
+					endedAt: minutesAgo(19),
+					outcome: "uncertified",
+					result: "pass",
+					detector: "down",
+					detectorReason: "the daemon restarted while this run was open, so nothing watched the tree",
+				}),
+				run({
+					id: "p1",
+					kind: "build",
+					label: "npm run build",
+					startedAt: minutesAgo(31),
+					endedAt: minutesAgo(30),
+					outcome: "trusted",
+					result: "fail",
+				}),
+			],
+		};
+	}
+	if (sessionId === "demo-ready") {
+		return {
+			runs: [
+				run({
+					id: "p1",
+					kind: "test",
+					label: "npm run test",
+					startedAt: minutesAgo(14),
+					endedAt: minutesAgo(13),
+					outcome: "trusted",
+					result: "pass",
+				}),
+			],
+		};
+	}
+	return { runs: [] };
+}

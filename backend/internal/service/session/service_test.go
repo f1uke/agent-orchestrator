@@ -33,6 +33,8 @@ type fakeStore struct {
 	comments      map[string][]domain.PullRequestComment
 	reviewRuns    map[domain.SessionID][]domain.ReviewRun
 	prList        map[domain.SessionID][]domain.PullRequest
+	openRuns      map[domain.SessionID]domain.CrewRun
+	runDiscards   map[domain.SessionID]int
 	num           int
 }
 
@@ -193,6 +195,15 @@ func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]
 
 func (f *fakeStore) SessionQueuedMessageCounts(_ context.Context, id domain.SessionID) (domain.QueuedMessageCounts, error) {
 	return f.queued[id], nil
+}
+
+func (f *fakeStore) OpenCrewRunForSession(_ context.Context, id domain.SessionID) (domain.CrewRun, bool, error) {
+	run, ok := f.openRuns[id]
+	return run, ok, nil
+}
+
+func (f *fakeStore) ConsecutiveCrewRunDiscards(_ context.Context, id domain.SessionID) (int, error) {
+	return f.runDiscards[id], nil
 }
 
 func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {

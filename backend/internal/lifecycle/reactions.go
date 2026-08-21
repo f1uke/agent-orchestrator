@@ -15,7 +15,12 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-const reviewMaxNudge = 3
+// reviewMaxNudge is domain.CappedRepeat under the name this file has always used
+// it by. The value is shared rather than repeated: "how many times do we repeat
+// something automatically before a human decides" is one question, and the
+// discarded-run retry cap (domain/crewrun.go) is the same question about a
+// different subject.
+const reviewMaxNudge = domain.CappedRepeat
 
 // ReviewDeliveryOutcome reports what ApplyReviewResult did with a completed
 // AO-internal review pass.

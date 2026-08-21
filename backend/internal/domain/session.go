@@ -224,7 +224,7 @@ type Session struct {
 	// StatusReason names the derivation rule that produced Status, so the UI can
 	// explain WHY (e.g. a needs_input from a lost-hook timeout vs a real agent
 	// prompt). Derived on read, never stored.
-	StatusReason StatusReason `json:"statusReason,omitempty" enum:"working,waiting_input,active_stale,idle_aged,idle,no_signal,pr_pipeline,terminated,merged"`
+	StatusReason StatusReason `json:"statusReason,omitempty" enum:"working,waiting_input,active_stale,idle_aged,idle,no_signal,pr_pipeline,terminated,merged,runs_discarded"`
 	// NextTransitionAt is when the current timeout-based reading will flip if no
 	// new signal arrives; nil when the status is sticky/terminal. NextTransitionTo
 	// is what it becomes. Both derived on read.
@@ -258,4 +258,19 @@ type Session struct {
 	// They feed status derivation and are surfaced on the API read model. Not
 	// serialized here: the HTTP boundary maps them to the curated wire shape.
 	PRs []PRFacts `json:"-"`
+	// CrewRun is the bracketed build/test/device run this member has OPEN right
+	// now, or nil when it is not running one.
+	//
+	// It is on the read model because "qa is running a build" cannot be derived
+	// from anything else AO holds: ActivityState is reported by the agent's own
+	// hooks and cannot tell a build from an agent reading a file. The bracket the
+	// tree-write detector already needs is the only place that fact exists, so
+	// the board reads it from here rather than from a second mechanism.
+	// Not serialized here; the HTTP boundary maps it to the curated wire shape.
+	CrewRun *CrewRun `json:"-"`
+	// CrewRunDiscards is how many of this member's runs, ending most-recent
+	// first, were thrown away because the tree moved under them - the CURRENT
+	// streak, not a lifetime count. At CappedRepeat the task parks at NEEDS YOU.
+	// Derived on read; one trusted run clears it.
+	CrewRunDiscards int `json:"-"`
 }

@@ -47,6 +47,13 @@ type Store interface {
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	SessionQueuedMessageCounts(ctx context.Context, id domain.SessionID) (domain.QueuedMessageCounts, error)
+	// OpenCrewRunForSession and ConsecutiveCrewRunDiscards are the bracketed-run
+	// facts the read model needs: what this member is running RIGHT NOW (which
+	// nothing else in the daemon can answer - see domain.Session.CrewRun) and how
+	// many runs in a row it has had to throw away. Both are indexed lookups on a
+	// table that is empty for every solo session.
+	OpenCrewRunForSession(ctx context.Context, id domain.SessionID) (domain.CrewRun, bool, error)
+	ConsecutiveCrewRunDiscards(ctx context.Context, id domain.SessionID) (int, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
 	ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error)
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
@@ -1098,7 +1105,18 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		approvalRule = project.Config.ApprovalRule
 		projectDefaultBranch = project.Config.WithDefaults().DefaultBranch
 	}
-	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule)
+	// Two indexed lookups on a table that stays empty unless somebody brackets a
+	// run: what this member is running now, and whether its runs are being thrown
+	// away. Both are on the LIST read model because the board draws them.
+	openRun, hasOpenRun, err := s.store.OpenCrewRunForSession(ctx, rec.ID)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("open crew run %s: %w", rec.ID, err)
+	}
+	discards, err := s.store.ConsecutiveCrewRunDiscards(ctx, rec.ID)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("crew run discards %s: %w", rec.ID, err)
+	}
+	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule, crewRunFacts{Discards: discards})
 	// Resolve the target branch from facts already loaded above — no extra query
 	// and no subprocess, so this stays affordable on the sessions LIST endpoint.
 	// That budget is why the chain stops at the project default here: the
@@ -1128,7 +1146,19 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		TargetSource:         targetSource,
 		QueuedMessages:       queued.Pending,
 		QueuedMessagesFailed: queued.Failed,
+		CrewRun:              openRunPtr(openRun, hasOpenRun),
+		CrewRunDiscards:      discards,
 	}, nil
+}
+
+// openRunPtr keeps the read model's "not running anything" as a nil rather than
+// a zero-valued run: an empty object on the wire would say "there is a run and
+// we know nothing about it", which is a different and false statement.
+func openRunPtr(run domain.CrewRun, ok bool) *domain.CrewRun {
+	if !ok {
+		return nil
+	}
+	return &run
 }
 
 // idleCloseAt is when the idle sweep would suspend this session if no further
