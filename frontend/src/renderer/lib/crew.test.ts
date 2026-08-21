@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAttachRole, crewChipState, reviewGateState, taskLane, tasksFrom, workerTasks } from "./crew";
+import { canAttachRole, crewChipState, neverStarted, reviewGateState, taskLane, tasksFrom, workerTasks } from "./crew";
 import type { SmokeProgress } from "./smoke-test";
 import { attentionZone, type SessionStatus, type WorkspaceSession } from "../types/workspace";
 
@@ -95,6 +95,25 @@ describe("crewChipState", () => {
 		expect(crewChipState(session("a", { isSuspended: true }))).toBe("asleep");
 		expect(crewChipState(session("a", { isTerminated: true }))).toBe("done");
 		expect(crewChipState(session("a", { status: "merged" }))).toBe("done");
+	});
+});
+
+// "Not started" and "asleep" answer different questions, and only one of them
+// has a button. There is deliberately no "waiting its turn": both members work
+// at the same time, so nothing is waiting for anything.
+describe("neverStarted", () => {
+	it("is true only for a crew member with no runtime behind it, ever", () => {
+		const started = { id: "demo-1", role: "qa" as const, hasRun: true };
+		const notYet = { id: "demo-1", role: "qa" as const, hasRun: false };
+		expect(neverStarted(session("a", { crew: notYet, isSuspended: true }))).toBe(true);
+		expect(neverStarted(session("a", { crew: started, isSuspended: true }))).toBe(false);
+		// A finished member is not "not started" - it ran and it is over.
+		expect(neverStarted(session("a", { crew: notYet, isTerminated: true }))).toBe(false);
+	});
+
+	it("is false for every solo session, which is every session on an ordinary board", () => {
+		expect(neverStarted(session("a"))).toBe(false);
+		expect(neverStarted(session("a", { isSuspended: true }))).toBe(false);
 	});
 });
 

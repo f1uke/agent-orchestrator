@@ -94,17 +94,17 @@ export function crewChipState(member: WorkspaceSession): CrewChipState {
 }
 
 /**
- * Whether this member HAS THE TURN right now - the renderer's mirror of the
- * daemon's `domain.Awake()`, same three facts in the same order.
+ * Whether this member has NEVER RUN: it is on the task and nothing has been
+ * spent on it. A crew's qa is created as a row - dev's branch, dev's worktree,
+ * its first turn already written - and stays that way until somebody starts it.
  *
- * It exists because "sleeps the other one" is only a true promise against a
- * member that is actually running. A finished member (its PR merged), one that
- * is already asleep, and one that never started are all stopped: waking this
- * member sleeps nobody, and the daemon's WakeCrewMember takes the ordinary
- * resume path without touching them.
+ * It is what the card and the pane read instead of a sleep state, because
+ * "asleep" and "never started" answer different questions and only one of them
+ * has a button. There is deliberately no "waiting its turn" any more: both
+ * members run at the same time, so nothing is waiting for anything.
  */
-export function holdsTheTurn(member: WorkspaceSession): boolean {
-	return !member.isTerminated && !member.isSuspended && !member.isTodo && member.status !== "merged";
+export function neverStarted(member: WorkspaceSession): boolean {
+	return Boolean(member.crew) && !member.crew?.hasRun && !member.isTerminated;
 }
 
 /**

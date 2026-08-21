@@ -274,24 +274,32 @@ describe("SessionsBoard", () => {
 		expect(screen.queryByRole("button", { name: /Done \/ Terminated/i })).not.toBeInTheDocument();
 	});
 
-	// A crew member asleep for TURN reasons is not "paused to free resources", and
-	// opening its card will not bring it back - the daemon leaves it asleep on
-	// purpose. So the chip must not promise that it will.
-	it("says a turn-asleep crew member is asleep, not paused-open-to-resume", () => {
+	// A crew member that has NEVER RUN is not "paused to free resources", and
+	// opening its card will not bring it back, because there is nothing to bring
+	// back: starting an agent for the first time is a decision, so it waits for
+	// Start. The chip must not promise a resume that will not happen.
+	it("says a never-started crew member is not started, not paused-open-to-resume", () => {
 		workspaceQueryMock.mockReturnValue({
 			data: [
 				{
 					id: "proj-1",
-					sessions: [{ ...activeSession("sess-9", "needs_input"), isSuspended: true, sleepReason: "turn" }],
+					sessions: [
+						{
+							...activeSession("sess-9", "needs_input"),
+							isSuspended: true,
+							sleepReason: "idle",
+							crew: { id: "sess-1", role: "qa", hasRun: false },
+						},
+					],
 				},
 			],
 			isError: false,
 		});
 		renderBoard();
 
-		expect(screen.getByText("Asleep")).toBeInTheDocument();
+		expect(screen.getByText("Not started")).toBeInTheDocument();
 		expect(screen.queryByText("Paused")).not.toBeInTheDocument();
-		expect(screen.getByLabelText("Asleep")).toHaveAttribute("title", expect.stringContaining("turn"));
+		expect(screen.getByLabelText("Not started")).toHaveAttribute("title", expect.stringContaining("Start"));
 	});
 
 	it("shows an escalating idle countdown when a live session nears suspension", () => {

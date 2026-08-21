@@ -6,7 +6,8 @@ import { X } from "lucide-react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
-import { CrewBatonBar } from "./CrewBatonBar";
+import { neverStarted } from "../lib/crew";
+import { CrewMemberNotStartedPane } from "./CrewMemberNotStartedPane";
 import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
@@ -598,6 +599,12 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		if (fileView) {
 			return <FileDiffView sessionId={sessionId} target={fileView} onClose={() => setFileView(null)} />;
 		}
+		if (session && neverStarted(session) && session.isSuspended) {
+			// A crew member that has never run has no terminal to attach to, and the
+			// ended strip would call that death. It is not: it is an agent nobody has
+			// started yet, which is a thing you can DO something about.
+			return <CrewMemberNotStartedPane session={session} />;
+		}
 		if (session?.isTodo) {
 			// A not-started TODO has no worktree/tmux/agent, so the terminal
 			// would sit forever on "Preparing the worker terminal". Show the
@@ -627,6 +634,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const renderSplitPane = (paneSessionId: string, focused: boolean): ReactNode => {
 		if (focused) return renderFocusedCenter(true);
 		const paneSession = workspace?.sessions.find((s) => s.id === paneSessionId);
+		if (paneSession && neverStarted(paneSession) && paneSession.isSuspended)
+			return <CrewMemberNotStartedPane session={paneSession} />;
 		if (paneSession?.isTodo) return <TodoSessionPane session={paneSession} />;
 		return (
 			<CenterPane
@@ -648,16 +657,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
             be strings. Numeric sizes here once clamped the inspector to 45px. */}
 				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
 					<div className="flex h-full min-h-0 flex-col">
-						{/* The baton bar, for a crew member only. It renders nothing for a
-						    solo session - every session on an ordinary board - so the
-						    terminal pane below is unchanged in both geometry and content. */}
-						{session && workspace && (
-							<CrewBatonBar
-								session={session}
-								sessions={workspace.sessions}
-								onOpenMember={(member) => goToSession(member.id)}
-							/>
-						)}
 						<div className="min-h-0 flex-1">
 							{splitRoot ? (
 								<SplitTreeView
