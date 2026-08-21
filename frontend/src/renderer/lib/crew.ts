@@ -94,6 +94,31 @@ export function crewChipState(member: WorkspaceSession): CrewChipState {
 }
 
 /**
+ * Whether this task can still GAIN a member - which is what decides whether the
+ * card offers `+ qa` at all.
+ *
+ * An affordance that can only fail is worse than no affordance, so the three
+ * refusals the daemon would give are asked here first:
+ *
+ * - the task already has a crew (there is no seat left; a second qa is refused
+ *   by the database, not just by policy),
+ * - it is a prepared TODO (nothing is materialized yet - starting it forms the
+ *   crew its size asks for on the way through),
+ * - it is finished (merged, or torn down). Attaching to a task that is over
+ *   would create an agent holding a worktree about to be reclaimed.
+ *
+ * An orchestrator is not a task at all: it shares one worktree with every other
+ * orchestrator of its project, so a crew there is a category error.
+ */
+export function canAttachRole(task: Task): boolean {
+	if (task.isCrew) return false;
+	const dev = task.dev;
+	if (isOrchestratorSession(dev)) return false;
+	if (dev.status === "todo") return false;
+	return crewChipState(dev) !== "done";
+}
+
+/**
  * The review GATE - not a teammate.
  *
  * Review has no session: each pass is an ephemeral run that reads the diff,

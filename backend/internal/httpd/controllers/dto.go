@@ -433,9 +433,6 @@ type RestartSessionResponse struct {
 	Session   SessionView      `json:"session"`
 }
 
-// WakeSessionResponse is the body of POST /api/v1/sessions/{sessionId}/wake:
-// the fresh read model after resuming a suspended session or resetting a live
-// session's idle-close countdown.
 // AddCrewMemberRequest is the body of POST /api/v1/sessions/{sessionId}/crew/members.
 //
 // The session named in the path may be EITHER member of the task (or the solo
@@ -458,6 +455,9 @@ type AddCrewMemberResponse struct {
 	Session   SessionView      `json:"session"`
 }
 
+// WakeSessionResponse is the body of POST /api/v1/sessions/{sessionId}/wake:
+// the fresh read model after resuming a suspended session or resetting a live
+// session's idle-close countdown.
 type WakeSessionResponse struct {
 	OK        bool             `json:"ok"`
 	SessionID domain.SessionID `json:"sessionId"`

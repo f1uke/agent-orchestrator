@@ -871,6 +871,22 @@ function SessionCard({
 		task.members.some((m) => m.id !== session.id && crewChipState(m) === "working");
 	const prSummaries0 = useSessionScmSummary(session.id).data;
 	const review = gates?.review ?? reviewGateState(prSummaries0 ?? []);
+	// `+ qa` on a solo card. The member arrives ASLEEP, so this changes nothing
+	// about the agent that is running - the card simply gains a crew strip, and
+	// the turn moves only when a person says so.
+	const queryClient = useQueryClient();
+	const addRole = useMutation({
+		mutationFn: async () => {
+			void captureRendererEvent("ao.renderer.crew_add", { project_id: session.workspaceId });
+			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/crew/members", {
+				params: { path: { sessionId: session.id } },
+				body: { role: "qa" },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError, "Unable to add a qa to this task"));
+		},
+		onSuccess: () => void queryClient.invalidateQueries({ queryKey: workspaceQueryKey }),
+	});
+	const addRoleError = addRole.error instanceof Error ? addRole.error.message : null;
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	// A Jira-linked session gets the richer display-only Jira badge (KEY · type ·
 	// status) below the branch instead of the raw provider-prefixed intake chip.
@@ -982,7 +998,19 @@ function SessionCard({
 					)}
 				</div>
 			</div>
-			<CrewStrip task={task} review={review} onOpenMember={onOpen} onOpenReviews={() => onOpen(session)} />
+			<CrewStrip
+				task={task}
+				review={review}
+				onOpenMember={onOpen}
+				onOpenReviews={() => onOpen(session)}
+				onAddRole={() => addRole.mutate()}
+				addRolePending={addRole.isPending}
+			/>
+			{addRoleError && (
+				<div className="px-[13px] pb-1.5 text-[10.5px] text-destructive" onClick={(event) => event.stopPropagation()}>
+					{addRoleError}
+				</div>
+			)}
 			<div
 				className="flex items-start justify-between gap-2 px-[13px] py-2"
 				style={{ borderTop: "1px solid var(--kanban-card-divider)" }}

@@ -108,7 +108,7 @@ func (m *Manager) CrewDevOf(ctx context.Context, id domain.SessionID) (domain.Se
 	if !rec.InCrew() || rec.CrewRole.IsDev() {
 		return rec, nil
 	}
-	dev, err := m.getRecord(ctx, domain.SessionID(rec.CrewID))
+	dev, err := m.getRecord(ctx, rec.CrewID)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("crew dev of %s: %w", id, err)
 	}

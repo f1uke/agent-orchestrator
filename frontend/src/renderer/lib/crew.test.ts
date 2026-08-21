@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crewChipState, reviewGateState, taskLane, tasksFrom, workerTasks } from "./crew";
+import { canAttachRole, crewChipState, reviewGateState, taskLane, tasksFrom, workerTasks } from "./crew";
 import type { SmokeProgress } from "./smoke-test";
 import { attentionZone, type SessionStatus, type WorkspaceSession } from "../types/workspace";
 
@@ -266,5 +266,34 @@ describe("reviewGateState", () => {
 		expect(reviewGateState([])).toBe("not run");
 		expect(reviewGateState([{ aoReview: { verdict: "approved" } } as never])).toBe("approved");
 		expect(reviewGateState([{ aoReview: { verdict: "changes_requested" } } as never])).toBe("changes");
+	});
+});
+
+describe("canAttachRole", () => {
+	const soloTask = (over: Partial<WorkspaceSession> = {}) => {
+		const dev = session("demo-9", over);
+		return { dev, members: [dev], isCrew: false };
+	};
+
+	it("offers a seat on a solo task that is still going", () => {
+		expect(canAttachRole(soloTask({ taskSize: "mechanical" }))).toBe(true);
+		// A parked task is not a finished one: the new member arrives asleep, so
+		// attaching here wakes nothing.
+		expect(canAttachRole(soloTask({ isSuspended: true, status: "idle" }))).toBe(true);
+	});
+
+	it("offers nothing where the daemon would refuse", () => {
+		// The seat is taken - and a second qa is refused by the database, not just
+		// by policy.
+		expect(canAttachRole(tasksFrom(crew().sessions)[0])).toBe(false);
+		// Over: attaching would create an agent holding a worktree about to be
+		// reclaimed, on a branch nobody will push.
+		expect(canAttachRole(soloTask({ isTerminated: true, status: "terminated" }))).toBe(false);
+		expect(canAttachRole(soloTask({ status: "merged" }))).toBe(false);
+		// Not started: starting it forms the crew its size asks for on the way past.
+		expect(canAttachRole(soloTask({ status: "todo" }))).toBe(false);
+		// Not a task at all: an orchestrator shares one worktree with every other
+		// orchestrator of its project.
+		expect(canAttachRole(soloTask({ kind: "orchestrator" }))).toBe(false);
 	});
 });

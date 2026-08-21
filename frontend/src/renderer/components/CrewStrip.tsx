@@ -1,6 +1,6 @@
-import { Check, Contrast, Eye, Moon, Slash, type LucideIcon } from "lucide-react";
+import { Check, Contrast, Eye, Moon, Plus, Slash, type LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { type CrewChipState, type ReviewGateState, type Task, crewChipState } from "../lib/crew";
+import { type CrewChipState, type ReviewGateState, type Task, canAttachRole, crewChipState } from "../lib/crew";
 import { statusGlyph, statusLabel } from "../lib/status-glyph";
 import { cn } from "../lib/utils";
 import type { TaskSize, WorkspaceSession } from "../types/workspace";
@@ -144,16 +144,59 @@ function SoloMarker({ size }: { size?: TaskSize }) {
 	);
 }
 
+/**
+ * `+ qa` - the escape hatch, on the card.
+ *
+ * The crew is decided at spawn, and this is the only way to change that mind
+ * afterwards. It sits beside the solo marker exactly as the design asks - "an
+ * unobtrusive `+ add a role`, never empty seats" - so it reads as an offer
+ * rather than as a chair nobody filled.
+ *
+ * What it does is worth being plain about, because it is easy to assume it
+ * starts a second agent: it does not. The new member is born ASLEEP. Nothing
+ * about the running task changes until somebody hands over the turn.
+ */
+function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolean }) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					className="inline-flex shrink-0 items-center gap-0.5 rounded-full px-1 py-px text-[10px] text-passive transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+					data-crew-add="qa"
+					disabled={pending}
+					onClick={(event) => {
+						event.stopPropagation();
+						onAdd();
+					}}
+					type="button"
+				>
+					<Plus className="h-[9px] w-[9px] shrink-0" aria-hidden="true" />
+					<span className="truncate">qa</span>
+				</button>
+			</TooltipTrigger>
+			<TooltipContent>
+				Add a qa to this task. It arrives asleep in the same worktree - nothing that is running now is interrupted - and
+				you give it the turn when you want it.
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 export function CrewStrip({
 	task,
 	review,
 	onOpenMember,
 	onOpenReviews,
+	onAddRole,
+	addRolePending,
 }: {
 	task: Task;
 	review: ReviewGateState;
 	onOpenMember: (member: WorkspaceSession) => void;
 	onOpenReviews?: () => void;
+	/** Attach a qa to this task. Omitted where attaching is not offered at all. */
+	onAddRole?: () => void;
+	addRolePending?: boolean;
 }) {
 	return (
 		// Its own provider: the strip is rendered inside a card that a test (and a
@@ -178,7 +221,10 @@ export function CrewStrip({
 						</span>
 					))
 				) : (
-					<SoloMarker size={task.dev.taskSize} />
+					<>
+						<SoloMarker size={task.dev.taskSize} />
+						{onAddRole && canAttachRole(task) && <AddRoleButton onAdd={onAddRole} pending={addRolePending} />}
+					</>
 				)}
 				<span aria-hidden="true" className="mx-0.5 h-2.5 w-px shrink-0 bg-[var(--kanban-card-divider)]" />
 				<ReviewPip state={review} onOpen={onOpenReviews} />
