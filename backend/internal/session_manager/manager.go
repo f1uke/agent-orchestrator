@@ -65,6 +65,20 @@ var (
 	// sessions can never produce it - they are in no crew - so it is a sentinel
 	// the crew routes assert on rather than a condition an ordinary spawn meets.
 	ErrCrewBusy = errors.New("session: another crew member is awake")
+	// ErrCrewRoleTaken means this task already has a member in the requested
+	// role. Unlike ErrInvalidCrew it is not a malformed request - the task is
+	// simply already the shape it was asked to become - so the API maps it to a
+	// 409. It counts a member that has been STOOD DOWN: standing qa down is how
+	// an attach is undone, and the seat stays that session's (see
+	// AttachCrewMember). The database pins the same rule
+	// (0047_session_crew_role_unique).
+	ErrCrewRoleTaken = errors.New("session: this task already has a member in that role")
+	// ErrCrewTaskFinished means a member was asked for on a task that is over -
+	// its PR has merged, or dev has been torn down. Attaching there would create a
+	// session holding a worktree that is about to be reclaimed and a turn it could
+	// never be given, so it is refused rather than stranded. Raised by the SERVICE,
+	// which is where a session's status is derived from PR facts.
+	ErrCrewTaskFinished = errors.New("session: this task is finished")
 )
 
 // Env vars a spawned process reads to learn who it is.

@@ -43,10 +43,15 @@ type stubRuntime struct {
 	// createErr fails the next Create, so a test can make a wake fail on purpose
 	// and check what the failure leaves behind.
 	createErr error
+	// lastCfg is the config the most recent Create was asked for. It is how a test
+	// reads the ENVIRONMENT an agent is launched with - AO_CREW_ID in particular,
+	// which decides whose card a smoke checklist lands on.
+	lastCfg ports.RuntimeConfig
 }
 
 func (s *stubRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
 	s.created++
+	s.lastCfg = cfg
 	if s.createErr != nil {
 		err := s.createErr
 		s.createErr = nil

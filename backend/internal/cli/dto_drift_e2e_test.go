@@ -109,6 +109,10 @@ func (f *fakeSessionService) WakeCrewMember(context.Context, domain.SessionID) (
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) AttachCrewMember(context.Context, domain.SessionID, domain.CrewRole) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Kill(context.Context, domain.SessionID) (bool, error) {
 	return false, nil
 }

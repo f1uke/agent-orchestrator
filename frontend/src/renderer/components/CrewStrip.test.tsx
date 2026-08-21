@@ -62,6 +62,57 @@ describe("CrewStrip", () => {
 		expect(onCardOpen).not.toHaveBeenCalled();
 	});
 
+	it("offers `+ qa` on a solo task, and fires it without opening the card", async () => {
+		const onAddRole = vi.fn();
+		const onCardOpen = vi.fn();
+		const dev = member("demo-9", { taskSize: "mechanical" });
+		render(
+			<div onClick={onCardOpen}>
+				<CrewStrip
+					task={{ dev, members: [dev], isCrew: false }}
+					review="not run"
+					onOpenMember={() => {}}
+					onAddRole={onAddRole}
+				/>
+			</div>,
+		);
+		const add = document.querySelector('[data-crew-add="qa"]')!;
+		expect(add).toBeInTheDocument();
+		await userEvent.click(add);
+		expect(onAddRole).toHaveBeenCalledTimes(1);
+		expect(onCardOpen).not.toHaveBeenCalled();
+	});
+
+	// An affordance that can only fail is worse than no affordance: each of these
+	// is a refusal the daemon would give, so the card never offers it.
+	it.each([
+		["the task already has a crew", () => crewTask()],
+		[
+			"the task is finished",
+			() => {
+				const dev = member("demo-9", { isTerminated: true, status: "terminated" });
+				return { dev, members: [dev], isCrew: false };
+			},
+		],
+		[
+			"the task has not started",
+			() => {
+				const dev = member("demo-9", { status: "todo" });
+				return { dev, members: [dev], isCrew: false };
+			},
+		],
+		[
+			"it is an orchestrator, not a task",
+			() => {
+				const dev = member("demo-orchestrator", { kind: "orchestrator" });
+				return { dev, members: [dev], isCrew: false };
+			},
+		],
+	])("does not offer `+ qa` when %s", (_name, build) => {
+		render(<CrewStrip task={build()} review="not run" onOpenMember={() => {}} onAddRole={() => {}} />);
+		expect(document.querySelector('[data-crew-add="qa"]')).toBeNull();
+	});
+
 	it("marks a finished member done rather than asleep", () => {
 		render(<CrewStrip task={crewTask({ isTerminated: true })} review="changes" onOpenMember={() => {}} />);
 		expect(document.querySelector('[data-crew-chip="qa"]')).toHaveAttribute("data-crew-chip-state", "done");

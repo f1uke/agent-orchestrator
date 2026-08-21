@@ -112,3 +112,74 @@ func TestSpawnHelp_SaysWhatTaskSizeCostsNow(t *testing.T) {
 		}
 	}
 }
+
+// `ao crew add <id>` posts to the crew MEMBERS route with the role, and says
+// what actually happened: the member exists and is ASLEEP. Getting that wrong -
+// letting a person think they just added a second running agent - is the one
+// misunderstanding this command can cause.
+func TestCrewAdd_PostsToTheMembersRouteAndSaysTheMemberIsAsleep(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var paths []string
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-2","session":{"id":"demo-9","isSuspended":true,"crew":{"id":"demo-2","role":"qa"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "add", "demo-2")
+	if err != nil {
+		t.Fatalf("ao crew add: %v stderr=%s", err, errOut)
+	}
+	want := "POST /api/v1/sessions/demo-2/crew/members"
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("requests = %v, want exactly [%s]", paths, want)
+	}
+	if !strings.Contains(bodies[0], `"role":"qa"`) {
+		t.Fatalf("body = %s, want the default role qa", bodies[0])
+	}
+	// The NEW member's id, not the one that was typed: it is what `ao crew wake`
+	// and `ao send` take next.
+	if !strings.Contains(out, "demo-9") {
+		t.Fatalf("output does not name the new member: %q", out)
+	}
+	if !strings.Contains(out, "asleep") {
+		t.Fatalf("output does not say the member is asleep: %q", out)
+	}
+}
+
+// A refusal from the daemon must reach the user as the daemon's own message -
+// "this task already has a qa", "this task is finished" - rather than a generic
+// failure, because both are things the person can act on.
+func TestCrewAdd_SurfacesTheDaemonsRefusal(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"conflict","code":"CREW_ROLE_TAKEN","message":"session: this task already has a member in that role"}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "add", "demo-2")
+	if err == nil {
+		t.Fatal("a refused attach exited 0")
+	}
+	if !strings.Contains(err.Error()+errOut, "already has a member") {
+		t.Fatalf("the daemon's reason did not reach the user: %v / %s", err, errOut)
+	}
+}

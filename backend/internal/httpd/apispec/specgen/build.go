@@ -1496,6 +1496,19 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/members", id: "addCrewMember", tag: "sessions",
+			summary:    "Attach a member (qa) to the task this session belongs to, born suspended",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AddCrewMemberRequest{},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.AddCrewMemberResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/wake", id: "wakeCrewMember", tag: "sessions",
 			summary:    "Give this task's one awake slot to this crew member, standing the current holder down",
 			pathParams: []any{controllers.SessionIDParam{}},

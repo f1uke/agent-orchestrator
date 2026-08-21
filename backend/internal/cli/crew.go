@@ -29,6 +29,14 @@ type crewWakeResponse struct {
 	Session crewSessionView `json:"session"`
 }
 
+type crewAddRequest struct {
+	Role string `json:"role,omitempty"`
+}
+
+type crewAddResponse struct {
+	Session crewSessionView `json:"session"`
+}
+
 type crewListResponse struct {
 	Sessions []crewSessionView `json:"sessions"`
 }
@@ -50,10 +58,62 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 			"worktree: dev owns the branch and the pull request, qa writes, runs and records\n" +
 			"the tests. Only one of them may be awake at a time, and AO does not decide when\n" +
 			"that changes - you do, with `ao crew wake`.\n\n" +
-			"A `mechanical` task has no crew: it is dev alone.",
+			"A `mechanical` task has no crew: it is dev alone - and if that turns out to be\n" +
+			"the wrong call, `ao crew add` attaches a qa to it without disturbing the agent\n" +
+			"that is already working.",
 	}
+	cmd.AddCommand(newCrewAddCommand(ctx))
 	cmd.AddCommand(newCrewWakeCommand(ctx))
 	cmd.AddCommand(newCrewStatusCommand(ctx))
+	return cmd
+}
+
+// newCrewAddCommand is the escape hatch the design asks for, built as what it
+// actually is: a CREATE.
+//
+// The crew is decided at spawn - `standard` and `deep` get a qa, `mechanical`
+// does not - and the design offers "add qa to a solo task" as a manual way out.
+// It describes that as a WAKE, "the session exists, suspended", which is true
+// only for a task whose qa was formed at spawn. A mechanical task's qa was never
+// created, and neither was one for any task older than the crew, so there is
+// nothing to wake: this makes the member.
+//
+// It changes nothing about the task it joins. The new member is born asleep - a
+// row and an id, no terminal - and dev keeps running straight through, so no
+// task gains a qa unless somebody asks for one.
+func newCrewAddCommand(ctx *commandContext) *cobra.Command {
+	var role string
+	cmd := &cobra.Command{
+		Use:   "add <session-id>",
+		Short: "Attach a qa to a task that is already running",
+		Long: "Adds a second agent to an existing task, sharing its worktree. The new member is\n" +
+			"born ASLEEP - it has an id and a card from the moment this returns, and `ao send`\n" +
+			"to it is held until somebody gives it the turn with `ao crew wake` - so attaching\n" +
+			"never interrupts the agent that is working.\n\n" +
+			"Name either member of the task; both resolve to the same crew. It is refused if\n" +
+			"the task already has that role, or if the task is finished (its pull request has\n" +
+			"merged, or its agent has been torn down).\n\n" +
+			"Attaching is one-way. To undo it, stand the member down with `ao session kill` -\n" +
+			"which leaves the task's worktree, branch and pull request with dev, exactly where\n" +
+			"they were - and `ao session restore` brings the SAME member back.",
+		Example: `  ao crew add agent-orchestrator-230   # this task should have a qa after all
+  ao crew wake agent-orchestrator-231  # now give it the turn`,
+		Args: oneSessionIDArg,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := normalizeSessionID(args[0])
+			if err != nil {
+				return err
+			}
+			var out crewAddResponse
+			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/members", crewAddRequest{Role: strings.TrimSpace(role)}, &out); err != nil {
+				return err
+			}
+			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is on the task, asleep. Give it the turn with `ao crew wake %s`.\n",
+				out.Session.ID, crewRoleOf(out.Session), out.Session.ID)
+			return printErr
+		},
+	}
+	cmd.Flags().StringVar(&role, "role", "qa", "Role the new member fills (only `qa` today: dev is the crew's root, not a seat)")
 	return cmd
 }
 

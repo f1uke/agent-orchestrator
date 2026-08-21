@@ -387,6 +387,8 @@ type fakeCommander struct {
 	woken           []domain.SessionID
 	crewWoken       []domain.SessionID
 	crewWakeErr     error
+	crewAttached    []domain.SessionID
+	crewDevOf       map[domain.SessionID]domain.SessionRecord
 	wakeRecord      domain.SessionRecord
 	spawned         bool
 	killsAtSpawn    int
@@ -434,6 +436,23 @@ func (f *fakeCommander) Restore(context.Context, domain.SessionID) (domain.Sessi
 func (f *fakeCommander) Wake(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	f.woken = append(f.woken, id)
 	return f.wakeRecord, nil
+}
+
+// crewDevOf lets a test say "this id belongs to that task", which is the
+// resolution the attach route does before it decides anything.
+func (f *fakeCommander) CrewDevOf(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	if dev, ok := f.crewDevOf[id]; ok {
+		return dev, nil
+	}
+	return domain.SessionRecord{ID: id, ProjectID: "mer", Kind: domain.KindWorker}, nil
+}
+
+func (f *fakeCommander) AttachCrewMember(_ context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+	f.crewAttached = append(f.crewAttached, devID)
+	rec := domain.SessionRecord{ID: devID + "-qa", ProjectID: "mer", Kind: domain.KindWorker, IsSuspended: true}
+	rec.CrewID = devID
+	rec.CrewRole = role
+	return rec, nil
 }
 
 func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
@@ -1631,5 +1650,117 @@ func TestWakeCrewMember_BusyIsAConflictNotAFailure(t *testing.T) {
 	var e *apierr.Error
 	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "CREW_SLOT_BUSY" {
 		t.Fatalf("err = %v, want apierr Conflict CREW_SLOT_BUSY", err)
+	}
+}
+
+// TestAttachCrewMember_RefusesAFinishedTask. Attaching a qa to a task that is
+// over would create a session holding a worktree that is about to be reclaimed,
+// on a branch nobody will push, with no turn it could ever be given. Refusing is
+// the honest answer, and the refusal is a CONFLICT: the request is well formed,
+// the task is simply past it.
+//
+// It is checked HERE rather than in the manager because "finished" is a derived
+// status assembled from PR facts at read time - AO deliberately stores no
+// display status - and the manager cannot see PR facts.
+func TestAttachCrewMember_RefusesAFinishedTask(t *testing.T) {
+	live := func() domain.SessionRecord {
+		return domain.SessionRecord{
+			ID: "dev-1", ProjectID: "mer", Kind: domain.KindWorker,
+			Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()},
+			Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/dev-1", Branch: "feature/x"},
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*fakeStore)
+		wantErr bool
+	}{
+		{
+			name: "the PR merged",
+			mutate: func(st *fakeStore) {
+				st.pr["dev-1"] = domain.PRFacts{URL: "pr1", Merged: true}
+			},
+			wantErr: true,
+		},
+		{
+			name: "dev was torn down",
+			mutate: func(st *fakeStore) {
+				rec := st.sessions["dev-1"]
+				rec.IsTerminated = true
+				rec.Activity = domain.Activity{State: domain.ActivityExited}
+				st.sessions["dev-1"] = rec
+			},
+			wantErr: true,
+		},
+		{
+			// Parked is not finished. The new member is born asleep, so attaching
+			// here wakes nothing and changes nothing until a human moves the baton.
+			name: "dev is merely suspended",
+			mutate: func(st *fakeStore) {
+				rec := st.sessions["dev-1"]
+				rec.IsSuspended = true
+				st.sessions["dev-1"] = rec
+			},
+		},
+		{name: "dev is working"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFakeStore()
+			st.sessions["dev-1"] = live()
+			if tc.mutate != nil {
+				tc.mutate(st)
+			}
+			// The route resolves the id to the task's dev before it decides
+			// anything, so the fake answers with the row the store now holds.
+			cmd := &fakeCommander{crewDevOf: map[domain.SessionID]domain.SessionRecord{"dev-1": st.sessions["dev-1"]}}
+			svc := &Service{store: st, manager: cmd}
+
+			member, err := svc.AttachCrewMember(context.Background(), "dev-1", domain.CrewRoleQA)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("a finished task accepted a new crew member")
+				}
+				if len(cmd.crewAttached) != 0 {
+					t.Fatalf("the refusal still reached the manager: %v", cmd.crewAttached)
+				}
+				var apiErr *apierr.Error
+				if !errors.As(err, &apiErr) || apiErr.Code != "CREW_TASK_FINISHED" {
+					t.Fatalf("err = %v, want a CREW_TASK_FINISHED conflict", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("AttachCrewMember: %v", err)
+			}
+			if !member.IsSuspended {
+				t.Fatal("the attached member must be born suspended")
+			}
+			if len(cmd.crewAttached) != 1 || cmd.crewAttached[0] != "dev-1" {
+				t.Fatalf("manager saw %v, want exactly [dev-1]", cmd.crewAttached)
+			}
+		})
+	}
+}
+
+// TestAttachCrewMember_ResolvesEitherMemberToTheTask: a human holding qa's id
+// must not have to know it is holding the wrong one. The route resolves to dev,
+// which is the crew's root and the only session an attach can hang off.
+func TestAttachCrewMember_ResolvesEitherMemberToTheTask(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["dev-1"] = domain.SessionRecord{
+		ID: "dev-1", ProjectID: "mer", Kind: domain.KindWorker,
+		Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()},
+		Metadata: domain.SessionMetadata{WorkspacePath: "/tmp/dev-1", Branch: "feature/x"},
+	}
+	cmd := &fakeCommander{crewDevOf: map[domain.SessionID]domain.SessionRecord{
+		"qa-1": st.sessions["dev-1"],
+	}}
+	svc := &Service{store: st, manager: cmd}
+
+	if _, err := svc.AttachCrewMember(context.Background(), "qa-1", domain.CrewRoleQA); err != nil {
+		t.Fatalf("AttachCrewMember: %v", err)
+	}
+	if len(cmd.crewAttached) != 1 || cmd.crewAttached[0] != "dev-1" {
+		t.Fatalf("manager saw %v, want the TASK's dev [dev-1]", cmd.crewAttached)
 	}
 }
