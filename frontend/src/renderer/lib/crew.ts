@@ -94,6 +94,20 @@ export function crewChipState(member: WorkspaceSession): CrewChipState {
 }
 
 /**
+ * Whether this member HAS THE TURN right now - the renderer's mirror of the
+ * daemon's `domain.Awake()`, same three facts in the same order.
+ *
+ * It exists because "sleeps the other one" is only a true promise against a
+ * member that is actually running. A finished member (its PR merged), one that
+ * is already asleep, and one that never started are all stopped: waking this
+ * member sleeps nobody, and the daemon's WakeCrewMember takes the ordinary
+ * resume path without touching them.
+ */
+export function holdsTheTurn(member: WorkspaceSession): boolean {
+	return !member.isTerminated && !member.isSuspended && !member.isTodo && member.status !== "merged";
+}
+
+/**
  * Whether this task can still GAIN a member - which is what decides whether the
  * card offers `+ qa` at all.
  *

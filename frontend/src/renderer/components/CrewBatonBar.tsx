@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Moon } from "lucide-react";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { crewChipState, tasksFrom } from "../lib/crew";
+import { crewChipState, holdsTheTurn, tasksFrom } from "../lib/crew";
 import { captureRendererEvent } from "../lib/telemetry";
 import type { WorkspaceSession } from "../types/workspace";
 
@@ -54,6 +54,13 @@ export function CrewBatonBar({
 	const role = session.crew.role;
 	const other = task.members.find((m) => m.id !== session.id);
 	const state = crewChipState(session);
+	// Waking this member stands the other one down only if the other one is
+	// actually RUNNING. Once it has finished (its PR merged), or is itself asleep,
+	// there is no turn to take off anybody - the daemon resolves the holder and
+	// takes the ordinary resume path - so neither the sentence nor the button may
+	// keep saying otherwise. The human hit exactly this: a crew whose dev had
+	// terminated still offered "Wake qa (sleeps dev)".
+	const displaced = other && holdsTheTurn(other) ? other : undefined;
 	const errorText = wake.error instanceof Error ? wake.error.message : null;
 
 	// Terminal members are not part of the baton any more: a finished task should
@@ -71,10 +78,15 @@ export function CrewBatonBar({
 					<>
 						<span className="font-medium text-foreground">{role}</span> has the turn on this task.
 					</>
-				) : (
+				) : displaced ? (
 					<>
 						<span className="font-medium text-foreground">{role}</span> is asleep —{" "}
-						{other?.crew?.role ?? "the other agent"} has the turn. Only one of them may run in this worktree at a time.
+						{displaced.crew?.role ?? "the other agent"} has the turn. Only one of them may run in this worktree at a
+						time.
+					</>
+				) : (
+					<>
+						<span className="font-medium text-foreground">{role}</span> is asleep — nobody has the turn on this task.
 					</>
 				)}
 			</span>
@@ -96,7 +108,11 @@ export function CrewBatonBar({
 						onClick={() => wake.mutate(session.id)}
 						type="button"
 					>
-						{wake.isPending ? "Handing over…" : `Wake ${role} (sleeps ${other?.crew?.role ?? "the other"})`}
+						{wake.isPending
+							? "Handing over…"
+							: displaced
+								? `Wake ${role} (sleeps ${displaced.crew?.role})`
+								: `Wake ${role}`}
 					</button>
 				)}
 			</span>
