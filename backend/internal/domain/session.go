@@ -207,6 +207,10 @@ type SessionRecord struct {
 // Termination is deliberately not folded in: a terminated session is not
 // "temporarily unable to receive", it is over, and holding a message for it
 // would be a promise AO cannot keep. Callers refuse that case outright.
+func (r SessionRecord) CanReceiveMessage() bool {
+	return !r.IsSuspended && r.Activity.State.IsListening()
+}
+
 // NeverStarted reports whether this session has never had a runtime at all - no
 // tmux, no agent, nothing spent. A crew's qa is created as a ROW (dev's branch,
 // dev's worktree, its kickoff prompt) and stays that way until somebody starts
@@ -220,10 +224,6 @@ type SessionRecord struct {
 // left a qa nobody had woken running twelve seconds after its dev's PR merged.
 func (r SessionRecord) NeverStarted() bool {
 	return r.Metadata.RuntimeHandleID == ""
-}
-
-func (r SessionRecord) CanReceiveMessage() bool {
-	return !r.IsSuspended && r.Activity.State.IsListening()
 }
 
 // Session is the read-model returned across the API boundary: a SessionRecord

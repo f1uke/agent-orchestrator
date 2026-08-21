@@ -172,12 +172,12 @@ func changedSuffix(paths []string) string {
 	if len(paths) == 0 {
 		return ""
 	}
-	const max = 5
+	const shownAtMost = 5
 	shown := paths
 	extra := ""
-	if len(shown) > max {
-		shown = shown[:max]
-		extra = fmt.Sprintf(" and %d more", len(paths)-max)
+	if len(shown) > shownAtMost {
+		shown = shown[:shownAtMost]
+		extra = fmt.Sprintf(" and %d more", len(paths)-shownAtMost)
 	}
 	return " (" + strings.Join(shown, ", ") + extra + ")"
 }

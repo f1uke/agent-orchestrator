@@ -65,11 +65,13 @@ func crewGitEnv(role domain.CrewRole, dataDir string) map[string]string {
 // the rule reaches sessions without anyone cleaning anything up.
 func installQAHooks(dataDir string) (string, error) {
 	dir := filepath.Join(dataDir, "githooks", "qa")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("crew hooks: %w", err)
 	}
 	path := filepath.Join(dir, "pre-commit")
-	if err := os.WriteFile(path, []byte(qaPreCommitHook), 0o755); err != nil {
+	// 0700, and the execute bit is the point: git runs this, so it has to be
+	// executable. Owner-only is as tight as a runnable hook gets.
+	if err := os.WriteFile(path, []byte(qaPreCommitHook), 0o700); err != nil { //nolint:gosec // a hook git must execute cannot be 0600
 		return "", fmt.Errorf("crew hooks: %w", err)
 	}
 	return dir, nil

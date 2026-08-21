@@ -41,7 +41,7 @@ type CrewTalk struct {
 // formed after dev's runtime is already launched, and a qa attached later
 // arrives later still, so an env var would be empty exactly when it mattered.
 // A role never goes stale, and the daemon is the thing that knows who fills it.
-func (s *Service) SendToCrewmate(ctx context.Context, from domain.SessionID, role domain.CrewRole, message string, subject string) (domain.SessionID, ports.SendOutcome, error) {
+func (s *Service) SendToCrewmate(ctx context.Context, from domain.SessionID, role domain.CrewRole, message, subject string) (domain.SessionID, ports.SendOutcome, error) {
 	if !role.Valid() {
 		return "", ports.SendOutcome{}, apierr.Invalid("INVALID_CREW_ROLE", "Role must be dev or qa", nil)
 	}
