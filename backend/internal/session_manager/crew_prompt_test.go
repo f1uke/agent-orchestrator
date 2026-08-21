@@ -46,38 +46,40 @@ func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 			t.Fatalf("a solo worker lost %q from its prompt:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "qa's instrument") {
-		t.Fatal("a solo worker was told to hand the device to a qa that does not exist")
+	if strings.Contains(got, "The device becomes qa's the moment you claim it") {
+		t.Fatal("a solo worker was told to hand the device to a qa it can never have")
 	}
 }
 
-// TestBuildSystemPrompt_CrewDevGivesUpQAsBlocks: on a crew, the checklist and the
-// device belong to qa, so dev stops carrying them - and keeps everything that is
-// still its job, including the orchestrator report block, which is what makes
-// "dev reports" structural rather than a request.
-func TestBuildSystemPrompt_CrewDevGivesUpQAsBlocks(t *testing.T) {
+// TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA. Under lazy creation
+// a crew-eligible dev is ALONE when its prompt is built, and may be alone for the
+// whole task - so it keeps every block a solo worker has, the checklist protocol
+// and the full simulator catalog included. Taking either away would leave a
+// backend-only standard task with no checklist author, and would forbid the one
+// act that ever creates a qa on an iOS task.
+func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
 	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, gone := range []string{
-		"## Smoke-test checklist (AO)",
-		"ao sim tap --label",
-	} {
-		if strings.Contains(got, gone) {
-			t.Fatalf("crew dev still carries qa's block %q:\n%s", gone, got)
-		}
-	}
 	for _, want := range []string{
-		"Most sessions open one pull request", // the worker base, unchanged
-		"## Orchestrator coordination",        // dev is the one that reports
-		"qa's instrument",                     // told where the device went
+		"## Smoke-test checklist (AO)",                    // it owns the list until a qa exists
+		"ao sim tap --label",                              // and it may drive the device itself
+		"Most sessions open one pull request",             // the worker base, unchanged
+		"## Orchestrator coordination",                    // dev is the one that reports
+		"The device becomes qa's the moment you claim it", // and what changes then
+		"AO creates a qa the first time you touch the app's runtime",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("crew dev prompt missing %q:\n%s", want, got)
 		}
+	}
+	// The old block forbade the claim outright, which under lazy creation would
+	// stop the only event that ever creates a qa.
+	if strings.Contains(got, "do not claim the lease or drive the screen yourself") {
+		t.Fatalf("crew dev is still forbidden the claim that creates its qa:\n%s", got)
 	}
 }
 
@@ -198,12 +200,14 @@ func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsQAs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// It still does not carry the protocol itself - the negative REPLACES it.
-	if strings.Contains(dev, "## Smoke-test checklist (AO)") {
-		t.Fatalf("crew dev carries qa's checklist protocol again:\n%s", dev)
+	// It carries the protocol AND the window: the list is dev's until a qa exists,
+	// which on a task that never touches a runtime surface is for ever.
+	if !strings.Contains(dev, "## Smoke-test checklist (AO)") {
+		t.Fatalf("crew dev cannot author a checklist for a task that may never get a qa:\n%s", dev)
 	}
 	for _, want := range []string{
-		"do not author or edit the smoke checklist",
+		"The checklist is yours only while you have no qa",
+		"REFUSED by AO for as long as a qa is on this task",
 		"that brief predates the crew",
 	} {
 		if !strings.Contains(dev, want) {
@@ -217,21 +221,20 @@ func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsQAs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(solo, "do not author or edit the smoke checklist") {
-		t.Fatalf("a solo worker was told not to author the checklist it owns:\n%s", solo)
+	if strings.Contains(solo, "The checklist is yours only while you have no qa") {
+		t.Fatalf("a solo worker was told about a crew it can never have:\n%s", solo)
 	}
 	if !strings.Contains(solo, "## Smoke-test checklist (AO)") {
 		t.Fatalf("a solo worker lost the checklist protocol:\n%s", solo)
 	}
 }
 
-// THE ORDERING THAT MADE THE SPLIT INERT. A crew is formed AFTER dev is
-// materialized (formCrew needs the tree to share), and dev's system prompt is
-// fixed when its runtime launches, several steps earlier - so reading the ROW
-// answered "solo" for every dev that was about to get a qa. A real
-// `--task-size standard` spawn therefore launched dev with the SOLO prompt: the
-// smoke-checklist protocol still in it, no word of a crewmate, and the split
-// only taking effect if something later restored the session.
+// THE ORDERING THAT MAKES THE PROMPT AN INTENT. dev's system prompt is fixed when
+// its runtime launches, and under lazy creation its crew does not exist then and
+// may never exist - so reading the ROW would answer "solo" for every dev, and
+// nothing would ever tell dev what summons a qa or what changes when one arrives.
+// The prompt is therefore built from the spawn's INTENT (promptCrewRole) and is
+// written to be true on both sides of the join.
 func TestSpawn_StandardTaskLaunchesDevWithTheCrewPrompt(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
@@ -246,11 +249,14 @@ func TestSpawn_StandardTaskLaunchesDevWithTheCrewPrompt(t *testing.T) {
 	if !strings.Contains(launched, "## Your crewmate (AO)") {
 		t.Fatalf("dev was launched without knowing it has a crewmate:\n%s", launched)
 	}
-	if !strings.Contains(launched, "do not author or edit the smoke checklist") {
-		t.Fatalf("dev was launched without the checklist negative:\n%s", launched)
+	if !strings.Contains(launched, "AO creates a qa the first time you touch the app's runtime") {
+		t.Fatalf("dev was launched without being told what creates its qa:\n%s", launched)
 	}
-	if strings.Contains(launched, "## Smoke-test checklist (AO)") {
-		t.Fatalf("dev was launched still carrying qa's checklist protocol:\n%s", launched)
+	if !strings.Contains(launched, "The checklist is yours only while you have no qa") {
+		t.Fatalf("dev was launched without the checklist window:\n%s", launched)
+	}
+	if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
+		t.Fatalf("dev was launched unable to author the checklist it owns until a qa exists:\n%s", launched)
 	}
 }
 

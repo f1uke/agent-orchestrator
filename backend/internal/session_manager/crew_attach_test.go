@@ -24,14 +24,19 @@ func spawnMechanical(t *testing.T, m *Manager) domain.SessionRecord {
 	return dev
 }
 
-// TestAttachCrewMember_TurnsASoloMechanicalTaskIntoACrew is the hole being
-// closed. The design calls adding qa a "wake" - but a mechanical task's qa was
-// never created, so it is a CREATE, and it must produce exactly what a
-// spawn-time qa is: a row and an id, asleep, in dev's tree.
+// TestAttachCrewMember_TurnsASoloMechanicalTaskIntoACrew is the manual half of
+// lazy creation. A `mechanical` task is never given a qa by the trigger, so a
+// human asking for one is a CREATE - and what it creates is what the trigger
+// creates: a member in dev's tree, working.
 func TestAttachCrewMember_TurnsASoloMechanicalTaskIntoACrew(t *testing.T) {
 	m, st, rt, ws := newManager()
 	dev := spawnMechanical(t, m)
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle[dev.Metadata.RuntimeHandleID] = true
 	rtCreatedBeforeAttach, wsCreatedBeforeAttach := rt.created, ws.createCalls
+	_ = wsCreatedBeforeAttach
 
 	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
 	if err != nil {
@@ -48,21 +53,21 @@ func TestAttachCrewMember_TurnsASoloMechanicalTaskIntoACrew(t *testing.T) {
 		t.Fatalf("qa row role=%q crew=%q, want qa/%s", qa.CrewRole, qa.CrewID, devRow.ID)
 	}
 
-	// BORN SUSPENDED, exactly as at spawn: no runtime, no tmux, no provisioning.
-	if !qa.IsSuspended || qa.Awake() {
-		t.Fatalf("attached qa is not born suspended: suspended=%v awake=%v", qa.IsSuspended, qa.Awake())
+	// AWAKE: a human who asks for a qa gets one that is working. Nothing waits for
+	// a turn, and the control that used to start a sleeping member is gone.
+	if qa.IsSuspended || !qa.Awake() {
+		t.Fatalf("attached qa did not start: suspended=%v awake=%v", qa.IsSuspended, qa.Awake())
 	}
-	if qa.Metadata.RuntimeHandleID != "" {
-		t.Fatalf("attached qa took a runtime handle %q; it must have no tmux at all", qa.Metadata.RuntimeHandleID)
+	if qa.Metadata.RuntimeHandleID == "" {
+		t.Fatalf("attached qa is awake with no runtime handle; nothing was launched")
 	}
-	if rt.created != rtCreatedBeforeAttach || ws.createCalls != wsCreatedBeforeAttach {
-		t.Fatalf("attaching touched the world: runtime %d->%d, workspace %d->%d",
-			rtCreatedBeforeAttach, rt.created, wsCreatedBeforeAttach, ws.createCalls)
+	if rt.created != rtCreatedBeforeAttach+1 {
+		t.Fatalf("runtime created %d times, want one more than before the attach (%d)", rt.created, rtCreatedBeforeAttach)
 	}
-	// dev's tree and branch, which IS the share.
-	if qa.Metadata.WorkspacePath != devRow.Metadata.WorkspacePath || qa.Metadata.Branch != devRow.Metadata.Branch {
-		t.Fatalf("attached qa is not in dev's tree: %q@%q vs %q@%q",
-			qa.Metadata.WorkspacePath, qa.Metadata.Branch, devRow.Metadata.WorkspacePath, devRow.Metadata.Branch)
+	// dev's branch, which IS the share: two sessions on one branch resolve to one
+	// worktree directory.
+	if qa.Metadata.Branch != devRow.Metadata.Branch {
+		t.Fatalf("attached qa is not on dev's branch: %q vs %q", qa.Metadata.Branch, devRow.Metadata.Branch)
 	}
 	// A promptless worker cannot be relaunched at all, so an empty kickoff would
 	// make the attached member permanently unwakeable.
@@ -71,14 +76,17 @@ func TestAttachCrewMember_TurnsASoloMechanicalTaskIntoACrew(t *testing.T) {
 	}
 }
 
-// TestAttachCrewMember_LeavesDevRunningAndHoldingTheSlot is the
-// no-two-members-awake guarantee, from the attach side. Attaching is additive:
-// it never suspends dev, never reaps its terminal, and never relaunches it - so
-// there is no instant at which the crew has two awake members, and none at which
-// it has none.
-func TestAttachCrewMember_LeavesDevRunningAndHoldingTheSlot(t *testing.T) {
+// TestAttachCrewMember_LeavesDevRunning: attaching is ADDITIVE. It never
+// suspends dev, never reaps its terminal and never relaunches it - dev keeps
+// working straight through, which is the whole point of being able to do this to
+// a task in flight.
+func TestAttachCrewMember_LeavesDevRunning(t *testing.T) {
 	m, st, rt, _ := newManager()
 	dev := spawnMechanical(t, m)
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle[dev.Metadata.RuntimeHandleID] = true
 	handleBefore := st.sessions[dev.ID].Metadata.RuntimeHandleID
 	destroyedBefore := rt.destroyed
 
@@ -94,47 +102,48 @@ func TestAttachCrewMember_LeavesDevRunningAndHoldingTheSlot(t *testing.T) {
 		t.Fatalf("attaching disturbed dev's terminal: handle %q->%q, destroys %d->%d",
 			handleBefore, devRow.Metadata.RuntimeHandleID, destroyedBefore, rt.destroyed)
 	}
-	// The new member is a ROW, not a running agent: attaching costs nothing until
-	// somebody starts it. That is not an exclusion - both members run at once -
-	// it is that nobody has asked for this one to start yet.
-	if qa.Awake() {
-		t.Fatal("the attached member started without anybody asking for it")
-	}
-	if qa.Metadata.RuntimeHandleID != "" {
-		t.Fatalf("the attached member has a runtime handle %q; it should never have been launched", qa.Metadata.RuntimeHandleID)
+	// ...and the new member is running beside it. Both awake at once in one
+	// worktree is the shape now, not a violation of anything.
+	if !qa.Awake() {
+		t.Fatal("the attached member did not start")
 	}
 }
 
-// TestAttachCrewMember_TellsALateArrivalWhatDevDidNotKnow. Everything else a late
-// qa inherits it inherits the same way a spawn-time one does. The one asymmetry
-// is that dev has been running the SOLO prompt, which owns the smoke checklist -
-// so a checklist may already exist, and re-sending a case under a new name is
-// what destroys the human's verdict (#226's id trap).
-func TestAttachCrewMember_TellsALateArrivalWhatDevDidNotKnow(t *testing.T) {
+// TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow. Every qa now arrives
+// after dev started work, and dev did not know it would get one: AO refuses
+// `ao smoke set` from a crew's dev only once a qa EXISTS, so a checklist may
+// already be there, possibly already carrying the human's verdicts - and
+// re-sending a case under a new name is what destroys them (#226's id trap).
+func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 	m, _, _, _ := newManager()
 	dev := spawnMechanical(t, m)
 	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
-	for _, want := range []string{"AFTER it started", "ao smoke list", "id it already has"} {
+	for _, want := range []string{"A HUMAN added you", "dev has been working alone until now", "ao smoke list", "id it already has"} {
 		if !strings.Contains(qa.Metadata.Prompt, want) {
-			t.Fatalf("a late arrival's kickoff is missing %q:\n%s", want, qa.Metadata.Prompt)
+			t.Fatalf("an attached member's kickoff is missing %q:\n%s", want, qa.Metadata.Prompt)
 		}
 	}
 
-	// A spawn-time qa must NOT carry it: it arrives before there is a PR or a
-	// checklist, and telling it to be careful of work that does not exist is noise.
+	// The same warning reaches a member the TRIGGER created, because the same
+	// thing is true of it - but it is told what dev was doing, not that a human
+	// asked for it.
 	m2, st2, _, _ := newManager()
-	atSpawn, err := m2.Spawn(ctx, ports.SpawnConfig{
+	auto, err := m2.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "build it", TaskSize: domain.TaskSizeStandard,
 	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	_, spawnQA := crewOf(t, st2, atSpawn.ID)
-	if strings.Contains(spawnQA.Metadata.Prompt, "AFTER it started") {
-		t.Fatalf("a spawn-time qa was told it arrived late:\n%s", spawnQA.Metadata.Prompt)
+	m2.NoteRuntimeTouch(ctx, auto.ID, domain.CrewJoinSim)
+	_, autoQA := crewOf(t, st2, auto.ID)
+	if strings.Contains(autoQA.Metadata.Prompt, "A HUMAN added you") {
+		t.Fatalf("a member AO created was told a human asked for it:\n%s", autoQA.Metadata.Prompt)
+	}
+	if !strings.Contains(autoQA.Metadata.Prompt, "dev has been working alone until now") {
+		t.Fatalf("a member AO created was not warned about work already in progress:\n%s", autoQA.Metadata.Prompt)
 	}
 }
 
@@ -157,7 +166,7 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 		}
 	})
 
-	t.Run("the crew was formed at spawn", func(t *testing.T) {
+	t.Run("the trigger already created one", func(t *testing.T) {
 		m, st, _, _ := newManager()
 		dev, err := m.Spawn(ctx, ports.SpawnConfig{
 			ProjectID: "mer", Kind: domain.KindWorker, Prompt: "build it", TaskSize: domain.TaskSizeStandard,
@@ -165,6 +174,7 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Spawn: %v", err)
 		}
+		m.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
 		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA); !errors.Is(err, ErrCrewRoleTaken) {
 			t.Fatalf("attach to a full crew err = %v, want ErrCrewRoleTaken", err)
 		}
@@ -327,10 +337,6 @@ func TestCrewDevOf_ResolvesEitherIdToTheTask(t *testing.T) {
 func TestAttachCrewMember_StartingTheAttachedMemberLeavesDevRunning(t *testing.T) {
 	m, st, rt, _ := newManager()
 	dev := spawnMechanical(t, m)
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
-	if err != nil {
-		t.Fatalf("AttachCrewMember: %v", err)
-	}
 	// dev's agent is genuinely running: the wake routes probe a crewmate that
 	// claims to be awake and put a CORPSE to sleep, which is the half of the old
 	// guard that survives.
@@ -338,7 +344,12 @@ func TestAttachCrewMember_StartingTheAttachedMemberLeavesDevRunning(t *testing.T
 		rt.aliveByHandle = map[string]bool{}
 	}
 	rt.aliveByHandle["h1"] = true
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	if err != nil {
+		t.Fatalf("AttachCrewMember: %v", err)
+	}
 
+	// Starting a member that is already up is a no-op, not an error.
 	if _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
 	}

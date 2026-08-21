@@ -263,7 +263,9 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 		"  mechanical  ONE agent. Skips the brainstorm/plan/TDD skills and goes straight to edit + verify.\n"+
 		"              For a small, well-scoped change: a rename, a copy tweak, a config bump, a one-line fix.\n"+
 		"  standard    (default) TWO agents on one worktree: dev implements and owns the PR, qa writes,\n"+
-		"              runs and records the tests. Full ceremony. qa starts asleep and costs nothing until woken.\n"+
+		"              runs and records the tests. Full ceremony. The qa is created - awake, beside dev - the first\n"+
+		"              time dev touches the app's runtime (`ao sim`, `ao preview`); a task with nothing to\n"+
+		"              exercise never gets one and costs nothing extra.\n"+
 		"  deep        As standard, and flags a high-stakes task.\n"+
 		"Tag it mechanical when it really is small: a crew is cheaper than one agent on a long task and dearer on a short one")
 	return cmd

@@ -174,6 +174,14 @@ type SessionRecord struct {
 	// of the API read model - nothing in the UI reads them.
 	CrewID   SessionID `json:"-"`
 	CrewRole CrewRole  `json:"-"`
+	// CrewJoinReason is WHAT CREATED this member: dev touching the simulator, dev
+	// pointing `ao preview` at the app, or a human asking for it. Empty on dev, on
+	// every solo session, and on a qa created before lazy creation existed.
+	// Durable, written once with the row and never toggled - there is one
+	// transition and it is one-way. Not part of the API read model directly: it
+	// reaches the board through the curated crew wire object, which is what turns
+	// it into the join line under the crew strip.
+	CrewJoinReason CrewJoinReason `json:"-"`
 	// TokenUsage holds the per-session token totals summed from the harness
 	// transcript (claude-code only; all-zero for agents without a parseable
 	// transcript). Durable measured facts; the raw + cost-weighted totals and the

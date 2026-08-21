@@ -49,7 +49,7 @@ func TestWiring_SimServiceRecordsGestures(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	screen := &fakeSimScreenReader{}
-	svc := newSimService(store, screen)
+	svc := newSimService(store, screen, nil)
 
 	const udid = "087DF306-1FC9-4E5A-B9ED-AD36D6A1A0F1"
 	now := time.Now().UTC()
@@ -104,7 +104,7 @@ func TestWiring_SimScreenIsAScreenReader(t *testing.T) {
 	t.Cleanup(screen.Shutdown)
 	// Compiles only if *simstream.Screen implements simsvc.ScreenReader, which
 	// is what daemon.Run relies on.
-	if svc := newSimService(nil, screen); svc == nil {
+	if svc := newSimService(nil, screen, nil); svc == nil {
 		t.Fatal("newSimService returned nil")
 	}
 }

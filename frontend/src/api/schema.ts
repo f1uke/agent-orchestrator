@@ -581,7 +581,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Attach a member (qa) to the task this session belongs to, born suspended */
+        /** Attach a member (qa) to the task this session belongs to, and start it */
         post: operations["addCrewMember"];
         delete?: never;
         options?: never;
@@ -2636,6 +2636,11 @@ export interface components {
         SessionCrew: {
             hasRun: boolean;
             id: string;
+            /**
+             * @description What created this member: dev took the simulator lease, dev pointed ao preview at the app, or a human asked for it.
+             * @enum {string}
+             */
+            joinReason?: "sim" | "preview" | "manual";
             /** @enum {string} */
             role: "dev" | "qa";
         };

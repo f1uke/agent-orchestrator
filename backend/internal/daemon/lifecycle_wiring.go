@@ -93,6 +93,11 @@ type sessionLifecycle interface {
 	RestoreAll(ctx context.Context) error
 	CloseIdleSessions(ctx context.Context) error
 	SyncOrchestratorWorkspaces(ctx context.Context) error
+	// NoteRuntimeTouch is the crew's lazy-creation trigger: the simulator service
+	// reports a granted lease and the manager decides whether that means this task
+	// has just earned a qa (crew_join.go). It is on this narrow interface because
+	// the daemon is where the two halves meet.
+	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
 }
 
 // startSession builds the controller-facing session service: a session manager

@@ -78,3 +78,51 @@ func (r SessionRecord) OwnsCrewWorkspace() bool {
 func (r SessionRecord) Awake() bool {
 	return !r.IsTerminated && !r.IsSuspended && !r.IsTodo
 }
+
+// CrewJoinReason says WHAT CREATED a crew member, and it is the one durable fact
+// lazy creation adds.
+//
+// A qa is no longer formed at spawn: a task starts as dev alone and gains a qa
+// the first time dev touches a RUNTIME SURFACE - claiming the simulator, or
+// pointing `ao preview` at the app (design §1.12.1). A backend-only task never
+// does either, so it never gets a qa and never pays for one.
+//
+// There is exactly ONE transition, absent -> present, one way and once, so this
+// enum is all the audit trail the event needs: everything else the board says
+// about the join ("when") is already on the member's CreatedAt. The board turns
+// it into one sentence - `qa joined · dev opened the simulator` - which is what
+// makes a card that moves BACKWARD (from ready-to-merge to in-review, as the
+// smoke gate gains a real input) legible instead of surprising.
+//
+// The zero value is "not recorded": every qa created before this existed, which
+// is why the board falls back to saying nothing rather than guessing.
+type CrewJoinReason string
+
+// The three ways a member joins a task.
+const (
+	// CrewJoinSim: dev took the simulator lease. `ao sim claim`, or any gesture,
+	// which cannot touch a device without one.
+	CrewJoinSim CrewJoinReason = "sim"
+	// CrewJoinPreview: dev pointed `ao preview` at the app, moving the session's
+	// preview_url / preview_revision.
+	CrewJoinPreview CrewJoinReason = "preview"
+	// CrewJoinManual: a human asked for it - `ao crew add`, or the card's `+ qa`.
+	CrewJoinManual CrewJoinReason = "manual"
+)
+
+// Valid reports whether r is a recorded reason. The empty string is NOT valid:
+// it is "we do not know", which is what every row written before lazy creation
+// carries.
+func (r CrewJoinReason) Valid() bool {
+	switch r {
+	case CrewJoinSim, CrewJoinPreview, CrewJoinManual:
+		return true
+	}
+	return false
+}
+
+// Automatic reports whether AO created this member by OBSERVING dev, rather than
+// because a person asked for it.
+func (r CrewJoinReason) Automatic() bool {
+	return r == CrewJoinSim || r == CrewJoinPreview
+}

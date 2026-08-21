@@ -130,7 +130,7 @@ You are the human-facing coordinator for project ` + ProjectIDPlaceholder + `. C
 
 Spawn worker sessions for implementation with:
 ` + "`ao spawn --project " + ProjectIDPlaceholder + " --from <base-branch> --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`" + `
---project, --from, and --name are required. --from is the existing branch the worker's worktree is CUT FROM (e.g. main). Optional ` + "`--target <branch>`" + ` is the branch the worker's PR MERGES INTO — pass it whenever that differs from --from (e.g. cut from ` + "`release/2.1`" + `, merge into ` + "`develop`" + `); when omitted it resolves to --from. Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it. **` + "`--task-size`" + ` now decides how many agents work the task, so choose it deliberately every time.** ` + "`--task-size mechanical`" + ` gives the task ONE agent, authorized to skip the brainstorm→plan→TDD ceremony and go straight to edit + verify: tag a small, well-scoped change that way (a rename, a copy tweak, a config bump, a one-line fix, a doc edit). The default ` + "`standard`" + ` (and ` + "`deep`" + `, which is standard plus a high-stakes flag) gives it TWO: dev, which implements and owns the PR, and a qa member that writes, runs and records the tests. qa is created asleep and costs nothing until it is woken, but a crew is dearer than one agent on a SHORT task and cheaper on a long one - so a small change tagged standard is a real waste, and a real feature tagged mechanical loses the rigor it needed. When in doubt, ask yourself whether you would want someone to test this by hand: if not, it is mechanical.
+--project, --from, and --name are required. --from is the existing branch the worker's worktree is CUT FROM (e.g. main). Optional ` + "`--target <branch>`" + ` is the branch the worker's PR MERGES INTO — pass it whenever that differs from --from (e.g. cut from ` + "`release/2.1`" + `, merge into ` + "`develop`" + `); when omitted it resolves to --from. Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it. **` + "`--task-size`" + ` now decides how many agents work the task, so choose it deliberately every time.** ` + "`--task-size mechanical`" + ` gives the task ONE agent, authorized to skip the brainstorm→plan→TDD ceremony and go straight to edit + verify: tag a small, well-scoped change that way (a rename, a copy tweak, a config bump, a one-line fix, a doc edit). The default ` + "`standard`" + ` (and ` + "`deep`" + `, which is standard plus a high-stakes flag) ALLOWS it a second: dev implements and owns the PR, and a qa member that writes, runs and records the tests is created - awake, working beside dev - the first time dev touches the app's runtime (an ` + "`ao sim`" + ` claim, or ` + "`ao preview`" + `). A task with nothing to exercise never trips that and stays one agent, so ` + "`standard`" + ` on a backend-only change costs nothing extra; where a qa does appear, a crew is dearer than one agent on a SHORT task and cheaper on a long one - so a small change tagged standard is a real waste, and a real feature tagged mechanical loses the rigor it needed. When in doubt, ask yourself whether you would want someone to test this by hand: if not, it is mechanical.
 
 In the common case each worker session owns one branch and one pull request. When the project sets a branch convention (prefix + PR target, injected separately), spawn the worker on a branch that follows it (e.g. ` + "`feature/<topic>`" + `) and set ` + "`--target`" + ` to the branch its PR should merge into — one worker, one on-convention branch, one PR. For a task of a different type (e.g. a ` + "`bugfix/`" + ` alongside a ` + "`feature/`" + ` worker), spawn a separate worker session rather than adding a second branch to an existing one. The convention and AO's namespace tracking are complementary, not competing.
 
@@ -355,22 +355,25 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // command tree, so a command added later cannot silently default to "omitted".
 func SimulatorGuidance() string { return simulatorGuidance }
 
-// SimulatorGuidanceCrewDev is what a CREW's dev is told about the device instead
-// of the full catalog above. On a crew the device is qa's instrument: qa claims
-// the lease, drives the screen and captures the evidence. Both members are awake
-// at the same time, which makes this MORE important rather than less - the lease
-// is exclusive, so a dev holding it is a dev blocking the member whose whole job
-// needs it, at the exact moment qa is trying to work. What dev has to know is
-// that the device exists, that it is not free to grab, and who to hand to.
+// SimulatorHandoverToQA is the short note a CREW-ELIGIBLE dev gets AFTER the full
+// simulator catalog, and the ordering is the point.
 //
-// A SOLO worker - every session on an ordinary machine, and every `mechanical`
-// task - keeps SimulatorGuidance() unchanged: there is no qa to hand to, so
-// taking the catalog away would leave nobody able to look at the screen.
-func SimulatorGuidanceCrewDev() string { return simulatorGuidanceCrewDev }
+// It used to REPLACE the catalog: on a crew the device was qa's instrument, so
+// dev was told not to claim the lease at all. Lazy creation makes that circular -
+// claiming the lease is the very event that CREATES the qa, so a dev that obeyed
+// the old block could never get one, and an iOS task would sit for ever with the
+// member that drives devices never being born. dev therefore keeps the whole
+// catalog (it may be alone on this task for its entire life) and is told what
+// changes at the moment it first claims: the device becomes qa's, and dev hands
+// the verification over.
+//
+// A SOLO worker - every `mechanical` task, and every session on a project with no
+// crew - gets the catalog and no note, byte-for-byte what it always had.
+func SimulatorHandoverToQA() string { return simulatorHandoverToQA }
 
-const simulatorGuidanceCrewDev = "\n\n" + `## The iOS Simulator is qa's instrument (AO)
+const simulatorHandoverToQA = "\n\n" + `### The device becomes qa's the moment you claim it (AO)
 
-This project targets iOS, and this task has a **qa** crew member whose job is to drive the device: it takes the ` + "`ao sim`" + ` lease, reads the screen, plays the flows and captures the evidence. qa is working AT THE SAME TIME as you, so a lease you are holding is one qa is blocked on right now. Build, run and install as you always would, but do not claim the lease or drive the screen yourself - hand the verification to qa instead, and release anything you did claim before you do. If you must look at something to make progress, reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim.`
+Your FIRST ` + "`ao sim claim`" + ` on this task is what creates its **qa** member - the agent whose job is to drive the device, play the flows and capture the evidence. So claim it when the work needs it, and then hand the driving over: release the lease when you are done with what you were checking, and give qa the verification rather than re-playing screens yourself. qa is awake and working at the same time as you, so a lease you leave held is one qa is blocked on. Reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim and never blocks anyone.`
 
 const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 
@@ -410,9 +413,10 @@ Everything else - naming an element by its identifier, typing, buttons, recordin
 //
 // Injected for qa only, and only on a project that has a simulator: every command
 // here fails on a machine with no device, and an instruction an agent cannot
-// follow is worse than none - the same reason SimulatorGuidance is gated. A crew
-// dev never sees it (the device is qa's instrument), and a SOLO worker never sees
-// it either, which keeps the lone-worker prompt byte-for-byte what it was.
+// follow is worse than none - the same reason SimulatorGuidance is gated. A dev
+// never sees it (once a qa exists, the device is qa's instrument), and a SOLO
+// worker never sees it either, which keeps the lone-worker prompt byte-for-byte
+// what it was.
 func RecordedFlowLoop() string { return recordedFlowLoop }
 
 const recordedFlowLoop = "\n\n" + `## Turning a played scenario into a test (AO)
@@ -436,13 +440,23 @@ ao smoke retire "$AO_CREW_ID" --case <id> --reason "now covered by <flow>"` + "\
 // is the only place either learns that the other exists as a live agent rather
 // than as a role in a story.
 //
+// The two members are told DIFFERENT things about when the crew exists, and that
+// is the whole of what lazy creation changes here. qa is created the first time
+// dev touches a runtime surface, so qa can always be told "you are both running
+// right now" - dev has been running for a while by then - while dev must be told
+// the truth of its own position: alone, possibly for ever, and one `ao sim claim`
+// away from not being. Naming the trigger in dev's own prompt is what stops the
+// instruction from being circular, because the sentence that used to say "the
+// device is qa's, do not claim it" would otherwise stop the only event that ever
+// creates a qa.
+//
 // It carries three things a prompt is the right home for and one it is not:
 //
-//   - You are BOTH RUNNING. Neither waits for the other, and neither can stand
-//     the other down. Anything exclusive - the git index, the simulator lease,
-//     a device - is contended in real time rather than by turns.
+//   - You are BOTH RUNNING, once there are two of you. Neither waits for the
+//     other, and neither can stand the other down. Anything exclusive - the git
+//     index, the simulator lease, a device - is contended in real time.
 //   - How to address the other one, which is by ROLE and never by id. dev cannot
-//     know qa's id: a crew is formed after dev's runtime is already launched.
+//     know qa's id: qa may not exist yet when dev's runtime is launched.
 //   - THE ARTIFACT IS THE REPLY. dev answers a finding by committing; qa answers
 //     a handoff by recording a result. An obligation to reply is what manufactures
 //     a loop between two agents, so there is none.
@@ -457,21 +471,37 @@ func CrewProtocol(role string) string {
 		return ""
 	}
 	other := "qa"
+	opening := crewOpeningDev
 	if role == "qa" {
 		other = "dev"
+		opening = crewOpeningQA
 	}
-	block := fmt.Sprintf(crewProtocol, role, other, other)
+	block := crewProtocolHeading + opening + fmt.Sprintf(crewProtocolBody, other, other)
 	if role == "dev" {
 		block += crewDevChecklistIsQAs
 	}
 	return block
 }
 
-const crewProtocol = "\n\n" + `## Your crewmate (AO)
+const crewProtocolHeading = "\n\n" + `## Your crewmate (AO)
 
-You are **%s** on a task worked by TWO agents in ONE worktree, and **you are both running right now**. Nothing takes turns: your crewmate is editing, building and committing while you are, and starting one of you never stops the other.
+`
 
-**What that means in practice.**
+// crewOpeningQA is straightforward: by the time a qa exists, dev has been working
+// for a while and is still working.
+const crewOpeningQA = `You are **qa** on a task worked by TWO agents in ONE worktree, and **you are both running right now**. Nothing takes turns: your crewmate is editing, building and committing while you are, and starting one of you never stops the other.`
+
+// crewOpeningDev is the one that had to change. A dev is told the shape of its
+// own task HONESTLY - it is alone, it may stay alone, and it is told exactly what
+// summons the second agent - because dev's prompt is fixed when its runtime
+// launches and has to stay true on both sides of that event.
+const crewOpeningDev = `You are **dev**. You are working this task ALONE right now, and a task that never needs a second pair of eyes stays that way: a backend-only change gets no qa and you carry the whole job.
+
+**AO creates a qa the first time you touch the app's runtime** - taking the ` + "`ao sim`" + ` lease, or pointing ` + "`ao preview`" + ` at what you built. That is an observation, not a request: it is not yours to ask for or to avoid, so do whatever the work needs. From that moment you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and two things stop being yours: the device (release the lease and hand the verification over) and the smoke checklist (below).`
+
+const crewProtocolBody = `
+
+**What that means once there are two of you.**
 - **One git index, one branch.** A wide ` + "`git add -A`" + ` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional ` + "`index.lock`" + ` failure is two commits landing together - retry it, nothing is damaged.
 - **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in ` + "`ao crew run --start --kind build|test|device`" + ` ... ` + "`ao crew run --end --result pass|fail`" + `. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
 - **Anything exclusive is contended live** - the ` + "`ao sim`" + ` lease above all. Take it when you need it, release it the moment you are done.
@@ -488,19 +518,21 @@ You are **%s** on a task worked by TWO agents in ONE worktree, and **you are bot
 // crewDevChecklistIsQAs is dev's half of the ownership split, and it exists
 // because SILENCE LOSES AN ARGUMENT IT IS NOT PRESENT FOR.
 //
-// The assembly layer already stops handing a crew dev the smoke protocol, and
-// that was believed to be enough. It was not: the orchestrator put "author the
-// smoke checklist" back BY HAND in every brief it wrote, and dev did it in both
-// real crew runs - not because it overrode anything, but because a prompt that
-// says nothing cannot contradict a brief that says something.
+// It was believed to be enough for the assembly layer to simply stop handing a
+// crew dev the smoke protocol. It was not: the orchestrator put "author the smoke
+// checklist" back BY HAND in every brief it wrote, and dev did it in both real
+// crew runs - not because it overrode anything, but because a prompt that says
+// nothing cannot contradict a brief that says something.
 //
-// So this states the negative, and the load-bearing clause is the LAST one: a
-// brief that asks for cases is named as predating the crew, and dev is told to
-// SAY SO. That turns a silent override into a visible contradiction in dev's own
-// output, where a human can see it. It does not prevent anything - `ao smoke set`
-// refusing a crew dev while a qa exists is the layer that actually holds - and it
-// is deliberately shorter than the 324-token protocol block dev stopped carrying.
-const crewDevChecklistIsQAs = "\n\n" + `**The checklist is qa's, not yours.** qa owns what VERIFIES this change: the cases, running them, recording machine results, and the smoke-test checklist itself. You own the branch, the implementation and the pull request, and you are the only one who reports to the orchestrator. So do not author or edit the smoke checklist and do not record test results - ` + "`ao smoke set`" + ` from you is REFUSED by AO for as long as a qa is on this task. **If a brief asks you for smoke cases, that brief predates the crew: say so in your own output, and hand it to qa** (` + "`ao send --crew qa --about <sha>`" + `) rather than writing them yourself.`
+// Under lazy creation the block also has to answer a question it did not used to
+// have: WHO WRITES THE CHECKLIST ON A TASK THAT NEVER GETS A QA? dev does, and it
+// carries the full protocol again for exactly that reason - a backend-only
+// standard task must not silently lose its checklist because of a crewmate it
+// never gained. So the rule is now a WINDOW rather than a flat prohibition, and
+// it is the same window AO enforces: `ao smoke set` from a crew's dev is refused
+// only while a qa EXISTS (service/smoke.checkChecklistOwner), which is precisely
+// when this block says to hand it over.
+const crewDevChecklistIsQAs = "\n\n" + `**The checklist is yours only while you have no qa.** Until a qa exists you own the whole job, this task's smoke checklist included - author it exactly as the protocol below describes. **The moment a qa exists it owns what VERIFIES this change**: the cases, running them, recording machine results, and the checklist itself. From that moment do not author or edit the checklist and do not record test results - ` + "`ao smoke set`" + ` from you is REFUSED by AO for as long as a qa is on this task. You still own the branch, the implementation and the pull request, and you are still the only one who reports to the orchestrator. **If a brief asks you for smoke cases and this task now has a qa, that brief predates the crew: say so in your own output, and hand it to qa** (` + "`ao send --crew qa --about <sha>`" + `) rather than writing them yourself.`
 
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of

@@ -22,9 +22,11 @@ import (
 // what happens to a REAL checkout that a REAL agent is holding. A fake workspace
 // cannot fail the way this must not fail, so the tree here is real.
 
-// TestCrewAttach_AMechanicalTaskGainsASleepingQA is the case the design's own
-// escape hatch could not serve: qa was never created, so adding one is a create.
-func TestCrewAttach_AMechanicalTaskGainsASleepingQA(t *testing.T) {
+// TestCrewAttach_AMechanicalTaskGainsAWorkingQA is the manual half of lazy
+// creation: a `mechanical` task is never given a qa by the trigger, so a human
+// asking for one is a CREATE - and it arrives WORKING, in dev's tree, beside a
+// dev that is not disturbed.
+func TestCrewAttach_AMechanicalTaskGainsAWorkingQA(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	s.rt.perSessionHandles = true
@@ -43,27 +45,29 @@ func TestCrewAttach_AMechanicalTaskGainsASleepingQA(t *testing.T) {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
 
-	// The member exists and is asleep: a row and an id, and no process anywhere.
-	if !qa.IsSuspended || qa.Awake() {
-		t.Fatalf("the attached member is not asleep: suspended=%v awake=%v", qa.IsSuspended, qa.Awake())
+	// The member exists and is RUNNING: a human who asks for a qa gets one that is
+	// working, because there is no turn left for it to wait for.
+	if qa.IsSuspended || !qa.Awake() {
+		t.Fatalf("the attached member did not start: suspended=%v awake=%v", qa.IsSuspended, qa.Awake())
 	}
-	if qa.Metadata.RuntimeHandleID != "" {
-		t.Fatalf("the attached member took a runtime handle %q", qa.Metadata.RuntimeHandleID)
+	if qa.Metadata.RuntimeHandleID == "" {
+		t.Fatalf("the attached member is awake with no runtime handle")
 	}
-	if s.rt.created != createdBefore || s.rt.destroyed != destroyedBefore {
-		t.Fatalf("attaching touched the runtime: created %d->%d, destroyed %d->%d",
-			createdBefore, s.rt.created, destroyedBefore, s.rt.destroyed)
+	if s.rt.created != createdBefore+1 {
+		t.Fatalf("runtimes created %d->%d, want exactly one more (the new member's)", createdBefore, s.rt.created)
+	}
+	// ...and dev's terminal was not touched on the way.
+	if s.rt.destroyed != destroyedBefore {
+		t.Fatalf("attaching destroyed a runtime: %d->%d", destroyedBefore, s.rt.destroyed)
 	}
 
-	// dev is untouched. Attaching costs the running task NOTHING: the member is a
-	// row until somebody starts it.
+	// dev is untouched: it keeps working straight through the attach, which is the
+	// whole point of being able to do this to a task in flight.
 	devRow := s.record(t, dev.ID)
 	if devRow.IsSuspended || !devRow.Awake() {
 		t.Fatalf("attaching stood dev down: suspended=%v awake=%v", devRow.IsSuspended, devRow.Awake())
 	}
-	if got := s.awakeMembers(t, dev.ID, qa.ID); len(got) != 1 || got[0] != dev.ID {
-		t.Fatalf("awake after an attach = %v, want only dev: nothing was started", got)
-	}
+	s.assertBothAwake(t, dev.ID, qa.ID)
 
 	// One REAL worktree, still on disk, with dev's work in it.
 	if qa.Metadata.WorkspacePath != devRow.Metadata.WorkspacePath || qa.Metadata.Branch != devRow.Metadata.Branch {
@@ -82,14 +86,15 @@ func TestCrewAttach_AMechanicalTaskGainsASleepingQA(t *testing.T) {
 	}
 }
 
-// TestCrewAttach_TheNewMemberIsReachableBeforeItWakes. The id existing from the
-// moment the attach returns is half of what "born suspended" buys: `ao send` to
-// it must be HELD by #217's queue, not dropped and not a wake.
+// TestCrewAttach_TheNewMemberIsReachableBeforeItWakes. A member normally arrives
+// working, but its start is BEST EFFORT - and a member whose launch failed must
+// still be addressable: `ao send` to it is HELD by #217's queue, not dropped and
+// not a wake.
 func TestCrewAttach_TheNewMemberIsReachableBeforeItWakes(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	s.rt.perSessionHandles = true
-	dev, qa := s.attachedCrew(t)
+	dev, qa := s.attachedCrewNeverStarted(t)
 
 	pane := &paneSpy{}
 	now := s.now
@@ -141,7 +146,7 @@ func TestCrewAttach_StartingItLeavesDevRunning(t *testing.T) {
 	s := newCrewStack(t)
 	s.rt.perSessionHandles = true
 	s.rt.trackLiveness = true
-	dev, qa := s.attachedCrew(t)
+	dev, qa := s.attachedCrewNeverStarted(t)
 	devHandle := s.record(t, dev.ID).Metadata.RuntimeHandleID
 
 	if _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
@@ -285,6 +290,19 @@ func TestSolo_AttachingToNobodyChangesNothing(t *testing.T) {
 // spawned solo, is still running, and has since been given a qa.
 func (s *crewStack) attachedCrew(t *testing.T) (dev, qa domain.SessionRecord) {
 	t.Helper()
+	return s.attachedCrewWithStartFailure(t, nil)
+}
+
+// attachedCrewNeverStarted attaches a member whose LAUNCH fails. That is the one
+// way a member can now exist without ever having run, and it is the state the
+// message queue and the glance rule are about.
+func (s *crewStack) attachedCrewNeverStarted(t *testing.T) (dev, qa domain.SessionRecord) {
+	t.Helper()
+	return s.attachedCrewWithStartFailure(t, errors.New("stub: no tmux for the new member"))
+}
+
+func (s *crewStack) attachedCrewWithStartFailure(t *testing.T, startErr error) (dev, qa domain.SessionRecord) {
+	t.Helper()
 	ctx := context.Background()
 	devRec, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/task", Prompt: "rename the flag",
@@ -293,6 +311,8 @@ func (s *crewStack) attachedCrew(t *testing.T) (dev, qa domain.SessionRecord) {
 	if err != nil {
 		t.Fatalf("spawn dev: %v", err)
 	}
+	// createErr fails exactly the next Create, which is the new member's launch.
+	s.rt.createErr = startErr
 	qaRec, err := s.mgr.AttachCrewMember(ctx, devRec.ID, domain.CrewRoleQA)
 	if err != nil {
 		t.Fatalf("attach qa: %v", err)

@@ -340,7 +340,7 @@ func Run() error {
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
-		Sim:                newSimService(store, simScreen),
+		Sim:                newSimService(store, simScreen, sessMgr),
 		SimScreen:          simScreen,
 		SimDrags:           simDrags,
 		Notifications:      notifier,

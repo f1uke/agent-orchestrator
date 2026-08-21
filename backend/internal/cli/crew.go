@@ -87,38 +87,37 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-// newCrewAddCommand is the escape hatch the design asks for, built as what it
+// newCrewAddCommand is the MANUAL half of lazy creation, built as what it
 // actually is: a CREATE.
 //
-// The crew is decided at spawn - `standard` and `deep` get a qa, `mechanical`
-// does not - and the design offers "add qa to a solo task" as a manual way out.
-// It describes that as a WAKE, "the session exists, suspended", which is true
-// only for a task whose qa was formed at spawn. A mechanical task's qa was never
-// created, and neither was one for any task older than the crew, so there is
-// nothing to wake: this makes the member.
+// No task has a qa until something creates one. AO creates one by OBSERVING dev -
+// the first `ao sim` claim, or an `ao preview` (session_manager/crew_join.go) -
+// and a task that never touches a runtime surface never gets one. This is how a
+// human overrules that: for a `mechanical` task, which is never eligible
+// automatically, or for a backend-only change with subtle behaviour somebody
+// wants a second pair of eyes on.
 //
-// It changes nothing about the task it joins. The new member is born asleep - a
-// row and an id, no terminal - and dev keeps running straight through, so no
-// task gains a qa unless somebody asks for one, and nothing is spent until
-// somebody starts it.
+// The member arrives WORKING, and dev keeps running straight through, so the task
+// gains an agent without losing a moment of the one it had.
 func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 	var role string
 	cmd := &cobra.Command{
 		Use:   "add <session-id>",
 		Short: "Attach a qa to a task that is already running",
-		Long: "Adds a second agent to an existing task, sharing its worktree. The new member is\n" +
-			"born ASLEEP - it has an id and a card from the moment this returns, and `ao send`\n" +
-			"to it is held until somebody starts it with `ao crew wake` (or by opening its\n" +
-			"card) - so attaching never interrupts the agent that is working.\n\n" +
+		Long: "Adds a second agent to an existing task, sharing its worktree. The new member\n" +
+			"STARTS WORKING straight away, beside the agent that is already there - attaching\n" +
+			"never interrupts it, and both members then run at the same time.\n\n" +
+			"AO adds a qa by itself the first time a task drives the app (`ao sim`, `ao\n" +
+			"preview`), so this is for the tasks it does not: a `mechanical` one, or a\n" +
+			"backend-only change you want a second pair of eyes on.\n\n" +
 			"Name either member of the task; both resolve to the same crew. It is refused if\n" +
 			"the task already has that role, or if the task is finished (its pull request has\n" +
 			"merged, or its agent has been torn down).\n\n" +
 			"Attaching is one-way. To undo it, stand the member down with `ao session kill` -\n" +
 			"which leaves the task's worktree, branch and pull request with dev, exactly where\n" +
 			"they were - and `ao session restore` brings the SAME member back.",
-		Example: `  ao crew add agent-orchestrator-230   # this task should have a qa after all
-  ao crew wake agent-orchestrator-231  # now start it - dev keeps running`,
-		Args: oneSessionIDArg,
+		Example: `  ao crew add agent-orchestrator-230   # this task should have a qa after all`,
+		Args:    oneSessionIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := normalizeSessionID(args[0])
 			if err != nil {
@@ -128,8 +127,8 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/members", crewAddRequest{Role: strings.TrimSpace(role)}, &out); err != nil {
 				return err
 			}
-			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is on the task, asleep. Start it with `ao crew wake %s`; dev keeps running.\n",
-				out.Session.ID, crewRoleOf(out.Session), out.Session.ID)
+			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is on the task and working, in the same worktree; dev keeps running.\n",
+				out.Session.ID, crewRoleOf(out.Session))
 			return printErr
 		},
 	}

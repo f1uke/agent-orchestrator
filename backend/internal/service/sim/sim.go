@@ -120,12 +120,26 @@ type Store interface {
 	ListSimRecordingSteps(ctx context.Context, udid string) ([]domain.SimRecordingStep, error)
 }
 
+// CrewJoiner is told when a session takes a device, so a task that turns out to
+// have a runtime surface can gain the qa that verifies it (design §1.12.1). The
+// lease is the signal because the daemon already owns it: no new instrumentation,
+// and no judgement call routed through the agent that would be tested.
+//
+// It is deliberately a one-way notification with no error: whether a crew forms
+// is not the simulator's business, and a claim must not fail because one did not.
+// nil is the ordinary configuration in tests and in every package that is not the
+// daemon.
+type CrewJoiner interface {
+	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
+}
+
 // Service is the concrete Manager.
 type Service struct {
 	store    Store
 	clock    func() time.Time
 	tokens   func() string
 	recorder ScreenReader
+	crew     CrewJoiner
 
 	// recMu guards pending and screens: the recorder's in-memory bookkeeping.
 	// See recording.go - both are keyed by hold token or udid, never touched
@@ -153,6 +167,13 @@ type Service struct {
 
 // Option customizes a Service.
 type Option func(*Service)
+
+// WithCrewJoiner wires the "this task has a runtime surface" observer. Left
+// unset, taking a lease notifies nobody and the service behaves exactly as it
+// did before crews were lazy.
+func WithCrewJoiner(crew CrewJoiner) Option {
+	return func(s *Service) { s.crew = crew }
+}
 
 // WithClock overrides the service clock for tests.
 func WithClock(clock func() time.Time) Option {
@@ -277,6 +298,7 @@ func (s *Service) Acquire(ctx context.Context, sessionID domain.SessionID, udid 
 	if !granted {
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now}
 	}
+	s.noteRuntimeTouch(ctx, sessionID)
 	return holder, nil
 }
 
@@ -318,6 +340,7 @@ func (s *Service) TakeOver(ctx context.Context, sessionID domain.SessionID, udid
 	if !granted {
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now, MidGesture: true}
 	}
+	s.noteRuntimeTouch(ctx, sessionID)
 	return holder, nil
 }
 
@@ -385,3 +408,14 @@ func (s *Service) requireLiveSession(ctx context.Context, sessionID domain.Sessi
 }
 
 func (s *Service) now() time.Time { return s.clock().UTC() }
+
+// noteRuntimeTouch reports a GRANTED lease - the moment this session started
+// driving a device, whether it claimed a free one or took one over. A renewal
+// reports too and costs nothing: the observer is idempotent, because a task that
+// already has its qa can never gain a second one.
+func (s *Service) noteRuntimeTouch(ctx context.Context, sessionID domain.SessionID) {
+	if s.crew == nil {
+		return
+	}
+	s.crew.NoteRuntimeTouch(ctx, sessionID, domain.CrewJoinSim)
+}

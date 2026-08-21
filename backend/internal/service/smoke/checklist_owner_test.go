@@ -63,6 +63,38 @@ func TestAuthor_CrewDevWithNoQAStillAuthors(t *testing.T) {
 	}
 }
 
+// THE WINDOW, walked end to end. Under lazy creation a `standard` task IS a solo
+// session until dev touches a runtime surface - dev carries no crew columns at
+// all - so the same call has to be allowed before the join and refused after it.
+// This is the interaction lazy creation reopens, so it is asserted rather than
+// reasoned about.
+func TestAuthor_TheRefusalStartsTheMomentAQAAppears(t *testing.T) {
+	store := newFakeStore()
+	// Before: a standard task, one agent, no crew columns anywhere.
+	store.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, TaskSize: domain.TaskSizeStandard,
+	}
+	svc := newTestService(t, store, nil)
+	if _, err := svc.Author(context.Background(), "mer-1", "mer-1", []domain.SmokeAuthoredCase{{Name: "Board still paints"}}); err != nil {
+		t.Fatalf("a standard task with no qa yet could not author its checklist: %v", err)
+	}
+
+	// The trigger fires: dev gains its crew columns and a qa appears beside it.
+	dev := store.sessions["mer-1"]
+	dev.CrewID, dev.CrewRole = "mer-1", domain.CrewRoleDev
+	store.sessions["mer-1"] = dev
+	store.sessions["mer-2"] = domain.SessionRecord{
+		ID: "mer-2", ProjectID: "mer", Kind: domain.KindWorker,
+		CrewID: "mer-1", CrewRole: domain.CrewRoleQA, CrewJoinReason: domain.CrewJoinSim,
+	}
+
+	// After: the same call, from the same caller, about the same task.
+	_, err := svc.Author(context.Background(), "mer-1", "mer-1", []domain.SmokeAuthoredCase{{Name: "Board still paints"}})
+	if !errors.Is(err, ErrQAOwnsChecklist) {
+		t.Fatalf("dev still owns the checklist after its qa arrived: err = %v", err)
+	}
+}
+
 // A TERMINATED qa is not a qa. Its rows survive teardown, and reading them as
 // "a qa exists" would leave dev unable to author on a task whose qa is gone.
 func TestAuthor_TerminatedQADoesNotOwnTheChecklist(t *testing.T) {

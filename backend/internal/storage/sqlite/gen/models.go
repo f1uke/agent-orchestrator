@@ -247,6 +247,7 @@ type Session struct {
 	CrewRole                  string
 	SleepReason               string
 	WokenBy                   string
+	CrewJoinReason            string
 }
 
 type SessionMessageQueue struct {

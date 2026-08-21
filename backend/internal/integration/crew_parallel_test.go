@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgqueue"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
 )
 
@@ -97,6 +98,53 @@ func TestCrewParallel_SpawnBringsUpASecondMemberInARunningTree(t *testing.T) {
 	// dev was not disturbed on the way: same runtime, same row.
 	if got := s.record(t, dev.ID); got.IsSuspended || got.IsTerminated {
 		t.Fatalf("forming the crew disturbed dev: suspended=%v terminated=%v", got.IsSuspended, got.IsTerminated)
+	}
+}
+
+// TestCrewParallel_TheRuntimeTouchBringsUpASecondAgent is lazy creation end to
+// end, against a real worktree: a `standard` task starts as ONE agent, and dev
+// driving the app turns it into two - both awake, in one tree, with dev never
+// interrupted. This is the whole feature; everything else here is a property of
+// it.
+func TestCrewParallel_TheRuntimeTouchBringsUpASecondAgent(t *testing.T) {
+	ctx := context.Background()
+	s := newCrewStack(t)
+	dev, qa := setupCrew(t, s)
+
+	s.assertBothAwake(t, dev.ID, qa.ID)
+	if qa.CrewJoinReason != domain.CrewJoinSim {
+		t.Fatalf("qa join reason = %q, want %q", qa.CrewJoinReason, domain.CrewJoinSim)
+	}
+	// ONE worktree, and it is dev's - still on disk, with dev's work in it.
+	if qa.Metadata.WorkspacePath != dev.Metadata.WorkspacePath || qa.Metadata.Branch != dev.Metadata.Branch {
+		t.Fatalf("the crew is not on one worktree: %q@%q vs %q@%q",
+			qa.Metadata.WorkspacePath, qa.Metadata.Branch, dev.Metadata.WorkspacePath, dev.Metadata.Branch)
+	}
+	if !dirExists(t, dev.Metadata.WorkspacePath) {
+		t.Fatal("gaining a qa disturbed the shared worktree")
+	}
+	// dev was not disturbed on the way: same row, same runtime.
+	if got := s.record(t, dev.ID); got.IsSuspended || got.IsTerminated {
+		t.Fatalf("gaining a qa disturbed dev: suspended=%v terminated=%v", got.IsSuspended, got.IsTerminated)
+	}
+	// The checklist the new member writes must land on dev's card, which is what
+	// AO_CREW_ID being dev's id buys - and it is set at LAUNCH, so a member that
+	// is created and started in one breath has to get it right first time.
+	if got := s.rt.lastCfg.Env[sessionmanager.EnvCrewID]; got != string(dev.ID) {
+		t.Fatalf("the new member launched with AO_CREW_ID=%q, want dev's id %q", got, dev.ID)
+	}
+
+	// And it happens ONCE: dev drives the device all day and the task stays two.
+	for range 3 {
+		s.mgr.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
+		s.mgr.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinPreview)
+	}
+	all, err := s.store.ListSessions(ctx, "mer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("six more runtime touches left %d sessions, want 2", len(all))
 	}
 }
 
@@ -190,17 +238,9 @@ func TestCrewParallel_EveryWakeRouteBringsAMemberUp(t *testing.T) {
 func TestCrewParallel_AGlanceDoesNotStartAMemberThatNeverRan(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, err := s.mgr.Spawn(ctx, ports.SpawnConfig{
-		ProjectID: "mer", Kind: domain.KindWorker, Branch: "feature/task", Prompt: "build it",
-		TaskSize: domain.TaskSizeStandard,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	qa, ok, err := s.qaOf(ctx, dev.ID)
-	if err != nil || !ok {
-		t.Fatalf("the standard spawn formed no crew: %v", err)
-	}
+	// A member that has never run: created by the trigger, with its start failing.
+	// Starting is best effort, so this is the state a real one can land in.
+	dev, qa := setupCrewNeverStarted(t, s)
 	created := s.rt.created
 
 	if _, err := s.svc.Wake(ctx, qa.ID); err != nil {

@@ -413,6 +413,18 @@ export type SessionCrew = {
 	 * answers this rather than leaving the board to guess.
 	 */
 	hasRun: boolean;
+	/**
+	 * WHAT CREATED this member, and the whole of what the board needs to explain a
+	 * task that changed shape.
+	 *
+	 * A crew is not decided at spawn: a task starts as dev alone and gains a qa
+	 * when dev first touches the app's runtime - taking the simulator lease, or
+	 * pointing `ao preview` at it - or when a human asks. A task with nothing to
+	 * exercise never gains one at all.
+	 *
+	 * Absent on dev, and on a member created before AO recorded this.
+	 */
+	joinReason?: "sim" | "preview" | "manual";
 };
 
 /**

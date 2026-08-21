@@ -137,6 +137,10 @@ func (f *fakeSessionService) SetPreview(context.Context, domain.SessionID, strin
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) SetPreviewFromAgent(context.Context, domain.SessionID, string) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 // previewErr, when set, is what EnsurePreviewAllowed returns — standing in for a
 // project whose config has no web UI.
 func (f *fakeSessionService) EnsurePreviewAllowed(context.Context, domain.SessionID) error {

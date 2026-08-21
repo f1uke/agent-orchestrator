@@ -20,6 +20,11 @@ import (
 // deliberate: its bridge is built on first use and kept, so recording a
 // gesture reads the tree through the process that is already touching the
 // device rather than starting a second one.
-func newSimService(store simsvc.Store, screen simsvc.ScreenReader) *simsvc.Service {
-	return simsvc.New(store, simsvc.WithRecorder(screen))
+//
+// crew is the "this task has a runtime surface" observer: a granted lease is what
+// creates a task's qa (design §1.12.1), and the daemon is the only place that
+// knows both halves. Wired here rather than in the controller so a take-over
+// counts exactly as a claim does.
+func newSimService(store simsvc.Store, screen simsvc.ScreenReader, crew simsvc.CrewJoiner) *simsvc.Service {
+	return simsvc.New(store, simsvc.WithRecorder(screen), simsvc.WithCrewJoiner(crew))
 }
