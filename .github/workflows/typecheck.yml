@@ -26,7 +26,9 @@ permissions:
   contents: read
 
 jobs:
-  frontend:
+  # Job id is the name GitHub shows in the PR check list, so it says what went
+  # wrong on its own rather than reading as "the frontend workflow".
+  frontend-typecheck:
     runs-on: ubuntu-latest
     defaults:
       run:
