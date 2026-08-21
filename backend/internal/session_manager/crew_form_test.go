@@ -81,6 +81,19 @@ func TestSpawn_StandardFormsACrew(t *testing.T) {
 			if !strings.Contains(qa.Metadata.Prompt, "build the thing") {
 				t.Fatalf("qa's kickoff does not carry dev's brief:\n%s", qa.Metadata.Prompt)
 			}
+			// And the turn it is given ENDS somewhere: the run that stalled ended
+			// with qa's work done and dev never told, so the first turn qa reads
+			// names the handback and what it has to carry.
+			for _, want := range []string{
+				`ao send --session "$AO_CREW_ID"`,
+				"the commit you tested",
+				"what is left for the human",
+				"even if the answer is that there was nothing to exercise",
+			} {
+				if !strings.Contains(qa.Metadata.Prompt, want) {
+					t.Fatalf("qa's kickoff is missing the handback %q:\n%s", want, qa.Metadata.Prompt)
+				}
+			}
 		})
 	}
 }

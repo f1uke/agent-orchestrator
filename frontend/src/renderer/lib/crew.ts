@@ -108,6 +108,40 @@ export function holdsTheTurn(member: WorkspaceSession): boolean {
 }
 
 /**
+ * Whether this member is AWAKE AND WORKING - the one question the stall rule is
+ * built on, and the one it is easiest to get wrong.
+ *
+ * Three facts, in order, and each excludes something deliberately:
+ *
+ *  - {@link crewChipState} answers whether there is a PROCESS at all. Asleep and
+ *    finished are both "no", which is AO's own `Awake()` and nothing new.
+ *  - The agent's own last word about its turn. `parked` is the harness saying
+ *    outright that the turn ENDED and it is sitting at an empty prompt; `exited`
+ *    is the pane being gone. Neither is work, however alive the row looks.
+ *  - `idle_aged` - the daemon has already decided a quiet idle is "assumed
+ *    waiting". Below that line an `idle` member is merely BETWEEN TURNS, which is
+ *    not the same thing as stopped, and it counts as working.
+ *
+ * Two exclusions are worth stating because they are what keeps the stall rule
+ * from crying wolf. A member blocked at an OPEN PROMPT counts as working: the
+ * task is not silent, it is asking a person a question, and the rollup names the
+ * role and the question one rule later - "nobody is working on this" would be a
+ * vaguer answer to a card that already has a better one. And a member with NO
+ * activity reading at all counts as working: a missing reading is absence of
+ * evidence, and a false stall warning teaches people to ignore the lane that is
+ * supposed to mean act now.
+ *
+ * It reads the member and nothing else - no baton, no `sleep_reason`, no crew
+ * shape - so it answers the same way for one awake member or two.
+ */
+function isWorking(member: WorkspaceSession): boolean {
+	if (crewChipState(member) !== "working") return false;
+	const state = member.activity?.state;
+	if (state === "parked" || state === "exited") return false;
+	return member.statusReason !== "idle_aged";
+}
+
+/**
  * Whether this task can still GAIN a member - which is what decides whether the
  * card offers `+ qa` at all.
  *
@@ -251,6 +285,9 @@ function roleNote(member: WorkspaceSession): string {
  * byte-for-byte the board that exists today. Everything below it is the crew
  * rule, in the design's stated priority order:
  *
+ *  0. NOBODY is working on it and nothing else owes it a move -> Needs you,
+ *     `Nobody is working on this`. Ahead of every other rule, because a card that
+ *     reads healthy while nothing runs is the worst failure a real run produced
  *  1. an AWAKE member is genuinely blocked on a person -> Needs you, named
  *  2. dev's work can land AND qa has signed off AND review has not objected
  *     -> Ready to merge. THIS is the AND the feature exists for
@@ -270,9 +307,60 @@ export function taskLane(task: Task, gates: TaskGates): TaskLane {
 	const { dev, qa, members } = task;
 	if (!qa) return { zone: attentionZone(dev), note: "", holder: dev };
 
+	// The terminal lanes, which is what "and the task is not over" means below: a
+	// finished task and one that was never started are both correctly quiet.
 	if (members.every((member) => attentionZone(member) === "done")) return { zone: "done", note: "" };
 	if (dev.isTodo) return { zone: "todo", note: "", holder: dev };
 
+	const lane = crewLane(task, qa, gates);
+
+	// 0. NOBODY IS WORKING ON THIS, and that is the whole finding: a `standard`
+	// crew ran a full task, qa parked after its pass, dev was asleep, no message
+	// passed between them and no pane existed for either - and the card read
+	// Ready, which looks healthy. It would have sat like that indefinitely.
+	//
+	// It takes priority over every rule below because those rules answer "what is
+	// this task waiting FOR", and a task nothing is working on is not waiting for
+	// anything - including, in the observed run, when dev's PR could have landed.
+	//
+	// The one thing it must not do is cry wolf, so it defers to a board that
+	// already has a better answer: any lane that NAMES an ask (a member at an open
+	// prompt, AO's reviewer objecting, a checklist only a person can play) is
+	// already telling you to act, more precisely than this could. A task waiting on
+	// CI or on a reviewer is likewise quiet on purpose - a machine owes that answer
+	// and dev is nudged when it lands.
+	if (!members.some(isWorking) && !someoneElseOwesTheMove(task, lane)) {
+		return { zone: "action", note: NOBODY_IS_WORKING };
+	}
+	return lane;
+}
+
+/**
+ * The caption a stalled task carries. A fact about the TASK, so it takes no role
+ * prefix and hands the card no holder: the lane came from nobody.
+ */
+const NOBODY_IS_WORKING = "Nobody is working on this";
+
+/**
+ * Whether something OTHER than an idle agent owes this task its next move, in
+ * which case its quiet is expected rather than a stall.
+ *
+ * Two answers, and they are different kinds of thing. A lane already in `action`
+ * has NAMED an ask and a person can act on it right now - replacing `qa · Play
+ * the cases` with `Nobody is working on this` would trade a specific instruction
+ * for a vague one. A member sitting in the `pending` zone on its PR PIPELINE is
+ * waiting on a machine or a reviewer: CI has not finished, or review has not come
+ * back. Nobody should be working, and when the answer lands the PR nudge wakes
+ * dev without a human touching anything.
+ */
+function someoneElseOwesTheMove(task: Task, lane: TaskLane): boolean {
+	if (lane.zone === "action") return true;
+	return task.members.some((member) => attentionZone(member) === "pending" && member.statusReason === "pr_pipeline");
+}
+
+/** Rules 1-5: what the task is waiting FOR, given that somebody could act on it. */
+function crewLane(task: Task, qa: WorkspaceSession, gates: TaskGates): TaskLane {
+	const { dev, members } = task;
 	const awake = members.filter((member) => crewChipState(member) === "working");
 
 	// 1. A live agent is stuck on something only a person can give it.
@@ -291,22 +379,25 @@ export function taskLane(task: Task, gates: TaskGates): TaskLane {
 		return { zone: "pending", note: "qa · Not played yet" };
 	}
 
-	// 4. Somebody has the turn and is using it.
-	const holder = awake[0];
+	// 4. Somebody has the turn and is USING it - which is asked of the member that
+	// is working rather than of the first awake one, because a parked dev beside a
+	// running qa is awake and has nothing to report.
+	const holder = members.find(isWorking);
 	if (holder && attentionZone(holder) !== "action") {
 		return { zone: attentionZone(holder), note: roleNote(holder), holder };
 	}
 
-	// 5. THE BATON IS DOWN. Either nothing is running, or the member that is
-	// running has ENDED ITS TURN - rule 1 already took every awake member that is
-	// genuinely blocked on a person, so an `action` zone reaching here can only be
-	// a turn that finished. Both are the same fact about the task: its next step
-	// belongs to the other agent, and the human's part is one click rather than a
-	// decision to reason about.
+	// 5. THE BATON IS DOWN: the member that was running has ENDED ITS TURN, and
+	// the task's next step belongs to the other agent - the human's part is one
+	// click rather than a decision to reason about.
 	//
 	// This is the second half of the trap, and the half that is easy to miss: a
 	// dev that parks without being stood down is still AWAKE, so a rollup that
 	// only skipped asleep members would put it straight back into Needs you.
+	//
+	// Rule 0 sits in front of this: a task where NOBODY is working reaches here
+	// only when something other than an agent owes the next move (CI, a reviewer),
+	// so "ready to wake" is now said about a task that still has an agent on it.
 	return { zone: "pending", note: `${nextUp(qa)} · Ready to wake` };
 }
 

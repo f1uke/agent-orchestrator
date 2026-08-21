@@ -19,9 +19,15 @@ function session(id: string, over: Partial<WorkspaceSession> = {}): WorkspaceSes
 	};
 }
 
+/** The activity reading of a member whose agent is RUNNING a turn right now. */
+const running = { state: "active", lastActivityAt: "2026-08-21T00:00:00Z" } as const;
+/** The activity reading of a member that has ENDED its turn and sits at its prompt. */
+const parked = { state: "parked", lastActivityAt: "2026-08-21T00:00:00Z" } as const;
+
 /** dev + a qa asleep beside it, in the state a `standard` spawn leaves them. */
 function crew(devOver: Partial<WorkspaceSession> = {}, qaOver: Partial<WorkspaceSession> = {}) {
 	const dev = session("demo-1", {
+		activity: running,
 		crew: { id: "demo-1", role: "dev", hasRun: true },
 		...devOver,
 	});
@@ -120,17 +126,40 @@ describe("taskLane — a solo task is untouched", () => {
 			expect(lane.note).toBe("");
 		});
 	}
+
+	// The stall rule asks "is anybody working on this?", and on a solo task the
+	// answer is regularly NO - a parked agent, a suspended one - without anything
+	// being wrong. Almost every task on this machine is solo, so the rule must not
+	// be able to reach one at all.
+	for (const status of statuses) {
+		it(`${status} is unchanged even with nobody running it`, () => {
+			for (const over of [
+				{ activity: parked },
+				{ activity: { state: "exited" as const, lastActivityAt: "2026-08-21T00:00:00Z" } },
+				{ isSuspended: true },
+				{ isSuspended: true, sleepReason: "turn" as const, statusReason: "idle_aged" as const },
+			]) {
+				const solo = session("demo-9", { status, isTodo: status === "todo", ...over });
+				const lane = taskLane({ dev: solo, members: [solo], isCrew: false }, { review: "not run" });
+				expect(lane.zone).toBe(attentionZone(solo));
+				expect(lane.note).toBe("");
+			}
+		});
+	}
 });
 
 describe("taskLane — the NEEDS YOU trap", () => {
 	// THE trap. dev parks after every turn, and a parked agent reads needs_input
 	// with reason idle_aged. Under a naive rollup every handed-off task would pile
 	// into Needs you and that lane would stop meaning "a human is on the hook".
-	it("a parked dev with qa waiting is IN REVIEW, not NEEDS YOU", () => {
-		const { dev, qa } = crew({ status: "needs_input", statusReason: "idle_aged" });
+	it("a parked dev whose qa is working is NOT NEEDS YOU", () => {
+		const { dev, qa } = crew(
+			{ status: "needs_input", statusReason: "idle_aged", activity: parked },
+			{ isSuspended: false, status: "working", activity: running, crew: { id: "demo-1", role: "qa", hasRun: true } },
+		);
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
-		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · Ready to wake");
+		expect(lane.zone).toBe("working");
+		expect(lane.note).toBe("qa · Working");
 	});
 
 	it("but a dev genuinely blocked at an OPEN PROMPT is still NEEDS YOU", () => {
@@ -170,6 +199,141 @@ describe("taskLane — the NEEDS YOU trap", () => {
 		);
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
 		expect(lane.zone).toBe("working");
+	});
+});
+
+describe("taskLane — nobody is working on this", () => {
+	// THE INCIDENT, as a test. A `standard` crew ran a full task: qa finished its
+	// pass and PARKED, dev was asleep with sleep_reason=turn, the queue was empty
+	// because qa never told dev it was done, and neither had a pane. Nothing was
+	// running and nothing said so - the card read Ready, which looks healthy, and
+	// it would have sat like that until a person happened to notice.
+	const stalled = () =>
+		crew(
+			{
+				status: "mergeable",
+				statusReason: "pr_pipeline",
+				isSuspended: true,
+				sleepReason: "turn",
+				activity: parked,
+			},
+			{
+				isSuspended: false,
+				status: "needs_input",
+				statusReason: "idle_aged",
+				activity: parked,
+				crew: { id: "demo-1", role: "qa", hasRun: true },
+			},
+		);
+
+	it("says so when qa has parked after its pass and dev is asleep", () => {
+		const { dev, qa } = stalled();
+		const lane = taskLane(
+			{ dev, qa, members: [dev, qa], isCrew: true },
+			{ review: "not run", smoke: smoke({ total: 1, pass: 1, checked: 1 }) },
+		);
+		expect(lane.zone).toBe("action");
+		expect(lane.note).toBe("Nobody is working on this");
+		// A fact about the TASK, not about a member: drawing a sleeping dev's glyph
+		// here would paint the board's only SOLID mark on a dead process.
+		expect(lane.holder).toBeUndefined();
+	});
+
+	it("says so however the checklist happens to stand", () => {
+		const { dev, qa } = stalled();
+		const task = { dev, qa, members: [dev, qa], isCrew: true };
+		// Not loaded; qa stood down and recorded nothing (an empty checklist reads
+		// as settled, which is what made the incident read Ready); all green.
+		for (const gate of [undefined, smoke(), smoke({ total: 1, pass: 1, checked: 1 })]) {
+			expect(taskLane(task, { review: "not run", smoke: gate }).note).toBe("Nobody is working on this");
+		}
+	});
+
+	it("is not fooled by a member that is awake with no process behind it", () => {
+		// The incident's other half: a row that still says awake while its pane is
+		// gone. `exited` is the agent's own last word, and it is not working.
+		const { dev, qa } = stalled();
+		const dead = { ...qa, activity: { state: "exited" as const, lastActivityAt: "2026-08-21T00:00:00Z" } };
+		const lane = taskLane({ dev, qa: dead, members: [dev, dead], isCrew: true }, { review: "not run" });
+		expect(lane.zone).toBe("action");
+		expect(lane.note).toBe("Nobody is working on this");
+	});
+
+	it("stays quiet while ONE member is still running", () => {
+		const { dev, qa } = stalled();
+		const live = { ...qa, activity: running, status: "working" as SessionStatus, statusReason: undefined };
+		const lane = taskLane({ dev, qa: live, members: [dev, live], isCrew: true }, { review: "not run" });
+		expect(lane.zone).not.toBe("action");
+		// dev can land and the checklist has not been played, so the card keeps
+		// saying exactly that - what it must not say is that nothing is running.
+		expect(lane.note).toBe("qa · Not played yet");
+	});
+
+	it("stays quiet for a member merely idle BETWEEN turns", () => {
+		// `idle` is "recently active" - the agent paused, it did not stop. Only once
+		// the daemon has aged that reading into idle_aged is the turn over.
+		const { dev, qa } = stalled();
+		const between = {
+			...qa,
+			status: "idle" as SessionStatus,
+			statusReason: "idle" as const,
+			activity: { state: "idle" as const, lastActivityAt: "2026-08-21T00:00:00Z" },
+		};
+		const lane = taskLane({ dev, qa: between, members: [dev, between], isCrew: true }, { review: "not run" });
+		expect(lane.zone).not.toBe("action");
+	});
+
+	it("does not call a task waiting on CI or on a reviewer stalled", () => {
+		// Nobody is working, and that is exactly right: a machine owes the answer
+		// and dev is nudged when it lands.
+		for (const status of ["pr_open", "review_pending", "draft"] as SessionStatus[]) {
+			const { dev, qa } = crew(
+				{ status, statusReason: "pr_pipeline", isSuspended: true, sleepReason: "turn", activity: parked },
+				{
+					isSuspended: true,
+					status: "idle",
+					activity: parked,
+					crew: { id: "demo-1", role: "qa", hasRun: true },
+				},
+			);
+			const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
+			expect(lane.zone).toBe("pending");
+			expect(lane.note).not.toBe("Nobody is working on this");
+		}
+	});
+
+	it("does not overwrite an ask the board already names", () => {
+		const { dev, qa } = stalled();
+		const task = { dev, qa, members: [dev, qa], isCrew: true };
+		// The human's play is the only thing left, and rule 3 says which cases.
+		expect(taskLane(task, { review: "not run", smoke: smoke({ total: 2, pending: 2, agentPass: 2 }) }).note).toBe(
+			"qa · Play the cases",
+		);
+		// AO's reviewer objected at this head, and that is dev's to answer.
+		expect(taskLane(task, { review: "changes" }).note).toBe("review · Changes requested");
+	});
+
+	it("does not call a member blocked at an open prompt a stall", () => {
+		const { dev, qa } = stalled();
+		const asking = {
+			...qa,
+			statusReason: "waiting_input" as const,
+			activity: { state: "waiting_input" as const, lastActivityAt: "2026-08-21T00:00:00Z" },
+		};
+		const lane = taskLane({ dev, qa: asking, members: [dev, asking], isCrew: true }, { review: "not run" });
+		expect(lane.zone).toBe("action");
+		expect(lane.note).toBe("qa · Input needed");
+	});
+
+	it("says nothing about a task that is over, or one that never started", () => {
+		const done = crew(
+			{ status: "merged", isTerminated: true, activity: parked },
+			{ status: "terminated", isTerminated: true, activity: parked, crew: { id: "demo-1", role: "qa", hasRun: true } },
+		);
+		expect(taskLane({ ...done, members: [done.dev, done.qa], isCrew: true }, { review: "not run" }).zone).toBe("done");
+
+		const todo = crew({ status: "todo", isTodo: true, activity: parked }, { status: "todo", isTodo: true });
+		expect(taskLane({ ...todo, members: [todo.dev, todo.qa], isCrew: true }, { review: "not run" }).zone).toBe("todo");
 	});
 });
 
@@ -246,18 +410,18 @@ describe("taskLane — several tasks at once", () => {
 			const dev = session(`demo-${n}a`, {
 				status: "needs_input",
 				statusReason: "idle_aged",
-				isSuspended: true,
+				activity: parked,
 				crew: { id: `demo-${n}a`, role: "dev", hasRun: true },
 			});
 			const qa = session(`demo-${n}b`, {
 				status: "idle",
-				isSuspended: true,
-				crew: { id: `demo-${n}a`, role: "qa", hasRun: false },
+				activity: running,
+				crew: { id: `demo-${n}a`, role: "qa", hasRun: true },
 			});
 			return { dev, qa, members: [dev, qa], isCrew: true };
 		});
 		const zones = boards.map((task) => taskLane(task, { review: "not run" }).zone);
-		expect(zones).toEqual(["pending", "pending", "pending"]);
+		expect(zones).toEqual(["working", "working", "working"]);
 	});
 });
 

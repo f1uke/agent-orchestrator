@@ -193,7 +193,10 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, join crew
 		b.WriteString("\n\nThe brief dev was given:\n\n")
 		b.WriteString(brief)
 	}
-	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, record what you found, and hand back to dev.")
+	// The last sentence names the handback CONCRETELY. qa's floor carries the
+	// obligation in full, but the kickoff is the turn qa actually reads, and the
+	// run that stalled ended precisely here - work done, nobody told.
+	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, record what you found, and finish by handing back to dev with `ao send --session \"$AO_CREW_ID\"` - the commit you tested, what you recorded and retired, and what is left for the human. Hand back even if the answer is that there was nothing to exercise.")
 	return b.String()
 }
 

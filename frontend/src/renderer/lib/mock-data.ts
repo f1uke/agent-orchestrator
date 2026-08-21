@@ -310,6 +310,48 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				crew: { id: "demo-ready", role: "qa", hasRun: true },
 			},
 			{
+				// THE STALL, on the demo board so the lane can be looked at: a crew
+				// that finished its work and stopped. qa parked after its pass, dev is
+				// asleep waiting for a turn nobody gave it, and neither has a pane.
+				// Before the rollup learned to say so, this card read Ready - the one
+				// state on the board that looks like nothing is wrong.
+				id: "demo-stalled",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Rename the export job's retry flag",
+				provider: "claude-code",
+				branch: "demo/retry-flag",
+				status: "mergeable",
+				displayStatus: "mergeable",
+				isSuspended: true,
+				sleepReason: "turn",
+				createdAt: hoursAgo(6),
+				updatedAt: hoursAgo(1),
+				activity: { state: "parked", lastActivityAt: hoursAgo(1) },
+				prs: [demoPr(324, "open", "passing", "approved")],
+				taskSize: "standard",
+				crew: { id: "demo-stalled", role: "dev", hasRun: true },
+			},
+			{
+				// qa ran, found nothing a person has to play, and parked. Its turn is
+				// over and it never told dev - which is the other half of the same
+				// failure, and why qa's floor now obliges it to hand back.
+				id: "demo-stalled-qa",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Rename the export job's retry flag",
+				provider: "claude-code",
+				branch: "demo/retry-flag",
+				status: "needs_input",
+				statusReason: "idle_aged",
+				createdAt: hoursAgo(6),
+				updatedAt: minutesAgo(50),
+				activity: { state: "parked", lastActivityAt: minutesAgo(50) },
+				prs: [],
+				taskSize: "standard",
+				crew: { id: "demo-stalled", role: "qa", hasRun: true },
+			},
+			{
 				id: "demo-ci-failed",
 				terminalHandleId: "demo-ci-failed/terminal_0",
 				workspaceId: "ao-demo",
