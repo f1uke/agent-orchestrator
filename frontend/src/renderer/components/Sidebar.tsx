@@ -36,7 +36,7 @@ import {
 	type WorkspaceSummary,
 	workerSessions,
 } from "../types/workspace";
-import { crewChipState, tasksFrom } from "../lib/crew";
+import { crewChipState, neverStarted, tasksFrom } from "../lib/crew";
 import { aoBridge } from "../lib/bridge";
 import { CopyButton } from "./CopyButton";
 import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
@@ -1131,7 +1131,7 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 
 /**
  * A crew member NESTED under its dev: one quiet, indented line saying which role
- * it is and whether it has the turn.
+ * it is and whether it is running.
  *
  * It is deliberately NOT a second SessionRow. A crew member is not a second
  * piece of work - it has no branch of its own, no pull request of its own and no
@@ -1143,6 +1143,9 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 function CrewMemberRow({ member, active, onOpen }: { member: WorkspaceSession; active: boolean; onOpen: () => void }) {
 	const role = member.crew?.role ?? "qa";
 	const state = crewChipState(member);
+	// "not started" and "paused" are different things to a person: one has a Start
+	// button on its card and the other comes back the moment you open it.
+	const notStarted = neverStarted(member);
 	return (
 		<SidebarMenuSubItem>
 			<button
@@ -1175,7 +1178,7 @@ function CrewMemberRow({ member, active, onOpen }: { member: WorkspaceSession; a
 					{role}
 					<span className="text-passive">
 						{" "}
-						· {state === "working" ? "has the turn" : state === "done" ? "finished" : "asleep"}
+						· {state === "working" ? "working" : state === "done" ? "finished" : notStarted ? "not started" : "paused"}
 					</span>
 				</span>
 			</button>

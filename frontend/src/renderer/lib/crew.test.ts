@@ -363,7 +363,7 @@ describe("taskLane — READY TO MERGE is an AND", () => {
 		const { dev, qa } = crew(mergeable);
 		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "approved", smoke: smoke() });
 		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · Not woken yet");
+		expect(lane.note).toBe("qa · Not started yet");
 	});
 
 	it("does not read ready while a person has not played the cases", () => {

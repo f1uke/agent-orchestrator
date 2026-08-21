@@ -46,7 +46,7 @@ export function IdleStatusChip({ session, compact = false }: { session: Workspac
 		const notStarted = neverStarted(session);
 		const label = notStarted ? "Not started" : "Paused";
 		const title = notStarted
-			? "On the task and never started — open its card and press Start. Its crewmate keeps running."
+			? "On the task and never started - open its card and press Start. Its crewmate keeps running."
 			: "Paused to free resources — open to resume";
 		if (compact) {
 			// The title rides a wrapping span: lucide's icon props do not include one,

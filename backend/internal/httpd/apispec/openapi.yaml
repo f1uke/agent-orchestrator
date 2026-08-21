@@ -4918,15 +4918,20 @@ paths:
     delete:
       operationId: clearSystemPrompt
       parameters:
-      - description: 'Editable prompt kind: orchestrator, worker, or reviewer.'
+      - description: 'Editable prompt kind: orchestrator, worker, qa, or reviewer.
+          The qa kind is the base the qa member of a crew starts from - a worker SESSION
+          doing a different job, so it has a base of its own.'
         in: path
         name: kind
         required: true
         schema:
-          description: 'Editable prompt kind: orchestrator, worker, or reviewer.'
+          description: 'Editable prompt kind: orchestrator, worker, qa, or reviewer.
+            The qa kind is the base the qa member of a crew starts from - a worker
+            SESSION doing a different job, so it has a base of its own.'
           enum:
           - orchestrator
           - worker
+          - qa
           - reviewer
           type: string
       responses:
@@ -4954,15 +4959,20 @@ paths:
     put:
       operationId: setSystemPrompt
       parameters:
-      - description: 'Editable prompt kind: orchestrator, worker, or reviewer.'
+      - description: 'Editable prompt kind: orchestrator, worker, qa, or reviewer.
+          The qa kind is the base the qa member of a crew starts from - a worker SESSION
+          doing a different job, so it has a base of its own.'
         in: path
         name: kind
         required: true
         schema:
-          description: 'Editable prompt kind: orchestrator, worker, or reviewer.'
+          description: 'Editable prompt kind: orchestrator, worker, qa, or reviewer.
+            The qa kind is the base the qa member of a crew starts from - a worker
+            SESSION doing a different job, so it has a base of its own.'
           enum:
           - orchestrator
           - worker
+          - qa
           - reviewer
           type: string
       requestBody:

@@ -1550,7 +1550,7 @@ type SetSystemPromptRequest struct {
 // /settings/prompts/{kind} routes. Handlers read it via chi.URLParam; it is
 // declared here so apispec.Build reflects it as the path parameter.
 type PromptKindParam struct {
-	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, or reviewer." enum:"orchestrator,worker,reviewer"`
+	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, qa, or reviewer. The qa kind is the base the qa member of a crew starts from - a worker SESSION doing a different job, so it has a base of its own." enum:"orchestrator,worker,qa,reviewer"`
 }
 
 // MessageTemplateItem is one editable nudge template on the wire: its built-in

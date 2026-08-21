@@ -9144,8 +9144,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Editable prompt kind: orchestrator, worker, or reviewer. */
-                kind: "orchestrator" | "worker" | "reviewer";
+                /** @description Editable prompt kind: orchestrator, worker, qa, or reviewer. The qa kind is the base the qa member of a crew starts from - a worker SESSION doing a different job, so it has a base of its own. */
+                kind: "orchestrator" | "worker" | "qa" | "reviewer";
             };
             cookie?: never;
         };
@@ -9189,8 +9189,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Editable prompt kind: orchestrator, worker, or reviewer. */
-                kind: "orchestrator" | "worker" | "reviewer";
+                /** @description Editable prompt kind: orchestrator, worker, qa, or reviewer. The qa kind is the base the qa member of a crew starts from - a worker SESSION doing a different job, so it has a base of its own. */
+                kind: "orchestrator" | "worker" | "qa" | "reviewer";
             };
             cookie?: never;
         };

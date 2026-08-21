@@ -49,7 +49,7 @@ export function CrewMemberNotStartedPane({ session }: { session: WorkspaceSessio
 				</div>
 				<p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
 					This agent is on the task and has its first turn waiting, in the same worktree and on the same branch as dev.
-					Nothing is spent until you start it. Starting it does not interrupt dev — both members of a crew work at the
+					Nothing is spent until you start it. Starting it does not interrupt dev: both members of a crew work at the
 					same time.
 				</p>
 				<div className="mt-4 flex items-center gap-3">
