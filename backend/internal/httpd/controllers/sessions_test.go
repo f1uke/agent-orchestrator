@@ -25,6 +25,7 @@ import (
 )
 
 type fakeSessionService struct {
+	crewDev               map[domain.SessionID]domain.SessionID
 	crewWoken             []domain.SessionID
 	crewAdded             []domain.CrewRole
 	crewAddErr            error
@@ -402,6 +403,15 @@ func (f *fakeSessionService) ListPRs(_ context.Context, id domain.SessionID) ([]
 		return nil, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
 	return []domain.PRFacts{{URL: "https://github.com/aoagents/agent-orchestrator/pull/142", Number: 142, CI: domain.CIPassing, Review: domain.ReviewRequired, Mergeability: domain.MergeMergeable, UpdatedAt: time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)}}, nil
+}
+
+// crewDev, when set, maps a member to the dev of its task; anything absent is
+// its own task, which is what a solo session is.
+func (f *fakeSessionService) TaskDevOf(_ context.Context, id domain.SessionID) (domain.SessionID, error) {
+	if dev, ok := f.crewDev[id]; ok {
+		return dev, nil
+	}
+	return id, nil
 }
 
 func (f *fakeSessionService) ListPRSummaries(_ context.Context, id domain.SessionID) ([]sessionsvc.PRSummary, error) {

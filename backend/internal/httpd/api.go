@@ -150,8 +150,6 @@ func (a *API) Register(root chi.Router) {
 			a.sessions.Register(r)
 			a.jira.Register(r)
 			a.prs.Register(r)
-			a.reviews.Register(r)
-			a.smoke.Register(r)
 			a.crewRuns.Register(r)
 			a.sim.Register(r)
 			a.simFlows.Register(r)
@@ -161,6 +159,28 @@ func (a *API) Register(root chi.Router) {
 			a.settings.Register(r)
 			a.daemon.Register(r)
 			// Sibling REST controllers plug in here.
+
+			// THE TASK-SCOPED SURFACES, and the only place that list lives.
+			//
+			// What these controllers own belongs to the TASK, not to the agent whose
+			// id the path names: the branch's pull request and its comment threads,
+			// AO's review verdicts on it, and the smoke checklist. A crew's two
+			// members share one of each, so both must be answered the same - reading
+			// them per-session is what left qa with an empty Tests tab and a
+			// readiness strip that saw no pull request at all.
+			//
+			// Everything above stays agent-scoped, which is the safe default: a
+			// task-level surface left out of this group merely keeps today's
+			// behaviour, while an agent-level one swept in would deliver qa's
+			// message, or qa's kill, to dev. Mount by CONTROLLER wherever every
+			// route it owns is task-scoped, so a route added later inherits the
+			// scope instead of having to remember it.
+			r.Group(func(r chi.Router) {
+				r.Use(controllers.TaskScoped(a.sessions.Svc))
+				a.reviews.Register(r)
+				a.smoke.Register(r)
+				a.sessions.RegisterTaskScoped(r)
+			})
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.
 		a.notifications.RegisterStream(r)
