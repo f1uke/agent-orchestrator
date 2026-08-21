@@ -336,6 +336,28 @@ func TestCrewParallel_BothComeBackFromADaemonRestart(t *testing.T) {
 	}
 }
 
+// TestCrewParallel_BothSurviveACrash is the same restart WITHOUT a clean
+// shutdown - the path #224 found the trap on, because reconcileLive reaches
+// saveAndTeardownOne at BOOT and that path force-destroys. A crew must not lose
+// a member, or its worktree, to a daemon that was killed.
+func TestCrewParallel_BothSurviveACrash(t *testing.T) {
+	ctx := context.Background()
+	s := newCrewStack(t)
+	dev, qa := s.spawnCrew(t)
+	tree := dev.Metadata.WorkspacePath
+
+	// The daemon was killed. No shutdown sweep ran; the panes died with it.
+	s.rt.killAll()
+	if err := s.mgr.Reconcile(ctx); err != nil {
+		t.Fatalf("boot after a crash: %v", err)
+	}
+
+	s.assertBothAwake(t, dev.ID, qa.ID)
+	if _, err := os.Stat(tree); err != nil {
+		t.Fatalf("the shared worktree was destroyed by boot reconciliation: %v", err)
+	}
+}
+
 // TestCrewParallel_ConcurrentWakesBringUpBoth. Two wakes arriving together used
 // to be the dangerous case: a check-then-act guard could let both through and
 // produce the one state everything existed to prevent. That state is now the
