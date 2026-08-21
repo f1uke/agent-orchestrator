@@ -126,12 +126,13 @@ func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project do
 		TaskSize:    dev.TaskSize.WithDefault(),
 		CreatedBy:   dev.CreatedBy,
 		// Asleep from the first byte written about it. This is the whole
-		// mechanism: no runtime is created, so nothing has to be torn down, and
-		// Awake() is false, so the crew slot is never taken.
+		// mechanism: no runtime is created, so nothing has to be torn down, and a
+		// qa nobody ever starts costs exactly one row.
 		IsSuspended: true,
-		// ...and asleep for a REASON that is recorded, so that merely opening qa's
-		// card does not hand it the turn dev is still holding (domain/sleep.go).
-		SleepReason: domain.SleepReasonTurn,
+		// ...and asleep the way anything else with no process is asleep. Opening it
+		// starts it and dev keeps running beside it; that a member has never run at
+		// all is read off its empty runtime handle, not off this (domain/sleep.go).
+		SleepReason: domain.SleepReasonIdle,
 		Metadata: domain.SessionMetadata{
 			// dev's tree, dev's branch. The worktree directory is derived from the
 			// BRANCH, so these two fields ARE the share (#224).
@@ -184,7 +185,7 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, join crew
 	var b strings.Builder
 	b.WriteString("You are ")
 	b.WriteString(string(role))
-	b.WriteString(" on this task, and it is your turn. dev has been working in the worktree you are in now - read the branch's diff against its base branch to see what actually changed, rather than assuming the brief below was followed.")
+	b.WriteString(" on this task. dev is working in the worktree you are in now, at the same time as you - read the branch's diff against its base branch to see what actually changed, rather than assuming the brief below was followed.")
 	if join == joinedLate {
 		b.WriteString("\n\n")
 		b.WriteString(crewLateArrival)
@@ -196,7 +197,7 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, join crew
 	// The last sentence names the handback CONCRETELY. qa's floor carries the
 	// obligation in full, but the kickoff is the turn qa actually reads, and the
 	// run that stalled ended precisely here - work done, nobody told.
-	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, record what you found, and finish by handing back to dev with `ao send --session \"$AO_CREW_ID\"` - the commit you tested, what you recorded and retired, and what is left for the human. Hand back even if the answer is that there was nothing to exercise.")
+	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, record what you found, and finish by handing back to dev with `ao send --crew dev --about <sha>` - the commit you tested, what you recorded and retired, and what is left for the human. Hand back even if the answer is that there was nothing to exercise. dev is working in this same worktree while you do, so bracket anything you want to trust with `ao crew run`.")
 	return b.String()
 }
 
@@ -240,14 +241,14 @@ func (m *Manager) CrewMember(ctx context.Context, id domain.SessionID, role doma
 	return domain.SessionRecord{}, false, nil
 }
 
-// WakeCrewMember gives the crew slot to `id`, whoever is holding it.
+// WakeCrewMember starts `id`, and TOUCHES NOBODY ELSE.
 //
-// It is the ONE affordance the design asks for at this stage: a way to say "qa's
-// turn now", with no policy about when that should happen. It goes THROUGH
-// #225's exclusion rather than around it - the holder is released (suspended,
-// tmux reaped) and the taker is Resumed, which takes crewSlotGuard - so it cannot
-// produce the two-agents-in-one-checkout state the guard exists to prevent, and
-// a failed take leaves the slot free rather than held by a corpse.
+// It used to be a handover: the holder was released - suspended, tmux reaped -
+// before the taker came up, because only one member could be awake. Both members
+// run at once now, so there is nothing to take the turn from and nothing to
+// stand down. What is left is an ordinary Resume, kept as a named call because
+// "start qa on this task" is still a thing a human and the orchestrator ask for
+// by role rather than by session id.
 //
 // A member that is already awake is returned unchanged: "wake qa" when qa is
 // already up is a no-op, not an error.
@@ -262,16 +263,8 @@ func (m *Manager) WakeCrewMember(ctx context.Context, id domain.SessionID) (doma
 	if rec.IsTerminated {
 		return domain.SessionRecord{}, fmt.Errorf("%w: %s is terminated", ErrInvalidCrew, id)
 	}
-	holder, ok, err := m.crewHolderOf(ctx, rec)
-	if err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("wake crew member: %w", err)
-	}
-	if ok && holder.ID == id {
+	if rec.Awake() {
 		return rec, nil
 	}
-	if !ok {
-		// Nobody holds it - the ordinary resume path takes it, guard and all.
-		return m.Resume(ctx, id, domain.WokenByWake)
-	}
-	return m.HandOverCrewSlot(ctx, holder.ID, id, domain.WokenByWake)
+	return m.Resume(ctx, id, domain.WokenByWake)
 }

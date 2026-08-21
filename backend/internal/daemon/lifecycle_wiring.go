@@ -100,7 +100,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, reclaimSettings func() reclaimsettings.Settings, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -205,11 +205,13 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		PRs:      store,
 		Projects: store,
 		Launcher: reviewcore.NewLauncher(reviewers, runtime),
-		// The ephemeral reviewer is a READER of the worker's checkout, so it must
-		// not start while an agent is writing that checkout. Only a shared worktree
-		// (a crew) ever reports a writer; for every solo worker this reports nobody
-		// and Trigger is unchanged.
-		TreeWriter: mgr.CrewTreeWriter,
+		// The ephemeral reviewer is a READER of the worker's checkout, and both crew
+		// members now write that checkout while it reads. It cannot refuse to start
+		// (it would refuse forever), so it brackets its run with the same write-
+		// generation detector qa uses and DISCARDS a pass the tree moved under. A
+		// solo worker's tree has one writer - the session under review - so no
+		// bracket is taken and Trigger is unchanged for it.
+		Watcher: treeWatchers,
 		// The reviewer base is assembled from the same global overrides at launch,
 		// so an edit through the settings API takes effect on the next review run.
 		PromptOverrides: func() promptoverrides.Overrides { return promptOverrides.Get() },

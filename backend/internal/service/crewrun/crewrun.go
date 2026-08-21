@@ -45,6 +45,7 @@ type Store interface {
 	ListCrewRunsForSession(ctx context.Context, id domain.SessionID, limit int) ([]domain.CrewRun, error)
 	OpenCrewRunForSession(ctx context.Context, id domain.SessionID) (domain.CrewRun, bool, error)
 	ConsecutiveCrewRunDiscards(ctx context.Context, id domain.SessionID) (int, error)
+	OpenCrewRunsForCrewmates(ctx context.Context, crewID, self domain.SessionID) ([]domain.CrewRun, error)
 	AbandonOpenCrewRuns(ctx context.Context, now time.Time) (int, error)
 }
 
@@ -79,6 +80,18 @@ type StartResult struct {
 	// reported rather than swallowed: a run thrown away silently is no better
 	// than a mixed result reported as clean.
 	SupersededRunID string `json:"supersededRunId,omitempty"`
+	// CrewmateRun is a run the OTHER member of this task already has open in the
+	// same worktree. ADVISORY, and nothing here waits or refuses on it: this run
+	// is allowed to start, and whether its result survives is the detector's call
+	// as always.
+	//
+	// It is worth saying at all because of one case the design left open and this
+	// does not close: two concurrent `xcodebuild` runs against ONE shared
+	// DerivedData. The shared cache is the whole reason a crew has one worktree,
+	// and Xcode's own locking either handles two builders or it does not - which
+	// is unverified. Naming it is what lets a member choose to wait, and lets a
+	// human recognise the failure if it ever happens.
+	CrewmateRun *domain.CrewRun `json:"crewmateRun,omitempty"`
 }
 
 // EndInput closes a bracket. RunID is optional: with it empty the session's open
@@ -239,7 +252,21 @@ func (s *Service) Start(ctx context.Context, sessionID domain.SessionID, in Star
 		Run:             run,
 		Certified:       run.Detector == domain.CrewRunDetectorLive,
 		SupersededRunID: superseded,
+		CrewmateRun:     s.crewmateRun(ctx, rec),
 	}, nil
+}
+
+// crewmateRun is the other member's open run, if it has one. Best effort by
+// design: this is advice, so failing to fetch it must not fail a build.
+func (s *Service) crewmateRun(ctx context.Context, rec domain.SessionRecord) *domain.CrewRun {
+	if rec.CrewID == "" {
+		return nil
+	}
+	runs, err := s.store.OpenCrewRunsForCrewmates(ctx, rec.CrewID, rec.ID)
+	if err != nil || len(runs) == 0 {
+		return nil
+	}
+	return &runs[0]
 }
 
 // attach establishes the detector and stamps the run's starting generation. It

@@ -78,8 +78,9 @@ export function taskOf(tasks: Task[], sessionId: string): Task | undefined {
 /**
  * What a crew chip says about one member. Three states and no more:
  *
- * - `working` - it has the turn and an agent is running.
- * - `asleep`  - it is waiting its turn. No process, worktree kept, one wake away.
+ * - `working` - an agent is running. Both members can be, and normally are.
+ * - `asleep`  - no process. Either paused, or never started; {@link neverStarted}
+ *   is what tells those apart, because only one of them has a Start button.
  * - `done`    - it has finished and been torn down.
  *
  * There is deliberately no "absent" state. A role that is not in the crew has no
@@ -94,17 +95,17 @@ export function crewChipState(member: WorkspaceSession): CrewChipState {
 }
 
 /**
- * Whether this member HAS THE TURN right now - the renderer's mirror of the
- * daemon's `domain.Awake()`, same three facts in the same order.
+ * Whether this member has NEVER RUN: it is on the task and nothing has been
+ * spent on it. A crew's qa is created as a row - dev's branch, dev's worktree,
+ * its first turn already written - and stays that way until somebody starts it.
  *
- * It exists because "sleeps the other one" is only a true promise against a
- * member that is actually running. A finished member (its PR merged), one that
- * is already asleep, and one that never started are all stopped: waking this
- * member sleeps nobody, and the daemon's WakeCrewMember takes the ordinary
- * resume path without touching them.
+ * It is what the card and the pane read instead of a sleep state, because
+ * "asleep" and "never started" answer different questions and only one of them
+ * has a button. There is deliberately no "waiting its turn" any more: both
+ * members run at the same time, so nothing is waiting for anything.
  */
-export function holdsTheTurn(member: WorkspaceSession): boolean {
-	return !member.isTerminated && !member.isSuspended && !member.isTodo && member.status !== "merged";
+export function neverStarted(member: WorkspaceSession): boolean {
+	return Boolean(member.crew) && !member.crew?.hasRun && !member.isTerminated;
 }
 
 /**
@@ -211,7 +212,7 @@ export type TaskLane = {
 	 *
 	 * It is absent when the lane came from a fact about the TASK rather than about
 	 * a member (`qa · Play the cases` is a fact about the checklist and the human;
-	 * `qa · Ready to wake` is a fact about the baton). Returning the member rather
+	 * `qa · Next up` is a fact about whose move it is). Returning the member rather
 	 * than leaving the card to parse the note is not merely tidier: drawing a
 	 * sleeping qa's glyph for "play the cases" would paint the board's only SOLID
 	 * mark - the one reserved for a genuinely live agent - on a dead process.
@@ -255,10 +256,9 @@ function awaitingOnlyTheHumansPlay(smoke: SmokeProgress | undefined): boolean {
 }
 
 /**
- * Whose turn the card SAYS is waiting - said, not decided. AO builds no scheduler
- * here (the handover policy is meant to be chosen after watching real tasks), so
- * this is only what the board reports: qa until it has had a turn on this change,
- * then dev, which owns the pull request and has to land it.
+ * Whose move the card SAYS it is - said, not decided. AO builds no scheduler here,
+ * so this is only what the board reports: qa until it has had a turn on this
+ * change, then dev, which owns the pull request and has to land it.
  */
 function nextUp(qa: WorkspaceSession): CrewRole {
 	if (!qa.crew?.hasRun) return "qa";
@@ -373,32 +373,31 @@ function crewLane(task: Task, qa: WorkspaceSession, gates: TaskGates): TaskLane 
 
 	// 2/3. dev's work can land: the AND, and what is still owed when it cannot.
 	if (attentionZone(dev) === "merge") {
-		if (!dev.crew?.hasRun || !qa.crew?.hasRun) return { zone: "pending", note: "qa · Not woken yet" };
+		if (!dev.crew?.hasRun || !qa.crew?.hasRun) return { zone: "pending", note: "qa · Not started yet" };
 		if (gates.smoke && smokeSettled(gates.smoke)) return { zone: "merge", note: "", holder: dev };
 		if (awaitingOnlyTheHumansPlay(gates.smoke)) return { zone: "action", note: "qa · Play the cases" };
 		return { zone: "pending", note: "qa · Not played yet" };
 	}
 
-	// 4. Somebody has the turn and is USING it - which is asked of the member that
-	// is working rather than of the first awake one, because a parked dev beside a
-	// running qa is awake and has nothing to report.
+	// 4. Somebody is WORKING - asked of the member that is working rather than of
+	// the first awake one, because a parked dev beside a running qa is awake and
+	// has nothing to report.
 	const holder = members.find(isWorking);
 	if (holder && attentionZone(holder) !== "action") {
 		return { zone: attentionZone(holder), note: roleNote(holder), holder };
 	}
 
-	// 5. THE BATON IS DOWN: the member that was running has ENDED ITS TURN, and
-	// the task's next step belongs to the other agent - the human's part is one
-	// click rather than a decision to reason about.
+	// 5. NOBODY IS MID-TURN: whoever was working has ended its turn and the task's
+	// next step belongs to the other agent. Both members may run at once, so this
+	// is not a handover waiting to happen - it is the board naming whose move it is.
 	//
 	// This is the second half of the trap, and the half that is easy to miss: a
-	// dev that parks without being stood down is still AWAKE, so a rollup that
-	// only skipped asleep members would put it straight back into Needs you.
+	// dev that parks is still AWAKE, so a rollup that only skipped asleep members
+	// would put it straight back into Needs you.
 	//
 	// Rule 0 sits in front of this: a task where NOBODY is working reaches here
-	// only when something other than an agent owes the next move (CI, a reviewer),
-	// so "ready to wake" is now said about a task that still has an agent on it.
-	return { zone: "pending", note: `${nextUp(qa)} · Ready to wake` };
+	// only when something other than an agent owes the next move (CI, a reviewer).
+	return { zone: "pending", note: `${nextUp(qa)} · Next up` };
 }
 
 /** Every worker task on the board, already grouped and laned. */

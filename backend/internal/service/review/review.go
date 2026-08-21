@@ -21,7 +21,6 @@ import (
 var (
 	ErrInvalid             = reviewcore.ErrInvalid
 	ErrNotFound            = reviewcore.ErrNotFound
-	ErrTreeBusy            = reviewcore.ErrTreeBusy
 	ErrAgentBinaryNotFound = ports.ErrAgentBinaryNotFound
 )
 
@@ -50,6 +49,9 @@ var _ Manager = (*Service)(nil)
 // Store is the review_run persistence surface owned by the service submit path.
 type Store interface {
 	GetReviewRun(ctx context.Context, id string) (domain.ReviewRun, bool, error)
+	// SupersedeReviewRun is how a DISCARDED pass is recorded: a run with no
+	// verdict and a body saying why what it read cannot be trusted.
+	SupersedeReviewRun(ctx context.Context, id, body string) (bool, error)
 	UpdateReviewRunResult(ctx context.Context, id string, status domain.ReviewRunStatus, verdict domain.ReviewVerdict, body, githubReviewID string) (bool, error)
 	MarkReviewRunDelivered(ctx context.Context, id string, deliveredAt time.Time) (bool, error)
 	ListPRsBySession(ctx context.Context, id domain.SessionID) ([]domain.PullRequest, error)
@@ -247,6 +249,29 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 
 	switch run.Status {
 	case domain.ReviewRunRunning:
+		// The bracket, and the one thing it can say that overrides the verdict: the
+		// tree moved while this pass was reading it, so what the reviewer judged is
+		// not what is on disk. The run is SUPERSEDED with the reason instead of
+		// recorded - it reports no verdict at all, because "failed" would blame the
+		// code and "approved" is the laundering the detector exists to stop.
+		//
+		// A solo worker is never bracketed, so this is a clean verdict for every
+		// review outside a crew and nothing about that path changes.
+		if s.engine != nil {
+			if bracket := s.engine.CloseBracket(ctx, workerID, run.ID); bracket.Discard {
+				if _, err := s.store.SupersedeReviewRun(ctx, run.ID, bracket.Reason); err != nil {
+					return domain.ReviewRun{}, err
+				}
+				discarded, ok, err := s.store.GetReviewRun(ctx, run.ID)
+				if err != nil {
+					return domain.ReviewRun{}, err
+				}
+				if !ok {
+					return domain.ReviewRun{}, fmt.Errorf("%w: review run %q", ErrNotFound, run.ID)
+				}
+				return discarded, nil
+			}
+		}
 		updated, err := s.store.UpdateReviewRunResult(ctx, run.ID, domain.ReviewRunComplete, verdict, body, githubReviewID)
 		if err != nil {
 			return domain.ReviewRun{}, err

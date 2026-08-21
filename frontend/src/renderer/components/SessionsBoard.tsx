@@ -858,22 +858,23 @@ function SessionCard({
 	const lane = taskLane(task, gates ?? { review: "not run" });
 	// The gutter keeps exactly ONE glyph, and it belongs to whoever holds the ball.
 	// When the lane came from a fact about the TASK rather than about a member -
-	// "the checklist is waiting for you", "the baton is down" - there is no member
-	// to draw and the LANE's own shape stands in.
+	// "the checklist is waiting for you", "nobody is working on this" - there is no
+	// member to draw and the LANE's own shape stands in.
 	const holderGlyph = lane.holder ? statusGlyph(lane.holder) : undefined;
 	const Icon = holderGlyph?.Icon ?? col.Icon;
 	const filled = holderGlyph?.filled ?? col.filled;
 	const statusText = lane.note !== "" ? lane.note : (holderGlyph?.label ?? statusGlyph(session).label);
-	// dev is asleep because it handed the turn over, not because the task stalled.
-	const batonHeldByAnother =
+	// This member is paused while its crewmate works - which is a fact about ONE
+	// member, not about the task, and the crew strip is where per-member facts go.
+	const pausedWhileCrewmateWorks =
 		task.isCrew &&
 		session.isSuspended &&
 		task.members.some((m) => m.id !== session.id && crewChipState(m) === "working");
 	const prSummaries0 = useSessionScmSummary(session.id).data;
 	const review = gates?.review ?? reviewGateState(prSummaries0 ?? []);
-	// `+ qa` on a solo card. The member arrives ASLEEP, so this changes nothing
-	// about the agent that is running - the card simply gains a crew strip, and
-	// the turn moves only when a person says so.
+	// `+ qa` on a solo card. The member arrives as a ROW and nothing is spent until
+	// somebody starts it, so this changes nothing about the agent that is running -
+	// the card simply gains a crew strip.
 	const queryClient = useQueryClient();
 	const addRole = useMutation({
 		mutationFn: async () => {
@@ -969,7 +970,7 @@ function SessionCard({
 								// not paused at all while its other member is running. The crew
 								// strip already says which member is asleep, in the place where
 								// per-member facts live.
-								!batonHeldByAnother && <IdleStatusChip session={session} />
+								!pausedWhileCrewmateWorks && <IdleStatusChip session={session} />
 							)}
 							<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
 								{agentLabel(session.provider)}

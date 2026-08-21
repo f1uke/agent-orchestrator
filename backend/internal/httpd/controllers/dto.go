@@ -512,6 +512,25 @@ type CleanupSessionsResponse struct {
 // what may be pasted into a live agent, not a transport limit.
 type SendSessionMessageRequest struct {
 	Message string `json:"message" minLength:"1" maxLength:"131072"`
+	// From names the SESSION that sent this, when a session did. It is what lets
+	// the daemon recognise a message between two members of one crew - the one
+	// conversation that can run away with nobody watching - and cap it. Empty for
+	// a human, the orchestrator, or any tool, all of which are uncapped.
+	From domain.SessionID `json:"from,omitempty"`
+	// About is the commit SHA or smoke case id this message concerns. Required
+	// between crewmates (a message with no subject is refused, so there is no
+	// "what do you think?" to answer) and ignored otherwise.
+	About string `json:"about,omitempty"`
+}
+
+// CrewSendRequest is the body of POST /api/v1/sessions/{sessionId}/send to a
+// crewmate addressed by ROLE. The path names the SENDER, not the recipient: a
+// crew member knows its own id from the environment and can never rely on
+// knowing its crewmate's.
+type CrewSendRequest struct {
+	Role    domain.CrewRole `json:"role" enum:"dev,qa"`
+	Message string          `json:"message" minLength:"1" maxLength:"131072"`
+	About   string          `json:"about,omitempty"`
 }
 
 // SendSessionMessageResponse is the body of POST /api/v1/sessions/{sessionId}/send.
@@ -1531,7 +1550,7 @@ type SetSystemPromptRequest struct {
 // /settings/prompts/{kind} routes. Handlers read it via chi.URLParam; it is
 // declared here so apispec.Build reflects it as the path parameter.
 type PromptKindParam struct {
-	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, or reviewer." enum:"orchestrator,worker,reviewer"`
+	Kind string `path:"kind" description:"Editable prompt kind: orchestrator, worker, qa, or reviewer. The qa kind is the base the qa member of a crew starts from - a worker SESSION doing a different job, so it has a base of its own." enum:"orchestrator,worker,qa,reviewer"`
 }
 
 // MessageTemplateItem is one editable nudge template on the wire: its built-in

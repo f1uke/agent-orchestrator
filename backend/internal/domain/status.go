@@ -55,4 +55,13 @@ const (
 	// or accept an uncertified result. It outranks the PR pipeline deliberately -
 	// a card must not read "mergeable" while nothing it says has been verified.
 	ReasonRunsDiscarded StatusReason = "runs_discarded"
+	// ReasonCrewTalkCapped is a conversation between the two agents on one task
+	// that hit its cap: the last thing this member tried to say to its crewmate
+	// was REFUSED, either because they have gone round CappedRepeat times on one
+	// subject with nothing moving, or because the crew has spent its hourly
+	// budget. The refusal is what stops the loop; this is what makes it visible
+	// rather than leaving two agents mysteriously quiet. It clears itself the
+	// moment a later message goes through, which happens as soon as they move on
+	// to a new commit or a new case.
+	ReasonCrewTalkCapped StatusReason = "crew_talk_capped"
 )

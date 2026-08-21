@@ -32,6 +32,10 @@ type fakeSessionService struct {
 	sessions              map[domain.SessionID]domain.Session
 	previewDisabled       bool
 	sent                  string
+	sentFrom              domain.SessionID
+	sentAbout             string
+	sentRole              domain.CrewRole
+	crewSendErr           error
 	dispatchedPR          string
 	dispatchedThread      string
 	dispatchedExtra       string
@@ -327,6 +331,24 @@ func (f *fakeSessionService) Rename(_ context.Context, id domain.SessionID, disp
 func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message string) (ports.SendOutcome, error) {
 	f.sent = message
 	return f.sendOutcome, nil
+}
+
+func (f *fakeSessionService) SendFrom(_ context.Context, _ domain.SessionID, message string, talk sessionsvc.CrewTalk) (ports.SendOutcome, error) {
+	f.sent = message
+	f.sentFrom = talk.From
+	f.sentAbout = talk.Subject
+	return f.sendOutcome, nil
+}
+
+func (f *fakeSessionService) SendToCrewmate(_ context.Context, from domain.SessionID, role domain.CrewRole, message, subject string) (domain.SessionID, ports.SendOutcome, error) {
+	if f.crewSendErr != nil {
+		return "", ports.SendOutcome{}, f.crewSendErr
+	}
+	f.sent = message
+	f.sentFrom = from
+	f.sentAbout = subject
+	f.sentRole = role
+	return domain.SessionID(string(from) + "-" + string(role)), f.sendOutcome, nil
 }
 
 func (f *fakeSessionService) DispatchCommentToWorker(_ context.Context, _ domain.SessionID, prURL, threadID, extraPrompt string) error {

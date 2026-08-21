@@ -13,26 +13,32 @@ import (
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
-// THE HANDBACK, end to end: what qa is now obliged to do when it finishes, done
+// THE HANDBACK, end to end: what qa is obliged to do when it finishes, done
 // against the real store and the real queue.
 //
 // The first full crew run did the work and then simply stopped - dev asleep, the
-// queue empty, nobody told. qa's instructions now end with one command,
-// `ao send --session "$AO_CREW_ID"`, so this asserts the two things that command
-// depends on: that AO_CREW_ID is the address of the member who owns the branch
-// and the PR, and that a report sent to it survives dev being asleep and is
-// there, once, when dev next has the turn.
+// queue empty, nobody told. Both members run at once now, so the common case is
+// no longer a message waiting in a queue: dev is RIGHT THERE, and qa's report
+// reaches it the moment it is sent. This asserts that, and that the ids qa is
+// handed to talk with are the ones the task is actually built from.
 func TestCrewHandback_QAsFinishReachesDev(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
-	dev, qa := s.spawnCrew(t) // dev stood down; qa holds the slot
+	dev, qa := s.spawnCrew(t) // both awake, one worktree
 
-	// The address qa is told to use. It is dev's id, in qa's own environment, so
-	// the command in qa's prompt is correct without qa having to work anything out.
-	crewID := s.rt.lastCfg.Env[sessionmanager.EnvCrewID]
-	if crewID != string(dev.ID) {
-		t.Fatalf("AO_CREW_ID in qa's environment = %q, want dev %q", crewID, dev.ID)
+	// The ids in qa's own environment. AO_CREW_ID is the TASK (what `ao smoke`
+	// takes); AO_CREW_DEV_ID names the member that owns the branch and the PR.
+	env := s.rt.lastCfg.Env
+	if got := env[sessionmanager.EnvCrewID]; got != string(dev.ID) {
+		t.Fatalf("AO_CREW_ID in qa's environment = %q, want dev %q", got, dev.ID)
 	}
+	if got := env[sessionmanager.EnvCrewDevID]; got != string(dev.ID) {
+		t.Fatalf("AO_CREW_DEV_ID in qa's environment = %q, want dev %q", got, dev.ID)
+	}
+	if got := env[sessionmanager.EnvCrewQAID]; got != string(qa.ID) {
+		t.Fatalf("AO_CREW_QA_ID in qa's environment = %q, want its own id %q", got, qa.ID)
+	}
+	crewID := string(dev.ID)
 
 	pane := &paneSpy{}
 	now := s.now
@@ -45,19 +51,29 @@ func TestCrewHandback_QAsFinishReachesDev(t *testing.T) {
 	if err != nil {
 		t.Fatalf("qa's handback to dev: %v", err)
 	}
-	// dev is asleep, so the report is HELD rather than lost - which is the whole
-	// reason the obligation can be unconditional: qa never has to decide whether
-	// dev is up first.
-	if !out.Queued {
-		t.Fatal("a handback to a sleeping dev was typed at a pane that is gone instead of held")
+	// dev is awake beside qa, so there is nothing to hold: the report lands now.
+	if out.Queued {
+		t.Fatal("the handback was held although dev is running right beside qa")
 	}
-	if typed := pane.typed(); len(typed) != 0 {
-		t.Fatalf("the handback was delivered somewhere while dev was asleep: %v", typed)
+	typed := pane.typed()
+	if len(typed) != 1 || !strings.Contains(typed[0], "recorded 1 case") {
+		t.Fatalf("dev received %v, want exactly qa's report", typed)
 	}
 
-	// dev takes the turn back, and the report is waiting for it.
-	if _, err := s.mgr.HandOverCrewSlot(ctx, qa.ID, dev.ID, domain.WokenByWake); err != nil {
-		t.Fatalf("hand the turn back to dev: %v", err)
+	// And the queue is still the safety net for the case that remains: a member
+	// the idle sweep paused. Nothing is lost, and it lands when that member is back.
+	if err := s.lcm.MarkSuspended(ctx, dev.ID, domain.SleepReasonIdle); err != nil {
+		t.Fatal(err)
+	}
+	held, err := messenger.Send(ctx, domain.SessionID(crewID), "and CI went green")
+	if err != nil {
+		t.Fatalf("send to a paused dev: %v", err)
+	}
+	if !held.Queued {
+		t.Fatal("a message for a paused member was typed at a pane that is gone instead of held")
+	}
+	if _, err := s.mgr.Resume(ctx, dev.ID, domain.WokenByWake); err != nil {
+		t.Fatalf("resume dev: %v", err)
 	}
 	for range 3 {
 		if err := queue.Drain(ctx); err != nil {
@@ -65,8 +81,7 @@ func TestCrewHandback_QAsFinishReachesDev(t *testing.T) {
 		}
 		now = now.Add(2 * time.Second)
 	}
-	typed := pane.typed()
-	if len(typed) != 1 || !strings.Contains(typed[0], "recorded 1 case") {
-		t.Fatalf("dev received %v, want exactly qa's report", typed)
+	if got := pane.typed(); len(got) != 2 {
+		t.Fatalf("messages delivered = %v, want the report and the held follow-up", got)
 	}
 }

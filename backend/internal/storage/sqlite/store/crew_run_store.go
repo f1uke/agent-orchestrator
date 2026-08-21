@@ -129,6 +129,33 @@ func (s *Store) OpenCrewRunForSession(ctx context.Context, id domain.SessionID) 
 	return run, err == nil, err
 }
 
+// OpenCrewRunsForCrewmates returns the runs the OTHER member of this session's
+// crew has open right now. It is the advisory half of the bracket: a member
+// about to start a build can see that its crewmate is already running one in the
+// same worktree, which matters most where it is least verified - two concurrent
+// `xcodebuild` runs against one shared DerivedData.
+//
+// Advisory means advisory: nothing here waits, queues or refuses. Whether an
+// overlapping run's result survives is still the detector's call.
+func (s *Store) OpenCrewRunsForCrewmates(ctx context.Context, crewID, self domain.SessionID) ([]domain.CrewRun, error) {
+	if crewID == "" {
+		return nil, nil
+	}
+	rows, err := s.qr.ListOpenCrewRunsForCrew(ctx, gen.ListOpenCrewRunsForCrewParams{CrewID: crewID, SessionID: self})
+	if err != nil {
+		return nil, fmt.Errorf("open crew runs for crew %s: %w", crewID, err)
+	}
+	runs := make([]domain.CrewRun, 0, len(rows))
+	for _, row := range rows {
+		run, err := crewRunFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, nil
+}
+
 // ConsecutiveCrewRunDiscards counts the discarded runs at the HEAD of a
 // session's finished history - the current streak, not a lifetime total.
 //

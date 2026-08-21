@@ -11,7 +11,7 @@ import (
 )
 
 func TestSpawnEnvProjectVarsCannotOverrideInternal(t *testing.T) {
-	env := spawnEnv("mer-1", "mer", "issue-9", domain.KindWorker, "", "/data", "/data/running.json", map[string]string{
+	env := spawnEnv("mer-1", "mer", "issue-9", domain.KindWorker, "", crewIDs{}, "/data", "/data/running.json", map[string]string{
 		"FOO":          "bar",
 		EnvSessionID:   "hacked", // a project must not override AO-internal vars
 		EnvSessionKind: "hacked",
@@ -40,7 +40,7 @@ func TestSpawnEnvProjectVarsCannotOverrideInternal(t *testing.T) {
 // session env a daemon running under a non-default run file has its hook
 // callbacks silently posted to whatever daemon owns the DEFAULT run file.
 func TestSpawnEnvInjectsSessionKind(t *testing.T) {
-	env := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", "/data", "", map[string]string{
+	env := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", crewIDs{}, "/data", "", map[string]string{
 		EnvSessionKind: string(domain.KindOrchestrator),
 	})
 	if got := env[EnvSessionKind]; got != string(domain.KindWorker) {
@@ -49,13 +49,13 @@ func TestSpawnEnvInjectsSessionKind(t *testing.T) {
 }
 
 func TestSpawnEnvInjectsRunFile(t *testing.T) {
-	env := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", "/data", "/custom/running.json", nil)
+	env := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", crewIDs{}, "/data", "/custom/running.json", nil)
 	if env[EnvRunFile] != "/custom/running.json" {
 		t.Fatalf("AO_RUN_FILE = %q, want /custom/running.json", env[EnvRunFile])
 	}
 
 	// No run file configured → no key, so the CLI's own default resolution applies.
-	env = spawnEnv("mer-1", "mer", "", domain.KindWorker, "", "/data", "", nil)
+	env = spawnEnv("mer-1", "mer", "", domain.KindWorker, "", crewIDs{}, "/data", "", nil)
 	if v, ok := env[EnvRunFile]; ok {
 		t.Fatalf("AO_RUN_FILE = %q, want absent when unconfigured", v)
 	}
@@ -215,15 +215,45 @@ func TestRunPostCreate(t *testing.T) {
 // A solo session is its own task and gets its own id, so there is no branch for
 // an agent to get wrong.
 func TestSpawnEnv_CrewID(t *testing.T) {
-	solo := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", "/data", "", nil)
+	solo := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", crewIDs{}, "/data", "", nil)
 	if got := solo[EnvCrewID]; got != "mer-1" {
 		t.Fatalf("solo AO_CREW_ID = %q, want its own id mer-1", got)
 	}
-	member := spawnEnv("mer-2", "mer", "", domain.KindWorker, "mer-1", "/data", "", nil)
+	member := spawnEnv("mer-2", "mer", "", domain.KindWorker, "mer-1", crewIDs{dev: "mer-1", qa: "mer-2"}, "/data", "", nil)
 	if got := member[EnvCrewID]; got != "mer-1" {
 		t.Fatalf("crew member AO_CREW_ID = %q, want dev's id mer-1", got)
 	}
 	if got := member[EnvSessionID]; got != "mer-2" {
 		t.Fatalf("AO_SESSION_ID = %q, want the member's own id mer-2", got)
+	}
+}
+
+// TestSpawnEnv_CrewMemberIDs: both members are named, so each can say something
+// about the other. They are NOT how a member addresses its crewmate - `ao send
+// --crew qa` is, because dev's environment is built before qa exists - so the
+// test that matters is the SOLO one: a session with no crew carries neither var,
+// and its environment is byte-for-byte what it always was.
+func TestSpawnEnv_CrewMemberIDs(t *testing.T) {
+	solo := spawnEnv("mer-1", "mer", "", domain.KindWorker, "", crewIDs{}, "/data", "", nil)
+	if _, ok := solo[EnvCrewDevID]; ok {
+		t.Fatalf("a solo session carries %s; its environment must not change", EnvCrewDevID)
+	}
+	if _, ok := solo[EnvCrewQAID]; ok {
+		t.Fatalf("a solo session carries %s; its environment must not change", EnvCrewQAID)
+	}
+
+	member := spawnEnv("mer-2", "mer", "", domain.KindWorker, "mer-1", crewIDs{dev: "mer-1", qa: "mer-2"}, "/data", "", nil)
+	if got := member[EnvCrewDevID]; got != "mer-1" {
+		t.Fatalf("AO_CREW_DEV_ID = %q, want mer-1", got)
+	}
+	if got := member[EnvCrewQAID]; got != "mer-2" {
+		t.Fatalf("AO_CREW_QA_ID = %q, want mer-2", got)
+	}
+
+	// dev launched before its qa existed: the qa var is ABSENT rather than wrong,
+	// which is exactly why the id is not the address.
+	devAlone := spawnEnv("mer-1", "mer", "", domain.KindWorker, "mer-1", crewIDs{dev: "mer-1"}, "/data", "", nil)
+	if _, ok := devAlone[EnvCrewQAID]; ok {
+		t.Fatalf("%s was set before qa existed", EnvCrewQAID)
 	}
 }

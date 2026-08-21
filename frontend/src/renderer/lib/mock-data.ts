@@ -324,7 +324,7 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				status: "mergeable",
 				displayStatus: "mergeable",
 				isSuspended: true,
-				sleepReason: "turn",
+				sleepReason: "idle",
 				createdAt: hoursAgo(6),
 				updatedAt: hoursAgo(1),
 				activity: { state: "parked", lastActivityAt: hoursAgo(1) },

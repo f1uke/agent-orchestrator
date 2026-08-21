@@ -17,6 +17,7 @@ import (
 type crewRunView struct {
 	ID             string   `json:"id"`
 	SessionID      string   `json:"sessionId"`
+	Role           string   `json:"role"`
 	Kind           string   `json:"kind"`
 	Label          string   `json:"label"`
 	Attempt        int      `json:"attempt"`
@@ -38,9 +39,10 @@ type crewRunStartRequest struct {
 }
 
 type crewRunStartResponse struct {
-	Run             crewRunView `json:"run"`
-	Certified       bool        `json:"certified"`
-	SupersededRunID string      `json:"supersededRunId"`
+	Run             crewRunView  `json:"run"`
+	Certified       bool         `json:"certified"`
+	SupersededRunID string       `json:"supersededRunId"`
+	CrewmateRun     *crewRunView `json:"crewmateRun,omitempty"`
 }
 
 type crewRunEndRequest struct {
@@ -155,6 +157,25 @@ func (c *commandContext) startCrewRun(cmd *cobra.Command, path string, out io.Wr
 		if _, err := fmt.Fprintf(out,
 			"WARNING: no tree-write detector on this worktree - %s\nThis run's result will be marked UNCERTIFIED, not verified.\n",
 			resp.Run.DetectorReason); err != nil {
+			return err
+		}
+	}
+	// Advisory, and phrased as advice. The other member is not asked to stop and
+	// this run is not held: what it is for is the one case nothing here verifies -
+	// two `xcodebuild` runs against the SHARED DerivedData that is the whole
+	// reason this task has one worktree.
+	if peer := resp.CrewmateRun; peer != nil {
+		label := peer.Label
+		if label == "" {
+			label = peer.Kind
+		}
+		who := peer.Role
+		if who == "" {
+			who = peer.SessionID
+		}
+		if _, err := fmt.Fprintf(out,
+			"NOTE: %s is already running a %s in this worktree (%s). Nothing stops you sharing it,\nbut two builds against one cache is the case AO does not verify - consider waiting.\n",
+			who, peer.Kind, label); err != nil {
 			return err
 		}
 	}

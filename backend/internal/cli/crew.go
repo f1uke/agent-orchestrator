@@ -60,23 +60,22 @@ type crewListResponse struct {
 	Sessions []crewSessionView `json:"sessions"`
 }
 
-// newCrewCommand exposes the ONE crew action AO deliberately leaves to a human:
-// deciding whose turn it is.
+// newCrewCommand is how a human sees and starts the agents on one task.
 //
-// A task of `--task-size standard` or `deep` is worked by two sessions on one
+// A task of `--task-size standard` or `deep` is worked by two sessions on ONE
 // worktree - dev, which owns the branch and the PR, and qa, which writes, runs
-// and records the tests - and exactly one of them may be awake at a time. AO
-// enforces that rule but takes NO position on when the baton should move: the
-// handover policy is meant to be decided after watching real tasks, not guessed
-// at. So `ao crew wake` is the affordance, and there is no scheduler behind it.
+// and records the tests - and they run AT THE SAME TIME. Neither waits for the
+// other and neither can stand the other down; what keeps a shared checkout
+// honest is the run bracket (`ao crew run`), which throws away a build or test
+// the tree moved under instead of trusting it.
 func newCrewCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "crew",
-		Short: "See and move the baton between the two agents working one task",
+		Short: "See and start the two agents working one task",
 		Long: "A `standard` or `deep` task is worked by a CREW of two sessions sharing one\n" +
 			"worktree: dev owns the branch and the pull request, qa writes, runs and records\n" +
-			"the tests. Only one of them may be awake at a time, and AO does not decide when\n" +
-			"that changes - you do, with `ao crew wake`.\n\n" +
+			"the tests. BOTH run at the same time - starting one never stops the other - and\n" +
+			"`ao crew run` is what keeps a result honest when they overlap.\n\n" +
 			"A `mechanical` task has no crew: it is dev alone - and if that turns out to be\n" +
 			"the wrong call, `ao crew add` attaches a qa to it without disturbing the agent\n" +
 			"that is already working.",
@@ -100,7 +99,8 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 //
 // It changes nothing about the task it joins. The new member is born asleep - a
 // row and an id, no terminal - and dev keeps running straight through, so no
-// task gains a qa unless somebody asks for one.
+// task gains a qa unless somebody asks for one, and nothing is spent until
+// somebody starts it.
 func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 	var role string
 	cmd := &cobra.Command{
@@ -108,8 +108,8 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 		Short: "Attach a qa to a task that is already running",
 		Long: "Adds a second agent to an existing task, sharing its worktree. The new member is\n" +
 			"born ASLEEP - it has an id and a card from the moment this returns, and `ao send`\n" +
-			"to it is held until somebody gives it the turn with `ao crew wake` - so attaching\n" +
-			"never interrupts the agent that is working.\n\n" +
+			"to it is held until somebody starts it with `ao crew wake` (or by opening its\n" +
+			"card) - so attaching never interrupts the agent that is working.\n\n" +
 			"Name either member of the task; both resolve to the same crew. It is refused if\n" +
 			"the task already has that role, or if the task is finished (its pull request has\n" +
 			"merged, or its agent has been torn down).\n\n" +
@@ -117,7 +117,7 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 			"which leaves the task's worktree, branch and pull request with dev, exactly where\n" +
 			"they were - and `ao session restore` brings the SAME member back.",
 		Example: `  ao crew add agent-orchestrator-230   # this task should have a qa after all
-  ao crew wake agent-orchestrator-231  # now give it the turn`,
+  ao crew wake agent-orchestrator-231  # now start it - dev keeps running`,
 		Args: oneSessionIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := normalizeSessionID(args[0])
@@ -128,7 +128,7 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/members", crewAddRequest{Role: strings.TrimSpace(role)}, &out); err != nil {
 				return err
 			}
-			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is on the task, asleep. Give it the turn with `ao crew wake %s`.\n",
+			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is on the task, asleep. Start it with `ao crew wake %s`; dev keeps running.\n",
 				out.Session.ID, crewRoleOf(out.Session), out.Session.ID)
 			return printErr
 		},
@@ -140,14 +140,13 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 func newCrewWakeCommand(ctx *commandContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "wake <session-id>",
-		Short: "Give this task's turn to one crew member, putting the current holder to sleep",
-		Long: "Hands the task's one awake slot to the named member. Whoever holds it is stood\n" +
-			"down first - suspended, with its terminal reaped, its card kept and its worktree\n" +
-			"untouched - and the named member is resumed in its place, so the two never run\n" +
-			"in the shared checkout at the same time.\n\n" +
-			"Waking the member that already holds the slot does nothing and is not an error.",
-		Example: `  ao crew wake agent-orchestrator-231   # qa's turn now
-  ao crew status                        # who is up, and who is asleep`,
+		Short: "Start one crew member, leaving its crewmate exactly as it is",
+		Long: "Brings the named member up in the task's worktree. It TOUCHES NOBODY ELSE: the\n" +
+			"other member keeps running, keeps its terminal and is not interrupted, because\n" +
+			"both members of a crew work at the same time.\n\n" +
+			"Waking a member that is already awake does nothing and is not an error.",
+		Example: `  ao crew wake agent-orchestrator-231   # start qa; dev carries on
+  ao crew status                        # who is up, and who has not started`,
 		Args: oneSessionIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := normalizeSessionID(args[0])
@@ -168,11 +167,12 @@ func newCrewStatusCommand(ctx *commandContext) *cobra.Command {
 	var project string
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "List the crews on the board and which member is awake",
+		Short: "List the crews on the board and which members are awake",
 		Long: "Groups the board's sessions into the tasks they are working and says, for each\n" +
-			"member, whether it has a running agent right now:\n\n" +
-			"  awake        this member holds the task's turn\n" +
-			"  asleep       suspended, waiting for a turn - `ao crew wake` gives it one\n" +
+			"member, whether it has a running agent right now. Both members may be awake at\n" +
+			"once, and normally are:\n\n" +
+			"  awake        this member has a running agent\n" +
+			"  asleep       suspended - `ao crew wake` (or opening its card) starts it\n" +
 			"  finished     torn down; `ao session restore` is what brings it back\n" +
 			"  not started  a prepared TODO that has never been started\n\n" +
 			"A solo task is not a crew and is not listed here; use `ao session ls` for those.",

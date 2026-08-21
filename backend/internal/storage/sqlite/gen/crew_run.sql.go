@@ -287,3 +287,66 @@ func (q *Queries) ListEndedCrewRunOutcomes(ctx context.Context, arg ListEndedCre
 	}
 	return items, nil
 }
+
+const listOpenCrewRunsForCrew = `-- name: ListOpenCrewRunsForCrew :many
+SELECT id, session_id, project_id, crew_id, role, worktree_path, kind, label, attempt, detector,
+    detector_reason, gen_at_start, gen_at_end, started_at, ended_at, outcome, result, changed_paths,
+    head_sha, created_at, updated_at
+FROM crew_run
+WHERE crew_id = ? AND crew_id != '' AND session_id != ? AND ended_at IS NULL
+ORDER BY started_at DESC, rowid DESC
+`
+
+type ListOpenCrewRunsForCrewParams struct {
+	CrewID    domain.SessionID
+	SessionID domain.SessionID
+}
+
+// The OTHER member's still-open runs in this crew. It is the advisory half of the
+// bracket: two `xcodebuild` runs against one shared DerivedData is not a
+// configuration Xcode is happy about, and this is what lets a member see that
+// before it starts one. Advisory only - nothing here waits or refuses.
+func (q *Queries) ListOpenCrewRunsForCrew(ctx context.Context, arg ListOpenCrewRunsForCrewParams) ([]CrewRun, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenCrewRunsForCrew, arg.CrewID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CrewRun{}
+	for rows.Next() {
+		var i CrewRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.CrewID,
+			&i.Role,
+			&i.WorktreePath,
+			&i.Kind,
+			&i.Label,
+			&i.Attempt,
+			&i.Detector,
+			&i.DetectorReason,
+			&i.GenAtStart,
+			&i.GenAtEnd,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.Outcome,
+			&i.Result,
+			&i.ChangedPaths,
+			&i.HeadSha,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

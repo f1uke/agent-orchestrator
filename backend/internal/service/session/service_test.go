@@ -35,6 +35,7 @@ type fakeStore struct {
 	prList        map[domain.SessionID][]domain.PullRequest
 	openRuns      map[domain.SessionID]domain.CrewRun
 	runDiscards   map[domain.SessionID]int
+	crewMessages  []domain.CrewMessage
 	num           int
 }
 
@@ -206,6 +207,40 @@ func (f *fakeStore) ConsecutiveCrewRunDiscards(_ context.Context, id domain.Sess
 	return f.runDiscards[id], nil
 }
 
+func (f *fakeStore) InsertCrewMessage(_ context.Context, msg domain.CrewMessage) error {
+	f.crewMessages = append(f.crewMessages, msg)
+	return nil
+}
+
+func (f *fakeStore) CrewMessagesOnSubject(_ context.Context, crewID domain.SessionID, subject string, from domain.SessionID) (int, error) {
+	n := 0
+	for _, msg := range f.crewMessages {
+		if msg.CrewID == crewID && msg.Subject == subject && msg.From == from && !msg.Refused() {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeStore) CrewMessagesSince(_ context.Context, crewID domain.SessionID, since time.Time) (int, error) {
+	n := 0
+	for _, msg := range f.crewMessages {
+		if msg.CrewID == crewID && !msg.CreatedAt.Before(since) && !msg.Refused() {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeStore) LatestCrewMessageFrom(_ context.Context, from domain.SessionID) (domain.CrewMessage, bool, error) {
+	for i := len(f.crewMessages) - 1; i >= 0; i-- {
+		if f.crewMessages[i].From == from {
+			return f.crewMessages[i], true, nil
+		}
+	}
+	return domain.CrewMessage{}, false, nil
+}
+
 func (f *fakeStore) ListPRFactsForSession(_ context.Context, id domain.SessionID) ([]domain.PRFacts, error) {
 	pr, ok := f.pr[id]
 	if !ok {
@@ -374,6 +409,13 @@ func TestSessionRenameMissingSessionReturnsNotFound(t *testing.T) {
 
 // fakeCommander records Kill/Spawn calls so a test can assert the
 // clean-orchestrator ordering without wiring a real session engine.
+// crewSeat keys the fake's crew lookup the way the real one is asked: "the
+// member filling ROLE on the task this session belongs to".
+type crewSeat struct {
+	id   domain.SessionID
+	role domain.CrewRole
+}
+
 type fakeCommander struct {
 	sendOutcome     ports.SendOutcome
 	teardownCauses  []string
@@ -397,6 +439,7 @@ type fakeCommander struct {
 	restartRecord   domain.SessionRecord
 	woken           []domain.SessionID
 	crewWoken       []domain.SessionID
+	crewMembers     map[crewSeat]domain.SessionRecord
 	crewWakeErr     error
 	crewAttached    []domain.SessionID
 	crewDevOf       map[domain.SessionID]domain.SessionRecord
@@ -456,6 +499,11 @@ func (f *fakeCommander) CrewDevOf(_ context.Context, id domain.SessionID) (domai
 		return dev, nil
 	}
 	return domain.SessionRecord{ID: id, ProjectID: "mer", Kind: domain.KindWorker}, nil
+}
+
+func (f *fakeCommander) CrewMember(_ context.Context, id domain.SessionID, role domain.CrewRole) (domain.SessionRecord, bool, error) {
+	rec, ok := f.crewMembers[crewSeat{id: id, role: role}]
+	return rec, ok, nil
 }
 
 func (f *fakeCommander) AttachCrewMember(_ context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
@@ -1646,21 +1694,6 @@ func TestReclaim_RefusesWhenTheRecordCannotBeRead(t *testing.T) {
 	}
 	if len(fc.killed) != 0 {
 		t.Fatalf("teardown ran without knowing the session was finished: %v", fc.killed)
-	}
-}
-
-// TestWakeCrewMember_BusyIsAConflictNotAFailure: "the other member is running"
-// is a state the caller can act on (stand it down, ask again), not a broken
-// daemon. It must surface as a 409 with a named code, the same way the review
-// engine's tree-busy refusal does.
-func TestWakeCrewMember_BusyIsAConflictNotAFailure(t *testing.T) {
-	fc := &fakeCommander{crewWakeErr: fmt.Errorf("wrap: %w", sessionmanager.ErrCrewBusy)}
-	svc := &Service{store: newFakeStore(), manager: fc}
-
-	_, err := svc.WakeCrewMember(context.Background(), "mer-2")
-	var e *apierr.Error
-	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "CREW_SLOT_BUSY" {
-		t.Fatalf("err = %v, want apierr Conflict CREW_SLOT_BUSY", err)
 	}
 }
 

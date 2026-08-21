@@ -91,6 +91,20 @@ func (f *fakeStore) OpenCrewRunForSession(_ context.Context, id domain.SessionID
 	return domain.CrewRun{}, false, nil
 }
 
+// OpenCrewRunsForCrewmates backs the advisory a member gets when the OTHER one
+// already has a run open in the same worktree.
+func (f *fakeStore) OpenCrewRunsForCrewmates(_ context.Context, crewID, self domain.SessionID) ([]domain.CrewRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []domain.CrewRun{}
+	for _, run := range f.runs {
+		if run.CrewID == crewID && run.SessionID != self && run.Open() {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
 // Mirrors the real store: only a TRUSTED run ends the streak, and an uncertified
 // one is skipped rather than treated as a clear.
 func (f *fakeStore) ConsecutiveCrewRunDiscards(_ context.Context, id domain.SessionID) (int, error) {

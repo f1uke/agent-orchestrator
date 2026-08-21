@@ -35,19 +35,6 @@ func seedCrewDev(m *Manager, st *fakeStore, rt *fakeRuntime, ws *fakeWorkspace) 
 	return dev
 }
 
-// standDown frees the crew slot the way a real caller must before adding a
-// member: dev is suspended (card kept, worktree kept, transcript kept) and its
-// tmux reaped, so nothing is writing the tree the new member is about to join.
-func standDown(t *testing.T, m *Manager, rt *fakeRuntime, id domain.SessionID) {
-	t.Helper()
-	if err := m.ReleaseCrewSlot(ctx, id); err != nil {
-		t.Fatalf("release the crew slot held by %s: %v", id, err)
-	}
-	if rt.aliveByHandle != nil {
-		rt.aliveByHandle["h1"] = false
-	}
-}
-
 // TestSpawnCrewMember_JoinsDevsWorktreeAndBranch is the capability itself: a
 // second long-lived session that works in the SAME tree, on the SAME branch, as
 // the task it belongs to - and a crew recorded on both rows, with dev named as
@@ -56,7 +43,8 @@ func TestSpawnCrewMember_JoinsDevsWorktreeAndBranch(t *testing.T) {
 	m, st, rt, ws := newManager()
 	dev := seedCrewDev(m, st, rt, ws)
 
-	standDown(t, m, rt, dev.ID)
+	// dev keeps working straight through: adding a member no longer requires
+	// stopping the one that is already there.
 
 	qa, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
@@ -96,7 +84,8 @@ func TestSpawnCrewMember_GetsItsOwnRuntimeName(t *testing.T) {
 	m, st, rt, ws := newManager()
 	dev := seedCrewDev(m, st, rt, ws)
 
-	standDown(t, m, rt, dev.ID)
+	// dev keeps working straight through: adding a member no longer requires
+	// stopping the one that is already there.
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",
@@ -140,7 +129,8 @@ func TestSpawnCrewMember_LeavesTheSharedTreeAlone(t *testing.T) {
 		},
 	}
 
-	standDown(t, m, rt, dev.ID)
+	// dev keeps working straight through: adding a member no longer requires
+	// stopping the one that is already there.
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "test the task",

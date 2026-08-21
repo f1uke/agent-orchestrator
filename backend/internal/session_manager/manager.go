@@ -59,12 +59,6 @@ var (
 	// through the Go seam, so this is a programming error rather than user input;
 	// it is a sentinel so a test can assert the refusal instead of a string.
 	ErrInvalidCrew = errors.New("session: invalid crew")
-	// ErrCrewBusy means another member of the same crew is already awake, so this
-	// one may not be brought up: the two share ONE worktree and running both at
-	// once is what makes a shared worktree unsafe (see crew_slot.go). Solo
-	// sessions can never produce it - they are in no crew - so it is a sentinel
-	// the crew routes assert on rather than a condition an ordinary spawn meets.
-	ErrCrewBusy = errors.New("session: another crew member is awake")
 	// ErrCrewRoleTaken means this task already has a member in the requested
 	// role. Unlike ErrInvalidCrew it is not a malformed request - the task is
 	// simply already the shape it was asked to become - so the API maps it to a
@@ -103,6 +97,19 @@ const (
 	// written with it is correct in both shapes and there is no branch for an
 	// agent to get wrong.
 	EnvCrewID = "AO_CREW_ID"
+	// EnvCrewDevID and EnvCrewQAID name the two MEMBERS of a crew, so each can say
+	// something about the other and a human reading a transcript can tell which
+	// agent is which. They are set only on a crew member: a solo session's
+	// environment is byte-for-byte what it always was.
+	//
+	// They are NOT the address a member should message its crewmate at, and the
+	// reason is structural rather than stylistic: a crew is formed AFTER dev's
+	// runtime is launched (formCrew runs after materialize), and a qa attached to
+	// a running task arrives later still - so dev's environment can never carry
+	// qa's id at the moment dev needs it. `ao send --crew qa` asks the daemon,
+	// which always knows.
+	EnvCrewDevID = "AO_CREW_DEV_ID"
+	EnvCrewQAID  = "AO_CREW_QA_ID"
 )
 
 // hookBinaryName is the executable name the workspace hook commands invoke:
@@ -426,20 +433,15 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		if err != nil {
 			return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
 		}
-		// ONE AWAKE AT A TIME: a new member may only be born into a FREE slot. The
-		// tree it is about to join is dev's, and dev is normally the one working in
-		// it, so this refuses far more often than it lets through - deliberately.
-		// The caller releases dev first (ReleaseCrewSlot), which is the same
-		// release half of a handover.
+		// The new member is born into a tree dev is normally still working in, and
+		// that is now allowed: both members run at once and the tree-write detector
+		// invalidates whatever it spoils (crew_slot.go).
 		//
-		// Held until this spawn has finished materializing, so a second spawn (or a
-		// wake of dev) cannot read the same free slot and take it too. dev's id is
-		// the crew key whether or not the crew exists yet, which is exactly why
-		// crew_id IS dev's session id.
+		// The lock is held until this spawn has finished materializing so two
+		// attaches cannot both see a free seat. dev's id is the crew key whether or
+		// not the crew exists yet, which is exactly why crew_id IS dev's session id.
 		defer m.lockCrew(dev.ID)()
-		if err := m.crewSlotGuardForNewMember(ctx, dev, routeSpawn); err != nil {
-			return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
-		}
+		m.reconcileCrewPeers(ctx, dev, routeSpawn)
 		crewDev = dev
 		cfg.Branch = dev.Metadata.Branch
 		cfg.BaseBranch = dev.BaseBranch
@@ -594,7 +596,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:        runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, project.Config.Env),
+		Env:           m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, project.Config.Env),
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1376,14 +1378,11 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	if meta.WorkspacePath == "" || meta.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", id, ErrIncompleteHandle)
 	}
-	// ONE AWAKE AT A TIME, ahead of the adopt-if-alive branch below: adopting
-	// clears the terminal flag without creating a runtime, which would make a
-	// second crew member awake just as surely as a relaunch. Solo: a no-op, and
-	// the lock is a no-op too.
+	// One of the five routes a session becomes awake by: settle the crewmates'
+	// rows against their runtimes on the way through, and bring this one up
+	// whatever they are doing. Solo: both calls are no-ops.
 	defer m.lockCrew(rec.CrewID)()
-	if err := m.crewSlotGuard(ctx, rec, routeRestore); err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", id, err)
-	}
+	m.reconcileCrewPeers(ctx, rec, routeRestore)
 	// A session can be terminated in the store while its runtime is still alive:
 	// e.g. its PR merged and the reaper/reclaim marked it done, but the agent
 	// process is still attached. Relaunching would then collide with the existing
@@ -1424,13 +1423,10 @@ func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.Sess
 // `by` names what asked for this relaunch; it reaches MarkSpawned, which keeps
 // it on the row when the session it revives was asleep. See domain/sleep.go.
 func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.SessionRecord, project domain.ProjectRecord, ws ports.WorkspaceInfo, by domain.WokenBy) (domain.SessionRecord, error) {
-	// ONE AWAKE AT A TIME, at the chokepoint. Restore, Resume and Restart guard
-	// their own entry too, but RestoreAll calls straight in here at boot - so this
-	// is the call that closes restore-after-restart, and it is deliberately BEFORE
-	// anything is launched. Solo: a no-op.
-	if err := m.crewSlotGuard(ctx, rec, routeRelaunch); err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("relaunch %s: %w", rec.ID, err)
-	}
+	// The chokepoint. Restore, Resume and Restart pass through their own entry
+	// too, but RestoreAll calls straight in here at boot, so this is where a boot
+	// pass settles a crew whose members did not all survive the restart.
+	m.reconcileCrewPeers(ctx, rec, routeRelaunch)
 	agent, ok := m.agents.Agent(rec.Harness)
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: no agent adapter for harness %q", rec.ID, rec.Harness)
@@ -1457,7 +1453,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:        runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, project.Config.Env),
+		Env:           m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, project.Config.Env),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
@@ -1525,16 +1521,12 @@ func (m *Manager) restartInPlace(ctx context.Context, rec domain.SessionRecord) 
 	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, ErrIncompleteHandle)
 	}
-	// ONE AWAKE AT A TIME, and deliberately HERE rather than only at the relaunch
-	// chokepoint below. restartInPlace destroys the runtime and marks the session
-	// terminated before it relaunches; a refusal discovered at the relaunch would
-	// leave the member terminated with its agent already killed - a restart that
-	// cost the user their session and gave nothing back. Refuse while it is still
-	// free. Solo: a no-op.
+	// Settled here as well as at the relaunch chokepoint below: restartInPlace
+	// destroys the runtime and marks the session terminated before it relaunches,
+	// so the crew's rows are read while this member's own row is still intact.
+	// Solo: both calls are no-ops.
 	defer m.lockCrew(rec.CrewID)()
-	if err := m.crewSlotGuard(ctx, rec, routeRestart); err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
-	}
+	m.reconcileCrewPeers(ctx, rec, routeRestart)
 	// Fallible reads run before the runtime is destroyed, so a failure here leaves
 	// the running agent untouched.
 	project, err := m.loadProject(ctx, rec.ProjectID)
@@ -2041,15 +2033,11 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID, by domain.Wok
 	if rec.Metadata.WorkspacePath == "" || rec.Metadata.Branch == "" {
 		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, ErrIncompleteHandle)
 	}
-	// ONE AWAKE AT A TIME, ahead of the adopt-if-alive branch below for the same
-	// reason as Restore. This is also the route a HUMAN takes: opening a crew
-	// member's card calls Wake, which calls Resume - and two clicks are the most
-	// likely way two wakes ever arrive at once, which is what the lock is for.
-	// Solo: both are no-ops.
+	// The route a HUMAN takes: opening a crew member's card calls Wake, which
+	// calls Resume. Nothing here refuses any more - opening qa while dev works
+	// starts qa and leaves dev exactly where it was. Solo: both calls are no-ops.
 	defer m.lockCrew(rec.CrewID)()
-	if err := m.crewSlotGuard(ctx, rec, routeResume); err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("resume %s: %w", id, err)
-	}
+	m.reconcileCrewPeers(ctx, rec, routeResume)
 	// The tmux was torn down at suspend, but defensively adopt a still-alive
 	// runtime (e.g. a suspend that raced this open) instead of colliding on
 	// `tmux new-session` — mirror Restore's adopt-if-alive guard.
@@ -2097,20 +2085,19 @@ func (m *Manager) Wake(ctx context.Context, id domain.SessionID) (domain.Session
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("wake %s: %w", id, ErrNotFound)
 	}
-	if rec.AsleepForTurn() {
+	// A crew member that has NEVER RUN stays asleep. Everything else about the
+	// turn is gone - both members run at once and starting one stops nobody - but
+	// this half was never about turns: opening a card is not a request to spend
+	// money on a second agent, and a glance doing exactly that is the incident this
+	// rule was written for (domain/sleep.go). An explicit `ao crew wake`, or the
+	// Start affordance on its card, still starts it.
+	if rec.IsSuspended && rec.InCrew() && rec.NeverStarted() {
+		m.logger.Debug("wake: left asleep, this member has never been started",
+			"sessionID", id, "crew", rec.CrewID, "role", string(rec.CrewRole))
 		return rec, nil
 	}
 	if rec.IsSuspended {
-		resumed, err := m.Resume(ctx, id, domain.WokenByView)
-		// The crew slot was not free. That is not a failure the viewer asked for
-		// and can do nothing about — a card that is merely being LOOKED at must not
-		// report a refusal — so the session is returned as it stands, still asleep.
-		// Solo sessions never reach this: the guard is a no-op without a crew.
-		if errors.Is(err, ErrCrewBusy) {
-			m.logger.Debug("wake: left asleep, another crew member holds the slot", "sessionID", id, "crew", rec.CrewID)
-			return rec, nil
-		}
-		return resumed, err
+		return m.Resume(ctx, id, domain.WokenByView)
 	}
 	if rec.IsTerminated {
 		return rec, nil
@@ -2241,14 +2228,6 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 			// quietly rather than as an error.
 			if errors.Is(err, ErrNotResumable) {
 				m.logger.Warn("restore-all: session left terminated (nothing to resume)", "sessionID", rec.ID)
-			} else if errors.Is(err, ErrCrewBusy) {
-				// A crewmate already holds the awake slot on this boot. Refusing is
-				// the point, not a failure - and the marker is deliberately LEFT in
-				// place, so this member is still restorable the moment the slot frees
-				// (by hand, or on the next boot). Nothing is lost and nothing runs
-				// twice in the shared tree.
-				m.logger.Warn("restore-all: crew member left terminated; a crewmate holds the awake slot",
-					"sessionID", rec.ID, "crew", rec.CrewID, "error", err)
 			} else {
 				m.logger.Error("restore-all: relaunch failed", "sessionID", rec.ID, "error", err)
 			}
@@ -2817,6 +2796,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			base = m.effectiveBase(prompts.KindQA, projectID) +
 				prompts.Section(adds.Worker) +
 				prompts.CoordinationFloor(prompts.KindQA) +
+				prompts.CrewProtocol(string(crewRole)) +
 				workerGitConventionPrompt(conv, cfg.DefaultBranch)
 			break
 		}
@@ -2827,6 +2807,10 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 		body := m.effectiveBase(prompts.KindWorker, projectID) +
 			prompts.Section(adds.Worker) +
 			prompts.CoordinationFloor(prompts.KindWorker) +
+			// Both members of a crew are told about each other; a SOLO worker -
+			// every session an ordinary spawn creates - renders nothing here and
+			// its prompt is byte-for-byte what it was.
+			prompts.CrewProtocol(string(crewRole)) +
 			workerGitConventionPrompt(conv, cfg.DefaultBranch)
 		if ok {
 			base = workerOrchestratorPrompt(orchestratorID) + "\n\n" + body
@@ -3091,7 +3075,7 @@ This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create 
 // the AO-internal vars last so they always win (a project cannot override
 // AO_SESSION_ID and friends). An empty runFile is omitted so the hook CLI's own
 // default run-file resolution applies.
-func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, dataDir, runFile string, projectEnv map[string]string) map[string]string {
+func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, members crewIDs, dataDir, runFile string, projectEnv map[string]string) map[string]string {
 	env := make(map[string]string, len(projectEnv)+6)
 	for k, v := range projectEnv {
 		env[k] = v
@@ -3105,6 +3089,12 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 		env[EnvCrewID] = string(crew)
 	} else {
 		env[EnvCrewID] = string(id)
+	}
+	if members.dev != "" {
+		env[EnvCrewDevID] = string(members.dev)
+	}
+	if members.qa != "" {
+		env[EnvCrewQAID] = string(members.qa)
 	}
 	env[EnvProjectID] = string(project)
 	env[EnvIssueID] = string(issue)
@@ -3124,8 +3114,11 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, projectEnv map[string]string) map[string]string {
-	env := spawnEnv(id, project, issue, kind, crew, m.dataDir, m.runFile, projectEnv)
+func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, projectEnv map[string]string) map[string]string {
+	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
+	for k, v := range crewGitEnv(role, m.dataDir) {
+		env[k] = v
+	}
 	path, err := HookPATH(m.executable, os.Getenv, projectEnv)
 	if err != nil {
 		m.logger.Warn("session PATH not pinned to the daemon binary; `ao hooks` callbacks may resolve to a different ao and activity tracking will stall",

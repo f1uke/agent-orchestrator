@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -21,10 +24,10 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
-	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
+	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
 )
 
 // TestWiring_WriteFlowsToBroadcaster exercises the real boot path end to end:
@@ -169,7 +172,8 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
-	svc, reviewSvc, _, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, log)
+	watcher := &recordingWatcher{}
+	svc, reviewSvc, _, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, watcher, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -183,18 +187,23 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 		t.Fatal("startSession returned nil session lifecycle")
 	}
 
-	// The reviewer must not read a checkout an agent is writing. That rule lives
-	// on the review engine but its ANSWER comes from the session manager, injected
-	// here as reviewcore.Deps.TreeWriter - and an unwired hook fails open, silently.
-	// So it is pinned end to end: seed a crew whose member holds the awake slot and
-	// prove a trigger against the shared tree is refused.
+	// The reviewer reads a checkout BOTH crew members are writing, so every pass
+	// over a crew's tree is bracketed with the tree-write detector and thrown away
+	// if the tree moved under it. The detector is injected here, and an unwired one
+	// fails OPEN and silently - every review would then certify on nothing. So it is
+	// pinned end to end: seed a crew, trigger a review over its shared tree, and
+	// prove the detector was asked to watch that tree.
 	ctx := context.Background()
 	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "mer", Path: t.TempDir(), RegisteredAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
+	// A real checkout with a commit on it: the pre-MR review path resolves the
+	// branch and head from the worktree, and a directory that is not a repository
+	// fails before the bracket is ever reached.
+	shared := gitRepoWithACommit(t)
 	dev, err := store.CreateSession(ctx, domain.SessionRecord{
 		ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
-		Metadata:    domain.SessionMetadata{Branch: "feature/task", WorkspacePath: t.TempDir(), RuntimeHandleID: "h-dev"},
+		Metadata:    domain.SessionMetadata{Branch: "feature/task", WorkspacePath: shared, RuntimeHandleID: "h-dev"},
 		IsSuspended: true,
 	})
 	if err != nil {
@@ -214,9 +223,63 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	if _, err := store.SetSessionCrew(ctx, qa.ID, dev.ID, domain.CrewRoleQA, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reviewSvc.Trigger(ctx, dev.ID); !errors.Is(err, reviewcore.ErrTreeBusy) {
-		t.Fatalf("review trigger over a tree an awake crew member is writing = %v, want ErrTreeBusy: the TreeWriter hook is not wired", err)
+	// The launch itself fails (there is no reviewer binary here) and that is fine:
+	// the bracket is taken BEFORE anything is launched, which is the whole point -
+	// the interval the reviewer reads over has to be watched from its first instant.
+	_, _ = reviewSvc.Trigger(ctx, dev.ID)
+	if got := watcher.watched(); got != dev.Metadata.WorkspacePath {
+		t.Fatalf("the detector was asked to watch %q, want the crew's shared checkout %q: the Watcher is not wired", got, dev.Metadata.WorkspacePath)
 	}
+}
+
+// gitRepoWithACommit is the minimum a pre-MR review can read: a branch and a
+// head commit.
+func gitRepoWithACommit(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "app.go"), []byte("package app\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@example.com"}, {"config", "user.name", "t"},
+		{"add", "-A"}, {"commit", "-qm", "init"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return root
+}
+
+// recordingWatcher stands in for the tree-write detector and remembers what it
+// was asked to watch. It refuses to attach, which openBrackets treats as "this
+// pass cannot be certified" rather than as a failure to review - so the trigger
+// still runs and the wiring is what is under test.
+type recordingWatcher struct {
+	mu    sync.Mutex
+	roots []string
+}
+
+func (w *recordingWatcher) Attach(_ context.Context, root string) (*treewatch.Lease, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.roots = append(w.roots, root)
+	return nil, errors.New("not watching in this test")
+}
+
+func (w *recordingWatcher) watched() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.roots) == 0 {
+		return ""
+	}
+	return w.roots[0]
 }
 
 // TestStartTrackerIntake_RunsEvenWithoutEnabledProjects is a regression test:
@@ -249,7 +312,7 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
-	svc, _, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, log)
+	svc, _, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, nil, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}

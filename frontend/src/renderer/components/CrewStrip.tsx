@@ -1,6 +1,13 @@
 import { Check, Contrast, Eye, Moon, Plus, Slash, type LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { type CrewChipState, type ReviewGateState, type Task, canAttachRole, crewChipState } from "../lib/crew";
+import {
+	type CrewChipState,
+	type ReviewGateState,
+	type Task,
+	canAttachRole,
+	crewChipState,
+	neverStarted,
+} from "../lib/crew";
 import { statusGlyph, statusLabel } from "../lib/status-glyph";
 import { cn } from "../lib/utils";
 import type { TaskSize, WorkspaceSession } from "../types/workspace";
@@ -26,9 +33,13 @@ import type { TaskSize, WorkspaceSession } from "../types/workspace";
  * signal on the quietest card on the board.
  */
 
+// What a chip's state MEANS, in the words a person would use. There is no
+// "waiting its turn" any more: both members work at the same time, so a member
+// that is not running is either paused or has simply never been started - and
+// only the second of those has a button.
 const CHIP_STATE_TITLE: Record<CrewChipState, string> = {
-	working: "has the turn",
-	asleep: "asleep, waiting its turn",
+	working: "working",
+	asleep: "paused",
 	done: "finished",
 };
 
@@ -46,7 +57,12 @@ function CrewChip({ member, onOpen }: { member: WorkspaceSession; onOpen: (membe
 	// the absence of one, and it must not compete with the member that is running.
 	const Icon = state === "asleep" ? Moon : state === "done" ? Check : StatusIcon;
 	const tone = state === "working" ? lane.dotVar : "var(--fg-passive)";
-	const detail = state === "working" ? statusLabel(member).toLowerCase() : CHIP_STATE_TITLE[state];
+	const detail =
+		state === "working"
+			? statusLabel(member).toLowerCase()
+			: neverStarted(member)
+				? "not started — open it to start"
+				: CHIP_STATE_TITLE[state];
 
 	return (
 		<Tooltip>
@@ -153,8 +169,9 @@ function SoloMarker({ size }: { size?: TaskSize }) {
  * rather than as a chair nobody filled.
  *
  * What it does is worth being plain about, because it is easy to assume it
- * starts a second agent: it does not. The new member is born ASLEEP. Nothing
- * about the running task changes until somebody hands over the turn.
+ * starts a second agent: it does not. The new member arrives as a row and
+ * nothing is spent until somebody starts it - and when they do, the agent that
+ * is already working keeps working.
  */
 function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolean }) {
 	return (
@@ -175,8 +192,8 @@ function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolea
 				</button>
 			</TooltipTrigger>
 			<TooltipContent>
-				Add a qa to this task. It arrives asleep in the same worktree - nothing that is running now is interrupted - and
-				you give it the turn when you want it.
+				Add a qa to this task. It arrives in the same worktree without starting - nothing that is running now is
+				interrupted - and you start it when you want it. Both members then work at the same time.
 			</TooltipContent>
 		</Tooltip>
 	);

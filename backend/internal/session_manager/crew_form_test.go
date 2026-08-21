@@ -71,10 +71,9 @@ func TestSpawn_StandardFormsACrew(t *testing.T) {
 				t.Fatalf("qa is not in dev's tree: %q@%q vs %q@%q",
 					qa.Metadata.WorkspacePath, qa.Metadata.Branch, devRow.Metadata.WorkspacePath, devRow.Metadata.Branch)
 			}
-			// dev still holds the slot. Forming the crew must not have taken it.
-			holder, ok, err := m.CrewSlotHolder(ctx, devRow.ID)
-			if err != nil || !ok || holder.ID != devRow.ID {
-				t.Fatalf("crew slot holder = %v/%v/%v, want dev %s", holder.ID, ok, err, devRow.ID)
+			// dev is still running. Forming the crew must not disturb it.
+			if devRow.IsSuspended || !devRow.Awake() {
+				t.Fatalf("forming the crew stood dev down: suspended=%v awake=%v", devRow.IsSuspended, devRow.Awake())
 			}
 			// qa has a turn waiting for it: a promptless worker cannot be relaunched
 			// at all (ErrNotResumable), so an empty prompt would make qa unwakeable.
@@ -85,7 +84,7 @@ func TestSpawn_StandardFormsACrew(t *testing.T) {
 			// with qa's work done and dev never told, so the first turn qa reads
 			// names the handback and what it has to carry.
 			for _, want := range []string{
-				`ao send --session "$AO_CREW_ID"`,
+				"ao send --crew dev --about",
 				"the commit you tested",
 				"what is left for the human",
 				"even if the answer is that there was nothing to exercise",
@@ -200,10 +199,11 @@ func TestFormCrew_IsBestEffort(t *testing.T) {
 	}
 }
 
-// TestWakeCrewMember_GoesThroughTheExclusion: waking qa is a HANDOVER, not a
-// second agent. dev must be asleep with its tmux gone before qa is up, and the
-// slot must hold exactly one member at every observable moment.
-func TestWakeCrewMember_GoesThroughTheExclusion(t *testing.T) {
+// TestWakeCrewMember_StartsItWithoutStoppingDev. This is the shape in one test:
+// starting qa is not a handover, it is a start. dev keeps its row, its agent and
+// its tmux, and for the first time both members of the crew are awake at once in
+// the one worktree.
+func TestWakeCrewMember_StartsItWithoutStoppingDev(t *testing.T) {
 	m, st, rt, _ := newManager()
 	dev, err := m.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "work", TaskSize: domain.TaskSizeStandard,
@@ -213,6 +213,14 @@ func TestWakeCrewMember_GoesThroughTheExclusion(t *testing.T) {
 	}
 	_, qa := crewOf(t, st, dev.ID)
 
+	// dev's agent is genuinely running: the wake routes probe a crewmate that
+	// claims to be awake and put a CORPSE to sleep, which is the half of the old
+	// guard that survives.
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle["h1"] = true
+
 	woken, err := m.WakeCrewMember(ctx, qa.ID)
 	if err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
@@ -221,30 +229,34 @@ func TestWakeCrewMember_GoesThroughTheExclusion(t *testing.T) {
 		t.Fatalf("qa is still suspended after being woken")
 	}
 	devAfter := st.sessions[dev.ID]
-	if !devAfter.IsSuspended {
-		t.Fatalf("dev was not stood down; two members would be awake in one checkout")
+	if devAfter.IsSuspended || !devAfter.Awake() {
+		t.Fatalf("starting qa stood dev down: suspended=%v awake=%v", devAfter.IsSuspended, devAfter.Awake())
 	}
-	if rt.aliveByHandle[dev.Metadata.RuntimeHandleID] {
-		t.Fatalf("dev's tmux is still alive after the handover")
+	if !rt.aliveByHandle[dev.Metadata.RuntimeHandleID] {
+		t.Fatalf("dev's tmux was reaped when qa started")
 	}
-	holder, ok, err := m.CrewSlotHolder(ctx, qa.ID)
-	if err != nil || !ok || holder.ID != qa.ID {
-		t.Fatalf("crew slot holder = %v/%v/%v, want qa %s", holder.ID, ok, err, qa.ID)
+	awake := 0
+	for _, rec := range st.sessions {
+		if rec.CrewID == dev.ID && rec.Awake() {
+			awake++
+		}
+	}
+	if awake != 2 {
+		t.Fatalf("%d members of the crew are awake, want both", awake)
 	}
 
-	// Waking the holder again is a no-op, not an error: "qa's turn" when it is
-	// already qa's turn should not cost the human a toast.
+	// Starting a member that is already up is a no-op, not an error.
 	if _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
-		t.Fatalf("re-waking the holder: %v", err)
+		t.Fatalf("re-starting a running member: %v", err)
 	}
 	if st.sessions[qa.ID].IsSuspended {
-		t.Fatalf("re-waking the holder put it back to sleep")
+		t.Fatalf("re-starting a running member put it back to sleep")
 	}
 }
 
 // TestWakeCrewMember_RefusesASoloSession: the affordance is about a crew. A solo
-// session has no slot to hand over, and saying so is better than silently doing
-// something else.
+// session has no crewmate to be named next to, and saying so is better than
+// silently doing something else with somebody's only agent.
 func TestWakeCrewMember_RefusesASoloSession(t *testing.T) {
 	m, _, _, _ := newManager()
 	rec, err := m.Spawn(ctx, ports.SpawnConfig{

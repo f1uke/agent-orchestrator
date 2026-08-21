@@ -88,17 +88,40 @@ func writeTreeArgs(worktree string) []string {
 	return []string{"-C", worktree, "write-tree"}
 }
 
-// commitTreeArgs creates a commit object from a tree SHA. parent is the HEAD
-// SHA to set as parent; message is the commit message. When parent is empty
-// (unborn HEAD), the -p flag is omitted.
+// commitTreeArgs creates a commit object from a tree SHA for the preserve ref.
+// parent is the HEAD SHA to set as parent; when it is empty (unborn HEAD) the
+// -p flag is omitted.
+//
+// The identity is AO's OWN, passed explicitly, because this commit is AO's
+// rather than the human's: it exists to hold work in progress across a teardown
+// and is never pushed anywhere. Without it the capture inherits whatever
+// `user.name`/`user.email` the machine happens to have, and on a machine that
+// has NONE - a fresh CI runner, a container, a new laptop - `commit-tree` fails
+// with "empty ident name". That failure is not cosmetic: the teardown is
+// abandoned, so the uncommitted work is not captured AND the session is left
+// without a restore marker, which means it does not come back at the next boot.
+// AO must not lose a worker's work because a machine has no gitconfig.
 func commitTreeArgs(worktree, treeSHA, parent, message string) []string {
-	args := []string{"-C", worktree, "commit-tree", treeSHA}
+	args := []string{
+		"-C", worktree,
+		"-c", "user.name=" + preserveIdentityName,
+		"-c", "user.email=" + preserveIdentityEmail,
+		"commit-tree", treeSHA,
+	}
 	if parent != "" {
 		args = append(args, "-p", parent)
 	}
 	args = append(args, "-m", message)
 	return args
 }
+
+// The author/committer AO stamps on a preserve commit. It is deliberately
+// recognisable: anyone who finds one of these objects should be able to see at a
+// glance that AO wrote it and no human did.
+const (
+	preserveIdentityName  = "Agent Orchestrator"
+	preserveIdentityEmail = "ao@agent-orchestrator.local"
+)
 
 // updateRefArgs creates or moves a ref to point at a commit SHA.
 func updateRefArgs(worktree, ref, commitSHA string) []string {

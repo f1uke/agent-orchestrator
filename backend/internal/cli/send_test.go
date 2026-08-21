@@ -451,3 +451,108 @@ func TestSend_SaysNothingWhenTheMessageWasDelivered(t *testing.T) {
 		t.Fatalf("output = %q, want nothing for a delivered message", out)
 	}
 }
+
+// ADDRESSING YOUR CREWMATE BY ROLE. dev cannot know qa's id: a crew is formed
+// after dev's runtime is already launched, and a qa attached later arrives later
+// still - so an id would be empty exactly when it mattered. The daemon resolves
+// the role, and the request names the SENDER in its path because that is the one
+// id a session always knows.
+func TestSend_CrewRoleAddressesTheDaemonsResolution(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-1")
+	cfg := setConfigEnv(t)
+	srv, capture := crewSendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-2","message":"pushed"}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "qa", "--about", "4a1b2c3", "--message", "pushed the fix"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if capture.path != "/api/v1/sessions/demo-1/crew/send" {
+		t.Errorf("path = %q, want the SENDER's crew/send", capture.path)
+	}
+	var req struct {
+		Role    string `json:"role"`
+		About   string `json:"about"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
+	}
+	if req.Role != "qa" || req.About != "4a1b2c3" {
+		t.Errorf("body = role %q about %q, want qa/4a1b2c3", req.Role, req.About)
+	}
+	if !strings.Contains(req.Message, "pushed the fix") {
+		t.Errorf("message = %q, want it to carry what was typed", req.Message)
+	}
+}
+
+// The plain form carries the sender too, so a crew member that addresses its
+// crewmate by ID is capped by exactly the same rules. Leaving that path uncapped
+// would leave the one command both prompts used before wide open.
+func TestSend_CarriesTheSenderAndSubjectOnThePlainForm(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-1")
+	cfg := setConfigEnv(t)
+	srv, capture := sendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-2","message":"hi"}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--session", "demo-2", "--about", "tab-stays-live", "--message", "recorded a pass"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var req struct {
+		From  string `json:"from"`
+		About string `json:"about"`
+	}
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
+	}
+	if req.From != "demo-1" || req.About != "tab-stays-live" {
+		t.Errorf("body = from %q about %q, want demo-1/tab-stays-live", req.From, req.About)
+	}
+}
+
+// --crew names your crewmate, so it cannot mean anything outside a session.
+func TestSend_CrewRoleNeedsASession(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	setConfigEnv(t)
+	_, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "qa", "--message", "hello")
+	if err == nil {
+		t.Fatal("--crew was accepted with no session behind it")
+	}
+	if !strings.Contains(err.Error(), "--session") {
+		t.Errorf("error = %q, want it to point at --session", err)
+	}
+}
+
+func TestSend_CrewAndSessionAreExclusive(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-1")
+	setConfigEnv(t)
+	if _, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "qa", "--session", "demo-2", "--message", "hello"); err == nil {
+		t.Fatal("--crew and --session were accepted together")
+	}
+}
+
+// crewSendServer expects POST /api/v1/sessions/{id}/crew/send.
+func crewSendServer(t *testing.T, status int, respBody string) (*httptest.Server, *sendCapture) {
+	t.Helper()
+	capture := &sendCapture{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/crew/send") {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		capture.body = string(body)
+		capture.path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, respBody)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, capture
+}

@@ -14,6 +14,8 @@ import (
 
 type sendOptions struct {
 	session     string
+	crew        string
+	about       string
 	message     string
 	messageFile string
 }
@@ -23,15 +25,27 @@ type sendOptions struct {
 // import httpd.
 type sendAPIRequest struct {
 	Message string `json:"message"`
+	// From is the sender's own session id, so the daemon can recognise - and cap -
+	// a message between two members of one crew. Empty when a human runs this.
+	From string `json:"from,omitempty"`
+	// About is the commit SHA or smoke case id the message concerns. Required
+	// between crewmates.
+	About string `json:"about,omitempty"`
 }
 
-// sendAPIResponse mirrors the daemon's SendSessionMessageResponse. Only the
-// queued half matters to the CLI: a message the daemon HELD is a success that
-// the agent has not seen yet, and saying nothing about that would leave the
-// sender believing it was delivered.
+// crewSendAPIRequest mirrors the daemon's CrewSendRequest for
+// POST /api/v1/sessions/{id}/crew/send, where {id} is the SENDER.
+type crewSendAPIRequest struct {
+	Role    string `json:"role"`
+	Message string `json:"message"`
+	About   string `json:"about,omitempty"`
+}
+
+// sendAPIResponse mirrors the daemon's SendSessionMessageResponse.
 type sendAPIResponse struct {
-	Queued          bool `json:"queued"`
-	PendingMessages int  `json:"pendingMessages"`
+	SessionID       string `json:"sessionId"`
+	Queued          bool   `json:"queued"`
+	PendingMessages int    `json:"pendingMessages"`
 }
 
 func newSendCommand(ctx *commandContext) *cobra.Command {
@@ -39,12 +53,33 @@ func newSendCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send",
 		Short: "Send a message to a running agent session",
-		Args:  noArgs,
+		Long: "Sends a message to an agent. A session that is not listening right now has it\n" +
+			"HELD and delivered when it is, so a message is never silently lost.\n\n" +
+			"MESSAGING YOUR CREWMATE. On a task worked by two agents, address the other one\n" +
+			"by ROLE - `--crew qa` or `--crew dev` - never by id: the crew is formed after\n" +
+			"dev is already running, so dev's environment cannot carry qa's id. Those\n" +
+			"messages are CAPPED, and the caps are the only thing standing between two\n" +
+			"agents that can each answer the other and a bill nobody is watching:\n\n" +
+			"  --about is required   name the commit SHA or smoke case id it is about\n" +
+			"  3 per subject         per direction; the 4th is refused and the task goes\n" +
+			"                        to NEEDS YOU for a human\n" +
+			"  20 per hour per crew  a backstop against a loop that keeps inventing new\n" +
+			"                        subjects\n\n" +
+			"There is NO obligation to reply, and that is deliberate: the ARTIFACT is the\n" +
+			"reply. dev answers a finding by committing; qa answers a handoff by recording a\n" +
+			"result. The one message that is not a reply and IS required is qa telling dev a\n" +
+			"run has finished - the end of qa's run is the start of dev's.",
+		Example: `  ao send --session agent-orchestrator-59 --message "CI is green"
+  ao send --crew dev --about 1185d0b4 --message "tests pass on this commit; 2 cases recorded"
+  ao send --crew qa --about tab-stays-live --message "fixed and pushed"`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return ctx.sendMessage(cmd.Context(), opts, cmd.InOrStdin())
 		},
 	}
-	cmd.Flags().StringVar(&opts.session, "session", "", "Session id (required)")
+	cmd.Flags().StringVar(&opts.session, "session", "", "Session id (required unless --crew)")
+	cmd.Flags().StringVar(&opts.crew, "crew", "", "Message your crewmate by ROLE (`dev` or `qa`) instead of by id. The only address that cannot go stale: a crew is formed after dev is already running, so dev never learns qa's id from its environment.")
+	cmd.Flags().StringVar(&opts.about, "about", "", "The commit SHA or smoke case id this message is ABOUT. Required when messaging your crewmate: every message between the two agents on a task names a durable artifact, and a subject is allowed only 3 messages in one direction before the next is refused and the task goes to NEEDS YOU.")
 	cmd.Flags().StringVar(&opts.message, "message", "", "Message body (required unless --message-file)")
 	cmd.Flags().StringVar(&opts.messageFile, "message-file", "", "Read the message from a file, or '-' for stdin; mutually exclusive with --message. Use for large messages that would be awkward to quote on the command line.")
 	return cmd
@@ -55,8 +90,12 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	// before resolving the message means `--message-file -` on an incomplete
 	// invocation exits immediately instead of blocking on stdin.
 	session := strings.TrimSpace(opts.session)
-	if session == "" {
-		return usageError{errors.New("usage: --session is required")}
+	role := strings.TrimSpace(opts.crew)
+	if session == "" && role == "" {
+		return usageError{errors.New("usage: --session or --crew is required")}
+	}
+	if session != "" && role != "" {
+		return usageError{errors.New("--session and --crew are mutually exclusive; pass only one")}
 	}
 	message, err := resolveMessage(opts.message, opts.messageFile, stdin)
 	if err != nil {
@@ -66,24 +105,52 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	// reference sigil (`[from @<project>-<num>]`), so the recipient's in-app
 	// terminal linkifies it and can navigate back to the sender. AO_SESSION_ID is
 	// the canonical `<project>-<num>`; the `@` is the human/agent-facing sigil.
-	if sender := strings.TrimSpace(os.Getenv("AO_SESSION_ID")); sender != "" {
+	sender := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+	if sender != "" {
 		message = "[from @" + sender + "] " + message
+	}
+
+	var res sendAPIResponse
+	if role != "" {
+		if sender == "" {
+			return usageError{errors.New("--crew names your crewmate, so it only works from inside a session (AO_SESSION_ID is unset here); use --session instead")}
+		}
+		// The path names the SENDER: the daemon resolves the role to a session id,
+		// because the sender cannot.
+		path := "sessions/" + url.PathEscape(sender) + "/crew/send"
+		if err := c.postJSON(ctx, path, crewSendAPIRequest{Role: role, Message: message, About: opts.about}, &res); err != nil {
+			return err
+		}
+		return reportSend(c.deps.Out, orFallback(res.SessionID, role), res)
 	}
 
 	// PathEscape: session ids are already "-"/digit safe, but may later come
 	// from sanitized issue refs; keep the URL well-formed regardless.
 	path := "sessions/" + url.PathEscape(session) + "/send"
-	var res sendAPIResponse
-	if err := c.postJSON(ctx, path, sendAPIRequest{Message: message}, &res); err != nil {
+	if err := c.postJSON(ctx, path, sendAPIRequest{Message: message, From: sender, About: opts.about}, &res); err != nil {
 		return err
 	}
-	if res.Queued {
-		_, err := fmt.Fprintf(c.deps.Out,
-			"queued for %s: the agent is not listening right now, so the message is held and will be delivered once it is (%d waiting)\n",
-			session, res.PendingMessages)
-		return err
+	return reportSend(c.deps.Out, session, res)
+}
+
+// reportSend says what happened to a message the daemon accepted. A HELD message
+// is a success the agent has not seen yet, and saying nothing about it would
+// leave the sender believing it was delivered.
+func reportSend(out io.Writer, recipient string, res sendAPIResponse) error {
+	if !res.Queued {
+		return nil
 	}
-	return nil
+	_, err := fmt.Fprintf(out,
+		"queued for %s: the agent is not listening right now, so the message is held and will be delivered once it is (%d waiting)\n",
+		recipient, res.PendingMessages)
+	return err
+}
+
+func orFallback(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 // resolveMessage returns the effective message body from --message /

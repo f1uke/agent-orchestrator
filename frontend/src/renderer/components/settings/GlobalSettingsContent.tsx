@@ -23,11 +23,16 @@ const INPUT_CLASS =
 const PROMPT_LABELS: Record<PromptKind, string> = {
 	orchestrator: "Orchestrator",
 	worker: "Worker",
+	qa: "QA",
 	reviewer: "Reviewer",
 };
 const PROMPT_PURPOSE: Record<PromptKind, string> = {
 	orchestrator: "Global base the orchestrator starts from",
 	worker: "Global base each worker starts from",
+	// The qa member of a crew is a worker SESSION doing a different job, so it has
+	// a base of its own. The daemon has shipped it since crews existed; this row
+	// was drawing with no name at all because the label map had never learned it.
+	qa: "Global base the qa member of a crew starts from",
 	reviewer: "Global base the reviewer starts from",
 };
 

@@ -21,6 +21,17 @@ type ChangeLog struct {
 	CreatedAt time.Time
 }
 
+type CrewMessage struct {
+	ID            string
+	CrewID        string
+	ProjectID     string
+	FromSession   string
+	ToSession     string
+	Subject       string
+	RefusedReason string
+	CreatedAt     time.Time
+}
+
 type CrewRun struct {
 	ID             string
 	SessionID      domain.SessionID

@@ -6,7 +6,7 @@ import type { UpdateChannel, UpdateSettings } from "../../../main/update-setting
 import type { components } from "../../../api/schema";
 import { updateSettingsQueryKey } from "./SystemActions";
 
-export type PromptKind = "orchestrator" | "worker" | "reviewer";
+export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
 export type PromptItem = { kind: PromptKind; default: string; override: string | null };
 export type TemplateName =
 	| "review-comment-dispatch"

@@ -319,11 +319,13 @@ export type WorkspaceSession = {
 	isSuspended?: boolean;
 	/**
 	 * WHY {@link isSuspended} is set, and therefore what opening the card will do.
-	 * `"idle"`/`"merged"` (and an absent value, which is every row written before
-	 * the daemon recorded this) come back when the session is opened — the
-	 * behaviour the "open to resume" copy promises. `"turn"` does NOT: it is a
-	 * crew member waiting for the baton, and only an explicit wake may take the
-	 * turn, so a card that says "open to resume" about one would be lying.
+	 * Every value now behaves the same way when the card is opened - the session
+	 * resumes - because the crew's turn-taking is gone: both members run at once,
+	 * so nothing sleeps waiting for the other. `"turn"` survives only as a value
+	 * rows written before that may still carry.
+	 *
+	 * What opening a card will NOT do is START an agent that has never run, and
+	 * that is read from `crew.hasRun` (see `neverStarted`), not from here.
 	 */
 	sleepReason?: "idle" | "turn" | "merged";
 	/**

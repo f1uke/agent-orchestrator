@@ -1,4 +1,5 @@
 import { Clock, Moon } from "lucide-react";
+import { neverStarted } from "../lib/crew";
 import { cn } from "../lib/utils";
 import { isMergeSuspended, type IdleCountdownLevel, type WorkspaceSession } from "../types/workspace";
 import { useIdleCountdown } from "../hooks/useIdleCountdown";
@@ -21,12 +22,12 @@ const LEVEL_BORDER: Record<IdleCountdownLevel, string> = {
  * The board-card / sidebar-row idle affordance. Two mutually exclusive states,
  * both orthogonal to the session's lane (the card never leaves its column):
  *
- *  - Suspended: a moon chip. Its copy follows the REASON, because the two kinds
- *    of sleep answer "what happens if I open this" differently — the idle sweep
- *    freed its tmux and opening resumes it in place, but a crew member waiting
- *    for the baton stays asleep however long you look at it, and only an explicit
- *    Wake takes the turn. Saying "open to resume" about the second would promise
- *    something the daemon refuses.
+ *  - Suspended: a moon chip. Its copy answers "what happens if I open this",
+ *    and there are two different answers. A session the idle sweep paused comes
+ *    back when you open it. A crew member that has NEVER RUN does not: starting
+ *    an agent for the first time spends money and is a decision, so it waits for
+ *    somebody to press Start on its card. Saying "open to resume" about the
+ *    second would promise something the daemon deliberately refuses.
  *  - Approaching suspension: an escalating countdown chip, surfaced ONLY within
  *    ~1d of the deadline (amber ≤6h, red + pulse ≤1h) so a session far from
  *    expiry stays quiet.
@@ -42,10 +43,10 @@ export function IdleStatusChip({ session, compact = false }: { session: Workspac
 	if (isMergeSuspended(session)) return null;
 
 	if (session.isSuspended) {
-		const notItsTurn = session.sleepReason === "turn";
-		const label = notItsTurn ? "Asleep" : "Paused";
-		const title = notItsTurn
-			? "Asleep until it is this agent's turn — use Wake to hand it the turn"
+		const notStarted = neverStarted(session);
+		const label = notStarted ? "Not started" : "Paused";
+		const title = notStarted
+			? "On the task and never started - open its card and press Start. Its crewmate keeps running."
 			: "Paused to free resources — open to resume";
 		if (compact) {
 			// The title rides a wrapping span: lucide's icon props do not include one,
