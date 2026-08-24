@@ -1125,10 +1125,6 @@ function SessionRow({
 					)}
 				</span>
 			</div>
-			{/* The qa pip lives in the row's RESERVED GUTTER, not in the text column —
-			see QaPip for why. Same handlers as the content, so it opens the task like
-			the rest of the row instead of being a dead patch over it. */}
-			<QaPip onClick={openClick} onPointerDown={openPointerDown} presence={presence} />
 			{/* Pencil reveals on row hover/focus (named group on SidebarMenuSubItem);
 			it sits beside the row button rather than nested inside it. */}
 			<button
@@ -1143,6 +1139,18 @@ function SessionRow({
 			>
 				<Pencil aria-hidden="true" />
 			</button>
+			{/* The qa pip lives in the row's RESERVED GUTTER, not in the text column —
+			see QaPip for why. Same handlers as the content, so it opens the task like
+			the rest of the row instead of being a dead patch over it.
+			AFTER the pencil, and that ORDER IS LOAD-BEARING: two positioned siblings
+			hit-test in DOM order, and the pencil's 20px button is 2.5px taller at the
+			bottom than the 15px icon it draws, so on a two-line row its hit box reaches
+			into the pip. Drawn first, the pencil owned the pip's top 2.5px — a quarter
+			of it — and clicking there opened the RENAME INPUT instead of the task,
+			which is worse than the dead patch the handlers were added to prevent. Drawn
+			last, the pip wins that strip and the pencil gives up only padding: its icon
+			is untouched, the two edges meeting within 0.01px. */}
+			<QaPip onClick={openClick} onPointerDown={openPointerDown} presence={presence} />
 		</SidebarMenuSubItem>
 	);
 }
@@ -1190,10 +1198,17 @@ function SessionRow({
  *    a different column - instead of ~12px away on the same eye-line, which is
  *    the one reading this pip must not invite.
  *
- * `bottom-[3px]` is not a taste: the pencil is a 15px icon centred on the row,
- * so it ends at y=28 on a two-line row and y=38 on a three-line one, and the pip
+ * `bottom-[3px]` is not a taste: the pencil is a 15px icon centred on the row, so
+ * it ends at y=28 on a two-line row and y=38 on a three-line one, and the pip
  * starts exactly where it stops. The gutter is 28px and the pip is 23.85px at
  * `right-1`, so it fits without touching the text column's edge.
+ *
+ * The pencil's BUTTON is 20px, though, not the 15px it draws - so on a two-line
+ * row its hit box still reaches 2.5px into the pip even though its ink does not.
+ * That is settled by DOM order at the call site (the pip is rendered AFTER the
+ * pencil, so it wins those 2.5px), and it is why this file draws them in the
+ * order it does. Ink is not the hit box, and only the second one decides what a
+ * click does.
  *
  * It carries the row's own open handlers because it is a patch of the row like
  * any other; a decorative span with no handlers would be a dead spot you could
@@ -1231,7 +1246,7 @@ function QaPip({
 		<span
 			aria-hidden="true"
 			className={cn(
-				"pointer-events-auto absolute right-1 bottom-[3px] inline-flex items-center gap-[3px] text-[10px] leading-none",
+				"absolute right-1 bottom-[3px] inline-flex items-center gap-[3px] text-[10px] leading-none",
 				awake ? "text-muted-foreground" : "text-passive",
 			)}
 			data-qa-pip={presence.state}
