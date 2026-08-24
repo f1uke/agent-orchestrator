@@ -270,19 +270,34 @@ describe("Sidebar — the qa pip on a task's row", () => {
 		expect(iconBox(awakePip)).toBe(asleep.iconClass);
 	});
 
-	it("does not put the work name on the pip's line, so a long name truncates exactly as it did", () => {
+	it("takes the pip out of the text column entirely, so no line of the row pays for it", () => {
 		const longName = "a task with a really quite long name that will certainly not fit the rail";
 		const container = renderWith([
 			{ ...dev, title: longName },
 			{ ...qa(), title: longName },
 		]);
 
-		const pip = container.querySelector("[data-qa-pip]")!;
+		const pip = container.querySelector<HTMLElement>("[data-qa-pip]")!;
+		// Absolutely positioned in the row's reserved gutter, as a sibling of the
+		// content — not inside the name's line, the id's line, or the status
+		// cluster. Nothing in the text column can be re-measured by it.
+		expect(pip.className).toContain("absolute");
+		expect(pip.parentElement).toBe(screen.getByText(longName).closest("li"));
 		const name = screen.getByText(longName);
 		expect(name).toHaveClass("truncate");
 		expect(name.contains(pip)).toBe(false);
-		// Same flex line as the session ref, not the name's line.
-		expect(pip.parentElement).toBe(screen.getByText("@proj-1-1").parentElement);
+		expect(screen.getByText("@proj-1-1").parentElement!.contains(pip)).toBe(false);
+	});
+
+	it("opens the task when the pip itself is clicked, so the gutter is not a dead patch", async () => {
+		renderWith([dev, qa()]);
+
+		const pip = document.querySelector<HTMLElement>("[data-qa-pip]")!;
+		await userEvent.click(pip);
+
+		expect(navigateMock).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "proj-1-1" } }),
+		);
 	});
 
 	// A row that CLAIMS to be awake while its agent is dead is the hazard this pip

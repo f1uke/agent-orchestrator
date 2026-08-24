@@ -1110,7 +1110,6 @@ function SessionRow({
 							{sessionRef}
 						</span>
 						<CopySessionIdButton sessionId={session.id} />
-						<QaPip presence={presence} />
 					</span>
 				</span>
 				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
@@ -1126,6 +1125,10 @@ function SessionRow({
 					)}
 				</span>
 			</div>
+			{/* The qa pip lives in the row's RESERVED GUTTER, not in the text column —
+			see QaPip for why. Same handlers as the content, so it opens the task like
+			the rest of the row instead of being a dead patch over it. */}
+			<QaPip onClick={openClick} onPointerDown={openPointerDown} presence={presence} />
 			{/* Pencil reveals on row hover/focus (named group on SidebarMenuSubItem);
 			it sits beside the row button rather than nested inside it. */}
 			<button
@@ -1145,7 +1148,7 @@ function SessionRow({
 }
 
 /**
- * The qa pip: does this task have a SECOND AGENT, and is it running right now?
+ * The qa pip: does this task have a SECOND AGENT, and is it up right now?
  *
  * ## One row, one pip
  *
@@ -1162,21 +1165,44 @@ function SessionRow({
  *    ordinary case (a whole project can turn automatic crew formation off), so
  *    an empty seat here would nag about a chair nobody meant to fill.
  *
- * ## Why it sits on the `@id` line
+ * ## Why it is in the GUTTER and not in the text column
  *
- * The work name is the row's headline and already truncates; anything put on its
- * line is paid for by every long name in the rail. The right-hand status cluster
- * is worse on two counts - it is a `shrink-0` sibling of the name's `flex-1`
- * span, so it narrows the NAME, and `IdleStatusChip` already draws a Moon there
- * for a paused dev, which would put two crescents side by side meaning different
- * things. Line 3 has real slack, and `ml-auto` pins the pip to one column so the
- * rail can be scanned down rather than read row by row.
+ * The row's three lines are full. Measured at the real 240px rail, the text
+ * column is 112px wide and every one of its lines is already at or over that:
+ * the work name truncates on essentially every task, and the `@id` line fits an
+ * `@project-NNN` ref with nothing to spare - a 24px pip put on it pushes a ref
+ * that FIT into an ellipsis, which is a regression on a line whose whole job is
+ * to name the session. There is no slack to take. So the pip takes none: it is
+ * absolutely positioned in the `pr-7` gutter the row ALREADY reserves for the
+ * rename pencil, and the text column is byte-identical with it and without it.
+ *
+ * Three things fall out of that, and all three were the alternative's problems:
+ *
+ *  - **Nothing on the row re-measures.** Not the name, not the id, not the row.
+ *  - **One column.** Pinned to the row's own right edge, so the rail can be
+ *    scanned straight down. Inside the text column it could not be: that column
+ *    is 122px on one row and 110px on the next, depending on what the row's
+ *    status cluster holds, so a right-aligned pip landed 12px apart on
+ *    neighbouring rows.
+ *  - **Clear of the dev's own crescent.** `IdleStatusChip` draws a Moon for a
+ *    PAUSED DEV, and it is centred on the row's full height at the text column's
+ *    right edge. The pip sits below it and further right - a different line and
+ *    a different column - instead of ~12px away on the same eye-line, which is
+ *    the one reading this pip must not invite.
+ *
+ * `bottom-[3px]` is not a taste: the pencil is a 15px icon centred on the row,
+ * so it ends at y=28 on a two-line row and y=38 on a three-line one, and the pip
+ * starts exactly where it stops. The gutter is 28px and the pip is 23.85px at
+ * `right-1`, so it fits without touching the text column's edge.
+ *
+ * It carries the row's own open handlers because it is a patch of the row like
+ * any other; a decorative span with no handlers would be a dead spot you could
+ * click without opening anything.
  *
  * ## Nothing moves when a qa wakes
  *
  * Both states draw the SAME BOX - same 9px icon slot, same `qa`, same padding -
- * and only the silhouette and the tone change, so awake <-> asleep is a
- * zero-reflow swap by construction rather than by a reserved-then-hidden slot.
+ * and only the silhouette and the tone change.
  *
  * ## Not colour, and not the accent
  *
@@ -1186,10 +1212,18 @@ function SessionRow({
  * and the accent (3.20:1 in dark) is asked to carry nothing.
  *
  * The hover text is a native `title`, not a tooltip: the shared popper sets no
- * max-width, so an uncapped bubble in a 256px rail lays itself out across the
+ * max-width, so an uncapped bubble in a 240px rail lays itself out across the
  * whole window.
  */
-function QaPip({ presence }: { presence: QaPresence | undefined }) {
+function QaPip({
+	presence,
+	onClick,
+	onPointerDown,
+}: {
+	presence: QaPresence | undefined;
+	onClick: () => void;
+	onPointerDown: (event: React.PointerEvent) => void;
+}) {
 	if (!presence) return null;
 	const awake = presence.state === "awake";
 	const Icon = awake ? Circle : Moon;
@@ -1197,22 +1231,25 @@ function QaPip({ presence }: { presence: QaPresence | undefined }) {
 		<span
 			aria-hidden="true"
 			className={cn(
-				"ml-auto inline-flex shrink-0 items-center gap-[3px] text-[10px] leading-none",
+				"pointer-events-auto absolute right-1 bottom-[3px] inline-flex items-center gap-[3px] text-[10px] leading-none",
 				awake ? "text-muted-foreground" : "text-passive",
 			)}
 			data-qa-pip={presence.state}
 			data-qa-pip-detail={presence.detail}
+			onClick={onClick}
+			onPointerDown={onPointerDown}
 			title={QA_PIP_TITLE[presence.detail]}
 		>
-			<Icon className="h-[9px] w-[9px] shrink-0" strokeWidth={2} style={awake ? { fill: "currentColor" } : undefined} />
+			<Icon
+				className="h-[9px] w-[9px] shrink-0"
+				strokeWidth={2}
+				style={awake ? { fill: "currentColor" } : undefined}
+			/>
 			qa
 		</span>
 	);
 }
 
-// What each reading MEANS. Note what the awake line does NOT say: it claims an
-// agent is UP, never that one is mid-turn. The board's rollup answers that
-// second question, and a parked member is awake here and not working there.
 // What the ROW's accessible name gains. Short, because it is a suffix on every
 // crew row's name and a screen-reader user hears it before anything else about
 // the task; the full sentence stays in the hover text.
