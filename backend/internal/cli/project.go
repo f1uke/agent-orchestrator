@@ -98,6 +98,7 @@ type projectSetConfigOptions struct {
 	branchPrefix      string
 	hasWebUI          bool
 	hasIOSSimulator   bool
+	noAutoCrew        bool
 	configJSON        string
 	clear             bool
 	json              bool
@@ -290,6 +291,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.trackerIntake, "tracker-intake", false, "Enable issue-tracker intake for matching issues (see --tracker-provider)")
 	f.BoolVar(&opts.hasWebUI, "web-ui", false, "This project has a web UI, so sessions get the Browser tab")
 	f.BoolVar(&opts.hasIOSSimulator, "ios-simulator", false, "This project targets iOS, so sessions get the Device tab")
+	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; `ao crew add` still works")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
@@ -342,6 +344,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 		},
 		HasWebUI:        opts.hasWebUI,
 		HasIOSSimulator: opts.hasIOSSimulator,
+		DisableAutoCrew: opts.noAutoCrew,
 	}
 	// "none" is the CLI-friendly spelling of the default (empty) workflow; the
 	// daemon stores it as unset. Normalize so `--git-workflow none` round-trips.

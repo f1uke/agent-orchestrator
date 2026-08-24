@@ -84,6 +84,35 @@ type ProjectConfig struct {
 	// harder to reason about than a switch, and gets monorepos wrong.
 	HasIOSSimulator bool `json:"hasIOSSimulator,omitempty"`
 
+	// DisableAutoCrew turns off AUTOMATIC crew formation for this project, and
+	// nothing else.
+	//
+	// It is opt-in (false) so every existing project keeps forming crews exactly
+	// as it did. When it is set, no qa is ever created on its own here - whatever
+	// the task size, and whether or not dev touches a runtime surface - while `ao
+	// crew add` and the topbar's `+ qa` keep working, so one task can still be
+	// opted into a tester by hand. That is the whole point of turning off the
+	// AUTOMATIC half rather than the capability: the cost saving without losing
+	// the escape hatch.
+	//
+	// It is deliberately NOT the same fact as `--task-size mechanical`, which
+	// additionally authorizes an agent to skip the brainstorm -> plan -> TDD
+	// ceremony. Implementing this by rewriting the task size would silently strip
+	// the rigor off every large task here and leave no way to ask for a big
+	// careful solo one, so the two stay separate: a `standard` or `deep` task on a
+	// crew-off project gets the full ceremony, with nobody else in the crew.
+	//
+	// It is read at the ELIGIBILITY seam (sessionmanager.crewEligible), which is
+	// upstream of both consumers - the trigger that would create qa, and the
+	// system prompt, which a spawn builds BEFORE any crew could exist. Reading it
+	// only where qa is created would hand dev the crew prompt telling it the smoke
+	// checklist belongs to a qa this project never creates, and nobody would write
+	// one.
+	//
+	// It applies to FUTURE spawns and touches. Setting it never kills or sleeps a
+	// qa that is already mid-task.
+	DisableAutoCrew bool `json:"disableAutoCrew,omitempty"`
+
 	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
 	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
 	// condition onto the existing ready-to-merge conditions. Approvals are only

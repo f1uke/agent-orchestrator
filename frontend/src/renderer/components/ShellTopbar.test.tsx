@@ -52,13 +52,14 @@ function sessionWith(overrides: Partial<WorkspaceSession> = {}): WorkspaceSessio
 	};
 }
 
-function renderTopbar(session: WorkspaceSession) {
+function renderTopbar(session: WorkspaceSession, project: Partial<WorkspaceSummary> = {}) {
 	const data: WorkspaceSummary[] = [
 		{
 			id: session.workspaceId,
 			name: session.workspaceName,
 			path: "/repo/my-app",
 			sessions: [session],
+			...project,
 		},
 	];
 	useWorkspaceQueryMock.mockReturnValue({ data, isError: false, isLoading: false });
@@ -237,6 +238,27 @@ describe("ShellTopbar — the member switcher, and where it has to live", () => 
 		// No chips and no gate: the identity slot still reads branch + status pill.
 		expect(document.querySelectorAll("[data-crew-switcher-chip]")).toHaveLength(0);
 		expect(document.querySelector("[data-crew-switcher-gate='review']")).toBeNull();
+	});
+
+	it("tells the switcher when this project never forms a crew by itself", () => {
+		// The topbar is the only place a human is looking when they wonder where the
+		// qa is, and the project fact lives on the workspace summary. Dropping it
+		// here would leave `+ qa` promising an automatic crewmate that never comes.
+		renderTopbar(sessionWith(), { disableAutoCrew: true });
+
+		expect(document.querySelector("[data-crew-switcher-add='qa']")).toHaveAttribute(
+			"data-crew-switcher-add-auto",
+			"off",
+		);
+	});
+
+	it("leaves the switcher's default promise alone on an ordinary project", () => {
+		renderTopbar(sessionWith());
+
+		expect(document.querySelector("[data-crew-switcher-add='qa']")).toHaveAttribute(
+			"data-crew-switcher-add-auto",
+			"on",
+		);
 	});
 
 	it("draws no switcher at all on an orchestrator session — a crew there is a category error", () => {

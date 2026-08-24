@@ -19,7 +19,13 @@ type Summary struct {
 	// (ProjectConfig.HasIOSSimulator), read by the desktop inspector for the same
 	// reason and in the same way as HasWebUI: it decides whether the session rail
 	// shows a Simulator tab. Always emitted, never omitempty.
-	HasIOSSimulator bool   `json:"hasIOSSimulator"`
+	HasIOSSimulator bool `json:"hasIOSSimulator"`
+	// DisableAutoCrew is the project's resolved automatic-crew fact
+	// (ProjectConfig.DisableAutoCrew). The desktop reads it from this list so a
+	// session on a crew-off project can say why no qa ever appears and that one
+	// can still be added by hand. Always emitted, never omitempty, for the same
+	// reason as the two above: absent and false must not be distinguishable.
+	DisableAutoCrew bool   `json:"disableAutoCrew"`
 	ResolveError    string `json:"resolveError,omitempty"`
 }
 

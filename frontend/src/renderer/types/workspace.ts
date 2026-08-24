@@ -745,6 +745,13 @@ export type WorkspaceSummary = {
 	 * watching, so its sessions get no Simulator tab.
 	 */
 	hasIOSSimulator?: boolean;
+	/**
+	 * Whether this project never forms a crew by itself
+	 * (ProjectConfig.disableAutoCrew). Opt-in, so undefined means AO forms crews
+	 * here as it always has. It changes no capability in the UI - `+ qa` works
+	 * either way - only what the topbar says AO will do on its own.
+	 */
+	disableAutoCrew?: boolean;
 	accentColor?: string;
 	diff?: {
 		additions: number;

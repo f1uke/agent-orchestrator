@@ -503,6 +503,64 @@ describe("ProjectSettingsForm", () => {
 		expect(body.config.hasWebUI).toBeUndefined();
 	});
 
+	it("turns automatic crew formation off for the project, and back on", async () => {
+		// The human chose "settable from both the app and the CLI" for one stated
+		// reason: a flag you cannot see is a flag you forget. This surface is the
+		// seeing half — the project's own settings say, in one place, whether AO
+		// will ever form a crew here.
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, env: { TOKEN: "secret" } },
+		});
+
+		renderSettings();
+		await screen.findByText("git@github.com:acme/project-one.git");
+
+		// Opt-in: a project that never configured it keeps forming crews.
+		const toggle = await screen.findByLabelText("Never form a crew automatically");
+		expect(toggle).not.toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.disableAutoCrew).toBe(true);
+		// It must not be implemented by demoting the task size: nothing else about
+		// how this project spawns changes, and config the form does not expose
+		// survives the round-trip.
+		expect(body.config.env).toEqual({ TOKEN: "secret" });
+	});
+
+	it("loads an already-crew-off project and can turn automatic crew back on", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, disableAutoCrew: true },
+		});
+
+		renderSettings();
+		const toggle = await screen.findByLabelText("Never form a crew automatically");
+		expect(toggle).toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		// Automatic crew IS the default, so "on" is the absence of the field.
+		expect(body.config.disableAutoCrew).toBeUndefined();
+	});
+
 	it("shows the approval-rule toggle for GitLab projects only, and saves the enabled rule with a threshold", async () => {
 		mockProject({
 			id: "proj-1",

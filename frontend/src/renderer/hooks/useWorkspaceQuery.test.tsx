@@ -286,4 +286,25 @@ describe("useWorkspaceQuery capability flags", () => {
 		expect(byId.web.hasIOSSimulator).toBe(false);
 		expect(byId.web.hasWebUI).toBe(true);
 	});
+
+	it("carries disableAutoCrew through to the workspace summary", async () => {
+		respondWith({
+			projects: {
+				data: {
+					projects: [
+						{ id: "solo", name: "Solo", kind: "single_repo", path: "/tmp/solo", disableAutoCrew: true },
+						{ id: "crew", name: "Crew", kind: "single_repo", path: "/tmp/crew", disableAutoCrew: false },
+					],
+				},
+				error: undefined,
+			},
+		});
+
+		const { result } = renderHook(() => useWorkspaceQuery(), { wrapper });
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		const byId = Object.fromEntries((result.current.data ?? []).map((w) => [w.id, w]));
+		expect(byId.solo.disableAutoCrew).toBe(true);
+		expect(byId.crew.disableAutoCrew).toBe(false);
+	});
 });
