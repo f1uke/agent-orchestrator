@@ -198,6 +198,71 @@ test.describe("the two states are told apart by shape, not by colour", () => {
 	});
 });
 
+test.describe("a click on the pip does what the pip says", () => {
+	// The pip carries the row's own open handler so it is not a dead spot in the
+	// gutter. That made WHICH element wins a click on it load-bearing, and it was
+	// briefly wrong: the rename pencil's ICON is 15px but its BUTTON is 20px, and
+	// on a two-line row those extra 2.5px of padding sat over the pip's top edge.
+	// The pencil won them, so a click 1px inside the pip opened the inline rename
+	// instead of the task — the top quarter of the indicator doing the wrong thing,
+	// which is worse than doing nothing.
+	//
+	// It is fixed by DOM ORDER: positioned siblings hit-test in tree order and the
+	// later one wins, so the pip is rendered after the pencil. Nothing about the
+	// geometry says so, which is exactly why it needs a test — anyone reordering
+	// those two JSX elements would reintroduce it silently, and every measurement
+	// of the drawn icons would still look fine.
+
+	/** Sample a grid over an element's box and report which component owns each point. */
+	async function ownersAcross(page: Page, name: string) {
+		return pip(page, name).evaluate((el) => {
+			const box = el.getBoundingClientRect();
+			const owners = new Set<string>();
+			for (let dy = 1; dy < box.height; dy += 2) {
+				for (const fx of [0.15, 0.5, 0.85]) {
+					const hit = document.elementFromPoint(box.x + box.width * fx, box.y + dy) as HTMLElement | null;
+					owners.add(
+						!hit
+							? "nothing"
+							: hit.closest("[data-qa-pip]")
+								? "pip"
+								: hit.closest('button[aria-label^="Rename"]')
+									? "rename pencil"
+									: hit.closest('button[aria-label^="Open "]')
+										? "row"
+										: hit.tagName.toLowerCase(),
+					);
+				}
+			}
+			return [...owners];
+		});
+	}
+
+	test("every point inside the pip belongs to the pip, not to the rename pencil", async ({ page }) => {
+		await openRail(page);
+
+		for (const name of [ROWS.awake, ROWS.paused, ROWS.notStarted]) {
+			// Hover first: the pencil is opacity-0 until then, but it takes pointer
+			// events either way, and hovering is the state a user clicks from.
+			await row(page, name).hover();
+			expect(await ownersAcross(page, name), `${name}: something else owns part of the pip`).toEqual(["pip"]);
+		}
+	});
+
+	test("clicking the pip's top edge opens the task and does not start a rename", async ({ page }) => {
+		await openRail(page);
+		// A two-line row, where the pencil's padding reaches furthest down.
+		const target = row(page, ROWS.paused);
+		await target.hover();
+
+		const box = (await target.locator("[data-qa-pip]").boundingBox())!;
+		await page.mouse.click(box.x + box.width / 2, box.y + 1);
+
+		await expect(page).toHaveURL(/sessions\/demo-ready/);
+		await expect(page.locator("input")).toHaveCount(0);
+	});
+});
+
 test.describe("the pip fits the rail", () => {
 	test("never overflows the row it sits on, in either state", async ({ page }) => {
 		await openRail(page);
