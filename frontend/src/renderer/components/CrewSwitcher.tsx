@@ -262,7 +262,10 @@ function AddRoleButton({
 					<span className="truncate">qa</span>
 				</button>
 			</TooltipTrigger>
-			<TooltipContent>
+			{/* Capped, because this is the longest tooltip in the bar and the shared
+			    popper sets no width: uncapped it lays itself out as one line across
+			    the whole window, which reads as a banner rather than a hint. */}
+			<TooltipContent className="max-w-[320px]">
 				Add a qa to this task. It starts working in the same worktree straight away, beside the agent that is already
 				there - nothing that is running now is interrupted.{" "}
 				{autoCrewDisabled
