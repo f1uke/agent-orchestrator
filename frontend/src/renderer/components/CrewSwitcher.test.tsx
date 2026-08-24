@@ -72,7 +72,9 @@ describe("CrewSwitcher — a solo task pays for one thing only", () => {
 			/>,
 		);
 		await user.hover(document.querySelector("[data-crew-switcher-add='qa']")!);
-		expect(await screen.findByRole("tooltip")).toHaveTextContent("AO adds one by itself the first time this task drives the app");
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(
+			"AO adds one by itself the first time this task drives the app",
+		);
 		unmount();
 
 		render(
