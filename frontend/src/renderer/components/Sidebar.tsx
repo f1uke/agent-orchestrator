@@ -4,6 +4,7 @@ import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import {
 	ChevronRight,
 	CheckCircle2,
+	Circle,
 	Folder,
 	FolderPlus,
 	GitPullRequest,
@@ -35,7 +36,7 @@ import {
 	type WorkspaceSummary,
 	workerSessions,
 } from "../types/workspace";
-import { tasksFrom } from "../lib/crew";
+import { type QaPresence, qaPresence, tasksFrom } from "../lib/crew";
 import { aoBridge } from "../lib/bridge";
 import { CopyButton } from "./CopyButton";
 import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
@@ -942,6 +943,7 @@ function ProjectItem({
 							active={task.members.some((member) => member.id === selection.activeSessionId)}
 							key={task.dev.id}
 							onOpen={() => selection.goSession(workspace.id, task.dev.id)}
+							qa={task.qa}
 							session={task.dev}
 						/>
 					))}
@@ -954,8 +956,20 @@ function ProjectItem({
 // One worker-session row. Reads as a link by default; a hover-revealed pencil
 // flips the label into an inline input (Enter/blur saves, Escape cancels) that
 // persists through the daemon rename endpoint, so the new name survives reload.
-function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; active: boolean; onOpen: () => void }) {
+function SessionRow({
+	session,
+	qa,
+	active,
+	onOpen,
+}: {
+	session: WorkspaceSession;
+	/** This task's qa, when it has one. Absent on every solo task, and that is structural. */
+	qa?: WorkspaceSession;
+	active: boolean;
+	onOpen: () => void;
+}) {
 	const queryClient = useQueryClient();
+	const presence = qaPresence(qa);
 	const sessionRef = sessionRefLabel(session.id);
 	const jiraKey = jiraKeyFromIssueId(session.issueId);
 	const [isEditing, setIsEditing] = useState(false);
@@ -1039,7 +1053,12 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 			the pointerdown, so it neither opens the row nor starts a split drag. */}
 			<button
 				aria-current={active ? "page" : undefined}
-				aria-label={`Open ${session.title}`}
+				// The qa's state rides the row's NAME rather than a live region — the
+				// sidebar is persistent navigation, and announcing every task's crewmate
+				// on every wake would interrupt constantly. The same choice the
+				// Orchestrator button makes for its busy dot: the name is read when the
+				// user asks for it, on focus. The pip itself is decorative.
+				aria-label={`Open ${session.title}` + (presence ? `, ${QA_PIP_NAME[presence.detail]}` : "")}
 				className={cn(
 					"absolute inset-0 rounded-[4px] outline-hidden",
 					"before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-px before:rounded-full before:bg-transparent",
@@ -1091,6 +1110,7 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 							{sessionRef}
 						</span>
 						<CopySessionIdButton sessionId={session.id} />
+						<QaPip presence={presence} />
 					</span>
 				</span>
 				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
@@ -1123,6 +1143,96 @@ function SessionRow({ session, active, onOpen }: { session: WorkspaceSession; ac
 		</SidebarMenuSubItem>
 	);
 }
+
+/**
+ * The qa pip: does this task have a SECOND AGENT, and is it running right now?
+ *
+ * ## One row, one pip
+ *
+ * A crew is ONE piece of work - one worktree, one branch, one pull request - so
+ * it keeps ONE row (#243). This is the whole of what that row says about its
+ * crewmate: an indicator, never a second row, a child row or a disclosure.
+ *
+ * Three renderings and no others:
+ *
+ *  - **awake**  - a filled disc. `status-glyph` reserves the solid mark for a
+ *    genuinely live agent and this is one, so the two surfaces agree on ink.
+ *  - **asleep** - a crescent, the app's settled glyph for "there is no process".
+ *  - **no qa**  - NOTHING. A task that never needed a second agent is now the
+ *    ordinary case (a whole project can turn automatic crew formation off), so
+ *    an empty seat here would nag about a chair nobody meant to fill.
+ *
+ * ## Why it sits on the `@id` line
+ *
+ * The work name is the row's headline and already truncates; anything put on its
+ * line is paid for by every long name in the rail. The right-hand status cluster
+ * is worse on two counts - it is a `shrink-0` sibling of the name's `flex-1`
+ * span, so it narrows the NAME, and `IdleStatusChip` already draws a Moon there
+ * for a paused dev, which would put two crescents side by side meaning different
+ * things. Line 3 has real slack, and `ml-auto` pins the pip to one column so the
+ * rail can be scanned down rather than read row by row.
+ *
+ * ## Nothing moves when a qa wakes
+ *
+ * Both states draw the SAME BOX - same 9px icon slot, same `qa`, same padding -
+ * and only the silhouette and the tone change, so awake <-> asleep is a
+ * zero-reflow swap by construction rather than by a reserved-then-hidden slot.
+ *
+ * ## Not colour, and not the accent
+ *
+ * The states are told apart by SHAPE (solid disc vs crescent) and named in the
+ * row's accessible name; the tones only reinforce. They stay quiet - muted and
+ * passive - so the dev's own status glyph is still the loudest mark on the row,
+ * and the accent (3.20:1 in dark) is asked to carry nothing.
+ *
+ * The hover text is a native `title`, not a tooltip: the shared popper sets no
+ * max-width, so an uncapped bubble in a 256px rail lays itself out across the
+ * whole window.
+ */
+function QaPip({ presence }: { presence: QaPresence | undefined }) {
+	if (!presence) return null;
+	const awake = presence.state === "awake";
+	const Icon = awake ? Circle : Moon;
+	return (
+		<span
+			aria-hidden="true"
+			className={cn(
+				"ml-auto inline-flex shrink-0 items-center gap-[3px] text-[10px] leading-none",
+				awake ? "text-muted-foreground" : "text-passive",
+			)}
+			data-qa-pip={presence.state}
+			data-qa-pip-detail={presence.detail}
+			title={QA_PIP_TITLE[presence.detail]}
+		>
+			<Icon
+				className="h-[9px] w-[9px] shrink-0"
+				strokeWidth={2}
+				style={awake ? { fill: "currentColor" } : undefined}
+			/>
+			qa
+		</span>
+	);
+}
+
+// What each reading MEANS. Note what the awake line does NOT say: it claims an
+// agent is UP, never that one is mid-turn. The board's rollup answers that
+// second question, and a parked member is awake here and not working there.
+// What the ROW's accessible name gains. Short, because it is a suffix on every
+// crew row's name and a screen-reader user hears it before anything else about
+// the task; the full sentence stays in the hover text.
+const QA_PIP_NAME: Record<QaPresence["detail"], string> = {
+	awake: "qa awake",
+	paused: "qa asleep",
+	"not started": "qa not started",
+	"no agent": "qa asleep, agent exited",
+};
+
+const QA_PIP_TITLE: Record<QaPresence["detail"], string> = {
+	awake: "qa is awake - there is a second agent up on this task, beside dev.",
+	paused: "qa is asleep - it is on this task, paused, with no agent running. Opening it resumes it.",
+	"not started": "qa is on this task and has never started - open it to start it.",
+	"no agent": "qa's agent has exited. It is still on the task; AO settles the row the next time a member is woken.",
+};
 
 /**
  * Click-to-copy for a session's canonical id, sitting beside the `@id` line.

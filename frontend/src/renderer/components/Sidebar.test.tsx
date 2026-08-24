@@ -179,6 +179,146 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+describe("Sidebar — the qa pip on a task's row", () => {
+	// The row says whether the task HAS a second agent and whether it is running,
+	// and it says it without growing a second row. Two live states, and a task
+	// with no qa draws nothing at all — which since #244 is a normal steady state
+	// (a whole project can run with automatic crew formation off) rather than a
+	// sign that something is pending.
+	const dev: WorkspaceSession = {
+		...session,
+		id: "proj-1-1",
+		title: "crew thing",
+		crew: { id: "proj-1-1", role: "dev", hasRun: true },
+	};
+	const qa = (over: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
+		...session,
+		id: "proj-1-2",
+		title: "crew thing",
+		crew: { id: "proj-1-1", role: "qa", hasRun: true },
+		...over,
+	});
+
+	// renderSidebar hands back the SAME tree's rerender, so a test can wake a qa
+	// the way a workspace refetch does rather than mounting a second sidebar.
+	function renderWith(sessions: WorkspaceSession[]) {
+		renderSidebar({ workspaces: [{ ...workspace, sessions }] });
+		return document.body;
+	}
+	const refetchWith = (sessions: WorkspaceSession[]) => rerenderWorkspaces([{ ...workspace, sessions }]);
+	// The icon's BOX, with lucide's own `lucide-<name>` identity dropped: the
+	// silhouette is exactly what is meant to differ between the two states.
+	const iconBox = (pip: HTMLElement) =>
+		(pip.querySelector("svg")!.getAttribute("class") ?? "")
+			.split(" ")
+			.filter((c) => !c.startsWith("lucide"))
+			.join(" ");
+
+	it("draws an awake pip for a task whose qa is running", () => {
+		const container = renderWith([dev, qa()]);
+
+		expect(container.querySelector('[data-qa-pip="awake"]')).toBeInTheDocument();
+		expect(container.querySelector('[data-qa-pip="asleep"]')).not.toBeInTheDocument();
+	});
+
+	it("draws an asleep pip for a task whose qa ran and went back to sleep", () => {
+		const container = renderWith([dev, qa({ isSuspended: true, status: "idle" })]);
+
+		const pip = container.querySelector('[data-qa-pip="asleep"]');
+		expect(pip).toBeInTheDocument();
+		expect(pip).toHaveAttribute("data-qa-pip-detail", "paused");
+	});
+
+	it("draws NOTHING for a solo task — no empty seat, no reserved slot with an outline", () => {
+		const container = renderWith([{ ...session, id: "proj-1-9", title: "solo thing" }]);
+
+		expect(container.querySelector("[data-qa-pip]")).not.toBeInTheDocument();
+	});
+
+	it("keeps ONE row: the pip is an indicator on the task's row, never a second row", () => {
+		renderWith([dev, qa()]);
+
+		expect(screen.getAllByRole("button", { name: /^Open crew thing/ })).toHaveLength(1);
+		expect(screen.queryByText("@proj-1-2")).not.toBeInTheDocument();
+	});
+
+	// The no-twitch rule. The pip lives on the `@id` line, so the work NAME is not
+	// on the indicator's line at all and cannot be re-measured by it; and both live
+	// states draw the same box, so waking a qa swaps ink and nothing else.
+	it("swaps ink and nothing else when a qa wakes: same box, same label, same 9px slot", () => {
+		const body = renderWith([dev, qa({ isSuspended: true, status: "idle" })]);
+		const asleepPip = body.querySelector<HTMLElement>("[data-qa-pip]")!;
+		const asleep = {
+			text: asleepPip.textContent,
+			className: asleepPip.className,
+			iconClass: iconBox(asleepPip),
+		};
+
+		refetchWith([dev, qa()]);
+
+		const awakePip = body.querySelector<HTMLElement>('[data-qa-pip="awake"]')!;
+		// Only the TONE differs. Every box-defining class is shared, the label is
+		// the same two characters, and the icon slot is the same fixed 9px square —
+		// so there is nothing left for the browser to re-measure.
+		expect(awakePip.textContent).toBe(asleep.text);
+		const boxClasses = (cls: string) =>
+			cls
+				.split(" ")
+				.filter((c) => !c.startsWith("text-"))
+				.join(" ");
+		expect(boxClasses(awakePip.className)).toBe(boxClasses(asleep.className));
+		expect(iconBox(awakePip)).toBe(asleep.iconClass);
+	});
+
+	it("does not put the work name on the pip's line, so a long name truncates exactly as it did", () => {
+		const longName = "a task with a really quite long name that will certainly not fit the rail";
+		const container = renderWith([{ ...dev, title: longName }, { ...qa(), title: longName }]);
+
+		const pip = container.querySelector("[data-qa-pip]")!;
+		const name = screen.getByText(longName);
+		expect(name).toHaveClass("truncate");
+		expect(name.contains(pip)).toBe(false);
+		// Same flex line as the session ref, not the name's line.
+		expect(pip.parentElement).toBe(screen.getByText("@proj-1-1").parentElement);
+	});
+
+	// A row that CLAIMS to be awake while its agent is dead is the hazard this pip
+	// could most easily inherit: AO's Awake() is structural, so a corpse with a
+	// live row reads as "working". Every dead-but-awake case the row can SEE is
+	// demoted (the rule and its limits live in lib/crew.ts qaPresence).
+	it("does not draw an awake pip over a qa whose start failed", () => {
+		const container = renderWith([dev, qa({ crew: { id: "proj-1-1", role: "qa", hasRun: false } })]);
+
+		const pip = container.querySelector("[data-qa-pip]")!;
+		expect(pip).toHaveAttribute("data-qa-pip", "asleep");
+		expect(pip).toHaveAttribute("data-qa-pip-detail", "not started");
+	});
+
+	it("does not draw an awake pip over a qa whose pane the harness reported gone", () => {
+		const container = renderWith([
+			dev,
+			qa({ activity: { state: "exited", lastActivityAt: "2026-06-30T00:00:00Z" } }),
+		]);
+
+		expect(container.querySelector("[data-qa-pip]")).toHaveAttribute("data-qa-pip-detail", "no agent");
+	});
+
+	// Colour cannot be the only channel, and the accent is below AA in dark, so it
+	// carries nothing here: the states differ in SHAPE, and the state is named in
+	// the row's accessible name for anyone who cannot see either.
+	it("names the qa's state in the row's accessible name, not only in the ink", () => {
+		renderWith([dev, qa({ isSuspended: true, status: "idle" })]);
+
+		expect(screen.getByRole("button", { name: "Open crew thing, qa asleep" })).toBeInTheDocument();
+	});
+
+	it("leaves a solo row's accessible name exactly as it was", () => {
+		renderWith([{ ...session, id: "proj-1-9", title: "solo thing" }]);
+
+		expect(screen.getByRole("button", { name: "Open solo thing" })).toBeInTheDocument();
+	});
+});
+
 describe("Sidebar — a crew task keeps ONE row", () => {
 	// The sidebar is the list of things being worked on, and a crew is ONE thing:
 	// one worktree, one branch, one pull request. So a task that gains a qa must
@@ -204,7 +344,7 @@ describe("Sidebar — a crew task keeps ONE row", () => {
 	it("draws one row for the task and no row for the qa", () => {
 		renderCrew();
 
-		expect(screen.getAllByRole("button", { name: "Open crew thing" })).toHaveLength(1);
+		expect(screen.getAllByRole("button", { name: "Open crew thing, qa awake" })).toHaveLength(1);
 		expect(screen.queryByText("qa · working")).not.toBeInTheDocument();
 		expect(screen.queryByText("@proj-1-2")).not.toBeInTheDocument();
 	});
@@ -214,13 +354,13 @@ describe("Sidebar — a crew task keeps ONE row", () => {
 		mockParams.sessionId = "proj-1-2";
 		renderCrew();
 
-		expect(screen.getByRole("button", { name: "Open crew thing" })).toHaveAttribute("aria-current", "page");
+		expect(screen.getByRole("button", { name: "Open crew thing, qa awake" })).toHaveAttribute("aria-current", "page");
 	});
 
 	it("lands on dev when the row is opened — dev owns the branch, the PR and the report", async () => {
 		renderCrew();
 
-		await userEvent.click(screen.getByRole("button", { name: "Open crew thing" }));
+		await userEvent.click(screen.getByRole("button", { name: "Open crew thing, qa awake" }));
 
 		expect(navigateMock).toHaveBeenCalledWith(
 			expect.objectContaining({ params: { projectId: "proj-1", sessionId: "proj-1-1" } }),
