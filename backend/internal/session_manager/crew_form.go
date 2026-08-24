@@ -65,11 +65,28 @@ func wantsCrew(project domain.ProjectRecord, dev domain.SessionRecord) bool {
 // and what kind of project it lives in. It is split out because dev's SYSTEM
 // PROMPT has to be built from it (promptCrewRole), and the prompt is built
 // before there is a materialized record to ask.
+//
+// It is also where a project that has turned AUTOMATIC crew formation off is
+// answered, and this function is the only correct home for that answer. It sits
+// upstream of BOTH consumers - the trigger that would create qa, and the prompt -
+// and the prompt is the one that would fail silently: a spawn composes it before
+// any crew exists, so a flag read further downstream would leave dev holding the
+// CREW prompt, which tells it the smoke checklist belongs to a qa this project
+// never creates and that `ao smoke set` from it is refused. Nobody would write a
+// checklist, and nothing would say so.
+//
+// What it deliberately does NOT gate is the MANUAL path. `ao crew add` and the
+// topbar's `+ qa` go through resolveCrewDev, which never calls this function, so
+// a human can still opt one task into a qa by hand - which is the whole reason
+// this switch turns off automatic formation rather than crews.
 func crewEligible(project domain.ProjectRecord, kind domain.SessionKind, size domain.TaskSize) bool {
 	if kind != domain.KindWorker {
 		return false
 	}
 	if !size.WantsCrew() {
+		return false
+	}
+	if project.Config.DisableAutoCrew {
 		return false
 	}
 	return project.Kind.WithDefault() != domain.ProjectKindWorkspace

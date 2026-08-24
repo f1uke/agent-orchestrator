@@ -53,6 +53,51 @@ describe("CrewSwitcher — a solo task pays for one thing only", () => {
 		expect(document.querySelector("[data-crew-switcher-gate='review']")).toBeNull();
 	});
 
+	it("says AO will add a qa by itself — and, where it will not, that it will not", async () => {
+		// The `+ qa` button is the one place a human asks "why is there no qa
+		// here?", so it has to answer honestly. On an ordinary project AO forms the
+		// crew itself the first time the task drives the app; on a project with
+		// automatic crew turned off it never does, and a button that still worked
+		// while quietly promising something that never happens is the confusing
+		// half of this feature.
+		const user = userEvent.setup();
+
+		const { unmount } = render(
+			<CrewSwitcher
+				activeSessionId="dev-1"
+				onAddRole={vi.fn()}
+				onOpenMember={vi.fn()}
+				review="not run"
+				task={soloTask()}
+			/>,
+		);
+		await user.hover(document.querySelector("[data-crew-switcher-add='qa']")!);
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(
+			"AO adds one by itself the first time this task drives the app",
+		);
+		unmount();
+
+		render(
+			<CrewSwitcher
+				activeSessionId="dev-1"
+				autoCrewDisabled
+				onAddRole={vi.fn()}
+				onOpenMember={vi.fn()}
+				review="not run"
+				task={soloTask()}
+			/>,
+		);
+		const add = document.querySelector("[data-crew-switcher-add='qa']")!;
+		// Still there, still enabled: turning off AUTOMATIC crew is precisely not
+		// turning off crew, and this button is the escape hatch that makes that true.
+		expect(add).not.toBeNull();
+		expect(add).not.toBeDisabled();
+		await user.hover(add);
+		const tip = await screen.findByRole("tooltip");
+		expect(tip).toHaveTextContent("automatic crew is off");
+		expect(tip).not.toHaveTextContent("AO adds one by itself the first time this task drives the app");
+	});
+
 	it("renders NOTHING at all when the task cannot gain a member", () => {
 		// A finished task: attaching would hand a new agent a worktree that is
 		// about to be reclaimed, so the daemon refuses — and an affordance that can

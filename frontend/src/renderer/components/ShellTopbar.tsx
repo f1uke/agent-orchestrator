@@ -165,6 +165,7 @@ export function ShellTopbar() {
 							<CrewSwitcher
 								activeSessionId={params.sessionId}
 								addRolePending={addRole.isPending}
+								autoCrewDisabled={Boolean(project?.disableAutoCrew)}
 								deviceHolders={deviceHolders}
 								onAddRole={() => addRole.mutate()}
 								onOpenMember={openMember}

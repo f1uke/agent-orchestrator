@@ -119,6 +119,7 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 			OrchestratorAgent: row.Config.Orchestrator.Harness,
 			HasWebUI:          row.Config.HasWebUI,
 			HasIOSSimulator:   row.Config.HasIOSSimulator,
+			DisableAutoCrew:   row.Config.DisableAutoCrew,
 		})
 	}
 	return out, nil

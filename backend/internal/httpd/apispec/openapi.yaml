@@ -7013,6 +7013,8 @@ components:
           $ref: '#/components/schemas/ApprovalRule'
         defaultBranch:
           type: string
+        disableAutoCrew:
+          type: boolean
         env:
           additionalProperties:
             type: string
@@ -7075,6 +7077,8 @@ components:
       type: object
     ProjectSummary:
       properties:
+        disableAutoCrew:
+          type: boolean
         hasIOSSimulator:
           type: boolean
         hasWebUI:
@@ -7101,6 +7105,7 @@ components:
       - sessionPrefix
       - hasWebUI
       - hasIOSSimulator
+      - disableAutoCrew
       type: object
     ReclaimSettingsResponse:
       properties:

@@ -52,6 +52,7 @@ export function CrewSwitcher({
 	onOpenReviews,
 	onAddRole,
 	addRolePending,
+	autoCrewDisabled,
 	style,
 }: {
 	task: Task;
@@ -71,6 +72,16 @@ export function CrewSwitcher({
 	onOpenReviews?: () => void;
 	onAddRole?: () => void;
 	addRolePending?: boolean;
+	/**
+	 * Whether this project has AUTOMATIC crew formation turned off
+	 * (ProjectConfig.disableAutoCrew). It changes nothing about what the button
+	 * DOES — adding a qa by hand is exactly what such a project keeps — only what
+	 * the button PROMISES: the default copy tells a human AO will form the crew
+	 * itself the first time the task drives the app, which here it never will.
+	 * `+ qa` that works but never fires on its own is the confusing state this
+	 * answers.
+	 */
+	autoCrewDisabled?: boolean;
 	/**
 	 * Applied to the root. The topbar is a macOS window DRAG region, so
 	 * everything clickable inside it has to opt out of dragging or the click
@@ -103,7 +114,7 @@ export function CrewSwitcher({
 						<ReviewPip onOpen={onOpenReviews} state={review} />
 					</>
 				) : (
-					<AddRoleButton onAdd={onAddRole!} pending={addRolePending} />
+					<AddRoleButton autoCrewDisabled={autoCrewDisabled} onAdd={onAddRole!} pending={addRolePending} />
 				)}
 			</div>
 		</TooltipProvider>
@@ -217,14 +228,32 @@ function ReviewPip({ state, onOpen }: { state: ReviewGateState; onOpen?: () => v
 	);
 }
 
-/** `+ qa`, in the switcher — because the switcher IS this view's crew strip. */
-function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolean }) {
+/**
+ * `+ qa`, in the switcher — because the switcher IS this view's crew strip.
+ *
+ * The button is the SAME button on a project with automatic crew turned off: it
+ * is enabled, it does the same thing, and it is deliberately not marked up in
+ * the bar itself. Only the sentence changes. A badge or a dot here would cost
+ * every project's topbar width in a strip that already collapses its labels to
+ * icons below 553px, to answer a question that is only ever asked at this
+ * button — so the answer lives where the question is asked.
+ */
+function AddRoleButton({
+	onAdd,
+	pending,
+	autoCrewDisabled,
+}: {
+	onAdd: () => void;
+	pending?: boolean;
+	autoCrewDisabled?: boolean;
+}) {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<button
 					className="inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-[3px] text-[11px] leading-none text-passive transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
 					data-crew-switcher-add="qa"
+					data-crew-switcher-add-auto={autoCrewDisabled ? "off" : "on"}
 					disabled={pending}
 					onClick={onAdd}
 					type="button"
@@ -233,10 +262,15 @@ function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolea
 					<span className="truncate">qa</span>
 				</button>
 			</TooltipTrigger>
-			<TooltipContent>
+			{/* Capped, because this is the longest tooltip in the bar and the shared
+			    popper sets no width: uncapped it lays itself out as one line across
+			    the whole window, which reads as a banner rather than a hint. */}
+			<TooltipContent className="max-w-[320px]">
 				Add a qa to this task. It starts working in the same worktree straight away, beside the agent that is already
-				there - nothing that is running now is interrupted. AO adds one by itself the first time this task drives the
-				app.
+				there - nothing that is running now is interrupted.{" "}
+				{autoCrewDisabled
+					? "AO never adds one here on its own: automatic crew is off in this project's settings, so adding one is always yours to do."
+					: "AO adds one by itself the first time this task drives the app."}
 			</TooltipContent>
 		</Tooltip>
 	);

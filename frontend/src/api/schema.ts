@@ -2470,6 +2470,7 @@ export interface components {
             agentConfig?: components["schemas"]["AgentConfig"];
             approvalRule?: components["schemas"]["ApprovalRule"];
             defaultBranch?: string;
+            disableAutoCrew?: boolean;
             env?: {
                 [key: string]: string;
             };
@@ -2496,6 +2497,7 @@ export interface components {
             project: components["schemas"]["Project"];
         };
         ProjectSummary: {
+            disableAutoCrew: boolean;
             hasIOSSimulator: boolean;
             hasWebUI: boolean;
             id: string;

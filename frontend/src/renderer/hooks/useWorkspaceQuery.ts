@@ -50,6 +50,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 		orchestratorAgent: project.orchestratorAgent ? toAgentProvider(project.orchestratorAgent) : undefined,
 		hasWebUI: project.hasWebUI,
 		hasIOSSimulator: project.hasIOSSimulator,
+		disableAutoCrew: project.disableAutoCrew,
 		sessions: (sessionsData?.sessions ?? [])
 			.filter((session) => session.projectId === project.id)
 			.map((session) => ({

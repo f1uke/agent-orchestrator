@@ -476,6 +476,34 @@ func TestProjectSetConfig_CarriesTheTabFacts(t *testing.T) {
 	}
 }
 
+// Turning AUTOMATIC crew formation off is a per-project setting a human must be
+// able to set from BOTH surfaces - "a flag you cannot see is a flag you forget"
+// applies just as much to one you cannot script. Both spellings have to reach
+// the daemon, for the same reason the tab facts above do.
+func TestProjectSetConfig_CarriesDisableAutoCrew(t *testing.T) {
+	for name, args := range map[string][]string{
+		"flag": {"project", "set-config", "demo", "--no-auto-crew"},
+		"json": {"project", "set-config", "demo", "--config-json", `{"disableAutoCrew":true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := setConfigEnv(t)
+			srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+			writeRunFileFor(t, cfg, srv)
+
+			if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, args...); err != nil {
+				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+			}
+			var got projectsvc.SetConfigInput
+			if err := json.Unmarshal(capture.body, &got); err != nil {
+				t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+			}
+			if !got.Config.DisableAutoCrew {
+				t.Fatalf("config = %#v, want automatic crew formation turned off", got.Config)
+			}
+		})
+	}
+}
+
 // A key the CLI does not recognize must be refused, not swallowed. `set-config`
 // replaces the whole stored config, so a typo (or a config produced by a newer
 // daemon than this CLI) that decodes "successfully" into a struct without that
