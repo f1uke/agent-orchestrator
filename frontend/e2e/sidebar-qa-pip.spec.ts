@@ -114,6 +114,47 @@ test.describe("nothing else on the row moves when the pip is there", () => {
 	}
 });
 
+test.describe("the pip stays out of the row's text column", () => {
+	// The pip's FIRST placement rode the `@id` line as a flex sibling, and at the
+	// 240px rail that line has no slack: the pip took 5px off `@demo-working` and
+	// 17px off `@demo-stalled`, so a session ref that had been fully readable was
+	// silently ellipsised the moment its task gained a qa. It now sits absolutely
+	// in the row's right-hand gutter instead, beside the rename pencil, and takes
+	// nothing from the text column at all.
+	//
+	// This is the guard against it creeping back in. Removing the pip from the DOM
+	// must change nothing about the session ref — not its box, and above all not
+	// whether it is clipped.
+	test("takes no width from the session ref, in any state", async ({ page }) => {
+		await openRail(page);
+
+		for (const name of [ROWS.awake, ROWS.paused, ROWS.notStarted]) {
+			const ref = await pip(page, name).evaluate((el) => {
+				const li = el.closest("li") as HTMLElement;
+				const id = li.querySelector('span[title^="@"]') as HTMLElement;
+				const snap = () => ({
+					text: id.textContent,
+					client: id.clientWidth,
+					scroll: id.scrollWidth,
+					clipped: id.scrollWidth > id.clientWidth + 1,
+				});
+				const withPip = snap();
+				const parent = el.parentElement as HTMLElement;
+				const next = el.nextSibling;
+				parent.removeChild(el);
+				void li.offsetHeight;
+				const withoutPip = snap();
+				parent.insertBefore(el, next);
+				return { withPip, withoutPip };
+			});
+
+			expect(ref.withPip, `${name}: the pip narrowed the session ref`).toEqual(ref.withoutPip);
+			// And a ref that fits without the pip still fits with it.
+			expect(ref.withPip.clipped, `${name}: the pip clipped the session ref`).toBe(ref.withoutPip.clipped);
+		}
+	});
+});
+
 test.describe("the two states are told apart by shape, not by colour", () => {
 	/**
 	 * What an <svg> icon actually PAINTS: `getBBox()` is the union of the drawn
