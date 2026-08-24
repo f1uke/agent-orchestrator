@@ -272,7 +272,10 @@ describe("Sidebar — the qa pip on a task's row", () => {
 
 	it("does not put the work name on the pip's line, so a long name truncates exactly as it did", () => {
 		const longName = "a task with a really quite long name that will certainly not fit the rail";
-		const container = renderWith([{ ...dev, title: longName }, { ...qa(), title: longName }]);
+		const container = renderWith([
+			{ ...dev, title: longName },
+			{ ...qa(), title: longName },
+		]);
 
 		const pip = container.querySelector("[data-qa-pip]")!;
 		const name = screen.getByText(longName);
@@ -295,10 +298,7 @@ describe("Sidebar — the qa pip on a task's row", () => {
 	});
 
 	it("does not draw an awake pip over a qa whose pane the harness reported gone", () => {
-		const container = renderWith([
-			dev,
-			qa({ activity: { state: "exited", lastActivityAt: "2026-06-30T00:00:00Z" } }),
-		]);
+		const container = renderWith([dev, qa({ activity: { state: "exited", lastActivityAt: "2026-06-30T00:00:00Z" } })]);
 
 		expect(container.querySelector("[data-qa-pip]")).toHaveAttribute("data-qa-pip-detail", "no agent");
 	});

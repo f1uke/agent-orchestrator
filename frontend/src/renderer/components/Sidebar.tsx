@@ -1204,11 +1204,7 @@ function QaPip({ presence }: { presence: QaPresence | undefined }) {
 			data-qa-pip-detail={presence.detail}
 			title={QA_PIP_TITLE[presence.detail]}
 		>
-			<Icon
-				className="h-[9px] w-[9px] shrink-0"
-				strokeWidth={2}
-				style={awake ? { fill: "currentColor" } : undefined}
-			/>
+			<Icon className="h-[9px] w-[9px] shrink-0" strokeWidth={2} style={awake ? { fill: "currentColor" } : undefined} />
 			qa
 		</span>
 	);
