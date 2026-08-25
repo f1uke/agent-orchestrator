@@ -766,9 +766,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
           and fills the entire window. */}
 			{splitToast ? <Toast text={splitToast} /> : null}
 			{/* ⌘⇧O. Owns its own shortcut and open state, so it costs one line here
-          and stays clear of the file viewer that slice 1 is replacing.
-          `hasInspector` is the "this session has a worktree" test — an
-          orchestrator has none to index. */}
+          and knows nothing about the viewer above — which is why swapping that
+          viewer for Monaco did not touch it. `hasInspector` is the "this session
+          has a worktree" test; an orchestrator has none to index. */}
 			<OpenQuicklyPalette enabled={hasInspector} onOpenFile={openWorkspaceFile} sessionId={sessionId} />
 			<SplitDragLayer />
 			{browserPoppedOut && hasWebUI && session
