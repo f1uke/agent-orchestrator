@@ -152,6 +152,81 @@ function isWorking(member: WorkspaceSession): boolean {
 }
 
 /**
+ * Whether a task's qa is AWAKE or ASLEEP - the one fact the sidebar rail puts on
+ * a task's row, and the one it is easiest to get wrong.
+ *
+ * Two live states and no more, because the rail is answering one question: is
+ * there a second agent on this piece of work, and is it UP? A task with no qa
+ * gets `undefined` and the row draws NOTHING - a task that never needed a second
+ * agent is the ordinary case (more so since a project can turn automatic crew
+ * formation off entirely), so an empty seat there would nag about a chair nobody
+ * meant to fill.
+ *
+ * ## Awake is about a PROCESS, not about a turn
+ *
+ * `awake` means there is an agent up: a pane a human, a nudge or a queued
+ * message can put back to work this instant. It deliberately does NOT mean
+ * "taking a turn right now", so a qa that ran, ended its turn and is sitting at
+ * its prompt is awake here while the board's rollup says nobody is WORKING on
+ * the task. Those are two different questions with two different answers, and
+ * flattening them would break the second one: {@link isWorking} exists to catch
+ * a crew that has quietly stopped, and it must keep counting a parked member as
+ * stopped. So the pip's words never claim work - it says awake, and the card
+ * says whether anyone is mid-turn.
+ *
+ * ## Why this is not just `crewChipState`
+ *
+ * `crewChipState` is AO's structural `Awake()` - `!IsTerminated && !IsSuspended
+ * && !IsTodo` - and AO is deliberately the sole author of those flags. That
+ * makes it the right thing to REFUSE on and the wrong thing to make a claim on,
+ * because three states with no process at all come out of it as "working". Each
+ * is demoted here:
+ *
+ *  - `todo` - prepared and never materialized: no branch, no worktree, no
+ *    runtime. `Awake()` excludes it and `crewChipState` does not.
+ *  - {@link neverStarted} - on the task with `hasRun` false. A member is created
+ *    and started in one breath, so this is what is left when that START FAILED.
+ *    It is not suspended, so it would otherwise read awake.
+ *  - `activity.state === "exited"` - the harness's own report that the pane is
+ *    GONE. That is positive evidence of death rather than absence of evidence,
+ *    and it is the one dead-but-awake case a row that is sitting still can
+ *    actually see.
+ *
+ * `no_signal` and `active_stale` are deliberately NOT folded in. Both are
+ * absence of evidence, and "a failed probe is never proof of death" is
+ * load-bearing everywhere else in this app.
+ *
+ * ## What it still cannot see
+ *
+ * A qa killed without its hook ever reporting - SIGKILL, a daemon restart
+ * mid-turn - still reads awake. Nothing here can fix that: the corpse probe
+ * (`reconcileCrewPeers`) runs only when the OTHER member is woken, so a crew
+ * whose rows are both sitting still is never settled.
+ */
+export type QaPresence = {
+	state: "awake" | "asleep";
+	/**
+	 * The fact behind the state, in the vocabulary the card and the idle chip
+	 * already use. `paused` and `not started` are kept apart because only one of
+	 * them is a pause and only one of them has a Start button.
+	 */
+	detail: "awake" | "paused" | "not started" | "no agent";
+};
+
+export function qaPresence(qa: WorkspaceSession | undefined): QaPresence | undefined {
+	if (!qa) return undefined;
+	// Finished and torn down is not a LIVE state, so it is not one of the two.
+	// The rail never sees this (it filters merged and terminated sessions out
+	// before grouping), but the rule must answer for callers that do not.
+	if (crewChipState(qa) === "done") return undefined;
+	if (qa.status === "todo") return { state: "asleep", detail: "not started" };
+	if (neverStarted(qa)) return { state: "asleep", detail: "not started" };
+	if (qa.activity?.state === "exited") return { state: "asleep", detail: "no agent" };
+	if (crewChipState(qa) === "asleep") return { state: "asleep", detail: "paused" };
+	return { state: "awake", detail: "awake" };
+}
+
+/**
  * Whether this task can still GAIN a member - which is what decides whether the
  * card offers `+ qa` at all.
  *

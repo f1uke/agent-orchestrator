@@ -4,6 +4,7 @@ import {
 	crewChipState,
 	crewJoinLine,
 	neverStarted,
+	qaPresence,
 	reviewGateState,
 	taskLane,
 	tasksFrom,
@@ -65,6 +66,63 @@ const smoke = (over: Partial<SmokeProgress> = {}): SmokeProgress => ({
 	agentFail: 0,
 	agentCaptured: 0,
 	...over,
+});
+
+describe("qaPresence — what a task's row may claim about its qa", () => {
+	const qa = (over: Partial<WorkspaceSession> = {}) =>
+		session("demo-2", { crew: { id: "demo-1", role: "qa", hasRun: true }, ...over });
+
+	it("is undefined for a task with no qa, so the row draws nothing at all", () => {
+		expect(qaPresence(undefined)).toBeUndefined();
+	});
+
+	it("reads a running qa as awake", () => {
+		expect(qaPresence(qa({ activity: running }))).toEqual({ state: "awake", detail: "awake" });
+	});
+
+	it("reads a suspended qa as asleep — the state that says a qa ran and went back to sleep", () => {
+		expect(qaPresence(qa({ isSuspended: true, status: "idle" }))).toEqual({ state: "asleep", detail: "paused" });
+	});
+
+	// The three dead-but-structurally-awake cases. crewChipState calls every one of
+	// them "working" because AO's Awake() is a fact about ROWS, not processes — and
+	// a pip that lies is worse than no pip.
+	it("does not call a TODO qa awake: prepared, with no worktree and no runtime", () => {
+		expect(crewChipState(qa({ status: "todo" }))).toBe("working");
+		expect(qaPresence(qa({ status: "todo" }))).toEqual({ state: "asleep", detail: "not started" });
+	});
+
+	it("does not call a qa whose START FAILED awake, even though nothing suspended it", () => {
+		const failed = qa({ crew: { id: "demo-1", role: "qa", hasRun: false } });
+		expect(failed.isSuspended).toBeUndefined();
+		expect(crewChipState(failed)).toBe("working");
+		expect(qaPresence(failed)).toEqual({ state: "asleep", detail: "not started" });
+	});
+
+	it("does not call a qa whose pane the harness reported GONE awake", () => {
+		const exited = qa({ activity: { state: "exited", lastActivityAt: "2026-08-21T00:00:00Z" } });
+		expect(crewChipState(exited)).toBe("working");
+		expect(qaPresence(exited)).toEqual({ state: "asleep", detail: "no agent" });
+	});
+
+	// Absence of evidence is not death. "A failed probe is never proof of death" is
+	// load-bearing across the daemon, and demoting these would make the rail
+	// disagree with every other surface about a qa that is merely quiet.
+	it("still calls a PARKED qa awake — the turn ended, the agent is alive at its prompt", () => {
+		expect(qaPresence(qa({ activity: parked }))).toEqual({ state: "awake", detail: "awake" });
+	});
+
+	it("still calls a no-signal qa awake — no hook has reported yet, which is not proof of anything", () => {
+		expect(qaPresence(qa({ status: "no_signal", statusReason: "active_stale" }))).toEqual({
+			state: "awake",
+			detail: "awake",
+		});
+	});
+
+	it("is undefined for a finished qa: torn down is not one of the two LIVE states", () => {
+		expect(qaPresence(qa({ isTerminated: true }))).toBeUndefined();
+		expect(qaPresence(qa({ status: "merged" }))).toBeUndefined();
+	});
 });
 
 describe("tasksFrom", () => {

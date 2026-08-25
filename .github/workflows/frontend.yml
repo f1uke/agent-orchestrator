@@ -47,10 +47,16 @@ jobs:
   # because the <svg> was present, sized, coloured and labelled. Only a real
   # browser's getBBox() can tell "draws a shape" from "draws nothing".
   #
-  # Scoped to this one spec on purpose. The rest of frontend/e2e/ still targets the
-  # `api-gateway` demo fixtures that 2cb20c23e replaced with `ao-demo`, so those
-  # six specs have been dead since — never noticed, because no workflow has ever
-  # run Playwright. Repairing them is its own task; widen this glob once it is done.
+  # The sidebar qa pip is here for the same reason and not a second one: whether an
+  # indicator MOVES the row it sits on, and whether its two states differ in
+  # SILHOUETTE rather than only in hue, are both questions about layout and paint
+  # that jsdom answers by having neither.
+  #
+  # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
+  # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
+  # replaced with `ao-demo`, so those six specs have been dead since — never
+  # noticed, because no workflow has ever run Playwright. Repairing them is its own
+  # task; widen this to the folder once it is done.
   glyph-legibility:
     runs-on: ubuntu-latest
     defaults:
@@ -70,5 +76,5 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Measure the status glyphs in a real browser
-        run: npx playwright test e2e/status-glyph.spec.ts
+      - name: Measure the status glyphs and the sidebar qa pip in a real browser
+        run: npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
