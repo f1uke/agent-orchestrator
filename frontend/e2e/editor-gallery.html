@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Editor gallery</title>
+	</head>
+	<body>
+		<!--
+			Dev-only harness for e2e/editor.spec.ts. Served by the Vite dev server
+			(root = frontend/) and deliberately NOT a rollup input, so it never ships.
+
+			It renders the real WorkspaceFileView against a stubbed `/workspace/file`,
+			so what is measured is the shipped composition — lazy editor chunk, header,
+			gutter and all — not a hand-built approximation of it.
+
+			It exists because everything worth guarding about the Monaco surface is
+			invisible to jsdom: whether shiki actually tokenized the file in the app's
+			own palette, whether the minimap's `// MARK:` bands survive Monaco's
+			comment-token filter, and whether their labels still fit the minimap at the
+			widths this editor really gets between the sidebar and the inspector rail.
+		-->
+		<div id="root"></div>
+		<script type="module" src="./editor-gallery.tsx"></script>
+	</body>
+</html>

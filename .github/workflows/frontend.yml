@@ -52,6 +52,12 @@ jobs:
   # SILHOUETTE rather than only in hue, are both questions about layout and paint
   # that jsdom answers by having neither.
   #
+  # e2e/editor.spec.ts is here for the third time the same reason applies. The
+  # Monaco file editor's two real failure modes are a minimap `// MARK:` band whose
+  # label got middle-truncated in canvas pixels, and a band that vanished because
+  # the token under it stopped reading as a comment. Both leave the DOM, the
+  # decorations and the console exactly as they are when it works.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -76,5 +82,5 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Measure the status glyphs and the sidebar qa pip in a real browser
-        run: npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
+      - name: Measure the status glyphs, the sidebar qa pip and the editor in a real browser
+        run: npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts e2e/editor.spec.ts
