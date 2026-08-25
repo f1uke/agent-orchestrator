@@ -206,6 +206,54 @@ async function lspFor(langId: string): Promise<Lsp | null> {
 // The client that owns the file currently in front of us.
 const lspForModel = (uri: string) => clients.get(langFor(uri)) ?? null;
 
+// ---- idle shutdown --------------------------------------------------------
+// A language server is worth ~250 MB (Swift) to ~2.4 GB (Go, §2.2), so leaving
+// one running for a language nobody is looking at is the expensive kind of
+// convenience. Drop it once it has been unused AND nothing on screen needs it.
+// The grace period matters: closing one Go file and opening another should not
+// pay the cold start again.
+const IDLE_MS = Number(localStorage.getItem("spike.idleMs") ?? 60_000);
+
+function languagesOnScreen(): Set<string> {
+	const live = new Set<string>();
+	const browse = editor.getModel();
+	if (browse) live.add(browse.getLanguageId());
+	const dm = diffEditor?.getModel()?.modified;
+	if (dm) live.add(dm.getLanguageId());
+	return live;
+}
+
+setInterval(() => {
+	const onScreen = languagesOnScreen();
+	// Self-heal: whatever is in front of the user should have a server, even if
+	// an earlier sweep stopped it while they were looking at something else.
+	for (const langId of onScreen) {
+		if (!clients.has(langId) && meta.languages.includes(langId)) {
+			void (async () => {
+				const c = await lspFor(langId);
+				const m = editor.getModel();
+				if (c && m && m.getLanguageId() === langId && !opened.has(m.uri.toString())) {
+					opened.add(m.uri.toString());
+					c.didOpen(m.uri.toString(), langId, m.getValue());
+				}
+			})();
+		}
+	}
+	for (const [langId, client] of clients) {
+		if (onScreen.has(langId)) continue;
+		if (performance.now() - client.lastUsedAt < IDLE_MS) continue;
+		log(`stopping the "${langId}" server — unused for ${(IDLE_MS / 1000).toFixed(0)}s and nothing on screen needs it`);
+		client.dispose();
+		clients.delete(langId);
+		// The replacement server will know nothing about these documents, so they
+		// have to be re-opened. Without this a file that was open once never wakes
+		// its language again — `opened` is permanent and short-circuits lspFor().
+		for (const uri of [...opened]) {
+			if (langFor(uri) === langId) opened.delete(uri);
+		}
+	}
+}, 10_000);
+
 const opened = new Set<string>();
 let currentUri = "";
 let firstDefinitionAt = 0;
@@ -262,105 +310,112 @@ function langFor(uri: string): string {
 // ---- 3. Cmd+click → textDocument/definition -------------------------------
 // Monaco routes cmd+click through its own definition provider, so registering
 // one is all it takes — no gesture handling of our own.
-const providersFor = new Set<string>();
+const providersFor = new Map<string, monaco.IDisposable[]>();
 
 function registerProviders(langId: string, client: Lsp) {
-	if (providersFor.has(langId)) return;
-	providersFor.add(langId);
+	// Providers close over the CLIENT, so a language that comes back after an
+	// idle stop needs new ones — the old pair would talk to a dead socket.
+	providersFor.get(langId)?.forEach((d) => d.dispose());
+	const disposables: monaco.IDisposable[] = [];
+	providersFor.set(langId, disposables);
 
 	// ---- 3. Cmd+click -> textDocument/definition --------------------------
 	// Monaco routes cmd+click through its own definition provider, so
 	// registering one is all it takes — no gesture handling of our own.
-	monaco.languages.registerDefinitionProvider(langId, {
-		provideDefinition: async (model, position) => {
-			const r = await client.definition(model.uri.toString(), position.lineNumber - 1, position.column - 1);
-			const locs: any[] = Array.isArray(r.result) ? r.result : r.result ? [r.result] : [];
-			if (!firstDefinitionAt && locs.length) {
-				firstDefinitionAt = performance.now();
-				log(`FIRST WORKING definition at ${(firstDefinitionAt - t0).toFixed(0)}ms from page load`);
-			}
-			log(`definition (${langId}) → ${locs.length} hit(s) in ${r.elapsedMs.toFixed(0)}ms`);
-			// A hit can live outside the workspace (Pods, SDK headers). Fetch it so
-			// Monaco has a model to reveal, then let Monaco do the navigation.
-			const out: monaco.languages.Location[] = [];
-			for (const l of locs) {
-				const uri = l.uri ?? l.targetUri;
-				const range = l.range ?? l.targetSelectionRange ?? l.targetRange;
-				const mUri = monaco.Uri.parse(uri);
-				if (!monaco.editor.getModel(mUri)) {
-					const abs = decodeURIComponent(uri.replace("file://", ""));
-					try {
-						const f = await (await fetch(`${BRIDGE}/open-external?abs=${encodeURIComponent(abs)}`)).json();
-						await ensureGrammar(langFor(uri));
-						monaco.editor.createModel(f.text, langFor(uri), mUri);
-					} catch {
-						continue;
-					}
+	disposables.push(
+		monaco.languages.registerDefinitionProvider(langId, {
+			provideDefinition: async (model, position) => {
+				const r = await client.definition(model.uri.toString(), position.lineNumber - 1, position.column - 1);
+				const locs: any[] = Array.isArray(r.result) ? r.result : r.result ? [r.result] : [];
+				if (!firstDefinitionAt && locs.length) {
+					firstDefinitionAt = performance.now();
+					log(`FIRST WORKING definition at ${(firstDefinitionAt - t0).toFixed(0)}ms from page load`);
 				}
-				out.push({
-					uri: mUri,
-					range: {
-						startLineNumber: range.start.line + 1,
-						startColumn: range.start.character + 1,
-						endLineNumber: range.end.line + 1,
-						endColumn: range.end.character + 1,
-					},
-				});
-			}
-			return out;
-		},
-	});
+				log(`definition (${langId}) → ${locs.length} hit(s) in ${r.elapsedMs.toFixed(0)}ms`);
+				// A hit can live outside the workspace (Pods, SDK headers). Fetch it so
+				// Monaco has a model to reveal, then let Monaco do the navigation.
+				const out: monaco.languages.Location[] = [];
+				for (const l of locs) {
+					const uri = l.uri ?? l.targetUri;
+					const range = l.range ?? l.targetSelectionRange ?? l.targetRange;
+					const mUri = monaco.Uri.parse(uri);
+					if (!monaco.editor.getModel(mUri)) {
+						const abs = decodeURIComponent(uri.replace("file://", ""));
+						try {
+							const f = await (await fetch(`${BRIDGE}/open-external?abs=${encodeURIComponent(abs)}`)).json();
+							await ensureGrammar(langFor(uri));
+							monaco.editor.createModel(f.text, langFor(uri), mUri);
+						} catch {
+							continue;
+						}
+					}
+					out.push({
+						uri: mUri,
+						range: {
+							startLineNumber: range.start.line + 1,
+							startColumn: range.start.character + 1,
+							endLineNumber: range.end.line + 1,
+							endColumn: range.end.character + 1,
+						},
+					});
+				}
+				return out;
+			},
+		}),
+	);
 
 	// ---- 4. autocompletion -> textDocument/completion ----------------------
-	monaco.languages.registerCompletionItemProvider(langId, {
-		triggerCharacters: [".", ":", "("],
-		provideCompletionItems: async (model, position, context) => {
-			const uri = model.uri.toString();
-			clearTimeout(changeTimers.get(uri));
-			client.didChange(uri, model.getValue());
-			const r = await client.completion(uri, position.lineNumber - 1, position.column - 1, context.triggerCharacter);
-			const list = Array.isArray(r.result) ? r.result : (r.result?.items ?? []);
-			lastCompletion = { ms: Math.round(r.elapsedMs), n: list.length };
-			log(
-				`completion (${langId}) → ${list.length} item(s) in ${r.elapsedMs.toFixed(0)}ms${r.result?.isIncomplete ? " (incomplete)" : ""}`,
-			);
-			const word = model.getWordUntilPosition(position);
-			const range = {
-				startLineNumber: position.lineNumber,
-				endLineNumber: position.lineNumber,
-				startColumn: word.startColumn,
-				endColumn: word.endColumn,
-			};
-			return {
-				incomplete: !!r.result?.isIncomplete,
-				suggestions: list.slice(0, 300).map((it: any) => {
-					const edit = it.textEdit;
-					const er = edit?.range ?? edit?.replace;
-					return {
-						label: it.labelDetails
-							? { label: it.label, detail: it.labelDetails.detail, description: it.labelDetails.description }
-							: it.label,
-						kind: LSP_KIND[it.kind] ?? monaco.languages.CompletionItemKind.Property,
-						detail: it.detail,
-						documentation: typeof it.documentation === "string" ? it.documentation : it.documentation?.value,
-						insertText: edit?.newText ?? it.insertText ?? it.label,
-						insertTextRules:
-							it.insertTextFormat === 2 ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
-						filterText: it.filterText,
-						sortText: it.sortText,
-						range: er
-							? {
-									startLineNumber: er.start.line + 1,
-									startColumn: er.start.character + 1,
-									endLineNumber: er.end.line + 1,
-									endColumn: er.end.character + 1,
-								}
-							: range,
-					} as monaco.languages.CompletionItem;
-				}),
-			};
-		},
-	});
+	disposables.push(
+		monaco.languages.registerCompletionItemProvider(langId, {
+			triggerCharacters: [".", ":", "("],
+			provideCompletionItems: async (model, position, context) => {
+				const uri = model.uri.toString();
+				clearTimeout(changeTimers.get(uri));
+				client.didChange(uri, model.getValue());
+				const r = await client.completion(uri, position.lineNumber - 1, position.column - 1, context.triggerCharacter);
+				const list = Array.isArray(r.result) ? r.result : (r.result?.items ?? []);
+				lastCompletion = { ms: Math.round(r.elapsedMs), n: list.length };
+				log(
+					`completion (${langId}) → ${list.length} item(s) in ${r.elapsedMs.toFixed(0)}ms${r.result?.isIncomplete ? " (incomplete)" : ""}`,
+				);
+				const word = model.getWordUntilPosition(position);
+				const range = {
+					startLineNumber: position.lineNumber,
+					endLineNumber: position.lineNumber,
+					startColumn: word.startColumn,
+					endColumn: word.endColumn,
+				};
+				return {
+					incomplete: !!r.result?.isIncomplete,
+					suggestions: list.slice(0, 300).map((it: any) => {
+						const edit = it.textEdit;
+						const er = edit?.range ?? edit?.replace;
+						return {
+							label: it.labelDetails
+								? { label: it.label, detail: it.labelDetails.detail, description: it.labelDetails.description }
+								: it.label,
+							kind: LSP_KIND[it.kind] ?? monaco.languages.CompletionItemKind.Property,
+							detail: it.detail,
+							documentation: typeof it.documentation === "string" ? it.documentation : it.documentation?.value,
+							insertText: edit?.newText ?? it.insertText ?? it.label,
+							insertTextRules:
+								it.insertTextFormat === 2 ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+							filterText: it.filterText,
+							sortText: it.sortText,
+							range: er
+								? {
+										startLineNumber: er.start.line + 1,
+										startColumn: er.start.character + 1,
+										endLineNumber: er.end.line + 1,
+										endColumn: er.end.character + 1,
+									}
+								: range,
+						} as monaco.languages.CompletionItem;
+					}),
+				};
+			},
+		}),
+	);
 }
 
 // Monaco will not switch models on its own in a bare editor; do it on reveal.

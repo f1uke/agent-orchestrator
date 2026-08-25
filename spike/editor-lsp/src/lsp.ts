@@ -80,7 +80,28 @@ export class Lsp {
 	notify(method: string, params: unknown) {
 		this.send({ jsonrpc: "2.0", method, params });
 	}
+
+	// Politely, then hang up. The bridge also shuts the process down when the
+	// last client goes, so this is belt and braces — but a server told to stop
+	// flushes its caches, and one that is merely disconnected does not.
+	dispose() {
+		try {
+			this.request("shutdown", null);
+			this.notify("exit", null);
+		} catch {
+			/* socket already gone */
+		}
+		try {
+			this.ws.close();
+		} catch {
+			/* already closed */
+		}
+		this.pending.clear();
+	}
+
+	lastUsedAt = performance.now();
 	request(method: string, params: unknown): Promise<any> {
+		this.lastUsedAt = performance.now();
 		const id = this.id++;
 		const sent = performance.now();
 		return new Promise((resolve) => {

@@ -98,7 +98,48 @@ function buildFileIndex() {
 // One server PER LANGUAGE, spawned on first use. gopls has no idea what a
 // .swift file is, so routing by the file's language is not a nicety — sending a
 // Swift didOpen to gopls is simply wrong, and it fails quietly.
-const servers = new Map(); // langId -> { proc, clients:Set<ws>, buf, startedAt }
+const servers = new Map(); // langId -> { proc, clients:Set<ws>, buf, startedAt, idleTimer }
+// How long a server may sit with no renderer attached before it is shut down.
+// Not zero: closing one Go file and opening another should not pay the cold
+// start again (§3.3 — the first definition after a cold start is seconds).
+const IDLE_MS = Number(process.env.LSP_IDLE_MS ?? 15000);
+
+// LSP has a two-step teardown: `shutdown` (stop accepting work, keep the process)
+// then `exit`. Skipping it and sending SIGTERM leaves gopls's cache half-written.
+function stopServer(entry, why) {
+	if (!entry.proc) return;
+	const proc = entry.proc;
+	entry.proc = null;
+	servers.delete(entry.langId);
+	const send = (msg) => {
+		const str = JSON.stringify(msg);
+		try {
+			proc.stdin.write(`Content-Length: ${Buffer.byteLength(str)}\r\n\r\n${str}`);
+		} catch {
+			/* already gone */
+		}
+	};
+	send({ jsonrpc: "2.0", id: 999999, method: "shutdown", params: null });
+	send({ jsonrpc: "2.0", method: "exit" });
+	console.log(`[${entry.langId}] stopping (${why}) after ${((Date.now() - entry.startedAt) / 1000).toFixed(0)}s`);
+	// If it has not gone on its own shortly, insist.
+	const hard = setTimeout(() => {
+		try {
+			proc.kill("SIGKILL");
+		} catch {
+			/* gone */
+		}
+	}, 3000);
+	proc.once("exit", () => clearTimeout(hard));
+}
+
+function scheduleIdleStop(entry) {
+	clearTimeout(entry.idleTimer);
+	if (entry.clients.size > 0) return;
+	entry.idleTimer = setTimeout(() => {
+		if (entry.clients.size === 0) stopServer(entry, "idle");
+	}, IDLE_MS);
+}
 
 function serverFor(langId) {
 	const cfg = SERVERS[langId];
@@ -380,11 +421,13 @@ const http = createServer((req, res) => {
 			files: fileIndex.length,
 			// Every language server currently alive, so the cost of a mixed-language
 			// session is visible rather than implied.
+			idleMs: IDLE_MS,
 			servers: [...servers.values()].map((e) => ({
 				lang: e.langId,
 				pid: e.proc?.pid ?? null,
 				upMs: Date.now() - e.startedAt,
 				clients: e.clients.size,
+				idle: e.clients.size === 0,
 			})),
 		});
 	}
@@ -403,13 +446,17 @@ wss.on("connection", (ws, req) => {
 		ws.close(4004, `no language server for ${langId}`);
 		return;
 	}
+	clearTimeout(entry.idleTimer); // a reconnect inside the grace period keeps it
 	entry.clients.add(ws);
 	console.log(`[ws] renderer connected for ${langId} (${entry.clients.size} client(s))`);
 	ws.on("message", (data) => {
 		const str = data.toString();
 		entry.proc?.stdin.write(`Content-Length: ${Buffer.byteLength(str)}\r\n\r\n${str}`);
 	});
-	ws.on("close", () => entry.clients.delete(ws));
+	ws.on("close", () => {
+		entry.clients.delete(ws);
+		scheduleIdleStop(entry);
+	});
 });
 
 await buildFileIndex();
