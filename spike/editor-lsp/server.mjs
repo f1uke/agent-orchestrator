@@ -128,6 +128,72 @@ function parseHunks(diff) {
 	}));
 }
 
+// The target branch a session is FOR. The daemon derives this from the PR
+// target (workspace_changes.go); here it is an env knob with the same fallbacks.
+const BASE_CANDIDATES = [process.env.LSP_BASE, "origin/main-fluke", "main-fluke", "origin/main", "main"].filter(
+	Boolean,
+);
+let baseRef = null;
+let mergeBase = null;
+
+async function resolveBase() {
+	for (const cand of BASE_CANDIDATES) {
+		if ((await git(["rev-parse", "--verify", "--quiet", cand])) === null) continue;
+		const mb = await git(["merge-base", cand, "HEAD"]);
+		if (mb === null) continue;
+		baseRef = cand;
+		mergeBase = mb.trim();
+		return;
+	}
+}
+
+// Everything this branch has done, committed or not. Diffing the merge base
+// against the WORKING TREE (no second ref) is what puts both in one list --
+// the same call the Changes view already makes (workspace_changes.go:208).
+async function branchChanges() {
+	if (!mergeBase) await resolveBase();
+	if (!mergeBase) return { available: false, files: [] };
+	const numstat = (await git(["diff", "--numstat", "-M", mergeBase])) ?? "";
+	const files = numstat
+		.split("\n")
+		.filter(Boolean)
+		.map((l) => {
+			const [add, del, ...rest] = l.split("\t");
+			return { path: rest.join("\t"), additions: Number(add) || 0, deletions: Number(del) || 0, status: "modified" };
+		});
+	const nameStatus = (await git(["diff", "--name-status", "-M", mergeBase])) ?? "";
+	for (const l of nameStatus.split("\n").filter(Boolean)) {
+		const [code, ...rest] = l.split("\t");
+		const p = rest[rest.length - 1];
+		const f = files.find((x) => x.path === p);
+		if (f)
+			f.status = code.startsWith("A")
+				? "added"
+				: code.startsWith("D")
+					? "removed"
+					: code.startsWith("R")
+						? "renamed"
+						: "modified";
+	}
+	// git diff never reports untracked files, and a file the agent just created
+	// is exactly what a reviewer is looking for.
+	const st = (await git(["status", "--porcelain=v1"])) ?? "";
+	for (const l of st.split("\n").filter(Boolean)) {
+		if (!l.startsWith("??")) continue;
+		const p = l.slice(3).trim();
+		if (p.endsWith("/") || files.some((x) => x.path === p)) continue;
+		let n = 0;
+		try {
+			n = readFileSync(path.resolve(ROOT, p), "utf8").split("\n").length;
+		} catch {
+			continue;
+		}
+		files.push({ path: p, additions: n, deletions: 0, status: "added", untracked: true });
+	}
+	files.sort((a, b) => a.path.localeCompare(b.path));
+	return { available: true, baseRef, mergeBase, files };
+}
+
 async function changesFor(rel) {
 	const tracked = await git(["ls-files", "--error-unmatch", "--", rel]);
 	if (tracked === null) {
@@ -139,7 +205,14 @@ async function changesFor(rel) {
 		};
 	}
 	const diff = await git(["diff", "--no-color", "--no-ext-diff", "-U0", "--", rel]);
-	return { tracked: true, hunks: parseHunks(diff) };
+	// Two levels, deliberately kept apart:
+	//   uncommitted  -- working tree vs HEAD. This is what Discard Change reverts.
+	//   branch       -- merge base vs working tree. Everything this branch did.
+	// The second is a superset of the first, so they are never merged into one
+	// list; the gutter gives each its own lane.
+	if (!mergeBase) await resolveBase();
+	const branchDiff = mergeBase ? await git(["diff", "--no-color", "--no-ext-diff", "-U0", mergeBase, "--", rel]) : null;
+	return { tracked: true, hunks: parseHunks(diff), branchHunks: parseHunks(branchDiff), baseRef };
 }
 
 const http = createServer((req, res) => {
@@ -219,6 +292,14 @@ const http = createServer((req, res) => {
 			}
 		});
 		return;
+	}
+	if (url.pathname === "/branch-changes") {
+		return branchChanges()
+			.then(json)
+			.catch((e) => {
+				res.writeHead(500);
+				res.end(String(e));
+			});
 	}
 	if (url.pathname === "/stats") {
 		return json({

@@ -15,6 +15,7 @@ import { shikiToMonaco } from "@shikijs/monaco";
 import langGo from "@shikijs/langs/go";
 import langSwift from "@shikijs/langs/swift";
 import langObjC from "@shikijs/langs/objective-c";
+import langTs from "@shikijs/langs/typescript";
 import themeDark from "@shikijs/themes/github-dark-default";
 import themeLight from "@shikijs/themes/github-light-default";
 import { Lsp } from "./lsp";
@@ -42,10 +43,10 @@ log(`file index: ${meta.files.length} files in ${meta.indexMs}ms (${meta.lang} @
 
 // ---- 2. syntax highlighting: real TextMate grammars ----------------------
 const tHl = performance.now();
-const langs = meta.lang === "swift" ? ["swift", "objective-c"] : ["go"];
+const langs = meta.lang === "swift" ? ["swift", "objective-c", "typescript"] : ["go", "typescript"];
 const highlighter = await createHighlighterCore({
 	themes: [themeDark, themeLight],
-	langs: meta.lang === "swift" ? [langSwift, langObjC] : [langGo],
+	langs: meta.lang === "swift" ? [langSwift, langObjC, langTs] : [langGo, langTs],
 	// The JS engine avoids oniguruma's WASM. Under `script-src 'self'` Chromium
 	// refuses WebAssembly.instantiate unless 'wasm-unsafe-eval' is present, so
 	// the WASM engine would need a CSP change; this one does not.
@@ -83,6 +84,8 @@ const editor = monaco.editor.create(el("editor"), {
 	},
 	scrollBeyondLastLine: false,
 	renderLineHighlight: "all",
+	// Room for two decoration lanes: branch-level and uncommitted.
+	lineDecorationsWidth: 16,
 });
 log(`monaco editor created`);
 
@@ -117,7 +120,14 @@ async function openPath(rel: string, line = 1, abs?: string) {
 	await refreshChanges();
 	return f;
 }
-const langFor = (uri: string) => (uri.endsWith(".swift") ? "swift" : uri.endsWith(".go") ? "go" : "plaintext");
+const langFor = (uri: string) =>
+	uri.endsWith(".swift")
+		? "swift"
+		: uri.endsWith(".go")
+			? "go"
+			: /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(uri)
+				? "typescript"
+				: "plaintext";
 
 // ---- 3. Cmd+click → textDocument/definition -------------------------------
 // Monaco routes cmd+click through its own definition provider, so registering
@@ -276,6 +286,84 @@ editor.onDidChangeModel(() => {
 	return source;
 };
 
+// ---- 7. what this BRANCH changed vs its target branch ---------------------
+// This is the app's existing Changes view (workspace_changes.go), brought into
+// the editor instead of living beside it. Two levels, never merged:
+//   branch       — merge base vs working tree. Everything the branch did.
+//   uncommitted  — working tree vs HEAD. What Discard Change can undo.
+// The second is a subset of the first, so each gets its own gutter lane.
+type ChangedFile = { path: string; additions: number; deletions: number; status: string; untracked?: boolean };
+let branchFiles: ChangedFile[] = [];
+let branchHunks: Hunk[] = [];
+let branchDecorations = editor.createDecorationsCollection([]);
+
+async function loadBranchChanges() {
+	try {
+		const r = await (await fetch(`${BRIDGE}/branch-changes`)).json();
+		branchFiles = r.available ? (r.files ?? []) : [];
+		el<HTMLElement>("railBase").textContent = r.available ? `vs ${r.baseRef}` : "no target branch";
+	} catch {
+		branchFiles = [];
+		el<HTMLElement>("railBase").textContent = "not a git checkout";
+	}
+	const add = branchFiles.reduce((a, f) => a + f.additions, 0);
+	const del = branchFiles.reduce((a, f) => a + f.deletions, 0);
+	el<HTMLElement>("railStat").innerHTML =
+		`${branchFiles.length} file${branchFiles.length === 1 ? "" : "s"} <span class="a">+${add}</span> <span class="d">−${del}</span>`;
+	renderRail();
+}
+
+function renderRail() {
+	const list = el<HTMLUListElement>("railList");
+	list.innerHTML = "";
+	const cur = relOf(editor.getModel()?.uri.toString() ?? "");
+	let lastDir = "";
+	for (const f of branchFiles) {
+		const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "";
+		if (dir !== lastDir) {
+			lastDir = dir;
+			const d = document.createElement("li");
+			d.className = "dir";
+			d.textContent = dir || "/";
+			d.title = dir;
+			list.appendChild(d);
+		}
+		const li = document.createElement("li");
+		li.className = "f" + (f.path === cur ? " cur" : "");
+		const n = document.createElement("span");
+		n.className = "n";
+		n.textContent = f.path.split("/").pop() ?? f.path;
+		n.title = f.path;
+		li.appendChild(n);
+		if (dirtyPaths.has(f.path)) {
+			const dot = document.createElement("span");
+			dot.className = "dot";
+			dot.title = "has uncommitted changes";
+			li.appendChild(dot);
+		}
+		const c = document.createElement("span");
+		c.className = "c";
+		c.innerHTML = `<span class="a">+${f.additions}</span><span class="d">−${f.deletions}</span>`;
+		li.appendChild(c);
+		li.onclick = () => openPath(f.path, 1).then(() => jumpToFirstBranchHunk());
+		list.appendChild(li);
+	}
+}
+
+// Opening a changed file at line 1 is not what anyone wants; land on the change.
+function jumpToFirstBranchHunk() {
+	const first = branchHunks[0];
+	if (!first) return;
+	const line = first.newLines === 0 ? first.newStart : first.newStart;
+	editor.revealLineInCenter(line);
+	editor.setPosition({ lineNumber: line, column: 1 });
+}
+
+// Files known to carry uncommitted work, for the dot in the rail. Filled in as
+// files are opened rather than up front: one `git diff` per changed file on
+// load would be the wrong trade for a dot.
+const dirtyPaths = new Set<string>();
+
 // ---- 6. uncommitted changes in the gutter, and revert ---------------------
 // Xcode paints a bar in the gutter beside every line that differs from the
 // last commit, and clicking it offers "Discard Change". The SHOWING half
@@ -299,16 +387,49 @@ async function refreshChanges() {
 	const rel = relOf(editor.getModel()?.uri.toString() ?? "");
 	if (!rel) {
 		hunks = [];
+		branchHunks = [];
 		changeDecorations.set([]);
+		branchDecorations.set([]);
 		paintChangeCount();
 		return;
 	}
 	try {
 		const c = await (await fetch(`${BRIDGE}/changes?path=${encodeURIComponent(rel)}`)).json();
 		hunks = c.hunks ?? [];
+		branchHunks = c.branchHunks ?? [];
 	} catch {
 		hunks = []; // not a git checkout, or the file is outside it
+		branchHunks = [];
 	}
+	if (hunks.length) dirtyPaths.add(rel);
+	else dirtyPaths.delete(rel);
+	// The outer lane: everything this branch changed against its target. Drawn
+	// quieter than the uncommitted lane beside it — on a branch under review
+	// nearly every line is "changed", so at full strength it would drown the
+	// signal it sits next to.
+	branchDecorations.set(
+		branchHunks.map((h) => {
+			const start = h.newLines === 0 ? Math.max(1, h.newStart) : h.newStart;
+			const end = h.newLines === 0 ? start : h.newStart + h.newLines - 1;
+			return {
+				range: new monaco.Range(start, 1, end, 1),
+				options: {
+					isWholeLine: true,
+					linesDecorationsClassName: `brbar br-${h.kind}`,
+					overviewRuler: {
+						color:
+							h.kind === "added"
+								? "rgba(127,216,160,0.45)"
+								: h.kind === "removed"
+									? "rgba(232,143,143,0.45)"
+									: "rgba(77,141,255,0.45)",
+						position: monaco.editor.OverviewRulerLane.Right,
+					},
+				},
+			};
+		}),
+	);
+	renderRail();
 	changeDecorations.set(
 		hunks.map((h) => {
 			// A pure deletion has no line of its own; mark the line it sits above.
@@ -511,6 +632,11 @@ editor.addAction({
 // sectionHeaderFontSize alone (tried 6-10) does not help, because the label is
 // clipped in minimap-canvas pixels. `scale: 2` doubles that canvas and the name
 // renders in full, matching Xcode.
+//
+// Gotcha seen live in this very file: the regex matches ANY line containing
+// "MARK:", including a comment that merely documents the regex, which puts a
+// nonsense band in the minimap. A real feature should confine it to comment
+// tokens rather than raw line text.
 
 // ---- 1. Cmd+Shift+O — files AND symbols in one list -----------------------
 type Row = {
@@ -828,6 +954,8 @@ window.addEventListener("keydown", (e) => {
 		choose(sel);
 	}
 });
+
+await loadBranchChanges();
 
 // open something to start on
 const seed =

@@ -20,6 +20,22 @@ outside this worktree:
 | ⌘click → definition  | `textDocument/definition`, wired into Monaco's own goto             |
 | autocompletion       | `textDocument/completion` + `didChange`, in Monaco's suggest widget |
 
+## Two levels of "changed", never merged
+
+```
+branch       merge base(target, HEAD) .. working tree   everything this branch did
+uncommitted  HEAD .. working tree                       what Discard Change can undo
+```
+
+The second is a subset of the first, so they get separate gutter lanes: a
+neutral grey hairline for the branch level (its question is only "is this line
+part of my change") and the coloured bar for uncommitted. Colouring both by kind
+put two same-coloured bars side by side that read as one thick bar.
+
+`LSP_BASE` picks the target ref; it falls back through `origin/main-fluke`,
+`main-fluke`, `origin/main`, `main`. The daemon derives this from the PR target
+instead (`workspace_changes.go`).
+
 ## Shape
 
 ```

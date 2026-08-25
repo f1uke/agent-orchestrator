@@ -26,6 +26,108 @@ body,
 	display: grid;
 	grid-template-rows: 34px 1fr 150px;
 }
+/* The Changes rail beside the editor. In the app this list already exists in
+   the inspector rail; here it sits on the left so it does not fight the
+   minimap. Where it finally lives is the real feature's call. */
+#body {
+	display: grid;
+	grid-template-columns: 272px 1fr;
+	min-height: 0;
+}
+#rail {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	border-right: 1px solid var(--line);
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#railHead {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 7px 10px;
+	border-bottom: 1px solid var(--line);
+	font-size: 11px;
+}
+#railBase {
+	color: rgba(235, 235, 245, 0.85);
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+#railStat {
+	margin-left: auto;
+	flex: none;
+	color: var(--dim);
+	font-variant-numeric: tabular-nums;
+}
+#railList {
+	list-style: none;
+	margin: 0;
+	padding: 4px 0 12px;
+	overflow: auto;
+	min-height: 0;
+}
+#railList .dir {
+	padding: 6px 10px 2px;
+	color: var(--dim);
+	font-size: 10px;
+	letter-spacing: 0.03em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	direction: rtl;
+	text-align: left;
+}
+#railList .f {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 10px 3px 20px;
+	cursor: pointer;
+	font-size: 12px;
+	color: rgba(235, 235, 245, 0.82);
+	white-space: nowrap;
+}
+#railList .f:hover {
+	background: rgba(255, 255, 255, 0.05);
+}
+#railList .f.cur {
+	background: #2f6ee0;
+	color: #fff;
+}
+#railList .f .n {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+/* +N -M, right-aligned and tabular so the columns line up down the list. */
+#railList .f .c {
+	margin-left: auto;
+	flex: none;
+	font-variant-numeric: tabular-nums;
+	font-size: 11px;
+}
+#railList .f .c .a {
+	color: #7fd8a0;
+}
+#railList .f .c .d {
+	color: #e88f8f;
+	margin-left: 5px;
+}
+#railList .f.cur .c .a,
+#railList .f.cur .c .d {
+	color: rgba(255, 255, 255, 0.88);
+}
+/* A dot for a file that also has uncommitted work in it, so the two levels stay
+   distinguishable in the list as well as in the gutter. */
+#railList .f .dot {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #4d8dff;
+}
 #bar {
 	display: flex;
 	align-items: center;
@@ -378,4 +480,30 @@ li.sel .crumbs .target {
 }
 #revertBox .rdiscard:hover {
 	background: #d0483a;
+}
+
+/* Two gutter lanes. Outer (next to the line number) = what this BRANCH changed
+   against its target; inner (next to the code) = what is not committed yet.
+   The outer lane is deliberately quieter: on a branch under review nearly every
+   line is "changed", so at full strength it would drown the uncommitted signal
+   it sits beside. */
+/* The branch lane is deliberately ONE neutral tone, not colour-coded by kind.
+   Its question is "is this line part of what my branch changed", and colouring
+   it green/blue/red put two same-coloured bars side by side that read as one
+   thick bar. Which kind it is lives in the rail's +N -M and in the diff view. */
+.brbar {
+	width: 2px !important;
+	margin-left: 0;
+	border-radius: 1px;
+	background: rgba(125, 133, 144, 0.75);
+}
+.chgbar {
+	margin-left: 8px;
+}
+#railStat .a {
+	color: #7fd8a0;
+}
+#railStat .d {
+	color: #e88f8f;
+	margin-left: 4px;
 }
