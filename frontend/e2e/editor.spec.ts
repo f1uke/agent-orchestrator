@@ -204,3 +204,171 @@ test.describe("Monaco file editor", () => {
 		await expect(page.locator(".ao-change-bar--removed").first()).toBeVisible();
 	});
 });
+
+/**
+ * The two guards below are about the file types this app is actually pointed at
+ * all day, rather than about the Swift fixture the specs above measure.
+ */
+
+/**
+ * Every language service Monaco ships is switched off in `monaco-setup.ts`, and
+ * `MonacoEnvironment.getWorker` THROWS for any label but the base editor
+ * worker — so the moment one of those services wakes up, opening an ordinary
+ * `.ts` or `.json` file starts throwing instead of rendering.
+ *
+ * Nothing about that is visible from the code: the services are disabled by
+ * flag, and Monaco loads a language's mode chunk lazily, on first use of that
+ * language. Whether the chunk then reaches for its worker is a runtime fact, and
+ * this is the only place it gets checked. The four language workers it would
+ * pull are 8.9 MB of the built renderer, so the same assertion is also what
+ * keeps them from ever being fetched.
+ *
+ * `plaintext` for an unknown extension is part of the contract, not a fallback
+ * that happens to work — a file with no extension is a normal thing to open.
+ */
+const LANGUAGE_EXPECTATIONS: [path: string, language: string][] = [
+	["src/app.ts", "typescript"],
+	["src/app.tsx", "typescript"],
+	["src/app.js", "javascript"],
+	["package.json", "json"],
+	["src/styles.css", "css"],
+	["src/styles.scss", "scss"],
+	["src/page.html", "html"],
+	["cmd/main.go", "go"],
+	["README.md", "markdown"],
+	["config.yaml", "yaml"],
+	["Cargo.toml", "toml"],
+	["Dockerfile", "dockerfile"],
+	["notes.txt", "plaintext"],
+	["LICENSE", "plaintext"],
+];
+
+test("opens every common file type without waking a language service", async ({ page }) => {
+	for (const [path, language] of LANGUAGE_EXPECTATIONS) {
+		const problems: string[] = [];
+		const languageWorkers: string[] = [];
+		page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
+		page.on("console", (m) => {
+			if (m.type() === "error" || m.type() === "warning") problems.push(`${m.type()}: ${m.text()}`);
+		});
+		// The base editor worker is expected; ts/css/html/json workers are the ones
+		// whose arrival would mean a disabled service came back to life.
+		page.on("request", (r) => {
+			const file = r.url().split("/").pop() ?? "";
+			if (/^(ts|css|html|json)\.worker/.test(file)) languageWorkers.push(file);
+		});
+
+		await page.goto(`${GALLERY}?width=1240&path=${encodeURIComponent(path)}`);
+		await page.waitForFunction(() => {
+			const monaco = (window as unknown as { __monaco?: typeof import("monaco-editor") }).__monaco;
+			return Boolean(monaco?.editor.getEditors()[0]?.getModel());
+		});
+		// Mode chunks load lazily, after the model is attached — asserting straight
+		// after the model appears would pass before the risky work has happened.
+		await page.waitForTimeout(500);
+
+		const resolved = await page.evaluate(() => {
+			const monaco = (window as unknown as { __monaco: typeof import("monaco-editor") }).__monaco;
+			return monaco.editor.getEditors()[0].getModel()?.getLanguageId();
+		});
+		expect(resolved, `${path} resolved to the wrong language`).toBe(language);
+		expect(languageWorkers, `${path} pulled a language-service worker`).toEqual([]);
+		expect(problems, `${path} logged something`).toEqual([]);
+		page.removeAllListeners();
+	}
+});
+
+/**
+ * 🗝 What actually truncates a `// MARK:` label, now that `maxColumn: 80` is set.
+ *
+ * The comment on `MINIMAP` reasons about label space as a function of EDITOR
+ * width, which is how it behaved before the cap. It no longer is: `maxColumn: 80`
+ * pins the minimap canvas at ~122-125 px at every editor width this app can
+ * produce (measured identical from 440 px to 1512 px). So the width-parameterised
+ * specs above can no longer fail by width alone — what is left to get wrong is
+ * the label BUDGET, and every change to `scale`, `maxColumn` or
+ * `sectionHeaderFontSize` moves it.
+ *
+ * The budget is ~100 px of drawn label, so it is pixel width and not character
+ * count that decides: 26 narrow characters fit where 16 wide ones do not. These
+ * are real Swift section names sitting just under the ceiling — if a setting is
+ * retuned and the budget drops, they truncate, and this says so instead of
+ * shipping `Networ…Cache` to the minimap.
+ */
+const REALISTIC_SECTION_LABELS = ["Networking & Cache", "Collection View Source"];
+
+for (const width of [620, 1512]) {
+	test(`prints a realistic-length section label in full at ${width}px`, async ({ page }) => {
+		for (const label of REALISTIC_SECTION_LABELS) {
+			await recordCanvasText(page);
+			await page.goto(`${GALLERY}?width=${width}&label=${encodeURIComponent(label)}`);
+			// The fixture's own three markers, plus the one this label adds.
+			await page.waitForFunction((expected) => {
+				const monaco = (window as unknown as { __monaco?: typeof import("monaco-editor") }).__monaco;
+				const model = monaco?.editor.getEditors()[0]?.getModel();
+				if (!model) return false;
+				return model.getAllDecorations().filter((d) => d.options.minimap?.sectionHeaderText).length === expected;
+			}, EXPECTED_SECTION_HEADERS.length + 1);
+			await page.evaluate(
+				() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+			);
+			const painted = await paintedMinimapLabels(page);
+			expect(painted, `"${label}" was truncated at ${width}px (painted: ${painted.join(", ")})`).toContain(label);
+		}
+	});
+}
+
+/**
+ * 🗝 That a file gets the shiki grammar we shipped FOR it.
+ *
+ * `GRAMMARS` in `monaco-setup.ts` is keyed by Monaco language id, and a key that
+ * is not one is not an error — `GRAMMARS[id]` is simply `undefined`, no grammar
+ * loads, and the file quietly falls back to Monaco's Monarch tokenizer. The app
+ * theme colours Monarch too, so the file still opens looking broadly right. That
+ * is the whole failure: a grammar is shipped, paid for in bundle size, and never
+ * reaches the editor, with nothing logged.
+ *
+ * It has happened once already — `protobuf` was keyed against Monaco's `proto`,
+ * so `.proto` files loaded no grammar at all while `@shikijs/langs/proto` sat in
+ * the bundle unreachable. Only a runtime check finds this; nothing about the map
+ * is wrong to read.
+ *
+ * The pairs below are the ones with somewhere to slip: the two SUPERSET mappings
+ * (Monaco folds `.ts`/`.tsx` and `.js`/`.jsx` onto one id each, so the grammar
+ * name deliberately differs from the language name), the three other entries
+ * whose grammar name differs from the Monaco id, and `proto` itself.
+ */
+const GRAMMAR_EXPECTATIONS: [path: string, grammar: string][] = [
+	["src/app.ts", "tsx"],
+	["src/app.tsx", "tsx"],
+	["src/app.js", "jsx"],
+	["Dockerfile", "docker"],
+	["deploy.sh", "shellscript"],
+	["api/service.proto", "proto"],
+	["cmd/main.go", "go"],
+	["Sources/View.swift", "swift"],
+];
+
+test("loads the shiki grammar that was shipped for each file type", async ({ page }) => {
+	for (const [path, grammar] of GRAMMAR_EXPECTATIONS) {
+		const loaded: string[] = [];
+		// One chunk per grammar, named after the module — `@shikijs/langs/<name>`
+		// under the dev server this spec runs against.
+		page.on("request", (r) => {
+			const hit = r.url().match(/@shikijs[_/]langs[_/]([a-z0-9-]+)\.js/i);
+			if (hit) loaded.push(hit[1]);
+		});
+		await page.goto(`${GALLERY}?width=1240&path=${encodeURIComponent(path)}`);
+		await page.waitForFunction(() => {
+			const monaco = (window as unknown as { __monaco?: typeof import("monaco-editor") }).__monaco;
+			return Boolean(monaco?.editor.getEditors()[0]?.getModel());
+		});
+		// The grammar is fetched after the model exists; `ensureLanguage` awaits it
+		// before attaching, but the request itself is what is being observed here.
+		await page.waitForTimeout(500);
+		expect(loaded, `${path} loaded no "${grammar}" grammar (loaded: ${loaded.join(", ") || "none"})`).toContain(
+			grammar,
+		);
+		page.removeAllListeners();
+	}
+});

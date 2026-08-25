@@ -77,3 +77,17 @@ export const SWIFT_FIXTURE = `${HEADER}${FILLER}\n}\n`;
 
 /** The labels Monaco should band, in order. */
 export const EXPECTED_SECTION_HEADERS = ["Lifecycle", "User Interaction", "Helpers"];
+
+/**
+ * The fixture with one extra INDENTED `// MARK: -` section carrying `label`.
+ *
+ * The fixture's own longest label is `User Interaction` (16 chars), and the fit
+ * calculation is in minimap-canvas pixels — so "it fits at 620px" is a statement
+ * about THAT label, not about the setting. Real section names get longer
+ * ("Networking & Cache", "Collection View Data Source"), and the failure is
+ * silent: Monaco middle-truncates to `Networ…Cache` and reports nothing. This
+ * lets a spec push the label until it breaks and pin the width where it does.
+ */
+export function fixtureWithLabel(label: string): string {
+	return `${HEADER}\n\t// MARK: - ${label}\n${FILLER}\n}\n`;
+}

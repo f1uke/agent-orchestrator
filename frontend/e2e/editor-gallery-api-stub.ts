@@ -1,5 +1,5 @@
 import { setApiBaseUrl } from "../src/renderer/lib/api-client";
-import { SWIFT_FIXTURE } from "./editor-fixture";
+import { fixtureWithLabel, SWIFT_FIXTURE } from "./editor-fixture";
 
 /**
  * Answers the one endpoint the workspace file viewer calls, so the harness page
@@ -11,7 +11,8 @@ import { SWIFT_FIXTURE } from "./editor-fixture";
  * has to be answered. So this points the client at the page's own origin and
  * then intercepts. Import it before anything that reaches `lib/api-client`.
  */
-export const GALLERY_PATH = "Sources/PromotionHubViewController.swift";
+export const GALLERY_PATH =
+	new URLSearchParams(window.location.search).get("path") ?? "Sources/PromotionHubViewController.swift";
 
 export const GALLERY_CHANGED_LINES = [
 	{ start: 15, end: 18, kind: "modified" },
@@ -22,11 +23,17 @@ export const GALLERY_CHANGED_LINES = [
 // Same origin: `runtimeFetch` short-circuits to the global `fetch` below.
 setApiBaseUrl("");
 
+// `?label=` swaps in a fixture carrying one extra section marker with that
+// label, so a spec can find the width at which the minimap starts truncating a
+// longer, realistic section name.
+const labelParam = new URLSearchParams(window.location.search).get("label");
+const SOURCE = labelParam ? fixtureWithLabel(labelParam) : SWIFT_FIXTURE;
+
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 	const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 	if (!url.includes("/workspace/file")) return realFetch(input, init);
-	const lines = SWIFT_FIXTURE.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text }));
+	const lines = SOURCE.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text }));
 	return new Response(
 		JSON.stringify({
 			available: true,
