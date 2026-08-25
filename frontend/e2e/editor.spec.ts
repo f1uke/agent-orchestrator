@@ -279,21 +279,32 @@ test("opens every common file type without waking a language service", async ({ 
 });
 
 /**
- * 🗝 What actually truncates a `// MARK:` label, now that `maxColumn: 80` is set.
+ * 🗝 What actually truncates a `// MARK:` label.
  *
- * The comment on `MINIMAP` reasons about label space as a function of EDITOR
- * width, which is how it behaved before the cap. It no longer is: `maxColumn: 80`
- * pins the minimap canvas at ~122-125 px at every editor width this app can
- * produce (measured identical from 440 px to 1512 px). So the width-parameterised
- * specs above can no longer fail by width alone — what is left to get wrong is
- * the label BUDGET, and every change to `scale`, `maxColumn` or
- * `sectionHeaderFontSize` moves it.
+ * The label is fitted in minimap-canvas pixels, and the minimap's width is
+ * proportional to the editor's until `maxColumn: 80` caps it at 160px. So the
+ * budget grows with the editor and then stops. Measured through this harness,
+ * at the widths the editor really gets between the sidebar and the inspector
+ * rail:
  *
- * The budget is ~100 px of drawn label, so it is pixel width and not character
- * count that decides: 26 narrow characters fit where 16 wide ones do not. These
- * are real Swift section names sitting just under the ceiling — if a setting is
- * retuned and the budget drops, they truncate, and this says so instead of
- * shipping `Networ…Cache` to the minimap.
+ * | editor width | 520 | 620 | 700 | 900 | 1240 | 1512 |
+ * |---|---|---|---|---|---|---|
+ * | minimap width | 110 | 123 | 139 | 160 | 160 | 160 |
+ * | longest label that prints | 16 | 22 | 22 | 27 | 27 | 27 |
+ *
+ * (Character counts are for ordinary mixed-case names; the fit is really pixel
+ * width, so 26 narrow characters print where 16 wide ones do not.)
+ *
+ * The labels below are real Swift section names that must survive at every width
+ * the app produces. They sit under the 620px budget, which is the binding one —
+ * anything that fits there fits everywhere wider. `scale`, `maxColumn` and
+ * `sectionHeaderFontSize` all move that budget, and this is what says so.
+ *
+ * ⚠️ Read the width off the EDITOR, not off the harness page. The gallery frame
+ * only sizes the editor if it is a block box: as a flex row the viewer
+ * shrink-wraps to ~630px and every "at 1240px" measurement is really at 630px,
+ * which is how this comment previously came to claim the fit was
+ * width-independent.
  */
 const REALISTIC_SECTION_LABELS = ["Networking & Cache", "Collection View Source"];
 

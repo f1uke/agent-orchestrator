@@ -38,7 +38,12 @@ function Gallery() {
 					theme: {theme}
 				</button>
 				<div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-					<div data-testid="editor-frame" style={{ width, flex: "none", display: "flex", minHeight: 0 }}>
+					{/* A plain BLOCK box, deliberately: in the app the viewer sits in
+					    `<div className="min-h-0 flex-1">` inside a flex COLUMN, so it fills
+					    the pane's width. Making this a flex ROW instead let the viewer
+					    shrink-wrap to its content (~630px) and silently ignore `?width=`
+					    above that — every "at 1240px" measurement was really at 630px. */}
+					<div data-testid="editor-frame" style={{ width, flex: "none", minHeight: 0 }}>
 						<WorkspaceFileView sessionId="gallery" path={GALLERY_PATH} line={26} onClose={() => {}} />
 					</div>
 					<div style={{ flex: 1, background: "var(--bg-1)" }} />
