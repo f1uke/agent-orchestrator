@@ -72,6 +72,15 @@ cold page load actually pulls.
   defaults `scale: 1` / `maxColumn: 120` middle-truncate the label
   ("User...ction"); `scale: 2` renders it in full. A hand-rolled overlay was
   written first and deleted once the built-in was found.
+- **CORS is real on the loopback hop.** The renderer and the bridge are
+  different origins, so a `POST` with a JSON content-type is preflighted. Without
+  an `OPTIONS` handler the write fails as a bare `TypeError: Failed to fetch`.
+- Reverting a hunk has to work in **whole lines**: replacing "line 96..96" with
+  the empty string leaves an empty line 96 behind. The range must reach the start
+  of the following line so the newline goes with it.
+- A popover parented to the editor gets its `mousedown` eaten by Monaco, which
+  closes it before the button sees a `click` — `stopPropagation` on the box. And
+  `#editor` needs `position: relative`, or the popover resolves against `<body>`.
 - Completion needs `textDocument/didChange` or the server answers about the file
   as it was opened; and every response came back `isIncomplete: true`, so the
   client must re-request rather than filter locally.

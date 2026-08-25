@@ -114,6 +114,7 @@ async function openPath(rel: string, line = 1, abs?: string) {
 		lsp.didOpen(f.uri, langFor(f.uri), f.text);
 	}
 	el<HTMLElement>("title").textContent = `AO spike · ${rel || f.abs}:${line}`;
+	await refreshChanges();
 	return f;
 }
 const langFor = (uri: string) => (uri.endsWith(".swift") ? "swift" : uri.endsWith(".go") ? "go" : "plaintext");
@@ -274,6 +275,225 @@ editor.onDidChangeModel(() => {
 	log(`jumped → ${uri.path.replace(meta.root + "/", "")}:${line}`);
 	return source;
 };
+
+// ---- 6. uncommitted changes in the gutter, and revert ---------------------
+// Xcode paints a bar in the gutter beside every line that differs from the
+// last commit, and clicking it offers "Discard Change". The SHOWING half
+// already exists in this app: the daemon returns `changedLines` with
+// ReadWorkspaceFile, and DiffRows.tsx already draws the bar in the rail.
+// Only REVERT is new. Colours follow the app's tokens (DiffRows.tsx:12):
+// added = success green, modified = accent blue, removed = error red.
+type Hunk = {
+	oldStart: number;
+	oldLines: number;
+	newStart: number;
+	newLines: number;
+	oldText: string[];
+	kind: "added" | "modified" | "removed";
+};
+
+let hunks: Hunk[] = [];
+let changeDecorations = editor.createDecorationsCollection([]);
+
+async function refreshChanges() {
+	const rel = relOf(editor.getModel()?.uri.toString() ?? "");
+	if (!rel) {
+		hunks = [];
+		changeDecorations.set([]);
+		paintChangeCount();
+		return;
+	}
+	try {
+		const c = await (await fetch(`${BRIDGE}/changes?path=${encodeURIComponent(rel)}`)).json();
+		hunks = c.hunks ?? [];
+	} catch {
+		hunks = []; // not a git checkout, or the file is outside it
+	}
+	changeDecorations.set(
+		hunks.map((h) => {
+			// A pure deletion has no line of its own; mark the line it sits above.
+			const start = h.newLines === 0 ? Math.max(1, h.newStart) : h.newStart;
+			const end = h.newLines === 0 ? start : h.newStart + h.newLines - 1;
+			return {
+				range: new monaco.Range(start, 1, end, 1),
+				options: {
+					isWholeLine: true,
+					linesDecorationsClassName: `chgbar chg-${h.kind}`,
+					overviewRuler: {
+						color: h.kind === "added" ? "#7fd8a0" : h.kind === "removed" ? "#e88f8f" : "#4d8dff",
+						position: monaco.editor.OverviewRulerLane.Left,
+					},
+				},
+			};
+		}),
+	);
+	paintChangeCount();
+}
+const relOf = (uri: string) => {
+	const abs = decodeURIComponent(uri.replace("file://", ""));
+	return abs.startsWith(meta.root + "/") ? abs.slice(meta.root.length + 1) : "";
+};
+function paintChangeCount() {
+	const n = hunks.length;
+	el<HTMLElement>("changes").textContent =
+		n === 0 ? "no uncommitted changes" : `${n} uncommitted change${n === 1 ? "" : "s"}`;
+	el<HTMLElement>("changes").classList.toggle("dirty", n > 0);
+}
+const hunkAt = (line: number) =>
+	hunks.find((h) =>
+		h.newLines === 0
+			? h.newStart === line || h.newStart + 1 === line
+			: line >= h.newStart && line <= h.newStart + h.newLines - 1,
+	);
+
+async function revertHunk(h: Hunk) {
+	const model = editor.getModel();
+	const rel = relOf(model?.uri.toString() ?? "");
+	if (!model || !rel) return;
+	// Replace the hunk's NEW lines with the OLD ones git handed us, working in
+	// WHOLE LINES. Replacing "line 96..96" with "" leaves an empty line 96
+	// behind; the range has to reach the start of the following line so the
+	// newline goes with it.
+	const lineCount = model.getLineCount();
+	// For a pure deletion git reports `+c,0`, meaning the lines were removed
+	// after line c — so they go back at the start of line c+1.
+	const startLine = h.newLines === 0 ? h.newStart + 1 : h.newStart;
+	const endExclusive = h.newLines === 0 ? startLine : h.newStart + h.newLines;
+	let range: monaco.Range;
+	let text: string;
+	if (endExclusive <= lineCount) {
+		range = new monaco.Range(startLine, 1, endExclusive, 1);
+		text = h.oldText.length ? h.oldText.join("\n") + "\n" : "";
+	} else {
+		// The hunk runs to the end of the file, so there is no trailing newline to
+		// consume — take the preceding one instead.
+		const prevLine = Math.max(1, startLine - 1);
+		range = new monaco.Range(
+			prevLine,
+			startLine > 1 ? model.getLineMaxColumn(prevLine) : 1,
+			lineCount,
+			model.getLineMaxColumn(lineCount),
+		);
+		text = h.oldText.length ? (startLine > 1 ? "\n" : "") + h.oldText.join("\n") : "";
+	}
+	model.pushEditOperations([], [{ range, text }], () => null);
+	// Undo still works: this went through the model, not through git.
+	await fetch(`${BRIDGE}/write`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ path: rel, text: model.getValue() }),
+	});
+	log(`reverted ${h.kind} hunk at line ${h.newStart} (⌘Z still undoes it)`);
+	hideRevert();
+	await refreshChanges();
+}
+
+// Xcode shows a small popover on the change bar rather than reverting on the
+// first click, because discarding work on a stray click is unforgivable.
+const revertBox = document.createElement("div");
+revertBox.id = "revertBox";
+revertBox.hidden = true;
+// The popover is a child of the editor's DOM node, so Monaco sees its mousedown
+// and treats it as "clicked outside the gutter" — hiding the popover before the
+// button ever receives its click. Stop the event here.
+revertBox.addEventListener("mousedown", (e) => e.stopPropagation());
+el("editor").appendChild(revertBox);
+const hideRevert = () => {
+	revertBox.hidden = true;
+};
+
+function showRevert(h: Hunk, top: number) {
+	revertBox.hidden = false;
+	revertBox.innerHTML = "";
+	const title = document.createElement("div");
+	title.className = "rtitle";
+	title.textContent =
+		h.kind === "added"
+			? "Added, not committed"
+			: h.kind === "removed"
+				? "Removed, not committed"
+				: "Modified, not committed";
+	revertBox.appendChild(title);
+	// Never make someone click a red button to find out what it does.
+	const what = document.createElement("div");
+	what.className = "rwhat";
+	what.textContent =
+		h.kind === "added"
+			? `Discarding removes ${h.newLines} line${h.newLines === 1 ? "" : "s"}.`
+			: h.kind === "removed"
+				? `Discarding puts ${h.oldText.length} line${h.oldText.length === 1 ? "" : "s"} back.`
+				: `Discarding restores ${h.oldText.length} line${h.oldText.length === 1 ? "" : "s"} from the last commit:`;
+	revertBox.appendChild(what);
+	if (h.oldText.length) {
+		const pre = document.createElement("pre");
+		pre.className = "rprev";
+		pre.textContent =
+			h.oldText.slice(0, 8).join("\n") + (h.oldText.length > 8 ? `\n… ${h.oldText.length - 8} more` : "");
+		revertBox.appendChild(pre);
+	}
+	const row = document.createElement("div");
+	row.className = "rrow";
+	const discard = document.createElement("button");
+	discard.className = "rdiscard";
+	discard.textContent = "Discard Change";
+	discard.onclick = () => revertHunk(h);
+	const cancel = document.createElement("button");
+	cancel.textContent = "Cancel";
+	cancel.onclick = hideRevert;
+	row.append(discard, cancel);
+	revertBox.appendChild(row);
+	revertBox.style.top = `${Math.max(4, top)}px`;
+}
+
+// Anchor BELOW the last line of the hunk, so the popover never covers the very
+// change it is asking about.
+function revertAnchorTop(h: Hunk) {
+	const last = h.newLines === 0 ? h.newStart : h.newStart + h.newLines - 1;
+	// getScrolledVisiblePosition is already relative to the editor container and
+	// already accounts for scroll; deriving it from getTopForLineNumber by hand
+	// was off by a line and the popover covered the change it asked about.
+	const p = editor.getScrolledVisiblePosition({ lineNumber: last, column: 1 });
+	const lineH = editor.getOption(monaco.editor.EditorOption.lineHeight);
+	return (p?.top ?? 0) + (p?.height ?? lineH) + 6;
+}
+
+editor.onMouseDown((e) => {
+	if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) {
+		hideRevert();
+		return;
+	}
+	const line = e.target.position?.lineNumber;
+	const h = line ? hunkAt(line) : undefined;
+	if (!h) {
+		hideRevert();
+		return;
+	}
+	showRevert(h, revertAnchorTop(h));
+});
+editor.onDidScrollChange(hideRevert);
+editor.onDidChangeModel(() => {
+	hideRevert();
+	refreshChanges();
+});
+// Editing changes what is uncommitted, so the bars have to follow the edits.
+let changeDebounce = 0 as unknown as number;
+editor.onDidChangeModelContent(() => {
+	clearTimeout(changeDebounce);
+	changeDebounce = setTimeout(refreshChanges, 400) as unknown as number;
+});
+
+editor.addAction({
+	id: "spike.discardChange",
+	label: "Discard Change",
+	contextMenuGroupId: "1_modification",
+	contextMenuOrder: 2,
+	keybindings: [],
+	run: (ed) => {
+		const h = hunkAt(ed.getPosition()?.lineNumber ?? 0);
+		if (h) showRevert(h, revertAnchorTop(h));
+		else log("no uncommitted change on this line");
+	},
+});
 
 // ---- 5. minimap section marks --------------------------------------------
 // NOTHING TO BUILD HERE. Monaco already renders `// MARK: - Helpers` into the

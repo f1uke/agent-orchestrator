@@ -3,7 +3,7 @@
 // a language server itself. Here that hop is a loopback WebSocket, which is
 // already allowed by the app's CSP (`connect-src ws://127.0.0.1:*`).
 import { spawn, execFile } from "node:child_process";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { WebSocketServer } from "ws";
@@ -87,8 +87,74 @@ function startServer() {
 	console.log(`[lsp] spawned ${cfg.cmd} pid=${lsp.pid} root=${ROOT}`);
 }
 
+// ---- uncommitted changes -------------------------------------------------
+// The daemon already computes this for the Files tab
+// (workspace_file.go ReadWorkspaceFile -> changedLines), so a real feature
+// reuses that. Here it is recomputed so the spike stands alone.
+function git(args) {
+	return new Promise((resolve) => {
+		execFile("git", args, { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => resolve(err ? null : stdout));
+	});
+}
+
+// `git diff -U0` gives one hunk per contiguous change. Keeping the OLD side of
+// each hunk is what makes revert possible without a second git call per click.
+function parseHunks(diff) {
+	const hunks = [];
+	if (!diff) return hunks;
+	let cur = null;
+	for (const line of diff.split("\n")) {
+		const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+		if (m) {
+			cur = {
+				oldStart: Number(m[1]),
+				oldLines: m[2] === undefined ? 1 : Number(m[2]),
+				newStart: Number(m[3]),
+				newLines: m[4] === undefined ? 1 : Number(m[4]),
+				oldText: [],
+			};
+			hunks.push(cur);
+			continue;
+		}
+		if (!cur) continue;
+		if (line.startsWith("-")) cur.oldText.push(line.slice(1));
+		// "+" lines are already in the working tree; "\ No newline" is ignored.
+	}
+	return hunks.map((h) => ({
+		...h,
+		// added: nothing on the old side. removed: nothing on the new side.
+		// otherwise the lines were rewritten.
+		kind: h.oldLines === 0 ? "added" : h.newLines === 0 ? "removed" : "modified",
+	}));
+}
+
+async function changesFor(rel) {
+	const tracked = await git(["ls-files", "--error-unmatch", "--", rel]);
+	if (tracked === null) {
+		// untracked: the whole file is new
+		const n = readFileSync(path.resolve(ROOT, rel), "utf8").split("\n").length;
+		return {
+			tracked: false,
+			hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: n, oldText: [], kind: "added" }],
+		};
+	}
+	const diff = await git(["diff", "--no-color", "--no-ext-diff", "-U0", "--", rel]);
+	return { tracked: true, hunks: parseHunks(diff) };
+}
+
 const http = createServer((req, res) => {
 	const url = new URL(req.url, "http://localhost");
+	// The renderer is a different origin from this loopback bridge (in the real
+	// app, `app://` vs `http://127.0.0.1`), so anything past a simple GET is
+	// preflighted. A POST with a JSON content-type is not simple — without this
+	// the write silently fails as "TypeError: Failed to fetch".
+	res.setHeader("access-control-allow-origin", "*");
+	res.setHeader("access-control-allow-headers", "content-type");
+	res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+	if (req.method === "OPTIONS") {
+		res.writeHead(204);
+		return res.end();
+	}
 	const json = (o) => {
 		res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
 		res.end(JSON.stringify(o));
@@ -115,6 +181,44 @@ const http = createServer((req, res) => {
 			return res.end("no such file");
 		}
 		return json({ abs, uri: pathToFileURL(abs).href, text: readFileSync(abs, "utf8") });
+	}
+	if (url.pathname === "/changes") {
+		const rel = url.searchParams.get("path") ?? "";
+		const abs = path.resolve(ROOT, rel);
+		if (!abs.startsWith(path.resolve(ROOT) + path.sep)) {
+			res.writeHead(403);
+			return res.end("outside root");
+		}
+		if (!existsSync(abs)) {
+			res.writeHead(404);
+			return res.end("no such file");
+		}
+		return changesFor(rel)
+			.then((c) => json({ path: rel, ...c }))
+			.catch((e) => {
+				res.writeHead(500);
+				res.end(String(e));
+			});
+	}
+	if (url.pathname === "/write" && req.method === "POST") {
+		let body = "";
+		req.on("data", (d) => (body += d));
+		req.on("end", () => {
+			try {
+				const { path: rel, text } = JSON.parse(body);
+				const abs = path.resolve(ROOT, rel ?? "");
+				if (!abs.startsWith(path.resolve(ROOT) + path.sep)) {
+					res.writeHead(403);
+					return res.end("outside root");
+				}
+				writeFileSync(abs, text, "utf8");
+				return changesFor(rel).then((c) => json({ ok: true, path: rel, ...c }));
+			} catch (e) {
+				res.writeHead(400);
+				res.end(String(e));
+			}
+		});
+		return;
 	}
 	if (url.pathname === "/stats") {
 		return json({
