@@ -85,6 +85,36 @@ func TestSessionsAPI_WriteWorkspaceFilePassesTheContentVerbatim(t *testing.T) {
 	}
 }
 
+// An explicit `"content": null` is the OTHER shape a JavaScript caller produces.
+// An absent key comes from stringifying an `undefined`; a null comes from a state
+// value initialised as null, which is an ordinary way to spell "the editor has
+// not loaded a model yet" - and JSON.stringify keeps that key rather than
+// dropping it. Both mean the same thing (the caller has no content to save) and
+// both must be refused, or the pointer guard only covers half the bug it was
+// added for.
+func TestSessionsAPI_WriteWorkspaceFileRejectsExplicitNullContent(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+		`{"path":"a.go","content":null,"baseHash":"sha256:old"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("a null content must be refused, got %d: %s", status, body)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	if code := errorCode(env); code != "WORKSPACE_FILE_CONTENT_REQUIRED" {
+		t.Fatalf("code = %q: %s", code, body)
+	}
+	// The refusal has to happen BEFORE the service: a null that reaches it
+	// arrives as "" and empties the user's file.
+	if svc.workspaceWrite.Path != "" {
+		t.Fatalf("the service was reached with %+v; the guard let a null through", svc.workspaceWrite)
+	}
+}
+
 // A conflict is only resolvable if the caller gets back what is on disk NOW.
 // Those details are the whole difference between "your save was refused" and a
 // UI that can offer to reload or diff, so they must survive serialisation with
