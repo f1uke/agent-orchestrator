@@ -3,10 +3,24 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getMock } = vi.hoisted(() => ({ getMock: vi.fn() }));
+const { getMock, editorProps } = vi.hoisted(() => ({
+	getMock: vi.fn(),
+	editorProps: { current: null as Record<string, unknown> | null },
+}));
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock },
 	apiErrorMessage: (e: unknown, fb = "Request failed") => (e instanceof Error ? e.message : fb),
+}));
+
+// Monaco needs a real browser — canvas metrics, ResizeObserver, workers — so the
+// editor itself is exercised in `e2e/editor.spec.ts`. What this file owns is the
+// viewer AROUND it: the chrome, the load/unavailable states, and the contract it
+// hands the editor.
+vi.mock("./MonacoFileEditor", () => ({
+	default: (props: Record<string, unknown>) => {
+		editorProps.current = props;
+		return <div data-testid="monaco-file-editor" />;
+	},
 }));
 
 import { WorkspaceFileView } from "./WorkspaceFileView";
@@ -28,33 +42,45 @@ let body: Record<string, unknown> = response;
 
 beforeEach(() => {
 	body = response;
+	editorProps.current = null;
 	getMock.mockReset().mockImplementation(async (path: string) => {
 		if (path.includes("/workspace/file")) return { data: body };
 		return { data: null };
 	});
 });
 
-function renderView(onClose = vi.fn(), path = "pkg/app.go") {
+function renderView(onClose = vi.fn(), path = "pkg/app.go", line?: number) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	render(
 		<QueryClientProvider client={client}>
-			<WorkspaceFileView sessionId="proj-1" path={path} onClose={onClose} />
+			<WorkspaceFileView sessionId="proj-1" path={path} line={line} onClose={onClose} />
 		</QueryClientProvider>,
 	);
 	return onClose;
 }
 
 describe("WorkspaceFileView", () => {
-	it("renders the file's content, syntax-highlighted", async () => {
+	it("hands the file's text and change ranges to the editor", async () => {
 		renderView();
-		await waitFor(() => expect(screen.getByText("package")).toBeInTheDocument());
-		expect(screen.getByText("Run")).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		expect(editorProps.current).toMatchObject({
+			sessionId: "proj-1",
+			path: "pkg/app.go",
+			// Lossless: the editor gets the file, not a per-row render of it.
+			text: "package app\nfunc Run() {\n}",
+			changedLines: [{ start: 2, end: 2, kind: "modified" }],
+		});
 	});
 
-	it("shows a gutter change bar on the modified line", async () => {
+	it("passes the referenced line through, so the editor lands on it", async () => {
+		renderView(vi.fn(), "pkg/app.go", 2);
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		expect(editorProps.current?.line).toBe(2);
+	});
+
+	it("counts the uncommitted lines in the header", async () => {
 		renderView();
-		// changedLines modified line 2 → row index 1 → change-bar-1.
-		await waitFor(() => expect(screen.getByTestId("change-bar-1")).toHaveAttribute("data-change", "modified"));
+		await waitFor(() => expect(screen.getByText("1 uncommitted")).toBeInTheDocument());
 	});
 
 	it("shows the file path in the header", async () => {
@@ -72,10 +98,11 @@ describe("WorkspaceFileView", () => {
 		expect(screen.getAllByTitle(abs).length).toBeGreaterThan(0);
 	});
 
-	it("explains WHY an unavailable file can't be shown", async () => {
+	it("explains WHY an unavailable file can't be shown, and opens no editor", async () => {
 		body = { available: false, path: "blob.bin", reason: "binary", lines: [], changedLines: [], truncated: false };
 		renderView(vi.fn(), "blob.bin");
 		await waitFor(() => expect(screen.getByText(/binary file/i)).toBeInTheDocument());
+		expect(screen.queryByTestId("monaco-file-editor")).toBeNull();
 	});
 
 	it("says a too-large file is too large", async () => {
@@ -84,11 +111,18 @@ describe("WorkspaceFileView", () => {
 		await waitFor(() => expect(screen.getByText(/too large/i)).toBeInTheDocument());
 	});
 
-	it("renders no gutter markers for a file outside any git repo", async () => {
+	it("passes no change markers for a file outside any git repo", async () => {
 		body = { ...response, path: "/Users/x/notes.md", changedLines: [] };
 		renderView(vi.fn(), "/Users/x/notes.md");
-		await waitFor(() => expect(screen.getByText("package")).toBeInTheDocument());
-		expect(screen.queryByTestId("change-bar-1")).toBeNull();
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		expect(editorProps.current?.changedLines).toEqual([]);
+		expect(screen.queryByText(/uncommitted/)).toBeNull();
+	});
+
+	it("says so when the backend truncated the file", async () => {
+		body = { ...response, truncated: true };
+		renderView();
+		await waitFor(() => expect(screen.getByText("truncated")).toBeInTheDocument());
 	});
 
 	it("calls onClose when the back button is clicked", async () => {

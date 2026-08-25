@@ -1,12 +1,17 @@
-import { type CSSProperties, useEffect, useMemo, useRef } from "react";
+import { type CSSProperties, lazy, Suspense, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
-import { type ChangeMark, DiffRows } from "./DiffRows";
+import { useUiStore } from "../stores/ui-store";
 
 type WorkspaceFile = components["schemas"]["WorkspaceFileResponse"];
+
+// Monaco and its grammars are ~an order of magnitude larger than the rest of the
+// renderer, so the editor is a lazy chunk: the app's cold start never pays for
+// it, only the first file opened does.
+const MonacoFileEditor = lazy(() => import("./MonacoFileEditor"));
 
 // Why a file that resolved still cannot be rendered. Reported inline rather
 // than as a toast: navigation has already happened, so the viewer itself is
@@ -37,9 +42,11 @@ function PathLabel({ path, style }: { path: string; style?: CSSProperties }) {
 /**
  * A file opened from a clickable terminal file reference, shown in the center
  * pane (in place of the terminal) until dismissed — the same placement the
- * Reviews "Expand full file" view uses. Reuses the Reviews code viewer
- * (`DiffRows`) read-only, and overlays an Xcode-style gutter bar on lines that
- * are modified-but-not-committed (working tree vs HEAD), fetched with the file.
+ * Reviews "Expand full file" view uses. The surface is a read-only Monaco
+ * editor: real syntax highlighting (shiki grammars, the app's own `--code-*`
+ * palette), folding, find, and an Xcode-style minimap that bands `// MARK:`
+ * sections. Lines that are modified-but-not-committed (working tree vs HEAD,
+ * fetched with the file) carry a gutter bar.
  *
  * `path` is workspace-relative for a file inside the session's workspace and
  * absolute for one outside it (a knowledge-store note, another session's
@@ -57,6 +64,7 @@ export function WorkspaceFileView({
 	line?: number;
 	onClose: () => void;
 }) {
+	const theme = useUiStore((s) => s.theme);
 	const q = useQuery({
 		queryKey: ["workspace-file", sessionId, path],
 		queryFn: async () => {
@@ -69,45 +77,16 @@ export function WorkspaceFileView({
 	});
 	const file = q.data;
 	const lines = useMemo(() => file?.lines ?? [], [file]);
-
-	// Map the backend's new-side change ranges to a per-row-index marker map.
-	// A "removed" marker is zero-height and anchors to the row now occupying the
-	// boundary (clamped to the last row for a trailing deletion).
-	const changeMarks = useMemo(() => {
-		const map = new Map<number, ChangeMark>();
-		for (const c of file?.changedLines ?? []) {
-			const kind = c.kind as ChangeMark;
-			if (kind === "removed") {
-				const idx = Math.min(Math.max(c.start - 1, 0), lines.length - 1);
-				if (idx >= 0 && !map.has(idx)) map.set(idx, "removed");
-				continue;
-			}
-			for (let ln = c.start; ln <= c.end; ln++) {
-				const idx = ln - 1;
-				if (idx >= 0 && idx < lines.length) map.set(idx, kind);
-			}
-		}
-		return map;
-	}, [file?.changedLines, lines.length]);
+	const text = useMemo(() => lines.map((l) => l.text).join("\n"), [lines]);
+	const changedLines = useMemo(() => file?.changedLines ?? [], [file]);
 
 	const changedCount = useMemo(() => {
 		let n = 0;
-		for (const c of file?.changedLines ?? []) {
+		for (const c of changedLines) {
 			n += c.kind === "removed" ? 1 : c.end - c.start + 1;
 		}
 		return n;
-	}, [file?.changedLines]);
-
-	// Jump to the referenced line once rendered, via a zero-height anchor node
-	// pinned to that row (reusing DiffRows' anchor mechanism).
-	const anchorRef = useRef<HTMLDivElement | null>(null);
-	const anchorIndex = line != null && line >= 1 && line <= lines.length ? line - 1 : undefined;
-	useEffect(() => {
-		if (anchorIndex == null) return;
-		const el = anchorRef.current;
-		if (!el || typeof el.scrollIntoView !== "function") return;
-		el.scrollIntoView({ block: "center" });
-	}, [anchorIndex, lines.length]);
+	}, [changedLines]);
 
 	return (
 		<div
@@ -175,61 +154,36 @@ export function WorkspaceFileView({
 						{changedCount} uncommitted
 					</span>
 				)}
+				{file?.truncated && (
+					<span style={{ fontFamily: MONO, fontSize: 11.5, color: P.muted2, flex: "none" }}>truncated</span>
+				)}
 			</div>
 
-			{/* body */}
-			<div style={{ flex: 1, overflow: "auto", padding: "20px 24px", minHeight: 0 }}>
-				{q.isLoading && <p style={{ fontSize: 12.5, color: P.muted2 }}>Loading file…</p>}
-				{q.error && <p style={{ fontSize: 12.5, color: P.red }}>{apiErrorMessage(q.error, "Unable to load file")}</p>}
-				{file && (!file.available || lines.length === 0) && !q.isLoading && (
-					<p style={{ fontSize: 12.5, color: P.muted2 }}>
-						{(file.reason && UNAVAILABLE_MESSAGE[file.reason]) || "This file can’t be displayed."}
-					</p>
-				)}
-				{file && file.available && lines.length > 0 && (
-					<div
-						style={{
-							maxWidth: 1040,
-							border: `1px solid ${P.borderCard}`,
-							borderRadius: 10,
-							overflow: "hidden",
-							background: V.cardBg,
-						}}
-					>
-						<div
-							className="mono"
-							style={{
-								display: "flex",
-								alignItems: "center",
-								gap: 8,
-								padding: "9px 14px",
-								background: P.fileHeader,
-								borderBottom: `1px solid ${P.borderCard}`,
-								fontFamily: MONO,
-								fontSize: 11.5,
-								color: V.chromeFg,
-								minWidth: 0,
-							}}
-						>
-							<PathLabel path={path} />
-						</div>
-						<DiffRows
-							lines={lines}
-							size="wide"
-							changeMarks={changeMarks}
-							anchorIndex={anchorIndex}
-							anchorNode={<div ref={anchorRef} style={{ height: 0 }} />}
-						/>
-						{file.truncated && (
-							<div
-								style={{ padding: "8px 14px", borderTop: `1px solid ${P.borderCard}`, fontSize: 11, color: P.muted2 }}
-							>
-								File truncated — showing the first lines only.
-							</div>
-						)}
-					</div>
-				)}
-			</div>
+			{/* body — the editor fills the pane; an editor in a card would give the
+			    minimap and the code half the width they need. */}
+			{q.isLoading && <p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Loading file…</p>}
+			{q.error && (
+				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.red }}>
+					{apiErrorMessage(q.error, "Unable to load file")}
+				</p>
+			)}
+			{file && (!file.available || lines.length === 0) && !q.isLoading && (
+				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>
+					{(file.reason && UNAVAILABLE_MESSAGE[file.reason]) || "This file can’t be displayed."}
+				</p>
+			)}
+			{file && file.available && lines.length > 0 && (
+				<Suspense fallback={<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Opening editor…</p>}>
+					<MonacoFileEditor
+						sessionId={sessionId}
+						path={path}
+						text={text}
+						changedLines={changedLines}
+						line={line}
+						theme={theme}
+					/>
+				</Suspense>
+			)}
 		</div>
 	);
 }

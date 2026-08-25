@@ -4514,3 +4514,47 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	flex: 1;
 	min-width: 0;
 }
+
+/* ===========================================================================
+   Monaco file editor — the uncommitted-change gutter.
+
+   Monaco paints these into its lines-decorations lane (between the line numbers
+   and the code, where Xcode puts the same bar). The colours are the ones
+   `DiffRows` already uses for the identical meaning — working tree vs HEAD —
+   so the editor and the review diff never disagree about what "changed" is.
+   =========================================================================== */
+.ao-change-bar {
+	position: relative;
+	width: 100%;
+}
+
+.ao-change-bar::before {
+	content: "";
+	position: absolute;
+	left: 4px;
+	top: 0;
+	bottom: 0;
+	width: 3px;
+	border-radius: 1px;
+	background: currentcolor;
+}
+
+.ao-change-bar--added {
+	color: var(--diff-add-sign);
+}
+
+.ao-change-bar--modified {
+	color: var(--accent);
+}
+
+/* A deletion has no line of its own: mark the boundary the removed lines used
+   to sit above, the way a zero-height marker does in the diff rows. */
+.ao-change-bar--removed {
+	color: var(--red);
+}
+
+.ao-change-bar--removed::before {
+	bottom: auto;
+	height: 7px;
+	transform: translateY(-3px);
+}
