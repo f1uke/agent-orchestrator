@@ -95,6 +95,14 @@ export function WorkspaceFileView({
 				display: "flex",
 				flexDirection: "column",
 				height: "100%",
+				// Explicit, because this root carries an editor whose whole layout —
+				// minimap width, and with it whether a `// MARK:` label fits — is a
+				// function of how wide it ends up. In the app it is a block child of a
+				// flex column and fills the pane either way; dropped into a flex ROW it
+				// would shrink-wrap to its content instead and silently ignore the width
+				// it was given, which is exactly how the e2e harness spent a day
+				// measuring 630px while believing it measured 1240.
+				width: "100%",
 				minHeight: 0,
 				background: V.bg,
 				color: P.text,

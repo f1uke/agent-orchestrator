@@ -50,24 +50,28 @@ const MARK_SECTION_HEADER_REGEX =
  * minimap-canvas pixels (`minimap.js:1421-1441`). `proportional` skips that
  * branch, so the configured scale survives at any file length.
  *
- * **`scale: 2` with `maxColumn: 80` pins the minimap's width.** Minimap width is
- * otherwise proportional to the editor's, and this editor sits between the
- * sidebar and the inspector rail, so it is routinely far narrower than the
- * window — at the default `scale: 1` a label only fits above ~755px of editor,
- * i.e. it truncates exactly when a rail is open. Scale 2 fixes that but would
- * hand a full-window editor a 310px minimap; the `maxColumn` cap binds first.
- * Measured in the harness, at both 1x and 2x:
+ * **`scale: 2` with `maxColumn: 80`.** Minimap width is proportional to the
+ * editor's, and this editor sits between the sidebar and the inspector rail, so
+ * it is routinely far narrower than the window. What a label may measure, in css
+ * px, at `sectionHeaderFontSize: 9` (measured at 1x, which is the tighter of 1x
+ * and 2x):
  *
- * | editor width | 440 | 620 | 900 | 1240 | 1512 |
- * |---|---|---|---|---|---|
- * | minimap width | 122 | 123 | 125 | 125 | 125 |
+ * | editor width | 520 | 620 | 700 | 780 | 900 | 1240 | 1512 |
+ * |---|---|---|---|---|---|---|---|
+ * | Monaco default (`scale: 1`, `maxColumn: 120`) | 52 | 64 | 73 | 83 | 97 | 112 | 112 |
+ * | **shipped** (`scale: 2`, `maxColumn: 80`) | 94 | 115 | 131 | 148 | 152 | 152 | 152 |
  *
- * So label fit does NOT depend on the editor's width. It is one number: **117 css
- * px of label**, at `sectionHeaderFontSize: 9`. `Networking & Cache` measures 99
- * and prints; `Collection View Data Source` measures 138 and truncates — on a
- * 1512px editor exactly as on a 620px one, and no width setting helps. That
- * ceiling is ~22 ordinary characters, which covers the section names Swift and
- * Go files actually carry.
+ * `User Interaction` measures 79, so the default only prints it above ~760 px of
+ * editor — it truncates exactly when a rail is open, which is the normal case.
+ * Scale 2 prints it at every width the app can produce; `maxColumn: 80` then caps
+ * the minimap at 160 px from ~800 px of editor upward, so a full-window editor
+ * does not hand 20% of the pane to a minimap.
+ *
+ * ⚠️ The binding case is the NARROW editor, never the wide one: anything that
+ * fits at 620 px fits everywhere above it. `Networking & Cache` (99) prints from
+ * ~560 px, `Collection View Source` (112) from ~610 px, and
+ * `Collection View Data Source` (138) needs ~830 px. Section names past ~22
+ * characters are the ones to check when the rails are open.
  */
 const MINIMAP: monaco.editor.IEditorMinimapOptions = {
 	enabled: true,
