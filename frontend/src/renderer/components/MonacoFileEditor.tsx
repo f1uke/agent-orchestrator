@@ -38,9 +38,9 @@ const MARK_SECTION_HEADER_REGEX =
 	"[^\\S\\r\\n]*(?<separator>-?)[^\\S\\r\\n]*(?<label>[^\\r\\n]*?)[^\\S\\r\\n]*(?:\\*/|-->)?$";
 
 /**
- * 🗝 Two of these settings are the difference between an Xcode-style `// MARK:`
- * band and one Monaco middle-truncates to `User…action`, and neither is the font
- * size it looks like.
+ * 🗝 Two of these settings decide whether an Xcode-style `// MARK:` band prints
+ * its label or Monaco middle-truncates it to `User…action`, and neither is the
+ * font size it looks like.
  *
  * **`size` must be `proportional`, not `fit`.** Under `fit` (and `fill`) Monaco
  * silently resets `minimap.scale` to 1 as soon as the file is taller than the
@@ -50,23 +50,24 @@ const MARK_SECTION_HEADER_REGEX =
  * minimap-canvas pixels (`minimap.js:1421-1441`). `proportional` skips that
  * branch, so the configured scale survives at any file length.
  *
- * **`scale: 2` with a `maxColumn` cap, rather than the default `scale: 1`.**
- * Minimap width is proportional to the editor's width, and this editor sits
- * between the sidebar and the inspector rail, so it is routinely far narrower
- * than the window. Measured at `sectionHeaderFontSize: 9`, in usable label px:
+ * **`scale: 2` with `maxColumn: 80` pins the minimap's width.** Minimap width is
+ * otherwise proportional to the editor's, and this editor sits between the
+ * sidebar and the inspector rail, so it is routinely far narrower than the
+ * window — at the default `scale: 1` a label only fits above ~755px of editor,
+ * i.e. it truncates exactly when a rail is open. Scale 2 fixes that but would
+ * hand a full-window editor a 310px minimap; the `maxColumn` cap binds first.
+ * Measured in the harness, at both 1x and 2x:
  *
- * | editor width | scale 1 | scale 2 | scale 2, maxColumn 80 |
- * |---|---|---|---|
- * | 620 px | 61 | 119 | 119 |
- * | 900 px | 97 | 173 | 152 |
- * | 1512 px | 152 | 302 | 152 |
+ * | editor width | 440 | 620 | 900 | 1240 | 1512 |
+ * |---|---|---|---|---|---|
+ * | minimap width | 122 | 123 | 125 | 125 | 125 |
  *
- * `User Interaction` needs 79 px, so scale 1 only fits it above ~755 px of
- * editor — it truncates exactly when a rail is open. Scale 2 fits it from
- * ~460 px, but uncapped it would hand a 1512 px editor a 310 px minimap.
- * `maxColumn: 80` caps the minimap at 160 px, keeping it between 7% and 19% of
- * the pane at every width the app produces and never below the ~100 px a
- * section label needs.
+ * So label fit does NOT depend on the editor's width. It is one number: **117 css
+ * px of label**, at `sectionHeaderFontSize: 9`. `Networking & Cache` measures 99
+ * and prints; `Collection View Data Source` measures 138 and truncates — on a
+ * 1512px editor exactly as on a 620px one, and no width setting helps. That
+ * ceiling is ~22 ordinary characters, which covers the section names Swift and
+ * Go files actually carry.
  */
 const MINIMAP: monaco.editor.IEditorMinimapOptions = {
 	enabled: true,

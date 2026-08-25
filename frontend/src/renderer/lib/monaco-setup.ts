@@ -104,7 +104,7 @@ const GRAMMARS: Record<string, () => Promise<unknown>> = {
 	"objective-c": () => import("@shikijs/langs/objective-c"),
 	perl: () => import("@shikijs/langs/perl"),
 	php: () => import("@shikijs/langs/php"),
-	protobuf: () => import("@shikijs/langs/proto"),
+	proto: () => import("@shikijs/langs/proto"),
 	python: () => import("@shikijs/langs/python"),
 	r: () => import("@shikijs/langs/r"),
 	ruby: () => import("@shikijs/langs/ruby"),
