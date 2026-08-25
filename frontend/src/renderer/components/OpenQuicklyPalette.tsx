@@ -76,6 +76,7 @@ export function OpenQuicklyPalette({
 	const [query, setQuery] = useState("");
 	const [activeIndex, setActiveIndex] = useState(0);
 	const listRef = useRef<HTMLDivElement | null>(null);
+	const inputRef = useRef<HTMLInputElement | null>(null);
 	const dismissFocus = useOverlayDismissFocus();
 
 	useEffect(() => {
@@ -84,6 +85,10 @@ export function OpenQuicklyPalette({
 			if (!isOpenQuicklyShortcut(event)) return;
 			event.preventDefault();
 			setOpen((prev) => !prev);
+			// The query survives (see onOpenAutoFocus) but the SELECTION does not:
+			// reopening always lands on the best match, never on wherever the
+			// arrow keys were left last time.
+			setActiveIndex(0);
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
@@ -123,14 +128,6 @@ export function OpenQuicklyPalette({
 		[onOpenFile],
 	);
 
-	const handleOpenChange = (next: boolean) => {
-		setOpen(next);
-		if (next) {
-			setQuery("");
-			setActiveIndex(0);
-		}
-	};
-
 	const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
 		if (event.key === "ArrowDown" || (event.key === "n" && event.ctrlKey)) {
 			event.preventDefault();
@@ -162,16 +159,33 @@ export function OpenQuicklyPalette({
 	const unavailable = index.data && !index.data.available;
 
 	return (
-		<Dialog.Root open={open} onOpenChange={handleOpenChange}>
+		<Dialog.Root open={open} onOpenChange={setOpen}>
 			<Dialog.Portal>
 				<Dialog.Overlay className="open-quickly__overlay" />
-				<Dialog.Content {...dismissFocus} className="open-quickly" aria-describedby={undefined}>
+				<Dialog.Content
+					{...dismissFocus}
+					aria-describedby={undefined}
+					className="open-quickly"
+					// Reopening keeps the last query and SELECTS it, the way Xcode's
+					// Open Quickly does: ⌘⇧O then Enter re-runs the last search, and
+					// typing replaces it, so carrying it over costs a user who does not
+					// want it nothing. Radix's own focus-return puts the caret at the
+					// END of the value, which is the one behaviour that is wrong here —
+					// it silently APPENDS the next thing typed to the old query. Taking
+					// focus ourselves is what makes the carried-over value a feature
+					// rather than that bug.
+					onOpenAutoFocus={(event) => {
+						event.preventDefault();
+						const input = inputRef.current;
+						if (!input) return;
+						input.focus();
+						input.select();
+					}}
+				>
 					<Dialog.Title className="sr-only">Open Quickly</Dialog.Title>
 					<div className="open-quickly__search">
 						<Search aria-hidden="true" className="open-quickly__search-icon" />
-						{/* eslint-disable-next-line jsx-a11y/no-autofocus -- the palette exists to be typed into */}
 						<input
-							autoFocus
 							aria-activedescendant={active >= 0 ? `open-quickly-row-${active}` : undefined}
 							aria-autocomplete="list"
 							aria-controls="open-quickly-results"
@@ -184,6 +198,7 @@ export function OpenQuicklyPalette({
 							}}
 							onKeyDown={handleInputKeyDown}
 							placeholder="Open Quickly — type a file name"
+							ref={inputRef}
 							role="combobox"
 							spellCheck={false}
 							type="text"

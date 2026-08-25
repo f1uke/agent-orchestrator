@@ -56,6 +56,14 @@ const LEAD_GAP = 1; // per character skipped before the match begins
  * two points on one scale, so they are separated by more than any bonus can
  * bridge. Typing `promohub` means "the file called that", and a directory that
  * happens to contain those letters must never come first.
+ *
+ * The price, measured on this repo: because the separation is absolute, an
+ * arbitrarily SCATTERED name match still beats a perfect directory match — for
+ * `"queries"`, `migrate_unique_version_test.go` lands above
+ * `storage/sqlite/queries/*.sql`, whose directory is spelled exactly that. That
+ * is rule 1 working as specified rather than a bug, and softening the tier into
+ * a bonus would put the spike's own regression back on the table, so it stays
+ * absolute until someone decides otherwise with a case in hand.
  */
 const NAME_TIER = 1000;
 

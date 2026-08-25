@@ -154,6 +154,48 @@ describe("OpenQuicklyPalette", () => {
 		expect(rows().every((r) => !r.getAttribute("title")?.includes("Promotion"))).toBe(true);
 	});
 
+	// Reopening used to carry the old query with the caret at its END, so the
+	// next thing typed was APPENDED: "promo", esc, ⌘⇧O, "hub" gave "promohub".
+	// The query is kept on purpose (⌘⇧O then Enter re-runs the last search) —
+	// what must not survive is the caret position.
+	it("reopens with the last query selected, so typing replaces it", async () => {
+		const user = userEvent.setup();
+		renderPalette();
+		await pressOpenQuickly(user);
+		await user.type(searchBox(), "promo");
+		await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+
+		await user.keyboard("{Escape}");
+		await waitFor(() => expect(screen.queryByRole("combobox")).not.toBeInTheDocument());
+		await pressOpenQuickly(user);
+
+		const input = searchBox() as HTMLInputElement;
+		expect(input.value).toBe("promo");
+		expect([input.selectionStart, input.selectionEnd]).toEqual([0, "promo".length]);
+
+		// `user.type` clicks first, which collapses the selection — that is the
+		// test harness, not the browser. Type into the focused element as a real
+		// keypress does.
+		await user.keyboard("hub");
+		expect((searchBox() as HTMLInputElement).value).toBe("hub");
+	});
+
+	it("reopens on the best match, not on wherever the arrow keys were left", async () => {
+		const user = userEvent.setup();
+		renderPalette();
+		await pressOpenQuickly(user);
+		await user.type(searchBox(), "tsx");
+		await waitFor(() => expect(rows().length).toBeGreaterThan(1));
+		await user.keyboard("{ArrowDown}");
+		expect(rows()[1]).toHaveAttribute("aria-selected", "true");
+
+		await user.keyboard("{Escape}");
+		await waitFor(() => expect(screen.queryByRole("combobox")).not.toBeInTheDocument());
+		await pressOpenQuickly(user);
+		await waitFor(() => expect(rows().length).toBeGreaterThan(1));
+		expect(rows()[0]).toHaveAttribute("aria-selected", "true");
+	});
+
 	it("says so when nothing matches, instead of showing an empty box", async () => {
 		const user = userEvent.setup();
 		renderPalette();
