@@ -193,6 +193,7 @@ async function modelFor(rel: string, abs?: string) {
 	await ensureGrammar(langFor(f.uri));
 	const uri = monaco.Uri.parse(f.uri);
 	const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(f.text, langFor(f.uri), uri);
+	if (!endsWithNewline.has(f.uri)) endsWithNewline.set(f.uri, String(f.text ?? "").endsWith("\n"));
 	// Only reset from disk when the buffer has no unsaved edits of its own.
 	if (!dirtyBuffers.has(f.uri) && model.getValue() !== f.text) model.setValue(f.text);
 	if (!opened.has(f.uri)) {
@@ -391,6 +392,8 @@ editor.onDidChangeModel(() => {
 // Editing is only real once it reaches disk. One save path for both modes,
 // because both edit the same buffer.
 const dirtyBuffers = new Set<string>();
+// Whether the file on disk ended with a newline when we read it.
+const endsWithNewline = new Map<string, boolean>();
 
 async function saveCurrent() {
 	const model = mode === "changes" ? diffEditor?.getModel()?.modified : editor.getModel();
@@ -400,11 +403,17 @@ async function saveCurrent() {
 		log("cannot save a file outside the workspace");
 		return;
 	}
+	// Found by qa: writing model.getValue() straight through drops a trailing
+	// newline whenever the last line is blank, and git then reports
+	// "\ No newline at end of file" — a one-line edit reads as two. Preserve
+	// whatever the file had rather than silently changing it.
+	let text = model.getValue();
+	if (endsWithNewline.get(model.uri.toString()) && !text.endsWith("\n")) text += "\n";
 	const t = performance.now();
 	const res = await fetch(`${BRIDGE}/write`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ path: rel, text: model.getValue() }),
+		body: JSON.stringify({ path: rel, text }),
 	});
 	if (!res.ok) {
 		log(`save failed: ${res.status}`);

@@ -19,7 +19,14 @@ const SERVERS = {
 	go: {
 		cmd: "gopls",
 		args: ["-mode=stdio"],
-		env: { GOPLSCACHE: path.join(AO, "gopls-app") },
+		env: {
+			GOPLSCACHE: path.join(AO, "gopls-app"),
+			// Measured in the proposal (§2.2): gopls holds ~880 MB of live types for
+			// this repo's dependency closure but lets RSS drift to ~1.7 GB.
+			// GOMEMLIMIT does not shrink the live data, it stops the runtime hoarding
+			// freed pages — ~1.0 GB instead of ~1.7 GB, for ~2.5x the CPU.
+			GOMEMLIMIT: process.env.GOMEMLIMIT ?? "1GiB",
+		},
 		exts: [".go"],
 		languageId: () => "go",
 	},
