@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>AO spike — in-app editor + LSP</title>
+		<!-- The SAME CSP the packaged renderer ships (frontend/src/shared/renderer-csp.ts),
+		     so anything that would be blocked in the real app is blocked here too. -->
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; frame-src 'none'"
+		/>
+	</head>
+	<body>
+		<div id="app">
+			<header id="bar">
+				<span id="title">AO spike · editor + LSP</span>
+				<span id="hint"
+					>⌘⇧O open quickly · ⌘click jump to definition · ⌃Space complete · click the gutter bar to discard</span
+				>
+				<span id="changes"></span>
+				<span id="stats"></span>
+			</header>
+			<div id="body">
+				<aside id="rail">
+					<div id="modes" role="tablist">
+						<button id="modeChanges" role="tab" type="button">Changes</button>
+						<button id="modeBrowse" role="tab" type="button">Browse</button>
+					</div>
+					<div id="railHead">
+						<span id="railBase"></span>
+						<span id="railStat"></span>
+						<button id="diffLayout" type="button" title="Side by side / inline">⇔</button>
+					</div>
+					<ul id="railList"></ul>
+				</aside>
+				<div id="panes">
+					<div id="editor"></div>
+					<div id="diffWrap" hidden>
+						<div id="diffHead">
+							<span class="side base"></span>
+							<span class="side head"></span>
+						</div>
+						<div id="diff"></div>
+					</div>
+				</div>
+			</div>
+			<div id="log"></div>
+		</div>
+		<div id="palette" hidden>
+			<div id="paletteField">
+				<svg class="mag" viewBox="0 0 20 20" aria-hidden="true">
+					<circle cx="8.5" cy="8.5" r="6" fill="none" stroke="currentColor" stroke-width="2" />
+					<path d="M13 13l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+				</svg>
+				<input id="paletteInput" placeholder="Open Quickly" autocomplete="off" spellcheck="false" />
+				<button id="paletteClear" type="button" aria-label="Clear">×</button>
+				<span id="paletteLang"></span>
+			</div>
+			<ul id="paletteList"></ul>
+			<div id="paletteEmpty" hidden>No matches</div>
+		</div>
+		<script type="module" src="/src/main.ts"></script>
+	</body>
+</html>

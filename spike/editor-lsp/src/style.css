@@ -1,0 +1,672 @@
+:root {
+	color-scheme: dark;
+	--bg: #0d1117;
+	--fg: #e6edf3;
+	--dim: #7d8590;
+	--acc: #4493f8;
+	--line: #30363d;
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body,
+#app {
+	height: 100%;
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	font:
+		12px/1.5 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+#app {
+	display: grid;
+	grid-template-rows: 34px 1fr 150px;
+}
+/* The Changes rail beside the editor. In the app this list already exists in
+   the inspector rail; here it sits on the left so it does not fight the
+   minimap. Where it finally lives is the real feature's call. */
+#body {
+	display: grid;
+	grid-template-columns: 272px 1fr;
+	min-height: 0;
+}
+#rail {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	border-right: 1px solid var(--line);
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#railHead {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 7px 10px;
+	border-bottom: 1px solid var(--line);
+	font-size: 11px;
+}
+#railBase {
+	color: rgba(235, 235, 245, 0.85);
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+#railStat {
+	margin-left: auto;
+	flex: none;
+	color: var(--dim);
+	font-variant-numeric: tabular-nums;
+}
+#railList {
+	list-style: none;
+	margin: 0;
+	padding: 4px 0 12px;
+	overflow: auto;
+	min-height: 0;
+}
+#railList .dir {
+	padding: 6px 10px 2px;
+	color: var(--dim);
+	font-size: 10px;
+	letter-spacing: 0.03em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	direction: rtl;
+	text-align: left;
+}
+#railList .f {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 10px 3px 20px;
+	cursor: pointer;
+	font-size: 12px;
+	color: rgba(235, 235, 245, 0.82);
+	white-space: nowrap;
+}
+#railList .f:hover {
+	background: rgba(255, 255, 255, 0.05);
+}
+#railList .f.cur {
+	background: #2f6ee0;
+	color: #fff;
+}
+#railList .f .n {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+/* +N -M, right-aligned and tabular so the columns line up down the list. */
+#railList .f .c {
+	margin-left: auto;
+	flex: none;
+	font-variant-numeric: tabular-nums;
+	font-size: 11px;
+}
+#railList .f .c .a {
+	color: #7fd8a0;
+}
+#railList .f .c .d {
+	color: #e88f8f;
+	margin-left: 5px;
+}
+#railList .f.cur .c .a,
+#railList .f.cur .c .d {
+	color: rgba(255, 255, 255, 0.88);
+}
+/* A dot for a file that also has uncommitted work in it, so the two levels stay
+   distinguishable in the list as well as in the gutter. */
+#railList .f .dot {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #4d8dff;
+}
+#bar {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--line);
+}
+#title {
+	font-weight: 600;
+}
+#hint,
+#stats {
+	color: var(--dim);
+}
+#stats {
+	margin-left: auto;
+}
+/* The revert popover is absolutely positioned inside this box, so it has to be
+   a positioning context — without this the popover resolves against <body> and
+   lands a header's height off. */
+#editor {
+	min-height: 0;
+	position: relative;
+}
+#log {
+	overflow: auto;
+	border-top: 1px solid var(--line);
+	padding: 6px 12px;
+	color: var(--dim);
+	white-space: pre;
+}
+#log div:first-child {
+	color: var(--acc);
+}
+
+/* ---------------------------------------------------------------------------
+   Open Quickly, following Xcode's: a translucent rounded panel, a big search
+   field with a magnifier and a clear button, and two-line rows — a document
+   icon tinted by file type, the name with matched characters in bold, and a
+   "›"-separated breadcrumb of the containing folders underneath.
+   Everything here is in the system UI face, not the monospace face the rest of
+   this throwaway page uses, because that is what Xcode shows.
+--------------------------------------------------------------------------- */
+#palette {
+	position: fixed;
+	inset: 72px 0 auto 0;
+	margin: 0 auto;
+	width: min(900px, 94vw);
+	background: rgba(46, 46, 51, 0.86);
+	-webkit-backdrop-filter: blur(28px) saturate(180%);
+	backdrop-filter: blur(28px) saturate(180%);
+	border: 0.5px solid rgba(255, 255, 255, 0.16);
+	border-radius: 14px;
+	box-shadow:
+		0 32px 80px rgba(0, 0, 0, 0.62),
+		0 0 0 0.5px rgba(0, 0, 0, 0.5);
+	overflow: hidden;
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#paletteField {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 16px;
+	border-bottom: 0.5px solid rgba(255, 255, 255, 0.13);
+}
+#paletteField .mag {
+	width: 21px;
+	height: 21px;
+	flex: none;
+	color: rgba(235, 235, 245, 0.62);
+}
+#paletteInput {
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	font: 400 21px/1.25 inherit;
+	letter-spacing: -0.01em;
+	background: transparent;
+	color: #fff;
+	border: 0;
+	outline: none;
+	caret-color: #fff;
+}
+#paletteInput::placeholder {
+	color: rgba(235, 235, 245, 0.35);
+}
+#paletteClear {
+	flex: none;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: rgba(235, 235, 245, 0.28);
+	color: rgba(28, 28, 30, 0.9);
+	font: 700 15px/18px inherit;
+	cursor: pointer;
+}
+#paletteClear:hover {
+	background: rgba(235, 235, 245, 0.42);
+}
+#paletteLang {
+	flex: none;
+	font: 500 12px/1 inherit;
+	color: rgba(235, 235, 245, 0.5);
+	padding: 4px 8px;
+	border-radius: 5px;
+	background: rgba(255, 255, 255, 0.08);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+#paletteList {
+	list-style: none;
+	margin: 0;
+	padding: 6px;
+	max-height: 58vh;
+	overflow: auto;
+}
+#paletteList::-webkit-scrollbar {
+	width: 11px;
+}
+#paletteList::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.22);
+	border-radius: 6px;
+	border: 3px solid transparent;
+	background-clip: content-box;
+}
+#paletteList li {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 7px 10px;
+	border-radius: 7px;
+	cursor: pointer;
+	min-width: 0;
+}
+#paletteList li.sel {
+	background: #2f6ee0;
+}
+#paletteList li .icon {
+	flex: none;
+}
+#paletteList li svg.icon {
+	width: 26px;
+	height: 32px;
+}
+.symicon {
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
+	background: #7c7cff;
+	color: #fff;
+	display: grid;
+	place-items: center;
+	font: 700 13px/1 inherit;
+}
+li.sel .symicon {
+	background: rgba(255, 255, 255, 0.9);
+	color: #2f6ee0;
+}
+.rowtext {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	min-width: 0;
+}
+.l {
+	font: 400 16px/1.2 inherit;
+	color: rgba(235, 235, 245, 0.72);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.l b {
+	font-weight: 700;
+	color: #fff;
+}
+li.sel .l {
+	color: rgba(255, 255, 255, 0.86);
+}
+li.sel .l b {
+	color: #fff;
+}
+.crumbs {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	overflow: hidden;
+	font: 400 13px/1.2 inherit;
+	color: rgba(235, 235, 245, 0.55);
+	white-space: nowrap;
+}
+/* Truncate the trail as a whole, never per segment — a row of
+   "NterA... > Promotion..." is unreadable. breadcrumb() already keeps only the
+   last few folders, so plain overflow is enough and the order stays readable. */
+.crumbs span {
+	flex: none;
+}
+.crumbs .loc {
+	color: rgba(235, 235, 245, 0.42);
+}
+li.sel .crumbs .loc {
+	color: rgba(255, 255, 255, 0.7);
+}
+.crumbs i {
+	font-style: normal;
+	color: rgba(235, 235, 245, 0.35);
+}
+li.sel .crumbs,
+li.sel .crumbs i {
+	color: rgba(255, 255, 255, 0.82);
+}
+.crumbs .target {
+	flex: none;
+	width: 15px;
+	height: 15px;
+	border-radius: 3.5px;
+	background: #2f6ee0;
+	color: #fff;
+	display: grid;
+	place-items: center;
+	font-size: 8px;
+	line-height: 1;
+}
+li.sel .crumbs .target {
+	background: rgba(255, 255, 255, 0.92);
+	color: #2f6ee0;
+}
+#paletteEmpty {
+	padding: 18px 16px 22px;
+	text-align: center;
+	font: 400 14px/1 inherit;
+	color: rgba(235, 235, 245, 0.45);
+}
+
+/* Monaco draws the minimap's MARK section headers itself; see the note in
+   main.ts. Nothing to style here — the size knobs are editor options. */
+
+/* ---------------------------------------------------------------------------
+   Uncommitted-change bars, Xcode style: a bar in the gutter beside every line
+   that differs from HEAD, and a popover on click offering to discard it.
+   Colours are the app's own tokens (DiffRows.tsx:12) rather than raw Xcode
+   blue: added = success green, modified = accent blue, removed = error red.
+--------------------------------------------------------------------------- */
+.chgbar {
+	width: 3px !important;
+	margin-left: 3px;
+	border-radius: 1px;
+	cursor: pointer;
+}
+.chgbar.chg-added {
+	background: #7fd8a0;
+}
+.chgbar.chg-modified {
+	background: #4d8dff;
+}
+/* A deletion has no line of its own, so it reads as a wedge on the boundary
+   rather than a bar spanning lines that are still there. */
+.chgbar.chg-removed {
+	background: linear-gradient(#e88f8f, rgba(232, 143, 143, 0));
+}
+.chgbar:hover {
+	width: 5px !important;
+	margin-left: 2px;
+}
+
+#changes {
+	margin-left: auto;
+	color: var(--dim);
+}
+#changes.dirty {
+	color: #4d8dff;
+}
+#changes.dirty::before {
+	content: "●";
+	margin-right: 5px;
+	font-size: 9px;
+	vertical-align: 1px;
+}
+#stats {
+	margin-left: 16px;
+}
+
+#revertBox {
+	position: absolute;
+	left: 56px;
+	z-index: 8;
+	width: 340px;
+	padding: 10px 12px 10px;
+	background: rgba(46, 46, 51, 0.94);
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	backdrop-filter: blur(24px) saturate(180%);
+	border: 0.5px solid rgba(255, 255, 255, 0.16);
+	border-radius: 10px;
+	box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#revertBox .rtitle {
+	font-size: 12px;
+	font-weight: 600;
+	color: rgba(235, 235, 245, 0.9);
+	margin-bottom: 2px;
+}
+#revertBox .rwhat {
+	font-size: 11px;
+	line-height: 1.45;
+	color: rgba(235, 235, 245, 0.6);
+	margin-bottom: 8px;
+}
+/* What discarding would put back — never make someone guess before they agree. */
+#revertBox .rprev {
+	margin: 0 0 9px;
+	padding: 7px 8px;
+	max-height: 132px;
+	overflow: auto;
+	background: rgba(0, 0, 0, 0.32);
+	border-radius: 6px;
+	font:
+		11px/1.45 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+	color: rgba(235, 235, 245, 0.72);
+	white-space: pre;
+}
+#revertBox .rrow {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+#revertBox button {
+	padding: 4px 12px;
+	border: 0.5px solid rgba(255, 255, 255, 0.18);
+	border-radius: 6px;
+	background: rgba(255, 255, 255, 0.1);
+	color: rgba(235, 235, 245, 0.9);
+	font: 500 12px/1.4 inherit;
+	cursor: pointer;
+}
+#revertBox button:hover {
+	background: rgba(255, 255, 255, 0.16);
+}
+#revertBox .rdiscard {
+	background: #c0392b;
+	border-color: transparent;
+	color: #fff;
+}
+#revertBox .rdiscard:hover {
+	background: #d0483a;
+}
+
+/* Two gutter lanes. Outer (next to the line number) = what this BRANCH changed
+   against its target; inner (next to the code) = what is not committed yet.
+   The outer lane is deliberately quieter: on a branch under review nearly every
+   line is "changed", so at full strength it would drown the uncommitted signal
+   it sits beside. */
+/* The branch lane is deliberately ONE neutral tone, not colour-coded by kind.
+   Its question is "is this line part of what my branch changed", and colouring
+   it green/blue/red put two same-coloured bars side by side that read as one
+   thick bar. Which kind it is lives in the rail's +N -M and in the diff view. */
+.brbar {
+	width: 2px !important;
+	margin-left: 0;
+	border-radius: 1px;
+	background: rgba(125, 133, 144, 0.75);
+}
+.chgbar {
+	margin-left: 8px;
+}
+#railStat .a {
+	color: #7fd8a0;
+}
+#railStat .d {
+	color: #e88f8f;
+	margin-left: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Two modes, the same pair the Files tab already offers:
+     Browse   — a normal editor. The whole project in a tree, open and edit.
+     Changes  — this branch against its target branch, as a diff.
+   The app's segmented control is the precedent; this mirrors it.
+--------------------------------------------------------------------------- */
+#modes {
+	display: flex;
+	gap: 2px;
+	padding: 6px;
+	border-bottom: 1px solid var(--line);
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#modes button {
+	flex: 1;
+	padding: 4px 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: rgba(235, 235, 245, 0.62);
+	font: 500 11px/1.5 inherit;
+	cursor: pointer;
+}
+#modes button:hover {
+	background: rgba(255, 255, 255, 0.06);
+	color: rgba(235, 235, 245, 0.85);
+}
+#modes button[aria-selected="true"] {
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
+#panes {
+	position: relative;
+	min-height: 0;
+	display: grid;
+}
+#panes > * {
+	min-height: 0;
+	grid-area: 1 / 1;
+}
+/* `display: flex/grid` beats the [hidden] attribute, so say it explicitly. */
+#diff[hidden],
+#editor[hidden],
+#railHead[hidden] {
+	display: none;
+}
+
+/* The Browse tree. Directories collapse; the row for the open file stays lit so
+   you can see where you are after a ⌘click has thrown you across the project. */
+#railList .node {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 10px 2px 0;
+	cursor: pointer;
+	font-size: 12px;
+	color: rgba(235, 235, 245, 0.82);
+	white-space: nowrap;
+}
+#railList .node:hover {
+	background: rgba(255, 255, 255, 0.05);
+}
+#railList .node.cur {
+	background: #2f6ee0;
+	color: #fff;
+}
+#railList .node .tw {
+	flex: none;
+	width: 12px;
+	text-align: center;
+	color: var(--dim);
+	font-size: 9px;
+}
+#railList .node.cur .tw {
+	color: rgba(255, 255, 255, 0.8);
+}
+#railList .node .nm {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+#railList .node.d .nm {
+	color: rgba(235, 235, 245, 0.92);
+}
+#railList .empty {
+	padding: 16px 12px;
+	color: var(--dim);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+/* Monaco's diff editor does both layouts; this just exposes the switch. */
+#diffLayout {
+	flex: none;
+	margin-left: 6px;
+	padding: 1px 5px;
+	border: 0.5px solid rgba(255, 255, 255, 0.16);
+	border-radius: 4px;
+	background: transparent;
+	color: rgba(235, 235, 245, 0.6);
+	font: 11px/1.3 inherit;
+	cursor: pointer;
+}
+#diffLayout:hover {
+	background: rgba(255, 255, 255, 0.08);
+	color: #fff;
+}
+#diffLayout[aria-pressed="true"] {
+	background: rgba(255, 255, 255, 0.14);
+	color: #fff;
+}
+
+/* An unsaved buffer says so, the way every editor does. */
+#title.dirty::after {
+	content: "●";
+	margin-left: 7px;
+	color: var(--acc);
+	font-size: 10px;
+	vertical-align: 1px;
+}
+
+/* Which side of the diff is which. A file added on this branch has an empty
+   original pane, which is a large blank target that invites a click and then
+   ignores it — so both halves say what they are. */
+#diffWrap {
+	display: grid;
+	grid-template-rows: 22px 1fr;
+	min-height: 0;
+}
+#diffWrap[hidden] {
+	display: none;
+}
+#diffHead {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	border-bottom: 1px solid var(--line);
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#diffHead .side {
+	padding: 3px 10px;
+	font-size: 10px;
+	letter-spacing: 0.03em;
+	color: var(--dim);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+#diffHead .base {
+	border-right: 1px solid var(--line);
+}
+#diffHead .head {
+	color: rgba(235, 235, 245, 0.85);
+}
+/* Inline mode has one column, so the two labels would lie about the layout. */
+#diffHead.inline {
+	grid-template-columns: 1fr;
+}
+#diffHead.inline .base {
+	display: none;
+}
+#diff {
+	min-height: 0;
+}
