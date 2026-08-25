@@ -4546,6 +4546,62 @@ paths:
       summary: Return a workspace file's content and per-line uncommitted-change map
       tags:
       - sessions
+    put:
+      operationId: writeWorkspaceFile
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriteWorkspaceFileRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteWorkspaceFileResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Replace a workspace file's content (confined, hash-preconditioned)
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/workspace/file-diff:
     get:
       operationId: workspaceFileDiff
@@ -8803,6 +8859,8 @@ components:
           items:
             $ref: '#/components/schemas/LineChangeDTO'
           type: array
+        contentHash:
+          type: string
         lines:
           items:
             $ref: '#/components/schemas/DiffContextLineDTO'
@@ -8811,6 +8869,8 @@ components:
           type: string
         reason:
           type: string
+        trailingNewline:
+          type: boolean
         truncated:
           type: boolean
       required:
@@ -8819,6 +8879,7 @@ components:
       - lines
       - changedLines
       - truncated
+      - trailingNewline
       type: object
     WorkspaceRepo:
       properties:
@@ -8844,6 +8905,43 @@ components:
       required:
       - ref
       - candidates
+      type: object
+    WriteWorkspaceFileRequest:
+      properties:
+        baseHash:
+          description: The contentHash the file was read with. A mismatch is a 409
+            conflict; omitting it is a 400.
+          type: string
+        content:
+          description: The file's full new content, written verbatim.
+          type: string
+        path:
+          description: 'Workspace-relative path of the file to write. Absolute and
+            ~/ paths are rejected: the write route is confined to the session''s workspace
+            even though the read route is not.'
+          type: string
+      required:
+      - path
+      - content
+      - baseHash
+      type: object
+    WriteWorkspaceFileResponse:
+      properties:
+        changedLines:
+          items:
+            $ref: '#/components/schemas/LineChangeDTO'
+          type: array
+        contentHash:
+          type: string
+        path:
+          type: string
+        size:
+          type: integer
+      required:
+      - path
+      - contentHash
+      - size
+      - changedLines
       type: object
 tags:
 - description: Supported and locally runnable agent adapters

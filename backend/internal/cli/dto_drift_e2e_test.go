@@ -216,6 +216,10 @@ func (f *fakeSessionService) ReadWorkspaceFile(context.Context, domain.SessionID
 	return sessionsvc.WorkspaceFileResult{}, nil
 }
 
+func (f *fakeSessionService) WriteWorkspaceFile(context.Context, domain.SessionID, sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error) {
+	return sessionsvc.WriteWorkspaceFileResult{}, nil
+}
+
 func (f *fakeSessionService) WorkspaceChanges(context.Context, domain.SessionID) (sessionsvc.WorkspaceChangesResult, error) {
 	return sessionsvc.WorkspaceChangesResult{}, nil
 }

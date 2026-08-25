@@ -121,6 +121,9 @@ type SessionService interface {
 	// ReadWorkspaceFile returns a file's content plus its per-line
 	// uncommitted-change map (working tree vs HEAD), with the same shape split.
 	ReadWorkspaceFile(ctx context.Context, id domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error)
+	// WriteWorkspaceFile replaces one workspace file's content, confined to the
+	// session's workspace and preconditioned on the hash the read handed out.
+	WriteWorkspaceFile(ctx context.Context, id domain.SessionID, in sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error)
 	WorkspaceChanges(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceChangesResult, error)
 	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, path string) (sessionsvc.DiffContextResult, error)
 }
@@ -163,6 +166,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Get("/sessions/{sessionId}/workspace/resolve", c.resolveWorkspaceRef)
 	r.Get("/sessions/{sessionId}/workspace/file", c.readWorkspaceFile)
+	r.Put("/sessions/{sessionId}/workspace/file", c.writeWorkspaceFile)
 	r.Get("/sessions/{sessionId}/workspace/changes", c.workspaceChanges)
 	r.Get("/sessions/{sessionId}/workspace/file-diff", c.workspaceFileDiff)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
@@ -664,6 +668,32 @@ func (c *SessionsController) readWorkspaceFile(w http.ResponseWriter, r *http.Re
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, workspaceFileResponse(res))
+}
+
+// writeWorkspaceFile replaces one workspace file's content. Unlike the read
+// route it is confined to the session's workspace, and it requires the
+// contentHash the read handed out - a stale hash is a 409 rather than a
+// clobber, which matters because agents write in the same worktree.
+func (c *SessionsController) writeWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/workspace/file")
+		return
+	}
+	var in WriteWorkspaceFileRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	res, err := c.Svc.WriteWorkspaceFile(r.Context(), sessionID(r), sessionsvc.WriteWorkspaceFileInput{
+		Path:     in.Path,
+		Content:  in.Content,
+		BaseHash: in.BaseHash,
+	})
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, writeWorkspaceFileResponse(res))
 }
 
 // workspaceChanges lists the files differing between the session's branch and
