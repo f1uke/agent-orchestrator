@@ -62,6 +62,9 @@ type fakeSessionService struct {
 	resolveRef            string
 	workspaceFile         sessionsvc.WorkspaceFileResult
 	workspaceFilePath     string
+	workspaceWrite        sessionsvc.WriteWorkspaceFileInput
+	workspaceWriteResult  sessionsvc.WriteWorkspaceFileResult
+	workspaceWriteErr     error
 	workspaceChanges      sessionsvc.WorkspaceChangesResult
 	workspaceFileDiff     sessionsvc.DiffContextResult
 	workspaceFileDiffPath string
@@ -474,6 +477,11 @@ func (f *fakeSessionService) ResolveWorkspaceRef(_ context.Context, _ domain.Ses
 func (f *fakeSessionService) ReadWorkspaceFile(_ context.Context, _ domain.SessionID, path string) (sessionsvc.WorkspaceFileResult, error) {
 	f.workspaceFilePath = path
 	return f.workspaceFile, nil
+}
+
+func (f *fakeSessionService) WriteWorkspaceFile(_ context.Context, _ domain.SessionID, in sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error) {
+	f.workspaceWrite = in
+	return f.workspaceWriteResult, f.workspaceWriteErr
 }
 
 func (f *fakeSessionService) WorkspaceChanges(_ context.Context, _ domain.SessionID) (sessionsvc.WorkspaceChangesResult, error) {
@@ -1870,6 +1878,118 @@ func TestSessionsAPI_ReadWorkspaceFile(t *testing.T) {
 		!strings.Contains(string(body), `"text":"package x"`) ||
 		!strings.Contains(string(body), `"kind":"modified"`) {
 		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestSessionsAPI_WriteWorkspaceFile(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceWriteResult = sessionsvc.WriteWorkspaceFileResult{
+		Path: "a.go", ContentHash: "sha256:beef", Size: 10,
+		ChangedLines: []diffhunk.LineChange{{Start: 1, End: 1, Kind: diffhunk.ChangeModified}},
+	}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+		`{"path":"a.go","content":"package x\n","baseHash":"sha256:cafe"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceWrite.Path != "a.go" || svc.workspaceWrite.Content != "package x\n" || svc.workspaceWrite.BaseHash != "sha256:cafe" {
+		t.Fatalf("service got %+v", svc.workspaceWrite)
+	}
+	for _, want := range []string{`"path":"a.go"`, `"contentHash":"sha256:beef"`, `"size":10`, `"kind":"modified"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s:\n%s", want, body)
+		}
+	}
+}
+
+// The three refusals the editor has to be able to explain must reach the client
+// as their own status and code, not flattened into one 400.
+func TestSessionsAPI_WriteWorkspaceFileErrorsKeepTheirCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		want   []string
+	}{
+		{
+			name:   "conflict",
+			err:    apierr.Conflict("WORKSPACE_FILE_CONFLICT", "changed on disk", map[string]any{"currentHash": "sha256:new"}),
+			status: http.StatusConflict,
+			want:   []string{`"code":"WORKSPACE_FILE_CONFLICT"`, `"currentHash":"sha256:new"`},
+		},
+		{
+			name:   "truncated",
+			err:    apierr.Conflict("WORKSPACE_FILE_NOT_EDITABLE", "truncated", map[string]any{"reason": "truncated"}),
+			status: http.StatusConflict,
+			want:   []string{`"code":"WORKSPACE_FILE_NOT_EDITABLE"`, `"reason":"truncated"`},
+		},
+		{
+			name:   "traversal",
+			err:    apierr.Invalid("WORKSPACE_FILE_PATH_INVALID", "outside the workspace", nil),
+			status: http.StatusBadRequest,
+			want:   []string{`"code":"WORKSPACE_FILE_PATH_INVALID"`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newFakeSessionService()
+			svc.workspaceWriteErr = tc.err
+			srv := newSessionTestServer(t, svc)
+
+			body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+				`{"path":"a.go","content":"x","baseHash":"sha256:old"}`)
+			if status != tc.status {
+				t.Fatalf("status %d, want %d: %s", status, tc.status, body)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(string(body), want) {
+					t.Fatalf("body missing %s:\n%s", want, body)
+				}
+			}
+		})
+	}
+}
+
+// An absent content key is refused rather than read as "". As a plain string
+// the two collapse and a caller that forgot the field empties the user's file
+// with a 200 - and baseHash cannot catch it, because the hash is still right.
+func TestSessionsAPI_WriteWorkspaceFileRequiresContent(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+		`{"path":"a.go","baseHash":"sha256:old"}`)
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":"WORKSPACE_FILE_CONTENT_REQUIRED"`) {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceWrite.Path != "" {
+		t.Fatalf("the service was reached with %+v; the refusal must happen first", svc.workspaceWrite)
+	}
+}
+
+// Explicitly emptying a file stays possible - the guard is on the KEY, not on
+// the value.
+func TestSessionsAPI_WriteWorkspaceFileAcceptsAnExplicitEmptyString(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+		`{"path":"a.go","content":"","baseHash":"sha256:old"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceWrite.Path != "a.go" || svc.workspaceWrite.Content != "" {
+		t.Fatalf("service got %+v", svc.workspaceWrite)
+	}
+}
+
+func TestSessionsAPI_WriteWorkspaceFileRejectsInvalidJSON(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file", "{not json")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":"INVALID_JSON"`) {
+		t.Fatalf("status %d: %s", status, body)
 	}
 }
 

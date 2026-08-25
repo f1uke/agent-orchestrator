@@ -1424,7 +1424,8 @@ export interface paths {
         };
         /** Return a workspace file's content and per-line uncommitted-change map */
         get: operations["readWorkspaceFile"];
-        put?: never;
+        /** Replace a workspace file's content (confined, hash-preconditioned) */
+        put: operations["writeWorkspaceFile"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3192,9 +3193,11 @@ export interface components {
         WorkspaceFileResponse: {
             available: boolean;
             changedLines: components["schemas"]["LineChangeDTO"][];
+            contentHash?: string;
             lines: components["schemas"]["DiffContextLineDTO"][];
             path: string;
             reason?: string;
+            trailingNewline: boolean;
             truncated: boolean;
         };
         WorkspaceRepo: {
@@ -3205,6 +3208,20 @@ export interface components {
         WorkspaceResolveResponse: {
             candidates: components["schemas"]["ControllersWorkspaceResolveCandidateDTO"][];
             ref: string;
+        };
+        WriteWorkspaceFileRequest: {
+            /** @description The contentHash the file was read with. A mismatch is a 409 conflict; omitting it is a 400. */
+            baseHash: string;
+            /** @description The file's full new content, written verbatim. Required: an absent key is a 400, so emptying a file must be spelled as an explicit empty string. */
+            content: null | string;
+            /** @description Workspace-relative path of the file to write. Absolute and ~/ paths are rejected: the write route is confined to the session's workspace even though the read route is not. */
+            path: string;
+        };
+        WriteWorkspaceFileResponse: {
+            changedLines: components["schemas"]["LineChangeDTO"][];
+            contentHash: string;
+            path: string;
+            size: number;
         };
     };
     responses: never;
@@ -8659,6 +8676,78 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    writeWorkspaceFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WriteWorkspaceFileRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteWorkspaceFileResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

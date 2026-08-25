@@ -1176,6 +1176,43 @@ type WorkspaceFileResponse struct {
 	Reason       string          `json:"reason,omitempty"`
 	ChangedLines []LineChangeDTO `json:"changedLines"`
 	Truncated    bool            `json:"truncated"`
+	// ContentHash ("sha256:<hex>") identifies the exact bytes read. Hand it back
+	// as baseHash to save the file; the write refuses without it. Empty on an
+	// available=false response.
+	ContentHash string `json:"contentHash,omitempty"`
+	// TrailingNewline reports whether the file ended in a newline. Lines cannot
+	// express it, so without this a save cannot reproduce the file's exact bytes
+	// and would silently drop the last newline.
+	TrailingNewline bool `json:"trailingNewline"`
+}
+
+// WriteWorkspaceFileRequest is the body of
+// PUT /api/v1/sessions/{sessionId}/workspace/file.
+type WriteWorkspaceFileRequest struct {
+	Path string `json:"path" description:"Workspace-relative path of the file to write. Absolute and ~/ paths are rejected: the write route is confined to the session's workspace even though the read route is not."`
+	// Content is written verbatim - the server performs no EOL translation and
+	// adds no trailing newline.
+	//
+	// It is a POINTER so an ABSENT key is distinguishable from an empty string.
+	// As a plain string the two collapse, and a client that forgot the field -
+	// a TypeScript caller stringifying an `undefined` while the editor is still
+	// initialising - would empty the user's file and get a 200 for it. baseHash
+	// cannot catch that: the hash is still correct. Emptying a file has to be
+	// spelled out as "content": "".
+	Content *string `json:"content" description:"The file's full new content, written verbatim. Required: an absent key is a 400, so emptying a file must be spelled as an explicit empty string."`
+	// BaseHash is required. There is deliberately no way to force a write.
+	BaseHash string `json:"baseHash" description:"The contentHash the file was read with. A mismatch is a 409 conflict; omitting it is a 400."`
+}
+
+// WriteWorkspaceFileResponse is the body of a successful write: the new
+// precondition token for the caller's next save, plus the refreshed
+// uncommitted-change map so the gutter updates without a second read.
+type WriteWorkspaceFileResponse struct {
+	Path        string `json:"path"`
+	ContentHash string `json:"contentHash"`
+	Size        int    `json:"size"`
+
+	ChangedLines []LineChangeDTO `json:"changedLines"`
 }
 
 // LineChangeDTO is one uncommitted-change gutter marker in new-side line
@@ -1277,12 +1314,28 @@ func workspaceFileResponse(res sessionsvc.WorkspaceFileResult) WorkspaceFileResp
 		changed = append(changed, LineChangeDTO{Start: c.Start, End: c.End, Kind: string(c.Kind)})
 	}
 	return WorkspaceFileResponse{
-		Available:    res.Available,
+		Available:       res.Available,
+		ContentHash:     res.ContentHash,
+		TrailingNewline: res.TrailingNewline,
+		Path:            res.Path,
+		Lines:           lines,
+		Reason:          res.Reason,
+		ChangedLines:    changed,
+		Truncated:       res.Truncated,
+	}
+}
+
+// writeWorkspaceFileResponse maps the service write result to the wire DTO.
+func writeWorkspaceFileResponse(res sessionsvc.WriteWorkspaceFileResult) WriteWorkspaceFileResponse {
+	changed := make([]LineChangeDTO, 0, len(res.ChangedLines))
+	for _, c := range res.ChangedLines {
+		changed = append(changed, LineChangeDTO{Start: c.Start, End: c.End, Kind: string(c.Kind)})
+	}
+	return WriteWorkspaceFileResponse{
 		Path:         res.Path,
-		Lines:        lines,
-		Reason:       res.Reason,
+		ContentHash:  res.ContentHash,
+		Size:         res.Size,
 		ChangedLines: changed,
-		Truncated:    res.Truncated,
 	}
 }
 

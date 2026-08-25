@@ -28,6 +28,11 @@ const maxWorkspaceFileBytes = 5 << 20 // 5 MiB
 const (
 	UnavailableTooLarge = "too_large"
 	UnavailableBinary   = "binary"
+	// UnavailableTruncated is not a read reason - a truncated read still
+	// returns content, with Truncated set. It names that state where a write
+	// has to REFUSE it, so the three "this file cannot be round-tripped"
+	// verdicts share one vocabulary.
+	UnavailableTruncated = "truncated"
 )
 
 // WorkspaceFileResult is a file's content plus the per-line map of its
@@ -43,6 +48,16 @@ type WorkspaceFileResult struct {
 	// Reason explains an Available=false result (UnavailableTooLarge,
 	// UnavailableBinary); empty when the file is displayable.
 	Reason string
+	// ContentHash identifies the exact bytes on disk ("sha256:<hex>"). It is
+	// the token WriteWorkspaceFile takes as its precondition, so a save can
+	// only land on the file the caller actually read. Empty when the file was
+	// not read (an Available=false result).
+	ContentHash string
+	// TrailingNewline reports whether the file ended in a newline. Lines cannot
+	// express it - they are split after the final "\n" is trimmed - so without
+	// this a client cannot reconstruct the file's exact bytes, and a save would
+	// silently drop the last newline.
+	TrailingNewline bool
 }
 
 // refTarget classifies a terminal file reference by SHAPE and, for the two
@@ -406,6 +421,8 @@ func readFileForViewer(ctx context.Context, abs, display string) (WorkspaceFileR
 		return WorkspaceFileResult{Path: display, Reason: UnavailableBinary}, nil
 	}
 	res := workspaceFileContent(display, string(data))
+	res.ContentHash = contentHash(data)
+	res.TrailingNewline = strings.HasSuffix(string(data), "\n")
 	res.ChangedLines = uncommittedChanges(ctx, abs, len(res.Lines))
 	return res, nil
 }
