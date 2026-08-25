@@ -68,7 +68,7 @@ const log = (s: string) => {
 	logEl.prepend(line);
 };
 
-type Meta = { root: string; lang: "go" | "swift"; files: string[]; indexMs: number };
+type Meta = { root: string; lang: "go" | "swift"; files: string[]; indexMs: number; languages: string[] };
 const meta: Meta = await (await fetch(`${BRIDGE}/files`)).json();
 log(`file index: ${meta.files.length} files in ${meta.indexMs}ms (${meta.lang} @ ${meta.root})`);
 
@@ -172,10 +172,39 @@ const editor = monaco.editor.create(el("editor"), {
 });
 log(`monaco editor created`);
 
-// ---- LSP ------------------------------------------------------------------
+// ---- LSP: one client per LANGUAGE ----------------------------------------
+// gopls has no idea what a .swift file is. A single server for the whole
+// workspace only works while the workspace is single-language — the moment it
+// is not, every request for the other language goes to the wrong process and
+// fails quietly. So: a client per language, connected the first time a file of
+// that language is opened, and never before.
 const rootUri = "file://" + meta.root;
-const lsp = new Lsp("ws://127.0.0.1:8917/lsp", rootUri, log);
-await lsp.connect();
+const clients = new Map<string, Lsp>();
+const noServer = new Set<string>();
+
+async function lspFor(langId: string): Promise<Lsp | null> {
+	if (!meta.languages.includes(langId)) return null; // no server configured
+	if (noServer.has(langId)) return null;
+	const existing = clients.get(langId);
+	if (existing) return existing;
+	const client = new Lsp(`ws://127.0.0.1:8917/lsp?lang=${encodeURIComponent(langId)}`, rootUri, log);
+	clients.set(langId, client);
+	const t = performance.now();
+	try {
+		await client.connect();
+	} catch {
+		clients.delete(langId);
+		noServer.add(langId);
+		log(`no language server for "${langId}"`);
+		return null;
+	}
+	log(`language server for "${langId}" ready in ${(performance.now() - t).toFixed(0)}ms`);
+	registerProviders(langId, client);
+	return client;
+}
+
+// The client that owns the file currently in front of us.
+const lspForModel = (uri: string) => clients.get(langFor(uri)) ?? null;
 
 const opened = new Set<string>();
 let currentUri = "";
@@ -198,7 +227,10 @@ async function modelFor(rel: string, abs?: string) {
 	if (!dirtyBuffers.has(f.uri) && model.getValue() !== f.text) model.setValue(f.text);
 	if (!opened.has(f.uri)) {
 		opened.add(f.uri);
-		lsp.didOpen(f.uri, langFor(f.uri), model.getValue());
+		// This is the moment a language server for THIS language starts — not at
+		// app launch, and not for languages nobody opened.
+		const client = await lspFor(langFor(f.uri));
+		client?.didOpen(f.uri, langFor(f.uri), model.getValue());
 	}
 	return { f, model };
 }
@@ -230,16 +262,24 @@ function langFor(uri: string): string {
 // ---- 3. Cmd+click → textDocument/definition -------------------------------
 // Monaco routes cmd+click through its own definition provider, so registering
 // one is all it takes — no gesture handling of our own.
-for (const l of langs) {
-	monaco.languages.registerDefinitionProvider(l, {
+const providersFor = new Set<string>();
+
+function registerProviders(langId: string, client: Lsp) {
+	if (providersFor.has(langId)) return;
+	providersFor.add(langId);
+
+	// ---- 3. Cmd+click -> textDocument/definition --------------------------
+	// Monaco routes cmd+click through its own definition provider, so
+	// registering one is all it takes — no gesture handling of our own.
+	monaco.languages.registerDefinitionProvider(langId, {
 		provideDefinition: async (model, position) => {
-			const r = await lsp.definition(model.uri.toString(), position.lineNumber - 1, position.column - 1);
+			const r = await client.definition(model.uri.toString(), position.lineNumber - 1, position.column - 1);
 			const locs: any[] = Array.isArray(r.result) ? r.result : r.result ? [r.result] : [];
 			if (!firstDefinitionAt && locs.length) {
 				firstDefinitionAt = performance.now();
 				log(`FIRST WORKING definition at ${(firstDefinitionAt - t0).toFixed(0)}ms from page load`);
 			}
-			log(`definition → ${locs.length} hit(s) in ${r.elapsedMs.toFixed(0)}ms`);
+			log(`definition (${langId}) → ${locs.length} hit(s) in ${r.elapsedMs.toFixed(0)}ms`);
 			// A hit can live outside the workspace (Pods, SDK headers). Fetch it so
 			// Monaco has a model to reveal, then let Monaco do the navigation.
 			const out: monaco.languages.Location[] = [];
@@ -251,6 +291,7 @@ for (const l of langs) {
 					const abs = decodeURIComponent(uri.replace("file://", ""));
 					try {
 						const f = await (await fetch(`${BRIDGE}/open-external?abs=${encodeURIComponent(abs)}`)).json();
+						await ensureGrammar(langFor(uri));
 						monaco.editor.createModel(f.text, langFor(uri), mUri);
 					} catch {
 						continue;
@@ -269,69 +310,19 @@ for (const l of langs) {
 			return out;
 		},
 	});
-}
-// ---- keep the server's copy current -------------------------------------
-// Without this, completion answers about the file as it was when opened.
-const changeTimers = new Map<string, number>();
-monaco.editor.onDidCreateModel((model) => {
-	model.onDidChangeContent(() => {
-		const uri = model.uri.toString();
-		if (!opened.has(uri)) return;
-		if (!uri.startsWith("diff-base://")) {
-			dirtyBuffers.add(uri);
-			paintDirty();
-		}
-		clearTimeout(changeTimers.get(uri));
-		// Debounced: sourcekitd re-parses the whole primary file on every change,
-		// and on a 2 000-line Swift file that is not free.
-		changeTimers.set(uri, setTimeout(() => lsp.didChange(uri, model.getValue()), 60) as unknown as number);
-	});
-});
 
-// ---- 4. autocompletion → textDocument/completion --------------------------
-// Same server, same channel as ⌘click; Monaco's own suggest widget renders it.
-const LSP_KIND: Record<number, monaco.languages.CompletionItemKind> = {
-	1: monaco.languages.CompletionItemKind.Text,
-	2: monaco.languages.CompletionItemKind.Method,
-	3: monaco.languages.CompletionItemKind.Function,
-	4: monaco.languages.CompletionItemKind.Constructor,
-	5: monaco.languages.CompletionItemKind.Field,
-	6: monaco.languages.CompletionItemKind.Variable,
-	7: monaco.languages.CompletionItemKind.Class,
-	8: monaco.languages.CompletionItemKind.Interface,
-	9: monaco.languages.CompletionItemKind.Module,
-	10: monaco.languages.CompletionItemKind.Property,
-	11: monaco.languages.CompletionItemKind.Unit,
-	12: monaco.languages.CompletionItemKind.Value,
-	13: monaco.languages.CompletionItemKind.Enum,
-	14: monaco.languages.CompletionItemKind.Keyword,
-	15: monaco.languages.CompletionItemKind.Snippet,
-	16: monaco.languages.CompletionItemKind.Color,
-	17: monaco.languages.CompletionItemKind.File,
-	18: monaco.languages.CompletionItemKind.Reference,
-	19: monaco.languages.CompletionItemKind.Folder,
-	20: monaco.languages.CompletionItemKind.EnumMember,
-	21: monaco.languages.CompletionItemKind.Constant,
-	22: monaco.languages.CompletionItemKind.Struct,
-	23: monaco.languages.CompletionItemKind.Event,
-	24: monaco.languages.CompletionItemKind.Operator,
-	25: monaco.languages.CompletionItemKind.TypeParameter,
-};
-let lastCompletion = { ms: 0, n: 0 };
-for (const l of langs) {
-	monaco.languages.registerCompletionItemProvider(l, {
-		// "." covers member access in both languages; ":" is Swift's argument labels.
+	// ---- 4. autocompletion -> textDocument/completion ----------------------
+	monaco.languages.registerCompletionItemProvider(langId, {
 		triggerCharacters: [".", ":", "("],
 		provideCompletionItems: async (model, position, context) => {
-			// Flush any pending edit first, or the server completes on stale text.
 			const uri = model.uri.toString();
 			clearTimeout(changeTimers.get(uri));
-			lsp.didChange(uri, model.getValue());
-			const r = await lsp.completion(uri, position.lineNumber - 1, position.column - 1, context.triggerCharacter);
+			client.didChange(uri, model.getValue());
+			const r = await client.completion(uri, position.lineNumber - 1, position.column - 1, context.triggerCharacter);
 			const list = Array.isArray(r.result) ? r.result : (r.result?.items ?? []);
 			lastCompletion = { ms: Math.round(r.elapsedMs), n: list.length };
 			log(
-				`completion → ${list.length} item(s) in ${r.elapsedMs.toFixed(0)}ms${r.result?.isIncomplete ? " (incomplete)" : ""}`,
+				`completion (${langId}) → ${list.length} item(s) in ${r.elapsedMs.toFixed(0)}ms${r.result?.isIncomplete ? " (incomplete)" : ""}`,
 			);
 			const word = model.getWordUntilPosition(position);
 			const range = {
@@ -1060,7 +1051,14 @@ async function refresh() {
 		.slice(0, 40);
 	render(fileRows);
 	if (q.length < 2) return;
-	const r = await lsp.workspaceSymbol(q);
+	// Ask every language server that is actually running and merge — Open Quickly
+	// should not care which language a symbol came from.
+	const live = [...clients.values()];
+	const results = await Promise.all(live.map((c) => c.workspaceSymbol(q)));
+	const r = {
+		result: results.flatMap((x) => x.result ?? []),
+		elapsedMs: Math.max(0, ...results.map((x) => x.elapsedMs)),
+	};
 	if (mine !== seq) return;
 	// MEASURED PROBLEM, worth carrying into the real feature: on the iOS app the
 	// index store also holds symbols from DerivedData — generated asset symbols
@@ -1315,14 +1313,17 @@ setMode((localStorage.getItem("spike.mode") as Mode) ?? "browse");
 
 setInterval(async () => {
 	const s = await (await fetch(`${BRIDGE}/stats`)).json();
-	statsEl.textContent = `lsp pid ${s.pid} · up ${(s.upMs / 1000).toFixed(0)}s · ${s.files} files`;
+	// Say how many language servers are alive and which — the cost of a
+	// mixed-language session should be visible, not implied.
+	const running = (s.servers ?? []).map((x: any) => `${x.lang}:${x.pid}`).join(" ");
+	statsEl.textContent = `${running || "no language server yet"} · ${s.files} files`;
 }, 2000);
 
 // Exposed so the spike can be driven from the console / a test harness without
 // synthesising mouse gestures. Throwaway: production code would not do this.
 (window as any).__spike = {
 	editor,
-	lsp,
+	clientFor: (langId: string) => clients.get(langId) ?? null,
 	meta,
 	openPath,
 	async jump(rel: string, line: number) {
@@ -1330,10 +1331,13 @@ setInterval(async () => {
 	},
 	async defAt(line: number, column: number) {
 		const model = editor.getModel()!;
-		const r = await lsp.definition(model.uri.toString(), line - 1, column - 1);
+		const c = lspForModel(model.uri.toString());
+		if (!c) return { elapsedMs: 0, result: null, note: "no server for this language" };
+		const r = await c.definition(model.uri.toString(), line - 1, column - 1);
 		return { elapsedMs: r.elapsedMs, result: r.result };
 	},
-	timings: () => lsp.timings,
+	timings: () => [...clients.values()].flatMap((c) => c.timings),
+	clients: () => [...clients.keys()],
 	openDiff: (rel: string) => openDiff(rel),
 	diff: () => diffEditor,
 	monaco,
@@ -1343,8 +1347,10 @@ setInterval(async () => {
 	lastCompletion: () => lastCompletion,
 	async completeAt(line: number, column: number, trigger?: string) {
 		const model = editor.getModel()!;
-		lsp.didChange(model.uri.toString(), model.getValue());
-		const r = await lsp.completion(model.uri.toString(), line - 1, column - 1, trigger);
+		const c = lspForModel(model.uri.toString());
+		if (!c) return { elapsedMs: 0, count: 0, isIncomplete: false, sample: [], note: "no server for this language" };
+		c.didChange(model.uri.toString(), model.getValue());
+		const r = await c.completion(model.uri.toString(), line - 1, column - 1, trigger);
 		const list = Array.isArray(r.result) ? r.result : (r.result?.items ?? []);
 		return {
 			elapsedMs: Math.round(r.elapsedMs),

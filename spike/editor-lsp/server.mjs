@@ -11,6 +11,9 @@ import { pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 8917);
 const ROOT = process.env.LSP_ROOT ?? process.cwd();
+// LSP_LANG only decides which server is warmed at startup. Every server below is
+// reachable, and one is spawned per LANGUAGE the moment a file of that language
+// is first opened — see the routing on the WebSocket path.
 const LANG = process.env.LSP_LANG ?? "go";
 
 // AO hard rule: every cache a language server writes must land under ~/.ao.
@@ -32,15 +35,23 @@ const SERVERS = {
 	},
 	swift: {
 		cmd: "/usr/bin/sourcekit-lsp",
-		args: ["--scratch-path", path.join(AO, "sk-scratch"), "--generated-files-path", path.join(AO, "sk-generated")],
+		args: [
+			"--scratch-path",
+			path.join(AO, "sk-scratch"),
+			"--generated-files-path",
+			path.join(AO, "sk-generated"),
+			// A compile database kept OUTSIDE the checkout. sourcekit-lsp resolves
+			// this relative to the workspace root and `..` escapes it, which is what
+			// keeps AO from writing into a user's repo (proposal 6.2).
+			...(process.env.LSP_COMPILE_DB ? ["--compilation-db-search-path", process.env.LSP_COMPILE_DB] : []),
+		],
 		env: {},
 		exts: [".swift"],
 		languageId: () => "swift",
 	},
 };
 
-const cfg = SERVERS[LANG];
-if (!cfg) {
+if (!SERVERS[LANG]) {
 	console.error("unknown LSP_LANG", LANG);
 	process.exit(1);
 }
@@ -84,20 +95,51 @@ function buildFileIndex() {
 }
 
 // ---- language server child process ----
-let lsp = null;
-let lspStartedAt = 0;
-function startServer() {
-	lspStartedAt = Date.now();
-	lsp = spawn(cfg.cmd, cfg.args, { cwd: ROOT, env: { ...process.env, ...cfg.env }, stdio: ["pipe", "pipe", "pipe"] });
-	lsp.stderr.on("data", (d) => process.stderr.write(`[lsp] ${d}`));
-	lsp.on("exit", (c) => {
-		// Found by qa: without clearing the handle, `if (!lsp) startServer()` can
-		// never fire again. The renderer reconnects, sends `initialize` into a dead
-		// pipe, and hangs there forever with no error and no timeout.
-		console.log(`[lsp] exited ${c}`);
-		lsp = null;
+// One server PER LANGUAGE, spawned on first use. gopls has no idea what a
+// .swift file is, so routing by the file's language is not a nicety — sending a
+// Swift didOpen to gopls is simply wrong, and it fails quietly.
+const servers = new Map(); // langId -> { proc, clients:Set<ws>, buf, startedAt }
+
+function serverFor(langId) {
+	const cfg = SERVERS[langId];
+	if (!cfg) return null;
+	let entry = servers.get(langId);
+	if (entry?.proc) return entry;
+	const proc = spawn(cfg.cmd, cfg.args, {
+		cwd: ROOT,
+		env: { ...process.env, ...cfg.env },
+		stdio: ["pipe", "pipe", "pipe"],
 	});
-	console.log(`[lsp] spawned ${cfg.cmd} pid=${lsp.pid} root=${ROOT}`);
+	entry = { proc, clients: new Set(), buf: Buffer.alloc(0), startedAt: Date.now(), langId };
+	servers.set(langId, entry);
+	proc.stderr.on("data", (d) => process.stderr.write(`[${langId}] ${d}`));
+	proc.on("exit", (c) => {
+		// qa: clearing the handle is what lets the next connection start a fresh
+		// one. Leaving it set hangs the renderer at `initialize` with no error.
+		console.log(`[${langId}] exited ${c}`);
+		entry.proc = null;
+		servers.delete(langId);
+	});
+	proc.stdout.on("data", (d) => {
+		entry.buf = Buffer.concat([entry.buf, d]);
+		for (;;) {
+			const sep = entry.buf.indexOf("\r\n\r\n");
+			if (sep < 0) return;
+			const len = Number(/content-length:\s*(\d+)/i.exec(entry.buf.subarray(0, sep).toString("ascii"))?.[1] ?? -1);
+			if (len < 0 || entry.buf.length < sep + 4 + len) return;
+			const payload = entry.buf.subarray(sep + 4, sep + 4 + len).toString("utf8");
+			entry.buf = entry.buf.subarray(sep + 4 + len);
+			for (const ws of entry.clients) {
+				try {
+					ws.send(payload);
+				} catch {
+					/* client went away */
+				}
+			}
+		}
+	});
+	console.log(`[${langId}] spawned ${cfg.cmd} pid=${proc.pid} root=${ROOT}`);
+	return entry;
 }
 
 // ---- uncommitted changes -------------------------------------------------
@@ -245,7 +287,8 @@ const http = createServer((req, res) => {
 		res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
 		res.end(JSON.stringify(o));
 	};
-	if (url.pathname === "/files") return json({ root: ROOT, lang: LANG, files: fileIndex, indexMs: fileIndexMs });
+	if (url.pathname === "/files")
+		return json({ root: ROOT, lang: LANG, files: fileIndex, indexMs: fileIndexMs, languages: Object.keys(SERVERS) });
 	if (url.pathname === "/file") {
 		const rel = url.searchParams.get("path") ?? "";
 		const abs = path.resolve(ROOT, rel);
@@ -334,9 +377,15 @@ const http = createServer((req, res) => {
 		return json({
 			root: ROOT,
 			lang: LANG,
-			pid: lsp?.pid ?? null,
-			upMs: lspStartedAt ? Date.now() - lspStartedAt : 0,
 			files: fileIndex.length,
+			// Every language server currently alive, so the cost of a mixed-language
+			// session is visible rather than implied.
+			servers: [...servers.values()].map((e) => ({
+				lang: e.langId,
+				pid: e.proc?.pid ?? null,
+				upMs: Date.now() - e.startedAt,
+				clients: e.clients.size,
+			})),
 		});
 	}
 	res.writeHead(404);
@@ -344,31 +393,23 @@ const http = createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server: http, path: "/lsp" });
-wss.on("connection", (ws) => {
-	console.log("[ws] renderer connected");
-	if (!lsp) startServer();
-
-	// renderer -> server: one JSON-RPC message per frame, framed here.
+wss.on("connection", (ws, req) => {
+	// One socket per language. The renderer opens a second one the first time it
+	// meets a second language, rather than multiplexing ids over one pipe.
+	const langId = new URL(req.url, "http://localhost").searchParams.get("lang") ?? LANG;
+	const entry = serverFor(langId);
+	if (!entry) {
+		console.log(`[ws] no server configured for "${langId}"`);
+		ws.close(4004, `no language server for ${langId}`);
+		return;
+	}
+	entry.clients.add(ws);
+	console.log(`[ws] renderer connected for ${langId} (${entry.clients.size} client(s))`);
 	ws.on("message", (data) => {
-		const s = data.toString();
-		lsp.stdin.write(`Content-Length: ${Buffer.byteLength(s)}\r\n\r\n${s}`);
+		const str = data.toString();
+		entry.proc?.stdin.write(`Content-Length: ${Buffer.byteLength(str)}\r\n\r\n${str}`);
 	});
-
-	// server -> renderer: unframe, forward payloads.
-	let buf = Buffer.alloc(0);
-	const onData = (d) => {
-		buf = Buffer.concat([buf, d]);
-		for (;;) {
-			const sep = buf.indexOf("\r\n\r\n");
-			if (sep < 0) return;
-			const len = Number(/content-length:\s*(\d+)/i.exec(buf.subarray(0, sep).toString("ascii"))?.[1] ?? -1);
-			if (len < 0 || buf.length < sep + 4 + len) return;
-			ws.send(buf.subarray(sep + 4, sep + 4 + len).toString("utf8"));
-			buf = buf.subarray(sep + 4 + len);
-		}
-	};
-	lsp.stdout.on("data", onData);
-	ws.on("close", () => lsp?.stdout.off("data", onData));
+	ws.on("close", () => entry.clients.delete(ws));
 });
 
 await buildFileIndex();

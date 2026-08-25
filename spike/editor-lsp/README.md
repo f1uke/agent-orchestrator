@@ -46,6 +46,16 @@ put two same-coloured bars side by side that read as one thick bar.
 `main-fluke`, `origin/main`, `main`. The daemon derives this from the PR target
 instead (`workspace_changes.go`).
 
+## One server per language, on first use
+
+Nothing spawns until a file of that language is opened; each language gets its
+own process and its own socket (`/lsp?lang=<id>`). `LSP_LANG` only decides which
+one is warmed at startup. `GET /stats` lists what is actually alive.
+
+The per-server floor is small — gopls + sourcekit-lsp together are 261 MB on a
+small mixed workspace, against ~880 MB live for gopls alone on this repo's Go
+backend. **The cost is the dependency graph, not the server count.**
+
 ## Shape
 
 ```
