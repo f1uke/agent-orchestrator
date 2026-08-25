@@ -599,7 +599,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:        runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, project.Config.Env),
+		Env:           m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env),
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1455,7 +1455,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:        runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath: ws.Path,
 		Argv:          argv,
-		Env:           m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, project.Config.Env),
+		Env:           m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
@@ -3127,9 +3127,9 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, projectEnv map[string]string) map[string]string {
+func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string) map[string]string {
 	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
-	for k, v := range crewGitEnv(role, m.dataDir) {
+	for k, v := range crewGitEnv(role, m.dataDir, workspacePath) {
 		env[k] = v
 	}
 	path, err := HookPATH(m.executable, os.Getenv, projectEnv)
