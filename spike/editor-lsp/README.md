@@ -48,9 +48,17 @@ instead (`workspace_changes.go`).
 
 ## One server per language, on first use
 
-Nothing spawns until a file of that language is opened; each language gets its
-own process and its own socket (`/lsp?lang=<id>`). `LSP_LANG` only decides which
-one is warmed at startup. `GET /stats` lists what is actually alive.
+Nothing spawns until a file of that language is opened, and nothing stays alive
+once nobody is looking at that language. Each language gets its own process and
+its own socket (`/lsp?lang=<id>`); `LSP_LANG` only decides which one is warmed at
+startup, and `GET /stats` lists what is actually alive.
+
+Shutdown is two-sided: the renderer stops a client unused for `spike.idleMs`
+(localStorage, default 60 s) whose language is on screen in neither pane, and the
+bridge stops the process a grace period after its last socket closes
+(`LSP_IDLE_MS`, default 15 s) through a real `shutdown`/`exit` handshake. Coming
+back to the language starts it again — the sweep self-heals whatever is in front
+of you.
 
 The per-server floor is small — gopls + sourcekit-lsp together are 261 MB on a
 small mixed workspace, against ~880 MB live for gopls alone on this repo's Go
