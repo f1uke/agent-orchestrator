@@ -8913,8 +8913,12 @@ components:
             conflict; omitting it is a 400.
           type: string
         content:
-          description: The file's full new content, written verbatim.
-          type: string
+          description: 'The file''s full new content, written verbatim. Required:
+            an absent key is a 400, so emptying a file must be spelled as an explicit
+            empty string.'
+          type:
+          - "null"
+          - string
         path:
           description: 'Workspace-relative path of the file to write. Absolute and
             ~/ paths are rejected: the write route is confined to the session''s workspace

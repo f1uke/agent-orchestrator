@@ -413,6 +413,67 @@ func TestWorkspaceFileWriteHTTP_NoBaseHashIsNotAForce(t *testing.T) {
 	}
 }
 
+// An ABSENT content key must not read as "". A TypeScript caller stringifying
+// an `undefined` while the editor is still initialising drops the key, and if
+// the server took that for an empty string it would empty the user's file and
+// answer 200 - with a baseHash that is entirely correct, so the precondition
+// cannot catch it. Emptying a file has to be spelled out.
+func TestWorkspaceFileWriteHTTP_AbsentContentIsNotAnEmptyFile(t *testing.T) {
+	s := newCrewStack(t)
+	dev, _ := s.spawnCrew(t)
+	tree := dev.Metadata.WorkspacePath
+	srv := writeRouterFor(t, s)
+	read, _ := getWorkspaceFile(t, srv, dev.ID, "README.md")
+
+	payload, err := json.Marshal(map[string]string{"path": "README.md", "baseHash": read.ContentHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := fmt.Sprintf("%s/api/v1/sessions/%s/workspace/file", srv.URL, dev.ID)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, url, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("an absent content key must be refused, got %d: %s", resp.StatusCode, body)
+	}
+	if code := errCode(t, body); code != "WORKSPACE_FILE_CONTENT_REQUIRED" {
+		t.Fatalf("code = %s, want WORKSPACE_FILE_CONTENT_REQUIRED", code)
+	}
+	if got, err := os.ReadFile(filepath.Join(tree, "README.md")); err != nil || string(got) != "seed\n" {
+		t.Fatalf("file = %q, %v; the file was emptied", got, err)
+	}
+	if out := gitPorcelain(t, tree); out != "" {
+		t.Fatalf("tree is dirty after a refused save:\n%s", out)
+	}
+}
+
+// The other side of the same rule: an EXPLICIT empty string is a legitimate
+// save. Refusing the key must not cost the ability to empty a file on purpose.
+func TestWorkspaceFileWriteHTTP_ExplicitEmptyStringEmptiesTheFile(t *testing.T) {
+	s := newCrewStack(t)
+	dev, _ := s.spawnCrew(t)
+	tree := dev.Metadata.WorkspacePath
+	srv := writeRouterFor(t, s)
+	read, _ := getWorkspaceFile(t, srv, dev.ID, "README.md")
+
+	status, body := putWorkspaceFile(t, srv, dev.ID, "README.md", "", read.ContentHash)
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if got, err := os.ReadFile(filepath.Join(tree, "README.md")); err != nil || string(got) != "" {
+		t.Fatalf("file = %q, %v; want it emptied", got, err)
+	}
+}
+
 func runGitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled args

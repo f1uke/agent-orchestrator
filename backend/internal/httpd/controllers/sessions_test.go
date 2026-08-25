@@ -1951,6 +1951,39 @@ func TestSessionsAPI_WriteWorkspaceFileErrorsKeepTheirCodes(t *testing.T) {
 	}
 }
 
+// An absent content key is refused rather than read as "". As a plain string
+// the two collapse and a caller that forgot the field empties the user's file
+// with a 200 - and baseHash cannot catch it, because the hash is still right.
+func TestSessionsAPI_WriteWorkspaceFileRequiresContent(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+		`{"path":"a.go","baseHash":"sha256:old"}`)
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":"WORKSPACE_FILE_CONTENT_REQUIRED"`) {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceWrite.Path != "" {
+		t.Fatalf("the service was reached with %+v; the refusal must happen first", svc.workspaceWrite)
+	}
+}
+
+// Explicitly emptying a file stays possible - the guard is on the KEY, not on
+// the value.
+func TestSessionsAPI_WriteWorkspaceFileAcceptsAnExplicitEmptyString(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/workspace/file",
+		`{"path":"a.go","content":"","baseHash":"sha256:old"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceWrite.Path != "a.go" || svc.workspaceWrite.Content != "" {
+		t.Fatalf("service got %+v", svc.workspaceWrite)
+	}
+}
+
 func TestSessionsAPI_WriteWorkspaceFileRejectsInvalidJSON(t *testing.T) {
 	srv := newSessionTestServer(t, newFakeSessionService())
 

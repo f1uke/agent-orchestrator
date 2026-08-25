@@ -75,6 +75,17 @@ type WriteWorkspaceFileResult struct {
 //     changed since you opened it" is the normal case. The caller must hand back
 //     the ContentHash it read; a mismatch is a conflict, never a clobber.
 //
+// The precondition is a CHECK, not a lock: the hash is compared and the file is
+// then replaced, and the two are not one atomic operation. The window is the
+// whole compare-and-write sequence - read, hash, temp file, write, fsync,
+// rename - which measures at roughly 1-5 ms, fsync being most of it. Two writes
+// landing closer together than that can both succeed, with the later one
+// winning silently; from ~5 ms apart the conflict is caught. What holds at ANY
+// spacing is that the rename is atomic, so no reader ever sees a torn or
+// interleaved file, and that a write which loses the compare is always refused
+// rather than merged. Closing the window entirely needs worktree locking, which
+// is deliberately out of scope here.
+//
 // It also refuses to write a file the caller could not have been holding in
 // full - one the read truncated, or that is now binary or over the size cap.
 // That verdict is re-derived here from the file on disk: a client-side guard is

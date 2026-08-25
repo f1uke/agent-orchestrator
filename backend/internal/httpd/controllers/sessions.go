@@ -684,9 +684,16 @@ func (c *SessionsController) writeWorkspaceFile(w http.ResponseWriter, r *http.R
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
+	// An absent "content" is refused rather than read as "": a caller that
+	// forgot the field would otherwise empty the file and be told 200.
+	if in.Content == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "WORKSPACE_FILE_CONTENT_REQUIRED",
+			"Body must carry a content field; send an empty string to empty the file", nil)
+		return
+	}
 	res, err := c.Svc.WriteWorkspaceFile(r.Context(), sessionID(r), sessionsvc.WriteWorkspaceFileInput{
 		Path:     in.Path,
-		Content:  in.Content,
+		Content:  *in.Content,
 		BaseHash: in.BaseHash,
 	})
 	if err != nil {

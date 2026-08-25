@@ -3212,8 +3212,8 @@ export interface components {
         WriteWorkspaceFileRequest: {
             /** @description The contentHash the file was read with. A mismatch is a 409 conflict; omitting it is a 400. */
             baseHash: string;
-            /** @description The file's full new content, written verbatim. */
-            content: string;
+            /** @description The file's full new content, written verbatim. Required: an absent key is a 400, so emptying a file must be spelled as an explicit empty string. */
+            content: null | string;
             /** @description Workspace-relative path of the file to write. Absolute and ~/ paths are rejected: the write route is confined to the session's workspace even though the read route is not. */
             path: string;
         };

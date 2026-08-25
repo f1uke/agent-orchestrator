@@ -1192,7 +1192,14 @@ type WriteWorkspaceFileRequest struct {
 	Path string `json:"path" description:"Workspace-relative path of the file to write. Absolute and ~/ paths are rejected: the write route is confined to the session's workspace even though the read route is not."`
 	// Content is written verbatim - the server performs no EOL translation and
 	// adds no trailing newline.
-	Content string `json:"content" description:"The file's full new content, written verbatim."`
+	//
+	// It is a POINTER so an ABSENT key is distinguishable from an empty string.
+	// As a plain string the two collapse, and a client that forgot the field -
+	// a TypeScript caller stringifying an `undefined` while the editor is still
+	// initialising - would empty the user's file and get a 200 for it. baseHash
+	// cannot catch that: the hash is still correct. Emptying a file has to be
+	// spelled out as "content": "".
+	Content *string `json:"content" description:"The file's full new content, written verbatim. Required: an absent key is a 400, so emptying a file must be spelled as an explicit empty string."`
 	// BaseHash is required. There is deliberately no way to force a write.
 	BaseHash string `json:"baseHash" description:"The contentHash the file was read with. A mismatch is a 409 conflict; omitting it is a 400."`
 }
