@@ -627,3 +627,46 @@ li.sel .crumbs .target {
 	font-size: 10px;
 	vertical-align: 1px;
 }
+
+/* Which side of the diff is which. A file added on this branch has an empty
+   original pane, which is a large blank target that invites a click and then
+   ignores it — so both halves say what they are. */
+#diffWrap {
+	display: grid;
+	grid-template-rows: 22px 1fr;
+	min-height: 0;
+}
+#diffWrap[hidden] {
+	display: none;
+}
+#diffHead {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	border-bottom: 1px solid var(--line);
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+#diffHead .side {
+	padding: 3px 10px;
+	font-size: 10px;
+	letter-spacing: 0.03em;
+	color: var(--dim);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+#diffHead .base {
+	border-right: 1px solid var(--line);
+}
+#diffHead .head {
+	color: rgba(235, 235, 245, 0.85);
+}
+/* Inline mode has one column, so the two labels would lie about the layout. */
+#diffHead.inline {
+	grid-template-columns: 1fr;
+}
+#diffHead.inline .base {
+	display: none;
+}
+#diff {
+	min-height: 0;
+}

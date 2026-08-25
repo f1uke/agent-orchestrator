@@ -452,10 +452,17 @@ function ensureDiffEditor() {
 		// meaningfully be written to.
 		readOnly: false,
 		originalEditable: false,
+		// Monaco shows this when someone types into the read-only side. Without it
+		// the caret appears, nothing happens, and there is no explanation — which
+		// is exactly how the first person to try this got stuck.
+		readOnlyMessage: { value: "This is the last commit. Edit on the right — that side is the working tree." },
 		renderOverviewRuler: true,
 		minimap: { enabled: false },
 		scrollBeyondLastLine: false,
 		ignoreTrimWhitespace: false,
+	});
+	diffEditor.getOriginalEditor().onDidAttemptReadOnlyEdit(() => {
+		log("that is the left side — the last commit. Type on the right.");
 	});
 	return diffEditor;
 }
@@ -475,6 +482,9 @@ async function openDiff(rel: string) {
 	const original = monaco.editor.getModel(oldUri) ?? monaco.editor.createModel(before.text ?? "", lang, oldUri);
 	if (original.getValue() !== (before.text ?? "")) original.setValue(before.text ?? "");
 	d.setModel({ original, modified });
+	// Land the caret where typing works, rather than wherever it was last.
+	d.getModifiedEditor().focus();
+	paintDiffHeads(rel);
 	currentRel = rel;
 	el<HTMLElement>("title").textContent = `AO spike · ${rel} — vs ${baseLabel}`;
 	renderRail();
@@ -489,7 +499,7 @@ function setMode(next: Mode) {
 	el<HTMLButtonElement>("modeChanges").setAttribute("aria-selected", String(next === "changes"));
 	el<HTMLButtonElement>("modeBrowse").setAttribute("aria-selected", String(next === "browse"));
 	el<HTMLElement>("editor").hidden = next !== "browse";
-	el<HTMLElement>("diff").hidden = next !== "changes";
+	el<HTMLElement>("diffWrap").hidden = next !== "changes";
 	el<HTMLElement>("railHead").hidden = next !== "changes";
 	hideRevert();
 	renderRail();
@@ -506,12 +516,24 @@ function setMode(next: Mode) {
 }
 
 let sideBySide = localStorage.getItem("spike.diffSideBySide") === "1";
+// Which side is which, said out loud. A file added on this branch has an EMPTY
+// original pane, so the read-only half is a large blank target that invites a
+// click and then silently ignores it.
+function paintDiffHeads(rel = currentRel) {
+	const base = el<HTMLElement>("diffHead").querySelector(".base") as HTMLElement;
+	const head = el<HTMLElement>("diffHead").querySelector(".head") as HTMLElement;
+	base.textContent = `${baseLabel} · read-only`;
+	head.textContent = `working tree · editable${rel ? "" : ""}`;
+	el<HTMLElement>("diffHead").classList.toggle("inline", !sideBySide);
+}
+
 function applyDiffLayout() {
 	el<HTMLButtonElement>("diffLayout").setAttribute("aria-pressed", String(sideBySide));
 	el<HTMLButtonElement>("diffLayout").title = sideBySide
 		? "Side by side — click for inline"
 		: "Inline — click for side by side";
 	diffEditor?.updateOptions({ renderSideBySide: sideBySide });
+	paintDiffHeads();
 }
 el<HTMLButtonElement>("diffLayout").onclick = () => {
 	sideBySide = !sideBySide;
@@ -1305,6 +1327,7 @@ setInterval(async () => {
 	timings: () => lsp.timings,
 	openDiff: (rel: string) => openDiff(rel),
 	diff: () => diffEditor,
+	monaco,
 	dirty: () => [...dirtyBuffers],
 	save: () => saveCurrent(),
 	mode: () => mode,
