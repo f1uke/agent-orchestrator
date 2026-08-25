@@ -259,3 +259,6 @@ li.sel .crumbs .target {
 	font: 400 14px/1 inherit;
 	color: rgba(235, 235, 245, 0.45);
 }
+
+/* Monaco draws the minimap's MARK section headers itself; see the note in
+   main.ts. Nothing to style here — the size knobs are editor options. */

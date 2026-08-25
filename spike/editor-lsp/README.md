@@ -67,6 +67,11 @@ cold page load actually pulls.
 - Definition and symbol results routinely point **outside** the workspace root
   (Pods, SDK headers, DerivedData). The editor needs a way to open those, which
   is what `/open-external` is.
+- The Xcode-style minimap with `// MARK: - Helpers` printed as a labelled band
+  needs **no code at all** — `showMarkSectionHeaders` is on by default. But the
+  defaults `scale: 1` / `maxColumn: 120` middle-truncate the label
+  ("User...ction"); `scale: 2` renders it in full. A hand-rolled overlay was
+  written first and deleted once the built-in was found.
 - Completion needs `textDocument/didChange` or the server answers about the file
   as it was opened; and every response came back `isIncomplete: true`, so the
   client must re-request rather than filter locally.

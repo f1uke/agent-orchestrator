@@ -61,7 +61,26 @@ const editor = monaco.editor.create(el("editor"), {
 	theme: "github-dark-default",
 	automaticLayout: true,
 	fontSize: 12,
-	minimap: { enabled: false },
+	// `size: "fit"` scales the minimap so the WHOLE file always fits — Xcode's
+	// minimap behaves the same way, and it also means the document maps onto the
+	// minimap linearly, which is what lets the MARK overlay below line up.
+	minimap: {
+		enabled: true,
+		size: "fit",
+		renderCharacters: true,
+		showSlider: "always",
+		// Xcode's minimap section labels, built in. `markSectionHeaderRegex`
+		// covers Swift/ObjC `// MARK:` and `showRegionSectionHeaders` covers
+		// `// #region`. Default 9px/1px is small on a Retina panel.
+		showMarkSectionHeaders: true,
+		showRegionSectionHeaders: true,
+		sectionHeaderFontSize: 9,
+		sectionHeaderLetterSpacing: 0.4,
+		// scale 2 gives the minimap canvas 2x the pixels, which is what makes it
+		// readable at all on a Retina panel; maxColumn buys the labels room.
+		scale: 2,
+		maxColumn: 220,
+	},
 	scrollBeyondLastLine: false,
 	renderLineHighlight: "all",
 });
@@ -255,6 +274,23 @@ editor.onDidChangeModel(() => {
 	log(`jumped → ${uri.path.replace(meta.root + "/", "")}:${line}`);
 	return source;
 };
+
+// ---- 5. minimap section marks --------------------------------------------
+// NOTHING TO BUILD HERE. Monaco already renders `// MARK: - Helpers` into the
+// minimap as a labelled band, exactly like Xcode — `showMarkSectionHeaders`
+// defaults to true and `markSectionHeaderRegex` defaults to
+//   \bMARK:\s*(?<separator>-?)\s*(?<label>.*)$
+// A hand-rolled overlay was written first, drifted against the minimap's own
+// sliding on any file taller than the viewport, and was deleted once the
+// built-in was found. The options live on `minimap` in the editor construction
+// above; only the type sizes are tuned here.
+//
+// The two settings below are load-bearing, not taste: at the default
+// `scale: 1` / `maxColumn: 120` Monaco middle-truncates the label —
+// `// MARK: - User Interaction` renders as "User...ction" — and changing
+// sectionHeaderFontSize alone (tried 6-10) does not help, because the label is
+// clipped in minimap-canvas pixels. `scale: 2` doubles that canvas and the name
+// renders in full, matching Xcode.
 
 // ---- 1. Cmd+Shift+O — files AND symbols in one list -----------------------
 type Row = {
