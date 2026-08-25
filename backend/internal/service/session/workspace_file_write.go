@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -231,6 +232,15 @@ func contentHash(data []byte) string {
 // it pointed at.
 func writableWorkspacePath(workspace, p string) (target, rel string, ok bool) {
 	if hasParentSegment(p) {
+		return "", "", false
+	}
+	// A path that cleans away to nothing ("/", "\\", "//") is rejected here
+	// rather than passed on, because ConfinedPath REWRITES that case to
+	// "index.html" - a leftover from serving a preview directory. On Unix the
+	// absolute check below already catches "/", but filepath.IsAbs("/") is
+	// false on Windows, so without this the route would silently target a file
+	// nobody named.
+	if strings.TrimPrefix(path.Clean("/"+strings.TrimSpace(p)), "/") == "" {
 		return "", "", false
 	}
 	confined, safeRel, ok := confinedWorkspacePath(workspace, p)

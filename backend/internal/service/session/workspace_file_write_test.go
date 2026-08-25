@@ -302,6 +302,7 @@ func TestWriteWorkspaceFile_RefusesPathsOutsideTheWorkspace(t *testing.T) {
 		{"empty", ""},
 		{"dot", "."},
 		{"root", "/"},
+		{"double_slash", "//"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", home)
