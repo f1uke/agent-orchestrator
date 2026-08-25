@@ -224,6 +224,10 @@ func (f *fakeSessionService) WorkspaceChanges(context.Context, domain.SessionID)
 	return sessionsvc.WorkspaceChangesResult{}, nil
 }
 
+func (f *fakeSessionService) ListWorkspaceFiles(context.Context, domain.SessionID) (sessionsvc.WorkspaceFilesResult, error) {
+	return sessionsvc.WorkspaceFilesResult{}, nil
+}
+
 func (f *fakeSessionService) WorkspaceFileDiff(context.Context, domain.SessionID, string) (sessionsvc.DiffContextResult, error) {
 	return sessionsvc.DiffContextResult{}, nil
 }

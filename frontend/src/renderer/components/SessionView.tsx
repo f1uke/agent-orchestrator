@@ -12,6 +12,7 @@ import { CrewMemberNotStartedPane } from "./CrewMemberNotStartedPane";
 import { TodoSessionPane } from "./TodoSessionPane";
 import type { FileDiffTarget } from "./ReviewsView";
 import { FileDiffView } from "./FileDiffView";
+import { OpenQuicklyPalette } from "./OpenQuicklyPalette";
 import { WorkspaceFileView } from "./WorkspaceFileView";
 import { type ChangesFocus, WorkspaceChangesView } from "./WorkspaceChangesView";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
@@ -157,11 +158,17 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		[workspaceChanges.data],
 	);
 
-	// A terminal file reference always opens in the center viewer (unchanged). A
-	// reference INSIDE the project additionally reveals the file in the rail's
-	// Files tab. The viewer is deliberately kept for both: it shows the whole file
-	// and honours the ref's `:line`, whereas the Changes view shows only diff
-	// hunks and could not scroll to a line that is not part of one.
+	// THE ONE PLACE A FILE IS OPENED. Every entry point — a clicked terminal
+	// reference, the ⌘⇧O palette, and later a go-to-definition jump — describes
+	// what it wants as a `WorkspaceFileOpen` and calls this. Repointing the editor
+	// (Monaco) or honouring a new coordinate (a column) is a change HERE and
+	// nowhere else; no caller knows which viewer is mounted.
+	//
+	// A file reference always opens in the center viewer (unchanged). A reference
+	// INSIDE the project additionally reveals the file in the rail's Files tab.
+	// The viewer is deliberately kept for both: it shows the whole file and
+	// honours the ref's `:line`, whereas the Changes view shows only diff hunks
+	// and could not scroll to a line that is not part of one.
 	const openWorkspaceFile = useCallback(
 		(file: WorkspaceFileOpen) => {
 			setWorkspaceFile(file);
@@ -758,6 +765,11 @@ export function SessionView({ sessionId }: SessionViewProps) {
           `[data-panel]` column, so the native WebContentsView is not clamped
           and fills the entire window. */}
 			{splitToast ? <Toast text={splitToast} /> : null}
+			{/* ⌘⇧O. Owns its own shortcut and open state, so it costs one line here
+          and knows nothing about the viewer above — which is why swapping that
+          viewer for Monaco did not touch it. `hasInspector` is the "this session
+          has a worktree" test; an orchestrator has none to index. */}
+			<OpenQuicklyPalette enabled={hasInspector} onOpenFile={openWorkspaceFile} sessionId={sessionId} />
 			<SplitDragLayer />
 			{browserPoppedOut && hasWebUI && session
 				? createPortal(

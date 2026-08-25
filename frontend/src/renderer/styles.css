@@ -4558,3 +4558,176 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	height: 7px;
 	transform: translateY(-3px);
 }
+
+/* ── Open Quickly (⌘⇧O) ─────────────────────────────────────────────────── */
+
+.open-quickly__overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 50;
+	background: rgb(0 0 0 / 0.5);
+}
+
+/* Anchored high rather than centred: the list grows downward as you type, so a
+   vertically centred dialog would slide the input under the caret. */
+.open-quickly {
+	position: fixed;
+	z-index: 50;
+	top: max(12vh, 56px);
+	left: 50%;
+	display: flex;
+	width: 640px;
+	max-width: min(92vw, 640px);
+	max-height: min(70vh, 560px);
+	transform: translateX(-50%);
+	flex-direction: column;
+	overflow: hidden;
+	border: 1px solid var(--border-1);
+	border-radius: var(--radius-xl);
+	background: var(--bg-1);
+	box-shadow: var(--shadow);
+}
+
+.open-quickly__search {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 10px;
+	padding: 0 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.open-quickly__search-icon {
+	width: 15px;
+	height: 15px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.open-quickly__input {
+	width: 100%;
+	min-width: 0;
+	padding: 15px 0;
+	border: 0;
+	background: transparent;
+	color: var(--fg);
+	font-size: 14.5px;
+	outline: none;
+}
+
+.open-quickly__input::placeholder {
+	color: var(--fg-passive);
+}
+
+.open-quickly__body {
+	min-height: 0;
+	flex: 1;
+	overflow-y: auto;
+	padding: 6px;
+}
+
+.open-quickly__note {
+	margin: 0;
+	padding: 14px 10px;
+	color: var(--fg-muted);
+	font-size: 12.5px;
+}
+
+.open-quickly__note--error {
+	color: var(--red);
+}
+
+.open-quickly__list {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+/* max-content then a 0-min column: the directory gives up its width first and
+   the file name only truncates once the directory has nothing left. */
+.open-quickly__row {
+	display: grid;
+	width: 100%;
+	align-items: baseline;
+	grid-template-columns: 14px minmax(0, max-content) minmax(0, 1fr);
+	column-gap: 8px;
+	padding: 7px 10px;
+	border: 0;
+	border-radius: var(--radius-md);
+	background: transparent;
+	color: var(--fg);
+	cursor: pointer;
+	text-align: left;
+}
+
+.open-quickly__row.is-active {
+	background: var(--accent-weak);
+}
+
+.open-quickly__row-icon {
+	width: 14px;
+	height: 14px;
+	align-self: center;
+	color: var(--fg-passive);
+}
+
+.open-quickly__row.is-active .open-quickly__row-icon {
+	color: var(--accent);
+}
+
+.open-quickly__name {
+	overflow: hidden;
+	font-size: 13px;
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.open-quickly__dir {
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* <mark> defaults to a yellow browser background in both themes; the matched
+   run is marked by WEIGHT and the accent, not by a highlighter. */
+.open-quickly__hit {
+	background: transparent;
+	color: var(--accent);
+	font-weight: 600;
+}
+
+.open-quickly__footer {
+	display: flex;
+	flex: none;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 8px 14px;
+	border-top: 1px solid var(--border);
+	background: var(--bg);
+	color: var(--fg-passive);
+	font-size: 11px;
+}
+
+.open-quickly__hint kbd {
+	display: inline-block;
+	min-width: 15px;
+	margin: 0 1px;
+	padding: 1px 4px;
+	border: 1px solid var(--border-1);
+	border-radius: var(--radius-sm);
+	background: var(--bg-2);
+	color: var(--fg-muted);
+	font-family: inherit;
+	font-size: 10px;
+	line-height: 1.4;
+	text-align: center;
+}
+
+.open-quickly__truncated {
+	flex: none;
+}

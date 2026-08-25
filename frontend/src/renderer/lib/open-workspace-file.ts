@@ -21,10 +21,28 @@ export type ResolvedCandidate = {
 	inWorkspace: boolean;
 };
 
-/** A workspace file to open in the viewer. */
+/**
+ * A workspace file to open, optionally at a location.
+ *
+ * THE SEAM. Everything that opens a file — a clicked terminal reference, the
+ * ⌘⇧O palette, and later a go-to-definition jump — describes what it wants with
+ * this type and hands it to the single `openWorkspaceFile` callback in
+ * `SessionView`. Nothing on either side of that callback knows which viewer is
+ * mounted, which is what lets the editor slices repoint it (at Monaco, at a
+ * definition target) without touching a single caller.
+ */
 export type WorkspaceFileOpen = {
+	/** Workspace-relative inside the workspace, absolute outside it. */
 	path: string;
+	/** 1-based line to scroll to. */
 	line?: number;
+	/**
+	 * 1-based column. Nothing sets it yet: a terminal ref carries no column and
+	 * ⌘⇧O over files opens at the top. It is here so that go-to-definition, which
+	 * lands on a symbol rather than a line, has a place to say where without
+	 * every caller of this type changing shape on that day.
+	 */
+	column?: number;
 	/** Carried through so the caller can decide whether to reveal it in the tree. */
 	inWorkspace?: boolean;
 };

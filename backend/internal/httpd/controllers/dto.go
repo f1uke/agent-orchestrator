@@ -1224,6 +1224,38 @@ type LineChangeDTO struct {
 	Kind  string `json:"kind"`
 }
 
+// WorkspaceFilesResponse is the body of the workspace/files route: the session
+// workspace's file index, which the ⌘⇧O palette ranks in the renderer.
+//
+// Paths only, deliberately: ranking is a renderer concern so that results are
+// derived synchronously from (index, query) and a fast typist can never be shown
+// a previous query's list.
+type WorkspaceFilesResponse struct {
+	Available bool `json:"available"`
+	// Reason explains an available=false response: "no_workspace" (the worktree
+	// is gone from disk). Empty when the index is usable.
+	Reason string `json:"reason,omitempty"`
+	// Paths are workspace-relative and slash-separated.
+	Paths []string `json:"paths"`
+	// Truncated reports that the workspace holds more files than the index cap,
+	// so the palette is searching a prefix of the tree rather than all of it.
+	Truncated bool `json:"truncated"`
+}
+
+// workspaceFilesResponse maps the service result to the wire DTO.
+func workspaceFilesResponse(res sessionsvc.WorkspaceFilesResult) WorkspaceFilesResponse {
+	paths := res.Paths
+	if paths == nil {
+		paths = []string{}
+	}
+	return WorkspaceFilesResponse{
+		Available: res.Available,
+		Reason:    res.Reason,
+		Paths:     paths,
+		Truncated: res.Truncated,
+	}
+}
+
 // WorkspaceChangesResponse is the body of the workspace/changes route: the
 // files differing between the session's branch (working tree included) and its
 // resolved target branch.

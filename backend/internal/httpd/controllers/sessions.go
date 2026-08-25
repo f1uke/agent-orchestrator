@@ -125,6 +125,7 @@ type SessionService interface {
 	// session's workspace and preconditioned on the hash the read handed out.
 	WriteWorkspaceFile(ctx context.Context, id domain.SessionID, in sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error)
 	WorkspaceChanges(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceChangesResult, error)
+	ListWorkspaceFiles(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceFilesResult, error)
 	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, path string) (sessionsvc.DiffContextResult, error)
 }
 
@@ -168,6 +169,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/workspace/file", c.readWorkspaceFile)
 	r.Put("/sessions/{sessionId}/workspace/file", c.writeWorkspaceFile)
 	r.Get("/sessions/{sessionId}/workspace/changes", c.workspaceChanges)
+	r.Get("/sessions/{sessionId}/workspace/files", c.listWorkspaceFiles)
 	r.Get("/sessions/{sessionId}/workspace/file-diff", c.workspaceFileDiff)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
@@ -717,6 +719,22 @@ func (c *SessionsController) workspaceChanges(w http.ResponseWriter, r *http.Req
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, workspaceChangesResponse(res))
+}
+
+// listWorkspaceFiles returns the session workspace's file index for the ⌘⇧O
+// palette. A worktree that is gone from disk comes back available=false with a
+// reason, not an error — the same degraded contract workspaceChanges uses.
+func (c *SessionsController) listWorkspaceFiles(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/files")
+		return
+	}
+	res, err := c.Svc.ListWorkspaceFiles(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, workspaceFilesResponse(res))
 }
 
 // workspaceFileDiff returns one file's diff against the session's target

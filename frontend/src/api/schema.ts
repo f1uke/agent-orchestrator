@@ -1450,6 +1450,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/workspace/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every file in the session's workspace (the Open Quickly index) */
+        get: operations["listWorkspaceFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/workspace/resolve": {
         parameters: {
             query?: never;
@@ -3198,6 +3215,12 @@ export interface components {
             path: string;
             reason?: string;
             trailingNewline: boolean;
+            truncated: boolean;
+        };
+        WorkspaceFilesResponse: {
+            available: boolean;
+            paths: string[];
+            reason?: string;
             truncated: boolean;
         };
         WorkspaceRepo: {
@@ -8797,6 +8820,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DiffContextResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listWorkspaceFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFilesResponse"];
                 };
             };
             /** @description Not Found */

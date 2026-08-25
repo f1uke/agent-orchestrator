@@ -4649,6 +4649,45 @@ paths:
       summary: Return one file's diff against the session's target branch (no PR required)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/workspace/files:
+    get:
+      operationId: listWorkspaceFiles
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFilesResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List every file in the session's workspace (the Open Quickly index)
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/workspace/resolve:
     get:
       operationId: resolveWorkspaceRef
@@ -8880,6 +8919,23 @@ components:
       - changedLines
       - truncated
       - trailingNewline
+      type: object
+    WorkspaceFilesResponse:
+      properties:
+        available:
+          type: boolean
+        paths:
+          items:
+            type: string
+          type: array
+        reason:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - available
+      - paths
+      - truncated
       type: object
     WorkspaceRepo:
       properties:

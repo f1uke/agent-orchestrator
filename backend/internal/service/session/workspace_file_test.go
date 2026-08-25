@@ -657,3 +657,70 @@ func TestResolveWorkspaceRef_OutsideCandidateIsNotRevealable(t *testing.T) {
 		}
 	}
 }
+
+// TestListWorkspaceFiles_GitIndex pins that ⌘⇧O reuses the SAME index terminal
+// refs resolve through: tracked and untracked files are in, git-ignored ones are
+// out, and paths come back slash-separated and workspace-relative.
+func TestListWorkspaceFiles_GitIndex(t *testing.T) {
+	dir := gitRepo(t, map[string]string{
+		"pkg/a.go":   "x\n",
+		"README.md":  "hi\n",
+		".gitignore": "ignored/\n",
+	})
+	writeRepoFile(t, dir, "untracked/new.ts", "export {}\n")
+	writeRepoFile(t, dir, "ignored/blob.bin", "junk\n")
+	svc := serviceForRepo(t, dir)
+
+	got, err := svc.ListWorkspaceFiles(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Available || got.Truncated {
+		t.Fatalf("available=%v truncated=%v, want true/false", got.Available, got.Truncated)
+	}
+	has := func(p string) bool {
+		for _, f := range got.Paths {
+			if f == p {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []string{"pkg/a.go", "README.md", "untracked/new.ts"} {
+		if !has(want) {
+			t.Fatalf("index missing %s: %v", want, got.Paths)
+		}
+	}
+	if has("ignored/blob.bin") {
+		t.Fatalf("index must not carry a git-ignored file: %v", got.Paths)
+	}
+}
+
+// TestListWorkspaceFiles_NoWorkspace pins the degraded contract: a session whose
+// worktree was cleaned up is a normal state, so it answers available=false with a
+// reason rather than an error the palette would have to render as a failure.
+func TestListWorkspaceFiles_NoWorkspace(t *testing.T) {
+	fake := newFakeStore()
+	fake.putSessionWithWorkspace("s1", filepath.Join(t.TempDir(), "gone"))
+	svc := newServiceWithStore(t, fake)
+
+	got, err := svc.ListWorkspaceFiles(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Available || got.Reason != ChangesNoWorkspace {
+		t.Fatalf("got available=%v reason=%q, want false/%q", got.Available, got.Reason, ChangesNoWorkspace)
+	}
+	if got.Paths == nil {
+		t.Fatalf("paths must be an empty slice, not nil, so the wire DTO is [] not null")
+	}
+}
+
+// TestListWorkspaceFiles_UnknownSession pins that only an unknown session is an
+// error — every other empty answer degrades.
+func TestListWorkspaceFiles_UnknownSession(t *testing.T) {
+	svc := newServiceWithStore(t, newFakeStore())
+	if _, err := svc.ListWorkspaceFiles(context.Background(), "nope"); err == nil {
+		t.Fatal("want an error for an unknown session")
+	}
+}
