@@ -231,6 +231,7 @@ var schemaNames = map[string]string{
 	"ControllersWorkspaceResolveResponse":         "WorkspaceResolveResponse",
 	"ControllersWorkspaceFileParams":              "WorkspaceFileParams",
 	"ControllersWorkspaceFileResponse":            "WorkspaceFileResponse",
+	"ControllersWorkspaceFilesResponse":           "WorkspaceFilesResponse",
 	"ControllersWriteWorkspaceFileRequest":        "WriteWorkspaceFileRequest",
 	"ControllersWriteWorkspaceFileResponse":       "WriteWorkspaceFileResponse",
 	"ControllersLineChangeDTO":                    "LineChangeDTO",
@@ -1463,6 +1464,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WorkspaceChangesResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/files", id: "listWorkspaceFiles", tag: "sessions",
+			summary:    "List every file in the session's workspace (the Open Quickly index)",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WorkspaceFilesResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

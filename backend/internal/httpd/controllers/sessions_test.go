@@ -66,6 +66,8 @@ type fakeSessionService struct {
 	workspaceWriteResult  sessionsvc.WriteWorkspaceFileResult
 	workspaceWriteErr     error
 	workspaceChanges      sessionsvc.WorkspaceChangesResult
+	workspaceFiles        sessionsvc.WorkspaceFilesResult
+	workspaceFilesErr     error
 	workspaceFileDiff     sessionsvc.DiffContextResult
 	workspaceFileDiffPath string
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
@@ -486,6 +488,10 @@ func (f *fakeSessionService) WriteWorkspaceFile(_ context.Context, _ domain.Sess
 
 func (f *fakeSessionService) WorkspaceChanges(_ context.Context, _ domain.SessionID) (sessionsvc.WorkspaceChangesResult, error) {
 	return f.workspaceChanges, nil
+}
+
+func (f *fakeSessionService) ListWorkspaceFiles(_ context.Context, _ domain.SessionID) (sessionsvc.WorkspaceFilesResult, error) {
+	return f.workspaceFiles, f.workspaceFilesErr
 }
 
 func (f *fakeSessionService) WorkspaceFileDiff(_ context.Context, _ domain.SessionID, path string) (sessionsvc.DiffContextResult, error) {
@@ -2033,6 +2039,46 @@ func TestSessionsAPI_WorkspaceChangesUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"reason":"no_target_branch"`) ||
 		!strings.Contains(string(body), `"files":[]`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+// TestSessionsAPI_ListWorkspaceFiles pins the ⌘⇧O index shape: paths only, in
+// index order (the palette ranks them), plus the truncation flag.
+func TestSessionsAPI_ListWorkspaceFiles(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceFiles = sessionsvc.WorkspaceFilesResult{
+		Available: true,
+		Paths:     []string{"backend/main.go", "frontend/src/App.tsx"},
+		Truncated: true,
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/files", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	for _, want := range []string{
+		`"available":true`, `"backend/main.go"`, `"frontend/src/App.tsx"`, `"truncated":true`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s:\n%s", want, body)
+		}
+	}
+}
+
+// TestSessionsAPI_ListWorkspaceFilesUnavailable pins the same degraded contract
+// workspace/changes has: a cleaned-up worktree is a 200 carrying a reason and an
+// empty list, never an error status and never a null the renderer must guard.
+func TestSessionsAPI_ListWorkspaceFilesUnavailable(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceFiles = sessionsvc.WorkspaceFilesResult{Reason: sessionsvc.ChangesNoWorkspace}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/files", "")
+	if status != http.StatusOK {
+		t.Fatalf("a degraded session must still be 200, got %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"reason":"no_workspace"`) ||
+		!strings.Contains(string(body), `"paths":[]`) {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }

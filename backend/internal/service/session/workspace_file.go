@@ -358,6 +358,68 @@ func walkWorkspaceFiles(workspace string) []string {
 	return files
 }
 
+// maxWorkspaceFileIndex bounds how many paths the ⌘⇧O index will answer with.
+// The index is unbounded on the git path (`git ls-files` has no cap), and the
+// palette ships the whole list to the renderer to rank it there — so the cap is
+// what keeps a pathological monorepo from turning one keystroke into a
+// multi-megabyte response. Hitting it sets Truncated, which the palette says out
+// loud rather than silently ranking a subset.
+const maxWorkspaceFileIndex = 50000
+
+// WorkspaceFilesResult is the ⌘⇧O file index: every path in the session's
+// workspace, workspace-relative and slash-separated.
+type WorkspaceFilesResult struct {
+	// Available is false when there is nothing to index; Reason says which of
+	// the two normal degraded states it is.
+	Available bool
+	// Reason explains an Available=false result: "no_workspace" (the worktree is
+	// gone from disk — a merged session keeps its board row). Empty otherwise.
+	Reason string
+	Paths  []string
+	// Truncated reports that the workspace holds more files than the cap, so the
+	// palette is ranking a prefix of the tree rather than all of it.
+	Truncated bool
+}
+
+// ListWorkspaceFiles returns the session workspace's file index for the ⌘⇧O
+// palette: tracked + untracked minus ignored via git, or a bounded walk for a
+// non-git workspace. This is the SAME index terminal-ref resolution already
+// uses (workspaceFileIndex); ⌘⇧O deliberately does not build a second one.
+//
+// Ranking is NOT done here. The palette ranks in the renderer so that results
+// are derived synchronously from (index, query) and a keystroke can never be
+// answered with a previous query's list. See the slice-2 plan in the knowledge
+// store for the measurement behind that.
+//
+// A workspace that is gone from disk degrades to Available=false with a reason,
+// the way WorkspaceChanges does — it is a normal state for a merged session, not
+// a failure. Only an unknown session is an error.
+func (s *Service) ListWorkspaceFiles(ctx context.Context, id domain.SessionID) (WorkspaceFilesResult, error) {
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil {
+		return WorkspaceFilesResult{}, fmt.Errorf("get %s: %w", id, err)
+	}
+	if !ok {
+		return WorkspaceFilesResult{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	workspace := rec.Metadata.WorkspacePath
+	if workspace == "" || !isDir(workspace) {
+		return WorkspaceFilesResult{Reason: ChangesNoWorkspace, Paths: []string{}}, nil
+	}
+	paths := workspaceFileIndex(ctx, workspace)
+	truncated := false
+	if len(paths) > maxWorkspaceFileIndex {
+		paths = paths[:maxWorkspaceFileIndex]
+		truncated = true
+	}
+	if paths == nil {
+		// An empty workspace is available with nothing in it, not unavailable —
+		// and the wire DTO wants [] rather than null.
+		paths = []string{}
+	}
+	return WorkspaceFilesResult{Available: true, Paths: paths, Truncated: truncated}, nil
+}
+
 // ReadWorkspaceFile reads a file's content and computes its per-line
 // uncommitted-change map. The path is interpreted with the same shape split as
 // ResolveWorkspaceRef: an absolute or `~/` path is read wherever it points

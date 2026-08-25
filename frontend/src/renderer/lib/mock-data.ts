@@ -3,6 +3,7 @@ import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
 
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
+type WorkspaceFilesResponse = components["schemas"]["WorkspaceFilesResponse"];
 type DiffContextResponse = components["schemas"]["DiffContextResponse"];
 
 const now = new Date().toISOString();
@@ -1778,4 +1779,54 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
 		};
 	}
 	return { runs: [] };
+}
+
+/**
+ * The ⌘⇧O index in `ao preview` (VITE_NO_ELECTRON), where there is no daemon and
+ * no worktree. Deliberately shaped like a real tree rather than a tidy list — it
+ * carries generated output, assets whose names read like source, and deep paths,
+ * so the palette's ranking and its long-path layout are both visible without a
+ * live session.
+ */
+export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
+	if (sessionId === "demo-merged") {
+		return { available: false, reason: "no_workspace", paths: [], truncated: false };
+	}
+	return {
+		available: true,
+		truncated: false,
+		paths: [
+			"AGENTS.md",
+			"CLAUDE.md",
+			"DESIGN.md",
+			"README.md",
+			"package.json",
+			"package-lock.json",
+			"backend/cmd/ao/main.go",
+			"backend/internal/cli/session.go",
+			"backend/internal/cli/smoke.go",
+			"backend/internal/domain/session.go",
+			"backend/internal/httpd/controllers/sessions.go",
+			"backend/internal/httpd/controllers/reviews.go",
+			"backend/internal/service/session/workspace_file.go",
+			"backend/internal/service/session/workspace_changes.go",
+			"backend/internal/storage/sqlite/gen/queries.sql.go",
+			"backend/internal/storage/sqlite/queries/sessions.sql",
+			"frontend/src/main.ts",
+			"frontend/src/renderer/components/SessionView.tsx",
+			"frontend/src/renderer/components/OpenQuicklyPalette.tsx",
+			"frontend/src/renderer/components/WorkspaceFileView.tsx",
+			"frontend/src/renderer/components/FilesPanel.tsx",
+			"frontend/src/renderer/lib/open-quickly.ts",
+			"frontend/src/renderer/lib/open-workspace-file.ts",
+			"frontend/src/renderer/routeTree.gen.ts",
+			"frontend/src/renderer/styles.css",
+			"frontend/node_modules/react-dom/cjs/react-dom.production.min.js",
+			"docs/architecture.md",
+			"docs/very/deeply/nested/directory/that/keeps/going/for/a/while/before/it/finally/stops/DeeplyNestedConfiguration.tsx",
+			"screenshots/ao-dashboard-preview.png",
+			"screenshots/OG-Promotion-Hub 2.png",
+			"ao-logo.svg",
+		],
+	};
 }
