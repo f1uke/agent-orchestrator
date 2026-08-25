@@ -12,10 +12,10 @@ import * as monaco from "monaco-editor";
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { shikiToMonaco } from "@shikijs/monaco";
-import langGo from "@shikijs/langs/go";
-import langSwift from "@shikijs/langs/swift";
-import langObjC from "@shikijs/langs/objective-c";
-import langTs from "@shikijs/langs/typescript";
+// `bundledLanguages` is a map of id -> lazy dynamic import, so nothing is pulled
+// until a file of that language is opened. That is what makes "every language"
+// affordable: 361 grammars on disk, one fetched when you first open a .rs file.
+import { bundledLanguages } from "shiki";
 import themeDark from "@shikijs/themes/github-dark-default";
 import themeLight from "@shikijs/themes/github-light-default";
 import { Lsp } from "./lsp";
@@ -23,8 +23,39 @@ import "./style.css";
 
 // Vite emits each worker as a same-origin file. Monaco's default worker loader
 // builds a blob: URL, which `default-src 'self'` blocks — this is the CSP trap.
+//
+// Once every built-in language is reachable, Monaco's OWN language services
+// wake up for ts/js/css/html/json and demand their dedicated workers. Handing
+// them the plain editor worker throws a stream of
+// "Missing requestHandler or method: getSyntacticDiagnostics". They are lazy
+// chunks, so this costs disk, not cold load — and it buys real validation and
+// completion in the languages we have no language server for.
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
-self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
+import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
+import JsonWorker from "monaco-editor/language/json/json.worker?worker";
+import CssWorker from "monaco-editor/language/css/css.worker?worker";
+import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
+self.MonacoEnvironment = {
+	getWorker(_moduleId: string, label: string) {
+		switch (label) {
+			case "typescript":
+			case "javascript":
+				return new TsWorker();
+			case "json":
+				return new JsonWorker();
+			case "css":
+			case "scss":
+			case "less":
+				return new CssWorker();
+			case "html":
+			case "handlebars":
+			case "razor":
+				return new HtmlWorker();
+			default:
+				return new EditorWorker();
+		}
+	},
+};
 
 const BRIDGE = "http://127.0.0.1:8917";
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -43,10 +74,12 @@ log(`file index: ${meta.files.length} files in ${meta.indexMs}ms (${meta.lang} @
 
 // ---- 2. syntax highlighting: real TextMate grammars ----------------------
 const tHl = performance.now();
-const langs = meta.lang === "swift" ? ["swift", "objective-c", "typescript"] : ["go", "typescript"];
+// Only the workspace's own language is loaded up front; everything else arrives
+// on demand through ensureGrammar().
+const langs = meta.lang === "swift" ? ["swift", "objective-c"] : ["go"];
 const highlighter = await createHighlighterCore({
 	themes: [themeDark, themeLight],
-	langs: meta.lang === "swift" ? [langSwift, langObjC, langTs] : [langGo, langTs],
+	langs: await Promise.all(langs.map((l) => bundledLanguages[l as keyof typeof bundledLanguages]())),
 	// The JS engine avoids oniguruma's WASM. Under `script-src 'self'` Chromium
 	// refuses WebAssembly.instantiate unless 'wasm-unsafe-eval' is present, so
 	// the WASM engine would need a CSP change; this one does not.
@@ -54,6 +87,56 @@ const highlighter = await createHighlighterCore({
 });
 for (const l of langs) monaco.languages.register({ id: l });
 shikiToMonaco(highlighter, monaco);
+
+// ---- every language Monaco or shiki knows ---------------------------------
+// Monaco already ships 84 Monarch grammars and registers them all through the
+// barrel import; shiki has 361 TextMate grammars, which are higher fidelity.
+// So: resolve the language from Monaco's own registry (it owns the extension
+// table), then upgrade to shiki's grammar when it has one, and otherwise keep
+// Monaco's — which still colours the file rather than showing it grey.
+const byExtension = new Map<string, string>();
+const byFilename = new Map<string, string>();
+for (const l of monaco.languages.getLanguages()) {
+	for (const e of l.extensions ?? []) byExtension.set(e.toLowerCase(), l.id);
+	for (const f of l.filenames ?? []) byFilename.set(f.toLowerCase(), l.id);
+}
+// Where the two registries disagree on the id for the same language.
+const SHIKI_ALIAS: Record<string, string> = {
+	shell: "shellscript",
+	bat: "batch",
+	dockerfile: "docker",
+	"objective-c": "objective-c",
+	"objective-cpp": "objective-cpp",
+	restructuredtext: "rst",
+	freemarker2: "handlebars",
+	mips: "asm",
+	pascaligo: "pascal",
+	sb: "vb",
+};
+const loadedGrammars = new Set(langs);
+const failedGrammars = new Set<string>();
+
+async function ensureGrammar(id: string) {
+	if (id === "plaintext" || loadedGrammars.has(id) || failedGrammars.has(id)) return;
+	const shikiId = SHIKI_ALIAS[id] ?? id;
+	const loader = bundledLanguages[shikiId as keyof typeof bundledLanguages];
+	if (!loader) {
+		// No TextMate grammar — Monaco's own Monarch one is already registered and
+		// will colour it. Remember, so we do not look again on every open.
+		failedGrammars.add(id);
+		return;
+	}
+	const t = performance.now();
+	try {
+		await highlighter.loadLanguage(await loader());
+		monaco.languages.register({ id });
+		shikiToMonaco(highlighter, monaco);
+		loadedGrammars.add(id);
+		log(`grammar "${id}" loaded in ${(performance.now() - t).toFixed(0)}ms (${loadedGrammars.size} loaded)`);
+	} catch {
+		failedGrammars.add(id);
+	}
+}
 log(`shiki grammars (${langs.join(", ")}) ready in ${(performance.now() - tHl).toFixed(0)}ms`);
 
 const editor = monaco.editor.create(el("editor"), {
@@ -98,36 +181,50 @@ const opened = new Set<string>();
 let currentUri = "";
 let firstDefinitionAt = 0;
 
-async function openPath(rel: string, line = 1, abs?: string) {
+// ONE buffer per file, shared by the editor and the diff's modified side. Two
+// models for the same path would let an edit made in one mode vanish in the
+// other, which is the kind of bug nobody reports because they assume they
+// imagined it.
+async function modelFor(rel: string, abs?: string) {
 	const q = abs
 		? `${BRIDGE}/open-external?abs=${encodeURIComponent(abs)}`
 		: `${BRIDGE}/file?path=${encodeURIComponent(rel)}`;
 	const f = await (await fetch(q)).json();
-	const model =
-		monaco.editor.getModel(monaco.Uri.parse(f.uri)) ??
-		monaco.editor.createModel(f.text, langFor(f.uri), monaco.Uri.parse(f.uri));
-	if (model.getValue() !== f.text) model.setValue(f.text);
+	await ensureGrammar(langFor(f.uri));
+	const uri = monaco.Uri.parse(f.uri);
+	const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(f.text, langFor(f.uri), uri);
+	// Only reset from disk when the buffer has no unsaved edits of its own.
+	if (!dirtyBuffers.has(f.uri) && model.getValue() !== f.text) model.setValue(f.text);
+	if (!opened.has(f.uri)) {
+		opened.add(f.uri);
+		lsp.didOpen(f.uri, langFor(f.uri), model.getValue());
+	}
+	return { f, model };
+}
+
+async function openPath(rel: string, line = 1, abs?: string) {
+	// Reached from ⌘click, ⌘⇧O or the Browse tree — all of which mean "put me in
+	// the file", so leave the diff behind rather than editing a hidden buffer.
+	if (mode === "changes") setMode("browse");
+	const { f, model } = await modelFor(rel, abs);
 	editor.setModel(model);
 	editor.revealLineInCenter(line);
 	editor.setPosition({ lineNumber: line, column: 1 });
 	editor.focus();
 	currentUri = f.uri;
-	if (!opened.has(f.uri)) {
-		opened.add(f.uri);
-		lsp.didOpen(f.uri, langFor(f.uri), f.text);
-	}
+	currentRel = rel;
 	el<HTMLElement>("title").textContent = `AO spike · ${rel || f.abs}:${line}`;
 	await refreshChanges();
 	return f;
 }
-const langFor = (uri: string) =>
-	uri.endsWith(".swift")
-		? "swift"
-		: uri.endsWith(".go")
-			? "go"
-			: /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(uri)
-				? "typescript"
-				: "plaintext";
+function langFor(uri: string): string {
+	const name = (uri.split("/").pop() ?? "").toLowerCase();
+	const byName = byFilename.get(name);
+	if (byName) return byName;
+	const dot = name.lastIndexOf(".");
+	if (dot < 0) return "plaintext";
+	return byExtension.get(name.slice(dot)) ?? "plaintext";
+}
 
 // ---- 3. Cmd+click → textDocument/definition -------------------------------
 // Monaco routes cmd+click through its own definition provider, so registering
@@ -179,6 +276,10 @@ monaco.editor.onDidCreateModel((model) => {
 	model.onDidChangeContent(() => {
 		const uri = model.uri.toString();
 		if (!opened.has(uri)) return;
+		if (!uri.startsWith("diff-base://")) {
+			dirtyBuffers.add(uri);
+			paintDirty();
+		}
 		clearTimeout(changeTimers.get(uri));
 		// Debounced: sourcekitd re-parses the whole primary file on every change,
 		// and on a 2 000-line Swift file that is not free.
@@ -286,6 +387,204 @@ editor.onDidChangeModel(() => {
 	return source;
 };
 
+// ---- 9. save -------------------------------------------------------------
+// Editing is only real once it reaches disk. One save path for both modes,
+// because both edit the same buffer.
+const dirtyBuffers = new Set<string>();
+
+async function saveCurrent() {
+	const model = mode === "changes" ? diffEditor?.getModel()?.modified : editor.getModel();
+	if (!model) return;
+	const rel = relOf(model.uri.toString());
+	if (!rel) {
+		log("cannot save a file outside the workspace");
+		return;
+	}
+	const t = performance.now();
+	const res = await fetch(`${BRIDGE}/write`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ path: rel, text: model.getValue() }),
+	});
+	if (!res.ok) {
+		log(`save failed: ${res.status}`);
+		return;
+	}
+	dirtyBuffers.delete(model.uri.toString());
+	log(`saved ${rel} in ${(performance.now() - t).toFixed(0)}ms`);
+	await Promise.all([refreshChanges(), loadBranchChanges()]);
+	if (mode === "changes") await openDiff(rel);
+	paintDirty();
+}
+
+function paintDirty() {
+	const model = mode === "changes" ? diffEditor?.getModel()?.modified : editor.getModel();
+	const isDirty = model ? dirtyBuffers.has(model.uri.toString()) : false;
+	el<HTMLElement>("title").classList.toggle("dirty", isDirty);
+}
+
+window.addEventListener("keydown", (e) => {
+	if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+		e.preventDefault();
+		void saveCurrent();
+	}
+});
+
+// ---- 8. two modes: Browse (a normal editor) and Changes (a diff) ----------
+// The same pair the Files tab already offers. Browse is a normal editor over
+// the whole project; Changes is this branch against its target, as a real diff.
+// Monaco has a diff editor built in, so Changes is a second editor instance
+// rather than a hand-rolled two-column renderer.
+type Mode = "changes" | "browse";
+let mode: Mode = "browse";
+let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
+
+function ensureDiffEditor() {
+	if (diffEditor) return diffEditor;
+	diffEditor = monaco.editor.createDiffEditor(el("diff"), {
+		theme: "github-dark-default",
+		automaticLayout: true,
+		fontSize: 12,
+		// Side by side needs width the rail has already taken; inline reads better
+		// at this size and matches how the app renders a diff today.
+		renderSideBySide: sideBySide,
+		// The modified side is editable; the original is the merge base and cannot
+		// meaningfully be written to.
+		readOnly: false,
+		originalEditable: false,
+		renderOverviewRuler: true,
+		minimap: { enabled: false },
+		scrollBeyondLastLine: false,
+		ignoreTrimWhitespace: false,
+	});
+	return diffEditor;
+}
+
+async function openDiff(rel: string) {
+	const d = ensureDiffEditor();
+	const lang = langFor(rel);
+	await ensureGrammar(lang);
+	const [{ model: modified }, before] = await Promise.all([
+		modelFor(rel),
+		(await fetch(`${BRIDGE}/file-at?path=${encodeURIComponent(rel)}`)).json(),
+	]);
+	// The old side only ever exists at the merge base, so it is its own model and
+	// stays read-only. The NEW side is the same buffer Browse mode edits, which
+	// is what lets you fix something without leaving the review.
+	const oldUri = monaco.Uri.parse(`diff-base://${rel}`);
+	const original = monaco.editor.getModel(oldUri) ?? monaco.editor.createModel(before.text ?? "", lang, oldUri);
+	if (original.getValue() !== (before.text ?? "")) original.setValue(before.text ?? "");
+	d.setModel({ original, modified });
+	currentRel = rel;
+	el<HTMLElement>("title").textContent = `AO spike · ${rel} — vs ${baseLabel}`;
+	renderRail();
+}
+
+let currentRel = "";
+let baseLabel = "target";
+
+function setMode(next: Mode) {
+	mode = next;
+	localStorage.setItem("spike.mode", next);
+	el<HTMLButtonElement>("modeChanges").setAttribute("aria-selected", String(next === "changes"));
+	el<HTMLButtonElement>("modeBrowse").setAttribute("aria-selected", String(next === "browse"));
+	el<HTMLElement>("editor").hidden = next !== "browse";
+	el<HTMLElement>("diff").hidden = next !== "changes";
+	el<HTMLElement>("railHead").hidden = next !== "changes";
+	hideRevert();
+	renderRail();
+	if (next === "changes") {
+		ensureDiffEditor();
+		applyDiffLayout();
+		// Land on something rather than an empty pane.
+		const target = branchFiles.find((f) => f.path === currentRel) ?? branchFiles[0];
+		if (target) void openDiff(target.path);
+	} else {
+		editor.layout();
+		editor.focus();
+	}
+}
+
+let sideBySide = localStorage.getItem("spike.diffSideBySide") === "1";
+function applyDiffLayout() {
+	el<HTMLButtonElement>("diffLayout").setAttribute("aria-pressed", String(sideBySide));
+	el<HTMLButtonElement>("diffLayout").title = sideBySide
+		? "Side by side — click for inline"
+		: "Inline — click for side by side";
+	diffEditor?.updateOptions({ renderSideBySide: sideBySide });
+}
+el<HTMLButtonElement>("diffLayout").onclick = () => {
+	sideBySide = !sideBySide;
+	localStorage.setItem("spike.diffSideBySide", sideBySide ? "1" : "0");
+	applyDiffLayout();
+};
+
+el<HTMLButtonElement>("modeChanges").onclick = () => setMode("changes");
+el<HTMLButtonElement>("modeBrowse").onclick = () => setMode("browse");
+
+// ---- the Browse tree ------------------------------------------------------
+// Built from the same file index that feeds ⌘⇧O, so there is one source of
+// truth for "what files exist".
+const expanded = new Set<string>();
+
+function renderBrowseTree() {
+	const list = el<HTMLUListElement>("railList");
+	list.innerHTML = "";
+	const cur = relOf(editor.getModel()?.uri.toString() ?? "");
+	// Keep the path to the open file expanded, so ⌘click landing somewhere far
+	// away still shows you where you are.
+	if (cur) {
+		const parts = cur.split("/");
+		for (let i = 1; i < parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
+	}
+	type Node = { name: string; path: string; dir: boolean; children: Map<string, Node> };
+	const root: Node = { name: "", path: "", dir: true, children: new Map() };
+	for (const f of meta.files) {
+		let node = root;
+		const parts = f.split("/");
+		parts.forEach((part, i) => {
+			const isDir = i < parts.length - 1;
+			const p = parts.slice(0, i + 1).join("/");
+			let child = node.children.get(part);
+			if (!child) {
+				child = { name: part, path: p, dir: isDir, children: new Map() };
+				node.children.set(part, child);
+			}
+			node = child;
+		});
+	}
+	const walk = (node: Node, depth: number) => {
+		const kids = [...node.children.values()].sort((a, b) =>
+			a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1,
+		);
+		for (const k of kids) {
+			const li = document.createElement("li");
+			li.className = "node" + (k.dir ? " d" : "") + (!k.dir && k.path === cur ? " cur" : "");
+			li.style.paddingLeft = `${8 + depth * 12}px`;
+			const tw = document.createElement("span");
+			tw.className = "tw";
+			tw.textContent = k.dir ? (expanded.has(k.path) ? "▾" : "▸") : "";
+			li.appendChild(tw);
+			const nm = document.createElement("span");
+			nm.className = "nm";
+			nm.textContent = k.name;
+			nm.title = k.path;
+			li.appendChild(nm);
+			li.onclick = () => {
+				if (k.dir) {
+					expanded.has(k.path) ? expanded.delete(k.path) : expanded.add(k.path);
+					renderBrowseTree();
+				} else {
+					void openPath(k.path, 1);
+				}
+			};
+			list.appendChild(li);
+			if (k.dir && expanded.has(k.path)) walk(k, depth + 1);
+		}
+	};
+	walk(root, 0);
+}
+
 // ---- 7. what this BRANCH changed vs its target branch ---------------------
 // This is the app's existing Changes view (workspace_changes.go), brought into
 // the editor instead of living beside it. Two levels, never merged:
@@ -313,7 +612,7 @@ async function loadBranchChanges() {
 	renderRail();
 }
 
-function renderRail() {
+function renderChangesRail() {
 	const list = el<HTMLUListElement>("railList");
 	list.innerHTML = "";
 	const cur = relOf(editor.getModel()?.uri.toString() ?? "");
@@ -329,7 +628,7 @@ function renderRail() {
 			list.appendChild(d);
 		}
 		const li = document.createElement("li");
-		li.className = "f" + (f.path === cur ? " cur" : "");
+		li.className = "f" + (f.path === (mode === "changes" ? currentRel : cur) ? " cur" : "");
 		const n = document.createElement("span");
 		n.className = "n";
 		n.textContent = f.path.split("/").pop() ?? f.path;
@@ -345,9 +644,15 @@ function renderRail() {
 		c.className = "c";
 		c.innerHTML = `<span class="a">+${f.additions}</span><span class="d">−${f.deletions}</span>`;
 		li.appendChild(c);
-		li.onclick = () => openPath(f.path, 1).then(() => jumpToFirstBranchHunk());
+		li.onclick = () =>
+			mode === "changes" ? openDiff(f.path) : openPath(f.path, 1).then(() => jumpToFirstBranchHunk());
 		list.appendChild(li);
 	}
+}
+
+function renderRail() {
+	if (mode === "browse") renderBrowseTree();
+	else renderChangesRail();
 }
 
 // Opening a changed file at line 1 is not what anyone wants; land on the change.
@@ -956,6 +1261,7 @@ window.addEventListener("keydown", (e) => {
 });
 
 await loadBranchChanges();
+baseLabel = el<HTMLElement>("railBase").textContent?.replace(/^vs /, "") ?? "target";
 
 // open something to start on
 const seed =
@@ -964,7 +1270,17 @@ const seed =
 			meta.files.find((f) => f.endsWith(".swift"))!)
 		: (meta.files.find((f) => f.endsWith("internal/service/session/workspace_file.go")) ??
 			meta.files.find((f) => f.endsWith(".go"))!);
-await openPath(seed, 1);
+// Found by qa: a module-level await that rejects (a failed fetch, or no file of
+// this language in the index) throws before `window.__spike` is ever assigned —
+// leaving a blank editor and nothing to debug with.
+try {
+	if (seed) await openPath(seed, 1);
+	else log("no file of this language in the index; open one from the tree");
+} catch (e) {
+	log(`could not open the seed file: ${String(e)}`);
+}
+
+setMode((localStorage.getItem("spike.mode") as Mode) ?? "browse");
 
 setInterval(async () => {
 	const s = await (await fetch(`${BRIDGE}/stats`)).json();
@@ -987,6 +1303,11 @@ setInterval(async () => {
 		return { elapsedMs: r.elapsedMs, result: r.result };
 	},
 	timings: () => lsp.timings,
+	openDiff: (rel: string) => openDiff(rel),
+	diff: () => diffEditor,
+	dirty: () => [...dirtyBuffers],
+	save: () => saveCurrent(),
+	mode: () => mode,
 	lastCompletion: () => lastCompletion,
 	async completeAt(line: number, column: number, trigger?: string) {
 		const model = editor.getModel()!;

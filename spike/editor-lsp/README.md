@@ -20,6 +20,16 @@ outside this worktree:
 | ⌘click → definition  | `textDocument/definition`, wired into Monaco's own goto             |
 | autocompletion       | `textDocument/completion` + `didChange`, in Monaco's suggest widget |
 
+## Two modes
+
+**Browse** is a normal editor — the whole project as a tree, open a file, edit
+it, ⌘S. **Changes** is `monaco.editor.createDiffEditor` against the merge base.
+
+Both share **one model per file**, so an edit made while reviewing a diff is the
+same buffer Browse has open; two models for one path is how an edit silently
+disappears. The diff's _modified_ side is editable and the _original_ is not —
+the original only exists at the merge base.
+
 ## Two levels of "changed", never merged
 
 ```
@@ -97,6 +107,11 @@ cold page load actually pulls.
 - A popover parented to the editor gets its `mousedown` eaten by Monaco, which
   closes it before the button sees a `click` — `stopPropagation` on the box. And
   `#editor` needs `position: relative`, or the popover resolves against `<body>`.
+- **Turning on every language wakes Monaco's own language services.** Once
+  ts/js/css/html/json models exist, those services demand their _dedicated_
+  workers; handing them the plain editor worker throws a stream of
+  `Missing requestHandler or method: getSyntacticDiagnostics`. Ship the four
+  workers (they are lazy chunks) or switch the services off.
 - Completion needs `textDocument/didChange` or the server answers about the file
   as it was opened; and every response came back `isIncomplete: true`, so the
   client must re-request rather than filter locally.

@@ -83,7 +83,13 @@ function startServer() {
 	lspStartedAt = Date.now();
 	lsp = spawn(cfg.cmd, cfg.args, { cwd: ROOT, env: { ...process.env, ...cfg.env }, stdio: ["pipe", "pipe", "pipe"] });
 	lsp.stderr.on("data", (d) => process.stderr.write(`[lsp] ${d}`));
-	lsp.on("exit", (c) => console.log(`[lsp] exited ${c}`));
+	lsp.on("exit", (c) => {
+		// Found by qa: without clearing the handle, `if (!lsp) startServer()` can
+		// never fire again. The renderer reconnects, sends `initialize` into a dead
+		// pipe, and hangs there forever with no error and no timeout.
+		console.log(`[lsp] exited ${c}`);
+		lsp = null;
+	});
 	console.log(`[lsp] spawned ${cfg.cmd} pid=${lsp.pid} root=${ROOT}`);
 }
 
@@ -292,6 +298,22 @@ const http = createServer((req, res) => {
 			}
 		});
 		return;
+	}
+	// The ORIGINAL side of a diff: the file as it is at the merge base. `git show`
+	// rather than a worktree read, because that content does not exist on disk.
+	if (url.pathname === "/file-at") {
+		const rel = url.searchParams.get("path") ?? "";
+		return (async () => {
+			if (!mergeBase) await resolveBase();
+			if (!mergeBase) return json({ path: rel, text: "", missing: true });
+			const out = await git(["show", `${mergeBase}:${rel}`]);
+			// A file added on this branch has no old side at all — an empty original
+			// is exactly right, and is what makes the diff read as "all added".
+			return json({ path: rel, ref: mergeBase, text: out ?? "", missing: out === null });
+		})().catch((e) => {
+			res.writeHead(500);
+			res.end(String(e));
+		});
 	}
 	if (url.pathname === "/branch-changes") {
 		return branchChanges()

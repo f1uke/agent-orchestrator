@@ -22,13 +22,21 @@
 			</header>
 			<div id="body">
 				<aside id="rail">
+					<div id="modes" role="tablist">
+						<button id="modeChanges" role="tab" type="button">Changes</button>
+						<button id="modeBrowse" role="tab" type="button">Browse</button>
+					</div>
 					<div id="railHead">
 						<span id="railBase"></span>
 						<span id="railStat"></span>
+						<button id="diffLayout" type="button" title="Side by side / inline">⇔</button>
 					</div>
 					<ul id="railList"></ul>
 				</aside>
-				<div id="editor"></div>
+				<div id="panes">
+					<div id="editor"></div>
+					<div id="diff" hidden></div>
+				</div>
 			</div>
 			<div id="log"></div>
 		</div>
