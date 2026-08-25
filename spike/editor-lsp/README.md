@@ -82,7 +82,7 @@ npm run dev            # http://localhost:5199
 LSP_LANG=swift LSP_ROOT=/path/to/ios/checkout PORT=8917 npm run bridge
 ```
 
-Swift needs the workspace to carry a `buildServer.json` + `.compile` produced by
+Swift needs a `buildServer.json` + `.compile` produced by
 [`xcode-build-server`](https://github.com/SolaWing/xcode-build-server) from a
 **previous Xcode build**. Without it sourcekit-lsp answers _nothing_ — measured,
 and it is the single most important finding in the proposal.
