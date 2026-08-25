@@ -1,0 +1,22 @@
+{
+	"name": "ao-spike-editor-lsp",
+	"private": true,
+	"version": "0.0.0",
+	"description": "THROWAWAY SPIKE. Not production code. Measures Monaco + LSP for the in-app editor.",
+	"type": "module",
+	"scripts": {
+		"bridge": "node server.mjs",
+		"dev": "vite",
+		"build": "vite build",
+		"measure:bundle": "node measure-bundle.mjs"
+	},
+	"dependencies": {
+		"monaco-editor": "0.56.0",
+		"shiki": "4.4.3",
+		"@shikijs/monaco": "4.4.3",
+		"ws": "8.18.3"
+	},
+	"devDependencies": {
+		"vite": "8.1.4"
+	}
+}
