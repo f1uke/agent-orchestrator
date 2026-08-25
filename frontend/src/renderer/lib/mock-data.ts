@@ -1489,7 +1489,10 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 	if (sessionId === "demo-no-target") {
 		return { available: false, reason: "no_target_branch", files: [], truncated: false };
 	}
-	if (sessionId === "demo-merged") {
+	// The board's merged sessions are `demo-merged-recent` / `demo-merged-earlier`
+	// — matching the bare id meant this branch was unreachable, so the "worktree
+	// is gone" state has never actually been visible in `ao preview`.
+	if (sessionId.startsWith("demo-merged")) {
 		return { available: false, reason: "no_workspace", files: [], truncated: false };
 	}
 	if (sessionId === "demo-clean") {
@@ -1789,7 +1792,7 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
  * live session.
  */
 export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
-	if (sessionId === "demo-merged") {
+	if (sessionId.startsWith("demo-merged")) {
 		return { available: false, reason: "no_workspace", paths: [], truncated: false };
 	}
 	return {
