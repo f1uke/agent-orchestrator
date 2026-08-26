@@ -4637,6 +4637,30 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--red);
 }
 
+/* Symbols sit above files in one scrolling body, so the group needs a label to
+   say which list a row belongs to. Existing tokens only - see DESIGN.md. */
+.open-quickly__section {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-bottom: 6px;
+}
+
+.open-quickly__section-label {
+	padding: 8px 10px 4px;
+	color: var(--fg-passive);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+}
+
+/* A symbol's own name is what identifies it, so it keeps the weight the file
+   name has; the location behind it is secondary and truncates first. */
+.open-quickly__row--symbol:hover {
+	background: var(--accent-weak);
+}
+
 .open-quickly__list {
 	display: flex;
 	flex-direction: column;

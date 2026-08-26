@@ -1,9 +1,11 @@
-import { type CSSProperties, lazy, Suspense, useMemo } from "react";
+import { type CSSProperties, lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
+import type { LanguageServerHandle } from "../lib/lsp/use-language-server";
+import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useUiStore } from "../stores/ui-store";
 
 type WorkspaceFile = components["schemas"]["WorkspaceFileResponse"];
@@ -57,14 +59,65 @@ export function WorkspaceFileView({
 	sessionId,
 	path,
 	line,
+	column,
+	workspaceRoot,
 	onClose,
+	onOpenFile,
 }: {
 	sessionId: string;
 	path: string;
 	line?: number;
+	/** 1-based column, carried by a go-to-definition target. */
+	column?: number;
+	/** The session's worktree root, absolute. Without it there is no language server. */
+	workspaceRoot?: string;
 	onClose: () => void;
+	/** The file-open seam, so a ⌘click target opens the way every other file does. */
+	onOpenFile?: (file: WorkspaceFileOpen) => void;
 }) {
 	const theme = useUiStore((s) => s.theme);
+	const [serverState, setServerState] = useState<{ state: LanguageServerHandle["state"]; detail?: string } | null>(
+		null,
+	);
+	// Stable, because MonacoFileEditor reports through it from an effect.
+	const handleServerState = useCallback(
+		(next: { state: LanguageServerHandle["state"]; detail?: string }) => setServerState(next),
+		[],
+	);
+
+	// A language server needs an on-disk path. Inside the workspace the viewer
+	// carries a relative one; outside it (a knowledge-store note, GOROOT) the path
+	// already IS absolute.
+	const absolutePath = useMemo(
+		() => (path.startsWith("/") ? path : workspaceRoot ? `${workspaceRoot}/${path}` : undefined),
+		[path, workspaceRoot],
+	);
+
+	/**
+	 * 🗝 Every state a reader could act on gets its OWN words, and none of them is
+	 * silence. `unavailable` is the deliberate exception: a Markdown file has no
+	 * language server and announcing that on every open would be noise, not
+	 * information.
+	 */
+	const serverLabel = useMemo(() => {
+		switch (serverState?.state) {
+			case "starting":
+			case "initializing":
+				return { text: "starting gopls…", tone: P.muted2, title: "The Go language server is starting." };
+			case "indexing":
+				return { text: "indexing…", tone: P.muted2, title: "The Go language server is still loading packages." };
+			case "ready":
+				return { text: "go ⌘click", tone: ACCENT, title: serverState.detail ?? "Go to definition is available." };
+			case "failed":
+				return {
+					text: "no language server",
+					tone: P.red,
+					title: serverState.detail ?? "The Go language server could not be started.",
+				};
+			default:
+				return null;
+		}
+	}, [serverState]);
 	const q = useQuery({
 		queryKey: ["workspace-file", sessionId, path],
 		queryFn: async () => {
@@ -162,6 +215,15 @@ export function WorkspaceFileView({
 						{changedCount} uncommitted
 					</span>
 				)}
+				{serverLabel && (
+					<span
+						data-testid="lsp-status"
+						style={{ fontFamily: MONO, fontSize: 11.5, color: serverLabel.tone, flex: "none" }}
+						title={serverLabel.title}
+					>
+						{serverLabel.text}
+					</span>
+				)}
 				{file?.truncated && (
 					<span style={{ fontFamily: MONO, fontSize: 11.5, color: P.muted2, flex: "none" }}>truncated</span>
 				)}
@@ -188,7 +250,12 @@ export function WorkspaceFileView({
 						text={text}
 						changedLines={changedLines}
 						line={line}
+						column={column}
 						theme={theme}
+						absolutePath={absolutePath}
+						workspaceRoot={workspaceRoot}
+						onOpenFile={onOpenFile}
+						onServerState={handleServerState}
 					/>
 				</Suspense>
 			)}

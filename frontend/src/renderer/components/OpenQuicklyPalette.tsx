@@ -1,14 +1,29 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { FileCode, Search } from "lucide-react";
+import { Braces, FileCode, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
+import { useLanguageServer } from "../lib/lsp/use-language-server";
 import { type FileMatch, rankFiles } from "../lib/open-quickly";
+import { parseWorkspaceSymbols, rankSymbols, type SymbolHit, type SymbolMatch } from "../lib/open-quickly-symbols";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 
 /** How many rows the palette will rank into. Xcode shows a comparable window. */
 const MAX_RESULTS = 50;
+
+/** Symbols sit above the files, so they take fewer rows before the fold. */
+const MAX_SYMBOL_RESULTS = 20;
+
+/**
+ * Long enough that typing does not fire a request per keystroke, short enough
+ * that a pause reads as instant. Not a correctness device: staleness is handled
+ * by tagging the answer with its query, below.
+ */
+const SYMBOL_DEBOUNCE_MS = 90;
+
+/** The one language this slice serves. Slice 5 and 7 add to it. */
+const SYMBOL_LANGUAGE = "go";
 
 /** ⌘⇧O on macOS, Ctrl+⇧O elsewhere. Nothing else in the app binds O. */
 function isOpenQuicklyShortcut(event: KeyboardEvent): boolean {
@@ -43,34 +58,38 @@ function splitPath(path: string): { dir: string; name: string } {
 }
 
 /**
- * ⌘⇧O — Open Quickly, over the session workspace's FILES.
+ * ⌘⇧O — Open Quickly, over the session workspace's FILES and Go SYMBOLS.
  *
- * The half of Xcode's Open Quickly that needs no language server, and per the
- * editor spike the half that gets used most. Symbols arrive in a later slice and
- * are meant to join this list rather than replace it.
+ * Files need no language server and are per the editor spike the half that gets
+ * used most, so they are always there; symbols JOIN them rather than replacing
+ * them, and are absent without a language server rather than blocking the rest.
  *
- * **Results can never lag the query.** The whole index is fetched once when the
+ * **Results can never lag the query.** The file index is fetched once when the
  * palette opens and ranked in a `useMemo` keyed on the current query, so what is
  * on screen is always the answer to what is in the box — there is no request in
- * flight that a fast typist could outrun. That is a structural guarantee, not a
- * debounce or a request-generation counter, and it is deliberate: the spike hit
- * exactly this bug on the symbol side, where results arrived wrong-then-right.
+ * flight that a fast typist could outrun. Symbols cannot be synchronous, so they
+ * get the same guarantee a different way: each answer is TAGGED with the query
+ * that produced it and shown only while that tag still matches the box, which
+ * discards a slow answer instead of displaying it late. The spike hit exactly
+ * this bug on the symbol side, where results arrived wrong-then-right.
  *
  * The component owns its own shortcut and its own open state, so mounting it is
- * one line and it stays out of the file viewer's way — slice 1 is replacing that
- * viewer with Monaco on another branch. Opening a file goes through the single
- * `onOpenFile` seam (`WorkspaceFileOpen`), which is what a later slice repoints
- * at Monaco and at a go-to-definition target.
+ * one line. Opening anything goes through the single `onOpenFile` seam
+ * (`WorkspaceFileOpen`) — a symbol carries the `column` that seam has always had
+ * a field for, and a file does not.
  */
 export function OpenQuicklyPalette({
 	sessionId,
 	enabled = true,
 	onOpenFile,
+	workspaceRoot,
 }: {
 	sessionId: string;
 	/** False for a session with no worktree to index (an orchestrator). */
 	enabled?: boolean;
 	onOpenFile: (file: WorkspaceFileOpen) => void;
+	/** The session's worktree root, absolute. Without it there are no symbols. */
+	workspaceRoot?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
@@ -105,6 +124,66 @@ export function OpenQuicklyPalette({
 
 	const results = useMemo(() => rankFiles(paths ?? [], query, MAX_RESULTS), [paths, query]);
 
+	// The Go server for THIS workspace, attached only while the palette is OPEN.
+	// Pressing ⌘⇧O is therefore what starts gopls - not opening a session, and
+	// not launching the app - and closing the palette begins its idle countdown.
+	const server = useLanguageServer(open && workspaceRoot ? workspaceRoot : undefined, SYMBOL_LANGUAGE);
+	const trimmedQuery = query.trim();
+
+	/**
+	 * 🗝 Slice 2's guarantee, extended to an ASYNCHRONOUS source.
+	 *
+	 * The file half is a `useMemo` over the current query, so it cannot lag.
+	 * Symbols cannot be, so each answer is TAGGED with the query that produced it
+	 * and rendered only while that tag still equals the box. A slow answer is
+	 * DISCARDED rather than shown late - stronger than a debounce, and the exact
+	 * bug the spike hit on the symbol side, where results arrived wrong-then-right.
+	 */
+	const [symbolAnswer, setSymbolAnswer] = useState<{ query: string; hits: SymbolHit[] } | null>(null);
+
+	useEffect(() => {
+		const client = server.client;
+		// Gate on READINESS, not on latency. workspace/symbol answers WRONG before
+		// the index settles, so asking early would put garbage on screen in exactly
+		// the seconds people use this most.
+		if (!open || !client || server.state !== "ready" || trimmedQuery === "") {
+			setSymbolAnswer(null);
+			return;
+		}
+		let cancelled = false;
+		const timer = setTimeout(() => {
+			void client
+				.request("workspace/symbol", { query: trimmedQuery })
+				.then((result) => {
+					if (cancelled) return;
+					const hits = parseWorkspaceSymbols(result);
+					if (hits.length === 0) {
+						// Up, answering, and returning nothing: logged so it is
+						// distinguishable in the console from a server that is broken.
+						console.warn(`[lsp] workspace/symbol "${trimmedQuery}" → 0 symbols (server ready)`);
+					}
+					setSymbolAnswer({ query: trimmedQuery, hits });
+				})
+				.catch((err: unknown) => {
+					if (cancelled) return;
+					console.warn(`[lsp] workspace/symbol "${trimmedQuery}" failed`, err);
+					setSymbolAnswer({ query: trimmedQuery, hits: [] });
+				});
+		}, SYMBOL_DEBOUNCE_MS);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+		};
+	}, [open, server.client, server.state, trimmedQuery]);
+
+	const symbols = useMemo(
+		() =>
+			symbolAnswer && symbolAnswer.query === trimmedQuery && workspaceRoot
+				? rankSymbols(symbolAnswer.hits, trimmedQuery, workspaceRoot, MAX_SYMBOL_RESULTS)
+				: [],
+		[symbolAnswer, trimmedQuery, workspaceRoot],
+	);
+
 	// Clamp rather than reset: re-ranking on each keystroke can shorten the list
 	// under a selection that was valid a character ago.
 	const active = results.length === 0 ? -1 : Math.min(activeIndex, results.length - 1);
@@ -124,6 +203,21 @@ export function OpenQuicklyPalette({
 			// Every path here came out of the session's own workspace index, so the
 			// containment verdict is known without asking the server for it again.
 			onOpenFile({ path: match.path, inWorkspace: true });
+		},
+		[onOpenFile],
+	);
+
+	const chooseSymbol = useCallback(
+		(symbol: SymbolMatch) => {
+			setOpen(false);
+			// The same seam a terminal reference and a file row use, carrying the
+			// COLUMN a symbol has and a file does not - the field slice 2 left here.
+			onOpenFile({
+				path: symbol.path,
+				line: symbol.line,
+				column: symbol.column,
+				inWorkspace: !symbol.path.startsWith("/"),
+			});
 		},
 		[onOpenFile],
 	);
@@ -224,7 +318,36 @@ export function OpenQuicklyPalette({
 						{!index.isLoading && !index.error && !unavailable && query.trim() !== "" && results.length === 0 ? (
 							<p className="open-quickly__note">No files match &ldquo;{query.trim()}&rdquo;.</p>
 						) : null}
-						{results.length > 0 ? (
+						{trimmedQuery !== "" && workspaceRoot && server.state !== "unavailable" ? (
+						<div className="open-quickly__section" data-testid="open-quickly-symbols">
+							<div className="open-quickly__section-label">Symbols</div>
+							{server.state === "failed" ? (
+								<p className="open-quickly__note open-quickly__note--error">
+									The Go language server isn&rsquo;t running, so symbols aren&rsquo;t searchable.
+									{server.detail ? ` (${server.detail})` : ""}
+								</p>
+							) : server.state !== "ready" ? (
+								/* Gate on READINESS, not latency: an empty list here would be a
+								   lie told in exactly the seconds people use this most. */
+								<p className="open-quickly__note">Indexing this workspace&rsquo;s Go packages&hellip;</p>
+							) : symbolAnswer?.query !== trimmedQuery ? (
+								<p className="open-quickly__note">Searching symbols&hellip;</p>
+							) : symbols.length === 0 ? (
+								<p className="open-quickly__note">No Go symbols match &ldquo;{trimmedQuery}&rdquo;.</p>
+							) : (
+								<div aria-label="Matching symbols" className="open-quickly__list" role="listbox">
+									{symbols.map((symbol) => (
+										<SymbolRow
+											key={`${symbol.uri}:${symbol.line}:${symbol.column}:${symbol.name}`}
+											match={symbol}
+											onPick={() => chooseSymbol(symbol)}
+										/>
+									))}
+								</div>
+							)}
+						</div>
+					) : null}
+					{results.length > 0 ? (
 							<div
 								aria-label="Matching files"
 								className="open-quickly__list"
@@ -260,6 +383,44 @@ export function OpenQuicklyPalette({
 				</Dialog.Content>
 			</Dialog.Portal>
 		</Dialog.Root>
+	);
+}
+
+/**
+ * One symbol. Deliberately shaped like `ResultRow`: same commit-on-click,
+ * never-take-focus behaviour, so the caret cannot be stolen from the input
+ * mid-typing, and the same underline treatment over the matched characters.
+ */
+function SymbolRow({ match, onPick }: { match: SymbolMatch; onPick: () => void }) {
+	return (
+		<button
+			className="open-quickly__row open-quickly__row--symbol"
+			onMouseDown={(e) => e.preventDefault()}
+			onClick={onPick}
+			role="option"
+			aria-selected={false}
+			title={`${match.path}:${match.line}`}
+			type="button"
+		>
+			<Braces aria-hidden="true" className="open-quickly__row-icon" />
+			<span className="open-quickly__name">
+				{highlightRuns(match.name, match.positions, 0).map((run, i) =>
+					run.hit ? (
+						// eslint-disable-next-line react/no-array-index-key -- runs are positional
+						<mark className="open-quickly__hit" key={i}>
+							{run.text}
+						</mark>
+					) : (
+						// eslint-disable-next-line react/no-array-index-key -- runs are positional
+						<span key={i}>{run.text}</span>
+					),
+				)}
+			</span>
+			<span className="open-quickly__dir">
+				{match.containerName ? `${match.containerName} · ` : ""}
+				{match.path}:{match.line}
+			</span>
+		</button>
 	);
 }
 
