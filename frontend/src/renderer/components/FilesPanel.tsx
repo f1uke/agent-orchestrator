@@ -1,4 +1,14 @@
-import { FileText, FolderOpen, GitBranch, List, ListTree, Rows3, RefreshCw, Search, TriangleAlert } from "lucide-react";
+import {
+	FileStack,
+	FileText,
+	FolderOpen,
+	GitBranch,
+	List,
+	ListTree,
+	RefreshCw,
+	Search,
+	TriangleAlert,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
@@ -566,7 +576,7 @@ function SummaryLine({
 						className="files-panel__refresh"
 						onClick={onReviewAll}
 					>
-						<Rows3 aria-hidden="true" className="h-3 w-3" />
+						<FileStack aria-hidden="true" className="h-3 w-3" />
 					</button>
 				</SimpleTooltip>
 			) : null}

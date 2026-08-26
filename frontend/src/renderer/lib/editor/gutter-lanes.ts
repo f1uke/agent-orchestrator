@@ -5,15 +5,23 @@ type LineChange = components["schemas"]["LineChangeDTO"];
 /** One gutter mark, in Monaco's 1-based line coordinates. */
 export type GutterMark = { line: number; className: string };
 
+/**
+ * On BOTH lanes. The gutter margin also holds Monaco's folding controls, so a
+ * click has to be attributable to one of ours before it opens the discard
+ * popover — and the two lanes overlap each other in that margin, so either one
+ * can be the element under the cursor.
+ */
+export const GUTTER_LANE_CLASS = "ao-gutter-lane";
+
 /** The uncommitted lane's classes; colours live in `styles.css` beside the diff tokens. */
 const UNCOMMITTED_CLASS: Record<string, string> = {
-	added: "ao-change-bar ao-change-bar--added",
-	modified: "ao-change-bar ao-change-bar--modified",
-	removed: "ao-change-bar ao-change-bar--removed",
+	added: `${GUTTER_LANE_CLASS} ao-change-bar ao-change-bar--added`,
+	modified: `${GUTTER_LANE_CLASS} ao-change-bar ao-change-bar--modified`,
+	removed: `${GUTTER_LANE_CLASS} ao-change-bar ao-change-bar--removed`,
 };
 
 /** The branch lane's single class. There is deliberately only one — see below. */
-export const BRANCH_LANE_CLASS = "ao-branch-bar";
+export const BRANCH_LANE_CLASS = `${GUTTER_LANE_CLASS} ao-branch-bar`;
 
 function clamp(line: number, lineCount: number): number {
 	return Math.min(Math.max(line, 1), Math.max(lineCount, 1));

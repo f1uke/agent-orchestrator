@@ -96,15 +96,15 @@ describe("gutter lanes", () => {
 		);
 
 		expect(marks).toEqual([
-			{ line: 2, className: "ao-change-bar ao-change-bar--added" },
-			{ line: 3, className: "ao-change-bar ao-change-bar--added" },
-			{ line: 9, className: "ao-change-bar ao-change-bar--removed" },
+			{ line: 2, className: "ao-gutter-lane ao-change-bar ao-change-bar--added" },
+			{ line: 3, className: "ao-gutter-lane ao-change-bar ao-change-bar--added" },
+			{ line: 9, className: "ao-gutter-lane ao-change-bar ao-change-bar--removed" },
 		]);
 	});
 
 	it("clamps a mark past the end of the buffer instead of decorating nothing", () => {
 		expect(uncommittedMarks([{ start: 99, end: 99, kind: "added" }], 4)).toEqual([
-			{ line: 4, className: "ao-change-bar ao-change-bar--added" },
+			{ line: 4, className: "ao-gutter-lane ao-change-bar ao-change-bar--added" },
 		]);
 	});
 

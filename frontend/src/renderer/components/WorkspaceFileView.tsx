@@ -33,6 +33,13 @@ const UNAVAILABLE_MESSAGE: Record<string, string> = {
 /** How long "Saved" stays before clearing. A persistent badge would compete with the dirty dot. */
 const SAVED_FLASH_MS = 1400;
 
+/**
+ * Below this the header sheds what it can afford to. This pane sits between a
+ * sidebar and a rail, so it is routinely far narrower than the window — a media
+ * query would be measuring the wrong box.
+ */
+const COMPACT_WIDTH = 760;
+
 type Mode = "browse" | "changes";
 
 /**
@@ -45,9 +52,25 @@ function PathLabel({ path, style }: { path: string; style?: CSSProperties }) {
 	const dir = slash >= 0 ? path.slice(0, slash + 1) : "";
 	const base = slash >= 0 ? path.slice(slash + 1) : path;
 	return (
-		<span title={path} style={{ display: "flex", minWidth: 0, ...style }}>
-			{dir !== "" && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dir}</span>}
-			<span style={{ flex: "none", whiteSpace: "nowrap" }}>{base}</span>
+		// 🗝 The whole label must be able to SHRINK, not only ellipsise its
+		// directory. `flex: none` on the basename made this row overflow its own
+		// header at 1000px and below, where the filename alone is wider than what
+		// is left — the mode toggle then painted straight over the path. The
+		// basename still has shrink PRIORITY (it gives way only once the directory
+		// is gone), which was the original intent; it just no longer refuses.
+		<span title={path} style={{ display: "flex", flex: "0 1 auto", minWidth: 0, overflow: "hidden", ...style }}>
+			{dir !== "" && (
+				<span
+					style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+				>
+					{dir}
+				</span>
+			)}
+			<span
+				style={{ flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+			>
+				{base}
+			</span>
 		</span>
 	);
 }
@@ -109,6 +132,23 @@ export function WorkspaceFileView({
 	const [baseHash, setBaseHash] = useState<string | undefined>(undefined);
 	const handleRef = useRef<EditorHandle | null>(null);
 	const queryClient = useQueryClient();
+	const rootRef = useRef<HTMLDivElement | null>(null);
+	const [compact, setCompact] = useState(false);
+
+	// What the header drops when it runs out of room, in priority order: the FILE
+	// badge and the uncommitted count go first (both are repeated elsewhere), then
+	// the mode toggle's labels. The PATH and SAVE never go — one says which file
+	// this is and the other is the only way to keep your work.
+	useEffect(() => {
+		const root = rootRef.current;
+		if (!root || typeof ResizeObserver === "undefined") return;
+		const observer = new ResizeObserver((entries) => {
+			const width = entries[0]?.contentRect.width ?? 0;
+			if (width > 0) setCompact(width < COMPACT_WIDTH);
+		});
+		observer.observe(root);
+		return () => observer.disconnect();
+	}, []);
 
 	// Stable, because MonacoFileEditor reports through these from effects.
 	const handleServerState = useCallback(
@@ -316,6 +356,7 @@ export function WorkspaceFileView({
 
 	return (
 		<div
+			ref={rootRef}
 			style={{
 				position: "relative",
 				display: "flex",
@@ -366,21 +407,30 @@ export function WorkspaceFileView({
 					<ChevronLeft aria-hidden="true" style={{ width: 14, height: 14 }} />
 					agent
 				</button>
-				<span
-					style={{
-						fontSize: 10,
-						fontWeight: 700,
-						letterSpacing: ".05em",
-						color: ACCENT,
-						background: accentMix(14),
-						border: `1px solid ${accentMix(35)}`,
-						borderRadius: 5,
-						padding: "3px 7px",
-					}}
-				>
-					FILE
-				</span>
-				<PathLabel path={path} style={{ fontFamily: MONO, fontSize: 12.5, color: V.pathFg }} />
+				{!compact && (
+					<span
+						style={{
+							flex: "none",
+							fontSize: 10,
+							fontWeight: 700,
+							letterSpacing: ".05em",
+							color: ACCENT,
+							background: accentMix(14),
+							border: `1px solid ${accentMix(35)}`,
+							borderRadius: 5,
+							padding: "3px 7px",
+						}}
+					>
+						FILE
+					</span>
+				)}
+				<PathLabel
+					path={path}
+					// A floor, so the filename never shrinks to nothing: a header that
+					// no longer says which file is open has dropped the one thing it
+					// exists for.
+					style={{ fontFamily: MONO, fontSize: 12.5, color: V.pathFg, minWidth: 84 }}
+				/>
 				{line != null && <span style={{ fontFamily: MONO, fontSize: 12, color: ACCENT, flex: "none" }}>:{line}</span>}
 				{dirty && (
 					<span
@@ -392,10 +442,16 @@ export function WorkspaceFileView({
 				<div style={{ flex: 1 }} />
 
 				{file?.available && (
-					<ModeToggle mode={mode} onMode={setMode} disabledReason={changesUnavailable} busy={drift?.reviewing} />
+					<ModeToggle
+						mode={mode}
+						onMode={setMode}
+						disabledReason={changesUnavailable}
+						busy={drift?.reviewing}
+						compact={compact}
+					/>
 				)}
 
-				{changedCount > 0 && (
+				{changedCount > 0 && !compact && (
 					<span style={{ fontFamily: MONO, fontSize: 11.5, color: ACCENT, flex: "none" }}>
 						{changedCount} uncommitted
 					</span>
@@ -549,12 +605,15 @@ function ModeToggle({
 	onMode,
 	disabledReason,
 	busy,
+	compact,
 }: {
 	mode: Mode;
 	onMode: (mode: Mode) => void;
 	disabledReason: string | null;
 	/** The resolve view owns the editor; the toggle waits rather than fighting it. */
 	busy?: boolean;
+	/** Icons only, for a pane too narrow to carry the labels as well as the path. */
+	compact?: boolean;
 }) {
 	const button = (value: Mode, label: string, Icon: typeof FolderOpen) => {
 		const active = mode === value && !busy;
@@ -566,8 +625,9 @@ function ModeToggle({
 				role="tab"
 				aria-selected={active}
 				disabled={disabled}
-				title={value === "changes" && disabledReason ? disabledReason : undefined}
 				onClick={() => onMode(value)}
+				aria-label={label}
+				title={value === "changes" && disabledReason ? disabledReason : label}
 				style={{
 					display: "inline-flex",
 					alignItems: "center",
@@ -583,7 +643,7 @@ function ModeToggle({
 				}}
 			>
 				<Icon aria-hidden="true" style={{ width: 12, height: 12 }} />
-				{label}
+				{!compact && label}
 			</button>
 		);
 	};

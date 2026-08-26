@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { components } from "../../api/schema";
 import { MONO } from "../lib/comment-inbox";
 import type { Hunk } from "../lib/editor/change-lanes";
-import { branchMarks, uncommittedMarks } from "../lib/editor/gutter-lanes";
+import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
 import { revertEdit } from "../lib/editor/revert";
 import { registerLspNavigation } from "../lib/lsp/definition";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
@@ -109,10 +109,22 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	renderLineHighlight: "line",
 	renderLineHighlightOnlyWhenFocus: false,
 	lineNumbersMinChars: 4,
-	// Two lanes now live here: the neutral branch hairline outboard, the
-	// kind-coloured uncommitted bar inboard, then the code.
-	lineDecorationsWidth: 18,
-	glyphMargin: false,
+	// 0, not slice 1's 14. The two change lanes moved OUT of this margin (see
+	// glyphMargin below) and nothing else needs reserved space here — Monaco
+	// sizes the folding controls itself. Keeping 14 on top of the glyph margin's
+	// 20 would take 34px off the content width, and the minimap's `// MARK:`
+	// label budget is a function of that width: slice 1 measured
+	// "Collection View Source" as printing from ~610px, and it stopped.
+	lineDecorationsWidth: 0,
+	// 🗝 The two change lanes live in the GLYPH MARGIN, not in the line-decorations
+	// margin beside the code — and that is not a cosmetic choice. Monaco puts its
+	// folding controls in the line-decorations margin, and a folding chevron is a
+	// full-width node that sits ON TOP of anything decorated there: a click aimed
+	// at a change bar landed on the chevron and collapsed the block instead, and
+	// the discard popover could not be opened at all. The glyph margin is a strip
+	// nothing else claims. It is also where Xcode draws its change bar — the far
+	// left edge, outboard of the line numbers.
+	glyphMargin: true,
 	folding: true,
 	showFoldingControls: "mouseover",
 	foldingHighlight: true,
@@ -235,6 +247,14 @@ export default function MonacoFileEditor({
 	const [editorGeneration, setEditorGeneration] = useState(0);
 	const [failed, setFailed] = useState<string | null>(null);
 	const [discarding, setDiscarding] = useState<{ hunk: Hunk; top: number; left: number } | null>(null);
+	/**
+	 * 🗝 Owned here rather than left to Monaco's `useInlineViewWhenSpaceIsLimited`.
+	 * The column labels above the diff have to say the same thing the diff is
+	 * doing, and Monaco's own decision is not readable from the outside — so at
+	 * 1000px the editor fell back to the inline view while two side-by-side
+	 * labels went on claiming two columns that were not there.
+	 */
+	const [sideBySide, setSideBySide] = useState(true);
 
 	const themeName = editorThemeName(theme);
 	// Read inside async work that outlives the render that started it: the theme
@@ -308,6 +328,20 @@ export default function MonacoFileEditor({
 		return () => client.didClose(fileUri);
 	}, [server.client, absolutePath, lspLanguage, text, modelGeneration]);
 
+	// The host's own width, which is what decides the diff layout: this pane sits
+	// between a sidebar and a rail, so it is routinely far narrower than the
+	// window and a media query would be measuring the wrong box.
+	useEffect(() => {
+		const host = hostRef.current;
+		if (!host || typeof ResizeObserver === "undefined") return;
+		const observer = new ResizeObserver((entries) => {
+			const width = entries[0]?.contentRect.width ?? 0;
+			if (width > 0) setSideBySide(width >= SIDE_BY_SIDE_BREAKPOINT);
+		});
+		observer.observe(host);
+		return () => observer.disconnect();
+	}, []);
+
 	// Monaco itself, once per mount.
 	useEffect(() => {
 		let disposed = false;
@@ -343,9 +377,11 @@ export default function MonacoFileEditor({
 				// The reviewer edits the MODIFIED side in place: that is what makes
 				// Changes mode a place to fix something rather than only to read.
 				originalEditable: false,
-				renderSideBySide: true,
-				renderSideBySideInlineBreakpoint: SIDE_BY_SIDE_BREAKPOINT,
-				useInlineViewWhenSpaceIsLimited: true,
+				renderSideBySide: sideBySide,
+				// Monaco's own narrow-pane fallback is turned OFF: it decides
+				// silently, and the labels above cannot follow a decision they
+				// cannot read.
+				useInlineViewWhenSpaceIsLimited: false,
 				renderMarginRevertIcon: true,
 				renderOverviewRuler: false,
 			});
@@ -373,9 +409,16 @@ export default function MonacoFileEditor({
 			originalModelRef.current = null;
 		};
 		// themeName is applied by its own effect; rebuilding on a theme change
-		// would drop scroll position and fold state.
+		// would drop scroll position and fold state. sideBySide is applied by the
+		// effect below for the same reason.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ready, mode]);
+
+	// Layout follows the pane's width without rebuilding the editor.
+	useEffect(() => {
+		if (editorGeneration === 0 || mode !== "diff") return;
+		(editorRef.current as monaco.editor.IStandaloneDiffEditor | null)?.updateOptions({ renderSideBySide: sideBySide });
+	}, [editorGeneration, mode, sideBySide]);
 
 	// Grammar first, then content. `ensureLanguage` loads the shiki grammar for
 	// this language (falling back to Monaco's own Monarch tokenizer when we ship
@@ -495,7 +538,7 @@ export default function MonacoFileEditor({
 		collection.set(
 			marks.map((mark) => ({
 				range: new monaco.Range(mark.line, 1, mark.line, 1),
-				options: { linesDecorationsClassName: mark.className },
+				options: { glyphMarginClassName: mark.className },
 			})),
 		);
 	}, [modelGeneration, editorGeneration, changedLines, branchLines]);
@@ -508,7 +551,12 @@ export default function MonacoFileEditor({
 		const host = hostRef.current;
 		if (!codeEditor || !host) return;
 		const subscription = codeEditor.onMouseDown((event) => {
-			if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) return;
+			if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+			// Belt and braces: the glyph margin is ours alone today, but a later
+			// slice putting breakpoints or diagnostics there must not silently start
+			// opening the discard popover.
+			const element = event.target.element;
+			if (!element || !element.className.includes(GUTTER_LANE_CLASS)) return;
 			const lineNumber = event.target.position?.lineNumber;
 			if (lineNumber == null) return;
 			const hunk = (hunksRef.current ?? []).find((h) => lineNumber >= h.start && lineNumber <= h.end);
@@ -520,10 +568,17 @@ export default function MonacoFileEditor({
 			// by a line once the editor has scrolled.
 			const at = codeEditor.getScrolledVisiblePosition({ lineNumber: hunk.start, column: 1 });
 			if (!at) return;
-			setDiscarding({ hunk, top: at.top + at.height + 4, left: 44 });
+			// Anchored to where the CODE starts, not to a magic number: the gutter's
+			// width is a function of the file's line count.
+			setDiscarding({ hunk, top: at.top + at.height + 4, left: at.left });
 		});
-		const dismiss = () => setDiscarding(null);
-		const scroll = codeEditor.onDidScrollChange(dismiss);
+		// 🗝 Only a scroll that MOVED the content closes the popover. Monaco fires
+		// onDidScrollChange for the caret placement the very same click makes — so
+		// an unfiltered listener dismissed the popover in the same tick it opened,
+		// and a gutter click looked like it did nothing at all.
+		const scroll = codeEditor.onDidScrollChange((event) => {
+			if (event.scrollTopChanged || event.scrollLeftChanged) setDiscarding(null);
+		});
 		return () => {
 			subscription.dispose();
 			scroll.dispose();
@@ -588,8 +643,16 @@ export default function MonacoFileEditor({
 						pointerEvents: "none",
 					}}
 				>
-					<span style={{ flex: 1, padding: "4px 12px" }}>{diffOriginal.label}</span>
-					<span style={{ flex: 1, padding: "4px 12px" }}>this worktree</span>
+					{sideBySide ? (
+						<>
+							<span style={{ flex: 1, padding: "4px 12px" }}>{diffOriginal.label}</span>
+							<span style={{ flex: 1, padding: "4px 12px" }}>this worktree</span>
+						</>
+					) : (
+						// One column, so one label. Two of them over an inline diff
+						// claim a layout that is not on screen.
+						<span style={{ flex: 1, padding: "4px 12px" }}>{diffOriginal.label} → this worktree</span>
+					)}
 				</div>
 			)}
 			{/* The two data attributes are the e2e handles for state that lives

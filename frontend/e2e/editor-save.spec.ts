@@ -70,7 +70,7 @@ test("a conflicting save offers a comparison, not an error", async ({ page }) =>
 
 	await page.getByRole("button", { name: /review changes/i }).click();
 	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
-	await expect(page.getByText("On disk", { exact: true })).toBeVisible();
+	await expect(page.getByText(/^On disk/)).toBeVisible();
 	// Two real editors now, over one buffer: the reader can still type.
 	await expect(page.locator(".monaco-diff-editor")).toBeVisible();
 
@@ -100,28 +100,45 @@ test("both change lanes are drawn, and the branch lane is not coloured by kind",
 	await openFile(page, ORDINARY);
 	await expect(page.getByTestId("monaco-file-editor")).toBeVisible();
 
-	const branch = page.locator(".ao-branch-bar");
-	const uncommitted = page.locator(".ao-change-bar");
-	await expect(branch.first()).toBeVisible();
-	await expect(uncommitted.first()).toBeVisible();
+	await expect(page.locator(".ao-branch-bar").first()).toBeVisible();
+	await expect(page.locator(".ao-change-bar").first()).toBeVisible();
 
-	// The branch lane carries exactly one class, and it is not one of the three
-	// kind classes. Two kind-coloured bars side by side read as one thick bar on
-	// a branch under review, which is what this pins.
-	// (Monaco adds its own `cldr` class to every line-decoration node; what
-	// matters is that none of OUR three kind classes appears on this lane.)
-	const branchClasses = await branch.evaluateAll((nodes) => nodes.map((n) => n.className));
-	expect(branchClasses.length).toBeGreaterThan(0);
-	for (const className of branchClasses) {
-		expect(className).toContain("ao-branch-bar");
-		expect(className).not.toMatch(/ao-change-bar--(added|modified|removed)/);
-	}
+	// 🗝 Asserted on the PAINT, not on class names. The glyph margin holds one
+	// node per line, so Monaco concatenates both lanes' classes onto it — the
+	// two bars are ::before and ::after of the same element, and only their
+	// computed styles can tell whether both actually drew and whether the branch
+	// one is neutral.
+	//
+	// The finding this pins: colouring the branch lane by kind, like the
+	// uncommitted one, made two same-coloured bars sit side by side and read as
+	// ONE thick bar on a branch under review.
+	const painted = await page
+		.locator(".ao-branch-bar.ao-change-bar")
+		.first()
+		.evaluate((node) => {
+			const before = getComputedStyle(node, "::before");
+			const after = getComputedStyle(node, "::after");
+			return {
+				branch: { colour: before.backgroundColor, left: before.left, width: before.width },
+				uncommitted: { colour: after.backgroundColor, left: after.left, width: after.width },
+			};
+		});
 
-	// They occupy different columns, so the two levels are readable apart.
-	const branchBox = await branch.first().boundingBox();
-	const uncommittedBox = await uncommitted.first().boundingBox();
-	expect(branchBox).not.toBeNull();
-	expect(uncommittedBox).not.toBeNull();
+	// Both drew.
+	expect(painted.branch.width).not.toBe("0px");
+	expect(painted.uncommitted.width).not.toBe("0px");
+	// In different columns, so the two levels are readable apart.
+	expect(painted.branch.left).not.toBe(painted.uncommitted.left);
+	// And in different colours, so they cannot merge into one bar.
+	expect(painted.branch.colour).not.toBe(painted.uncommitted.colour);
+
+	// The branch lane is the SAME colour on every line it marks, whatever kind
+	// of change is under it. That is what "not coloured by kind" means.
+	const branchColours = await page
+		.locator(".ao-branch-bar")
+		.evaluateAll((nodes) => nodes.map((n) => getComputedStyle(n, "::before").backgroundColor));
+	expect(branchColours.length).toBeGreaterThan(1);
+	expect(new Set(branchColours).size).toBe(1);
 });
 
 test("Changes mode diffs against the target branch over the same buffer", async ({ page }) => {
@@ -132,7 +149,7 @@ test("Changes mode diffs against the target branch over the same buffer", async 
 	const pane = page.getByTestId("terminal");
 	await pane.getByRole("tab", { name: "Changes" }).click();
 	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
-	await expect(pane.getByText("target branch", { exact: true })).toBeVisible();
+	await expect(pane.getByText(/^target branch/)).toBeVisible();
 
 	// 🗝 One model per file. The obvious implementation gives the diff its own
 	// model, and then the edit made here is invisible in Browse and lost on the

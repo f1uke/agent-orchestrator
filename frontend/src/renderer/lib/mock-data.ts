@@ -1666,6 +1666,8 @@ export function mockWorkspaceFileDiff(
 	path: string,
 	options?: { base?: "target" | "head"; fullContext?: boolean },
 ): DiffContextResponse {
+	const supplied = mockOverride()?.diff?.(path);
+	if (supplied) return supplied;
 	const newLines = mockFileText(path).split("\n");
 	const edits = options?.base === "head" ? MOCK_UNCOMMITTED_EDITS : MOCK_BRANCH_EDITS;
 	const lines: DiffContextResponse["lines"] = [];
@@ -2016,7 +2018,28 @@ function mockFileText(path: string): string {
  * tail). An ABSOLUTE path is served too, and is what exercises the
  * outside-the-workspace read-only state.
  */
+/**
+ * The e2e editor gallery's seam.
+ *
+ * 🗝 `e2e/editor-gallery-api-stub.ts` serves its Swift fixture by intercepting
+ * `window.fetch`. That worked while the viewer always went through the network —
+ * and stopped the moment the viewer grew a preview branch that issues no request
+ * at all, silently swapping the gallery's fixture for these mocks and taking
+ * every `// MARK:` section with it. The harness registers its payload here
+ * instead of the fixture having to become a second mock.
+ */
+type MockFileOverride = {
+	file?(path: string): WorkspaceFileResponse | null;
+	diff?(path: string): DiffContextResponse | null;
+};
+
+function mockOverride(): MockFileOverride | undefined {
+	return (globalThis as { __aoMockWorkspaceFile?: MockFileOverride }).__aoMockWorkspaceFile;
+}
+
 export function mockWorkspaceFile(path: string): WorkspaceFileResponse {
+	const supplied = mockOverride()?.file?.(path);
+	if (supplied) return supplied;
 	if (path.endsWith(".png") || path.endsWith(".svg")) {
 		return {
 			available: false,

@@ -91,10 +91,19 @@ export function FileDriftBanner({
 						? "You’re comparing your version with the one on disk."
 						: "This file changed on disk while you were editing it."}
 				</p>
-				<p style={{ margin: "2px 0 0", fontSize: 11.5, color: P.secondary }}>
-					{drift.reviewing
-						? "Saving now writes your version over the one on the left, which you have seen."
-						: "Nothing was written and your edits are untouched."}
+				<p
+					style={{
+						margin: "2px 0 0",
+						fontSize: 11.5,
+						color: P.secondary,
+						// One line, always. Wrapping pushed the buttons off the row's
+						// vertical centre, and the banner grew as the file aged.
+						overflow: "hidden",
+						textOverflow: "ellipsis",
+						whiteSpace: "nowrap",
+					}}
+				>
+					{drift.reviewing ? "Saving writes your version over the one on the left." : "Nothing was written."}
 					{facts !== "" && <span style={{ color: P.muted3 }}> {facts}</span>}
 				</p>
 			</div>
