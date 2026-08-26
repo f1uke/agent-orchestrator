@@ -127,6 +127,5 @@ describe.skipIf(!CAN_RUN)("gopls, for real", () => {
 		expect(health.rssMb ?? 0).toBeGreaterThan(200);
 
 		registry.detach(attachment.handleId);
-	}, // A cold GOPLSCACHE has to load this module's whole dependency closure.
-	180_000);
+	}, 180_000); // A cold GOPLSCACHE has to load this module's whole dependency closure.
 });
