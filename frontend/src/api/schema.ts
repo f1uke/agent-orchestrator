@@ -1907,6 +1907,8 @@ export interface components {
             sessionId: string;
         };
         ControllersAddCrewMemberRequest: {
+            /** @description The calling session's own id. An AO session is refused (409 CREW_AUTO_FORMATION_OFF) on a project with automatic crew formation turned off; omitted callers are never refused. */
+            from?: string;
             /** @enum {string} */
             role?: "qa";
         };

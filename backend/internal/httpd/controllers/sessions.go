@@ -73,7 +73,7 @@ type SessionService interface {
 	// AttachCrewMember adds a member in the given role to the task this session
 	// belongs to, and starts it. It is how a human adds a qa to a task AO did not
 	// give one to.
-	AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error)
+	AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.Session, error)
 	// SendToCrewmate delivers a message addressed by ROLE - the only address a
 	// crew member can rely on, since a crew is formed after dev's runtime is
 	// already launched and dev's environment can never carry qa's id.
@@ -876,6 +876,10 @@ func (c *SessionsController) wake(w http.ResponseWriter, r *http.Request) {
 // which is never eligible automatically, or for a backend-only one that never
 // trips the trigger.
 //
+// A HUMAN. `from` is what makes that word mean something: on a project with
+// automatic crew formation turned off, a call carrying a session id is refused
+// and a call without one is not.
+//
 // The new member arrives WORKING, in dev's worktree. dev is not disturbed: the
 // task keeps running straight through this, with both members awake at once,
 // which is the shape.
@@ -896,7 +900,7 @@ func (c *SessionsController) crewAddMember(w http.ResponseWriter, r *http.Reques
 	if role == "" {
 		role = domain.CrewRoleQA
 	}
-	sess, err := c.Svc.AttachCrewMember(r.Context(), sessionID(r), role)
+	sess, err := c.Svc.AttachCrewMember(r.Context(), sessionID(r), role, in.From)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

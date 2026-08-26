@@ -98,7 +98,7 @@ type commander interface {
 	// AttachCrewMember adds a member in `role` to the task dev works on, born
 	// SUSPENDED. It is how a task that was spawned solo - every `mechanical` one,
 	// and every task older than the crew - gains a qa.
-	AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error)
+	AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.SessionRecord, error)
 	// CrewDevOf resolves any session to the DEV of the task it belongs to; a solo
 	// session answers with itself.
 	CrewDevOf(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
@@ -578,7 +578,12 @@ func (s *Service) TaskDevOf(ctx context.Context, id domain.SessionID) (domain.Se
 // A SUSPENDED dev is not finished - it is parked - and attaching is allowed
 // there: the new member is born asleep, so nothing wakes and nothing changes
 // until a human moves the baton.
-func (s *Service) AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error) {
+//
+// `requestedBy` names the AO session that asked, when one did, and is empty for
+// a human (the app's `+ qa`, or `ao crew add` in an ordinary shell). It is
+// carried through untouched: the only thing that reads it is the manager's
+// crew-off refusal, which needs the project's config to answer.
+func (s *Service) AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.Session, error) {
 	dev, err := s.manager.CrewDevOf(ctx, id)
 	if err != nil {
 		return domain.Session{}, toAPIError(err)
@@ -590,7 +595,7 @@ func (s *Service) AttachCrewMember(ctx context.Context, id domain.SessionID, rol
 	if sess.Status == domain.StatusMerged || sess.Status == domain.StatusTerminated {
 		return domain.Session{}, toAPIError(fmt.Errorf("%w: %s is %s", sessionmanager.ErrCrewTaskFinished, dev.ID, sess.Status))
 	}
-	rec, err := s.manager.AttachCrewMember(ctx, dev.ID, role)
+	rec, err := s.manager.AttachCrewMember(ctx, dev.ID, role, requestedBy)
 	if err != nil {
 		return domain.Session{}, toAPIError(err)
 	}
@@ -1170,6 +1175,11 @@ func toAPIError(err error) error {
 		return apierr.Conflict("CREW_ROLE_TAKEN", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrCrewTaskFinished):
 		return apierr.Conflict("CREW_TASK_FINISHED", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrCrewAutoFormationOff):
+		// A conflict rather than a bad request: the call is well formed and the
+		// same call from a human succeeds. What it conflicts with is the project's
+		// standing policy, and the message says who can still do it.
+		return apierr.Conflict("CREW_AUTO_FORMATION_OFF", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrNotTodo):
 		return apierr.Conflict("SESSION_NOT_TODO", "Session is not a prepared TODO (already started or never was one)", nil)
 	case errors.Is(err, sessionmanager.ErrNotTerminal):

@@ -28,6 +28,7 @@ type fakeSessionService struct {
 	crewDev               map[domain.SessionID]domain.SessionID
 	crewWoken             []domain.SessionID
 	crewAdded             []domain.CrewRole
+	crewAddedFrom         []domain.SessionID
 	crewAddErr            error
 	sendOutcome           ports.SendOutcome
 	sessions              map[domain.SessionID]domain.Session
@@ -289,11 +290,14 @@ func (f *fakeSessionService) Wake(_ context.Context, id domain.SessionID) (domai
 
 // crewAdded records the role the attach route asked for, so a test can assert
 // the controller defaulted it rather than passing an empty role down.
-func (f *fakeSessionService) AttachCrewMember(_ context.Context, id domain.SessionID, role domain.CrewRole) (domain.Session, error) {
+// crewAddedFrom records the caller id it forwarded, which is the whole of what
+// separates an AO session from a person on this route.
+func (f *fakeSessionService) AttachCrewMember(_ context.Context, id domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.Session, error) {
 	if f.crewAddErr != nil {
 		return domain.Session{}, f.crewAddErr
 	}
 	f.crewAdded = append(f.crewAdded, role)
+	f.crewAddedFrom = append(f.crewAddedFrom, requestedBy)
 	member := domain.Session{SessionRecord: domain.SessionRecord{ID: id + "-qa", IsSuspended: true}}
 	member.CrewID = id
 	member.CrewRole = role
@@ -2379,6 +2383,35 @@ func TestSessionsAPI_AddCrewMemberSurfacesRefusals(t *testing.T) {
 			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/members", `{"role":"qa"}`)
 			if status != tc.want {
 				t.Fatalf("attach = %d, want %d; body=%s", status, tc.want, body)
+			}
+		})
+	}
+}
+
+// TestSessionsAPI_AddCrewMemberForwardsTheCallerID: `from` is the only thing on
+// this route that can tell an AO session from a person - both POST to it over
+// the same loopback socket - so the controller has to hand it down untouched.
+// The daemon's crew-off refusal is decided on it; dropping it here would make
+// every agent look like a human.
+func TestSessionsAPI_AddCrewMemberForwardsTheCallerID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want domain.SessionID
+	}{
+		{"an AO session identifies itself", `{"role":"qa","from":"ao-7"}`, "ao-7"},
+		{"the desktop app sends no from at all", `{"role":"qa"}`, ""},
+		{"a bare POST is still a complete request", ``, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newFakeSessionService()
+			srv := newSessionTestServer(t, svc)
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/members", tc.body)
+			if status != http.StatusCreated {
+				t.Fatalf("attach = %d, want 201; body=%s", status, body)
+			}
+			if len(svc.crewAddedFrom) != 1 || svc.crewAddedFrom[0] != tc.want {
+				t.Fatalf("service saw from %v, want exactly [%q]", svc.crewAddedFrom, tc.want)
 			}
 		})
 	}

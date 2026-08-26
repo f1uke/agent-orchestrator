@@ -151,9 +151,10 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 				<p className="text-[11px] text-passive">
 					Off by default. When on, AO never adds a qa to a task here on its own - not at any task size, and not when the
 					task drives the app - so every task on this project is one agent unless you say otherwise. You can still add a
-					qa to a single task by hand, with <code>+ qa</code> in its topbar or <code>ao crew add</code>. This changes
-					the number of agents only: a standard or deep task still gets the full ceremony, and tasks already running
-					with a qa keep it.
+					qa to a single task by hand, with <code>+ qa</code> in its topbar or <code>ao crew add</code> in your own
+					shell; an agent running <code>ao crew add</code> from inside a session here is refused, so the choice stays
+					yours. This changes the number of agents only: a standard or deep task still gets the full ceremony, and tasks
+					already running with a qa keep it.
 				</p>
 			</SettingsGroup>
 

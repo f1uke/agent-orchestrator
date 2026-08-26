@@ -78,7 +78,11 @@ func wantsCrew(project domain.ProjectRecord, dev domain.SessionRecord) bool {
 // What it deliberately does NOT gate is the MANUAL path. `ao crew add` and the
 // topbar's `+ qa` go through resolveCrewDev, which never calls this function, so
 // a human can still opt one task into a qa by hand - which is the whole reason
-// this switch turns off automatic formation rather than crews.
+// this switch turns off automatic formation rather than crews. The manual path
+// reads the flag ONCE MORE, at its own seam, for a different question: whether
+// the CALLER is a person (crew_attach.go). That is not this test duplicated -
+// this one asks whether AO may form a crew unasked, that one asks who is
+// allowed to ask.
 func crewEligible(project domain.ProjectRecord, kind domain.SessionKind, size domain.TaskSize) bool {
 	if kind != domain.KindWorker {
 		return false

@@ -73,6 +73,18 @@ var (
 	// never be given, so it is refused rather than stranded. Raised by the SERVICE,
 	// which is where a session's status is derived from PR facts.
 	ErrCrewTaskFinished = errors.New("session: this task is finished")
+	// ErrCrewAutoFormationOff means an AO SESSION asked to attach a member to a
+	// task on a project whose `disableAutoCrew` is set. The flag turns off
+	// AUTOMATIC crew formation and keeps the manual escape hatch - but the hatch
+	// was designed for a PERSON, and an agent reading its own brief ("the smoke
+	// checklist belongs to qa") walks through it routinely, which is how six
+	// consecutive tasks on a crew-off project still got a qa. So the manual path
+	// stays open to a human (the app's `+ qa`, or `ao crew add` typed in an
+	// ordinary shell) and is refused to every AO session, the orchestrator
+	// included: the failure being prevented is an agent overriding a project
+	// policy without the human knowing, and the orchestrator is the agent most
+	// able to do that at scale.
+	ErrCrewAutoFormationOff = errors.New("session: this project does not form crews automatically")
 )
 
 // Env vars a spawned process reads to learn who it is.

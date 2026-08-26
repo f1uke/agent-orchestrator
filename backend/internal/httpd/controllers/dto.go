@@ -467,6 +467,14 @@ type AddCrewMemberRequest struct {
 	// role: `dev` is the crew's root rather than a seat, and the design names no
 	// third role yet.
 	Role domain.CrewRole `json:"role,omitempty" enum:"qa"`
+	// From is the CALLER's own session id (`ao crew add` sends $AO_SESSION_ID),
+	// and it is the only thing that can tell an AO agent from a person: both
+	// arrive on this route over the same loopback socket. The desktop app's `+ qa`
+	// omits it, as does the CLI typed in an ordinary shell, and an unidentified
+	// caller is never refused. It exists for one refusal: a project that has
+	// turned automatic crew formation off keeps its manual escape hatch for a
+	// human and closes it to every AO session (409 CREW_AUTO_FORMATION_OFF).
+	From domain.SessionID `json:"from,omitempty" description:"The calling session's own id. An AO session is refused (409 CREW_AUTO_FORMATION_OFF) on a project with automatic crew formation turned off; omitted callers are never refused."`
 }
 
 // AddCrewMemberResponse is the body of POST /api/v1/sessions/{sessionId}/crew/members.
