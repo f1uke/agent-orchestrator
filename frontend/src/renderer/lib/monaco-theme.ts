@@ -1,9 +1,24 @@
 /**
  * Monaco's own themes do not match this app, so the editor gets two themes built
- * from the app's OWN tokens: the seven `--code-*` syntax roles (Xcode "Midnight"
- * in dark, Xcode "Default" in light — the same palette `DiffRows` paints) plus
- * the surface/chrome tokens around them. `monaco-theme.test.ts` re-parses
+ * from the app's OWN tokens: the twelve `--code-*` syntax roles plus the
+ * surface/chrome tokens around them. `monaco-theme.test.ts` re-parses
  * `styles.css` and fails if any value here drifts from the token it claims.
+ *
+ * 🗝 The palette is XCODE's, role for role — the one place the renderer
+ * deliberately does not clone the reference app (explicit decision, 2026-08-26).
+ * Dark is the human's own `Default (Dark).xccolortheme`, light is Xcode's
+ * bundled `Default (Light)`. The scope of that exception is the syntax colours
+ * only: the surface, gutter, minimap and widget colours below still come from
+ * the app's tokens, and so does everything outside the editor.
+ *
+ * What this CANNOT match, and why no palette can: Xcode colours from compiler
+ * knowledge — it knows `titleLabel` is a declared property and not a local, and
+ * that `UILabel` is a system type while `SettingsViewModel` is yours. shiki
+ * tokenises with TextMate grammars, which are regex over word shapes. So every
+ * role below is anchored to a scope the GRAMMAR actually emits; where the
+ * grammar emits nothing (a property name, a type in a parameter clause) the
+ * token stays plain rather than being guessed at. Semantic tokens from the LSP
+ * are the real fix and are a separate slice.
  *
  * Why literals rather than `var(--code-keyword)`: Monaco tokenizes into a packed
  * colour map, not into CSS classes, so a theme colour must be a resolved value.
@@ -21,13 +36,18 @@
 /** The `styles.css` tokens the two editor themes are built from. */
 export const EDITOR_THEME_TOKENS = {
 	dark: {
-		"--code-keyword": "#fc5fa3",
-		"--code-string": "#fc6a5d",
+		"--code-plain": "#dadada",
 		"--code-comment": "#6c7986",
+		"--code-string": "#fc6a5d",
 		"--code-number": "#d0bf69",
+		"--code-keyword": "#fc5fa3",
+		"--code-attribute": "#bf8555",
+		"--code-directive": "#fd8f3f",
 		"--code-type": "#5dd8ff",
+		"--code-declaration": "#41a1c0",
+		"--code-type-ref": "#9ef1dd",
 		"--code-fn": "#67b7a4",
-		"--code-plain": "#e8e8ea",
+		"--code-type-system": "#d0a8ff",
 		"--viewer-bg": "#060607",
 		"--fg": "#f4f5f7",
 		"--fg-muted": "#9ba1aa",
@@ -41,13 +61,18 @@ export const EDITOR_THEME_TOKENS = {
 		"--interactive-hover": "#ffffff0a",
 	},
 	light: {
-		"--code-keyword": "#9b2393",
-		"--code-string": "#c41a16",
+		"--code-plain": "#262626",
 		"--code-comment": "#5d6c79",
+		"--code-string": "#c41a16",
 		"--code-number": "#1c00cf",
+		"--code-keyword": "#9b2393",
+		"--code-attribute": "#815f03",
+		"--code-directive": "#643820",
 		"--code-type": "#0b4f79",
-		"--code-fn": "#266b60",
-		"--code-plain": "#1a1a1a",
+		"--code-declaration": "#0f68a0",
+		"--code-type-ref": "#1c464a",
+		"--code-fn": "#326d74",
+		"--code-type-system": "#3900a0",
 		"--viewer-bg": "#fcfcfc",
 		"--fg": "#1a1a1a",
 		"--fg-muted": "#666666",
@@ -61,6 +86,22 @@ export const EDITOR_THEME_TOKENS = {
 		"--interactive-hover": "#0000000a",
 	},
 } as const;
+
+/** The `--code-*` roles, in the order the themes declare their rules. */
+export const SYNTAX_ROLES = [
+	"--code-plain",
+	"--code-comment",
+	"--code-string",
+	"--code-number",
+	"--code-keyword",
+	"--code-attribute",
+	"--code-directive",
+	"--code-type",
+	"--code-declaration",
+	"--code-type-ref",
+	"--code-fn",
+	"--code-type-system",
+] as const;
 
 export type EditorThemeName = "ao-dark" | "ao-light";
 
@@ -141,45 +182,104 @@ function buildTheme(name: EditorThemeName, type: "dark" | "light", t: Tokens) {
 			focusBorder: accent,
 			"widget.shadow": "#00000059",
 		},
-		// Order matters — see the header comment.
+		/**
+		 * Order matters — see the header comment. Beyond that, TextMate resolves a
+		 * token by the MOST SPECIFIC selector that matches its own scope, so a
+		 * three-segment rule below always beats the one-segment rule above it; that
+		 * is how `keyword.operator.type-casting` climbs back out of the plain rule.
+		 */
 		settings: [
 			{ scope: ["comment", "punctuation.definition.comment"], settings: { foreground: t["--code-comment"] } },
 			{ scope: ["string", "attribute.value"], settings: { foreground: t["--code-string"] } },
+			// xcode.syntax.regex is the string colour in both of Xcode's Default themes.
 			{ scope: ["regexp"], settings: { foreground: t["--code-string"] } },
+			// Xcode has NO operator role: `=`, `->`, `!`, `?`, `+` are plain text.
+			{ scope: ["keyword.operator"], settings: { foreground: t["--code-plain"] } },
 			{
-				scope: ["keyword", "storage", "constant.language", "entity.name.tag", "tag", "markup.heading"],
+				scope: [
+					"keyword",
+					"storage",
+					"constant.language",
+					// `self`/`super`/`this` — a keyword in Xcode, not an identifier.
+					"variable.language",
+					// …and the WORD operators, which Xcode does colour as keywords.
+					"keyword.operator.word",
+					"keyword.operator.logical",
+					"keyword.operator.expression",
+					"keyword.operator.new",
+					"keyword.operator.type-casting",
+					"entity.name.tag",
+					"tag",
+					"markup.heading",
+				],
 				settings: { foreground: t["--code-keyword"] },
 			},
 			{
-				scope: ["constant.numeric", "number", "constant.character.escape"],
+				// xcode.syntax.character carries the same value as .number.
+				scope: ["constant.numeric", "number", "constant.character"],
 				settings: { foreground: t["--code-number"] },
 			},
 			{
 				scope: [
+					"storage.modifier.attribute",
+					"punctuation.definition.attribute",
+					"meta.attribute",
+					"keyword.other.attribute",
+					// The `iOS 15.0, *` inside `@available`, which Xcode paints with the attribute.
+					"keyword.other.platform",
+					"storage.type.annotation",
+					"entity.other.attribute-name",
+					"attribute.name",
+				],
+				settings: { foreground: t["--code-attribute"] },
+			},
+			{
+				scope: [
+					"meta.preprocessor",
+					"punctuation.definition.preprocessor",
+					"keyword.control.import.preprocessor",
+					"keyword.control.directive",
+					"entity.name.function.preprocessor",
+					"entity.name.function.macro",
+					// `#selector(…)` and `#available(…)`.
+					"support.function.selector-reference",
+					"support.function.availability-condition",
+				],
+				settings: { foreground: t["--code-directive"] },
+			},
+			{
+				scope: [
+					// A type being DECLARED: the name in `class Foo` / `enum Kind`.
 					"entity.name.type",
 					"entity.name.class",
 					"entity.name.namespace",
-					"support.type",
-					"support.class",
 					"support.type.property-name",
-					"entity.other.attribute-name",
 					"type",
 					"type.identifier",
-					"attribute.name",
 					"markup.underline.link",
 				],
 				settings: { foreground: t["--code-type"] },
 			},
 			{
-				scope: [
-					"entity.name.function",
-					"support.function",
-					"meta.function-call",
-					"variable.function",
-					"function",
-					"markup.inline.raw",
-				],
+				// Anything else being DECLARED: the name in `func foo`. Grammars scope a
+				// CALL as `support.function`/`meta.function-call`, so the split is real.
+				scope: ["entity.name.function", "function"],
+				settings: { foreground: t["--code-declaration"] },
+			},
+			{
+				// A type being USED. Xcode splits this again by whether the type is the
+				// SDK's; a grammar cannot know that, so every non-builtin lands here.
+				scope: ["meta.type-name", "entity.other.inherited-class", "variable.language.generic-parameter"],
+				settings: { foreground: t["--code-type-ref"] },
+			},
+			{
+				scope: ["support.function", "meta.function-call", "variable.function", "markup.inline.raw"],
 				settings: { foreground: t["--code-fn"] },
+			},
+			{
+				// Types the grammar itself ships a list for — `Int`, `String`, `Bool`.
+				scope: ["support.type", "support.class"],
+				settings: { foreground: t["--code-type-system"] },
 			},
 			{ scope: ["markup.bold"], settings: { fontStyle: "bold" } },
 			{ scope: ["markup.italic"], settings: { fontStyle: "italic" } },

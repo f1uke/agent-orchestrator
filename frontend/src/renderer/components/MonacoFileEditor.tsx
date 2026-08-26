@@ -130,8 +130,8 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	foldingHighlight: true,
 	stickyScroll: { enabled: true, maxLineCount: 3 },
 	guides: { indentation: true, highlightActiveIndentation: true, bracketPairs: false },
-	// The seven `--code-*` roles are the app's syntax language; rainbow brackets
-	// would add colours that belong to no role.
+	// The `--code-*` roles are Xcode's palette, role for role; rainbow brackets
+	// would add colours that belong to no role — and Xcode has none.
 	bracketPairColorization: { enabled: false },
 	occurrencesHighlight: "singleFile",
 	renderWhitespace: "selection",

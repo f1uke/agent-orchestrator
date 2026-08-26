@@ -90,10 +90,15 @@ async function paintedMinimapLabels(page: Page): Promise<string[]> {
 }
 
 test.describe("Monaco file editor", () => {
-	test("bands only the real // MARK: markers, never a comment that mentions one", async ({ page }) => {
-		await openGallery(page, { width: 1240 });
-		expect(await sectionHeaderLabels(page)).toEqual(EXPECTED_SECTION_HEADERS);
-	});
+	// Both themes, because the scope every band depends on is reverse-mapped from
+	// the token's COLOUR and that map is rebuilt on each `setTheme` — so a palette
+	// that collides in one theme and not the other breaks exactly one of these.
+	for (const theme of ["dark", "light"] as const) {
+		test(`bands only the real // MARK: markers in ${theme}, never a comment that mentions one`, async ({ page }) => {
+			await openGallery(page, { width: 1240, theme });
+			expect(await sectionHeaderLabels(page)).toEqual(EXPECTED_SECTION_HEADERS);
+		});
+	}
 
 	for (const width of EDITOR_WIDTHS) {
 		test(`prints every // MARK: label in full at ${width}px`, async ({ page }) => {

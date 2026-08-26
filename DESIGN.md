@@ -51,6 +51,16 @@ sections below — where they conflict, **agent-orchestrator wins**. Do not re-f
   hand-rolled CSS components are structure/behaviour reference only.
 - The one carried-over divergence still holds: the **accent is refined blue**, and
   the **terminal keeps its own palette**. Everything else tracks agent-orchestrator.
+- **Approved divergence (2026-08-26):** the **code editor's syntax colours are
+  Xcode's**, not the reference app's. The human reads Swift in this editor with
+  Xcode open beside it, and asked for a match; dark is their own
+  `~/Library/Developer/Xcode/UserData/FontAndColorThemes/Default (Dark).xccolortheme`,
+  light is Xcode's bundled `Default (Light)`. The scope is the twelve `--code-*`
+  syntax roles ONLY — the editor's surface, gutter, minimap, widgets and every
+  other pixel of chrome still clone agent-orchestrator, as does the terminal. Do
+  not widen it, and do not re-flag the editor's colours as a palette mismatch.
+  Each role names the `xcode.syntax.*` key it came from in `styles.css`; the
+  mapping from grammar scopes to roles lives in `lib/monaco-theme.ts`.
 - **Approved divergence (2026-06-10):** on macOS, a titlebar cluster (sidebar toggle +
   back/forward history arrows, `TitlebarNav`) sits beside the traffic lights,
   VS Code-style — the web reference has no window chrome, so no analogue exists.
