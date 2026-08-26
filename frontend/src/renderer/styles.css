@@ -220,9 +220,11 @@
 	   chrome, rails and the terminal still clone the reference app.
 	   Values are `DVTSourceTextSyntaxColors` read out of
 	   ~/Library/Developer/Xcode/UserData/FontAndColorThemes/Default (Dark).xccolortheme,
-	   and each role's Xcode key is named beside it. All twelve clear 4.5:1 on
-	   `--viewer-bg`, and all twelve are DISTINCT — see `monaco-theme.ts` for why a
-	   shared colour would silently kill the minimap's `// MARK:` bands. */
+	   and each role's Xcode key is named beside it. All thirteen clear 4.5:1 on
+	   `--viewer-bg`, and all thirteen are DISTINCT — see `monaco-theme.ts` for why
+	   a shared colour would silently kill the minimap's `// MARK:` bands.
+	   The last role is reachable only from LSP semantic tokens: no TextMate
+	   grammar can tell an SDK symbol from one of yours. */
 	--code-plain: #dadada; /* xcode.syntax.plain: white @85%, flattened onto the surface */
 	--code-comment: #6c7986; /* xcode.syntax.comment, and .comment.doc */
 	--code-string: #fc6a5d; /* xcode.syntax.string, and .regex */
@@ -235,6 +237,7 @@
 	--code-type-ref: #9ef1dd; /* xcode.syntax.identifier.type: a type being USED */
 	--code-fn: #67b7a4; /* xcode.syntax.identifier.function, .variable, .constant */
 	--code-type-system: #d0a8ff; /* xcode.syntax.identifier.type.system: a built-in type */
+	--code-fn-system: #a167e6; /* xcode.syntax.identifier.function.system, .variable.system, .constant.system */
 
 	/* Full-file viewer chrome (the center-pane code/diff surface). */
 	--viewer-bg: #060607;
@@ -397,8 +400,8 @@
 	/* Xcode's "Default (Light)" scheme — the light-mode sibling of the dark block
 	   above, same roles, same Xcode keys. Read out of Xcode's own bundled theme
 	   (DVTUserInterfaceKit.framework/Resources/FontAndColorThemes), which is the
-	   light theme the human actually runs. All twelve clear 4.5:1 on the code
-	   surface, and all twelve are distinct. */
+	   light theme the human actually runs. All thirteen clear 4.5:1 on the code
+	   surface, and all thirteen are distinct. */
 	--code-plain: #262626; /* xcode.syntax.plain: black @85%, flattened onto the surface */
 	--code-comment: #5d6c79;
 	--code-string: #c41a16;
@@ -411,6 +414,7 @@
 	--code-type-ref: #1c464a;
 	--code-fn: #326d74;
 	--code-type-system: #3900a0;
+	--code-fn-system: #6c36a9;
 
 	--viewer-bg: var(--bg);
 	--viewer-card-bg: var(--bg-1);

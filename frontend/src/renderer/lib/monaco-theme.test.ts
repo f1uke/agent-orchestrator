@@ -1,7 +1,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AO_DARK_THEME, AO_LIGHT_THEME, EDITOR_THEME_TOKENS, SYNTAX_ROLES } from "./monaco-theme";
+import {
+	AO_DARK_THEME,
+	AO_LIGHT_THEME,
+	EDITOR_THEME_TOKENS,
+	grammarRole,
+	SEMANTIC_SCOPES,
+	SYNTAX_ROLES,
+} from "./monaco-theme";
 
 /**
  * Monaco cannot read a CSS custom property: it tokenizes into a packed colour
@@ -137,4 +144,82 @@ describe("shiki → Monaco scope round-trip", () => {
 			}
 		});
 	}
+});
+
+/**
+ * The semantic layer shares this one rule table with shiki - Monaco standalone
+ * resolves an LSP token by joining its type and modifiers with dots and matching
+ * THAT against these same rules. So the rules that make semantic tokens work are
+ * also rules the #248 reverse map walks, and both facts have to stay true.
+ */
+describe("semantic token rules", () => {
+	for (const theme of [AO_DARK_THEME, AO_LIGHT_THEME]) {
+		const rules = theme.settings.flatMap((entry) =>
+			entry.scope.map((scope) => ({
+				scope,
+				foreground: "foreground" in entry.settings ? entry.settings.foreground : undefined,
+			})),
+		);
+		const semantic = new Set<string>(SEMANTIC_SCOPES.map((s) => s.scope));
+
+		it(`${theme.name}: every semantic scope has a rule carrying its role's colour`, () => {
+			const t = EDITOR_THEME_TOKENS[theme.type];
+			for (const { scope, role } of SEMANTIC_SCOPES) {
+				const rule = rules.find((r) => r.scope === scope);
+				expect(rule, `no rule for ${scope}`).toBeTruthy();
+				expect(rule?.foreground?.toLowerCase()).toBe(t[role].toLowerCase());
+			}
+		});
+
+		/**
+		 * 🗝 Order, again. `@shikijs/monaco` keeps the FIRST rule holding a colour
+		 * as that colour's scope, and Monaco reads `StandardTokenType` off it. Every
+		 * semantic rule reuses a colour a grammar rule already carries, so as long
+		 * as they all come last, the reverse map is exactly what #255 left.
+		 */
+		it(`${theme.name}: the semantic rules come after every grammar rule`, () => {
+			const firstSemantic = rules.findIndex((r) => semantic.has(r.scope));
+			expect(firstSemantic, "no semantic rules at all").toBeGreaterThan(0);
+			expect(rules.slice(firstSemantic).every((r) => semantic.has(r.scope))).toBe(true);
+		});
+
+		/**
+		 * The `ao.` namespace is what keeps the two vocabularies apart: an LSP type
+		 * called `function` or `type` would otherwise match a TextMate rule of the
+		 * same name and take the wrong role entirely.
+		 */
+		it(`${theme.name}: no semantic scope collides with a grammar scope`, () => {
+			const grammar = rules.filter((r) => !semantic.has(r.scope)).map((r) => r.scope);
+			for (const scope of semantic) {
+				expect(scope.startsWith("ao."), `${scope} is not namespaced`).toBe(true);
+				expect(grammar, `${scope} is also a grammar scope`).not.toContain(scope);
+				// A TextMate token that reverse-mapped onto one of these would have its
+				// StandardTokenType read from the name - see the round-trip block above.
+				expect(scope).not.toMatch(/\b(comment|string|regex|regexp)\b/);
+			}
+		});
+
+		it(`${theme.name}: the SDK-value colour is reachable only from the semantic layer`, () => {
+			const colour = EDITOR_THEME_TOKENS[theme.type]["--code-fn-system"].toLowerCase();
+			const carriers = rules.filter((r) => r.foreground?.toLowerCase() === colour);
+			expect(carriers.length, "no rule carries --code-fn-system").toBeGreaterThan(0);
+			expect(carriers.every((r) => semantic.has(r.scope))).toBe(true);
+		});
+	}
+
+	/**
+	 * The table `monaco.editor.tokenize`'s answer is read through. It is built
+	 * from the theme's own rules, so this is really asserting that the derivation
+	 * survives - a scope with no rule, and the `keyword.operator` spelling of
+	 * unstyled text, both have to come out plain.
+	 */
+	it("reads a grammar scope back as the role that painted it", () => {
+		expect(grammarRole("comment")).toBe("--code-comment");
+		expect(grammarRole("entity.name.type")).toBe("--code-type");
+		expect(grammarRole("entity.name.function")).toBe("--code-declaration");
+		expect(grammarRole("support.type")).toBe("--code-type-system");
+		expect(grammarRole("keyword.operator")).toBe("--code-plain");
+		expect(grammarRole("")).toBe("--code-plain");
+		expect(grammarRole("no.such.scope")).toBe("--code-plain");
+	});
 });

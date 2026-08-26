@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { createLspClient, type LspClient, type LspResultOutcome, type LspTransport } from "./lsp-client";
+import {
+	createLspClient,
+	type LspClient,
+	type LspResultOutcome,
+	type LspTransport,
+	type SemanticTokensLegend,
+} from "./lsp-client";
 
 /**
  * Attach a pane to the language server for its (workspace, language), and keep
@@ -26,10 +32,14 @@ export type LanguageServerHandle = {
 };
 
 type Bridge = {
-	attach(input: {
-		root: string;
-		languageId: string;
-	}): Promise<{ handleId: string; state: LspState; detail?: string; documentRoot?: string; warning?: string }>;
+	attach(input: { root: string; languageId: string }): Promise<{
+		handleId: string;
+		state: LspState;
+		detail?: string;
+		documentRoot?: string;
+		warning?: string;
+		semanticTokens?: SemanticTokensLegend | null;
+	}>;
 	detach(handleId: string): void;
 	send(handleId: string, message: Record<string, unknown>): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
@@ -39,6 +49,18 @@ type Bridge = {
 
 function bridge(): Bridge | null {
 	return (globalThis as unknown as { ao?: { lsp?: Bridge } }).ao?.lsp ?? null;
+}
+
+/**
+ * Whether this renderer can have a language server AT ALL.
+ *
+ * A property of the environment, not of any pane or state, so a caller can skip
+ * wiring up machinery that could never answer - the browser-preview build and
+ * the e2e harness have no main process, and there a provider registered against
+ * a server that will never exist is pure cost.
+ */
+export function hasLanguageServers(): boolean {
+	return bridge() !== null;
 }
 
 /** The IPC channel as the client sees it, or null where there is no main process. */
@@ -106,6 +128,10 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 					// workspace root is right for every language but Swift, and Swift
 					// cannot attach without a main process anyway.
 					documentRoot: attachment.documentRoot ?? workspaceRoot,
+					// Absent from older bridges and from the browser-preview stub, which
+					// is the same thing as a server that advertised no legend: the
+					// provider then has nothing to decode against and stays quiet.
+					semanticTokens: attachment.semanticTokens ?? null,
 				});
 				setHandle({ client, state: attachment.state, detail: attachment.detail, warning: attachment.warning });
 			})

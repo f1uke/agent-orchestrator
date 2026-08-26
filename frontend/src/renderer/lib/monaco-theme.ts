@@ -1,6 +1,6 @@
 /**
  * Monaco's own themes do not match this app, so the editor gets two themes built
- * from the app's OWN tokens: the twelve `--code-*` syntax roles plus the
+ * from the app's OWN tokens: the thirteen `--code-*` syntax roles plus the
  * surface/chrome tokens around them. `monaco-theme.test.ts` re-parses
  * `styles.css` and fails if any value here drifts from the token it claims.
  *
@@ -17,8 +17,8 @@
  * tokenises with TextMate grammars, which are regex over word shapes. So every
  * role below is anchored to a scope the GRAMMAR actually emits; where the
  * grammar emits nothing (a property name, a type in a parameter clause) the
- * token stays plain rather than being guessed at. Semantic tokens from the LSP
- * are the real fix and are a separate slice.
+ * token stays plain rather than being guessed at. The language server fills
+ * those in on top - see `SEMANTIC_SCOPES` and `lib/lsp/semantic-tokens.ts`.
  *
  * Why literals rather than `var(--code-keyword)`: Monaco tokenizes into a packed
  * colour map, not into CSS classes, so a theme colour must be a resolved value.
@@ -48,6 +48,7 @@ export const EDITOR_THEME_TOKENS = {
 		"--code-type-ref": "#9ef1dd",
 		"--code-fn": "#67b7a4",
 		"--code-type-system": "#d0a8ff",
+		"--code-fn-system": "#a167e6",
 		"--viewer-bg": "#060607",
 		"--fg": "#f4f5f7",
 		"--fg-muted": "#9ba1aa",
@@ -73,6 +74,7 @@ export const EDITOR_THEME_TOKENS = {
 		"--code-type-ref": "#1c464a",
 		"--code-fn": "#326d74",
 		"--code-type-system": "#3900a0",
+		"--code-fn-system": "#6c36a9",
 		"--viewer-bg": "#fcfcfc",
 		"--fg": "#1a1a1a",
 		"--fg-muted": "#666666",
@@ -101,7 +103,45 @@ export const SYNTAX_ROLES = [
 	"--code-type-ref",
 	"--code-fn",
 	"--code-type-system",
+	"--code-fn-system",
 ] as const;
+
+/**
+ * The scopes the LSP semantic layer paints with, and the role each one takes.
+ *
+ * 🗝 Monaco standalone has NO separate semantic palette. `StandaloneTheme`
+ * resolves a semantic token by joining its type and modifiers with dots and
+ * matching THAT against the rules below (`standaloneThemeService.js:149`,
+ * `tokenTheme._match([type].concat(modifiers).join('.'))`). So a semantic rule is
+ * an ordinary theme rule, and shiki and the language server share one table
+ * rather than fighting over two.
+ *
+ * 🗝 Which is exactly why these are namespaced `ao.`. The LSP type names collide
+ * with TextMate scope names the theme already uses - a legend saying `function`
+ * would match `entity.name.function`'s rule and paint every call the DECLARATION
+ * colour, and `type` would take the `type` rule above. Nothing in any grammar
+ * starts with `ao.`, so the two vocabularies cannot reach each other.
+ *
+ * The roles are Xcode's own identifier split: project vs system, type vs value.
+ * `--code-fn-system` exists only here - no TextMate grammar can know that
+ * `contentView` is UIKit's and `viewModel` is yours.
+ */
+export const SEMANTIC_SCOPES = [
+	/** A name at its declaration site: `xcode.syntax.declaration.other`. */
+	{ scope: "ao.declaration", role: "--code-declaration" },
+	/** A type being referred to: `xcode.syntax.identifier.type`. */
+	{ scope: "ao.type", role: "--code-type-ref" },
+	/** …one the SDK declared: `xcode.syntax.identifier.type.system`. */
+	{ scope: "ao.type.system", role: "--code-type-system" },
+	/** A value being referred to: `xcode.syntax.identifier.function`/`.variable`. */
+	{ scope: "ao.value", role: "--code-fn" },
+	/** …one the SDK declared: `xcode.syntax.identifier.function.system`. */
+	{ scope: "ao.value.system", role: "--code-fn-system" },
+	/** `xcode.syntax.identifier.macro`, which Xcode paints with preprocessor. */
+	{ scope: "ao.macro", role: "--code-directive" },
+] as const satisfies readonly { scope: string; role: (typeof SYNTAX_ROLES)[number] }[];
+
+export type SemanticScope = (typeof SEMANTIC_SCOPES)[number]["scope"];
 
 export type EditorThemeName = "ao-dark" | "ao-light";
 
@@ -283,9 +323,57 @@ function buildTheme(name: EditorThemeName, type: "dark" | "light", t: Tokens) {
 			},
 			{ scope: ["markup.bold"], settings: { fontStyle: "bold" } },
 			{ scope: ["markup.italic"], settings: { fontStyle: "italic" } },
+			// LAST, always: see SEMANTIC_SCOPES. Appending keeps every colour's
+			// FIRST rule a grammar scope, which is the invariant the minimap's
+			// `// MARK:` bands hang on.
+			...SEMANTIC_SCOPES.map((rule) => ({
+				scope: [rule.scope],
+				settings: { foreground: t[rule.role] },
+			})),
 		],
 	};
 }
 
 export const AO_DARK_THEME = buildTheme("ao-dark", "dark", EDITOR_THEME_TOKENS.dark);
 export const AO_LIGHT_THEME = buildTheme("ao-light", "light", EDITOR_THEME_TOKENS.light);
+
+export type SyntaxRole = (typeof SYNTAX_ROLES)[number];
+
+const ROLE_BY_COLOUR = new Map<string, SyntaxRole>(
+	SYNTAX_ROLES.map((role) => [EDITOR_THEME_TOKENS.dark[role].toLowerCase(), role]),
+);
+
+/**
+ * Scope → role, derived from the theme's OWN rules so it cannot drift from them.
+ * Both themes are built by the same function, so their scope lists are identical
+ * and one table serves both.
+ *
+ * This is what reads `monaco.editor.tokenize`'s answer: under `@shikijs/monaco` a
+ * token's reported "scope" IS the first rule carrying its colour, so every string
+ * that API can return is a key here.
+ */
+export const SCOPE_ROLES: ReadonlyMap<string, SyntaxRole> = new Map(
+	AO_DARK_THEME.settings.flatMap((rule) => {
+		const foreground = "foreground" in rule.settings ? rule.settings.foreground : undefined;
+		const role = foreground ? ROLE_BY_COLOUR.get(foreground.toLowerCase()) : undefined;
+		// 🗝 `?? []`, because shiki NORMALISES the theme object it is handed IN
+		// PLACE: `createHighlighterCore` prepends a scope-less default rule
+		// (`{ settings: { foreground, background } }`) to this very array. This runs
+		// at import, before the highlighter exists, but a lazy rebuild would then
+		// throw on a rule that has no `scope` - and it would throw from a module
+		// nobody would think to look at.
+		return role ? (rule.scope ?? []).map((scope) => [scope, role] as [string, SyntaxRole]) : [];
+	}),
+);
+
+/**
+ * The role the GRAMMAR gave a token, `--code-plain` where it gave it none.
+ *
+ * 🗝 An unstyled token does NOT come back with an empty scope: `--code-plain` is
+ * both the editor's default foreground and the `keyword.operator` rule's colour,
+ * so shiki reverse-maps every unscoped token to `"keyword.operator"`. Going
+ * through this table rather than testing for `""` is what makes that harmless.
+ */
+export function grammarRole(scope: string): SyntaxRole {
+	return SCOPE_ROLES.get(scope) ?? "--code-plain";
+}

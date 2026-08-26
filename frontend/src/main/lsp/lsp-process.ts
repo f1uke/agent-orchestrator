@@ -41,11 +41,22 @@ export type LspProcessOptions = {
 	onMessage: (message: JsonRpcMessage) => void;
 };
 
+/**
+ * The token vocabulary a server paints with, straight out of its `initialize`
+ * reply. Carried rather than assumed: the indices in every
+ * `textDocument/semanticTokens` answer mean nothing without it, and the two
+ * servers this app runs publish legends of different shapes (sourcekit-lsp 28
+ * types / 21 modifiers, gopls 14 / 15).
+ */
+export type SemanticTokensLegend = { tokenTypes: string[]; tokenModifiers: string[] };
+
 export type LspProcess = {
 	readonly pid: number | null;
 	readonly state: LspState;
 	readonly startedAt: number;
 	readonly detail: string | undefined;
+	/** Null when the server advertised no `semanticTokensProvider`. */
+	readonly semanticTokensLegend: SemanticTokensLegend | null;
 	/** Resolves when the handshake completes; rejects on timeout or spawn failure. */
 	readonly initialized: Promise<void>;
 	/** Client→server. Ids belong to the renderer; this only frames and writes. */
@@ -170,6 +181,22 @@ function clientCapabilities() {
 			definition: { linkSupport: true },
 			documentSymbol: { hierarchicalDocumentSymbolSupport: true },
 			publishDiagnostics: {},
+			/**
+			 * Declared even though sourcekit-lsp advertises its provider regardless:
+			 * the spec makes the legend a negotiation, and a server is entitled to
+			 * withhold the feature from a client that never asked. Empty type and
+			 * modifier lists mean "whatever you have" - the renderer maps by NAME
+			 * from the legend that comes back, so it does not need to pick.
+			 */
+			semanticTokens: {
+				dynamicRegistration: false,
+				requests: { full: true, range: false },
+				tokenTypes: [],
+				tokenModifiers: [],
+				formats: ["relative"],
+				overlappingTokenSupport: false,
+				multilineTokenSupport: false,
+			},
 		},
 		window: { workDoneProgress: true },
 	};
@@ -192,6 +219,7 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	const progress = new Set<string>();
 	let child: ChildProcessWithoutNullStreams | null = null;
 	let stopping: Promise<void> | null = null;
+	let semanticTokensLegend: SemanticTokensLegend | null = null;
 
 	const setState = (next: LspState, why?: string) => {
 		state = next;
@@ -363,7 +391,19 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 				fail(`initialize failed: ${JSON.stringify(message.error)}`);
 				return;
 			}
-			const info = (message.result as { serverInfo?: { name?: string; version?: string } } | null)?.serverInfo;
+			const reply = message.result as {
+				serverInfo?: { name?: string; version?: string };
+				capabilities?: { semanticTokensProvider?: { legend?: SemanticTokensLegend } };
+			} | null;
+			const info = reply?.serverInfo;
+			// Kept whole. A legend is only meaningful as the exact list the server
+			// sent, in the exact order: the indices in its answers are offsets into
+			// it, so a reconstructed or reordered one silently mislabels every token.
+			const legend = reply?.capabilities?.semanticTokensProvider?.legend;
+			semanticTokensLegend =
+				legend && Array.isArray(legend.tokenTypes) && Array.isArray(legend.tokenModifiers)
+					? { tokenTypes: [...legend.tokenTypes], tokenModifiers: [...legend.tokenModifiers] }
+					: null;
 			// Carried as `detail` so a test - and a human reading the health panel -
 			// can see the root the server was actually given.
 			// sourcekit-lsp sends NO serverInfo, so a blind assignment here would erase
@@ -544,6 +584,9 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 		},
 		get detail() {
 			return detail;
+		},
+		get semanticTokensLegend() {
+			return semanticTokensLegend;
 		},
 		startedAt,
 		initialized,

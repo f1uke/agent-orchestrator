@@ -5,8 +5,9 @@ import type { Hunk } from "../lib/editor/change-lanes";
 import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
 import { revertEdit } from "../lib/editor/revert";
 import { registerLspNavigation } from "../lib/lsp/definition";
+import { registerSemanticTokens } from "../lib/lsp/semantic-provider";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
-import { type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
+import { hasLanguageServers, type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
 import { ensureLanguage, ensureMonacoReady, languageForPath, monaco } from "../lib/monaco-setup";
 import { editorThemeName } from "../lib/monaco-theme";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
@@ -133,6 +134,15 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	// would add colours that belong to no role — and Xcode has none.
 	bracketPairColorization: { enabled: false },
 	occurrencesHighlight: "singleFile",
+	/**
+	 * 🗝 Semantic tokens are OFF in Monaco standalone without this.
+	 * `StandaloneTheme.semanticHighlighting` is hardcoded false and the setting
+	 * defaults to `'configuredByTheme'`, so `isSemanticColoringEnabled` says no
+	 * and the provider is never asked - silently, like everything else here.
+	 * Passing it as a construction option is what writes
+	 * `editor.semanticHighlighting.enabled` into the standalone config service.
+	 */
+	"semanticHighlighting.enabled": true,
 	renderWhitespace: "selection",
 	// Every file in this repo is full of typographic dashes and arrows. Monaco's
 	// ambiguous-character boxes would draw a warning around most comment lines.
@@ -296,6 +306,10 @@ export default function MonacoFileEditor({
 	// change, and would have silently destroyed edits the moment this pane became
 	// editable.
 	const appliedTextRef = useRef<string | null>(null);
+	// The text the server has: `didOpen` below is keyed on this same value.
+	const textRef = useRef(text);
+	textRef.current = text;
+	const semanticRefreshRef = useRef<(() => void) | null>(null);
 
 	useEffect(() => {
 		onServerState?.({ state: server.state, detail: server.detail });
@@ -316,6 +330,37 @@ export default function MonacoFileEditor({
 		});
 		return () => registration.dispose();
 	}, [ready, lspLanguage, workspaceRoot]);
+
+	// Semantic tokens: the colours the grammar cannot know. Registered per MODEL
+	// as well as per language, because Monaco asks one provider about every model
+	// of that language and two Swift panes are ordinary.
+	useEffect(() => {
+		// 🗝 `hasLanguageServers()` and not the pane's state: it is a property of the
+		// environment and never flips, so the registration is stable. Gating on the
+		// state instead would tear the provider down and rebuild it on every
+		// transition, and disposing it is what clears the colours already applied.
+		if (!ready || !lspLanguage || modelGeneration === 0 || !hasLanguageServers()) return;
+		const registration = registerSemanticTokens({
+			languageId: lspLanguage,
+			modelUri: uri.toString(),
+			getClient: () => serverRef.current.client,
+			getAbsolutePath: () => absolutePathRef.current ?? null,
+			// The SAVED text, which is what the server was handed by `didOpen`.
+			getServerText: () => textRef.current,
+			getState: () => serverRef.current.state,
+		});
+		semanticRefreshRef.current = registration.refresh;
+		return () => {
+			semanticRefreshRef.current = null;
+			registration.dispose();
+		};
+	}, [ready, lspLanguage, uri, modelGeneration]);
+
+	// The pane almost always registers before the server has attached, and a
+	// provider that could not answer is not asked again on its own.
+	useEffect(() => {
+		semanticRefreshRef.current?.();
+	}, [server.client, server.state, text]);
 
 	// Tell the server about this buffer. Keyed on the CLIENT, so a re-attached
 	// server learns about the file that is on screen - the spike's prototype

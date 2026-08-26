@@ -131,6 +131,28 @@ describe("startLspProcess", () => {
 		expect(proc.detail).toBe("Xcode build settings from NterWorkspace-abc");
 	});
 
+	test("carries the server's semantic-token legend through, in order", async () => {
+		// Every index in a `textDocument/semanticTokens` answer is an offset into
+		// this list, so a legend that is rebuilt, reordered or partly copied
+		// mislabels every token - and mislabelled tokens are still tokens, painted
+		// in the wrong colour with nothing logged. Hence: verbatim.
+		const { proc } = start(fakeSpec());
+		await proc.initialized;
+		expect(proc.semanticTokensLegend).toEqual({
+			tokenTypes: ["property", "identifier"],
+			tokenModifiers: ["declaration", "defaultLibrary"],
+		});
+	});
+
+	test("a server that advertises no semantic tokens reports none, rather than an empty legend", async () => {
+		// Null and `{tokenTypes: [], …}` are different answers: the renderer skips
+		// the feature on the first and would decode every token to `undefined` on
+		// the second.
+		const { proc } = start(fakeSpec({ FAKE_LSP_NO_SEMANTIC_TOKENS: "1" }));
+		await proc.initialized;
+		expect(proc.semanticTokensLegend).toBeNull();
+	});
+
 	test("answers workspace/configuration itself so the server does not stall", async () => {
 		// The fake exits 3 if its configuration request goes unanswered.
 		const { proc } = start(fakeSpec({ FAKE_LSP_ASK_CONFIG: "1" }));
