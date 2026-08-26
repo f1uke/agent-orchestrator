@@ -592,9 +592,13 @@ export default function MonacoFileEditor({
 					<span style={{ flex: 1, padding: "4px 12px" }}>this worktree</span>
 				</div>
 			)}
+			{/* The two data attributes are the e2e handles for state that lives
+			    inside Monaco and has no DOM of its own. */}
 			<div
 				ref={hostRef}
 				data-testid="monaco-file-editor"
+				data-editable={readOnly ? "false" : "true"}
+				data-mode={mode}
 				style={{ position: "absolute", inset: 0, top: mode === "diff" ? 22 : 0 }}
 			/>
 			{discarding && (

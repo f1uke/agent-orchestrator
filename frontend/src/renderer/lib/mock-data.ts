@@ -1897,6 +1897,17 @@ type WriteWorkspaceFileResponse = components["schemas"]["WriteWorkspaceFileRespo
  */
 export const MOCK_CONFLICTING_PATH = "backend/internal/service/session/workspace_changes.go";
 
+/**
+ * Paths an imaginary agent has written since this pane opened them.
+ *
+ * A conflicting save puts its path in here, so the read that follows really does
+ * come back with the OTHER version — which is what makes the resolve view a
+ * genuine two-sided comparison in `ao preview` rather than a diff against
+ * itself. A successful save clears it: the reader's bytes are the ones on disk
+ * now.
+ */
+const mockAgentWrites = new Set<string>();
+
 /** The mock bytes a conflicting save finds already on disk. */
 const MOCK_CONFLICT_DISK_SUFFIX = [
 	"",
@@ -2028,7 +2039,7 @@ export function mockWorkspaceFile(path: string): WorkspaceFileResponse {
 			truncated: false,
 		};
 	}
-	const text = mockFileText(path);
+	const text = mockAgentWrites.has(path) ? mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX : mockFileText(path);
 	const rows = text.split("\n");
 	const truncated = path === "frontend/src/renderer/routeTree.gen.ts";
 	return {
@@ -2053,9 +2064,26 @@ export type MockSaveResult =
 	| { ok: true; response: WriteWorkspaceFileResponse }
 	| { ok: false; status: 409; body: components["schemas"]["APIError"] };
 
-export function mockWorkspaceFileSave(path: string, content: string): MockSaveResult {
+/**
+ * 🗝 The conflict is preconditioned, not unconditional, and that is the point.
+ * A save that carries the hash of the version now ON DISK succeeds; one that
+ * carries the stale hash the reader started from is refused. That is exactly
+ * the daemon's own contract — the route refuses a BLIND clobber, not an
+ * informed one — so the preview really does demonstrate the way out of a 409,
+ * rather than a dead end that can only be dismissed.
+ */
+export function mockWorkspaceFileSave(path: string, content: string, baseHash?: string): MockSaveResult {
 	if (path === MOCK_CONFLICTING_PATH) {
 		const disk = mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX;
+		const diskHash = mockContentHash(disk);
+		if (baseHash === diskHash) {
+			mockAgentWrites.delete(path);
+			return {
+				ok: true,
+				response: { path, contentHash: mockContentHash(content), size: content.length, changedLines: [] },
+			};
+		}
+		mockAgentWrites.add(path);
 		return {
 			ok: false,
 			status: 409,
@@ -2064,7 +2092,7 @@ export function mockWorkspaceFileSave(path: string, content: string): MockSaveRe
 				code: "WORKSPACE_FILE_CONFLICT",
 				message: "This file changed on disk since it was read.",
 				details: {
-					currentHash: mockContentHash(disk),
+					currentHash: diskHash,
 					currentSize: disk.length,
 					currentModifiedAt: new Date(Date.now() - 12_000).toISOString(),
 				},
@@ -2082,18 +2110,5 @@ export function mockWorkspaceFileSave(path: string, content: string): MockSaveRe
 				{ start: 31, end: 34, kind: "added" },
 			],
 		},
-	};
-}
-
-/** The bytes a conflicting mock save found already on disk, for the resolve view. */
-export function mockWorkspaceFileOnDisk(path: string): WorkspaceFileResponse {
-	const base = mockWorkspaceFile(path);
-	if (path !== MOCK_CONFLICTING_PATH || !base.available) return base;
-	const text = mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX;
-	const rows = text.split("\n");
-	return {
-		...base,
-		contentHash: mockContentHash(text),
-		lines: rows.map((row, i) => ({ kind: "context", text: row, oldLine: i + 1, newLine: i + 1 })),
 	};
 }

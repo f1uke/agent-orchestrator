@@ -38,7 +38,7 @@ export function useSaveWorkspaceFile(sessionId: string) {
 		mutationFn: async (input) => {
 			const body = buildSaveRequest(input);
 			if (usePreviewData) {
-				const result = mockWorkspaceFileSave(body.path, body.content ?? "");
+				const result = mockWorkspaceFileSave(body.path, body.content ?? "", body.baseHash);
 				if (!result.ok) throw new SaveError(saveFailureFrom(result.body));
 				return result.response;
 			}
