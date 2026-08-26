@@ -175,7 +175,11 @@ step(`settled=${settled} peak=${samples.length ? Math.max(...samples) : "?"}MB a
 // document closes. If it releases on its own, the idle stop is about process
 // count and cold-start latency rather than about memory, and that changes what
 // the cap is actually buying.
-send({ jsonrpc: "2.0", method: "textDocument/didClose", params: { textDocument: { uri: pathToFileURL(openAbs).href } } });
+send({
+	jsonrpc: "2.0",
+	method: "textDocument/didClose",
+	params: { textDocument: { uri: pathToFileURL(openAbs).href } },
+});
 step("didClose - sampling what is given back");
 const afterClose = [];
 const closeStart = Date.now();
@@ -183,7 +187,8 @@ while (Date.now() - closeStart < 60_000) {
 	const mb = await rss(child.pid);
 	if (mb !== null) afterClose.push(mb);
 	const tail = afterClose.slice(-SETTLE_SAMPLES);
-	if (tail.length === SETTLE_SAMPLES && Math.max(...tail) - Math.min(...tail) <= Math.max(...tail) * SETTLE_TOLERANCE) break;
+	if (tail.length === SETTLE_SAMPLES && Math.max(...tail) - Math.min(...tail) <= Math.max(...tail) * SETTLE_TOLERANCE)
+		break;
 	await new Promise((r) => setTimeout(r, 1000));
 }
 step(`after close: ${afterClose.at(0)}MB → ${afterClose.at(-1)}MB`);
