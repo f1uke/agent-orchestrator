@@ -262,6 +262,62 @@ describe("FilesPanel", () => {
 		expect(screen.queryByText(/vs main/)).toBeNull();
 	});
 
+	describe("Browse folders", () => {
+		const browsePaths = [
+			"README.md",
+			"App/Wallet/View.swift",
+			"App/Wallet/Deep/Nested/Cell.swift",
+			"App/Trading/Order.swift",
+		];
+		const browseWith = (paths: string[]) => {
+			getMock.mockImplementation(async (url: string) => {
+				if (url.includes("/workspace/files")) return { data: { available: true, truncated: false, paths } };
+				return { data: { available: true, targetBranch: "main", truncated: false, files: [file()] } };
+			});
+		};
+		const openBrowse = async () => {
+			render(<FilesPanel sessionId="s1" />, { wrapper });
+			await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		};
+
+		// A worktree tree is not a diff: 7,000 files is ~8,500 rows, and a list that
+		// long is not navigable however fast it paints.
+		it("opens showing only the top level", async () => {
+			browseWith(browsePaths);
+			await openBrowse();
+			await screen.findByRole("treeitem", { name: /^App$/ });
+			expect(screen.queryByRole("treeitem", { name: /Order\.swift/ })).not.toBeInTheDocument();
+		});
+
+		// Browse shipped with `onToggleDir={() => {}}`: the folders LOOKED foldable
+		// and did nothing.
+		it("expands and re-folds a directory when its row is clicked", async () => {
+			browseWith(browsePaths);
+			await openBrowse();
+			await userEvent.click(await screen.findByRole("treeitem", { name: /^Trading$/ }));
+			expect(screen.getByRole("treeitem", { name: /Order\.swift/ })).toBeInTheDocument();
+
+			await userEvent.click(screen.getByRole("treeitem", { name: /^Trading$/ }));
+			expect(screen.queryByRole("treeitem", { name: /Order\.swift/ })).not.toBeInTheDocument();
+		});
+
+		// A match five levels down must not sit behind a folder the reader never
+		// closed - the folds are the un-searched tree's state, not the results'.
+		it("shows a deep match without needing its folders opened", async () => {
+			browseWith(browsePaths);
+			await openBrowse();
+			await screen.findByRole("treeitem", { name: /^App$/ });
+
+			await userEvent.type(screen.getByRole("searchbox"), "Cell");
+			expect(await screen.findByRole("treeitem", { name: /Cell\.swift/ })).toBeInTheDocument();
+
+			// ...and clearing the query restores the folds rather than leaving the
+			// tree blown open.
+			await userEvent.clear(screen.getByRole("searchbox"));
+			await waitFor(() => expect(screen.queryByRole("treeitem", { name: /Cell\.swift/ })).not.toBeInTheDocument());
+		});
+	});
+
 	// The index is a `git ls-files` over the whole tree. A rail opened on
 	// Changes - which is most of the time - must not pay for it.
 	it("does not index the worktree until Browse is chosen", async () => {
