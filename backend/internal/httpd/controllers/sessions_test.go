@@ -71,6 +71,7 @@ type fakeSessionService struct {
 	workspaceFileDiff     sessionsvc.DiffContextResult
 	workspaceFileDiffPath string
 	workspaceFileDiffBase sessionsvc.DiffBase
+	workspaceFileDiffFull bool
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -496,10 +497,11 @@ func (f *fakeSessionService) ListWorkspaceFiles(_ context.Context, _ domain.Sess
 }
 
 func (f *fakeSessionService) WorkspaceFileDiff(
-	_ context.Context, _ domain.SessionID, path string, base sessionsvc.DiffBase,
+	_ context.Context, _ domain.SessionID, q sessionsvc.FileDiffQuery,
 ) (sessionsvc.DiffContextResult, error) {
-	f.workspaceFileDiffPath = path
-	f.workspaceFileDiffBase = base
+	f.workspaceFileDiffPath = q.Path
+	f.workspaceFileDiffBase = q.Base
+	f.workspaceFileDiffFull = q.FullContext
 	return f.workspaceFileDiff, nil
 }
 
@@ -2123,6 +2125,18 @@ func TestSessionsAPI_WorkspaceFileDiff_PassesBaseThrough(t *testing.T) {
 	}
 	if svc.workspaceFileDiffBase != sessionsvc.DiffBaseHead {
 		t.Fatalf("service got base %q, want %q", svc.workspaceFileDiffBase, sessionsvc.DiffBaseHead)
+	}
+	if svc.workspaceFileDiffFull {
+		t.Fatal("fullContext must default to off, so the stacked view keeps its skip markers")
+	}
+
+	if _, status, _ = doRequest(
+		t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file-diff?path=a.go&fullContext=true", "",
+	); status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+	if !svc.workspaceFileDiffFull {
+		t.Fatal("fullContext=true must reach the service")
 	}
 }
 

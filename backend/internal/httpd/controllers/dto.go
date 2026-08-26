@@ -1332,8 +1332,9 @@ func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceCh
 // WorkspaceFileDiffParams is the query string accepted by
 // GET /api/v1/sessions/{sessionId}/workspace/file-diff.
 type WorkspaceFileDiffParams struct {
-	Path string `query:"path" description:"Repo-relative path of the file to diff. Absolute and ~/ paths are rejected."`
-	Base string `query:"base" description:"Which change level to answer: \"target\" (default) is merge-base(target, HEAD)..working tree - everything this branch did, committed or not; \"head\" is HEAD..working tree - what Discard Change can undo. Any other value is a 400: the two answer different questions, so falling back silently would answer one that was not asked."`
+	Path        string `query:"path" description:"Repo-relative path of the file to diff. Absolute and ~/ paths are rejected."`
+	Base        string `query:"base" description:"Which change level to answer: \"target\" (default) is merge-base(target, HEAD)..working tree - everything this branch did, committed or not; \"head\" is HEAD..working tree - what Discard Change can undo. Any other value is a 400: the two answer different questions, so falling back silently would answer one that was not asked."`
+	FullContext bool   `query:"fullContext" description:"Include every unchanged line rather than git's default three, so the caller can replay either whole side of the file. Off by default: the windowed payload is what carries the skip markers telling a reader that lines were left out."`
 }
 
 // workspaceFileResponse maps the service result to the wire DTO.

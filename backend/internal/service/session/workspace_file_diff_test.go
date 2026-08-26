@@ -3,6 +3,11 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
@@ -39,7 +44,7 @@ func addedTexts(res DiffContextResult) []string {
 func TestWorkspaceFileDiff_TargetBaseSpansCommittedAndUncommitted(t *testing.T) {
 	svc, _ := fileDiffService(t, "main")
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go", DiffBaseTarget)
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: DiffBaseTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +70,7 @@ func TestWorkspaceFileDiff_TargetBaseSpansCommittedAndUncommitted(t *testing.T) 
 func TestWorkspaceFileDiff_HeadBaseIsUncommittedOnly(t *testing.T) {
 	svc, _ := fileDiffService(t, "main")
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go", DiffBaseHead)
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: DiffBaseHead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +94,7 @@ func TestWorkspaceFileDiff_HeadBaseIsUncommittedOnly(t *testing.T) {
 func TestWorkspaceFileDiff_HeadBaseNeedsNoTargetBranch(t *testing.T) {
 	svc, _ := fileDiffService(t, "no-such-branch-anywhere")
 
-	head, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go", DiffBaseHead)
+	head, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: DiffBaseHead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +103,7 @@ func TestWorkspaceFileDiff_HeadBaseNeedsNoTargetBranch(t *testing.T) {
 	}
 
 	// Same session, same file, target base: unresolvable, so nothing to show.
-	target, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go", DiffBaseTarget)
+	target, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: DiffBaseTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +118,7 @@ func TestWorkspaceFileDiff_UntrackedIsAddedUnderBothBases(t *testing.T) {
 	svc, _ := fileDiffService(t, "main")
 
 	for _, base := range []DiffBase{DiffBaseTarget, DiffBaseHead} {
-		res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "untracked.go", base)
+		res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "untracked.go", Base: base})
 		if err != nil {
 			t.Fatalf("%s: %v", base, err)
 		}
@@ -131,7 +136,7 @@ func TestWorkspaceFileDiff_UntrackedIsAddedUnderBothBases(t *testing.T) {
 func TestWorkspaceFileDiff_EmptyBaseDefaultsToTarget(t *testing.T) {
 	svc, _ := fileDiffService(t, "main")
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go", "")
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,12 +151,100 @@ func TestWorkspaceFileDiff_EmptyBaseDefaultsToTarget(t *testing.T) {
 func TestWorkspaceFileDiff_UnknownBaseIsRefused(t *testing.T) {
 	svc, _ := fileDiffService(t, "main")
 
-	_, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go", "HEAD~3")
+	_, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: "HEAD~3"})
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want an API error, got %v", err)
 	}
 	if apiErr.Kind != apierr.KindInvalid || apiErr.Code != "WORKSPACE_FILE_BASE_INVALID" {
 		t.Fatalf("err = %+v, want 400/WORKSPACE_FILE_BASE_INVALID", apiErr)
+	}
+}
+
+// 🗝 `git diff` defaults to three lines of context, so the ordinary payload is
+// HUNKS, not the file. Changes mode needs the whole ORIGINAL side to put in a
+// diff editor, and it can only replay that from a payload that carries every
+// unchanged line too.
+func TestWorkspaceFileDiff_FullContextCarriesEveryLine(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Two changes 40 lines apart: with -U3 the middle is skipped, with full
+	// context it is all there.
+	body := make([]string, 60)
+	for i := range body {
+		body[i] = fmt.Sprintf("line %d", i+1)
+	}
+	write := func(rows []string) {
+		if err := os.WriteFile(filepath.Join(dir, "wide.go"), []byte(strings.Join(rows, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit("init", "-q")
+	runGit("config", "user.email", "t@t")
+	runGit("config", "user.name", "t")
+	write(body)
+	runGit("add", "-A")
+	runGit("commit", "-qm", "base")
+	runGit("branch", "-M", "main")
+	runGit("checkout", "-qb", "feature/x")
+	changed := append([]string(nil), body...)
+	changed[4] = "EDITED near the top"
+	changed[49] = "EDITED near the bottom"
+	write(changed)
+
+	fake := newFakeStore()
+	fake.putSessionWithWorkspace("s1", dir)
+	rec := fake.sessions["s1"]
+	rec.PRTarget = "main"
+	fake.sessions["s1"] = rec
+	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
+
+	windowed, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "wide.go", Base: DiffBaseTarget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawSkip bool
+	for _, l := range windowed.Lines {
+		if l.Kind == "hunk" {
+			sawSkip = true
+		}
+	}
+	if !sawSkip {
+		t.Fatal("the default payload must still be windowed hunks with skip markers")
+	}
+
+	full, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "wide.go", Base: DiffBaseTarget, FullContext: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !full.Available {
+		t.Fatalf("want a diff, got %+v", full)
+	}
+	for _, l := range full.Lines {
+		if l.Kind == "hunk" {
+			t.Fatalf("full context must skip nothing, but a marker survived: %+v", l)
+		}
+	}
+	// The old side, replayed, must be exactly the file as it was committed.
+	var old []string
+	for _, l := range full.Lines {
+		if l.OldLine > 0 {
+			old = append(old, l.Text)
+		}
+	}
+	if len(old) != len(body) {
+		t.Fatalf("replayed old side has %d lines, want %d", len(old), len(body))
+	}
+	for i := range body {
+		if old[i] != body[i] {
+			t.Fatalf("old line %d = %q, want %q", i+1, old[i], body[i])
+		}
 	}
 }

@@ -126,7 +126,7 @@ type SessionService interface {
 	WriteWorkspaceFile(ctx context.Context, id domain.SessionID, in sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error)
 	WorkspaceChanges(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceChangesResult, error)
 	ListWorkspaceFiles(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceFilesResult, error)
-	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, path string, base sessionsvc.DiffBase) (sessionsvc.DiffContextResult, error)
+	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, q sessionsvc.FileDiffQuery) (sessionsvc.DiffContextResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -746,9 +746,11 @@ func (c *SessionsController) workspaceFileDiff(w http.ResponseWriter, r *http.Re
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/file-diff")
 		return
 	}
-	res, err := c.Svc.WorkspaceFileDiff(
-		r.Context(), sessionID(r), r.URL.Query().Get("path"), sessionsvc.DiffBase(r.URL.Query().Get("base")),
-	)
+	res, err := c.Svc.WorkspaceFileDiff(r.Context(), sessionID(r), sessionsvc.FileDiffQuery{
+		Path:        r.URL.Query().Get("path"),
+		Base:        sessionsvc.DiffBase(r.URL.Query().Get("base")),
+		FullContext: r.URL.Query().Get("fullContext") == "true",
+	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

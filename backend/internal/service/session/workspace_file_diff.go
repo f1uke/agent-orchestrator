@@ -48,6 +48,23 @@ func parseDiffBase(base DiffBase) (DiffBase, error) {
 	}
 }
 
+// FileDiffQuery selects one file's diff.
+type FileDiffQuery struct {
+	// Path is repo-relative. Absolute and ~/ paths are rejected.
+	Path string
+	// Base is which change level to answer; empty means DiffBaseTarget.
+	Base DiffBase
+	// FullContext includes every unchanged line rather than `git diff`'s three,
+	// so a caller can replay EITHER SIDE of the file instead of only the hunks.
+	//
+	// 🗝 The windowed default is not a mere size optimisation and must stay the
+	// default: the stacked diff view renders the skip markers that tell a reader
+	// lines were left out, and those markers only exist because the payload is
+	// windowed. Full context is for a caller that needs the file, not the diff -
+	// the editor's Changes mode, which puts the original side in a diff editor.
+	FullContext bool
+}
+
 // WorkspaceFileDiff returns one file's diff against the session's resolved
 // target branch (base "target", the default) or against HEAD (base "head").
 //
@@ -63,12 +80,13 @@ func parseDiffBase(base DiffBase) (DiffBase, error) {
 // no working-tree content, so reading it through the file endpoint 404s. Here it
 // diffs correctly as an all-deletions patch.
 func (s *Service) WorkspaceFileDiff(
-	ctx context.Context, id domain.SessionID, relPath string, base DiffBase,
+	ctx context.Context, id domain.SessionID, q FileDiffQuery,
 ) (DiffContextResult, error) {
-	base, err := parseDiffBase(base)
+	base, err := parseDiffBase(q.Base)
 	if err != nil {
 		return DiffContextResult{}, err
 	}
+	relPath := q.Path
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return DiffContextResult{}, fmt.Errorf("get %s: %w", id, err)
@@ -100,7 +118,7 @@ func (s *Service) WorkspaceFileDiff(
 			return DiffContextResult{Mode: "file", Path: safePath}, nil
 		}
 	}
-	return diffFileAgainst(ctx, workspace, abs, safePath, baseRev), nil
+	return diffFileAgainst(ctx, workspace, abs, safePath, baseRev, q.FullContext), nil
 }
 
 // mergeBaseWithTarget resolves the session's target branch, refreshes it, and
@@ -131,8 +149,14 @@ func (s *Service) mergeBaseWithTarget(ctx context.Context, rec domain.SessionRec
 // diff runs against the WORKING TREE, so a file the worker has edited but not
 // committed shows its real current state — the same union WorkspaceChanges
 // lists.
-func diffFileAgainst(ctx context.Context, workspace, abs, safePath, baseRev string) DiffContextResult {
-	out, err := gitOutput(ctx, workspace, "diff", "-M", baseRev, "--", safePath)
+func diffFileAgainst(ctx context.Context, workspace, abs, safePath, baseRev string, fullContext bool) DiffContextResult {
+	args := []string{"diff", "-M", baseRev, "--", safePath}
+	if fullContext {
+		// -U with the viewer's own line cap: any wider is wasted, and anything
+		// this drops is dropped again by the maxFileLines truncation below.
+		args = []string{"diff", "-M", fmt.Sprintf("-U%d", maxFileLines), baseRev, "--", safePath}
+	}
+	out, err := gitOutput(ctx, workspace, args...)
 	if err != nil {
 		return DiffContextResult{Mode: "file", Path: safePath}
 	}

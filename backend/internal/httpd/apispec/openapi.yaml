@@ -4635,6 +4635,18 @@ paths:
             is a 400: the two answer different questions, so falling back silently
             would answer one that was not asked.'
           type: string
+      - description: 'Include every unchanged line rather than git''s default three,
+          so the caller can replay either whole side of the file. Off by default:
+          the windowed payload is what carries the skip markers telling a reader that
+          lines were left out.'
+        in: query
+        name: fullContext
+        schema:
+          description: 'Include every unchanged line rather than git''s default three,
+            so the caller can replay either whole side of the file. Off by default:
+            the windowed payload is what carries the skip markers telling a reader
+            that lines were left out.'
+          type: boolean
       responses:
         "200":
           content:
