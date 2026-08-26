@@ -1833,3 +1833,220 @@ export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
 		],
 	};
 }
+
+// ── The editor, in `ao preview` ─────────────────────────────────────────────
+
+type WorkspaceFileResponse = components["schemas"]["WorkspaceFileResponse"];
+type WriteWorkspaceFileResponse = components["schemas"]["WriteWorkspaceFileResponse"];
+
+/**
+ * The path whose mock save ALWAYS answers `409 WORKSPACE_FILE_CONFLICT`.
+ *
+ * The conflict flow is the one part of slice 4 that cannot be judged from a
+ * still: an AO worktree has agents writing in it, so "the file moved under you"
+ * is the normal case, and the resolve view is the thing most worth reviewing.
+ * Without a fixed path that always conflicts it would be unreachable in
+ * `ao preview`, where there is no second writer to race.
+ */
+export const MOCK_CONFLICTING_PATH = "backend/internal/service/session/workspace_changes.go";
+
+/** The mock bytes a conflicting save finds already on disk. */
+const MOCK_CONFLICT_DISK_SUFFIX = [
+	"",
+	"// Written by the agent while you were editing this file.",
+	"func (s *Service) refreshTargetOnce(ctx context.Context, workspace, branch string) {",
+	'\ts.throttle.Do(workspace+"\\x00"+branch, func() { s.refreshTarget(ctx, workspace, branch) })',
+	"}",
+].join("\n");
+
+/**
+ * A stable content hash for mock bytes. FNV-1a over the string: the editor only
+ * ever compares hashes for equality and re-sends what it was handed, so what
+ * matters is that identical bytes hash identically and a save MOVES the hash —
+ * not that it is really SHA-256.
+ */
+function mockContentHash(content: string): string {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < content.length; i++) {
+		h ^= content.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return `sha256:mock${h.toString(16).padStart(8, "0")}`;
+}
+
+const MOCK_FILE_BODIES: Record<string, (name: string, stem: string) => string[]> = {
+	go: (name, stem) => [
+		"package session",
+		"",
+		"import (",
+		'\t"context"',
+		'\t"fmt"',
+		'\t"strings"',
+		")",
+		"",
+		`// ${stem} is the mock body ${name} renders with in \`ao preview\`.`,
+		`type ${stem} struct {`,
+		"\tWorkspace string",
+		"\tTarget    string",
+		"}",
+		"",
+		`func (r *${stem}) Resolve(ctx context.Context) (string, error) {`,
+		'\tif r.Workspace == "" {',
+		'\t\treturn "", fmt.Errorf("no workspace")',
+		"\t}",
+		"\treturn strings.TrimSpace(r.Target), nil",
+		"}",
+	],
+	ts: (name, stem) => [
+		'import { useMemo } from "react";',
+		"",
+		`/** ${name} — the mock body this file renders with in \`ao preview\`. */`,
+		`export function ${stem}(input: readonly string[]) {`,
+		"\treturn useMemo(() => {",
+		"\t\tconst seen = new Set<string>();",
+		"\t\treturn input.filter((value) => {",
+		"\t\t\tif (seen.has(value)) return false;",
+		"\t\t\tseen.add(value);",
+		"\t\t\treturn true;",
+		"\t\t});",
+		"\t}, [input]);",
+		"}",
+	],
+	md: (name) => [
+		`# ${name}`,
+		"",
+		"The mock body this file renders with in `ao preview`, where there is no",
+		"daemon and no worktree to read.",
+		"",
+		"- one",
+		"- two",
+		"- three",
+	],
+};
+
+/** An identifier-safe stem for a file name, so the mock body compiles by eye. */
+function mockStem(name: string): string {
+	const base = name.replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9]/g, "");
+	const stem = base === "" ? "Mock" : base;
+	return stem[0].toUpperCase() + stem.slice(1);
+}
+
+function mockFileText(path: string): string {
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	const ext = name.slice(name.lastIndexOf(".") + 1);
+	const stem = mockStem(name);
+	const body =
+		MOCK_FILE_BODIES[ext] ??
+		MOCK_FILE_BODIES[ext === "tsx" || ext === "js" || ext === "jsx" ? "ts" : "md"] ??
+		MOCK_FILE_BODIES.md;
+	const head = body(name, stem);
+	// Padded to a length worth scrolling, so the minimap, sticky scroll and the
+	// two gutter lanes are all visible at once rather than in a 20-line stub.
+	const tail: string[] = [];
+	for (let i = head.length + 1; i <= 96; i++) tail.push(`// ${name}:${i}`);
+	return [...head, ...tail].join("\n");
+}
+
+/**
+ * One file's content for the renderer harness (`VITE_NO_ELECTRON=1`), where
+ * there is no daemon to read a worktree.
+ *
+ * Deliberately covers the states the editor must render differently, because
+ * each one is a different pane and none of them was previewable before:
+ * an ordinary editable file, a file that is `too_large` to display, and a file
+ * whose read was `truncated` (which is read-only — saving it would delete the
+ * tail). An ABSOLUTE path is served too, and is what exercises the
+ * outside-the-workspace read-only state.
+ */
+export function mockWorkspaceFile(path: string): WorkspaceFileResponse {
+	if (path.endsWith(".png") || path.endsWith(".svg")) {
+		return {
+			available: false,
+			reason: "binary",
+			path,
+			lines: [],
+			changedLines: [],
+			trailingNewline: true,
+			truncated: false,
+		};
+	}
+	if (path === "frontend/src/renderer/lib/generated-icons.ts") {
+		return {
+			available: false,
+			reason: "too_large",
+			path,
+			lines: [],
+			changedLines: [],
+			trailingNewline: true,
+			truncated: false,
+		};
+	}
+	const text = mockFileText(path);
+	const rows = text.split("\n");
+	const truncated = path === "frontend/src/renderer/routeTree.gen.ts";
+	return {
+		available: true,
+		path,
+		truncated,
+		trailingNewline: true,
+		contentHash: mockContentHash(text),
+		lines: rows.map((row, i) => ({ kind: "context", text: row, oldLine: i + 1, newLine: i + 1 })),
+		// One run of each kind, so both gutter lanes and the discard popover have
+		// something real to draw without a git repository behind them.
+		changedLines: [
+			{ start: 10, end: 12, kind: "modified" },
+			{ start: 20, end: 20, kind: "removed" },
+			{ start: 31, end: 34, kind: "added" },
+		],
+	};
+}
+
+/** What a mock save answers: the moved hash, or a conflict for the fixed path. */
+export type MockSaveResult =
+	| { ok: true; response: WriteWorkspaceFileResponse }
+	| { ok: false; status: 409; body: components["schemas"]["APIError"] };
+
+export function mockWorkspaceFileSave(path: string, content: string): MockSaveResult {
+	if (path === MOCK_CONFLICTING_PATH) {
+		const disk = mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX;
+		return {
+			ok: false,
+			status: 409,
+			body: {
+				error: "conflict",
+				code: "WORKSPACE_FILE_CONFLICT",
+				message: "This file changed on disk since it was read.",
+				details: {
+					currentHash: mockContentHash(disk),
+					currentSize: disk.length,
+					currentModifiedAt: new Date(Date.now() - 12_000).toISOString(),
+				},
+			} as components["schemas"]["APIError"],
+		};
+	}
+	return {
+		ok: true,
+		response: {
+			path,
+			contentHash: mockContentHash(content),
+			size: content.length,
+			changedLines: [
+				{ start: 10, end: 12, kind: "modified" },
+				{ start: 31, end: 34, kind: "added" },
+			],
+		},
+	};
+}
+
+/** The bytes a conflicting mock save found already on disk, for the resolve view. */
+export function mockWorkspaceFileOnDisk(path: string): WorkspaceFileResponse {
+	const base = mockWorkspaceFile(path);
+	if (path !== MOCK_CONFLICTING_PATH || !base.available) return base;
+	const text = mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX;
+	const rows = text.split("\n");
+	return {
+		...base,
+		contentHash: mockContentHash(text),
+		lines: rows.map((row, i) => ({ kind: "context", text: row, oldLine: i + 1, newLine: i + 1 })),
+	};
+}

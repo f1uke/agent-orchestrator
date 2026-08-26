@@ -1,14 +1,11 @@
 import { type CSSProperties, lazy, Suspense, useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
-import type { components } from "../../api/schema";
-import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { useWorkspaceFile } from "../hooks/useWorkspaceFile";
+import { apiErrorMessage } from "../lib/api-client";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
 import type { LanguageServerHandle } from "../lib/lsp/use-language-server";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useUiStore } from "../stores/ui-store";
-
-type WorkspaceFile = components["schemas"]["WorkspaceFileResponse"];
 
 // Monaco and its grammars are ~an order of magnitude larger than the rest of the
 // renderer, so the editor is a lazy chunk: the app's cold start never pays for
@@ -118,16 +115,7 @@ export function WorkspaceFileView({
 				return null;
 		}
 	}, [serverState]);
-	const q = useQuery({
-		queryKey: ["workspace-file", sessionId, path],
-		queryFn: async () => {
-			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/workspace/file", {
-				params: { path: { sessionId }, query: { path } },
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to load file"));
-			return data as WorkspaceFile;
-		},
-	});
+	const q = useWorkspaceFile(sessionId, path);
 	const file = q.data;
 	const lines = useMemo(() => file?.lines ?? [], [file]);
 	const text = useMemo(() => lines.map((l) => l.text).join("\n"), [lines]);
@@ -231,13 +219,18 @@ export function WorkspaceFileView({
 
 			{/* body — the editor fills the pane; an editor in a card would give the
 			    minimap and the code half the width they need. */}
-			{q.isLoading && <p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Loading file…</p>}
+			{/* `isPending`, not `isLoading`: between react-query retries a query has no
+			    data, no error, and `isLoading` false, so a viewer keyed on isLoading
+			    renders every branch falsy and shows a BLANK pane. */}
+			{q.isPending && !q.error && (
+				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Loading file…</p>
+			)}
 			{q.error && (
 				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.red }}>
 					{apiErrorMessage(q.error, "Unable to load file")}
 				</p>
 			)}
-			{file && (!file.available || lines.length === 0) && !q.isLoading && (
+			{file && (!file.available || lines.length === 0) && (
 				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>
 					{(file.reason && UNAVAILABLE_MESSAGE[file.reason]) || "This file can’t be displayed."}
 				</p>
