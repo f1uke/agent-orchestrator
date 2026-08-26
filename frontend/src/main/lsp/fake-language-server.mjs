@@ -89,7 +89,10 @@ function handle(msg) {
 									semanticTokensProvider: {
 										full: true,
 										range: true,
-										legend: { tokenTypes: ["property", "identifier"], tokenModifiers: ["declaration", "defaultLibrary"] },
+										legend: {
+											tokenTypes: ["property", "identifier"],
+											tokenModifiers: ["declaration", "defaultLibrary"],
+										},
 									},
 								}),
 					},
