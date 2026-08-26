@@ -333,7 +333,7 @@ describe("OpenQuicklyPalette", () => {
 				renderPalette(vi.fn(), { workspaceRoot: "/w" });
 				await pressOpenQuickly(user);
 				await user.type(searchBox(), "confined");
-				expect(await screen.findByText(/loading this workspace.s go packages/i)).toBeInTheDocument();
+				expect(await screen.findByText(/loading this workspace.s go index/i)).toBeInTheDocument();
 				expect(screen.queryByText(/no go symbols match/i)).not.toBeInTheDocument();
 				expect(screen.queryByText("ConfinedPath")).not.toBeInTheDocument();
 			} finally {
@@ -354,25 +354,49 @@ describe("OpenQuicklyPalette", () => {
 			}
 		});
 
-		it("failed → says the server is not running, and why", async () => {
-			const restore = installLanguageServer({ state: "failed", detail: "gopls: spawn ENOENT" });
+		it("failed → shows the REASON verbatim, not a generic apology", async () => {
+			// 🗝 The reason is the whole message, because on Swift it is the half a
+			// person can act on. "Build it in Xcode once" and "install
+			// xcode-build-server" are the difference between a fixable setup and a
+			// feature that reads as broken; a generic "not running" throws that away.
+			const restore = installLanguageServer({
+				state: "failed",
+				detail:
+					"Xcode has never built NterWorkspace.xcworkspace from this worktree. Build it in Xcode once and reopen this file.",
+			});
 			try {
 				const user = userEvent.setup();
 				renderPalette(vi.fn(), { workspaceRoot: "/w" });
 				await pressOpenQuickly(user);
 				await user.type(searchBox(), "confined");
-				expect(await screen.findByText(/isn.t running/i)).toBeInTheDocument();
-				expect(screen.getByText(/ENOENT/)).toBeInTheDocument();
+				expect(await screen.findByText(/build it in xcode once/i)).toBeInTheDocument();
 			} finally {
 				restore();
 			}
 		});
 
-		it("a workspace with no Go files never starts a server at all", async () => {
+		it("failed with no reason at all still names the server, never falls silent", async () => {
+			const restore = installLanguageServer({ state: "failed", detail: "" });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confined");
+				expect(await screen.findByText(/gopls/i)).toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("a workspace with no served language never starts a server at all", async () => {
 			// The file index is already in hand, so this guard is free - and without
 			// it, ⌘⇧O in a TypeScript-only repo spawns gopls in a directory with no
 			// go.mod, every single time the palette opens.
-			body = { available: true, paths: PATHS.filter((p) => !p.endsWith(".go")), truncated: false };
+			body = {
+				available: true,
+				paths: PATHS.filter((p) => !p.endsWith(".go") && !p.endsWith(".swift")),
+				truncated: false,
+			};
 			const restore = installLanguageServer({ state: "ready", symbols: [GO_SYMBOL] });
 			try {
 				const user = userEvent.setup();
@@ -381,6 +405,30 @@ describe("OpenQuicklyPalette", () => {
 				await user.type(searchBox(), "sessionview");
 				await waitFor(() => expect(rows().length).toBeGreaterThan(0));
 				expect(screen.queryByTestId("open-quickly-symbols")).not.toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("a Swift-majority index searches Swift symbols, not Go", async () => {
+			// 🗝 The palette attaches to ONE language, because the registry caps the
+			// app at two servers: attaching to every language present would evict the
+			// pane the reader is looking at just to answer a search. On an iOS
+			// project the answer has to be Swift, and it has to SAY Swift - the
+			// not-ready line is the only thing telling a reader that an empty list is
+			// a wait rather than a broken feature.
+			body = {
+				available: true,
+				paths: [...PATHS, "App/AppDelegate.swift", "App/Helpers/BuildChecker.swift", "App/Models/Coupon.swift"],
+				truncated: false,
+			};
+			const restore = installLanguageServer({ state: "indexing" });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "coupon");
+				expect(await screen.findByText(/loading this workspace.s swift index/i)).toBeInTheDocument();
 			} finally {
 				restore();
 			}

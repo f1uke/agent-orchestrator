@@ -33,7 +33,24 @@ export type LspHealth = {
 	peakRssMb: number | null;
 };
 
-export type LspAttachment = { handleId: string; key: string; state: LspState; detail?: string };
+export type LspAttachment = {
+	handleId: string;
+	key: string;
+	state: LspState;
+	detail?: string;
+	/**
+	 * The directory the renderer must address documents under.
+	 *
+	 * 🗝 Equal to the workspace root for every language but Swift, and carried
+	 * rather than re-derived because getting it wrong is INVISIBLE: address a
+	 * Swift document by its real path instead of through the shadow root's
+	 * symlink and every ⌘click returns 0 hits in ~60 ms, with no error, while
+	 * symbol search carries on working perfectly.
+	 */
+	documentRoot: string;
+	/** Configured enough to run, but a feature will find nothing. Say which. */
+	warning?: string;
+};
 
 export type LspResultOutcome = "ok" | "empty" | "error";
 
@@ -45,6 +62,7 @@ export type LspRegistryOptions = {
 	initializeTimeoutMs?: number;
 	killGraceMs?: number;
 	readinessSettleMs?: number;
+	indexTimeoutMs?: number;
 	onState: (event: { handleId: string; key: string; state: LspState; detail?: string }) => void;
 	onMessage: (event: { handleId: string; message: JsonRpcMessage }) => void;
 	/** Injected in tests. */
@@ -64,6 +82,8 @@ type Entry = {
 	key: string;
 	languageId: string;
 	root: string;
+	documentRoot: string;
+	warning?: string;
 	proc: LspProcess;
 	handles: Set<string>;
 	lastUsedAt: number;
@@ -151,15 +171,32 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 		const env = options.env();
 		const spec = serverForLanguage(languageId, env);
 		if (!spec) throw new Error(`no language server for "${languageId}"`);
+		// 🗝 Asked BEFORE anything is spawned, and allowed to say no.
+		//
+		// An unconfigured sourcekit-lsp is the sharpest example of this stack's
+		// characteristic failure: pointed at a real .xcodeproj with no build
+		// settings it initializes in ~60 ms, publishes diagnostics and answers
+		// documentSymbol, while returning 0 hits for every ⌘click and 0 results for
+		// every symbol query. Spawning it and letting the user discover that is
+		// strictly worse than refusing with a sentence they can act on.
+		const prepared = spec.prepare?.({ workspaceRoot: root, dataDir: options.dataDir, env }) ?? {
+			ok: true as const,
+			lspRoot: root,
+			documentRoot: root,
+		};
+		if (!prepared.ok) throw new Error(prepared.reason);
 		let entry: Entry | undefined;
 		const proc = startProcess({
 			spec,
 			root,
+			lspRoot: prepared.lspRoot,
+			initialDetail: prepared.detail,
 			dataDir: options.dataDir,
 			env,
 			initializeTimeoutMs: options.initializeTimeoutMs,
 			killGraceMs: options.killGraceMs,
 			readinessSettleMs: options.readinessSettleMs,
+			indexTimeoutMs: options.indexTimeoutMs,
 			onState: (state, detail) => {
 				if (!entry) return;
 				emitState(entry, state, detail);
@@ -176,6 +213,8 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 			key,
 			languageId,
 			root,
+			documentRoot: prepared.documentRoot,
+			warning: prepared.warning,
 			proc,
 			handles: new Set(),
 			lastUsedAt: Date.now(),
@@ -226,7 +265,14 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 				entry.handles.delete(handleId);
 				throw err;
 			}
-			return { handleId, key, state: entry.proc.state, detail: entry.proc.detail };
+			return {
+				handleId,
+				key,
+				state: entry.proc.state,
+				detail: entry.proc.detail,
+				documentRoot: entry.documentRoot,
+				warning: entry.warning,
+			};
 		},
 
 		detach(handleId) {

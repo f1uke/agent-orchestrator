@@ -16,10 +16,20 @@ export type LanguageServerHandle = {
 	client: LspClient | null;
 	state: LspState | "unavailable";
 	detail?: string;
+	/**
+	 * Configured enough to run, but a feature will find nothing - an Xcode build
+	 * that produced compile settings and no index, say. Distinct from `detail`
+	 * because a reader has to be able to act on it, and distinct from `failed`
+	 * because the server is genuinely working.
+	 */
+	warning?: string;
 };
 
 type Bridge = {
-	attach(input: { root: string; languageId: string }): Promise<{ handleId: string; state: LspState; detail?: string }>;
+	attach(input: {
+		root: string;
+		languageId: string;
+	}): Promise<{ handleId: string; state: LspState; detail?: string; documentRoot?: string; warning?: string }>;
 	detach(handleId: string): void;
 	send(handleId: string, message: Record<string, unknown>): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
@@ -90,8 +100,14 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 				attachedId = attachment.handleId;
 				const transport = lspTransport();
 				if (!transport) return;
-				client = createLspClient(attachment.handleId, transport);
-				setHandle({ client, state: attachment.state, detail: attachment.detail });
+				client = createLspClient(attachment.handleId, transport, {
+					workspaceRoot,
+					// Older bridges (and the browser-preview stub) do not send one; the
+					// workspace root is right for every language but Swift, and Swift
+					// cannot attach without a main process anyway.
+					documentRoot: attachment.documentRoot ?? workspaceRoot,
+				});
+				setHandle({ client, state: attachment.state, detail: attachment.detail, warning: attachment.warning });
 			})
 			.catch((err: unknown) => {
 				if (cancelled) return;

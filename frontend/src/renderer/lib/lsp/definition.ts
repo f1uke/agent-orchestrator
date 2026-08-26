@@ -2,7 +2,7 @@ import { monaco } from "../monaco-setup";
 import type { WorkspaceFileOpen } from "../open-workspace-file";
 import type { LspClient } from "./lsp-client";
 import { toMonacoDefinitions } from "./definition-mapping";
-import { fileUriForPath, openTargetForUri } from "./lsp-uri";
+import { openTargetForUri } from "./lsp-uri";
 
 /**
  * ⌘click, in two halves that are BOTH required.
@@ -21,6 +21,8 @@ import { fileUriForPath, openTargetForUri } from "./lsp-uri";
 export type LspNavigationInput = {
 	languageId: string;
 	getClient: () => LspClient | null;
+	/** So a 0-hit answer can say WHY, rather than being indistinguishable from broken. */
+	getState: () => string;
 	getWorkspaceRoot: () => string | undefined;
 	getAbsolutePath: (modelUri: monaco.Uri) => string | null;
 	openFile: (file: WorkspaceFileOpen) => void;
@@ -56,7 +58,9 @@ export function registerLspNavigation(input: LspNavigationInput): monaco.IDispos
 			let result: unknown;
 			try {
 				result = await client.request("textDocument/definition", {
-					textDocument: { uri: fileUriForPath(absolute) },
+					// 🗝 `client.documentUri`, never `fileUriForPath`. On Swift the two
+					// differ, and using the wrong one returns 0 hits with no error.
+					textDocument: { uri: client.documentUri(absolute) },
 					position: { line: position.lineNumber - 1, character: position.column - 1 },
 				});
 			} catch (err) {
@@ -72,9 +76,18 @@ export function registerLspNavigation(input: LspNavigationInput): monaco.IDispos
 				// Up, answering, and returning nothing. Logged so it is
 				// DISTINGUISHABLE in the console from a server that is broken - which
 				// is the whole difference this slice is trying to make visible.
+				//
+				// 🗝 And the state is part of the sentence. Measured on sourcekit-lsp
+				// against a real iOS project: before the index has loaded, one of four
+				// ⌘click targets returns nothing and the rest take 1.7-2.5 s, while
+				// after it all four land in 59-67 ms. "0 locations" during that window
+				// is the index, not the code, and saying so is the difference between
+				// a known wait and an apparently broken feature.
+				const state = input.getState();
 				console.warn(
 					`[lsp] ${languageId} definition → 0 locations at ${absolute}:${position.lineNumber}:${position.column}` +
-						` (${Math.round(performance.now() - startedAt)}ms)`,
+						` (${Math.round(performance.now() - startedAt)}ms, server ${state})` +
+						(state === "ready" ? "" : " - the index is still loading, so this is expected"),
 				);
 			}
 			return links;

@@ -20,12 +20,22 @@ export type LspState = "starting" | "initializing" | "indexing" | "ready" | "fai
 
 export type LspProcessOptions = {
 	spec: LanguageServerSpec;
+	/** The session's worktree. Reported in health; NOT necessarily the LSP root. */
 	root: string;
+	/**
+	 * Where the server is rooted: `cwd` and `rootUri`. Differs from `root` only
+	 * for Swift, whose Xcode workspaces are served from a shadow root under the
+	 * AO data dir so that nothing is ever written into the user's checkout.
+	 */
+	lspRoot?: string;
 	dataDir: string;
 	env: NodeJS.ProcessEnv;
 	initializeTimeoutMs?: number;
 	killGraceMs?: number;
 	readinessSettleMs?: number;
+	indexTimeoutMs?: number;
+	/** What `prepare` learned about this workspace, before the server says anything. */
+	initialDetail?: string;
 	onState: (state: LspState, detail?: string) => void;
 	/** Server→client traffic main does NOT answer itself. */
 	onMessage: (message: JsonRpcMessage) => void;
@@ -48,6 +58,7 @@ export type LspProcess = {
 /** Ids main uses for its own traffic, kept far from the renderer's counter. */
 const INITIALIZE_ID = -1;
 const SHUTDOWN_ID = -2;
+const SYNCHRONIZE_ID = -3;
 
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 20_000;
 const DEFAULT_KILL_GRACE_MS = 3_000;
@@ -68,6 +79,80 @@ const DEFAULT_KILL_GRACE_MS = 3_000;
  * nothing to load pays this once, on attach, and never again.
  */
 const DEFAULT_READINESS_SETTLE_MS = 400;
+
+/**
+ * How long to wait for `workspace/synchronize` before giving up on it.
+ *
+ * It blocked for 6.15 s on an 8 964-source iOS app with a warm 212 MB index
+ * store, so this is ~30x that - generous, because the alternative to waiting is
+ * showing results that are measurably wrong. If it does expire the state moves
+ * to `ready` with the reason attached rather than sitting in `indexing` for the
+ * rest of the session, since a permanently-loading palette is its own silent
+ * failure.
+ */
+const DEFAULT_INDEX_TIMEOUT_MS = 180_000;
+
+export type PsRow = { pid: number; ppid: number; rssMb: number; command: string };
+
+/** `ps -axo pid=,ppid=,rss=,comm=`, one row per line. Exported so it can be tested. */
+export function parsePsTable(stdout: string): PsRow[] {
+	const rows: PsRow[] = [];
+	for (const line of String(stdout ?? "").split("\n")) {
+		const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*\S)\s*$/.exec(line);
+		if (!match) continue;
+		rows.push({
+			pid: Number(match[1]),
+			ppid: Number(match[2]),
+			rssMb: Math.round(Number(match[3]) / 1024),
+			command: match[4],
+		});
+	}
+	return rows;
+}
+
+/**
+ * RSS for a process and everything descended from it, or null when the process
+ * is gone. The children matter: a Swift server's build server is a real 19 MB
+ * Python process that only exists because we started it.
+ */
+export function treeRss(rows: readonly PsRow[], pid: number): number | null {
+	const byParent = new Map<number, PsRow[]>();
+	let root: PsRow | undefined;
+	for (const row of rows) {
+		if (row.pid === pid) root = row;
+		const siblings = byParent.get(row.ppid);
+		if (siblings) siblings.push(row);
+		else byParent.set(row.ppid, [row]);
+	}
+	if (!root) return null;
+	let total = 0;
+	const queue = [root];
+	const seen = new Set<number>();
+	while (queue.length > 0) {
+		const row = queue.pop() as PsRow;
+		// A cycle is impossible in a real process table, but `ps` output is parsed
+		// text and a self-parented row would otherwise hang the app.
+		if (seen.has(row.pid)) continue;
+		seen.add(row.pid);
+		total += row.rssMb;
+		for (const child of byParent.get(row.pid) ?? []) queue.push(child);
+	}
+	return total;
+}
+
+const basename = (command: string) => command.slice(command.lastIndexOf("/") + 1);
+
+/**
+ * Sidecar pids already spoken for by another live server.
+ *
+ * 🗝 An XPC service cannot be attributed by anything the OS exposes: measured
+ * with two sourcekit-lsp servers running, each `SourceKitService` carried
+ * `ppid=1`, its own process group and session 0. What IS true is that they
+ * appear one per client and are reaped with their client, so they are claimed by
+ * pid diffing across the spawn - and this set is what stops two servers claiming
+ * the same one and double-counting it.
+ */
+const claimedSidecars = new Set<number>();
 
 /**
  * The client capabilities are a property of what THIS APP implements, not of any
@@ -92,12 +177,14 @@ function clientCapabilities() {
 
 export function startLspProcess(options: LspProcessOptions): LspProcess {
 	const { spec, root, dataDir, env, onState, onMessage } = options;
+	const lspRoot = options.lspRoot ?? root;
 	const initializeTimeoutMs = options.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS;
 	const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
 	const readinessSettleMs = options.readinessSettleMs ?? DEFAULT_READINESS_SETTLE_MS;
+	const indexTimeoutMs = options.indexTimeoutMs ?? DEFAULT_INDEX_TIMEOUT_MS;
 
 	let state: LspState = "starting";
-	let detail: string | undefined;
+	let detail: string | undefined = options.initialDetail;
 	const startedAt = Date.now();
 	// Work-done progress tokens the server opens while it loads packages. While
 	// any is outstanding the index is not settled and workspace/symbol answers
@@ -131,7 +218,48 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	// unhandled rejection and take the process down.
 	initialized.catch(() => {});
 
-	const rootUri = pathToFileURL(root).href;
+	const rootUri = pathToFileURL(lspRoot).href;
+
+	const psTable = (): Promise<PsRow[]> =>
+		new Promise((resolve) =>
+			execFile("ps", ["-axo", "pid=,ppid=,rss=,comm="], { maxBuffer: 8 << 20 }, (err, stdout) =>
+				resolve(err ? [] : parsePsTable(stdout)),
+			),
+		);
+
+	// Started BEFORE the spawn so anything matching that already existed - another
+	// AO window's server, or Xcode's own - is never mistaken for ours.
+	const preexistingSidecars: Promise<Set<number>> | null = spec.sidecarCommand
+		? psTable().then(
+				(rows) => new Set(rows.filter((r) => basename(r.command) === spec.sidecarCommand).map((r) => r.pid)),
+			)
+		: null;
+	let sidecarPid: number | null = null;
+
+	const releaseSidecar = () => {
+		if (sidecarPid !== null) claimedSidecars.delete(sidecarPid);
+		sidecarPid = null;
+	};
+
+	const sidecarRss = async (rows: readonly PsRow[]): Promise<number> => {
+		const name = spec.sidecarCommand;
+		if (!name || !preexistingSidecars) return 0;
+		const matching = rows.filter((r) => basename(r.command) === name);
+		if (sidecarPid !== null) {
+			const still = matching.find((r) => r.pid === sidecarPid);
+			if (still) return still.rssMb;
+			// It went and a replacement may have taken its place; re-claim below.
+			releaseSidecar();
+		}
+		const before = await preexistingSidecars;
+		const candidate = matching
+			.filter((r) => !before.has(r.pid) && !claimedSidecars.has(r.pid))
+			.sort((a, b) => a.pid - b.pid)[0];
+		if (!candidate) return 0;
+		sidecarPid = candidate.pid;
+		claimedSidecars.add(candidate.pid);
+		return candidate.rssMb;
+	};
 
 	const fail = (why: string) => {
 		if (state === "stopped") return;
@@ -152,8 +280,56 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	// progress begins, because that answers the question the window was asking.
 	let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
+	/**
+	 * 🗝 The Swift half of readiness, and the reason this is not one timer.
+	 *
+	 * A progress-driven gate cannot work on a server that emits no progress, and
+	 * sourcekit-lsp emits none - not one `$/progress`, not one
+	 * `window/workDoneProgress/create`, in 45 s of listening on a real iOS app.
+	 * So it is ASKED instead, with `workspace/synchronize { index: true }`, which
+	 * blocks until the index store is loaded.
+	 *
+	 * Two things it deliberately does NOT do:
+	 *
+	 * - It does not hold `initialized`. ⌘click needs compile arguments, not an
+	 *   index, so the pane gets its client immediately and can open its document
+	 *   while the index loads. Blocking here would cost every Swift file six
+	 *   seconds of dead editor for a gate that only symbol search needs.
+	 * - It does not report `ready` early on failure. A server whose synchronize
+	 *   is not implemented (older sourcekit-lsp: `-32601`) is genuinely usable,
+	 *   so it becomes ready with the degradation SPELLED OUT in `detail`, which
+	 *   is the difference between a known limitation and a silent one.
+	 */
+	let indexTimer: ReturnType<typeof setTimeout> | null = null;
+	let synchronizing = false;
+
+	const finishIndex = (why?: string) => {
+		if (indexTimer) {
+			clearTimeout(indexTimer);
+			indexTimer = null;
+		}
+		if (!synchronizing || state === "failed" || state === "stopped") return;
+		synchronizing = false;
+		setState("ready", why ?? detail);
+	};
+
+	const beginIndex = () => {
+		synchronizing = true;
+		setState("indexing", detail);
+		// Resolved HERE, not on `ready`: the server is usable for everything that
+		// does not need the index, and the renderer is what decides which of its
+		// features to gate.
+		resolveInit();
+		send({ jsonrpc: "2.0", id: SYNCHRONIZE_ID, method: "workspace/synchronize", params: { index: true } });
+		indexTimer = setTimeout(() => {
+			indexTimer = null;
+			finishIndex(`${spec.command}: the index was still loading after ${Math.round(indexTimeoutMs / 1000)}s`);
+		}, indexTimeoutMs);
+		indexTimer.unref?.();
+	};
+
 	const settle = () => {
-		if (state === "failed" || state === "stopped") return;
+		if (state === "failed" || state === "stopped" || synchronizing) return;
 		if (progress.size > 0) {
 			if (settleTimer) {
 				clearTimeout(settleTimer);
@@ -168,6 +344,10 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 		settleTimer = setTimeout(() => {
 			settleTimer = null;
 			if (state === "failed" || state === "stopped" || progress.size > 0) return;
+			if (spec.indexReadiness === "synchronize") {
+				beginIndex();
+				return;
+			}
 			setState("ready", detail);
 			resolveInit();
 		}, readinessSettleMs);
@@ -186,9 +366,25 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 			const info = (message.result as { serverInfo?: { name?: string; version?: string } } | null)?.serverInfo;
 			// Carried as `detail` so a test - and a human reading the health panel -
 			// can see the root the server was actually given.
-			detail = info ? `${info.name ?? spec.command} ${info.version ?? ""}`.trim() : undefined;
+			// sourcekit-lsp sends NO serverInfo, so a blind assignment here would erase
+			// what `prepare` found out about the workspace - which is the only thing
+			// the status pill has to show on the Swift path.
+			if (info) detail = `${info.name ?? spec.command} ${info.version ?? ""}`.trim();
 			send({ jsonrpc: "2.0", method: "initialized", params: {} });
 			settle();
+			return;
+		}
+
+		if (message.id === SYNCHRONIZE_ID) {
+			// `-32601` is the old spelling of this request having been renamed
+			// (`workspace/_pollIndex` in earlier sourcekit-lsp). The server still
+			// works; it just cannot be asked, so say that rather than imply the
+			// index is loaded.
+			finishIndex(
+				message.error
+					? `${detail ?? spec.command} - index readiness is unknown on this toolchain, so symbol results may be incomplete`
+					: detail,
+			);
 			return;
 		}
 
@@ -245,6 +441,12 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 			clearTimeout(settleTimer);
 			settleTimer = null;
 		}
+		if (indexTimer) {
+			clearTimeout(indexTimer);
+			indexTimer = null;
+		}
+		synchronizing = false;
+		releaseSidecar();
 		const proc = child;
 		child = null;
 		if (!proc || proc.exitCode !== null) {
@@ -279,8 +481,8 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	}
 
 	try {
-		child = spawn(spec.command, spec.args, {
-			cwd: root,
+		child = spawn(spec.command, spec.args({ dataDir }), {
+			cwd: lspRoot,
 			env: { ...env, ...spec.env({ dataDir, env }) },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
@@ -314,7 +516,10 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 			if (state === "stopped" || stopping) return;
 			fail(`${spec.command} exited (${signal ?? code})`);
 		});
-		setState("initializing");
+		// Carries `detail` rather than clearing it: what `prepare` learned about the
+		// workspace is the only thing the Swift status pill has, and sourcekit-lsp
+		// never sends a serverInfo to replace it.
+		setState("initializing", detail);
 		send({
 			jsonrpc: "2.0",
 			id: INITIALIZE_ID,
@@ -323,7 +528,7 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 				processId: process.pid,
 				// The two fields monaco.lsp gets wrong, and the reason we hand-roll.
 				rootUri,
-				workspaceFolders: [{ uri: rootUri, name: root.slice(root.lastIndexOf("/") + 1) }],
+				workspaceFolders: [{ uri: rootUri, name: lspRoot.slice(lspRoot.lastIndexOf("/") + 1) }],
 				capabilities: clientCapabilities(),
 				initializationOptions: {},
 			},
@@ -348,16 +553,20 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 		 * `ps` rather than anything in-process: the number that matters is the OS's
 		 * view of the whole process, which is what the spike measured and what a
 		 * 24 GB machine actually feels.
+		 *
+		 * 🗝 And it is the TREE plus the sidecar, not the process. Measured on the
+		 * real iOS app, one Swift server is three processes - sourcekit-lsp at
+		 * 207 MB, the xcode-build-server child at 19 MB, and a `SourceKitService`
+		 * XPC service at 390 MB that no tree walk can reach. Reporting the first
+		 * alone, which is what the spike published, understates it by ~3x.
 		 */
 		async rss() {
 			const pid = child?.pid;
 			if (!pid) return null;
-			return new Promise<number | null>((resolve) => {
-				execFile("ps", ["-o", "rss=", "-p", String(pid)], (err, stdout) => {
-					const kb = Number(String(stdout ?? "").trim());
-					resolve(err || !Number.isFinite(kb) || kb <= 0 ? null : Math.round(kb / 1024));
-				});
-			});
+			const table = await psTable();
+			const own = treeRss(table, pid);
+			if (own === null) return null;
+			return own + (await sidecarRss(table));
 		},
 	};
 }

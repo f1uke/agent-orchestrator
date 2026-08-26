@@ -5,6 +5,8 @@
 // Behaviour is steered by env vars so one script covers every path the
 // supervisor has to survive. See lsp-process.test.ts / lsp-registry.test.ts.
 let buffer = Buffer.alloc(0);
+/** Flipped by `workspace/synchronize`, so symbol answers can differ across it. */
+let synchronized = false;
 const send = (msg) => {
 	const body = Buffer.from(JSON.stringify(msg), "utf8");
 	process.stdout.write(`Content-Length: ${body.length}\r\n\r\n`);
@@ -76,7 +78,9 @@ function handle(msg) {
 					capabilities: { definitionProvider: true, workspaceSymbolProvider: true, textDocumentSync: 1 },
 					// The rootUri is echoed back so a test can assert main sent a REAL
 					// root rather than the null monaco.lsp hardcodes.
-					serverInfo: { name: "fake", version: String(msg.params?.rootUri ?? "") },
+					...(process.env.FAKE_LSP_NO_SERVER_INFO === "1"
+						? {}
+						: { serverInfo: { name: "fake", version: String(msg.params?.rootUri ?? "") } }),
 				},
 			});
 			return;
@@ -98,7 +102,34 @@ function handle(msg) {
 			send({ jsonrpc: "2.0", id: msg.id, result: parseJson("FAKE_LSP_DEFINITION", null) });
 			return;
 		case "workspace/symbol":
-			send({ jsonrpc: "2.0", id: msg.id, result: parseJson("FAKE_LSP_SYMBOLS", []) });
+			// 🗝 Different answers before and after the index gate, so a test can
+			// prove the gate MATTERS rather than merely that it exists. This is not
+			// invention: measured on sourcekit-lsp against a real iOS app,
+			// `workspace/symbol` returned one or two hits for the first 3.6 s and
+			// NONE of them was the right one.
+			send({
+				jsonrpc: "2.0",
+				id: msg.id,
+				result: synchronized
+					? parseJson("FAKE_LSP_SYMBOLS", [])
+					: parseJson("FAKE_LSP_SYMBOLS_BEFORE_SYNC", parseJson("FAKE_LSP_SYMBOLS", [])),
+			});
+			return;
+		case "workspace/synchronize":
+			// A server that predates the request answers -32601. It is still usable;
+			// it just cannot be asked whether its index is loaded.
+			if (process.env.FAKE_LSP_SYNCHRONIZE_UNSUPPORTED === "1") {
+				send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
+				return;
+			}
+			if (process.env.FAKE_LSP_SYNCHRONIZE_HANGS === "1") return;
+			setTimeout(
+				() => {
+					synchronized = true;
+					send({ jsonrpc: "2.0", id: msg.id, result: {} });
+				},
+				Number(process.env.FAKE_LSP_SYNCHRONIZE_MS ?? 0),
+			);
 			return;
 		case "shutdown":
 			send({ jsonrpc: "2.0", id: msg.id, result: null });

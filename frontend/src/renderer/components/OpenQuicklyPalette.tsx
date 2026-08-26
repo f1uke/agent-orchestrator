@@ -3,6 +3,7 @@ import { Braces, FileCode, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
+import { languageDisplayName, languageServerName, symbolLanguageForIndex } from "../lib/lsp/language-ids";
 import { useLanguageServer } from "../lib/lsp/use-language-server";
 import { type FileMatch, rankFiles } from "../lib/open-quickly";
 import { parseWorkspaceSymbols, rankSymbols, type SymbolHit, type SymbolMatch } from "../lib/open-quickly-symbols";
@@ -21,10 +22,6 @@ const MAX_SYMBOL_RESULTS = 20;
  * by tagging the answer with its query, below.
  */
 const SYMBOL_DEBOUNCE_MS = 90;
-
-/** The one language this slice serves. Slice 5 and 7 add to it. */
-const SYMBOL_LANGUAGE = "go";
-const SYMBOL_EXTENSION = ".go";
 
 /** ⌘⇧O on macOS, Ctrl+⇧O elsewhere. Nothing else in the app binds O. */
 function isOpenQuicklyShortcut(event: KeyboardEvent): boolean {
@@ -59,7 +56,7 @@ function splitPath(path: string): { dir: string; name: string } {
 }
 
 /**
- * ⌘⇧O — Open Quickly, over the session workspace's FILES and Go SYMBOLS.
+ * ⌘⇧O — Open Quickly, over the session workspace's FILES and SYMBOLS.
  *
  * Files need no language server and are per the editor spike the half that gets
  * used most, so they are always there; symbols JOIN them rather than replacing
@@ -78,6 +75,11 @@ function splitPath(path: string): { dir: string; name: string } {
  * one line. Opening anything goes through the single `onOpenFile` seam
  * (`WorkspaceFileOpen`) — a symbol carries the `column` that seam has always had
  * a field for, and a file does not.
+ *
+ * Symbols come from ONE language server — the one whose language the workspace
+ * has most of. The registry caps the app at two servers, so a palette that
+ * attached to every language present would evict the pane the reader is looking
+ * at just to answer a search.
  */
 export function OpenQuicklyPalette({
 	sessionId,
@@ -125,18 +127,16 @@ export function OpenQuicklyPalette({
 
 	const results = useMemo(() => rankFiles(paths ?? [], query, MAX_RESULTS), [paths, query]);
 
-	// Only attach where there is actually Go to serve. The file index is already
-	// in hand, so this costs nothing - and without it, ⌘⇧O in a TypeScript-only
-	// repo would spawn gopls in a directory with no go.mod, every time.
-	const hasSymbolLanguage = useMemo(() => paths?.some((p) => p.endsWith(SYMBOL_EXTENSION)) ?? false, [paths]);
+	// Which language to serve symbols from, decided from the index that is already
+	// in hand. Costs nothing, and without it ⌘⇧O in a repo with no served language
+	// would spawn a server in a directory that has nothing for it to read.
+	const symbolLanguage = useMemo(() => symbolLanguageForIndex(paths), [paths]);
+	const languageLabel = symbolLanguage ? languageDisplayName(symbolLanguage) : "";
 
-	// The Go server for THIS workspace, attached only while the palette is OPEN.
-	// Pressing ⌘⇧O is therefore what starts gopls - not opening a session, and
-	// not launching the app - and closing the palette begins its idle countdown.
-	const server = useLanguageServer(
-		open && workspaceRoot && hasSymbolLanguage ? workspaceRoot : undefined,
-		SYMBOL_LANGUAGE,
-	);
+	// That server for THIS workspace, attached only while the palette is OPEN.
+	// Pressing ⌘⇧O is therefore what starts it - not opening a session, and not
+	// launching the app - and closing the palette begins its idle countdown.
+	const server = useLanguageServer(open && workspaceRoot && symbolLanguage ? workspaceRoot : undefined, symbolLanguage);
 	const trimmedQuery = query.trim();
 
 	/**
@@ -331,18 +331,34 @@ export function OpenQuicklyPalette({
 							<div className="open-quickly__section" data-testid="open-quickly-symbols">
 								<div className="open-quickly__section-label">Symbols</div>
 								{server.state === "failed" ? (
+									/* The reason IS the message. On Swift these are sentences a
+									   person can act on - "build it in Xcode once", "install
+									   xcode-build-server" - and dropping them in favour of a
+									   generic string is what turns a fixable setup into a feature
+									   that looks broken. */
 									<p className="open-quickly__note open-quickly__note--error">
-										The Go language server isn&rsquo;t running, so symbols aren&rsquo;t searchable.
-										{server.detail ? ` (${server.detail})` : ""}
+										{/* `||`, not `??`: an empty reason is silence, and silence is the
+										    one thing this section is not allowed to render. */}
+										{server.detail ||
+											`${languageServerName(symbolLanguage ?? "")} isn’t running, so symbols aren’t searchable.`}
 									</p>
 								) : server.state !== "ready" ? (
 									/* Gate on READINESS, not latency: an empty list here would be a
-								   lie told in exactly the seconds people use this most. */
-									<p className="open-quickly__note">Loading this workspace&rsquo;s Go packages&hellip;</p>
+								   lie told in exactly the seconds people use this most.
+								   Measured on sourcekit-lsp against a real iOS project - for the
+								   first 3.6 s `workspace/symbol` returns one or two hits and NONE
+								   of them is the right one. */
+									<p className="open-quickly__note">Loading this workspace&rsquo;s {languageLabel} index&hellip;</p>
 								) : symbolAnswer?.query !== trimmedQuery ? (
 									<p className="open-quickly__note">Searching symbols&hellip;</p>
 								) : symbols.length === 0 ? (
-									<p className="open-quickly__note">No Go symbols match &ldquo;{trimmedQuery}&rdquo;.</p>
+									<p className="open-quickly__note">
+										No {languageLabel} symbols match &ldquo;{trimmedQuery}&rdquo;.
+										{/* A file that has never been built ⌘clicks out of itself
+										    perfectly and is not in the index at all, which is the
+										    same deal Xcode gives - but only if it is said out loud. */}
+										{server.warning ? ` ${server.warning}` : ""}
+									</p>
 								) : (
 									<div aria-label="Matching symbols" className="open-quickly__list" role="listbox">
 										{symbols.map((symbol) => (
