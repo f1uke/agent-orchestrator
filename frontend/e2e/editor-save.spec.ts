@@ -44,9 +44,19 @@ async function reopenFile(page: Page, query: string): Promise<void> {
 	await expect(page.getByTestId("monaco-file-editor")).toBeVisible();
 }
 
-/** Put the caret in the buffer and type, which is the only way to make it dirty. */
+/**
+ * Put the caret in the buffer and type, which is the only way to make it dirty.
+ *
+ * The wait is not padding. Monaco takes focus ASYNCHRONOUSLY: the click hands it
+ * to the view's edit context a tick or more later (`view.js` only adds `focused`
+ * to `.monaco-editor` once `_editContext.isFocused()`), and every keystroke sent
+ * before that handover lands nowhere at all. The buffer stays clean, `save-file`
+ * stays disabled, and the failure surfaces 30 seconds later as a click timing out
+ * on a disabled button — nowhere near the typing that actually went missing.
+ */
 async function typeIntoEditor(page: Page, text: string): Promise<void> {
 	await page.locator(".monaco-editor .view-lines").first().click();
+	await expect(page.locator(".monaco-editor.focused").first()).toBeVisible();
 	await page.keyboard.type(text);
 }
 
