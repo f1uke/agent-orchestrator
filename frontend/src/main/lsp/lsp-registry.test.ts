@@ -140,3 +140,36 @@ describe("disposeAll", () => {
 		expect(await r.health()).toHaveLength(0);
 	});
 });
+
+describe("a workspace that cannot be served", () => {
+	test("attach REFUSES with the reason, and spawns nothing", async () => {
+		// 🗝 The whole reason `prepare` exists. Pointed at a real .xcodeproj with no
+		// build settings, sourcekit-lsp initializes in ~60 ms, publishes
+		// diagnostics and answers documentSymbol - while returning 0 hits for every
+		// ⌘click and 0 results for every symbol query, with no error anywhere. A
+		// user who gets that concludes the feature does not work. A user who gets
+		// "build it in Xcode once" fixes it in a minute.
+		const r = make({
+			env: () => ({
+				...process.env,
+				AO_LSP_COMMAND_SWIFT: process.execPath,
+				AO_LSP_ARGS_SWIFT: FAKE,
+				// No xcode-build-server, no Xcode container: `prepare` says no.
+				PATH: "/nowhere",
+				HOME: path.join(HERE, "no-such-home"),
+			}),
+		});
+		await expect(r.attach({ root: HERE, languageId: "swift" })).rejects.toThrow(/Package\.swift|xcode/i);
+		expect(await r.health()).toHaveLength(0);
+	});
+});
+
+describe("the document root", () => {
+	test("is the workspace root for a language that does not remap it", async () => {
+		// Carried on every attachment rather than only the Swift ones, so the
+		// renderer has exactly one rule to follow and no special case to forget.
+		const r = make();
+		const attachment = await r.attach({ root: HERE, languageId: "go" });
+		expect(attachment.documentRoot).toBe(HERE);
+	});
+});

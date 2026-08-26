@@ -10,6 +10,7 @@ import { branchLaneLines, firstHunkLine, hunksOf, originalTextFrom } from "../li
 import { editabilityOf } from "../lib/editor/editability";
 import { fileBytes, modelTextFrom } from "../lib/editor/save-file";
 import type { SaveFailure } from "../lib/editor/save-errors";
+import { languageDisplayName, languageServerName, lspLanguageForPath } from "../lib/lsp/language-ids";
 import type { LanguageServerHandle } from "../lib/lsp/use-language-server";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { useUiStore } from "../stores/ui-store";
@@ -175,24 +176,45 @@ export function WorkspaceFileView({
 	 * information.
 	 */
 	const serverLabel = useMemo(() => {
+		const languageId = lspLanguageForPath(path) ?? "";
+		const language = languageDisplayName(languageId);
+		const server = languageServerName(languageId);
 		switch (serverState?.state) {
 			case "starting":
 			case "initializing":
-				return { text: "starting gopls…", tone: P.muted2, title: "The Go language server is starting." };
+				return { text: `starting ${server}…`, tone: P.muted2, title: `The ${language} language server is starting.` };
 			case "indexing":
-				return { text: "indexing…", tone: P.muted2, title: "The Go language server is still loading packages." };
+				return {
+					// 🗝 Not cosmetic on Swift. sourcekit-lsp answers ⌘click in ~60 ms
+					// once its index has loaded and MISSES a target outright before
+					// then, and it announces none of that itself - so this pill is the
+					// only thing telling a reader that a ⌘click which did nothing was a
+					// wait rather than a broken feature.
+					text: "loading index…",
+					tone: P.muted2,
+					title:
+						serverState.detail ||
+						`The ${language} language server is still loading its index. Go to definition and symbol search settle once it finishes.`,
+				};
 			case "ready":
-				return { text: "go ⌘click", tone: ACCENT, title: serverState.detail ?? "Go to definition is available." };
+				return {
+					text: `${language.toLowerCase()} ⌘click`,
+					tone: ACCENT,
+					title: serverState.detail || "Go to definition is available.",
+				};
 			case "failed":
 				return {
 					text: "no language server",
 					tone: P.red,
-					title: serverState.detail ?? "The Go language server could not be started.",
+					// The reason, verbatim: on Swift it is the actionable half - which
+					// build is missing, or which tool to install.
+					// `||`, not `??`: an empty reason must still say something.
+					title: serverState.detail || `The ${language} language server could not be started.`,
 				};
 			default:
 				return null;
 		}
-	}, [serverState]);
+	}, [serverState, path]);
 
 	// The file itself. Polled only while there is something to lose: an AO
 	// worktree has agents writing in it, so a dirty buffer's base can go stale

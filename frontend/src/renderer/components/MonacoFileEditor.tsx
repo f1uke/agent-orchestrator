@@ -6,7 +6,6 @@ import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/
 import { revertEdit } from "../lib/editor/revert";
 import { registerLspNavigation } from "../lib/lsp/definition";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
-import { fileUriForPath } from "../lib/lsp/lsp-uri";
 import { type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
 import { ensureLanguage, ensureMonacoReady, languageForPath, monaco } from "../lib/monaco-setup";
 import { editorThemeName } from "../lib/monaco-theme";
@@ -310,6 +309,7 @@ export default function MonacoFileEditor({
 		const registration = registerLspNavigation({
 			languageId: lspLanguage,
 			getClient: () => serverRef.current.client,
+			getState: () => serverRef.current.state,
 			getWorkspaceRoot: () => workspaceRoot,
 			getAbsolutePath: () => absolutePathRef.current ?? null,
 			openFile: (file) => openFileRef.current?.(file),
@@ -323,7 +323,9 @@ export default function MonacoFileEditor({
 	useEffect(() => {
 		const client = server.client;
 		if (!client || !absolutePath || !lspLanguage || modelGeneration === 0) return;
-		const fileUri = fileUriForPath(absolutePath);
+		// 🗝 The server's OWN address for this file, which on Swift is not its real
+		// path: sourcekit-lsp refuses documents outside its (shadow) root, silently.
+		const fileUri = client.documentUri(absolutePath);
 		client.didOpen(fileUri, lspLanguage, text);
 		return () => client.didClose(fileUri);
 	}, [server.client, absolutePath, lspLanguage, text, modelGeneration]);

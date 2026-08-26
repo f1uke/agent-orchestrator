@@ -104,3 +104,108 @@ describe("rankSymbols", () => {
 		expect(ranked[0].positions).toEqual([0, 1, 2, 3]);
 	});
 });
+
+/**
+ * The four ranking rules against SWIFT noise, taken from what a real iOS app
+ * actually returns rather than from what a fixture makes convenient.
+ *
+ * 🗝 Slice 2 already implements all four for paths, and this suite reuses that
+ * scorer rather than growing a second one - so what is pinned here is that the
+ * FILE rules survive contact with symbol-shaped input, which is where they were
+ * measured against Xcode's own Open Quickly in the first place.
+ */
+describe("Swift, at real-project scale", () => {
+	const IOS = "/Users/x/nter-ios-app";
+
+	test("fuzzy noise loses to the symbol you asked for", () => {
+		// Measured, and NOT a readiness artefact the way the spike read it: querying
+		// "AppDelegateViewModel" on the real app returns the two right hits plus an
+		// Objective-C selector and a 700-character Swift initialiser that both match
+		// as SUBSEQUENCES, and those two never go away no matter how long the index
+		// has had to settle. Ranking is what makes them harmless.
+		const ranked = rankSymbols(
+			[
+				hit({
+					name: "initWithAppID:appName:loginTooltipEnabled:loginTooltipText:defaultShareMode:advertisingIDEnabled:implicitLoggingEnabled:dialogConfigurations:dialogFlows:timestamp:errorConfiguration:",
+					uri: `file://${IOS}/Pods/FBSDKCoreKit/FBSDKServerConfiguration.m`,
+				}),
+				hit({
+					name: "init(indvEmail:customerIdPhoto1:ocrRef:title:titleOther:sex:firstNameTh:lastNameTh:appDelegateLike:viewModelish:)",
+					uri: `file://${IOS}/NterApp/Models/MandatoryModel.swift`,
+				}),
+				hit({ name: "AppDelegateViewModel", kind: 5, uri: `file://${IOS}/NterApp/AppDelegateViewModel.swift` }),
+			],
+			"AppDelegateViewModel",
+			IOS,
+		);
+		expect(ranked[0].name).toBe("AppDelegateViewModel");
+		expect(ranked[0].path).toBe("NterApp/AppDelegateViewModel.swift");
+	});
+
+	test("generated asset symbols are demoted by PATH SHAPE, not by root prefix", () => {
+		// The spike's sharpest ranking finding: `ImageResource.*` and `_R.image.*`
+		// out of DerivedData/.../GeneratedAssetSymbols outnumbered the hand-written
+		// hits and took every visible row. The index answers with paths from the
+		// tree that was BUILT, so a root-prefix rule would not have caught them.
+		const ranked = rankSymbols(
+			[
+				// Same NAME on both, so the only thing that can separate them is the
+				// shape of the path - which is exactly the rule under test.
+				hit({
+					name: "couponBookSearch",
+					uri: "file:///Users/x/Library/Developer/Xcode/DerivedData/NterWorkspace-abc/Build/Intermediates.noindex/GeneratedAssetSymbols/ImageResource.swift",
+				}),
+				hit({ name: "couponBookSearch", kind: 6, uri: `file://${IOS}/NterApp/Coupon/CouponBookSearch.swift` }),
+			],
+			"couponbooksearch",
+			IOS,
+		);
+		expect(ranked[0].path).toBe("NterApp/Coupon/CouponBookSearch.swift");
+	});
+
+	test("assets are not code", () => {
+		const ranked = rankSymbols(
+			[
+				hit({ name: "PromotionHub", uri: `file://${IOS}/Assets/OG-PromotionHub.png` }),
+				hit({ name: "PromotionHub", kind: 5, uri: `file://${IOS}/NterApp/PromotionHub.swift` }),
+			],
+			"promotionhub",
+			IOS,
+		);
+		expect(ranked[0].path).toBe("NterApp/PromotionHub.swift");
+	});
+
+	test("one declaration built for three architectures is ONE row", () => {
+		// 🗝 The index holds one unit per built arch and target, so on this project
+		// every symbol arrives two or three times. The key is (name, kind, uri,
+		// line) rather than name alone, so two genuinely distinct declarations of
+		// the same name in one file both survive.
+		const one = { name: "AppDelegateViewModel", kind: 5, uri: `file://${IOS}/NterApp/AppDelegateViewModel.swift` };
+		const ranked = rankSymbols(
+			[hit({ ...one, line: 44 }), hit({ ...one, line: 44 }), hit({ ...one, line: 44 }), hit({ ...one, line: 90 })],
+			"appdelegateviewmodel",
+			IOS,
+		);
+		expect(ranked).toHaveLength(2);
+		expect(ranked.map((r) => r.line).sort((a, b) => a - b)).toEqual([44, 90]);
+	});
+
+	test("a definition in ANOTHER checkout keeps its absolute path", () => {
+		// The index answers with paths from the tree that was built, which on this
+		// machine is routinely a different AO worktree of the same iOS app. Dropping
+		// those rows, or relativising them against the wrong root, is how ⌘⇧O grows
+		// a dead row that opens nothing.
+		const ranked = rankSymbols(
+			[
+				hit({
+					name: "DisposeBag",
+					kind: 5,
+					uri: "file:///Users/x/.ao/data/worktrees/nter/other/Pods/RxSwift/DisposeBag.swift",
+				}),
+			],
+			"disposebag",
+			IOS,
+		);
+		expect(ranked[0].path).toBe("/Users/x/.ao/data/worktrees/nter/other/Pods/RxSwift/DisposeBag.swift");
+	});
+});

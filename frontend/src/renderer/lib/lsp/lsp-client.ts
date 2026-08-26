@@ -12,6 +12,8 @@
  * until the workspace has settled, so by the time a client exists the server is
  * already usable.
  */
+import { type DocumentMapping, documentUriForPath } from "./lsp-uri";
+
 export type JsonRpcMessage = Record<string, unknown>;
 
 export type LspResultOutcome = "ok" | "empty" | "error";
@@ -24,6 +26,12 @@ export type LspTransport = {
 
 export type LspClient = {
 	readonly handleId: string;
+	/**
+	 * The URI to address a workspace file by. NOT `fileUriForPath` - see
+	 * `documentUriForPath`, whose whole reason to exist is that getting this wrong
+	 * on Swift kills ⌘click silently while symbol search carries on working.
+	 */
+	documentUri(absolutePath: string): string;
 	request<T>(method: string, params: unknown): Promise<T>;
 	notify(method: string, params: unknown): void;
 	didOpen(uri: string, languageId: string, text: string): void;
@@ -39,7 +47,7 @@ function isEmptyResult(result: unknown): boolean {
 	return false;
 }
 
-export function createLspClient(handleId: string, transport: LspTransport): LspClient {
+export function createLspClient(handleId: string, transport: LspTransport, mapping: DocumentMapping): LspClient {
 	let nextId = 1;
 	let disposed = false;
 	const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; method: string }>();
@@ -83,6 +91,9 @@ export function createLspClient(handleId: string, transport: LspTransport): LspC
 
 	return {
 		handleId,
+		documentUri(absolutePath) {
+			return documentUriForPath(absolutePath, mapping);
+		},
 		request<T>(method: string, params: unknown): Promise<T> {
 			if (disposed) return Promise.reject(new Error(`LSP client disposed (${method})`));
 			const id = nextId++;

@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { createLspClient, type LspTransport } from "./lsp-client";
+import { createLspClient as createRawLspClient, type LspTransport } from "./lsp-client";
 
 function harness() {
 	const sent: { handleId: string; message: Record<string, unknown> }[] = [];
@@ -22,6 +22,14 @@ function harness() {
 		emit: (m: Record<string, unknown>, handleId = "h1") => emit({ handleId, message: m }),
 	};
 }
+
+/**
+ * The identity mapping: `documentRoot === workspaceRoot`, which is every
+ * language but Swift. Swift's mapping is tested where it lives, in
+ * `lsp-uri.test.ts`.
+ */
+const createLspClient = (handleId: string, transport: Parameters<typeof createRawLspClient>[1]) =>
+	createRawLspClient(handleId, transport, { workspaceRoot: "/w", documentRoot: "/w" });
 
 describe("request", () => {
 	test("resolves with the matching response", async () => {
